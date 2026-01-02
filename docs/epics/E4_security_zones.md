@@ -1,8 +1,10 @@
 ## Epic E4: Data Externalization & Security Zones 📋
 
-**Business Requirement**: Controlled data movement between security zones via Azure Data Factory
+**Type**: Enabler
+**Value Statement**: E1 and E2 capabilities become available externally.
+**Runs On**: E2 (Raster Data), ADF Infrastructure
 **Status**: 📋 PLANNED
-**Last Updated**: 30 DEC 2025
+**Last Updated**: 31 DEC 2025
 
 **Strategic Context**:
 > E4 handles movement of data between security zones. ADF copies data from the **Silver Zone**

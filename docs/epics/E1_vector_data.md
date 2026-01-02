@@ -1,6 +1,8 @@
 ## Epic E1: Vector Data as API 🚧
 
-**Business Requirement**: "Make vector data available as API"
+**Type**: Business
+**Value Statement**: Any vector garbage you throw at us becomes clean, standardized, API-accessible data.
+**Runs On**: E7 (Pipeline Infrastructure)
 **Status**: 🚧 PARTIAL (Core ✅, Styles 🚧)
 **Completed**: NOV 2025 (core features)
 

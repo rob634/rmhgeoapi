@@ -1,14 +1,34 @@
-## Epic E12: Platform Interfaces 🚧
+## Epic E12: Integration Onboarding UI 🚧
 
-**Business Requirement**: Unified, maintainable admin interfaces for platform operations
+**Type**: Enabler
+**Value Statement**: "Hi! Here's how to integrate me!" — Self-service onboarding for integrators.
+**Runs On**: E1, E2, E8, E9 (Data APIs)
 **Status**: 🚧 PARTIAL (Enablers ✅, Core Interfaces 📋)
 **Last Updated**: 31 DEC 2025
 **Owner**: Geospatial Team
 
 **Strategic Context**:
-> E12 delivers the 5 primary user-facing interfaces for the geospatial platform.
-> Phase 1 (complete) established HTMX patterns and component helpers.
-> Phase 2 builds the core interfaces using those patterns.
+> This isn't just an admin dashboard. It's an *onboarding experience* for anyone integrating with the platform.
+> Every button shows the raw API call (CURL command in a nearby box). It's designed to:
+>
+> 1. Enable operators to manage pipelines without CLI/database access
+> 2. **Teach other teams how to integrate** — this is the real purpose
+> 3. Define the interaction patterns consumers will eventually implement
+> 4. Be so helpful that copying it is the path of least resistance
+
+**The CURL Box Strategy**:
+```
+┌─────────────────────────────────────────────────────┐
+│  [Submit Vector Job]                                │
+│                                                     │
+│  curl -X POST https://api.geo.../jobs/submit/vector│
+│    -H "Content-Type: application/json"              │
+│    -d '{"container": "bronze", "blob": "data.shp"}'│
+│                                                     │
+│  📋 Copy to clipboard                               │
+└─────────────────────────────────────────────────────┘
+```
+Every button says "this is what you would copy." When integrators replicate this UI, they're copying example code that calls *your* APIs with *your* contracts.
 
 **Feature Summary**:
 | Feature | Status | Description |
@@ -26,27 +46,27 @@
 
 **Architecture**:
 ```
-Platform Interfaces (Azure Functions + HTMX)
+Integration Onboarding UI (Azure Functions + HTMX)
 ┌─────────────────────────────────────────────────────────────────────┐
+│  Every interface includes: [Action Button] + [CURL Box] + [Copy]    │
+├─────────────────────────────────────────────────────────────────────┤
 │                                                                     │
 │  F12.4: System Dashboard     F12.5: Pipeline Workflow Hub           │
 │  ┌─────────────────────┐     ┌─────────────────────────────────┐   │
 │  │ Architecture Map    │     │ Process Vector  │ Process Raster│   │
 │  │ Health Components   │     │ Raster Collection │ H3 Pipelines│   │
-│  │ Resources (CPU/RAM) │     │ ─────────────────────────────── │   │
-│  │ Database Schemas    │     │ Completed Jobs Table            │   │
+│  │ [curl /api/health]  │     │ [curl /api/jobs/submit/...]     │   │
 │  └─────────────────────┘     └─────────────────────────────────┘   │
 │                                                                     │
 │  F12.6: STAC/Raster          F12.7: OGC Features                   │
 │  ┌─────────────────────┐     ┌─────────────────────────────────┐   │
 │  │ Collection Cards    │     │ Collection Cards                │   │
-│  │ Raster Viewer       │     │ Map Viewer Links                │   │
-│  │ Thumbnails          │     │ Promote Status                  │   │
+│  │ [curl /api/stac/..] │     │ [curl /api/features/..]         │   │
 │  └─────────────────────┘     └─────────────────────────────────┘   │
 │                                                                     │
-│  F12.8: API Documentation                                           │
+│  F12.8: API Documentation Hub                                       │
 │  ┌─────────────────────────────────────────────────────────────┐   │
-│  │ Swagger UI  │  Integration Guides  │  Examples              │   │
+│  │ Swagger UI  │  Integration Guides  │  Copy-Paste Examples   │   │
 │  └─────────────────────────────────────────────────────────────┘   │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
@@ -440,4 +460,4 @@ Phase 1 (Complete)           Phase 2 (Current)
 
 ---
 
-**Last Updated**: 31 DEC 2025 (Restructured around 5 core interfaces)
+**Last Updated**: 31 DEC 2025 (Reframed as Integration Onboarding with CURL box strategy)

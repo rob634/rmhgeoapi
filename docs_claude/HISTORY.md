@@ -1,6 +1,6 @@
 # Project History
 
-**Last Updated**: 23 DEC 2025
+**Last Updated**: 01 JAN 2026
 **Active Log**: This is the main project history log (Sep 2025 onwards)
 
 **Archives**:
@@ -8,6 +8,72 @@
 - For history prior to September 2025, see **OLDER_HISTORY.md**
 
 This document tracks completed architectural changes and improvements to the Azure Geospatial ETL Pipeline.
+
+---
+
+## 01 JAN 2026: DDL Utilities Consolidation 🔧
+
+**Status**: ✅ **COMPLETE** - DRY refactoring of SQL DDL generation
+**Impact**: Code reduction, consistency, maintainability
+**Author**: Robert and Claude
+
+### Achievement
+
+Created centralized `ddl_utils.py` module consolidating SQL DDL patterns across all schema generators:
+
+```
+core/schema/ddl_utils.py (NEW - 646 lines)
+├── IndexBuilder     (btree, gist, gin, unique with partial/descending)
+├── TriggerBuilder   (updated_at triggers)
+├── CommentBuilder   (schema/table/column/index comments)
+└── SchemaUtils      (create_schema, set_search_path, grant_all)
+```
+
+### Files Migrated
+
+| File | Before | After | Reduction |
+|------|--------|-------|-----------|
+| `infrastructure/h3_schema.py` | 1419 | 1161 | -258 (-18%) |
+| `core/schema/geo_table_builder.py` | 602 | 520 | -82 (-14%) |
+| `core/schema/sql_generator.py` | — | 1073 | Updated |
+
+### Changes Made
+
+1. **Fixed f-string SQL injection** in `triggers/admin/h3_debug.py` - converted to `sql.Identifier()`
+2. **Created IndexBuilder** with support for:
+   - Composite indexes (multiple columns)
+   - Partial indexes (`partial_where` clause)
+   - Descending indexes for temporal queries
+3. **Updated sql_generator.py**:
+   - Fixed `etl_fathom` → `etl_source_files` table name
+   - Added missing primary keys for curated_datasets, curated_update_log, promoted_datasets
+   - Added 15+ new indexes for newer tables
+4. **Fixed config attribute** `admin_identity_name` → `managed_identity_admin_name`
+
+### Testing Verified
+
+| Schema | Test Method | Result |
+|--------|-------------|--------|
+| App | `full-rebuild` endpoint | ✅ 9 tables, 39 indexes, 5 functions |
+| H3 | Drop + rebuild | ✅ 16 tables created |
+| Geo | Vector ETL job | ✅ Table created with indexes/triggers |
+
+### Key Pattern
+
+```python
+from core.schema.ddl_utils import IndexBuilder, TriggerBuilder, CommentBuilder
+
+# Create indexes
+IndexBuilder.btree('app', 'jobs', 'status', name='idx_jobs_status')
+IndexBuilder.gist('geo', 'countries', 'geom')
+IndexBuilder.btree('app', 'tasks', 'heartbeat', partial_where='heartbeat IS NOT NULL')
+
+# Create triggers
+TriggerBuilder.updated_at_trigger('geo', 'countries')
+
+# Add comments
+CommentBuilder.table('geo', 'countries', 'Country boundaries')
+```
 
 ---
 

@@ -1,13 +1,24 @@
 ## Epic E7: Pipeline Infrastructure 🚧
 
-**Business Requirement**: Generic pipeline orchestration infrastructure (enabler for E8 and E9)
+**Type**: Foundational Enabler
+**Value Statement**: The ETL brain that makes everything else possible.
 **Status**: 🚧 PARTIAL (F7.1 ✅, F7.3 ✅, F7.4 ✅)
-**Last Updated**: 30 DEC 2025
+**Last Updated**: 31 DEC 2025
 
-**Strategic Context**:
-> E7 provides generic pipeline infrastructure that enables E8 (GeoAnalytics) and E9 (Large Data).
-> Domain-specific pipelines (FATHOM, CMIP6) are now in E9. H3 analytics pipelines are in E8.
-> E7 focuses on: job orchestration, ingestion patterns, observability, and pipeline builder UI.
+**This is the substrate.** E1, E2, E8, and E9 all run on E7. Without it, nothing processes.
+
+**Core Capabilities**:
+
+| Capability | What It Does |
+|------------|--------------|
+| Data type inference | "This is RGB imagery" / "multispectral" / "probably a DEM" |
+| Validation logic | Garbage KML (redundant nodes, broken geometries) → beautiful PostGIS |
+| Job orchestration | Durable Functions + Service Bus coordination |
+| Advisory locks | PostgreSQL-based distributed coordination |
+| Fan-out patterns | Parallel task processing with controlled concurrency |
+| Observability | Job state tracking, monitoring, failure handling |
+
+**Why it's separate from E1/E2**: The orchestration system serves *all* data pipelines. It's not "vector ETL" or "raster ETL" — it's the engine that runs both.
 
 **Feature Summary**:
 | Feature | Status | Description |

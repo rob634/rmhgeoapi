@@ -25,6 +25,8 @@ from pydantic.fields import FieldInfo
 from psycopg import sql
 from annotated_types import MaxLen  # Import at top for health check validation
 
+from core.schema.ddl_utils import IndexBuilder, TriggerBuilder, SchemaUtils
+
 # Import the core models
 # NOTE: OrchestrationJob REMOVED (22 NOV 2025) - no job chaining in Platform
 from ..models import (
@@ -306,6 +308,8 @@ class PydanticToSQL:
                 column_parts.extend([sql.SQL(" DEFAULT '{}'")])  # JSONB empty object
             elif field_name == "source_metadata" and " DEFAULT" not in str(sql.SQL("").join(column_parts)):
                 column_parts.extend([sql.SQL(" DEFAULT '{}'")])  # JSONB empty object for ETL metadata
+            elif field_name == "retry_count" and " DEFAULT" not in str(sql.SQL("").join(column_parts)):
+                column_parts.extend([sql.SQL(" DEFAULT 0")])  # Platform retry count (01 JAN 2026)
 
             columns.append(sql.SQL("").join(column_parts))
         
@@ -366,6 +370,21 @@ class PydanticToSQL:
                     sql.Identifier("source_blob_path")
                 )
             )
+        elif table_name == "curated_datasets":
+            # Curated datasets registry (15 DEC 2025)
+            constraints.append(
+                sql.SQL("PRIMARY KEY ({})").format(sql.Identifier("dataset_id"))
+            )
+        elif table_name == "curated_update_log":
+            # Curated update audit log (15 DEC 2025)
+            constraints.append(
+                sql.SQL("PRIMARY KEY ({})").format(sql.Identifier("log_id"))
+            )
+        elif table_name == "promoted_datasets":
+            # Promoted datasets registry (23 DEC 2025)
+            constraints.append(
+                sql.SQL("PRIMARY KEY ({})").format(sql.Identifier("promoted_id"))
+            )
 
         # Combine columns and constraints
         all_parts = columns + constraints
@@ -387,9 +406,9 @@ class PydanticToSQL:
         
     def generate_indexes_composed(self, table_name: str, model: Type[BaseModel]) -> List[sql.Composed]:
         """
-        Generate index statements using psycopg.sql composition.
+        Generate index statements using IndexBuilder from ddl_utils.
 
-        NO STRING CONCATENATION - Full SQL composition for safety.
+        Uses centralized IndexBuilder for DRY index generation.
 
         Args:
             table_name: Name of the table
@@ -400,326 +419,86 @@ class PydanticToSQL:
         """
         self.logger.debug(f"🔧 Generating indexes for table {table_name}")
         indexes = []
+        s = self.schema_name  # Shorthand
 
         if table_name == "jobs":
-            # Status index
-            indexes.append(
-                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
-                    sql.Identifier("idx_jobs_status"),
-                    sql.Identifier(self.schema_name),
-                    sql.Identifier("jobs"),
-                    sql.Identifier("status")
-                )
-            )
-            # Job type index
-            indexes.append(
-                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
-                    sql.Identifier("idx_jobs_job_type"),
-                    sql.Identifier(self.schema_name),
-                    sql.Identifier("jobs"),
-                    sql.Identifier("job_type")
-                )
-            )
-            # Created at index
-            indexes.append(
-                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
-                    sql.Identifier("idx_jobs_created_at"),
-                    sql.Identifier(self.schema_name),
-                    sql.Identifier("jobs"),
-                    sql.Identifier("created_at")
-                )
-            )
-            # Updated at index
-            indexes.append(
-                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
-                    sql.Identifier("idx_jobs_updated_at"),
-                    sql.Identifier(self.schema_name),
-                    sql.Identifier("jobs"),
-                    sql.Identifier("updated_at")
-                )
-            )
+            indexes.append(IndexBuilder.btree(s, "jobs", "status", name="idx_jobs_status"))
+            indexes.append(IndexBuilder.btree(s, "jobs", "job_type", name="idx_jobs_job_type"))
+            indexes.append(IndexBuilder.btree(s, "jobs", "created_at", name="idx_jobs_created_at"))
+            indexes.append(IndexBuilder.btree(s, "jobs", "updated_at", name="idx_jobs_updated_at"))
 
         elif table_name == "tasks":
-            # Parent job ID index
-            indexes.append(
-                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
-                    sql.Identifier("idx_tasks_parent_job_id"),
-                    sql.Identifier(self.schema_name),
-                    sql.Identifier("tasks"),
-                    sql.Identifier("parent_job_id")
-                )
-            )
-            # Status index
-            indexes.append(
-                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
-                    sql.Identifier("idx_tasks_status"),
-                    sql.Identifier(self.schema_name),
-                    sql.Identifier("tasks"),
-                    sql.Identifier("status")
-                )
-            )
-            # Composite index: parent_job_id, stage
-            indexes.append(
-                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({}, {})").format(
-                    sql.Identifier("idx_tasks_job_stage"),
-                    sql.Identifier(self.schema_name),
-                    sql.Identifier("tasks"),
-                    sql.Identifier("parent_job_id"),
-                    sql.Identifier("stage")
-                )
-            )
-            # Composite index: parent_job_id, stage, status
-            indexes.append(
-                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({}, {}, {})").format(
-                    sql.Identifier("idx_tasks_job_stage_status"),
-                    sql.Identifier(self.schema_name),
-                    sql.Identifier("tasks"),
-                    sql.Identifier("parent_job_id"),
-                    sql.Identifier("stage"),
-                    sql.Identifier("status")
-                )
-            )
-            # Partial index for heartbeat
-            indexes.append(
-                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({}) WHERE {} IS NOT NULL").format(
-                    sql.Identifier("idx_tasks_heartbeat"),
-                    sql.Identifier(self.schema_name),
-                    sql.Identifier("tasks"),
-                    sql.Identifier("heartbeat"),
-                    sql.Identifier("heartbeat")
-                )
-            )
-            # Partial index for retry_count
-            indexes.append(
-                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({}) WHERE {} > 0").format(
-                    sql.Identifier("idx_tasks_retry_count"),
-                    sql.Identifier(self.schema_name),
-                    sql.Identifier("tasks"),
-                    sql.Identifier("retry_count"),
-                    sql.Identifier("retry_count")
-                )
-            )
-            # Target queue index for multi-app tracking (07 DEC 2025)
-            indexes.append(
-                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
-                    sql.Identifier("idx_tasks_target_queue"),
-                    sql.Identifier(self.schema_name),
-                    sql.Identifier("tasks"),
-                    sql.Identifier("target_queue")
-                )
-            )
-            # Executed by app index for multi-app tracking (07 DEC 2025)
-            indexes.append(
-                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
-                    sql.Identifier("idx_tasks_executed_by_app"),
-                    sql.Identifier(self.schema_name),
-                    sql.Identifier("tasks"),
-                    sql.Identifier("executed_by_app")
-                )
-            )
+            indexes.append(IndexBuilder.btree(s, "tasks", "parent_job_id", name="idx_tasks_parent_job_id"))
+            indexes.append(IndexBuilder.btree(s, "tasks", "status", name="idx_tasks_status"))
+            indexes.append(IndexBuilder.btree(s, "tasks", ["parent_job_id", "stage"], name="idx_tasks_job_stage"))
+            indexes.append(IndexBuilder.btree(s, "tasks", ["parent_job_id", "stage", "status"], name="idx_tasks_job_stage_status"))
+            indexes.append(IndexBuilder.btree(s, "tasks", "heartbeat", name="idx_tasks_heartbeat",
+                                              partial_where="heartbeat IS NOT NULL"))
+            indexes.append(IndexBuilder.btree(s, "tasks", "retry_count", name="idx_tasks_retry_count",
+                                              partial_where="retry_count > 0"))
+            indexes.append(IndexBuilder.btree(s, "tasks", "target_queue", name="idx_tasks_target_queue"))
+            indexes.append(IndexBuilder.btree(s, "tasks", "executed_by_app", name="idx_tasks_executed_by_app"))
 
         elif table_name == "api_requests":
-            # Platform Layer indexes (added 16 NOV 2025, FIXED 24 NOV 2025)
             # NOTE: api_requests does NOT have a status column (removed 22 NOV 2025)
-            # Status is delegated to CoreMachine job_id lookup
-
-            # Dataset ID index for filtering by dataset
-            indexes.append(
-                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
-                    sql.Identifier("idx_api_requests_dataset_id"),
-                    sql.Identifier(self.schema_name),
-                    sql.Identifier("api_requests"),
-                    sql.Identifier("dataset_id")
-                )
-            )
-            # Created at index for time-based queries
-            indexes.append(
-                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
-                    sql.Identifier("idx_api_requests_created_at"),
-                    sql.Identifier(self.schema_name),
-                    sql.Identifier("api_requests"),
-                    sql.Identifier("created_at")
-                )
-            )
+            indexes.append(IndexBuilder.btree(s, "api_requests", "dataset_id", name="idx_api_requests_dataset_id"))
+            indexes.append(IndexBuilder.btree(s, "api_requests", "created_at", name="idx_api_requests_created_at"))
 
         elif table_name == "orchestration_jobs":
-            # Platform Layer indexes (added 16 NOV 2025)
-            # Request ID index for querying jobs by request
-            indexes.append(
-                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
-                    sql.Identifier("idx_orchestration_jobs_request_id"),
-                    sql.Identifier(self.schema_name),
-                    sql.Identifier("orchestration_jobs"),
-                    sql.Identifier("request_id")
-                )
-            )
-            # Job ID index for querying requests by job
-            indexes.append(
-                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
-                    sql.Identifier("idx_orchestration_jobs_job_id"),
-                    sql.Identifier(self.schema_name),
-                    sql.Identifier("orchestration_jobs"),
-                    sql.Identifier("job_id")
-                )
-            )
+            indexes.append(IndexBuilder.btree(s, "orchestration_jobs", "request_id", name="idx_orchestration_jobs_request_id"))
+            indexes.append(IndexBuilder.btree(s, "orchestration_jobs", "job_id", name="idx_orchestration_jobs_job_id"))
 
         elif table_name == "janitor_runs":
-            # Janitor audit table indexes (21 NOV 2025)
-            # Started at index for querying recent runs
-            indexes.append(
-                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({} DESC)").format(
-                    sql.Identifier("idx_janitor_runs_started_at"),
-                    sql.Identifier(self.schema_name),
-                    sql.Identifier("janitor_runs"),
-                    sql.Identifier("started_at")
-                )
-            )
-            # Run type index for filtering by operation type
-            indexes.append(
-                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
-                    sql.Identifier("idx_janitor_runs_type"),
-                    sql.Identifier(self.schema_name),
-                    sql.Identifier("janitor_runs"),
-                    sql.Identifier("run_type")
-                )
-            )
+            indexes.append(IndexBuilder.btree(s, "janitor_runs", "started_at", name="idx_janitor_runs_started_at", descending=True))
+            indexes.append(IndexBuilder.btree(s, "janitor_runs", "run_type", name="idx_janitor_runs_type"))
 
-        elif table_name == "etl_fathom":
-            # ETL Fathom tracking table indexes (05 DEC 2025)
-            # UNIQUE constraint on source_blob_path
-            indexes.append(
-                sql.SQL("CREATE UNIQUE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
-                    sql.Identifier("idx_etl_fathom_source_blob_path"),
-                    sql.Identifier(self.schema_name),
-                    sql.Identifier("etl_fathom"),
-                    sql.Identifier("source_blob_path")
-                )
-            )
-            # Tile index for grouping
-            indexes.append(
-                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
-                    sql.Identifier("idx_etl_fathom_tile"),
-                    sql.Identifier(self.schema_name),
-                    sql.Identifier("etl_fathom"),
-                    sql.Identifier("tile")
-                )
-            )
-            # Phase 1 group key index
-            indexes.append(
-                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
-                    sql.Identifier("idx_etl_fathom_phase1_group"),
-                    sql.Identifier(self.schema_name),
-                    sql.Identifier("etl_fathom"),
-                    sql.Identifier("phase1_group_key")
-                )
-            )
-            # Phase 2 group key index
-            indexes.append(
-                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
-                    sql.Identifier("idx_etl_fathom_phase2_group"),
-                    sql.Identifier(self.schema_name),
-                    sql.Identifier("etl_fathom"),
-                    sql.Identifier("phase2_group_key")
-                )
-            )
-            # Flood type + defense compound index
-            indexes.append(
-                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({}, {})").format(
-                    sql.Identifier("idx_etl_fathom_flood_type"),
-                    sql.Identifier(self.schema_name),
-                    sql.Identifier("etl_fathom"),
-                    sql.Identifier("flood_type"),
-                    sql.Identifier("defense")
-                )
-            )
-            # Year + SSP compound index
-            indexes.append(
-                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({}, {})").format(
-                    sql.Identifier("idx_etl_fathom_year_ssp"),
-                    sql.Identifier(self.schema_name),
-                    sql.Identifier("etl_fathom"),
-                    sql.Identifier("year"),
-                    sql.Identifier("ssp")
-                )
-            )
-            # Partial index for phase 1 pending records
-            indexes.append(
-                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({}) WHERE {} IS NULL").format(
-                    sql.Identifier("idx_etl_fathom_p1_pending"),
-                    sql.Identifier(self.schema_name),
-                    sql.Identifier("etl_fathom"),
-                    sql.Identifier("phase1_group_key"),
-                    sql.Identifier("phase1_processed_at")
-                )
-            )
-            # Partial index for phase 2 pending records (phase 1 done, phase 2 not)
-            indexes.append(
-                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({}) WHERE {} IS NOT NULL AND {} IS NULL").format(
-                    sql.Identifier("idx_etl_fathom_p2_pending"),
-                    sql.Identifier(self.schema_name),
-                    sql.Identifier("etl_fathom"),
-                    sql.Identifier("phase2_group_key"),
-                    sql.Identifier("phase1_processed_at"),
-                    sql.Identifier("phase2_processed_at")
-                )
-            )
+        elif table_name == "etl_source_files":
+            # Generalized ETL tracking table (21 DEC 2025)
+            # Note: UNIQUE constraint on (etl_type, source_blob_path) is in table definition
+            indexes.append(IndexBuilder.btree(s, "etl_source_files", "etl_type", name="idx_etl_source_files_type"))
+            indexes.append(IndexBuilder.btree(s, "etl_source_files", ["etl_type", "phase1_group_key"], name="idx_etl_source_files_p1_group"))
+            indexes.append(IndexBuilder.btree(s, "etl_source_files", ["etl_type", "phase2_group_key"], name="idx_etl_source_files_p2_group"))
+            # Partial indexes for finding unprocessed records by ETL type
+            indexes.append(IndexBuilder.btree(s, "etl_source_files", ["etl_type", "phase1_group_key"], name="idx_etl_source_files_p1_pending",
+                                              partial_where="phase1_completed_at IS NULL"))
+            indexes.append(IndexBuilder.btree(s, "etl_source_files", ["etl_type", "phase2_group_key"], name="idx_etl_source_files_p2_pending",
+                                              partial_where="phase1_completed_at IS NOT NULL AND phase2_completed_at IS NULL"))
 
         elif table_name == "unpublish_jobs":
-            # Unpublish audit table indexes (12 DEC 2025)
-            # STAC item lookup
-            indexes.append(
-                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
-                    sql.Identifier("idx_unpublish_jobs_stac_item"),
-                    sql.Identifier(self.schema_name),
-                    sql.Identifier("unpublish_jobs"),
-                    sql.Identifier("stac_item_id")
-                )
-            )
-            # Collection lookup
-            indexes.append(
-                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
-                    sql.Identifier("idx_unpublish_jobs_collection"),
-                    sql.Identifier(self.schema_name),
-                    sql.Identifier("unpublish_jobs"),
-                    sql.Identifier("collection_id")
-                )
-            )
-            # Original job lookup (for checking if job was unpublished)
-            indexes.append(
-                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
-                    sql.Identifier("idx_unpublish_jobs_original_job"),
-                    sql.Identifier(self.schema_name),
-                    sql.Identifier("unpublish_jobs"),
-                    sql.Identifier("original_job_id")
-                )
-            )
-            # Status filter
-            indexes.append(
-                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
-                    sql.Identifier("idx_unpublish_jobs_status"),
-                    sql.Identifier(self.schema_name),
-                    sql.Identifier("unpublish_jobs"),
-                    sql.Identifier("status")
-                )
-            )
-            # Created at for recent queries (descending for newest first)
-            indexes.append(
-                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({} DESC)").format(
-                    sql.Identifier("idx_unpublish_jobs_created_at"),
-                    sql.Identifier(self.schema_name),
-                    sql.Identifier("unpublish_jobs"),
-                    sql.Identifier("created_at")
-                )
-            )
-            # Unpublish job ID lookup
-            indexes.append(
-                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
-                    sql.Identifier("idx_unpublish_jobs_unpublish_job_id"),
-                    sql.Identifier(self.schema_name),
-                    sql.Identifier("unpublish_jobs"),
-                    sql.Identifier("unpublish_job_id")
-                )
-            )
+            indexes.append(IndexBuilder.btree(s, "unpublish_jobs", "stac_item_id", name="idx_unpublish_jobs_stac_item"))
+            indexes.append(IndexBuilder.btree(s, "unpublish_jobs", "collection_id", name="idx_unpublish_jobs_collection"))
+            indexes.append(IndexBuilder.btree(s, "unpublish_jobs", "original_job_id", name="idx_unpublish_jobs_original_job"))
+            indexes.append(IndexBuilder.btree(s, "unpublish_jobs", "status", name="idx_unpublish_jobs_status"))
+            indexes.append(IndexBuilder.btree(s, "unpublish_jobs", "created_at", name="idx_unpublish_jobs_created_at", descending=True))
+            indexes.append(IndexBuilder.btree(s, "unpublish_jobs", "unpublish_job_id", name="idx_unpublish_jobs_unpublish_job_id"))
+
+        elif table_name == "curated_datasets":
+            # Curated datasets registry (15 DEC 2025)
+            indexes.append(IndexBuilder.btree(s, "curated_datasets", "enabled", name="idx_curated_datasets_enabled"))
+            indexes.append(IndexBuilder.btree(s, "curated_datasets", "target_table_name", name="idx_curated_datasets_target_table"))
+            # Partial index for finding scheduled datasets
+            indexes.append(IndexBuilder.btree(s, "curated_datasets", "update_schedule", name="idx_curated_datasets_scheduled",
+                                              partial_where="enabled = true AND update_schedule IS NOT NULL"))
+
+        elif table_name == "curated_update_log":
+            # Curated update audit log (15 DEC 2025)
+            indexes.append(IndexBuilder.btree(s, "curated_update_log", "dataset_id", name="idx_curated_update_log_dataset"))
+            indexes.append(IndexBuilder.btree(s, "curated_update_log", "job_id", name="idx_curated_update_log_job"))
+            indexes.append(IndexBuilder.btree(s, "curated_update_log", "status", name="idx_curated_update_log_status"))
+            indexes.append(IndexBuilder.btree(s, "curated_update_log", "started_at", name="idx_curated_update_log_started", descending=True))
+
+        elif table_name == "promoted_datasets":
+            # Promoted datasets registry (23 DEC 2025)
+            indexes.append(IndexBuilder.btree(s, "promoted_datasets", "stac_collection_id", name="idx_promoted_datasets_collection",
+                                              partial_where="stac_collection_id IS NOT NULL"))
+            indexes.append(IndexBuilder.btree(s, "promoted_datasets", "stac_item_id", name="idx_promoted_datasets_item",
+                                              partial_where="stac_item_id IS NOT NULL"))
+            indexes.append(IndexBuilder.btree(s, "promoted_datasets", "in_gallery", name="idx_promoted_datasets_gallery",
+                                              partial_where="in_gallery = true"))
+            indexes.append(IndexBuilder.btree(s, "promoted_datasets", "gallery_order", name="idx_promoted_datasets_gallery_order",
+                                              partial_where="in_gallery = true AND gallery_order IS NOT NULL"))
+            indexes.append(IndexBuilder.btree(s, "promoted_datasets", "system_role", name="idx_promoted_datasets_system_role",
+                                              partial_where="system_role IS NOT NULL"))
 
         self.logger.debug(f"✅ Generated {len(indexes)} indexes for table {table_name}")
         return indexes
@@ -1008,52 +787,21 @@ $$""").format(
         
     def generate_triggers_composed(self) -> List[sql.Composed]:
         """
-        Generate trigger statements using psycopg.sql composition.
-        
-        NO STRING CONCATENATION - Full SQL composition for safety.
-        
+        Generate trigger statements using TriggerBuilder from ddl_utils.
+
+        Uses centralized TriggerBuilder for DRY trigger generation.
+
         Returns:
             List of composed trigger statements
         """
         self.logger.debug(f"🔧 Generating triggers for updated_at columns")
         triggers = []
-        
-        # Updated_at trigger for jobs table
-        triggers.append(
-            sql.SQL("DROP TRIGGER IF EXISTS {} ON {}.{}").format(
-                sql.Identifier("update_jobs_updated_at"),
-                sql.Identifier(self.schema_name),
-                sql.Identifier("jobs")
-            )
-        )
-        triggers.append(
-            sql.SQL("CREATE TRIGGER {} BEFORE UPDATE ON {}.{} FOR EACH ROW EXECUTE FUNCTION {}.{}()").format(
-                sql.Identifier("update_jobs_updated_at"),
-                sql.Identifier(self.schema_name),
-                sql.Identifier("jobs"),
-                sql.Identifier(self.schema_name),
-                sql.Identifier("update_updated_at_column")
-            )
-        )
-        
-        # Updated_at trigger for tasks table
-        triggers.append(
-            sql.SQL("DROP TRIGGER IF EXISTS {} ON {}.{}").format(
-                sql.Identifier("update_tasks_updated_at"),
-                sql.Identifier(self.schema_name),
-                sql.Identifier("tasks")
-            )
-        )
-        triggers.append(
-            sql.SQL("CREATE TRIGGER {} BEFORE UPDATE ON {}.{} FOR EACH ROW EXECUTE FUNCTION {}.{}()").format(
-                sql.Identifier("update_tasks_updated_at"),
-                sql.Identifier(self.schema_name),
-                sql.Identifier("tasks"),
-                sql.Identifier(self.schema_name),
-                sql.Identifier("update_updated_at_column")
-            )
-        )
-        
+
+        # Updated_at triggers for jobs and tasks tables
+        # TriggerBuilder.updated_at_trigger returns [DROP, CREATE] statements
+        triggers.extend(TriggerBuilder.updated_at_trigger(self.schema_name, "jobs", "update_jobs_updated_at"))
+        triggers.extend(TriggerBuilder.updated_at_trigger(self.schema_name, "tasks", "update_tasks_updated_at"))
+
         self.logger.debug(f"✅ Generated {len(triggers)} trigger statements")
         return triggers
     

@@ -1,6 +1,8 @@
 ## Epic E2: Raster Data as API 🚧
 
-**Business Requirement**: "Make GeoTIFF available as API"
+**Type**: Business
+**Value Statement**: Any imagery you have becomes analysis-ready and visualizable.
+**Runs On**: E7 (Pipeline Infrastructure)
 **Status**: 🚧 PARTIAL (F2.7 Collection + F2.8 Classification pending)
 **Core Complete**: NOV 2025
 

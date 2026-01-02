@@ -23,6 +23,7 @@ from enum import Enum
 from psycopg import sql
 import geopandas as gpd
 
+from core.schema.ddl_utils import IndexBuilder, TriggerBuilder, CommentBuilder
 from util_logger import LoggerFactory, ComponentType
 
 logger = LoggerFactory.create_logger(ComponentType.SERVICE, "GeoTableBuilder")
@@ -285,19 +286,11 @@ class GeoTableBuilder:
 
         statements.append(create_table)
 
-        # Add comment on table for documentation
+        # Add comment on table for documentation using CommentBuilder
         comment = f"Geo table created from {source_file or 'unknown source'}"
         if stac_item_id:
             comment += f", STAC item: {stac_item_id}"
-
-        table_comment = sql.SQL("""
-            COMMENT ON TABLE {schema}.{table} IS {comment}
-        """).format(
-            schema=sql.Identifier(schema),
-            table=sql.Identifier(table_name),
-            comment=sql.Literal(comment)
-        )
-        statements.append(table_comment)
+        statements.append(CommentBuilder.table(schema, table_name, comment))
 
         logger.info(f"✅ Generated CREATE TABLE with {len(column_defs)} columns")
 
@@ -374,17 +367,7 @@ class GeoTableBuilder:
         # 1. SPATIAL INDEX (GIST on geometry column) - always
         if config.get('spatial', True):
             idx_name = f"idx_{table_name}_{self.geometry_column_name}"
-            spatial_idx = sql.SQL("""
-                CREATE INDEX IF NOT EXISTS {idx_name}
-                ON {schema}.{table}
-                USING GIST ({geom_col})
-            """).format(
-                idx_name=sql.Identifier(idx_name),
-                schema=sql.Identifier(schema),
-                table=sql.Identifier(table_name),
-                geom_col=sql.Identifier(self.geometry_column_name)
-            )
-            statements.append(spatial_idx)
+            statements.append(IndexBuilder.gist(schema, table_name, self.geometry_column_name, name=idx_name))
             logger.info(f"   ✅ Spatial index: {idx_name}")
 
         # 2. STANDARD COLUMN INDEXES (if using standard columns)
@@ -393,50 +376,22 @@ class GeoTableBuilder:
             for col in standard_indexed:
                 if col in self.NO_INDEX_COLUMNS:
                     continue
-
                 idx_name = f"idx_{table_name}_{col}"
-                col_idx = sql.SQL("""
-                    CREATE INDEX IF NOT EXISTS {idx_name}
-                    ON {schema}.{table} ({column})
-                """).format(
-                    idx_name=sql.Identifier(idx_name),
-                    schema=sql.Identifier(schema),
-                    table=sql.Identifier(table_name),
-                    column=sql.Identifier(col)
-                )
-                statements.append(col_idx)
+                statements.append(IndexBuilder.btree(schema, table_name, col, name=idx_name))
                 logger.info(f"   ✅ Standard index: {idx_name}")
 
         # 3. ATTRIBUTE INDEXES (B-tree on specified columns)
         for col in config.get('attributes', []):
             cleaned_col = self._clean_column_name(col)
             idx_name = f"idx_{table_name}_{cleaned_col}"
-            attr_idx = sql.SQL("""
-                CREATE INDEX IF NOT EXISTS {idx_name}
-                ON {schema}.{table} ({column})
-            """).format(
-                idx_name=sql.Identifier(idx_name),
-                schema=sql.Identifier(schema),
-                table=sql.Identifier(table_name),
-                column=sql.Identifier(cleaned_col)
-            )
-            statements.append(attr_idx)
+            statements.append(IndexBuilder.btree(schema, table_name, cleaned_col, name=idx_name))
             logger.info(f"   ✅ Attribute index: {idx_name}")
 
         # 4. TEMPORAL INDEXES (B-tree DESC for time-series queries)
         for col in config.get('temporal', []):
             cleaned_col = self._clean_column_name(col)
             idx_name = f"idx_{table_name}_{cleaned_col}_desc"
-            temp_idx = sql.SQL("""
-                CREATE INDEX IF NOT EXISTS {idx_name}
-                ON {schema}.{table} ({column} DESC)
-            """).format(
-                idx_name=sql.Identifier(idx_name),
-                schema=sql.Identifier(schema),
-                table=sql.Identifier(table_name),
-                column=sql.Identifier(cleaned_col)
-            )
-            statements.append(temp_idx)
+            statements.append(IndexBuilder.btree(schema, table_name, cleaned_col, name=idx_name, descending=True))
             logger.info(f"   ✅ Temporal index: {idx_name}")
 
         logger.info(f"✅ Generated {len(statements)} indexes")
@@ -452,7 +407,7 @@ class GeoTableBuilder:
         Generate trigger DDL for automatic updated_at maintenance.
 
         Creates a trigger that updates the updated_at column on every UPDATE.
-        Requires the update_updated_at_column() function to exist in the schema.
+        Uses TriggerBuilder from ddl_utils for consistent trigger generation.
 
         Args:
             table_name: Target table name
@@ -464,46 +419,10 @@ class GeoTableBuilder:
         if not self.include_standard_columns:
             return []  # No trigger needed without standard columns
 
-        statements = []
-
-        # First, ensure the trigger function exists in geo schema
-        # (Copies pattern from app schema)
-        trigger_func = sql.SQL("""
-            CREATE OR REPLACE FUNCTION {schema}.update_updated_at_column()
-            RETURNS TRIGGER
-            LANGUAGE plpgsql
-            AS $$
-            BEGIN
-                NEW.updated_at = NOW();
-                RETURN NEW;
-            END;
-            $$
-        """).format(schema=sql.Identifier(schema))
-        statements.append(trigger_func)
-
-        # Drop existing trigger if exists (for idempotency)
+        # Use TriggerBuilder for consistent trigger generation
+        # Returns [CREATE FUNCTION, DROP TRIGGER, CREATE TRIGGER]
         trigger_name = f"trg_{table_name}_updated_at"
-        drop_trigger = sql.SQL("""
-            DROP TRIGGER IF EXISTS {trigger_name} ON {schema}.{table}
-        """).format(
-            trigger_name=sql.Identifier(trigger_name),
-            schema=sql.Identifier(schema),
-            table=sql.Identifier(table_name)
-        )
-        statements.append(drop_trigger)
-
-        # Create trigger
-        create_trigger = sql.SQL("""
-            CREATE TRIGGER {trigger_name}
-            BEFORE UPDATE ON {schema}.{table}
-            FOR EACH ROW
-            EXECUTE FUNCTION {schema}.update_updated_at_column()
-        """).format(
-            trigger_name=sql.Identifier(trigger_name),
-            schema=sql.Identifier(schema),
-            table=sql.Identifier(table_name)
-        )
-        statements.append(create_trigger)
+        statements = TriggerBuilder.updated_at(schema, table_name)
 
         logger.info(f"✅ Generated updated_at trigger: {trigger_name}")
 

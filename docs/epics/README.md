@@ -1,9 +1,51 @@
 # SAFe Epic & Feature Registry
 
-**Last Updated**: 30 DEC 2025
+**Last Updated**: 31 DEC 2025
 **Framework**: SAFe (Scaled Agile Framework)
 **Purpose**: Master reference for Azure DevOps Boards import
 **Source of Truth**: This directory defines Epic/Feature numbers; TODO.md should align
+
+---
+
+## Portfolio Data Flow
+
+```
+╔═════════════════════════════════════════════════════════════════════╗
+║                 E7: PIPELINE INFRASTRUCTURE                         ║
+║                      (FOUNDATIONAL LAYER)                           ║
+║                                                                     ║
+║   • Data type inference • Validation logic • Job orchestration      ║
+║   • Advisory locks • Fan-out patterns • Observability               ║
+║                                                                     ║
+║   This is the ETL brain. All other Epics run on this substrate.     ║
+╚══════════════════════════════════╦══════════════════════════════════╝
+                                   ║
+         ┌─────────────────────────╬─────────────────────────┐
+         ▼                         ▼                         ▼
+┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
+│   E1: Vector    │      │   E2: Raster    │      │   E9: Large &   │
+│                 │      │                 │      │   Multidim      │
+│ CSV,KML,SHP,    │      │ GeoTIFF → COG   │      │                 │
+│ GeoJSON →       │      │ → TiTiler       │      │ FATHOM, CMIP6   │
+│ PostGIS + OGC   │      │                 │      │ Zarr/NetCDF     │
+└────────┬────────┘      └────────┬────────┘      └────────┬────────┘
+         │                        │                        │
+         └────────────────────────┼────────────────────────┘
+                                  ▼
+                    ┌─────────────────────────┐
+                    │   E8: GeoAnalytics      │
+                    │                         │
+                    │   H3 Aggregation →      │
+                    │   GeoParquet / OGC      │
+                    └────────────┬────────────┘
+                                 │
+        ┌────────────────────────┼────────────────────────┐
+        ▼                        ▼                        ▼
+┌───────────────┐      ┌─────────────────┐      ┌─────────────────────┐
+│  E3: DDH      │      │ E4: External    │      │ E12: Integration    │
+│  Integration  │      │ Security Zones  │      │ Onboarding UI       │
+└───────────────┘      └─────────────────┘      └─────────────────────┘
+```
 
 ---
 
@@ -11,16 +53,21 @@
 
 **FY26 Target (ends 30 JUN 2026)**: E1 ✅, E2, E3, E4
 
-| Priority | Epic | Name | Status | Features | WSJF | Link |
-|:--------:|------|------|--------|:--------:|:----:|:----:|
-| — | E1 | Vector Data as API | 🚧 Partial | 8 | — | [E1](E1_vector_data.md) |
-| 1 | E2 | Raster Data as API | 🚧 Partial | 8 | 5.9 | [E2](E2_raster_data.md) |
-| 2 | E3 | DDH Platform Integration | 🚧 Partial | 8 | 4.8 | [E3](E3_ddh_integration.md) |
-| 3 | E4 | Data Externalization & Security Zones | 🚧 Partial | 5 | 4.3 | [E4](E4_security_zones.md) |
-| 4 | E9 | Large and Multidimensional Data | 🚧 Partial | 7 | 2.5 | [E9](E9_large_data.md) |
-| 5 | E8 | GeoAnalytics Pipeline | 🚧 Partial | 12 | 1.8 | [E8](E8_geoanalytics.md) |
-| 6 | E7 | Pipeline Infrastructure | 🚧 Partial | 5 | — | [E7](E7_pipeline_infra.md) |
-| — | E12 | Platform Interfaces | 🚧 Partial | 10 | — | [E12](E12_interfaces.md) |
+| Epic | Name | Type | Value Statement | Status | Features | Link |
+|------|------|------|-----------------|--------|:--------:|:----:|
+| E7 | Pipeline Infrastructure | Foundational | The ETL brain that makes everything possible | 🚧 Partial | 5 | [E7](E7_pipeline_infra.md) |
+| E1 | Vector Data as API | Business | Vector garbage → clean, API-accessible data | 🚧 Partial | 8 | [E1](E1_vector_data.md) |
+| E2 | Raster Data as API | Business | Any imagery → analysis-ready and tileable | 🚧 Partial | 9 | [E2](E2_raster_data.md) |
+| E9 | Large & Multidimensional | Business | Host FATHOM/CMIP6 at scale | 🚧 Partial | 10 | [E9](E9_large_data.md) |
+| E8 | GeoAnalytics Pipeline | Business | Raw data → H3-aggregated, analysis-ready | 🚧 Partial | 12 | [E8](E8_geoanalytics.md) |
+| E3 | DDH Integration | Enabler | DDH consumes geospatial services | 🚧 Partial | 8 | [E3](E3_ddh_integration.md) |
+| E4 | Externalization & Security | Enabler | Data movement to external zones | 📋 Planned | 5 | [E4](E4_security_zones.md) |
+| E12 | Integration Onboarding | Enabler | Self-service onboarding for integrators | 🚧 Partial | 10 | [E12](E12_interfaces.md) |
+
+**Epic Types**:
+- **Foundational**: Infrastructure that other epics depend on (E7)
+- **Business**: Delivers direct stakeholder value (E1, E2, E8, E9)
+- **Enabler**: Enables integration, consumption, or security (E3, E4, E12)
 
 **Consolidated Epics** (absorbed into E1, E7, E8, or E9):
 - ~~E5~~ → F1.7-F1.8 (OGC Styles) - now in E1

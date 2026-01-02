@@ -1,6 +1,8 @@
 ## Epic E3: DDH Platform Integration 🚧
 
-**Business Requirement**: Enable DDH application to consume geospatial platform data services
+**Type**: Enabler
+**Value Statement**: DDH consumes geospatial services via documented, stable APIs.
+**Runs On**: E1, E2 (Data APIs)
 **Status**: 🚧 PARTIAL (Observability complete, Identity/Access in progress, Documentation planned)
 **Owner**: ITSDA Team (DDH) + Geospatial Team (Platform)
 

@@ -1,8 +1,10 @@
 ## Epic E8: GeoAnalytics Pipeline 🚧
 
-**Business Requirement**: Transform raster/vector data to H3 hexagonal grid, export to GeoParquet and OGC Features
+**Type**: Business
+**Value Statement**: Raw hosted data becomes H3-aggregated, analysis-ready output.
+**Runs On**: E7 (Pipeline Infrastructure)
 **Status**: 🚧 PARTIAL (F8.1-F8.3 ✅, F8.8 ✅, F8.9 ✅)
-**Last Updated**: 30 DEC 2025
+**Last Updated**: 31 DEC 2025
 
 **Strategic Context**:
 > E8 is the "transform and export" epic. Data hosted in E9 (FATHOM, CMIP6) gets aggregated to H3

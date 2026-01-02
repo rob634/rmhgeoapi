@@ -79,31 +79,53 @@ class ApiRequestRepository(PostgreSQLRepository):
         # Schema deployed centrally via POST /api/db/schema/redeploy?confirm=yes
         # No _ensure_schema() call - fail fast if schema missing
 
-    def create_request(self, request: ApiRequest) -> ApiRequest:
+    def create_request(self, request: ApiRequest, is_retry: bool = False) -> ApiRequest:
         """
-        Create a new Platform request record (thin tracking).
+        Create or update a Platform request record (thin tracking).
 
-        Uses ON CONFLICT to handle idempotent submissions:
-        - Same DDH identifiers = same request_id (SHA256 hash)
-        - If already exists, returns existing record
+        Uses UPSERT semantics (01 JAN 2026):
+        - New request: INSERT with retry_count=0
+        - Retry (is_retry=True): UPDATE retry_count and updated_at
+        - If already exists and not retry: returns existing record unchanged
 
         Args:
             request: ApiRequest with request_id, DDH IDs, job_id
+            is_retry: True if this is a user-initiated retry of a failed job
 
         Returns:
-            ApiRequest (newly created or existing)
+            ApiRequest (newly created, updated, or existing)
         """
         with self._error_context("platform request creation", request.request_id):
-            query = sql.SQL("""
-                INSERT INTO {}.{}
-                (request_id, dataset_id, resource_id, version_id, job_id, data_type, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (request_id) DO NOTHING
-                RETURNING *
-            """).format(
-                sql.Identifier(self.schema_name),
-                sql.Identifier("api_requests")
-            )
+            now = datetime.utcnow()
+
+            if is_retry:
+                # Retry mode: UPSERT with retry_count increment (01 JAN 2026)
+                query = sql.SQL("""
+                    INSERT INTO {}.{}
+                    (request_id, dataset_id, resource_id, version_id, job_id, data_type, retry_count, created_at, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, 1, %s, %s)
+                    ON CONFLICT (request_id) DO UPDATE SET
+                        retry_count = {}.{}.retry_count + 1,
+                        updated_at = EXCLUDED.updated_at
+                    RETURNING *
+                """).format(
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("api_requests"),
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("api_requests")
+                )
+            else:
+                # Normal mode: INSERT only, no update on conflict
+                query = sql.SQL("""
+                    INSERT INTO {}.{}
+                    (request_id, dataset_id, resource_id, version_id, job_id, data_type, retry_count, created_at, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, 0, %s, %s)
+                    ON CONFLICT (request_id) DO NOTHING
+                    RETURNING *
+                """).format(
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("api_requests")
+                )
 
             params = (
                 request.request_id,
@@ -112,13 +134,18 @@ class ApiRequestRepository(PostgreSQLRepository):
                 request.version_id,
                 request.job_id,
                 request.data_type,
-                request.created_at or datetime.utcnow()
+                request.created_at or now,
+                now  # updated_at
             )
 
             row = self._execute_query(query, params, fetch='one')
 
             if row:
-                logger.info(f"Created platform request: {request.request_id} → job {request.job_id}")
+                retry_count = row.get('retry_count', 0)
+                if is_retry:
+                    logger.info(f"Retried platform request: {request.request_id} → job {request.job_id} (retry #{retry_count})")
+                else:
+                    logger.info(f"Created platform request: {request.request_id} → job {request.job_id}")
                 return self._row_to_record(row)
             else:
                 # Request already exists (idempotent), fetch it
@@ -247,7 +274,9 @@ class ApiRequestRepository(PostgreSQLRepository):
                     'version_id': row['version_id'],
                     'job_id': row['job_id'],
                     'data_type': row['data_type'],
-                    'created_at': row['created_at'].isoformat() if row['created_at'] else None
+                    'retry_count': row.get('retry_count', 0),
+                    'created_at': row['created_at'].isoformat() if row['created_at'] else None,
+                    'updated_at': row['updated_at'].isoformat() if row.get('updated_at') else None
                 }
                 for row in rows
             ]
@@ -269,7 +298,9 @@ class ApiRequestRepository(PostgreSQLRepository):
             version_id=row['version_id'],
             job_id=row['job_id'],
             data_type=row['data_type'],
-            created_at=row.get('created_at')
+            retry_count=row.get('retry_count', 0),
+            created_at=row.get('created_at'),
+            updated_at=row.get('updated_at')
         )
 
 

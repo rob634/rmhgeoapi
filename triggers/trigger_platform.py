@@ -752,22 +752,39 @@ def platform_unpublish_raster(req: func.HttpRequest) -> func.HttpResponse:
         # Generate unpublish request ID (different from create to avoid collision)
         unpublish_request_id = _generate_unpublish_request_id("raster", stac_item_id)
 
-        # Check for existing unpublish request (idempotent)
+        # Check for existing unpublish request (idempotent with retry support - 01 JAN 2026)
         existing = platform_repo.get_request(unpublish_request_id)
+        is_retry = False
         if existing:
-            logger.info(f"Unpublish request already exists: {unpublish_request_id[:16]} → job {existing.job_id[:16]}")
-            return func.HttpResponse(
-                json.dumps({
-                    "success": True,
-                    "request_id": unpublish_request_id,
-                    "job_id": existing.job_id,
-                    "mode": mode,
-                    "message": "Unpublish request already submitted (idempotent)",
-                    "monitor_url": f"/api/platform/status/{unpublish_request_id}"
-                }),
-                status_code=200,
-                headers={"Content-Type": "application/json"}
-            )
+            # Check job status - allow resubmission if job failed
+            job_repo = JobRepository()
+            existing_job = job_repo.get_job(existing.job_id)
+
+            if existing_job and existing_job.status == JobStatus.FAILED:
+                # Job failed - allow retry (01 JAN 2026)
+                logger.info(
+                    f"Previous job failed, allowing retry: {unpublish_request_id[:16]} "
+                    f"(job {existing.job_id[:16]} status={existing_job.status.value})"
+                )
+                is_retry = True
+            else:
+                # Job is still running or completed - return idempotent
+                job_status = existing_job.status.value if existing_job else "unknown"
+                logger.info(f"Unpublish request already exists: {unpublish_request_id[:16]} → job {existing.job_id[:16]} (status={job_status})")
+                return func.HttpResponse(
+                    json.dumps({
+                        "success": True,
+                        "request_id": unpublish_request_id,
+                        "job_id": existing.job_id,
+                        "job_status": job_status,
+                        "mode": mode,
+                        "retry_count": existing.retry_count,
+                        "message": "Unpublish request already submitted (idempotent)",
+                        "monitor_url": f"/api/platform/status/{unpublish_request_id}"
+                    }),
+                    status_code=200,
+                    headers={"Content-Type": "application/json"}
+                )
 
         # Submit unpublish_raster job
         job_params = {
@@ -790,9 +807,10 @@ def platform_unpublish_raster(req: func.HttpRequest) -> func.HttpResponse:
             job_id=job_id,
             data_type="unpublish_raster"
         )
-        platform_repo.create_request(api_request)
+        created_request = platform_repo.create_request(api_request, is_retry=is_retry)
 
-        logger.info(f"Raster unpublish request submitted: {unpublish_request_id[:16]} → job {job_id[:16]}")
+        retry_msg = f" (retry #{created_request.retry_count})" if is_retry else ""
+        logger.info(f"Raster unpublish request submitted{retry_msg}: {unpublish_request_id[:16]} → job {job_id[:16]}")
 
         return func.HttpResponse(
             json.dumps({
@@ -802,9 +820,11 @@ def platform_unpublish_raster(req: func.HttpRequest) -> func.HttpResponse:
                 "job_type": "unpublish_raster",
                 "mode": mode,
                 "dry_run": dry_run,
+                "is_retry": is_retry,
+                "retry_count": created_request.retry_count,
                 "stac_item_id": stac_item_id,
                 "collection_id": collection_id,
-                "message": f"Raster unpublish job submitted (dry_run={dry_run})",
+                "message": f"Raster unpublish job submitted{retry_msg} (dry_run={dry_run})",
                 "monitor_url": f"/api/platform/status/{unpublish_request_id}"
             }),
             status_code=202,
@@ -1040,20 +1060,35 @@ def _handle_collection_unpublish(
     # Submit unpublish job for each item
     submitted_jobs = []
     skipped_jobs = []
+    retried_jobs = []
+    job_repo = JobRepository()
 
     for stac_item_id in item_ids:
         unpublish_request_id = _generate_unpublish_request_id("raster", stac_item_id)
 
-        # Check for existing request (idempotent)
+        # Check for existing request (idempotent with retry support - 01 JAN 2026)
         existing = platform_repo.get_request(unpublish_request_id)
+        is_retry = False
+
         if existing:
-            skipped_jobs.append({
-                "stac_item_id": stac_item_id,
-                "request_id": unpublish_request_id,
-                "job_id": existing.job_id,
-                "status": "already_submitted"
-            })
-            continue
+            # Check job status - allow resubmission if job failed
+            existing_job = job_repo.get_job(existing.job_id)
+
+            if existing_job and existing_job.status == JobStatus.FAILED:
+                # Job failed - allow retry
+                is_retry = True
+                logger.info(f"Previous job failed, retrying: {stac_item_id}")
+            else:
+                # Job is still running or completed - skip
+                job_status = existing_job.status.value if existing_job else "unknown"
+                skipped_jobs.append({
+                    "stac_item_id": stac_item_id,
+                    "request_id": unpublish_request_id,
+                    "job_id": existing.job_id,
+                    "job_status": job_status,
+                    "status": "already_submitted"
+                })
+                continue
 
         # Submit job
         job_params = {
@@ -1074,19 +1109,25 @@ def _handle_collection_unpublish(
                 job_id=job_id,
                 data_type="unpublish_raster"
             )
-            platform_repo.create_request(api_request)
+            created_request = platform_repo.create_request(api_request, is_retry=is_retry)
 
-            submitted_jobs.append({
+            job_info = {
                 "stac_item_id": stac_item_id,
                 "request_id": unpublish_request_id,
-                "job_id": job_id
-            })
+                "job_id": job_id,
+                "retry_count": created_request.retry_count
+            }
+
+            if is_retry:
+                retried_jobs.append(job_info)
+            else:
+                submitted_jobs.append(job_info)
         else:
             logger.error(f"Failed to submit unpublish job for item: {stac_item_id}")
 
     logger.info(
         f"Collection unpublish submitted: {len(submitted_jobs)} new jobs, "
-        f"{len(skipped_jobs)} already submitted"
+        f"{len(retried_jobs)} retried, {len(skipped_jobs)} skipped"
     )
 
     return func.HttpResponse(
@@ -1097,9 +1138,11 @@ def _handle_collection_unpublish(
             "dry_run": dry_run,
             "total_items": len(item_ids),
             "jobs_submitted": len(submitted_jobs),
+            "jobs_retried": len(retried_jobs),
             "jobs_skipped": len(skipped_jobs),
-            "message": f"Submitted {len(submitted_jobs)} unpublish jobs for collection '{collection_id}' (dry_run={dry_run})",
+            "message": f"Submitted {len(submitted_jobs)} new + {len(retried_jobs)} retried unpublish jobs for collection '{collection_id}' (dry_run={dry_run})",
             "submitted_jobs": submitted_jobs[:10],  # Limit to first 10 for response size
+            "retried_jobs": retried_jobs[:10],
             "skipped_jobs": skipped_jobs[:10]
         }),
         status_code=202,

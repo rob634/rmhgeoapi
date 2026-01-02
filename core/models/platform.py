@@ -244,12 +244,14 @@ class ApiRequest(BaseModel):
     API request database record - THIN TRACKING ONLY.
 
     ⚠️ SIMPLIFIED (22 NOV 2025): This is now a thin tracking layer.
+    ⚠️ UPDATED (01 JAN 2026): Added retry_count and updated_at for failed job resubmission.
 
     Purpose:
         - Store DDH identifiers for status lookup
         - Map request_id → job_id (1:1)
         - Enable DDH to poll /api/platform/status/{request_id}
         - Platform looks up job_id, fetches status from CoreMachine
+        - Track user-initiated retries of failed jobs (retry_count)
 
     What's REMOVED:
         - jobs JSONB (was: multi-job tracking)
@@ -257,7 +259,6 @@ class ApiRequest(BaseModel):
         - parameters JSONB (passed to CoreMachine, not stored twice)
         - metadata JSONB (passed to CoreMachine, not stored twice)
         - result_data JSONB (CoreMachine stores results)
-        - updated_at (thin record, doesn't update)
 
     Auto-generates:
         CREATE TABLE app.api_requests (
@@ -267,13 +268,20 @@ class ApiRequest(BaseModel):
             version_id VARCHAR(50) NOT NULL,
             job_id VARCHAR(64) NOT NULL,
             data_type VARCHAR(50) NOT NULL,
-            created_at TIMESTAMPTZ DEFAULT NOW()
+            retry_count INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
         );
 
     Request ID Generation:
         SHA256(dataset_id | resource_id | version_id)[:32]
         - Idempotent: same DDH identifiers = same request_id
         - See config.generate_platform_request_id()
+
+    Retry Tracking (01 JAN 2026):
+        - retry_count: Increments when user resubmits a failed job
+        - updated_at: Timestamp of last retry (or creation if never retried)
+        - Distinguishes automated CoreMachine retries from user-initiated Platform retries
     """
     request_id: str = Field(
         ...,
@@ -289,9 +297,17 @@ class ApiRequest(BaseModel):
         description="CoreMachine job ID (1:1 mapping)"
     )
     data_type: str = Field(..., max_length=50, description="Type of data: raster, vector, etc.")
+    retry_count: int = Field(
+        default=0,
+        description="Number of user-initiated retries (0 = first submission)"
+    )
     created_at: datetime = Field(
         default_factory=datetime.utcnow,
         description="Timestamp when request was created"
+    )
+    updated_at: datetime = Field(
+        default_factory=datetime.utcnow,
+        description="Timestamp of last update (retry or creation)"
     )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -303,7 +319,9 @@ class ApiRequest(BaseModel):
             'version_id': self.version_id,
             'job_id': self.job_id,
             'data_type': self.data_type,
-            'created_at': self.created_at.isoformat() if self.created_at else None
+            'retry_count': self.retry_count,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
 
 

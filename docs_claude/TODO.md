@@ -1,7 +1,7 @@
 # Working Backlog
 
-**Last Updated**: 30 DEC 2025
-**Source of Truth**: [EPICS.md](/EPICS.md) — Epic/Feature/Story definitions live there
+**Last Updated**: 31 DEC 2025
+**Source of Truth**: [docs/epics/README.md](/docs/epics/README.md) — Epic/Feature/Story definitions
 **Purpose**: Sprint-level task tracking and delegation
 
 ---
@@ -10,38 +10,68 @@
 
 | Priority | Epic | Name | Status | Next Action |
 |:--------:|------|------|--------|-------------|
-| 1 | E2 | Raster Data as API | 🚧 | F2.7: Collection Processing |
-| 2 | E3 | DDH Platform Integration | 🚧 | F3.1: Validate Swagger UI |
-| 3 | E4 | Data Externalization | 📋 | F4.1: Publishing Workflow |
-| 4 | E9 | Zarr/Climate Data as API | 🚧 | F9.2: Virtual Zarr Pipeline |
-| 5 | E7 | Pipeline Extensibility | 🚧 | F7.4: FATHOM Phase 2 retry |
-| 6 | E5 | OGC Styles | 🚧 | F5.2: ETL Integration |
-| 7 | E8 | H3 Analytics Pipeline | 🚧 | F8.4: Vector→H3 |
-| — | E12 | Interface Modernization | ✅ | Phase 1 Complete |
+| 🔴 1 | E9 | Large Data Hosting | 🚧 | **F9.8: Pre-prepared Raster Ingest** |
+| 2 | E2 | Raster Data as API | 🚧 | F2.7: Collection Processing |
+| 3 | E3 | DDH Platform Integration | 🚧 | F3.1: Validate Swagger UI |
+| 4 | E4 | Data Externalization | 📋 | F4.1: Publishing Workflow |
+| 5 | E9 | Large Data Hosting | 🚧 | F9.1: FATHOM Phase 2 retry |
+| 6 | E7 | Pipeline Infrastructure | 🚧 | F7.2: Reference Data Pipelines |
+| 7 | E8 | GeoAnalytics Pipeline | 🚧 | F8.4: Vector→H3 |
+| — | E1 | Vector Data as API | 🚧 | F1.8: ETL Style Integration |
+| — | E12 | Integration Onboarding | ✅ | Phase 1 Complete |
 
-**Epic Consolidation (29 DEC 2025)**:
-- ~~E10~~ → F7.4 (FATHOM ETL Operations)
-- ~~E11~~ → F7.7 (Pipeline Builder UI)
-- ~~E13~~ → F7.6 (Pipeline Observability) ✅
-- ~~E14~~ → F8.12 (H3 Export Pipeline) ✅
-- ~~E15~~ → F7.5 (Collection Ingestion) ✅
+**Epic Consolidation (31 DEC 2025)**:
+- ~~E5~~ → F1.7-F1.8 (OGC Styles) - now in E1
+- ~~E10~~ → F9.1 (FATHOM ETL Operations) - now in E9
+- ~~E11~~ → F8.10-12 (Analytics UI) - now in E8
+- ~~E13~~ → F7.4 (Pipeline Observability) ✅
+- ~~E14~~ → F8.9 (H3 Export Pipeline) ✅
+- ~~E15~~ → F7.3 (Collection Ingestion) ✅
 
 ---
 
 ## Current Sprint Focus
 
-### E7: Pipeline Extensibility
+### 🔴 F9.8: Pre-prepared Raster Ingest (HIGH PRIORITY)
 
-**Consolidated from**: E7 + E10 + E11 + E13 + E15
+**Epic**: E9 Large Data Hosting
+**Goal**: Lightweight ingest for raster datasets already prepared as COGs (no conversion needed)
+**Use Case**: Partner provides COGs; we copy to silver storage and create STAC from parameters
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| S9.8.1 | Design STAC structure parameter schema | 📋 |
+| S9.8.2 | Create `ingest_prepared_raster` job (3-stage) | 📋 |
+| S9.8.3 | Inventory handler (scan source, validate COG) | 📋 |
+| S9.8.4 | Copy handler (parallel blob copy) | 📋 |
+| S9.8.5 | STAC generation handler (collection + items) | 📋 |
+| S9.8.6 | Support bbox/datetime from COG metadata | 📋 |
+| S9.8.7 | Support custom asset naming | 📋 |
+
+**Docs**: [E9_large_data.md](/docs/epics/E9_large_data.md#feature-f98-pre-prepared-raster-ingest--planned)
+
+---
+
+### E9: Large Data Hosting
 
 | Feature | Description | Status |
 |---------|-------------|--------|
-| F7.4: FATHOM ETL | Band stacking + spatial merge | 🚧 46/47 tasks |
-| F7.5: Collection Ingestion | Pre-processed COG ingest (MapSPAM) | ✅ Complete |
-| F7.6: Pipeline Observability | Real-time job metrics | ✅ Complete |
+| F9.1: FATHOM ETL | Band stacking + spatial merge | 🚧 46/47 tasks |
+| F9.5: xarray Service | Time-series endpoints | ✅ Complete |
+| F9.8: Pre-prepared Ingest | COG copy + STAC from params | 📋 HIGH PRIORITY |
 
-**F7.4 Current Issue**: Phase 2 task `n10-n15_w005-w010` failed. Need retry with `force_reprocess=true`.
+**F9.1 Current Issue**: Phase 2 task `n10-n15_w005-w010` failed. Need retry with `force_reprocess=true`.
 **Docs**: [FATHOM_ETL.md](./FATHOM_ETL.md)
+
+---
+
+### E7: Pipeline Infrastructure
+
+| Feature | Description | Status |
+|---------|-------------|--------|
+| F7.3: Collection Ingestion | Pre-processed COG ingest (MapSPAM) | ✅ Complete |
+| F7.4: Pipeline Observability | Real-time job metrics | ✅ Complete |
+| F7.5: Pipeline Builder UI | Visual orchestration | 📋 Planned |
 
 ### E2: Raster Data as API
 
@@ -414,11 +444,11 @@ Tasks suitable for a colleague with Azure/Python/pipeline expertise but without 
 
 | Document | Purpose |
 |----------|---------|
-| [EPICS.md](/EPICS.md) | Master Epic/Feature/Story definitions |
+| [docs/epics/README.md](/docs/epics/README.md) | Master Epic/Feature/Story definitions |
+| [docs/archive/revisions.md](/docs/archive/revisions.md) | SAFe Portfolio context (archived) |
 | [HISTORY.md](./HISTORY.md) | Full completion log |
-| [READER_MIGRATION_PLAN.md](/READER_MIGRATION_PLAN.md) | F3.3 implementation guide |
 | [ARCHITECTURE_REFERENCE.md](./ARCHITECTURE_REFERENCE.md) | Technical patterns |
-| [NICEGUI.md](./NICEGUI.md) | E12 Interface Modernization (HTMX + NiceGUI) |
+| [FATHOM_ETL.md](./FATHOM_ETL.md) | FATHOM flood data pipeline |
 
 ---
 

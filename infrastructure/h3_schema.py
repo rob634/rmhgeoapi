@@ -4,7 +4,7 @@
 # EPOCH: 4 - ACTIVE
 # STATUS: Infrastructure - H3 OLTP Schema DDL
 # PURPOSE: Deploy normalized H3 schema (cells, admin mappings, stats tables)
-# LAST_REVIEWED: 22 DEC 2025
+# LAST_REVIEWED: 01 JAN 2026
 # EXPORTS: H3SchemaDeployer, deploy_h3_normalized_schema
 # DEPENDENCIES: psycopg, pydantic
 # ============================================================================
@@ -41,6 +41,7 @@ from psycopg import sql
 import traceback
 
 from infrastructure.postgresql import PostgreSQLRepository
+from core.schema.ddl_utils import IndexBuilder, CommentBuilder, SchemaUtils
 from util_logger import LoggerFactory, ComponentType
 from config import get_config
 
@@ -144,16 +145,14 @@ class H3SchemaDeployer:
 
         try:
             with conn.cursor() as cur:
-                cur.execute(sql.SQL("""
-                    CREATE SCHEMA IF NOT EXISTS {}
-                """).format(sql.Identifier(self.SCHEMA_NAME)))
-
-                cur.execute(sql.SQL("""
-                    COMMENT ON SCHEMA {} IS
+                # Use SchemaUtils for schema creation with comment
+                schema_comment = (
                     'Normalized H3 hexagonal grid schema - OLTP system of record. '
                     'Unique geometry per h3_index with sparse mapping tables for '
                     'political boundaries and aggregation results.'
-                """).format(sql.Identifier(self.SCHEMA_NAME)))
+                )
+                for stmt in SchemaUtils.create_schema(self.SCHEMA_NAME, schema_comment):
+                    cur.execute(stmt)
 
             step["status"] = "success"
             logger.info(f"Schema {self.SCHEMA_NAME} created/verified")
@@ -216,53 +215,19 @@ class H3SchemaDeployer:
                     table=sql.Identifier("cells")
                 ))
 
-                # Spatial index (GiST)
-                cur.execute(sql.SQL("""
-                    CREATE INDEX IF NOT EXISTS idx_h3_cells_geom
-                    ON {schema}.{table} USING GIST(geom)
-                """).format(
-                    schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("cells")
-                ))
+                # Indexes using IndexBuilder
+                cur.execute(IndexBuilder.gist(self.SCHEMA_NAME, 'cells', 'geom'))
+                cur.execute(IndexBuilder.btree(self.SCHEMA_NAME, 'cells', 'resolution'))
+                cur.execute(IndexBuilder.btree(self.SCHEMA_NAME, 'cells', 'parent_h3_index',
+                                               name='idx_h3_cells_parent',
+                                               partial_where='parent_h3_index IS NOT NULL'))
+                cur.execute(IndexBuilder.btree(self.SCHEMA_NAME, 'cells', 'is_land',
+                                               partial_where='is_land IS NOT NULL'))
 
-                # Resolution index (for filtering by level)
-                cur.execute(sql.SQL("""
-                    CREATE INDEX IF NOT EXISTS idx_h3_cells_resolution
-                    ON {schema}.{table}(resolution)
-                """).format(
-                    schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("cells")
-                ))
-
-                # Parent index (for hierarchy queries)
-                cur.execute(sql.SQL("""
-                    CREATE INDEX IF NOT EXISTS idx_h3_cells_parent
-                    ON {schema}.{table}(parent_h3_index)
-                    WHERE parent_h3_index IS NOT NULL
-                """).format(
-                    schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("cells")
-                ))
-
-                # Land filter index
-                cur.execute(sql.SQL("""
-                    CREATE INDEX IF NOT EXISTS idx_h3_cells_is_land
-                    ON {schema}.{table}(is_land)
-                    WHERE is_land IS NOT NULL
-                """).format(
-                    schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("cells")
-                ))
-
-                # Table comment
-                cur.execute(sql.SQL("""
-                    COMMENT ON TABLE {schema}.{table} IS
+                # Table comment using CommentBuilder
+                cur.execute(CommentBuilder.table(self.SCHEMA_NAME, 'cells',
                     'Core H3 hexagonal grid - unique geometry per h3_index. '
-                    'OLTP system of record. All mapping tables reference this via FK.'
-                """).format(
-                    schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("cells")
-                ))
+                    'OLTP system of record. All mapping tables reference this via FK.'))
 
             step["status"] = "success"
             logger.info("Table h3.cells created with indexes")
@@ -320,34 +285,15 @@ class H3SchemaDeployer:
                     table=sql.Identifier("cell_admin0")
                 ))
 
-                # Index on iso3 for country queries
-                cur.execute(sql.SQL("""
-                    CREATE INDEX IF NOT EXISTS idx_h3_cell_admin0_iso3
-                    ON {schema}.{table}(iso3)
-                """).format(
-                    schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("cell_admin0")
-                ))
+                # Indexes using IndexBuilder
+                cur.execute(IndexBuilder.btree(self.SCHEMA_NAME, 'cell_admin0', 'iso3'))
+                cur.execute(IndexBuilder.btree(self.SCHEMA_NAME, 'cell_admin0', 'h3_index'))
 
-                # Index on h3_index for cell lookups
-                cur.execute(sql.SQL("""
-                    CREATE INDEX IF NOT EXISTS idx_h3_cell_admin0_h3_index
-                    ON {schema}.{table}(h3_index)
-                """).format(
-                    schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("cell_admin0")
-                ))
-
-                # Table comment
-                cur.execute(sql.SQL("""
-                    COMMENT ON TABLE {schema}.{table} IS
+                # Table comment using CommentBuilder
+                cur.execute(CommentBuilder.table(self.SCHEMA_NAME, 'cell_admin0',
                     'H3 cell to country (admin0) mapping. Sparse table - only stores '
                     'actual overlaps. One cell can belong to multiple countries (borders). '
-                    'coverage_pct indicates fraction of cell area within country.'
-                """).format(
-                    schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("cell_admin0")
-                ))
+                    'coverage_pct indicates fraction of cell area within country.'))
 
             step["status"] = "success"
             logger.info("Table h3.cell_admin0 created with indexes")
@@ -410,42 +356,15 @@ class H3SchemaDeployer:
                     table=sql.Identifier("cell_admin1")
                 ))
 
-                # Index on admin1_id for region queries
-                cur.execute(sql.SQL("""
-                    CREATE INDEX IF NOT EXISTS idx_h3_cell_admin1_admin1_id
-                    ON {schema}.{table}(admin1_id)
-                """).format(
-                    schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("cell_admin1")
-                ))
+                # Indexes using IndexBuilder
+                cur.execute(IndexBuilder.btree(self.SCHEMA_NAME, 'cell_admin1', 'admin1_id'))
+                cur.execute(IndexBuilder.btree(self.SCHEMA_NAME, 'cell_admin1', 'iso3'))
+                cur.execute(IndexBuilder.btree(self.SCHEMA_NAME, 'cell_admin1', 'h3_index'))
 
-                # Index on iso3 for country filtering
-                cur.execute(sql.SQL("""
-                    CREATE INDEX IF NOT EXISTS idx_h3_cell_admin1_iso3
-                    ON {schema}.{table}(iso3)
-                """).format(
-                    schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("cell_admin1")
-                ))
-
-                # Index on h3_index for cell lookups
-                cur.execute(sql.SQL("""
-                    CREATE INDEX IF NOT EXISTS idx_h3_cell_admin1_h3_index
-                    ON {schema}.{table}(h3_index)
-                """).format(
-                    schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("cell_admin1")
-                ))
-
-                # Table comment
-                cur.execute(sql.SQL("""
-                    COMMENT ON TABLE {schema}.{table} IS
+                # Table comment using CommentBuilder
+                cur.execute(CommentBuilder.table(self.SCHEMA_NAME, 'cell_admin1',
                     'H3 cell to admin1 (state/province) mapping. Sparse table - only '
-                    'stores actual overlaps. admin1_id format: ISO3-CODE (e.g., US-CA).'
-                """).format(
-                    schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("cell_admin1")
-                ))
+                    'stores actual overlaps. admin1_id format: ISO3-CODE (e.g., US-CA).'))
 
             step["status"] = "success"
             logger.info("Table h3.cell_admin1 created with indexes")
@@ -570,53 +489,20 @@ class H3SchemaDeployer:
                     table=sql.Identifier("dataset_registry")
                 ))
 
-                # Index on theme for partition alignment queries
-                cur.execute(sql.SQL("""
-                    CREATE INDEX IF NOT EXISTS idx_h3_dataset_registry_theme
-                    ON {schema}.{table}(theme)
-                """).format(
-                    schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("dataset_registry")
-                ))
+                # Indexes using IndexBuilder
+                cur.execute(IndexBuilder.btree(self.SCHEMA_NAME, 'dataset_registry', 'theme'))
+                cur.execute(IndexBuilder.btree(self.SCHEMA_NAME, 'dataset_registry', 'source_type'))
+                cur.execute(IndexBuilder.btree(self.SCHEMA_NAME, 'dataset_registry', 'data_category',
+                                               name='idx_h3_dataset_registry_category'))
+                cur.execute(IndexBuilder.gin(self.SCHEMA_NAME, 'dataset_registry', 'source_config',
+                                             name='idx_h3_dataset_registry_config'))
 
-                # Index on source_type for source queries
-                cur.execute(sql.SQL("""
-                    CREATE INDEX IF NOT EXISTS idx_h3_dataset_registry_source_type
-                    ON {schema}.{table}(source_type)
-                """).format(
-                    schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("dataset_registry")
-                ))
-
-                # Index on data_category for category queries
-                cur.execute(sql.SQL("""
-                    CREATE INDEX IF NOT EXISTS idx_h3_dataset_registry_category
-                    ON {schema}.{table}(data_category)
-                """).format(
-                    schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("dataset_registry")
-                ))
-
-                # GIN index on source_config for JSONB queries
-                cur.execute(sql.SQL("""
-                    CREATE INDEX IF NOT EXISTS idx_h3_dataset_registry_config
-                    ON {schema}.{table} USING GIN(source_config)
-                """).format(
-                    schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("dataset_registry")
-                ))
-
-                # Table comment
-                cur.execute(sql.SQL("""
-                    COMMENT ON TABLE {schema}.{table} IS
+                # Table comment using CommentBuilder
+                cur.execute(CommentBuilder.table(self.SCHEMA_NAME, 'dataset_registry',
                     'Comprehensive metadata catalog for H3 aggregation datasets. '
                     'Stores source configuration (Planetary Computer, Azure, URL) and '
                     'links to zonal_stats via dataset_id FK. Theme column aligns with '
-                    'zonal_stats partitioning for query optimization.'
-                """).format(
-                    schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("dataset_registry")
-                ))
+                    'zonal_stats partitioning for query optimization.'))
 
             step["status"] = "success"
             logger.info("Table h3.dataset_registry created with indexes")
@@ -797,55 +683,22 @@ class H3SchemaDeployer:
                     table=sql.Identifier("source_catalog")
                 ))
 
-                # Index on theme for partition-aligned queries
-                cur.execute(sql.SQL("""
-                    CREATE INDEX IF NOT EXISTS idx_h3_source_catalog_theme
-                    ON {schema}.{table}(theme)
-                """).format(
-                    schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("source_catalog")
-                ))
+                # Indexes using IndexBuilder
+                cur.execute(IndexBuilder.btree(self.SCHEMA_NAME, 'source_catalog', 'theme'))
+                cur.execute(IndexBuilder.btree(self.SCHEMA_NAME, 'source_catalog', 'source_type'))
+                cur.execute(IndexBuilder.btree(self.SCHEMA_NAME, 'source_catalog', 'is_active',
+                                               name='idx_h3_source_catalog_active',
+                                               partial_where='is_active = true'))
+                cur.execute(IndexBuilder.gist(self.SCHEMA_NAME, 'source_catalog', 'spatial_extent',
+                                              name='idx_h3_source_catalog_extent',
+                                              partial_where='spatial_extent IS NOT NULL'))
 
-                # Index on source_type for source queries
-                cur.execute(sql.SQL("""
-                    CREATE INDEX IF NOT EXISTS idx_h3_source_catalog_source_type
-                    ON {schema}.{table}(source_type)
-                """).format(
-                    schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("source_catalog")
-                ))
-
-                # Index on active sources
-                cur.execute(sql.SQL("""
-                    CREATE INDEX IF NOT EXISTS idx_h3_source_catalog_active
-                    ON {schema}.{table}(is_active)
-                    WHERE is_active = true
-                """).format(
-                    schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("source_catalog")
-                ))
-
-                # Spatial index on extent
-                cur.execute(sql.SQL("""
-                    CREATE INDEX IF NOT EXISTS idx_h3_source_catalog_extent
-                    ON {schema}.{table} USING GIST(spatial_extent)
-                    WHERE spatial_extent IS NOT NULL
-                """).format(
-                    schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("source_catalog")
-                ))
-
-                # Table comment
-                cur.execute(sql.SQL("""
-                    COMMENT ON TABLE {schema}.{table} IS
+                # Table comment using CommentBuilder
+                cur.execute(CommentBuilder.table(self.SCHEMA_NAME, 'source_catalog',
                     'Comprehensive metadata catalog for H3 aggregation data sources. '
                     'Supports Planetary Computer STAC, Azure Blob, direct URLs, and PostGIS. '
                     'Enables dynamic tile discovery and declarative pipeline definitions. '
-                    'Created: 27 DEC 2025.'
-                """).format(
-                    schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("source_catalog")
-                ))
+                    'Created: 27 DEC 2025.'))
 
             step["status"] = "success"
             logger.info("Table h3.source_catalog created with indexes")
@@ -959,56 +812,23 @@ class H3SchemaDeployer:
                     ))
                     logger.info(f"  Created partition h3.{partition_name}")
 
-                # Create indexes on parent (automatically propagated to partitions)
-                # Index on h3_index for cell lookups
-                cur.execute(sql.SQL("""
-                    CREATE INDEX IF NOT EXISTS idx_h3_zonal_stats_h3_index
-                    ON {schema}.{table}(h3_index)
-                """).format(
-                    schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("zonal_stats")
-                ))
+                # Indexes using IndexBuilder (automatically propagated to partitions)
+                cur.execute(IndexBuilder.btree(self.SCHEMA_NAME, 'zonal_stats', 'h3_index'))
+                cur.execute(IndexBuilder.btree(self.SCHEMA_NAME, 'zonal_stats', 'dataset_id',
+                                               name='idx_h3_zonal_stats_dataset'))
+                cur.execute(IndexBuilder.btree(self.SCHEMA_NAME, 'zonal_stats', ['dataset_id', 'stat_type'],
+                                               name='idx_h3_zonal_stats_dataset_stat'))
+                cur.execute(IndexBuilder.btree(self.SCHEMA_NAME, 'zonal_stats', 'source_job_id',
+                                               name='idx_h3_zonal_stats_job',
+                                               partial_where='source_job_id IS NOT NULL'))
 
-                # Index on dataset_id for dataset queries
-                cur.execute(sql.SQL("""
-                    CREATE INDEX IF NOT EXISTS idx_h3_zonal_stats_dataset
-                    ON {schema}.{table}(dataset_id)
-                """).format(
-                    schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("zonal_stats")
-                ))
-
-                # Composite index for common query pattern
-                cur.execute(sql.SQL("""
-                    CREATE INDEX IF NOT EXISTS idx_h3_zonal_stats_dataset_stat
-                    ON {schema}.{table}(dataset_id, stat_type)
-                """).format(
-                    schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("zonal_stats")
-                ))
-
-                # Index for job tracking
-                cur.execute(sql.SQL("""
-                    CREATE INDEX IF NOT EXISTS idx_h3_zonal_stats_job
-                    ON {schema}.{table}(source_job_id)
-                    WHERE source_job_id IS NOT NULL
-                """).format(
-                    schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("zonal_stats")
-                ))
-
-                # Table comment
-                cur.execute(sql.SQL("""
-                    COMMENT ON TABLE {schema}.{table} IS
+                # Table comment using CommentBuilder
+                cur.execute(CommentBuilder.table(self.SCHEMA_NAME, 'zonal_stats',
                     'Pre-computed zonal statistics from raster datasets aggregated to H3 cells. '
                     'PARTITIONED BY THEME for billion-row scalability. '
                     'Themes: terrain, water, climate, demographics, infrastructure, landcover, vegetation. '
                     'Each partition: ~110-165M rows at 1B total. '
-                    'stat_type: mean, sum, min, max, count, std, median.'
-                """).format(
-                    schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("zonal_stats")
-                ))
+                    'stat_type: mean, sum, min, max, count, std, median.'))
 
             step["status"] = "success"
             step["partitions"] = self.VALID_THEMES
@@ -1069,43 +889,17 @@ class H3SchemaDeployer:
                     table=sql.Identifier("point_stats")
                 ))
 
-                # Index on source_id for source queries
-                cur.execute(sql.SQL("""
-                    CREATE INDEX IF NOT EXISTS idx_h3_point_stats_source
-                    ON {schema}.{table}(source_id)
-                """).format(
-                    schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("point_stats")
-                ))
+                # Indexes using IndexBuilder
+                cur.execute(IndexBuilder.btree(self.SCHEMA_NAME, 'point_stats', 'source_id',
+                                               name='idx_h3_point_stats_source'))
+                cur.execute(IndexBuilder.btree(self.SCHEMA_NAME, 'point_stats', 'h3_index'))
+                cur.execute(IndexBuilder.btree(self.SCHEMA_NAME, 'point_stats', 'category',
+                                               partial_where='category IS NOT NULL'))
 
-                # Index on h3_index for cell lookups
-                cur.execute(sql.SQL("""
-                    CREATE INDEX IF NOT EXISTS idx_h3_point_stats_h3_index
-                    ON {schema}.{table}(h3_index)
-                """).format(
-                    schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("point_stats")
-                ))
-
-                # Index on category for category filtering
-                cur.execute(sql.SQL("""
-                    CREATE INDEX IF NOT EXISTS idx_h3_point_stats_category
-                    ON {schema}.{table}(category)
-                    WHERE category IS NOT NULL
-                """).format(
-                    schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("point_stats")
-                ))
-
-                # Table comment
-                cur.execute(sql.SQL("""
-                    COMMENT ON TABLE {schema}.{table} IS
+                # Table comment using CommentBuilder
+                cur.execute(CommentBuilder.table(self.SCHEMA_NAME, 'point_stats',
                     'Point-in-polygon aggregation results - counts of points within H3 cells. '
-                    'Grouped by data source and category. Supports Overture, OSM, custom sources.'
-                """).format(
-                    schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("point_stats")
-                ))
+                    'Grouped by data source and category. Supports Overture, OSM, custom sources.'))
 
             step["status"] = "success"
             logger.info("Table h3.point_stats created with indexes")
@@ -1191,43 +985,17 @@ class H3SchemaDeployer:
                     table=sql.Identifier("batch_progress")
                 ))
 
-                # Index on job_id for job queries
-                cur.execute(sql.SQL("""
-                    CREATE INDEX IF NOT EXISTS idx_h3_batch_progress_job_id
-                    ON {schema}.{table}(job_id)
-                """).format(
-                    schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("batch_progress")
-                ))
+                # Indexes using IndexBuilder
+                cur.execute(IndexBuilder.btree(self.SCHEMA_NAME, 'batch_progress', 'job_id'))
+                cur.execute(IndexBuilder.btree(self.SCHEMA_NAME, 'batch_progress', 'status'))
+                cur.execute(IndexBuilder.btree(self.SCHEMA_NAME, 'batch_progress', ['job_id', 'stage_number'],
+                                               name='idx_h3_batch_progress_job_stage'))
 
-                # Index on status for incomplete batch queries
-                cur.execute(sql.SQL("""
-                    CREATE INDEX IF NOT EXISTS idx_h3_batch_progress_status
-                    ON {schema}.{table}(status)
-                """).format(
-                    schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("batch_progress")
-                ))
-
-                # Composite index for common query pattern
-                cur.execute(sql.SQL("""
-                    CREATE INDEX IF NOT EXISTS idx_h3_batch_progress_job_stage
-                    ON {schema}.{table}(job_id, stage_number)
-                """).format(
-                    schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("batch_progress")
-                ))
-
-                # Table comment
-                cur.execute(sql.SQL("""
-                    COMMENT ON TABLE {schema}.{table} IS
+                # Table comment using CommentBuilder
+                cur.execute(CommentBuilder.table(self.SCHEMA_NAME, 'batch_progress',
                     'Batch-level completion tracking for resumable H3 cascade jobs. '
                     'When a job fails partway through, only incomplete batches are re-executed. '
-                    'Part of 3-layer idempotency: DB constraints → batch tracking → handler checks.'
-                """).format(
-                    schema=sql.Identifier(self.SCHEMA_NAME),
-                    table=sql.Identifier("batch_progress")
-                ))
+                    'Part of 3-layer idempotency: DB constraints → batch tracking → handler checks.'))
 
             step["status"] = "success"
             logger.info("Table h3.batch_progress created with indexes")
@@ -1250,39 +1018,14 @@ class H3SchemaDeployer:
         try:
             # Get admin identity from config - NO HARDCODED USERS
             config = get_config()
-            admin_identity = config.database.admin_identity_name
+            admin_identity = config.database.managed_identity_admin_name
             if not admin_identity:
-                raise ValueError("database.admin_identity_name not configured - cannot grant permissions")
-
-            admin_ident = sql.Identifier(admin_identity)
-            schema_ident = sql.Identifier(self.SCHEMA_NAME)
+                raise ValueError("database.managed_identity_admin_name not configured - cannot grant permissions")
 
             with conn.cursor() as cur:
-                # Grant schema usage
-                cur.execute(sql.SQL("""
-                    GRANT ALL PRIVILEGES ON SCHEMA {} TO {}
-                """).format(schema_ident, admin_ident))
-
-                # Grant table permissions
-                cur.execute(sql.SQL("""
-                    GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA {} TO {}
-                """).format(schema_ident, admin_ident))
-
-                # Grant sequence permissions
-                cur.execute(sql.SQL("""
-                    GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA {} TO {}
-                """).format(schema_ident, admin_ident))
-
-                # Default privileges for future objects
-                cur.execute(sql.SQL("""
-                    ALTER DEFAULT PRIVILEGES IN SCHEMA {}
-                    GRANT ALL PRIVILEGES ON TABLES TO {}
-                """).format(schema_ident, admin_ident))
-
-                cur.execute(sql.SQL("""
-                    ALTER DEFAULT PRIVILEGES IN SCHEMA {}
-                    GRANT ALL PRIVILEGES ON SEQUENCES TO {}
-                """).format(schema_ident, admin_ident))
+                # Use SchemaUtils for all grants
+                for stmt in SchemaUtils.grant_all(self.SCHEMA_NAME, admin_identity):
+                    cur.execute(stmt)
 
             step["status"] = "success"
             step["admin_identity"] = admin_identity

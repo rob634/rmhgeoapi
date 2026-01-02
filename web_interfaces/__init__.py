@@ -401,6 +401,12 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Could not import Promoted Viewer interface: {e}")
 
+try:
+    from .submit_raster_collection import interface as _submit_raster_collection
+    logger.info("✅ Imported Submit Raster Collection interface module")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import Submit Raster Collection interface: {e}")
+
 
 # Public API
 __all__ = [

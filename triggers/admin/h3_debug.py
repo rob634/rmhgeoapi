@@ -815,13 +815,19 @@ class AdminH3DebugTrigger:
                 'cells', 'cell_admin0', 'cell_admin1', 'zonal_stats', 'point_stats'  # Normalized
             ]
 
+            from psycopg import sql
+
             with self.h3_repo._get_connection() as conn:
                 with conn.cursor() as cur:
                     # Count rows before
                     counts_before = {}
                     for table in all_tables:
                         try:
-                            cur.execute(f"SELECT COUNT(*) as count FROM h3.{table}")
+                            count_query = sql.SQL("SELECT COUNT(*) as count FROM {schema}.{table}").format(
+                                schema=sql.Identifier('h3'),
+                                table=sql.Identifier(table)
+                            )
+                            cur.execute(count_query)
                             counts_before[table] = cur.fetchone()['count']
                         except Exception:
                             counts_before[table] = 0
@@ -849,7 +855,11 @@ class AdminH3DebugTrigger:
                     ]
                     for table in truncate_order:
                         try:
-                            cur.execute(f"TRUNCATE TABLE h3.{table} CASCADE")
+                            truncate_query = sql.SQL("TRUNCATE TABLE {schema}.{table} CASCADE").format(
+                                schema=sql.Identifier('h3'),
+                                table=sql.Identifier(table)
+                            )
+                            cur.execute(truncate_query)
                         except Exception as e:
                             logger.warning(f"Could not truncate h3.{table}: {e}")
 

@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 # Pydantic for band_names validation
-from models.band_mapping import BandNames
+from core.models.band_mapping import BandNames
 from pydantic import ValidationError
 
 # Logging

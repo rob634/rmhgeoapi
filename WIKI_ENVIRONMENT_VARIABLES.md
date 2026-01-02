@@ -1,6 +1,6 @@
 # Environment Variables Reference
 
-**Last Updated**: 19 DEC 2025
+**Last Updated**: 01 JAN 2026
 **Purpose**: Complete reference for all environment variables used by the platform
 
 ---
@@ -20,10 +20,14 @@ These variables have **no defaults** or require environment-specific values. The
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `STORAGE_ACCOUNT_NAME` | **Bronze/Silver Storage Account** name | `mystorageaccount` |
+| `BRONZE_STORAGE_ACCOUNT` | **Bronze Storage Account** (raw uploads) | `myaboronze` |
+| `SILVER_STORAGE_ACCOUNT` | **Silver Storage Account** (processed data) | `myappsilver` |
 | `SERVICE_BUS_NAMESPACE` | **Service Bus** namespace (without `.servicebus.windows.net`) | `myservicebus` |
 | `POSTGIS_HOST` | **App Database** server hostname | `myserver.postgres.database.azure.com` |
 | `POSTGIS_DATABASE` | **App Database** name | `geodb` |
+| `APP_NAME` | **Function App** name for task tracking | `rmhazuregeoapi` |
+
+**Note**: `STORAGE_ACCOUNT_NAME` was deprecated 08 DEC 2025. Use zone-specific accounts instead.
 
 ### 1.2 Authentication
 
@@ -57,6 +61,17 @@ One of these is required:
 | `ServiceBusConnection` | Full connection string (Azure Functions binding) |
 | `ServiceBusConnection__fullyQualifiedNamespace` | FQDN for managed identity auth |
 
+### 1.5 Database Schema Names (REQUIRED - No Defaults)
+
+**Changed 23 DEC 2025**: Schema names now REQUIRE explicit configuration. No fallback defaults.
+
+| Variable | Description | Standard Value |
+|----------|-------------|----------------|
+| `POSTGIS_SCHEMA` | PostGIS/vector data schema | `geo` |
+| `APP_SCHEMA` | Job/task orchestration schema | `app` |
+| `PGSTAC_SCHEMA` | STAC catalog schema | `pgstac` |
+| `H3_SCHEMA` | H3 analytics schema | `h3` |
+
 ---
 
 ## 2. Database Configuration
@@ -66,11 +81,9 @@ One of these is required:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `POSTGIS_PORT` | `5432` | PostgreSQL port |
-| `POSTGIS_SCHEMA` | `geo` | PostGIS/vector data schema |
-| `APP_SCHEMA` | `app` | Job/task orchestration schema |
-| `PGSTAC_SCHEMA` | `pgstac` | STAC catalog schema |
-| `H3_SCHEMA` | `h3` | H3 analytics schema |
 | `DB_CONNECTION_TIMEOUT` | `30` | Connection timeout in seconds |
+
+**Note**: Schema names (`POSTGIS_SCHEMA`, `APP_SCHEMA`, `PGSTAC_SCHEMA`, `H3_SCHEMA`) moved to Section 1.5 — they are now REQUIRED with no defaults.
 
 ### 2.2 Business Database (Optional - Separate DB)
 
@@ -93,14 +106,27 @@ Set these only if using a separate database for business data:
 | `SERVICE_BUS_JOBS_QUEUE` | `geospatial-jobs` | **Job Queue** name |
 | `SERVICE_BUS_VECTOR_TASKS_QUEUE` | `vector-tasks` | **Vector Task Queue** name |
 | `SERVICE_BUS_RASTER_TASKS_QUEUE` | `raster-tasks` | **Raster Task Queue** name |
-| `SERVICE_BUS_LONG_RUNNING_RASTER_TASKS_QUEUE` | `long-running-raster-tasks` | **Long-Running Task Queue** name |
+| `SERVICE_BUS_LONG_RUNNING_TASKS_QUEUE` | `long-running-tasks` | **Long-Running Task Queue** (Docker worker) |
 | `SERVICE_BUS_MAX_BATCH_SIZE` | `100` | Max messages per batch |
-| `SERVICE_BUS_BATCH_THRESHOLD` | `10` | Threshold for batch processing |
+| `SERVICE_BUS_BATCH_THRESHOLD` | `50` | Threshold for batch processing |
 | `SERVICE_BUS_RETRY_COUNT` | `3` | Retry attempts for failed messages |
+
+**Note**: Queue renamed from `long-running-raster-tasks` to `long-running-tasks` on 22 DEC 2025.
 
 ---
 
 ## 4. Storage Configuration
+
+### 4.0 Zone Storage Accounts
+
+Each trust zone can have its own storage account. Required accounts are in Section 1.1.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BRONZE_STORAGE_ACCOUNT` | — | **REQUIRED** - Raw uploads zone |
+| `SILVER_STORAGE_ACCOUNT` | — | **REQUIRED** - Processed data zone |
+| `SILVEREXT_STORAGE_ACCOUNT` | *(falls back to SILVER)* | External/airgapped zone |
+| `GOLD_STORAGE_ACCOUNT` | *(falls back to SILVER)* | Analytics exports zone |
 
 ### 4.1 Bronze Tier (Raw Data)
 
@@ -268,13 +294,20 @@ Set these only if using a separate database for business data:
     "AzureWebJobsStorage": "UseDevelopmentStorage=true",
     "FUNCTIONS_WORKER_RUNTIME": "python",
 
-    "STORAGE_ACCOUNT_NAME": "your-storage-account",
+    "BRONZE_STORAGE_ACCOUNT": "your-storage-account",
+    "SILVER_STORAGE_ACCOUNT": "your-storage-account",
     "POSTGIS_HOST": "localhost",
     "POSTGIS_DATABASE": "geodb",
     "POSTGIS_USER": "postgres",
     "POSTGIS_PASSWORD": "your-password",
     "USE_MANAGED_IDENTITY": "false",
 
+    "POSTGIS_SCHEMA": "geo",
+    "APP_SCHEMA": "app",
+    "PGSTAC_SCHEMA": "pgstac",
+    "H3_SCHEMA": "h3",
+
+    "APP_NAME": "local-dev",
     "SERVICE_BUS_NAMESPACE": "your-servicebus",
     "ServiceBusConnection": "Endpoint=sb://...",
 
@@ -288,14 +321,33 @@ Set these only if using a separate database for business data:
 ### Azure Function App (Required Settings)
 
 ```
-STORAGE_ACCOUNT_NAME=prodstorageaccount
+# Storage (zone-based)
+BRONZE_STORAGE_ACCOUNT=myappbronze
+SILVER_STORAGE_ACCOUNT=myappsilver
+
+# Database
 POSTGIS_HOST=prodserver.postgres.database.azure.com
 POSTGIS_DATABASE=geodb
+POSTGIS_SCHEMA=geo
+APP_SCHEMA=app
+PGSTAC_SCHEMA=pgstac
+H3_SCHEMA=h3
+
+# Authentication
 USE_MANAGED_IDENTITY=true
 DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID=<guid>
+
+# Service Bus
 SERVICE_BUS_NAMESPACE=prodservicebus
 ServiceBusConnection__fullyQualifiedNamespace=prodservicebus.servicebus.windows.net
+
+# Service URLs
 TITILER_BASE_URL=https://prodtitiler.azurewebsites.net
+ETL_APP_URL=https://prodetl.azurewebsites.net
+OGC_STAC_APP_URL=https://prodogcstac.azurewebsites.net
+
+# App Identity
+APP_NAME=rmhazuregeoapi
 ENVIRONMENT=prod
 ```
 
@@ -319,10 +371,10 @@ The `/api/health` endpoint shows configuration status:
 
 If required variables are missing, warnings will appear:
 - `"using_defaults": true` — Environment-specific values not set
-- `"missing_required": ["STORAGE_ACCOUNT_NAME"]` — Critical variables missing
+- `"missing_required": ["BRONZE_STORAGE_ACCOUNT", "APP_SCHEMA", ...]` — Critical variables missing
 
 ---
 
 **See Also**:
-- [Component Glossary](./EPICS.md#component-glossary) — Abstract component names
-- [WIKI_ONBOARDING.md](./WIKI_ONBOARDING.md) — Full setup guide
+- [Component Glossary](./docs/epics/README.md#component-glossary) — Abstract component names
+- [config/defaults.py](./config/defaults.py) — Default values and fail-fast placeholders

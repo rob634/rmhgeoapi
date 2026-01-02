@@ -238,16 +238,27 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
             logger.info(f"📡 STEP 3: Starting STAC extraction from blob (this may take 30-60s)...")
             extract_start = datetime.utcnow()
 
-            # STEP 3A: Extract platform and app metadata for STAC enrichment (25 NOV 2025)
+            # STEP 3A: Extract platform, app, and raster metadata for STAC enrichment (25 NOV 2025, updated 01 JAN 2026)
             platform_meta = None
             app_meta = None
+            raster_meta = None
             try:
-                from services.stac_metadata_helper import PlatformMetadata, AppMetadata
+                from services.stac_metadata_helper import PlatformMetadata, AppMetadata, RasterVisualizationMetadata
                 platform_meta = PlatformMetadata.from_job_params(params)
                 app_meta = AppMetadata(
                     job_id=params.get('_job_id'),
                     job_type=params.get('_job_type', 'stac_catalog_container')
                 )
+                # Create raster visualization metadata from raster_type (01 JAN 2026)
+                # This enables DEM-specific colormaps in STAC preview/thumbnail URLs
+                raster_type_info = params.get('raster_type')
+                if raster_type_info:
+                    detected_type = raster_type_info.get('detected_type') if isinstance(raster_type_info, dict) else raster_type_info
+                    raster_meta = RasterVisualizationMetadata(
+                        raster_type=detected_type,
+                        colormap='terrain' if detected_type == 'dem' else None
+                    )
+                    logger.debug(f"   Step 3A: Raster metadata created - type={detected_type}")
                 logger.debug(f"   Step 3A: Platform/App metadata extracted - job_id={params.get('_job_id')}")
             except Exception as meta_err:
                 logger.warning(f"   Step 3A: Metadata extraction failed (non-critical): {meta_err}")
@@ -259,7 +270,8 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
                 collection_id=collection_id,
                 item_id=item_id,  # Will be None if not provided, service will auto-generate
                 platform_meta=platform_meta,
-                app_meta=app_meta
+                app_meta=app_meta,
+                raster_meta=raster_meta  # For DEM colormap in preview URLs (01 JAN 2026)
             )
 
             extract_duration = (datetime.utcnow() - extract_start).total_seconds()

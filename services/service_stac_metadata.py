@@ -94,7 +94,8 @@ class StacMetadataService:
         existing_metadata: Optional[Dict[str, Any]] = None,
         item_id: Optional[str] = None,
         platform_meta: Optional['PlatformMetadata'] = None,
-        app_meta: Optional['AppMetadata'] = None
+        app_meta: Optional['AppMetadata'] = None,
+        raster_meta: Optional['RasterVisualizationMetadata'] = None  # For DEM colormap (01 JAN 2026)
     ) -> Item:
         """
         Extract STAC Item from raster blob using rio-stac.
@@ -107,6 +108,7 @@ class StacMetadataService:
             item_id: Optional custom STAC item ID (auto-generated if not provided)
             platform_meta: Optional PlatformMetadata for DDH identifiers (25 NOV 2025)
             app_meta: Optional AppMetadata for job linkage (25 NOV 2025)
+            raster_meta: Optional RasterVisualizationMetadata for colormap selection (01 JAN 2026)
 
         Returns:
             Validated stac-pydantic Item
@@ -262,6 +264,30 @@ class StacMetadataService:
             logger.error(f"   Traceback:\n{traceback.format_exc()}")
             raise ValueError(f"Failed to convert STAC item to dict: {e}")
 
+        # STEP G.0a: Validate bbox values (01 JAN 2026)
+        # rio_stac returns bbox with None values when CRS can't be transformed to WGS84
+        # or when geotransform is missing/invalid. Fail early with clear error.
+        try:
+            bbox = item_dict.get('bbox', [])
+            if bbox and any(v is None for v in bbox):
+                logger.error(f"❌ Step G.0a FAILED: rio_stac returned bbox with None values")
+                logger.error(f"   Blob: {container}/{blob_name}")
+                logger.error(f"   bbox: {bbox}")
+                logger.error(f"   This usually means:")
+                logger.error(f"   - The raster has no valid geotransform")
+                logger.error(f"   - The CRS cannot be transformed to WGS84")
+                logger.error(f"   - The raster bounds are invalid")
+                raise ValueError(
+                    f"Cannot create STAC Item: raster '{blob_name}' has invalid bounds (bbox={bbox}). "
+                    f"Verify the source file has a valid CRS and geotransform. "
+                    f"You may need to reprocess with explicit source_crs parameter."
+                )
+            logger.debug(f"   ✅ Step G.0a: bbox validated: {bbox}")
+        except ValueError:
+            raise  # Re-raise our own ValueError
+        except Exception as e:
+            logger.warning(f"   ⚠️  Step G.0a: bbox validation check failed (non-fatal): {e}")
+
         # STEP G.1: Add required STAC fields for pgSTAC search compatibility (12 NOV 2025)
         try:
             logger.debug("   Step G.1: Adding required STAC fields for pgSTAC compatibility...")
@@ -337,6 +363,7 @@ class StacMetadataService:
                 blob_name=blob_name,
                 platform=platform_meta,
                 app=app_meta,
+                raster=raster_meta,  # For DEM colormap in preview URLs (01 JAN 2026)
                 include_iso3=True,
                 include_titiler=True  # Adds TiTiler links + thumbnail asset
             )

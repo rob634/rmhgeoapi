@@ -358,7 +358,7 @@ def _create_stac_collection_impl(
 
         for i, tile_blob in enumerate(tile_blobs):
             try:
-                logger.debug(f"   Creating STAC Item {i+1}/{len(tile_blobs)}: {tile_blob}")
+                logger.info(f"   Creating STAC Item {i+1}/{len(tile_blobs)}: {tile_blob}")
 
                 # Generate semantic item ID from blob name
                 tile_name = tile_blob.split('/')[-1].replace('_cog.tif', '').replace('.tif', '')
@@ -382,15 +382,18 @@ def _create_stac_collection_impl(
 
             except Exception as e:
                 logger.error(f"   ❌ Failed to create STAC Item for {tile_blob}: {e}")
+                logger.error(f"      Container: {cog_container}")
+                logger.error(f"      Item ID: {item_id}")
+                logger.error(f"      Progress: {i+1}/{len(tile_blobs)}")
                 logger.error(f"      Traceback: {traceback.format_exc()}")
                 failed_items.append(tile_blob)
                 # CRITICAL (11 NOV 2025): Fail fast if Item creation fails
                 # Orthodox STAC requires Items - if they fail, the collection is incomplete
                 # Better to fail with clear error than succeed with broken/missing Items
                 raise RuntimeError(
-                    f"STAC Item creation failed for {tile_blob}. "
-                    f"Cannot create orthodox STAC collection without Items. "
-                    f"Created {len(created_items)} of {len(tile_blobs)} items before failure. "
+                    f"STAC Item creation failed for tile {i+1}/{len(tile_blobs)}: {tile_blob} "
+                    f"in container {cog_container}. "
+                    f"Created {len(created_items)} items before failure. "
                     f"Error: {e}"
                 )
 

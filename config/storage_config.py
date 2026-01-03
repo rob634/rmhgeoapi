@@ -1,14 +1,121 @@
 """
 Azure Storage Configuration.
 
-Provides configuration for:
-    - COG tier profiles (VISUALIZATION, ANALYSIS, ARCHIVE)
-    - Multi-account storage pattern (Bronze, Silver, SilverExternal, Gold)
-    - Container naming conventions
-    - Storage access tiers
+================================================================================
+CORPORATE QA/PROD DEPLOYMENT GUIDE
+================================================================================
 
-Exports:
-    CogTier: Enum of COG quality tiers
+This module configures Azure Blob Storage for the geospatial data pipeline.
+Before deploying, file service requests to create the storage resources.
+
+--------------------------------------------------------------------------------
+REQUIRED AZURE RESOURCES
+--------------------------------------------------------------------------------
+
+1. STORAGE ACCOUNTS (Trust Zones)
+   -------------------------------
+   Service Request Template:
+       "Create Azure Storage Accounts for geospatial data tiers:
+
+        BRONZE ZONE (Raw uploads - INPUT):
+        - Name: {app-name}-bronze
+        - SKU: Standard_LRS (or GRS for production)
+        - Access: Private (no public blob access)
+        - Containers: bronze-vectors, bronze-rasters, bronze-misc, bronze-temp
+
+        SILVER ZONE (Processed data - INTERNAL):
+        - Name: {app-name}-silver
+        - SKU: Standard_LRS (or GRS for production)
+        - Access: Private + SAS tokens for TiTiler
+        - Containers: silver-vectors, silver-rasters, silver-cogs, silver-tiles,
+                      silver-mosaicjson, silver-stac-assets, silver-misc, silver-temp
+
+        GOLD ZONE (Analytics exports - OPTIONAL):
+        - Name: {app-name}-gold
+        - SKU: Standard_LRS
+        - Containers: gold-geoparquet, gold-h3-grids, gold-temp
+
+        Lifecycle Rules:
+        - bronze-temp: Delete after 7 days
+        - silver-temp: Delete after 7 days
+        - silver-cogs: Move to Cool tier after 30 days (optional)"
+
+   Environment Variables:
+       BRONZE_STORAGE_ACCOUNT = {bronze-account-name}
+       SILVER_STORAGE_ACCOUNT = {silver-account-name}
+       GOLD_STORAGE_ACCOUNT   = {gold-account-name}  # Optional
+
+2. MANAGED IDENTITY ACCESS
+   ------------------------
+   After storage accounts are created:
+
+   Service Request Template:
+       "Grant managed identity access to storage accounts:
+        - Identity: {app-name}-db-admin
+        - Role: 'Storage Blob Data Contributor'
+        - Scope: Each storage account resource
+
+        For TiTiler access to silver-cogs:
+        - Generate SAS token with Read permission
+        - Set TITILER_AZURE_SAS_TOKEN env var"
+
+3. CONTAINER CREATION
+   -------------------
+   Containers can be created automatically by the app OR via service request.
+
+   If manual creation required:
+       "Create blob containers in each storage account:
+        Bronze: bronze-vectors, bronze-rasters, bronze-misc, bronze-temp
+        Silver: silver-vectors, silver-rasters, silver-cogs, silver-tiles,
+                silver-mosaicjson, silver-stac-assets, silver-misc, silver-temp
+        Gold: gold-geoparquet, gold-h3-grids, gold-temp"
+
+--------------------------------------------------------------------------------
+DEPLOYMENT SCENARIOS
+--------------------------------------------------------------------------------
+
+1. DEVELOPMENT (Single Account)
+   - All zones use same storage account
+   - Set only: (none - uses placeholder, will fail-fast)
+
+2. PRODUCTION (Separate Accounts)
+   - Each zone has dedicated account
+   - Set: BRONZE_STORAGE_ACCOUNT, SILVER_STORAGE_ACCOUNT, GOLD_STORAGE_ACCOUNT
+
+3. CUSTOM CONTAINERS
+   - Override individual container names
+   - Set: BRONZE_VECTORS_CONTAINER, SILVER_COGS_CONTAINER, etc.
+
+--------------------------------------------------------------------------------
+DEPLOYMENT VERIFICATION
+--------------------------------------------------------------------------------
+
+After configuration, verify with:
+
+    curl https://{app-url}/api/health
+
+Expected response includes:
+    "storage": {
+        "status": "healthy",
+        "bronze_account": "{bronze-account}",
+        "silver_account": "{silver-account}"
+    }
+
+Common Failure Messages:
+    AuthorizationFailure: Managed identity lacks storage access
+        → Grant 'Storage Blob Data Contributor' role
+
+    ContainerNotFound: Container does not exist
+        → Create containers or enable auto-creation
+
+    InvalidAccountName: Storage account name invalid
+        → Check BRONZE_STORAGE_ACCOUNT, SILVER_STORAGE_ACCOUNT values
+
+--------------------------------------------------------------------------------
+EXPORTS
+--------------------------------------------------------------------------------
+
+    CogTier: Enum of COG quality tiers (VISUALIZATION, ANALYSIS, ARCHIVE)
     StorageConfig: Pydantic storage configuration model
     determine_applicable_tiers: Helper to select tiers for file sizes
 """
@@ -267,11 +374,12 @@ class StorageAccountConfig(BaseModel):
     """
     Configuration for a single storage account with purpose-specific containers.
 
-    Design: Currently all three "accounts" use rmhazuregeo, but container
-    names are prefixed to simulate separation (bronze-*, silver-*, silverext-*).
+    Design: In development, all zones may use a single account with prefixed
+    containers (bronze-*, silver-*, silverext-*). In production, each zone
+    should have a dedicated storage account.
 
-    Future: Each account will be a separate Azure Storage Account with
-    independent networking, access policies, and lifecycle rules.
+    Production Architecture: Each account will be a separate Azure Storage Account
+    with independent networking, access policies, and lifecycle rules.
 
     Trust Zones:
         Bronze: Untrusted user uploads (write-only for users, read-only for ETL)

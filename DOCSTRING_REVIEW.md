@@ -281,6 +281,28 @@ Applied full 8-check review:
 - Removed hardcoded `ddhgeodb` default (now requires explicit BUSINESS_DB_NAME)
 - Replaced `rmhpgflexadmin` references with `{identity-name}` placeholders
 
+### Session 4: 02 JAN 2026 - storage_config.py + queue_config.py (P0)
+
+Applied Check 8 to both remaining P0 files:
+
+**storage_config.py:**
+- Added deployment guide (~120 lines)
+- Storage account service request templates (Bronze, Silver, Gold zones)
+- Managed identity access configuration
+- Container creation guidance
+- Deployment scenarios (dev single-account vs prod multi-account)
+- Fixed DEV-specific "rmhazuregeo" reference → generic description
+
+**queue_config.py:**
+- Added deployment guide (~140 lines)
+- Service Bus namespace creation template
+- Queue creation with specific settings (TTL, lock duration, max delivery)
+- Managed identity access roles (Sender/Receiver)
+- Authentication modes (connection string vs managed identity)
+- Test job submission command
+
+**All P0 files now have Check 8 operational documentation.**
+
 ---
 
 ## Root Level Files
@@ -306,9 +328,9 @@ Applied full 8-check review:
 | [ ] | `h3_config.py` | |
 | [ ] | `metrics_config.py` | |
 | [ ] | `platform_config.py` | |
-| [ ] | `queue_config.py` | |
+| [x] | `queue_config.py` | Full Check 8 applied - Service Bus deployment guide |
 | [ ] | `raster_config.py` | |
-| [ ] | `storage_config.py` | |
+| [x] | `storage_config.py` | Full Check 8 applied - Storage accounts deployment guide |
 | [ ] | `vector_config.py` | |
 
 ---
@@ -819,7 +841,7 @@ Applied full 8-check review:
 
 | Category | Total | Reviewed | Remaining |
 |----------|-------|----------|-----------|
-| config/ | 13 | 5 | 8 |
+| config/ | 13 | 7 | 6 |
 | core/ | 36 | 0 | 36 |
 | infrastructure/ | 31 | 0 | 31 |
 | jobs/ | 30 | 0 | 30 |
@@ -831,7 +853,7 @@ Applied full 8-check review:
 | scripts/ | 4 | 0 | 4 |
 | test/ | 20 | 0 | 20 |
 | Root files | 3 | 0 | 3 |
-| **TOTAL** | **302** | **5** | **297** |
+| **TOTAL** | **302** | **7** | **295** |
 
 ---
 
@@ -844,3 +866,4 @@ Applied full 8-check review:
 | 02 JAN 2026 | Check 8 Added | Added operational deployment documentation checks for corporate QA/PROD |
 | 02 JAN 2026 | Session 2 | Applied Check 8 to `config/defaults.py` as template example |
 | 02 JAN 2026 | Session 3 | Applied full 8-check review to `config/database_config.py` |
+| 02 JAN 2026 | Session 4 | Applied Check 8 to `config/storage_config.py` and `config/queue_config.py` |

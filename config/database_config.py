@@ -1,3 +1,12 @@
+# ============================================================================
+# CLAUDE CONTEXT - POSTGRESQL DATABASE CONFIGURATION
+# ============================================================================
+# STATUS: Configuration - PostgreSQL connection and managed identity
+# PURPOSE: Configure database connections for app and business databases
+# LAST_REVIEWED: 02 JAN 2026
+# REVIEW_STATUS: Check 8 Applied - Full operational deployment guide
+# ============================================================================
+
 """
 PostgreSQL/PostGIS Database Configuration.
 

@@ -1,3 +1,12 @@
+# ============================================================================
+# CLAUDE CONTEXT - SERVICE BUS QUEUE CONFIGURATION
+# ============================================================================
+# STATUS: Configuration - Azure Service Bus queues for job/task messaging
+# PURPOSE: Configure Service Bus namespace, queues, and authentication
+# LAST_REVIEWED: 02 JAN 2026
+# REVIEW_STATUS: Check 8 Applied - Full operational deployment guide
+# ============================================================================
+
 """
 Azure Service Bus Queue Configuration.
 

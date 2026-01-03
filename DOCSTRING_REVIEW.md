@@ -215,6 +215,245 @@ REQUIRED - Must be configured before deployment:
 
 ---
 
+## Patterns and Templates (Learned from P0 Review)
+
+**Extracted from Sessions 1-4 reviewing defaults.py, database_config.py, storage_config.py, queue_config.py**
+
+### Pattern 1: Module Docstring Structure
+
+All P0 config files now follow this consistent structure:
+
+```python
+"""
+{Module Title}.
+
+================================================================================
+CORPORATE QA/PROD DEPLOYMENT GUIDE
+================================================================================
+
+{Brief description of what this module configures.}
+
+--------------------------------------------------------------------------------
+REQUIRED AZURE RESOURCES
+--------------------------------------------------------------------------------
+
+1. {RESOURCE TYPE}
+   {Dashes under title}
+   Service Request Template:
+       "{Copy-paste ready request text...}"
+
+   Environment Variables:
+       {VAR_NAME} = {placeholder-or-value}
+
+2. {NEXT RESOURCE}
+   ...
+
+--------------------------------------------------------------------------------
+DEPLOYMENT VERIFICATION
+--------------------------------------------------------------------------------
+
+After configuration, verify with:
+
+    curl https://{app-url}/api/health
+
+Expected response includes:
+    "{component}": {{"status": "healthy"}}
+
+Common Failure Messages:
+    {ErrorType}: {description}
+        → {Solution}
+
+--------------------------------------------------------------------------------
+{OPTIONAL SECTIONS: ARCHITECTURE, AUTHENTICATION MODES, etc.}
+--------------------------------------------------------------------------------
+
+Exports:
+    {Class1}: {description}
+    {Class2}: {description}
+"""
+```
+
+### Pattern 2: Service Request Template Format
+
+Each Azure resource follows this structure:
+
+```
+1. {RESOURCE NAME IN CAPS}
+   {Dashes matching length}
+   Service Request Template:
+       "Create {Resource Type}:
+        - Name: {naming-convention}
+        - SKU: {recommended-sku}
+        - {Key Setting}: {value}
+        - {Key Setting}: {value}
+
+        {Additional instructions if needed}"
+
+   Environment Variables:
+       {VAR_NAME} = {placeholder}
+```
+
+### Pattern 3: Placeholder Conventions
+
+Replace DEV-specific values with these placeholders:
+
+| DEV Value | Placeholder | Usage |
+|-----------|-------------|-------|
+| `rmhpgflex.postgres...` | `{server-name}.postgres.database.azure.com` | PostgreSQL host |
+| `geopgflex` | `{database-name}` | Database name |
+| `rmhpgflexadmin` | `{identity-name}` | Managed identity |
+| `rmhazuregeo` | `{app-name}-bronze`, `{app-name}-silver` | Storage accounts |
+| `rmhazuregeoapi` | `{app-url}` | Function App URL |
+| `rmhazure_rg` | `{your-resource-group}` | Resource group |
+
+### Pattern 4: Verification Section
+
+Always include:
+
+```
+--------------------------------------------------------------------------------
+DEPLOYMENT VERIFICATION
+--------------------------------------------------------------------------------
+
+After configuration, verify with:
+
+    curl https://{app-url}/api/health
+
+Expected response includes:
+    "{component}": {
+        "status": "healthy",
+        "{key}": "{value}"
+    }
+
+{Optional: Test command}
+    curl -X POST https://{app-url}/api/...
+
+Common Failure Messages:
+    {ErrorType}: {Brief description}
+        → {One-line solution}
+
+    {ErrorType2}: {Brief description}
+        → {One-line solution}
+```
+
+### Pattern 5: Authentication Modes
+
+For resources supporting multiple auth methods:
+
+```
+--------------------------------------------------------------------------------
+AUTHENTICATION MODES
+--------------------------------------------------------------------------------
+
+1. MANAGED IDENTITY (Production - Recommended)
+   - {Benefit 1}
+   - {Benefit 2}
+
+   Environment Variables:
+       {VAR_NAME} = {value}
+
+2. {ALTERNATIVE} (Development/Troubleshooting Only)
+   - {Use case}
+   - Never use in production
+
+   Environment Variables:
+       {VAR_NAME} = {value}
+```
+
+### Pattern 6: Class Docstring Enhancements
+
+For classes with Azure resource dependencies:
+
+```python
+class SomeConfig(BaseModel):
+    """
+    {Brief description}.
+
+    ============================================================================
+    {OPTIONAL CONTEXT HEADER IF NEEDED}
+    ============================================================================
+    {Additional context about when/how to use this class}
+
+    Environment Variables:
+        {VAR_NAME}: {Description} (default: {default})
+        {VAR_NAME}: {Description} (required)
+
+    Usage:
+        from config import get_config
+        config = get_config()
+        value = config.{path}.{attribute}
+    """
+```
+
+### Pattern 7: Hardcoded Value Replacement
+
+When finding hardcoded values:
+
+1. **Check if constant exists** in `config/defaults.py`
+2. **If not, add it** to appropriate `*Defaults` class
+3. **Replace hardcoded value** with constant reference
+4. **Update imports** if needed
+
+Example:
+```python
+# Before
+default="rmhazure_rg"
+
+# After (in defaults.py)
+class AzureDefaults:
+    RESOURCE_GROUP = "your-resource-group-name"
+
+# After (in config file)
+from .defaults import AzureDefaults
+default=AzureDefaults.RESOURCE_GROUP
+```
+
+### Pattern 8: Field Examples
+
+Replace DEV-specific examples with placeholders:
+
+```python
+# Before
+examples=["rmhpgflex.postgres.database.azure.com"]
+
+# After
+examples=["{server-name}.postgres.database.azure.com"]
+```
+
+### Pattern 9: File Header with Review Date
+
+**IMPORTANT**: Add or update the file header to track when the docstring review was performed:
+
+```python
+# ============================================================================
+# CLAUDE CONTEXT - {DESCRIPTIVE_TITLE}
+# ============================================================================
+# STATUS: {Component type} - {Brief description}
+# PURPOSE: {One sentence description}
+# LAST_REVIEWED: {DD MMM YYYY}
+# REVIEW_STATUS: Check 8 Applied | Checks 1-7 Only | Pending
+# ============================================================================
+```
+
+For config files with Check 8 applied:
+```python
+# ============================================================================
+# CLAUDE CONTEXT - POSTGRESQL DATABASE CONFIGURATION
+# ============================================================================
+# STATUS: Configuration - PostgreSQL connection and managed identity
+# PURPOSE: Configure database connections for app and business databases
+# LAST_REVIEWED: 02 JAN 2026
+# REVIEW_STATUS: Check 8 Applied - Full operational deployment guide
+# ============================================================================
+```
+
+This allows future reviewers (human or Claude) to quickly see:
+- When the file was last reviewed
+- What level of review was performed
+- Whether operational documentation exists
+
+---
+
 ## Review Session Log
 
 ### Session 1: 02 JAN 2026 - config/ (4 files) - Code Quality Focus

@@ -716,12 +716,12 @@ Applied systematic 8-check review to both files:
 | Status | File | Notes |
 |--------|------|-------|
 | [ ] | `__init__.py` | |
-| [ ] | `core_controller.py` | |
-| [ ] | `error_handler.py` | |
-| [ ] | `errors.py` | |
-| [ ] | `machine.py` | |
-| [ ] | `orchestration_manager.py` | |
-| [ ] | `state_manager.py` | |
+| [x] | `core_controller.py` | Checks 1-7 applied - added header, enhanced architecture docs (374 lines) |
+| [x] | `error_handler.py` | Checks 1-7 applied - added header, App Insights docs (206 lines) |
+| [x] | `errors.py` | Checks 1-7 applied - added header, enhanced exports list (285 lines) |
+| [x] | `machine.py` | Checks 1-7 applied - added header, enhanced docstring (2228 lines) |
+| [x] | `orchestration_manager.py` | Checks 1-7 applied - added header, enhanced docstring (415 lines) |
+| [x] | `state_manager.py` | Checks 1-7 applied - added header, enhanced docstring (992 lines) |
 | [ ] | `task_id.py` | |
 | [ ] | `utils.py` | |
 
@@ -1216,7 +1216,7 @@ Applied systematic 8-check review to both files:
 | Category | Total | Reviewed | Remaining |
 |----------|-------|----------|-----------|
 | config/ | 13 | 13 | 0 |
-| core/ | 36 | 0 | 36 |
+| core/ | 36 | 6 | 30 |
 | infrastructure/ | 31 | 3 | 28 |
 | jobs/ | 30 | 0 | 30 |
 | services/ | 47 | 0 | 47 |
@@ -1227,7 +1227,7 @@ Applied systematic 8-check review to both files:
 | scripts/ | 4 | 0 | 4 |
 | test/ | 20 | 0 | 20 |
 | Root files | 3 | 3 | 0 |
-| **TOTAL** | **302** | **20** | **282** |
+| **TOTAL** | **302** | **26** | **276** |
 
 ---
 
@@ -1252,3 +1252,9 @@ Applied systematic 8-check review to both files:
 | 02 JAN 2026 | Session 13 | Applied Checks 1-7 to `util_logger.py` - added file header (1631 lines) |
 | 02 JAN 2026 | Session 14 | P1 infra: `infrastructure/service_bus.py` + `triggers/health.py` - Check 8 refs/deployment docs |
 | 02 JAN 2026 | Session 15 | P2 complete: `config/app_config.py` - added file header + Check 8 delegation to component configs |
+| 02 JAN 2026 | Session 16 | Applied Checks 1-7 to `core/machine.py` - added header, enhanced docstring (2228 lines) |
+| 02 JAN 2026 | Session 17 | Applied Checks 1-7 to `core/state_manager.py` - added header, enhanced docstring (992 lines) |
+| 02 JAN 2026 | Session 18 | Applied Checks 1-7 to `core/orchestration_manager.py` - added header (415 lines) |
+| 02 JAN 2026 | Session 19 | Applied Checks 1-7 to `core/core_controller.py` - added header, enhanced architecture (374 lines) |
+| 02 JAN 2026 | Session 20 | Applied Checks 1-7 to `core/error_handler.py` - added header, App Insights docs (206 lines) |
+| 02 JAN 2026 | Session 21 | Applied Checks 1-7 to `core/errors.py` - added header, error categories docs (285 lines) |

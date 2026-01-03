@@ -1,3 +1,11 @@
+# ============================================================================
+# STATE MANAGER - DATABASE STATE MANAGEMENT
+# ============================================================================
+# STATUS: Core - Job/Task state transitions with advisory locks
+# PURPOSE: Atomic state management for "last task turns out the lights" pattern
+# LAST_REVIEWED: 02 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 State Manager - Database State Management with Advisory Locks.
 
@@ -10,6 +18,12 @@ Key Responsibilities:
     - Stage advancement with advisory locks
     - Job completion and result aggregation
     - Database record creation and updates
+
+Critical Method:
+    complete_task_with_sql(): Atomic task completion using PostgreSQL function
+    - Prevents race conditions via advisory locks
+    - Detects when last task completes stage
+    - Handles idempotent duplicate message delivery
 
 Exports:
     StateManager: Handles job/task state transitions and completion logic

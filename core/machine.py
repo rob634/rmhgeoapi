@@ -1,3 +1,11 @@
+# ============================================================================
+# COREMACHINE - UNIVERSAL JOB ORCHESTRATOR
+# ============================================================================
+# STATUS: Core - Central orchestration engine (Epoch 4)
+# PURPOSE: Job→Stage→Task coordination without job-specific logic
+# LAST_REVIEWED: 02 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 CoreMachine - Universal Job Orchestrator.
 
@@ -10,18 +18,27 @@ Key Principles:
     3. Delegation: Specialized components handle all actual work
     4. Stateless: No job-specific state stored in CoreMachine
 
+Architecture:
+    CoreMachine delegates to:
+    - Workflow instances (define stages and parameters) via ALL_JOBS registry
+    - Task handlers (execute business logic) via ALL_HANDLERS registry
+    - StateManager (database operations)
+    - OrchestrationManager (stage advancement)
+    - Repositories (external services via RepositoryFactory)
+
 Exports:
     CoreMachine: Universal orchestrator class
 
 Dependencies:
-    jobs.registry: Job workflow definitions
-    services.registry: Task handler implementations
+    jobs.registry: Job workflow definitions (ALL_JOBS)
+    services.registry: Task handler implementations (ALL_HANDLERS)
     core: StateManager, OrchestrationManager
     infrastructure: Repository implementations
 
 Entry Points:
-    process_job_message(): Process job queue messages
-    process_task_message(): Process task queue messages
+    process_job_message(): Process job queue messages (creates tasks)
+    process_task_message(): Process task queue messages (executes handlers)
+    handle_stage_complete(): Handle stage completion signals (multi-app)
 """
 
 from typing import Dict, Any, Optional

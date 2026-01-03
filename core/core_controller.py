@@ -1,3 +1,11 @@
+# ============================================================================
+# CORE CONTROLLER - ABSTRACT BASE CLASS
+# ============================================================================
+# STATUS: Core - Controller contract definition
+# PURPOSE: Define 5 abstract methods all job controllers must implement
+# LAST_REVIEWED: 02 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Core Controller - Minimal Abstract Base.
 
@@ -5,9 +13,21 @@ Clean abstraction containing only the methods that should be inherited.
 Enables parallel implementation of controllers without legacy baggage.
 
 Architecture:
-    5 abstract methods (core contract)
-    2 ID generation methods
-    2 validation methods
+    5 abstract methods (core contract):
+        - get_job_type(): Return job type identifier
+        - validate_job_parameters(): Validate/normalize parameters
+        - create_stage_tasks(): Create TaskDefinitions for stage
+        - should_advance_stage(): Decide stage advancement
+        - aggregate_job_results(): Produce final job output
+
+    2 ID generation methods:
+        - generate_job_id(): SHA256 hash for idempotency
+        - generate_task_id(): Semantic ID for cross-stage lineage
+
+    2 validation methods:
+        - validate_stage_parameters(): Stage-specific validation
+        - aggregate_stage_results(): Default stage aggregation
+
     Composition over inheritance pattern
 
 Exports:
@@ -15,7 +35,7 @@ Exports:
 
 Dependencies:
     util_logger: LoggerFactory, ComponentType
-    core.models: JobExecutionContext, TaskDefinition, TaskResult, StageResultContract, StageExecutionContext
+    core.models: JobExecutionContext, TaskDefinition, TaskResult, StageResultContract
     core.schema: WorkflowDefinition, get_workflow_definition
     utils.contract_validator: enforce_contract
 """

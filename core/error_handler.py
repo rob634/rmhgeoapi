@@ -1,8 +1,26 @@
+# ============================================================================
+# COREMACHINE ERROR HANDLER - CENTRALIZED ERROR HANDLING
+# ============================================================================
+# STATUS: Core - Error handling patterns for orchestration
+# PURPOSE: Context manager for consistent error logging and Application Insights
+# LAST_REVIEWED: 02 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 CoreMachine Error Handler - Centralized Error Handling.
 
 Provides context manager for consistent error logging and handling across
 CoreMachine operations. Eliminates duplicate try-catch patterns.
+
+Key Features:
+    - Structured error context for Application Insights
+    - ContractViolationError always bubbles up (programming bugs)
+    - Optional error callbacks (e.g., mark job failed)
+    - Nested error logging preserves root cause
+
+Application Insights Integration:
+    Search for customDimensions.nested_error = true to find all nested errors
+    Search for customDimensions.primary_error_type to find root causes
 
 Exports:
     CoreMachineErrorHandler: Context manager for operation error handling

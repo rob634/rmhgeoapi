@@ -1,3 +1,11 @@
+# ============================================================================
+# ORCHESTRATION MANAGER - DYNAMIC TASK CREATION
+# ============================================================================
+# STATUS: Core - Stage-to-stage task orchestration
+# PURPOSE: Create Stage 2 tasks dynamically from Stage 1 analysis results
+# LAST_REVIEWED: 02 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Orchestration Manager - Dynamic Task Creation.
 
@@ -5,15 +13,25 @@ Simplified orchestration for Service Bus controllers that need dynamic
 task creation (like container operations). Optimized for batch processing.
 
 Key Pattern:
-    Stage 1: Analyze (e.g., list container files)
-    Stage 2: Process items in batches (e.g., extract metadata)
+    Stage 1: Analyze (e.g., list container files) → returns OrchestrationInstruction
+    Stage 2: Process items in batches (e.g., extract metadata) → tasks created from instruction
+
+Usage:
+    orchestrator = OrchestrationManager("list_container")
+
+    # Stage 1: Create instruction from analysis
+    items = analyze_container()
+    instruction = orchestrator.create_instruction(items)
+
+    # Stage 2: Create tasks from instruction
+    tasks = orchestrator.create_tasks_from_instruction(instruction, job_id, stage=2)
 
 Exports:
     OrchestrationManager: Manages dynamic task creation for controllers
 
 Dependencies:
     core.models: TaskDefinition
-    core.schema: OrchestrationInstruction, OrchestrationAction, FileOrchestrationItem, OrchestrationItem
+    core.schema: OrchestrationInstruction, OrchestrationAction, FileOrchestrationItem
     util_logger: LoggerFactory, ComponentType
 """
 

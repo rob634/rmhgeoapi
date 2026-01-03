@@ -1,3 +1,11 @@
+# ============================================================================
+# ERROR CODE DEFINITIONS AND CLASSIFICATION
+# ============================================================================
+# STATUS: Core - Standardized error codes and retry logic
+# PURPOSE: Centralized error management with HTTP status and retry classification
+# LAST_REVIEWED: 02 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Error Code Definitions and Classification.
 
@@ -7,12 +15,21 @@ error responses across all endpoints.
 Key Features:
     - Explicit error codes for all failure modes
     - Retry classification (PERMANENT, TRANSIENT, THROTTLING)
-    - Helper function to determine if error should retry
+    - HTTP status code mapping (400, 404, 500, 503)
+    - Standardized error response structure
+
+Error Categories:
+    - VALIDATION: Client errors (400/404) - NOT retryable
+    - PROCESSING: Service errors (500) - MAYBE retryable
+    - INFRASTRUCTURE: Transient errors (500/503) - RETRYABLE
 
 Exports:
-    ErrorCode: Standardized error codes enum
-    ErrorClassification: Error category enum
-    is_retryable: Helper to check if error should be retried
+    ErrorCode: Standardized error codes enum (~25 codes)
+    ErrorClassification: Error category enum (PERMANENT, TRANSIENT, THROTTLING)
+    is_retryable(): Check if error should be retried
+    get_error_classification(): Get classification for error code
+    get_http_status_code(): Get HTTP status for error code
+    create_error_response(): Create standardized error response dict
 """
 
 from enum import Enum

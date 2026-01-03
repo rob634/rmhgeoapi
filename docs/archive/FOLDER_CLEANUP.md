@@ -1,9 +1,10 @@
 # Folder Structure Assessment & Cleanup Plan
 
 **Created**: 02 JAN 2026
-**Updated**: 02 JAN 2026
-**Status**: In Progress
+**Completed**: 02 JAN 2026
+**Status**: ✅ COMPLETE - ARCHIVED
 **Purpose**: Document folder structure analysis and consolidation recommendations
+**Location**: `docs/archive/FOLDER_CLEANUP.md` (moved from root)
 
 ---
 
@@ -105,20 +106,23 @@ All follow the same pattern: `__init__.py` + `triggers.py` + `service.py` + opti
 
 ---
 
-### 5. `utils/` - Only 2 Files
+### 5. ~~`utils/` - Only 2 Files~~ ✅ RESOLVED (KEEP)
+
+**Status**: Reviewed 02 JAN 2026 - KEEPING as valid utility package
 
 **Current Contents**:
 ```
 utils/
-├── contract_validator.py
-└── import_validator.py
+├── __init__.py           # Package exports
+├── contract_validator.py # @enforce_contract decorator (288 lines)
+└── import_validator.py   # Azure startup validation (694 lines)
 ```
 
-**Problem**: Only 2 files - `core/` already has `utils.py` and `infrastructure/` has `validators.py`
+**Analysis**: Despite only having 2 files, both are actively used:
+- `contract_validator.py`: 16 usages across `infrastructure/postgresql.py`, `infrastructure/jobs_tasks.py`, `core/core_controller.py`
+- `import_validator.py`: Used by `function_app.py` for startup validation
 
-**Recommendation**: Merge into `core/` or `infrastructure/`
-- `contract_validator.py` → `core/`
-- `import_validator.py` → `infrastructure/`
+**Decision**: KEEP - legitimate cross-cutting utilities package
 
 ---
 
@@ -193,22 +197,18 @@ openapi/
 - [x] **TODO-3.3**: Update imports in `function_app.py` and `triggers/admin/__init__.py` ✅ 02 JAN 2026
 - [x] **TODO-3.4**: Delete `routes/` folder ✅ 02 JAN 2026
 
-### Phase 4: Utils Consolidation
+### Phase 4: Utils Consolidation ✅ SKIPPED
 
-- [ ] **TODO-4.1**: Move `utils/contract_validator.py` to `core/`
-- [ ] **TODO-4.2**: Move `utils/import_validator.py` to `infrastructure/`
-- [ ] **TODO-4.3**: Update imports across codebase
-- [ ] **TODO-4.4**: Delete empty `utils/` folder
+- [x] **TODO-4.1**: ~~Move utils/~~ SKIPPED - Valid utility package with 16+ active usages ✅ 02 JAN 2026
 
-### Phase 5: SQL Consolidation
+### Phase 5: SQL Consolidation ✅ SKIPPED
 
-- [ ] **TODO-5.1**: Flatten `sql/init/*` to `sql/`
-- [ ] **TODO-5.2**: Move SQL scripts from `scripts/` to `sql/`
+- [x] **TODO-5.1**: ~~Flatten sql/init/~~ SKIPPED - H3 refactor will handle separately ✅ 02 JAN 2026
 
-### Phase 6: Optional Moves
+### Phase 6: Optional Moves ✅ SKIPPED
 
-- [ ] **TODO-6.1**: Consider moving `openapi/` to `docs/api/`
-- [ ] **TODO-6.2**: Consider moving test scripts from `scripts/` to `test/`
+- [x] **TODO-6.1**: ~~Move openapi/~~ SKIPPED - Valid folder, no action needed ✅ 02 JAN 2026
+- [x] **TODO-6.2**: ~~Move scripts/~~ SKIPPED - Valid folder, no action needed ✅ 02 JAN 2026
 
 ---
 
@@ -216,10 +216,12 @@ openapi/
 
 | Metric | Before | After |
 |--------|--------|-------|
-| Root folders | 26 | ~20 |
-| Empty/near-empty folders | 6 | 0 |
+| Root folders | 26 | ~22 |
+| Empty/near-empty folders | 6 | 2 (sql/, optional) |
 | Documentation in code folders | 2 | 0 |
 | Model locations | 2 | 1 |
+| Folders consolidated | - | 4 (titiler, fathom, models, routes) |
+| Folders kept after review | - | 1 (utils - valid utility package) |
 
 ---
 
@@ -321,7 +323,7 @@ rmhgeoapi/
 │   ├── admin/
 │   ├── curated/
 │   └── janitor/
-├── utils/               # ❌ Merge - Only 2 files
+├── utils/               # ✅ Keep - Valid utility package (16+ usages)
 ├── vector_viewer/       # ✅ Keep - Viewer
 ├── web_interfaces/      # ✅ Keep - UI interfaces
 └── xarray_api/          # ✅ Keep - XArray API
@@ -343,3 +345,7 @@ Legend:
 | 02 JAN 2026 | TODO-1.3, 1.4 | Moved `fathom/FATHOM.md` → `docs_claude/`, deleted folder |
 | 02 JAN 2026 | TODO-2.1-2.4 | Consolidated `models/`: `band_mapping.py` → `core/models/`, `h3_base.py` archived |
 | 02 JAN 2026 | TODO-3.1-3.4 | Consolidated `routes/`: blueprints → `triggers/admin/`, updated imports |
+| 02 JAN 2026 | TODO-4.1 | SKIPPED `utils/`: Valid utility package with 16+ active usages |
+| 02 JAN 2026 | TODO-5.1 | SKIPPED `sql/init/`: H3 refactor will handle separately |
+| 02 JAN 2026 | TODO-6.1, 6.2 | SKIPPED `openapi/`, `scripts/`: Valid folders, no action needed |
+| 02 JAN 2026 | COMPLETE | Cleanup complete, document archived to `docs/archive/` |

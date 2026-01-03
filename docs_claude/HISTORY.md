@@ -1,6 +1,6 @@
 # Project History
 
-**Last Updated**: 01 JAN 2026
+**Last Updated**: 02 JAN 2026
 **Active Log**: This is the main project history log (Sep 2025 onwards)
 
 **Archives**:
@@ -8,6 +8,43 @@
 - For history prior to September 2025, see **OLDER_HISTORY.md**
 
 This document tracks completed architectural changes and improvements to the Azure Geospatial ETL Pipeline.
+
+---
+
+## 02 JAN 2026: Root Folder Cleanup & Consolidation 🧹
+
+**Status**: ✅ **COMPLETE**
+**Impact**: Reduced root folders from 26 to 22, improved discoverability
+**Author**: Robert and Claude
+**Archive**: [docs/archive/FOLDER_CLEANUP.md](../docs/archive/FOLDER_CLEANUP.md)
+
+### Achievement
+
+Comprehensive folder structure cleanup consolidating orphaned files and reorganizing misplaced content:
+
+| Phase | Action | Result |
+|-------|--------|--------|
+| Phase 1 | Docs consolidation | `titiler/` (18 files) → `docs/titiler/`, `fathom/` → `docs_claude/` |
+| Phase 2 | Models consolidation | `band_mapping.py` → `core/models/`, `h3_base.py` archived |
+| Phase 3 | Routes consolidation | Blueprints → `triggers/admin/`, imports updated |
+| Phase 4 | Utils review | KEPT - Valid utility package (16+ active usages) |
+| Phase 5 | SQL review | SKIPPED - H3 refactor will handle |
+| Phase 6 | Optional moves | SKIPPED - `openapi/`, `scripts/` valid as-is |
+
+### Root File Cleanup
+
+Also cleaned 52 root files (~1.8MB):
+- 10 files → `docs_claude/` (planning docs)
+- 20 files → `docs/wiki/` (markdown documentation)
+- 8 files → `docs/archive/` (deprecated/historical)
+- 6 files deleted (test HTML artifacts)
+- 2 files deleted (`service_stac.py`, `service_statistics.py` - dead code)
+
+### Key Changes
+
+1. **Deleted dead code**: `service_stac.py`, `service_statistics.py`, `models/h3_base.py`
+2. **Updated imports**: `services/tiling_scheme.py`, `services/tiling_extraction.py` now use `core.models.band_mapping`
+3. **Moved blueprints**: `routes/admin_*.py` → `triggers/admin/`, updated `function_app.py`
 
 ---
 

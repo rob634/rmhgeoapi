@@ -1,3 +1,11 @@
+# ============================================================================
+# AZURE FUNCTIONS ENTRY POINT
+# ============================================================================
+# STATUS: Core - Main application entry point
+# PURPOSE: HTTP endpoints, Service Bus triggers, and CoreMachine orchestration
+# LAST_REVIEWED: 02 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 in CLAUDE.md deployment guide)
+# ============================================================================
 """
 Azure Functions entry point for Geospatial ETL Pipeline.
 

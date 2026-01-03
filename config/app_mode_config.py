@@ -1,34 +1,150 @@
+# ============================================================================
+# APPLICATION MODE CONFIGURATION
+# ============================================================================
+# STATUS: Configuration - Multi-Function App deployment modes
+# PURPOSE: Control queue listening behavior and task routing per deployment
+# LAST_REVIEWED: 02 JAN 2026
+# REVIEW_STATUS: Check 8 Applied - Full operational deployment guide
+# ============================================================================
 """
 Application Mode Configuration.
 
-Controls deployment mode and task routing behavior for multi-Function App architecture.
+================================================================================
+CORPORATE QA/PROD DEPLOYMENT GUIDE
+================================================================================
 
-Architecture (11 DEC 2025 - No Legacy Fallbacks):
-- Single codebase deployable to multiple Function Apps
-- Environment variable APP_MODE controls behavior
-- Centralized orchestration (Platform) + Distributed execution (Workers)
-- THREE queues only: geospatial-jobs, raster-tasks, vector-tasks
-- NO legacy/fallback queue - all tasks must be explicitly routed
+This module controls deployment modes for multi-Function App architecture.
+The APP_MODE environment variable determines queue listening and routing behavior.
 
-Modes:
-- standalone: All queues, all endpoints (current behavior, default)
-- platform_raster: HTTP + jobs + raster-tasks
-- platform_vector: HTTP + jobs + vector-tasks
-- platform_only: HTTP + jobs only (pure router)
-- worker_raster: raster-tasks only (no HTTP)
-- worker_vector: vector-tasks only (no HTTP)
+--------------------------------------------------------------------------------
+DEPLOYMENT MODES
+--------------------------------------------------------------------------------
 
-Usage:
+1. STANDALONE (Default - Development)
+   ---------------------------------
+   Single Function App handles everything:
+   - Listens to: geospatial-jobs, raster-tasks, vector-tasks
+   - Serves: All HTTP endpoints
+   - Use case: Development, small deployments
+
+   Environment:
+       APP_MODE = standalone
+
+2. PLATFORM_ONLY (Orchestrator)
+   ----------------------------
+   Pure orchestrator - routes tasks to workers:
+   - Listens to: geospatial-jobs only
+   - Serves: HTTP endpoints (job submission, status)
+   - Routes: Raster/vector tasks to external queues
+
+   Environment:
+       APP_MODE = platform_only
+
+3. WORKER_RASTER / WORKER_VECTOR (Dedicated Workers)
+   --------------------------------------------------
+   Headless workers - no HTTP endpoints:
+   - Listens to: raster-tasks OR vector-tasks only
+   - No HTTP: Service Bus triggered only
+   - Use case: Scale-out architecture
+
+   Environment:
+       APP_MODE = worker_raster
+       APP_MODE = worker_vector
+
+4. WORKER_DOCKER (Long-Running Tasks)
+   -----------------------------------
+   Docker container for tasks exceeding Function App timeout:
+   - Listens to: long-running-tasks queue only
+   - No Function App timeout constraints (can run hours)
+   - Cannot run in Azure Functions runtime (validated at startup)
+
+   Environment:
+       APP_MODE = worker_docker
+
+   Note: Requires custom Docker deployment, not Azure Functions.
+
+--------------------------------------------------------------------------------
+MULTI-APP ARCHITECTURE (Scale-Out)
+--------------------------------------------------------------------------------
+
+Service Request Template for QA/PROD:
+    "Deploy multi-Function App geospatial architecture:
+
+     Platform App (Orchestrator):
+     - Name: {app-name}-platform
+     - APP_MODE: platform_only
+     - SKU: B2 Basic (orchestration is lightweight)
+
+     Raster Worker App:
+     - Name: {app-name}-raster
+     - APP_MODE: worker_raster
+     - SKU: B3 Premium (memory-intensive GDAL)
+
+     Vector Worker App:
+     - Name: {app-name}-vector
+     - APP_MODE: worker_vector
+     - SKU: B2 Basic (DB-bound operations)
+
+     All apps share:
+     - Same Service Bus namespace
+     - Same PostgreSQL database
+     - Same Storage account"
+
+--------------------------------------------------------------------------------
+ENVIRONMENT VARIABLES
+--------------------------------------------------------------------------------
+
+Required:
+    APP_MODE = standalone | platform_only | platform_raster | platform_vector | worker_raster | worker_vector | worker_docker
+
+Optional:
+    APP_NAME = {unique-app-identifier}  # Tracked on tasks for debugging
+    RASTER_APP_URL = https://{raster-app}.azurewebsites.net  # Future cross-app routing
+    VECTOR_APP_URL = https://{vector-app}.azurewebsites.net  # Future cross-app routing
+
+--------------------------------------------------------------------------------
+DEPLOYMENT VERIFICATION
+--------------------------------------------------------------------------------
+
+Check app mode after deployment:
+
+    curl https://{app-url}/api/health
+
+Expected response includes:
+    "app_mode": {
+        "mode": "standalone",
+        "queues_listening": {
+            "jobs": true,
+            "raster_tasks": true,
+            "vector_tasks": true
+        }
+    }
+
+Common Failure Messages:
+    ValueError: Invalid APP_MODE='{value}'
+        → Set APP_MODE to one of the valid modes
+
+    ValueError: APP_MODE='worker_docker' cannot run in Azure Functions
+        → Deploy WORKER_DOCKER mode in Docker container only
+
+--------------------------------------------------------------------------------
+EXPORTS
+--------------------------------------------------------------------------------
+
+    AppMode: Enum of valid application modes
+    AppModeConfig: Pydantic configuration model
+    get_app_mode_config(): Singleton accessor
+
+--------------------------------------------------------------------------------
+USAGE EXAMPLE
+--------------------------------------------------------------------------------
+
     from config.app_mode_config import AppModeConfig, AppMode
 
     config = AppModeConfig.from_environment()
     if config.listens_to_raster_tasks:
         # Register raster task queue trigger
         pass
-
-Exports:
-    AppMode: Enum of valid application modes
-    AppModeConfig: Pydantic configuration model
 """
 
 import os
@@ -205,12 +321,13 @@ class AppModeConfig(BaseModel):
         Load configuration from environment variables.
 
         Environment Variables:
-            APP_MODE: Deployment mode (default: standalone)
-            APP_NAME: Unique app identifier (default: rmhazuregeoapi)
+            APP_MODE: Deployment mode (default: AppModeDefaults.DEFAULT_MODE)
+            APP_NAME: Unique app identifier (default: AppModeDefaults.DEFAULT_APP_NAME)
             RASTER_APP_URL: External raster app URL (optional)
             VECTOR_APP_URL: External vector app URL (optional)
 
         Raises:
+            ValueError: If APP_MODE is not a valid mode
             ValueError: If WORKER_DOCKER mode is used in Azure Functions runtime
         """
         mode_str = os.environ.get("APP_MODE", AppModeDefaults.DEFAULT_MODE)

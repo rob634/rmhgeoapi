@@ -1,5 +1,38 @@
+# ============================================================================
+# HEALTH CHECK HTTP TRIGGER
+# ============================================================================
+# STATUS: Trigger - Deployment verification endpoint
+# PURPOSE: GET /api/health - Comprehensive system health monitoring
+# LAST_REVIEWED: 02 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8: Deployment verification endpoint)
+# ============================================================================
 """
 Health Check HTTP Trigger.
+
+================================================================================
+DEPLOYMENT VERIFICATION
+================================================================================
+
+This endpoint is the PRIMARY deployment verification tool. After any deployment:
+
+    curl -sf https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/health
+
+Response Interpretation:
+    HTTP 200 + "status": "healthy"  →  Deployment successful
+    HTTP 200 + "status": "degraded" →  Partial issues (check "warnings" array)
+    HTTP 404 or connection refused  →  App startup failed
+
+Common Startup Failures (check Application Insights for STARTUP_FAILED):
+    - Missing environment variables (POSTGIS_HOST, SERVICE_BUS_NAMESPACE, etc.)
+    - Database connectivity (firewall rules, managed identity)
+    - Service Bus connectivity (namespace permissions)
+
+Debug Mode (for troubleshooting):
+    Add DEBUG_MODE=true to app settings to see config_sources in response
+
+For full deployment verification steps, see CLAUDE.md → Post-Deployment Validation
+
+================================================================================
 
 Comprehensive system health monitoring endpoint for GET /api/health.
 

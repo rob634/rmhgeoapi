@@ -1,5 +1,40 @@
+# ============================================================================
+# SERVICE BUS REPOSITORY IMPLEMENTATION
+# ============================================================================
+# STATUS: Infrastructure - Azure Service Bus messaging
+# PURPOSE: High-performance message queue with batch support
+# LAST_REVIEWED: 02 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 ref: config/queue_config.py)
+# ============================================================================
 """
 Service Bus Repository Implementation.
+
+================================================================================
+DEPLOYMENT NOTE
+================================================================================
+
+Azure Service Bus configuration is in:
+    config/queue_config.py (has full Check 8 deployment guide)
+
+This module USES those settings - see queue_config.py for:
+    - Service Bus namespace service request template
+    - Queue creation (geospatial-jobs, raster-tasks, vector-tasks)
+    - Managed identity role assignments (Azure Service Bus Data Owner)
+    - Connection string vs managed identity authentication
+    - Verification commands
+
+Key Environment Variables (configured in queue_config.py):
+    SERVICE_BUS_NAMESPACE: Fully qualified namespace (e.g., myns.servicebus.windows.net)
+    SERVICE_BUS_CONNECTION_STRING: Optional connection string for local dev
+    SERVICE_BUS_MAX_BATCH_SIZE: Messages per batch (default: 100)
+    SERVICE_BUS_RETRY_COUNT: Retry attempts (default: 3)
+
+Queue Names (from queue_config.py):
+    - geospatial-jobs: Job orchestration + stage_complete signals
+    - raster-tasks: Memory-intensive GDAL operations
+    - vector-tasks: Database-bound vector operations
+
+================================================================================
 
 High-performance message repository for Azure Service Bus with batch support.
 Designed for scenarios where Queue Storage times out (>1000 messages),

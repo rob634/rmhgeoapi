@@ -1,9 +1,21 @@
+# ============================================================================
+# CUSTOM EXCEPTION HIERARCHY
+# ============================================================================
+# STATUS: Core - Error handling foundation
+# PURPOSE: Distinguish contract violations (bugs) from business logic failures
+# LAST_REVIEWED: 02 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure)
+# ============================================================================
 """
 Custom Exception Hierarchy.
 
 Distinguishes between:
-    1. Contract Violations (programming bugs)
-    2. Business Logic Failures (expected runtime issues)
+    1. Contract Violations (programming bugs) - should NEVER be caught
+    2. Business Logic Failures (expected runtime issues) - handle gracefully
+
+Error Handling Strategy:
+    - ContractViolationError: Let bubble up, fix the code
+    - BusinessLogicError subclasses: Catch and handle appropriately
 
 Exports:
     ContractViolationError: Programming bugs that need fixing
@@ -13,6 +25,7 @@ Exports:
     TaskExecutionError: Task execution failures
     ResourceNotFoundError: Missing resource errors
     ValidationError: Business validation failures
+    ConfigurationError: Fatal system misconfiguration
 """
 
 

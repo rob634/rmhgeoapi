@@ -542,15 +542,150 @@ Applied Check 8 to both remaining P0 files:
 
 **All P0 files now have Check 8 operational documentation.**
 
+### Session 10: 02 JAN 2026 - P1 Infrastructure Files (postgresql.py + blob.py)
+
+Applied Check 8 pattern for infrastructure files that **reference** config files for deployment docs.
+
+**Pattern Applied:** Infrastructure files that USE config settings should reference the config file's Check 8 documentation rather than duplicate it.
+
+**infrastructure/postgresql.py:**
+
+| Check | Status | Notes |
+|-------|--------|-------|
+| 1. Module docstring | [~] | Excellent - architecture, thread safety, token caching |
+| 2. Class docstrings | [~] | Excellent - all methods documented with examples |
+| 3. Hardcoded values | [~] | None - uses config |
+| 4. Magic numbers | [~] | Token expiration (1hr) explained in context |
+| 5. Outdated comments | [~] | Date references are contextual |
+| 6. Imports | [~] | All used correctly |
+| 7. Env var docs | [~] | All vars documented in _get_connection_string |
+| 8. Operational docs | [x] | Added deployment note referencing database_config.py |
+
+**infrastructure/blob.py:**
+
+| Check | Status | Notes |
+|-------|--------|-------|
+| 1. Module docstring | [~] | Excellent - auth hierarchy, usage examples |
+| 2. Class docstrings | [~] | Excellent - design principles, methods |
+| 3. Hardcoded values | [~] | None - uses config |
+| 4. Magic numbers | [~] | 4MB chunk size explained |
+| 5. Outdated comments | [~] | None found |
+| 6. Imports | [~] | All used correctly |
+| 7. Env var docs | [~] | Auth hierarchy documented |
+| 8. Operational docs | [x] | Added deployment note referencing storage_config.py |
+
+**Key additions:**
+- File headers with REVIEW_STATUS
+- Deployment notes pointing to config files with full Check 8 guides
+- Key role assignments documented (Storage Blob Data Contributor, Delegator)
+- Authentication flow documented
+
+---
+
+### Session 14: 02 JAN 2026 - service_bus.py + health.py (P1 Infrastructure)
+
+Completed P1 infrastructure files from Option A.
+
+**infrastructure/service_bus.py (1740 lines):**
+
+| Check | Status | Notes |
+|-------|--------|-------|
+| 1. Module docstring | [~] | Excellent existing documentation |
+| 2. Class docstrings | [~] | All classes well documented |
+| 3. Hardcoded values | [~] | Uses queue_config.py constants |
+| 4. Magic numbers | [~] | Batch sizes, retries via config |
+| 5. Outdated comments | [~] | Current |
+| 6. Imports | [~] | All valid |
+| 7. Env var docs | [~] | References queue_config.py |
+| 8. Operational docs | [x] | Added deployment note referencing queue_config.py |
+
+**triggers/health.py (2136 lines):**
+
+| Check | Status | Notes |
+|-------|--------|-------|
+| 1. Module docstring | [~] | Comprehensive - 12+ components listed |
+| 2. Class docstrings | [~] | HealthCheckTrigger well documented |
+| 3. Hardcoded values | [~] | None found |
+| 4. Magic numbers | [~] | None - uses config values |
+| 5. Outdated comments | [~] | Current with DEBUG_MODE notes |
+| 6. Imports | [~] | All valid |
+| 7. Env var docs | [~] | DEBUG_MODE documented |
+| 8. Operational docs | [x] | Added DEPLOYMENT VERIFICATION section |
+
+**Key additions:**
+- service_bus.py: File header + deployment note referencing queue_config.py for Check 8
+- health.py: File header + DEPLOYMENT VERIFICATION section explaining endpoint usage
+
+**P1 Infrastructure Files - COMPLETE:**
+All 4 P1 files now reviewed:
+- ✅ infrastructure/postgresql.py (Session 10)
+- ✅ infrastructure/blob.py (Session 10)
+- ✅ infrastructure/service_bus.py (Session 14)
+- ✅ triggers/health.py (Session 14)
+
+---
+
+### Session 8: 02 JAN 2026 - raster_config.py (Already Complete)
+
+Verified that `raster_config.py` already had full Check 8 applied - tracking wasn't updated.
+
+**Existing documentation includes:**
+- GDAL/Rasterio dependencies section with Docker instructions
+- 15+ environment variables documented with descriptions
+- Storage containers section with service request template
+- Memory considerations (in-memory vs disk-based COG creation)
+- All values reference RasterDefaults/STACDefaults (no hardcoded values)
+
+**No code changes needed** - file already meets all 8 checks. Updated tracking only.
+
+---
+
+### Session 7: 02 JAN 2026 - h3_config.py + metrics_config.py (Internal Config)
+
+Applied systematic 8-check review to both files:
+
+**h3_config.py:**
+
+| Check | Status | Notes |
+|-------|--------|-------|
+| 1. Module docstring | [~] | Excellent - roadmap, phases, usage examples |
+| 2. Class docstrings | [~] | Excellent - all fields documented with ranges |
+| 3. Hardcoded values | [~] | None - "geo.curated_admin0" is proper default |
+| 4. Magic numbers | [~] | All explained (resolutions 0-15, ~70% savings) |
+| 5. Outdated comments | [~] | "15 DEC 2025" references are contextual |
+| 6. Imports | [~] | All used correctly |
+| 7. Env var docs | [~] | All 4 env vars documented in from_environment |
+| 8. Operational docs | N/A | No Azure resources - internal config only |
+
+**metrics_config.py:**
+
+| Check | Status | Notes |
+|-------|--------|-------|
+| 1. Module docstring | [~] | Excellent - features, env vars, debug examples |
+| 2. Class docstrings | [~] | Excellent - all fields with valid ranges |
+| 3. Hardcoded values | [~] | None - all internal defaults |
+| 4. Magic numbers | [~] | All explained (5s interval, 60min retention) |
+| 5. Outdated comments | [~] | None found |
+| 6. Imports | [~] | All used correctly |
+| 7. Env var docs | [~] | All 5 env vars documented |
+| 8. Operational docs | N/A | No Azure resources - internal config only |
+
+**Result:** Both files already had excellent documentation. Only change was standardizing the file header REVIEW_STATUS to match the established pattern: `Checks 1-7 Applied (Check 8 N/A - no Azure resources)`.
+
+**Why Check 8 N/A:**
+- H3Config: Configures H3 grid generation parameters (resolutions, land filtering) - all internal settings
+- MetricsConfig: Configures pipeline observability (debug mode, sample intervals) - all internal settings
+- Neither file requires Azure service requests or managed identity configuration
+
 ---
 
 ## Root Level Files
 
 | Status | File | Notes |
 |--------|------|-------|
-| [ ] | `exceptions.py` | |
-| [ ] | `function_app.py` | Main entry point |
-| [ ] | `util_logger.py` | |
+| [x] | `exceptions.py` | Checks 1-7 applied - added file header, enhanced docstring |
+| [x] | `function_app.py` | Checks 1-7 applied - added file header (Check 8 in CLAUDE.md) |
+| [x] | `util_logger.py` | Checks 1-7 applied - added file header (1631 lines, excellent docs) |
 
 ---
 
@@ -560,17 +695,17 @@ Applied Check 8 to both remaining P0 files:
 |--------|------|-------|
 | [x] | `__init__.py` | Fixed: outdated structure listing |
 | [~] | `analytics_config.py` | Excellent docstrings, no changes |
-| [x] | `app_config.py` | Fixed: 2 hardcoded values |
-| [ ] | `app_mode_config.py` | |
+| [x] | `app_config.py` | Fixed: 2 hardcoded values, added file header + Check 8 delegation |
+| [x] | `app_mode_config.py` | Full Check 8 applied - Multi-app deployment guide |
 | [x] | `database_config.py` | Full Check 8 applied - deployment guide added |
 | [x] | `defaults.py` | Added RESOURCE_GROUP constant |
-| [ ] | `h3_config.py` | |
-| [ ] | `metrics_config.py` | |
-| [ ] | `platform_config.py` | |
+| [~] | `h3_config.py` | Checks 1-7 applied (Check 8 N/A - no Azure resources) |
+| [~] | `metrics_config.py` | Checks 1-7 applied (Check 8 N/A - no Azure resources) |
+| [x] | `platform_config.py` | Checks 1-7 applied (Check 8 N/A - no Azure resources) |
 | [x] | `queue_config.py` | Full Check 8 applied - Service Bus deployment guide |
-| [ ] | `raster_config.py` | |
+| [x] | `raster_config.py` | Full Check 8 applied - GDAL deps, storage, memory guide |
 | [x] | `storage_config.py` | Full Check 8 applied - Storage accounts deployment guide |
-| [ ] | `vector_config.py` | |
+| [x] | `vector_config.py` | Checks 1-7 applied - added header, fixed 6 hardcoded values |
 
 ---
 
@@ -646,7 +781,7 @@ Applied Check 8 to both remaining P0 files:
 |--------|------|-------|
 | [ ] | `__init__.py` | |
 | [ ] | `base.py` | |
-| [ ] | `blob.py` | |
+| [x] | `blob.py` | Check 8 ref to storage_config.py, added deployment note |
 | [ ] | `curated_repository.py` | |
 | [ ] | `data_factory.py` | |
 | [ ] | `database_utils.py` | |
@@ -669,9 +804,9 @@ Applied Check 8 to both remaining P0 files:
 | [ ] | `pgstac_repository.py` | |
 | [ ] | `platform.py` | |
 | [ ] | `postgis.py` | |
-| [ ] | `postgresql.py` | |
+| [x] | `postgresql.py` | Check 8 ref to database_config.py, added deployment note |
 | [ ] | `promoted_repository.py` | |
-| [ ] | `service_bus.py` | |
+| [x] | `service_bus.py` | Check 8 ref to queue_config.py, added deployment note |
 | [ ] | `validators.py` | |
 | [ ] | `vault.py` | |
 
@@ -811,7 +946,7 @@ Applied Check 8 to both remaining P0 files:
 | [ ] | `analyze_container.py` | |
 | [ ] | `get_blob_metadata.py` | |
 | [ ] | `get_job_status.py` | |
-| [ ] | `health.py` | |
+| [x] | `health.py` | Check 8: Deployment verification endpoint docs |
 | [ ] | `http_base.py` | |
 | [ ] | `list_container_blobs.py` | |
 | [ ] | `list_storage_containers.py` | |
@@ -1080,19 +1215,19 @@ Applied Check 8 to both remaining P0 files:
 
 | Category | Total | Reviewed | Remaining |
 |----------|-------|----------|-----------|
-| config/ | 13 | 7 | 6 |
+| config/ | 13 | 13 | 0 |
 | core/ | 36 | 0 | 36 |
-| infrastructure/ | 31 | 0 | 31 |
+| infrastructure/ | 31 | 3 | 28 |
 | jobs/ | 30 | 0 | 30 |
 | services/ | 47 | 0 | 47 |
-| triggers/ | 35 | 0 | 35 |
+| triggers/ | 35 | 1 | 34 |
 | API modules | 24 | 0 | 24 |
 | web_interfaces/ | 56 | 0 | 56 |
 | utils/ | 3 | 0 | 3 |
 | scripts/ | 4 | 0 | 4 |
 | test/ | 20 | 0 | 20 |
-| Root files | 3 | 0 | 3 |
-| **TOTAL** | **302** | **7** | **295** |
+| Root files | 3 | 3 | 0 |
+| **TOTAL** | **302** | **20** | **282** |
 
 ---
 
@@ -1106,3 +1241,14 @@ Applied Check 8 to both remaining P0 files:
 | 02 JAN 2026 | Session 2 | Applied Check 8 to `config/defaults.py` as template example |
 | 02 JAN 2026 | Session 3 | Applied full 8-check review to `config/database_config.py` |
 | 02 JAN 2026 | Session 4 | Applied Check 8 to `config/storage_config.py` and `config/queue_config.py` |
+| 02 JAN 2026 | Session 5 | Applied Checks 1-7 to `config/platform_config.py` (Check 8 N/A - no Azure resources) |
+| 02 JAN 2026 | Session 6 | Verified `config/app_mode_config.py` - already had Check 8, minor cleanup |
+| 02 JAN 2026 | Session 7 | Reviewed `config/h3_config.py` + `config/metrics_config.py` - Checks 1-7 (Check 8 N/A) |
+| 02 JAN 2026 | Session 8 | Verified `config/raster_config.py` - already had Check 8, updated tracking |
+| 02 JAN 2026 | Session 9 | Applied Checks 1-7 to `config/vector_config.py` - added header, fixed 6 hardcoded values |
+| 02 JAN 2026 | Session 10 | P1 infra: `infrastructure/postgresql.py` + `infrastructure/blob.py` - Check 8 refs to config files |
+| 02 JAN 2026 | Session 11 | Applied Checks 1-7 to `function_app.py` - added file header (Check 8 in CLAUDE.md) |
+| 02 JAN 2026 | Session 12 | Applied Checks 1-7 to `exceptions.py` - added file header, enhanced docstring |
+| 02 JAN 2026 | Session 13 | Applied Checks 1-7 to `util_logger.py` - added file header (1631 lines) |
+| 02 JAN 2026 | Session 14 | P1 infra: `infrastructure/service_bus.py` + `triggers/health.py` - Check 8 refs/deployment docs |
+| 02 JAN 2026 | Session 15 | P2 complete: `config/app_config.py` - added file header + Check 8 delegation to component configs |

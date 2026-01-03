@@ -1,5 +1,35 @@
+# ============================================================================
+# POSTGRESQL REPOSITORY IMPLEMENTATION
+# ============================================================================
+# STATUS: Infrastructure - Database connection and repository pattern
+# PURPOSE: PostgreSQL access with managed identity authentication
+# LAST_REVIEWED: 02 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 ref: config/database_config.py)
+# ============================================================================
 """
 PostgreSQL Repository Implementation.
+
+================================================================================
+DEPLOYMENT NOTE
+================================================================================
+
+PostgreSQL authentication and connection settings are configured in:
+    config/database_config.py (has full Check 8 deployment guide)
+
+This module USES those settings - see database_config.py for:
+    - PostgreSQL Flexible Server service request template
+    - Managed identity setup (user-assigned recommended)
+    - Database user creation SQL
+    - Authentication modes (managed identity vs password)
+    - Verification commands
+
+Key Environment Variables (configured in database_config.py):
+    POSTGIS_HOST: PostgreSQL server hostname
+    POSTGIS_DATABASE: Database name
+    DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID: User-assigned identity client ID
+    DB_ADMIN_MANAGED_IDENTITY_NAME: PostgreSQL user name for identity
+
+================================================================================
 
 Provides PostgreSQL-specific repository implementations with direct database access
 and atomic operations. Consolidates PostgreSQL operations into a clean repository

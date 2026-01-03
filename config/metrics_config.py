@@ -1,12 +1,10 @@
 # ============================================================================
-# CLAUDE CONTEXT - METRICS CONFIGURATION
+# METRICS CONFIGURATION
 # ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: Config Module - Pipeline Observability Settings
+# STATUS: Configuration - Pipeline Observability Settings
 # PURPOSE: Configure real-time metrics for long-running jobs
-# LAST_REVIEWED: 28 DEC 2025
-# EXPORTS: MetricsConfig
-# DEPENDENCIES: pydantic
+# LAST_REVIEWED: 02 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no Azure resources)
 # ============================================================================
 """
 Pipeline Observability Metrics Configuration.

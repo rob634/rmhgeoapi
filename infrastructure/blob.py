@@ -1,5 +1,41 @@
+# ============================================================================
+# BLOB STORAGE REPOSITORY
+# ============================================================================
+# STATUS: Infrastructure - Azure Blob Storage access
+# PURPOSE: Centralized blob operations with DefaultAzureCredential
+# LAST_REVIEWED: 02 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 ref: config/storage_config.py)
+# ============================================================================
 """
 Blob Storage Repository.
+
+================================================================================
+DEPLOYMENT NOTE
+================================================================================
+
+Azure Storage account configuration is in:
+    config/storage_config.py (has full Check 8 deployment guide)
+
+This module USES those settings - see storage_config.py for:
+    - Storage account service request template
+    - Container creation requirements
+    - Managed identity role assignments (Storage Blob Data Contributor)
+    - Trust zone architecture (Bronze/Silver/SilverExternal)
+    - Verification commands
+
+Key Role Assignments Required:
+    - Storage Blob Data Contributor: Read/write blob data
+    - Storage Blob Delegator: Generate user delegation SAS tokens
+
+Authentication Flow:
+    DefaultAzureCredential automatically tries (in order):
+    1. Environment variables (AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_CLIENT_SECRET)
+    2. Managed Identity (when running in Azure)
+    3. Azure CLI (local development: az login)
+    4. Visual Studio Code Azure extension
+    5. Azure PowerShell
+
+================================================================================
 
 Centralized blob storage repository with managed authentication using
 DefaultAzureCredential. Serves as the single point of authentication

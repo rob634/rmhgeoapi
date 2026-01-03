@@ -1,11 +1,22 @@
+# ============================================================================
+# PLATFORM LAYER CONFIGURATION
+# ============================================================================
+# STATUS: Configuration - DDH Anti-Corruption Layer settings
+# PURPOSE: Translate external DDH identifiers to internal CoreMachine parameters
+# LAST_REVIEWED: 02 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no Azure resources required)
+# ============================================================================
 """
 Platform Layer Configuration.
 
 Provides configuration for the Platform layer which acts as an Anti-Corruption
 Layer (ACL) between DDH (Development Data Hub) and CoreMachine.
 
-Architecture:
-    DDH (external, unstable API) -> Platform (translator) -> CoreMachine (internal, stable)
+================================================================================
+ARCHITECTURE
+================================================================================
+
+    DDH (external, unstable API) → Platform (translator) → CoreMachine (internal, stable)
 
 Key Responsibilities:
     1. Translate DDH identifiers to CoreMachine parameters
@@ -19,6 +30,55 @@ DDH Core Identifiers:
     - version_id: Version control (e.g., "v1.0", "2024-10-29")
 
     Combined: SHA256(dataset_id + resource_id + version_id)[:32] = idempotent request_id
+
+================================================================================
+ENVIRONMENT VARIABLES (All Optional - Sensible Defaults Provided)
+================================================================================
+
+No Azure resources required. All settings have defaults suitable for most deployments.
+Override only if DDH integration requires different naming patterns.
+
+Client Configuration:
+    PLATFORM_PRIMARY_CLIENT        Default: "ddh"
+                                   Primary client application identifier
+
+Container Validation:
+    PLATFORM_VALID_CONTAINERS      Default: "bronze-vectors,bronze-rasters,bronze-misc,bronze-temp"
+                                   Comma-separated list of valid input containers
+
+Access Levels:
+    PLATFORM_ACCESS_LEVELS         Default: "public,OUO,restricted"
+                                   Comma-separated list of valid access levels
+    PLATFORM_DEFAULT_ACCESS_LEVEL  Default: "OUO"
+                                   Default access level if not specified
+
+Naming Patterns (placeholders: {dataset_id}, {resource_id}, {version_id}):
+    PLATFORM_VECTOR_TABLE_PATTERN      Default: "{dataset_id}_{resource_id}_{version_id}"
+    PLATFORM_RASTER_OUTPUT_PATTERN     Default: "{dataset_id}/{resource_id}/{version_id}"
+    PLATFORM_STAC_COLLECTION_PATTERN   Default: "{dataset_id}"
+    PLATFORM_STAC_ITEM_PATTERN         Default: "{dataset_id}_{resource_id}_{version_id}"
+
+Request ID:
+    PLATFORM_REQUEST_ID_LENGTH     Default: 32 (range: 16-64)
+                                   Length of SHA256 hash prefix for request IDs
+
+Webhooks (Future Feature):
+    PLATFORM_WEBHOOK_ENABLED       Default: "false"
+    PLATFORM_WEBHOOK_RETRY_COUNT   Default: 3
+    PLATFORM_WEBHOOK_RETRY_DELAY   Default: 5 (seconds, exponential backoff)
+
+================================================================================
+HELPER FUNCTIONS
+================================================================================
+
+    generate_platform_request_id(): Create deterministic request ID from DDH identifiers
+    _slugify_for_postgres(): Convert text to PostgreSQL-safe identifier (max 63 chars)
+    _slugify_for_path(): Convert text to blob storage path (preserves slashes)
+    _slugify_for_stac(): Convert text to STAC-compliant ID (lowercase, hyphens)
+
+Exports:
+    PlatformConfig: Pydantic model with all platform settings
+    generate_platform_request_id: Idempotent request ID generator
 """
 
 import os
@@ -26,6 +86,8 @@ import re
 import hashlib
 from typing import List, Optional
 from pydantic import BaseModel, Field, field_validator
+
+from .defaults import PlatformDefaults
 
 
 # ============================================================================
@@ -50,7 +112,7 @@ class PlatformConfig(BaseModel):
     # ========================================================================
 
     primary_client: str = Field(
-        default="ddh",
+        default=PlatformDefaults.PRIMARY_CLIENT,
         description="Primary client application identifier",
         examples=["ddh", "analytics", "mobile"]
     )
@@ -60,12 +122,7 @@ class PlatformConfig(BaseModel):
     # ========================================================================
 
     valid_input_containers: List[str] = Field(
-        default=[
-            "bronze-vectors",
-            "bronze-rasters",
-            "bronze-misc",
-            "bronze-temp",
-        ],
+        default=PlatformDefaults.VALID_INPUT_CONTAINERS,
         description="Valid Azure containers for DDH input data (Bronze tier)"
     )
 
@@ -74,12 +131,12 @@ class PlatformConfig(BaseModel):
     # ========================================================================
 
     valid_access_levels: List[str] = Field(
-        default=["public", "OUO", "restricted"],
+        default=PlatformDefaults.VALID_ACCESS_LEVELS,
         description="Valid access level values for DDH data"
     )
 
     default_access_level: str = Field(
-        default="OUO",
+        default=PlatformDefaults.DEFAULT_ACCESS_LEVEL,
         description="Default access level if not specified by DDH"
     )
 
@@ -89,25 +146,25 @@ class PlatformConfig(BaseModel):
     # These patterns define how DDH identifiers map to CoreMachine output names
 
     vector_table_pattern: str = Field(
-        default="{dataset_id}_{resource_id}_{version_id}",
+        default=PlatformDefaults.VECTOR_TABLE_PATTERN,
         description="Pattern for PostGIS table names from DDH identifiers. "
                     "Placeholders: {dataset_id}, {resource_id}, {version_id}"
     )
 
     raster_output_folder_pattern: str = Field(
-        default="{dataset_id}/{resource_id}/{version_id}",
+        default=PlatformDefaults.RASTER_OUTPUT_FOLDER_PATTERN,
         description="Pattern for COG output folder paths. "
                     "Placeholders: {dataset_id}, {resource_id}, {version_id}"
     )
 
     stac_collection_pattern: str = Field(
-        default="{dataset_id}",
+        default=PlatformDefaults.STAC_COLLECTION_PATTERN,
         description="Pattern for STAC collection IDs. "
                     "Placeholders: {dataset_id}, {resource_id}, {version_id}"
     )
 
     stac_item_pattern: str = Field(
-        default="{dataset_id}_{resource_id}_{version_id}",
+        default=PlatformDefaults.STAC_ITEM_PATTERN,
         description="Pattern for STAC item IDs (URL-safe slugified). "
                     "Placeholders: {dataset_id}, {resource_id}, {version_id}"
     )
@@ -117,7 +174,7 @@ class PlatformConfig(BaseModel):
     # ========================================================================
 
     request_id_length: int = Field(
-        default=32,
+        default=PlatformDefaults.REQUEST_ID_LENGTH,
         ge=16,
         le=64,
         description="Length of generated request IDs (SHA256 hash prefix)"
@@ -128,19 +185,19 @@ class PlatformConfig(BaseModel):
     # ========================================================================
 
     webhook_enabled: bool = Field(
-        default=False,
+        default=PlatformDefaults.WEBHOOK_ENABLED,
         description="Enable webhook callbacks to DDH on job completion"
     )
 
     webhook_retry_count: int = Field(
-        default=3,
+        default=PlatformDefaults.WEBHOOK_RETRY_COUNT,
         ge=0,
         le=10,
         description="Number of retry attempts for failed webhook deliveries"
     )
 
     webhook_retry_delay_seconds: int = Field(
-        default=5,
+        default=PlatformDefaults.WEBHOOK_RETRY_DELAY_SECONDS,
         ge=1,
         le=300,
         description="Base delay between webhook retry attempts (exponential backoff)"
@@ -168,44 +225,65 @@ class PlatformConfig(BaseModel):
 
     @classmethod
     def from_environment(cls) -> 'PlatformConfig':
-        """Load from environment variables."""
+        """Load from environment variables with PlatformDefaults fallbacks."""
 
         # Parse valid containers from comma-separated list
         containers_env = os.environ.get(
             "PLATFORM_VALID_CONTAINERS",
-            "bronze-vectors,bronze-rasters,bronze-misc,bronze-temp"
+            ",".join(PlatformDefaults.VALID_INPUT_CONTAINERS)
         )
         valid_containers = [c.strip() for c in containers_env.split(",") if c.strip()]
 
         # Parse access levels from comma-separated list
-        access_env = os.environ.get("PLATFORM_ACCESS_LEVELS", "public,OUO,restricted")
+        access_env = os.environ.get(
+            "PLATFORM_ACCESS_LEVELS",
+            ",".join(PlatformDefaults.VALID_ACCESS_LEVELS)
+        )
         access_levels = [a.strip() for a in access_env.split(",") if a.strip()]
 
         return cls(
-            primary_client=os.environ.get("PLATFORM_PRIMARY_CLIENT", "ddh"),
+            primary_client=os.environ.get(
+                "PLATFORM_PRIMARY_CLIENT",
+                PlatformDefaults.PRIMARY_CLIENT
+            ),
             valid_input_containers=valid_containers,
             valid_access_levels=access_levels,
-            default_access_level=os.environ.get("PLATFORM_DEFAULT_ACCESS_LEVEL", "OUO"),
+            default_access_level=os.environ.get(
+                "PLATFORM_DEFAULT_ACCESS_LEVEL",
+                PlatformDefaults.DEFAULT_ACCESS_LEVEL
+            ),
             vector_table_pattern=os.environ.get(
                 "PLATFORM_VECTOR_TABLE_PATTERN",
-                "{dataset_id}_{resource_id}_{version_id}"
+                PlatformDefaults.VECTOR_TABLE_PATTERN
             ),
             raster_output_folder_pattern=os.environ.get(
                 "PLATFORM_RASTER_OUTPUT_PATTERN",
-                "{dataset_id}/{resource_id}/{version_id}"
+                PlatformDefaults.RASTER_OUTPUT_FOLDER_PATTERN
             ),
             stac_collection_pattern=os.environ.get(
                 "PLATFORM_STAC_COLLECTION_PATTERN",
-                "{dataset_id}"
+                PlatformDefaults.STAC_COLLECTION_PATTERN
             ),
             stac_item_pattern=os.environ.get(
                 "PLATFORM_STAC_ITEM_PATTERN",
-                "{dataset_id}_{resource_id}_{version_id}"
+                PlatformDefaults.STAC_ITEM_PATTERN
             ),
-            request_id_length=int(os.environ.get("PLATFORM_REQUEST_ID_LENGTH", "32")),
-            webhook_enabled=os.environ.get("PLATFORM_WEBHOOK_ENABLED", "false").lower() == "true",
-            webhook_retry_count=int(os.environ.get("PLATFORM_WEBHOOK_RETRY_COUNT", "3")),
-            webhook_retry_delay_seconds=int(os.environ.get("PLATFORM_WEBHOOK_RETRY_DELAY", "5"))
+            request_id_length=int(os.environ.get(
+                "PLATFORM_REQUEST_ID_LENGTH",
+                str(PlatformDefaults.REQUEST_ID_LENGTH)
+            )),
+            webhook_enabled=os.environ.get(
+                "PLATFORM_WEBHOOK_ENABLED",
+                str(PlatformDefaults.WEBHOOK_ENABLED).lower()
+            ).lower() == "true",
+            webhook_retry_count=int(os.environ.get(
+                "PLATFORM_WEBHOOK_RETRY_COUNT",
+                str(PlatformDefaults.WEBHOOK_RETRY_COUNT)
+            )),
+            webhook_retry_delay_seconds=int(os.environ.get(
+                "PLATFORM_WEBHOOK_RETRY_DELAY",
+                str(PlatformDefaults.WEBHOOK_RETRY_DELAY_SECONDS)
+            ))
         )
 
     # ========================================================================

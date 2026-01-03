@@ -1,3 +1,11 @@
+# ============================================================================
+# H3 SPATIAL INDEXING CONFIGURATION
+# ============================================================================
+# STATUS: Configuration - H3 hexagonal grid system settings
+# PURPOSE: Configure H3 grid generation, spatial filtering, and PostGIS storage
+# LAST_REVIEWED: 02 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no Azure resources)
+# ============================================================================
 """
 H3 spatial indexing configuration.
 

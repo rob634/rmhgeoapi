@@ -1,5 +1,44 @@
+# ============================================================================
+# MAIN APPLICATION CONFIGURATION
+# ============================================================================
+# STATUS: Config - Composition of all domain configurations
+# PURPOSE: Single entry point for all application settings
+# LAST_REVIEWED: 02 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8: See component configs below)
+# ============================================================================
 """
 Main Application Configuration.
+
+================================================================================
+CORPORATE QA/PROD DEPLOYMENT - CHECK 8 DELEGATION
+================================================================================
+
+This file COMPOSES domain-specific configurations. For deployment documentation,
+see the component config files:
+
+    Database Setup:     config/database_config.py (PostgreSQL, managed identity)
+    Storage Setup:      config/storage_config.py (Bronze/Silver/Gold accounts)
+    Service Bus Setup:  config/queue_config.py (Namespace, queues)
+    Raster Pipeline:    config/raster_config.py (GDAL, COG creation)
+    Vector Pipeline:    config/vector_config.py (PostGIS, OGC Features)
+    H3 Indexing:        config/h3_config.py (Spatial indexing - no Azure resources)
+    Analytics:          config/analytics_config.py (DuckDB - no Azure resources)
+    Platform:           config/platform_config.py (DDH integration - internal)
+    Metrics:            config/metrics_config.py (Observability - internal)
+
+Environment-Specific Settings (this file):
+    DEBUG_MODE          = false (set true for verbose diagnostics)
+    ENVIRONMENT         = dev|qa|prod
+    LOG_LEVEL           = INFO|DEBUG|WARNING|ERROR
+    TITILER_BASE_URL    = TiTiler tile server URL
+    OGC_STAC_APP_URL    = OGC/STAC function app URL
+    ETL_APP_URL         = ETL admin function app URL
+
+Verification:
+    curl https://{app-url}/api/health
+    # All component health checks aggregated in single endpoint
+
+================================================================================
 
 Composes domain-specific configuration modules:
     - StorageConfig (COG tiers, multi-account storage)

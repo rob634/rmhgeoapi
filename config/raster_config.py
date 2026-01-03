@@ -1,5 +1,97 @@
+# ============================================================================
+# RASTER PROCESSING CONFIGURATION
+# ============================================================================
+# STATUS: Configuration - COG creation and raster pipeline settings
+# PURPOSE: Configure GDAL/rio-cogeo parameters, routing thresholds, STAC defaults
+# LAST_REVIEWED: 02 JAN 2026
+# REVIEW_STATUS: Check 8 Applied - Full operational deployment guide
+# ============================================================================
 """
 Raster Processing Pipeline Configuration.
+
+================================================================================
+CORPORATE QA/PROD DEPLOYMENT GUIDE
+================================================================================
+
+This module configures raster processing (COG creation, validation, routing).
+All defaults are defined in config/defaults.py - override via environment variables.
+
+--------------------------------------------------------------------------------
+GDAL/RASTERIO DEPENDENCIES
+--------------------------------------------------------------------------------
+
+The raster pipeline requires GDAL with COG driver support.
+
+For Azure Functions:
+    GDAL is included in the Python runtime. No additional setup required.
+    The Function App uses rio-cogeo for COG creation.
+
+For Docker Workers:
+    Dockerfile should include:
+        FROM ghcr.io/osgeo/gdal:ubuntu-full-3.8.0
+        # Or use requirements.txt with rasterio[s3]
+
+Verify GDAL installation:
+    python -c "from osgeo import gdal; print(gdal.__version__)"
+
+--------------------------------------------------------------------------------
+ENVIRONMENT VARIABLES
+--------------------------------------------------------------------------------
+
+Routing Thresholds (Orchestration Layer):
+    RASTER_ROUTE_LARGE_MB = 500       # Route to tiling pipeline above this size
+    RASTER_ROUTE_DOCKER_MB = 2000     # Route to Docker worker above this size
+    RASTER_ROUTE_REJECT_MB = 50000    # Hard reject threshold
+    RASTER_COLLECTION_MAX_FILES = 1000  # Max files per collection
+
+Processing Settings (Handler Layer):
+    RASTER_TILE_TARGET_MB = 200       # Target tile size for large file splitting
+    RASTER_COG_IN_MEMORY = false      # Use disk-based processing (safer)
+    RASTER_COG_COMPRESSION = deflate  # COG compression algorithm
+    RASTER_COG_TILE_SIZE = 512        # Internal COG tile size (pixels)
+
+Validation Settings:
+    RASTER_TARGET_CRS = EPSG:4326     # Target coordinate reference system
+    RASTER_STRICT_VALIDATION = true   # Fail on validation warnings
+
+STAC Settings:
+    STAC_DEFAULT_COLLECTION = rasters  # Default collection for ad-hoc rasters
+
+--------------------------------------------------------------------------------
+STORAGE CONTAINERS
+--------------------------------------------------------------------------------
+
+Raster pipeline uses these containers (configure in storage_config.py):
+    - bronze-rasters: Input files from DDH
+    - silver-cogs: Output COG files
+    - silver-tiles: Intermediate tiles (large file processing)
+
+Service Request for new environments:
+    "Create storage containers for raster processing:
+     - silver-cogs (Hot tier, lifecycle: archive after 90 days)
+     - silver-tiles (Hot tier, lifecycle: delete after 7 days)"
+
+--------------------------------------------------------------------------------
+MEMORY CONSIDERATIONS
+--------------------------------------------------------------------------------
+
+COG creation is memory-intensive. Settings are tuned for Azure Functions B3:
+
+    cog_in_memory = False (default)
+        - Uses disk-based processing via /tmp (Azure SSD-backed)
+        - Safe for concurrent processing (maxConcurrentCalls=4)
+        - 10-20% slower but prevents OOM
+
+    cog_in_memory = True (per-job override)
+        - Faster for small files (<500MB)
+        - Risk of OOM with concurrent large files
+        - Only use for known-small rasters
+
+--------------------------------------------------------------------------------
+EXPORTS
+--------------------------------------------------------------------------------
+
+    RasterConfig: Pydantic configuration model
 
 Provides configuration for:
     - COG creation settings (compression, tile size, quality)

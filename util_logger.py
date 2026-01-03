@@ -1,3 +1,11 @@
+# ============================================================================
+# UNIFIED LOGGER SYSTEM
+# ============================================================================
+# STATUS: Core - Structured logging and resource monitoring
+# PURPOSE: JSON logging for Azure Application Insights + memory/CPU/DB monitoring
+# LAST_REVIEWED: 02 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure)
+# ============================================================================
 """
 Unified Logger System.
 

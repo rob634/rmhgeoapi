@@ -1,24 +1,156 @@
 """
 PostgreSQL/PostGIS Database Configuration.
 
-Provides configuration for:
-    - App Database (DatabaseConfig): Full DDL permissions for app infrastructure
-      - jobs, tasks, api_requests tables
-      - pgSTAC metadata catalog
-      - App-owned geo data (admin0 countries)
-      - H3 grids
-    - Business Database (BusinessDatabaseConfig): Restricted CRUD for ETL outputs
-      - process_vector ETL outputs only
-      - Same managed identity, different permissions (NO DROP SCHEMA)
+================================================================================
+CORPORATE QA/PROD DEPLOYMENT GUIDE
+================================================================================
 
-Architecture:
-    App Database (geopgflex) - Can nuke/rebuild schemas
-    Business Database (ddhgeodb) - Protected from accidental destruction
+This module configures PostgreSQL database connections. Before deploying,
+file service requests to create the database resources listed below.
+
+--------------------------------------------------------------------------------
+REQUIRED AZURE RESOURCES
+--------------------------------------------------------------------------------
+
+1. POSTGRESQL FLEXIBLE SERVER
+   ---------------------------
+   Service Request Template:
+       "Create Azure Database for PostgreSQL Flexible Server:
+        - Name: {server-name}
+        - SKU: Standard_D4s_v3 (or higher for production)
+        - PostgreSQL Version: 15 or 16
+        - Authentication: Azure AD + PostgreSQL authentication
+        - High Availability: Zone redundant (production)
+        - Backup: Geo-redundant (production)
+        - Network: Private endpoint or VNet integration"
+
+   Environment Variables:
+       POSTGIS_HOST     = {server-name}.postgres.database.azure.com
+       POSTGIS_DATABASE = {database-name}
+       POSTGIS_PORT     = 5432 (default, optional)
+
+2. DATABASE SCHEMAS
+   -----------------
+   After server creation, create the required schemas:
+
+   Service Request or DBA Task:
+       "Create PostgreSQL schemas and extensions:
+        ```sql
+        -- Create schemas
+        CREATE SCHEMA IF NOT EXISTS app;
+        CREATE SCHEMA IF NOT EXISTS geo;
+        CREATE SCHEMA IF NOT EXISTS pgstac;
+        CREATE SCHEMA IF NOT EXISTS h3;
+
+        -- Enable extensions
+        CREATE EXTENSION IF NOT EXISTS postgis;
+        CREATE EXTENSION IF NOT EXISTS h3 WITH SCHEMA h3;
+        CREATE EXTENSION IF NOT EXISTS pgstac WITH SCHEMA pgstac;
+        ```"
+
+   Environment Variables:
+       POSTGIS_SCHEMA = geo
+       APP_SCHEMA     = app
+       PGSTAC_SCHEMA  = pgstac
+       H3_SCHEMA      = h3
+
+3. MANAGED IDENTITY DATABASE USER
+   -------------------------------
+   After managed identity is created (see config/defaults.py), create the
+   PostgreSQL user:
+
+   DBA Task:
+       "Create AAD user for managed identity:
+        ```sql
+        -- Create the AAD principal (run as AAD admin)
+        SELECT * FROM pgaadauth_create_principal('{identity-name}', false, false);
+
+        -- Grant schema permissions
+        GRANT ALL PRIVILEGES ON SCHEMA app TO "{identity-name}";
+        GRANT ALL PRIVILEGES ON SCHEMA geo TO "{identity-name}";
+        GRANT ALL PRIVILEGES ON SCHEMA pgstac TO "{identity-name}";
+        GRANT ALL PRIVILEGES ON SCHEMA h3 TO "{identity-name}";
+
+        -- Grant table permissions
+        GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA app TO "{identity-name}";
+        GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA geo TO "{identity-name}";
+        -- etc.
+        ```"
+
+   Environment Variable:
+       DB_ADMIN_MANAGED_IDENTITY_NAME = {identity-name}
+
+--------------------------------------------------------------------------------
+AUTHENTICATION MODES
+--------------------------------------------------------------------------------
+
+1. MANAGED IDENTITY (Production - Recommended)
+   - No passwords stored
+   - Automatic token refresh
+   - Azure AD audit logging
+
+   Environment Variables:
+       USE_MANAGED_IDENTITY              = true
+       DB_ADMIN_MANAGED_IDENTITY_NAME    = {identity-name}
+       DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID = {client-id}  # For user-assigned
+
+2. PASSWORD AUTHENTICATION (Development/Troubleshooting Only)
+   - Use for local development without Azure access
+   - Never use in production
+
+   Environment Variables:
+       USE_MANAGED_IDENTITY = false
+       POSTGIS_USER         = {username}
+       POSTGIS_PASSWORD     = {password}
+
+--------------------------------------------------------------------------------
+DEPLOYMENT VERIFICATION
+--------------------------------------------------------------------------------
+
+After configuration, verify with:
+
+    curl https://{app-url}/api/health
+
+Expected response:
+    "database": {
+        "status": "healthy",
+        "host": "{server}.postgres.database.azure.com",
+        "managed_identity": true
+    }
+
+Common Failure Messages:
+    ValueError: POSTGIS_HOST is not set
+        → Set POSTGIS_HOST environment variable
+
+    ValueError: Required environment variable APP_SCHEMA is not set
+        → Set APP_SCHEMA, POSTGIS_SCHEMA, PGSTAC_SCHEMA, H3_SCHEMA
+
+    FATAL: password authentication failed for user "..."
+        → Check USE_MANAGED_IDENTITY setting and identity configuration
+
+    Connection refused
+        → Check VNet/firewall rules, private endpoint configuration
+
+--------------------------------------------------------------------------------
+ARCHITECTURE
+--------------------------------------------------------------------------------
+
+Two databases may be configured:
+
+    App Database (DatabaseConfig):
+        - Full DDL permissions (CREATE/DROP SCHEMA)
+        - Contains: app, pgstac, h3 schemas
+        - Can be nuked/rebuilt for development
+
+    Business Database (BusinessDatabaseConfig) - Optional:
+        - Restricted CRUD (NO DROP SCHEMA)
+        - Contains: geo schema (ETL outputs)
+        - Protected from accidental destruction
 
 Exports:
     DatabaseConfig: App database configuration
-    BusinessDatabaseConfig: Business database configuration
-    get_postgres_connection_string: Connection string factory
+    BusinessDatabaseConfig: Business database configuration (optional)
+    get_postgres_connection_string: Connection string factory (deprecated)
 """
 
 import os
@@ -43,7 +175,7 @@ class DatabaseConfig(BaseModel):
     host: str = Field(
         ...,
         description="PostgreSQL server hostname",
-        examples=["rmhpgflex.postgres.database.azure.com"]
+        examples=["{server-name}.postgres.database.azure.com"]
     )
 
     port: int = Field(
@@ -86,7 +218,7 @@ class DatabaseConfig(BaseModel):
     database: str = Field(
         ...,
         description="PostgreSQL database name",
-        examples=["geopgflex"]
+        examples=["{database-name}"]
     )
 
     # Schema names
@@ -164,17 +296,17 @@ class DatabaseConfig(BaseModel):
 
         Behavior:
             - If specified via env var: Uses that value
-            - If not specified: Uses default 'rmhpgflexadmin' (user-assigned identity)
+            - If not specified: Uses placeholder (will fail - see config/defaults.py)
 
         Environment Variable: DB_ADMIN_MANAGED_IDENTITY_NAME
 
         PostgreSQL Setup:
             The managed identity user must be created in PostgreSQL using:
-            SELECT * FROM pgaadauth_create_principal('rmhpgflexadmin', false, false);
-            GRANT ALL PRIVILEGES ON SCHEMA geo TO rmhpgflexadmin;
-            GRANT ALL PRIVILEGES ON SCHEMA app TO rmhpgflexadmin;
-            GRANT ALL PRIVILEGES ON SCHEMA pgstac TO rmhpgflexadmin;
-            -- etc. for all required schemas
+            SELECT * FROM pgaadauth_create_principal('{identity-name}', false, false);
+            GRANT ALL PRIVILEGES ON SCHEMA geo TO "{identity-name}";
+            GRANT ALL PRIVILEGES ON SCHEMA app TO "{identity-name}";
+            GRANT ALL PRIVILEGES ON SCHEMA pgstac TO "{identity-name}";
+            -- etc. for all required schemas (see module docstring for full SQL)
 
         Important:
             - Name must match EXACTLY (case-sensitive)
@@ -375,16 +507,23 @@ class BusinessDatabaseConfig(BaseModel):
     Business data database configuration for ETL pipeline outputs.
 
     This is a SEPARATE database from the app database, used exclusively for
-    process_vector ETL outputs. Uses the SAME managed identity (rmhpgflexadmin)
-    but with RESTRICTED permissions - specifically NO DROP SCHEMA.
+    process_vector ETL outputs. Uses the SAME managed identity but with
+    RESTRICTED permissions - specifically NO DROP SCHEMA.
+
+    ============================================================================
+    OPTIONAL - SKIP IF USING SINGLE DATABASE
+    ============================================================================
+    This configuration is OPTIONAL. If not configured, the system uses the
+    app database geo schema for all ETL outputs. Configure this only when
+    you need to protect business data from accidental deletion.
 
     Architecture:
-        App Database (geopgflex):
+        App Database:
             - Full DDL: CREATE/DROP SCHEMA, ALL PRIVILEGES
-            - Contains: app, pgstac, geo (app reference), h3 schemas
+            - Contains: app, pgstac, h3 schemas
             - Can be nuked/rebuilt for development
 
-        Business Database (ddhgeodb):
+        Business Database (Optional):
             - Restricted: CREATE TABLE, INSERT, UPDATE, DELETE, SELECT
             - NO DROP SCHEMA permission
             - Contains: geo schema (ETL outputs only)
@@ -393,9 +532,9 @@ class BusinessDatabaseConfig(BaseModel):
     Environment Variables:
         BUSINESS_DB_HOST: PostgreSQL host (defaults to POSTGIS_HOST if not set)
         BUSINESS_DB_PORT: Port (default: 5432)
-        BUSINESS_DB_NAME: Database name (default: "geodata")
+        BUSINESS_DB_NAME: Database name
         BUSINESS_DB_SCHEMA: Schema for ETL outputs (default: "geo")
-        BUSINESS_DB_MANAGED_IDENTITY_NAME: Identity name (default: "rmhpgflexadmin")
+        BUSINESS_DB_MANAGED_IDENTITY_NAME: Identity name (uses DB_ADMIN_MANAGED_IDENTITY_NAME)
         BUSINESS_DB_MANAGED_IDENTITY_CLIENT_ID: Client ID (optional, uses DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID if not set)
 
     Usage:
@@ -423,8 +562,8 @@ class BusinessDatabaseConfig(BaseModel):
     )
 
     database: str = Field(
-        default="ddhgeodb",
-        description="Business database name (separate from app database)"
+        ...,
+        description="Business database name (separate from app database). Set via BUSINESS_DB_NAME."
     )
 
     db_schema: str = Field(
@@ -499,7 +638,7 @@ class BusinessDatabaseConfig(BaseModel):
             # Host: Use BUSINESS_DB_HOST, fall back to POSTGIS_HOST
             host=os.environ.get("BUSINESS_DB_HOST", os.environ.get("POSTGIS_HOST", "")),
             port=int(os.environ.get("BUSINESS_DB_PORT", str(DatabaseDefaults.PORT))),
-            database=os.environ.get("BUSINESS_DB_NAME", "ddhgeodb"),
+            database=os.environ.get("BUSINESS_DB_NAME", ""),  # Required if business DB is configured
             db_schema=os.environ.get("BUSINESS_DB_SCHEMA", DatabaseDefaults.POSTGIS_SCHEMA),
             use_managed_identity=os.environ.get(
                 "BUSINESS_DB_USE_MANAGED_IDENTITY",

@@ -253,6 +253,34 @@ Applied Check 8 (Operational Deployment Documentation) to `config/defaults.py` a
 
 **This serves as the TEMPLATE for all P0/P1 files.**
 
+### Session 3: 02 JAN 2026 - database_config.py (P0)
+
+Applied full 8-check review:
+
+| Check | Status | Action |
+|-------|--------|--------|
+| 1. Module docstring | [x] | Added full deployment guide (~150 lines) |
+| 2. Class docstrings | [~] | Already good |
+| 3. Hardcoded values | [x] | Fixed DEV examples: `rmhpgflex`, `geopgflex`, `ddhgeodb` |
+| 4. Magic numbers | [~] | Uses DatabaseDefaults |
+| 5. Outdated comments | [~] | OK |
+| 6. Imports | [~] | OK |
+| 7. Env var docs | [~] | Already good |
+| 8. Operational docs | [x] | Added service request templates, SQL examples, verification |
+
+**Key additions:**
+1. Complete PostgreSQL Flexible Server service request template
+2. Schema creation SQL with all required extensions
+3. Managed identity database user setup SQL
+4. Authentication modes comparison (managed identity vs password)
+5. Deployment verification commands
+6. Common failure messages with solutions
+
+**Fixes:**
+- Removed DEV-specific examples (`rmhpgflex.postgres.database.azure.com` → `{server-name}...`)
+- Removed hardcoded `ddhgeodb` default (now requires explicit BUSINESS_DB_NAME)
+- Replaced `rmhpgflexadmin` references with `{identity-name}` placeholders
+
 ---
 
 ## Root Level Files
@@ -273,7 +301,7 @@ Applied Check 8 (Operational Deployment Documentation) to `config/defaults.py` a
 | [~] | `analytics_config.py` | Excellent docstrings, no changes |
 | [x] | `app_config.py` | Fixed: 2 hardcoded values |
 | [ ] | `app_mode_config.py` | |
-| [ ] | `database_config.py` | |
+| [x] | `database_config.py` | Full Check 8 applied - deployment guide added |
 | [x] | `defaults.py` | Added RESOURCE_GROUP constant |
 | [ ] | `h3_config.py` | |
 | [ ] | `metrics_config.py` | |
@@ -791,7 +819,7 @@ Applied Check 8 (Operational Deployment Documentation) to `config/defaults.py` a
 
 | Category | Total | Reviewed | Remaining |
 |----------|-------|----------|-----------|
-| config/ | 13 | 4 | 9 |
+| config/ | 13 | 5 | 8 |
 | core/ | 36 | 0 | 36 |
 | infrastructure/ | 31 | 0 | 31 |
 | jobs/ | 30 | 0 | 30 |
@@ -803,7 +831,7 @@ Applied Check 8 (Operational Deployment Documentation) to `config/defaults.py` a
 | scripts/ | 4 | 0 | 4 |
 | test/ | 20 | 0 | 20 |
 | Root files | 3 | 0 | 3 |
-| **TOTAL** | **302** | **4** | **298** |
+| **TOTAL** | **302** | **5** | **297** |
 
 ---
 
@@ -815,3 +843,4 @@ Applied Check 8 (Operational Deployment Documentation) to `config/defaults.py` a
 | 02 JAN 2026 | Session 1 | Reviewed 4 config/ files, developed 7-check systematic process |
 | 02 JAN 2026 | Check 8 Added | Added operational deployment documentation checks for corporate QA/PROD |
 | 02 JAN 2026 | Session 2 | Applied Check 8 to `config/defaults.py` as template example |
+| 02 JAN 2026 | Session 3 | Applied full 8-check review to `config/database_config.py` |

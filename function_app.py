@@ -335,7 +335,6 @@ from triggers.janitor import (
 #
 # Reason: Epoch 3 controllers deprecated, CoreMachine handles all orchestration
 # Migration: Use Epoch 4 @register_job and @register_task decorators instead
-# See: STORAGE_QUEUE_DEPRECATION_COMPLETE.md
 # ============================================================================
 
 # ========================================================================

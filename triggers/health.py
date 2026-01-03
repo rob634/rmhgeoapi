@@ -158,15 +158,6 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             health_data["status"] = "unhealthy"
             health_data["errors"].extend(service_bus_health.get("errors", []))
 
-        # Storage tables REMOVED (1 OCT 2025) - deprecated in favor of PostgreSQL
-        # Azure Table Storage was replaced by PostgreSQL for ACID compliance
-        health_data["components"]["tables"] = {
-            "component": "tables",
-            "status": "deprecated",
-            "details": {"message": "Azure Table Storage deprecated - using PostgreSQL instead"},
-            "checked_at": datetime.now(timezone.utc).isoformat()
-        }
-        
         # Key Vault disabled - using environment variables only
         # vault_health = self._check_vault_configuration()
         # health_data["components"]["vault"] = vault_health

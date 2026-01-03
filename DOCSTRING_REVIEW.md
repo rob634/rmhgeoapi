@@ -426,7 +426,7 @@ examples=["{server-name}.postgres.database.azure.com"]
 
 ```python
 # ============================================================================
-# CLAUDE CONTEXT - {DESCRIPTIVE_TITLE}
+# {DESCRIPTIVE_TITLE}
 # ============================================================================
 # STATUS: {Component type} - {Brief description}
 # PURPOSE: {One sentence description}
@@ -438,7 +438,7 @@ examples=["{server-name}.postgres.database.azure.com"]
 For config files with Check 8 applied:
 ```python
 # ============================================================================
-# CLAUDE CONTEXT - POSTGRESQL DATABASE CONFIGURATION
+# POSTGRESQL DATABASE CONFIGURATION
 # ============================================================================
 # STATUS: Configuration - PostgreSQL connection and managed identity
 # PURPOSE: Configure database connections for app and business databases
@@ -447,7 +447,7 @@ For config files with Check 8 applied:
 # ============================================================================
 ```
 
-This allows future reviewers (human or Claude) to quickly see:
+This allows future reviewers to quickly see:
 - When the file was last reviewed
 - What level of review was performed
 - Whether operational documentation exists

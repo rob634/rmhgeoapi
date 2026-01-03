@@ -1,5 +1,5 @@
 # ============================================================================
-# CLAUDE CONTEXT - CONFIGURATION DEFAULTS
+# CONFIGURATION DEFAULTS
 # ============================================================================
 # STATUS: Configuration - Single source of truth for all default values
 # PURPOSE: Define fail-fast placeholder defaults for Azure resource configuration

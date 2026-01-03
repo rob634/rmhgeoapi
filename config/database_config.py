@@ -1,5 +1,5 @@
 # ============================================================================
-# CLAUDE CONTEXT - POSTGRESQL DATABASE CONFIGURATION
+# POSTGRESQL DATABASE CONFIGURATION
 # ============================================================================
 # STATUS: Configuration - PostgreSQL connection and managed identity
 # PURPOSE: Configure database connections for app and business databases

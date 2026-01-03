@@ -1,5 +1,5 @@
 # ============================================================================
-# CLAUDE CONTEXT - AZURE STORAGE CONFIGURATION
+# AZURE STORAGE CONFIGURATION
 # ============================================================================
 # STATUS: Configuration - Multi-account blob storage for trust zones
 # PURPOSE: Configure Bronze/Silver/Gold storage accounts and containers

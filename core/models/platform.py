@@ -165,23 +165,11 @@ class PlatformRequest(BaseModel):
     # Computed Properties
     # ========================================================================
 
-    @property
-    def source_location(self) -> str:
-        """
-        Construct Azure blob storage URL from container_name + file_name.
-
-        Returns:
-            Full Azure blob URL for the first file (if array) or single file
-        """
-        base_url = "https://rmhazuregeo.blob.core.windows.net"
-
-        # Handle array of file names (raster collections)
-        if isinstance(self.file_name, list):
-            first_file = self.file_name[0]
-            return f"{base_url}/{self.container_name}/{first_file}"
-
-        # Handle single file name
-        return f"{base_url}/{self.container_name}/{self.file_name}"
+    # REMOVED (02 JAN 2026): source_location property
+    # Was dead code with hardcoded storage account. Use zone-based storage:
+    #   from infrastructure import RepositoryFactory
+    #   blob_repo = RepositoryFactory.create_blob_repository(zone="bronze")
+    #   url = blob_repo.get_blob_url(container, blob_path)
 
     @property
     def data_type(self) -> DataType:

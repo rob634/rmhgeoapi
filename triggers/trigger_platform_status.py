@@ -343,6 +343,12 @@ def _generate_data_access_urls(
     """
     Generate data access URLs for completed jobs.
 
+    Uses config properties to build URLs for the correct services:
+    - OGC Features: OGC_STAC_APP_URL (dedicated OGC/STAC app)
+    - STAC API: OGC_STAC_APP_URL (dedicated OGC/STAC app)
+    - TiTiler: TITILER_BASE_URL (dedicated tile server)
+    - Vector Viewer: ETL_APP_URL (admin/ETL app)
+
     Args:
         platform_request: ApiRequest record
         job_type: Type of CoreMachine job
@@ -351,16 +357,22 @@ def _generate_data_access_urls(
     Returns:
         Dictionary with OGC Features, STAC, TiTiler URLs as applicable
     """
-    try:
-        from config import get_config
-        config = get_config()
-    except Exception:
-        base_url = "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net"
-    else:
-        base_url = getattr(config, 'function_app_url', None) or \
-            "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net"
+    from config import get_config
+    config = get_config()
 
-    web_map_url = "https://rmhazuregeo.z13.web.core.windows.net"
+    # Get service URLs from config (no hardcoded fallbacks - fail-fast design)
+    # ogc_features_base_url = OGC_STAC_APP_URL + "/api/features"
+    ogc_features_base = config.ogc_features_base_url
+
+    # For STAC, we need the app base URL (without /api/stac suffix)
+    # stac_api_base_url includes /api/stac, but STAC endpoints are at /api/collections
+    # So we derive the base from ogc_features_base_url by stripping /api/features
+    ogc_stac_app_base = ogc_features_base.replace("/api/features", "")
+
+    # TiTiler and ETL app URLs
+    titiler_base = config.titiler_base_url
+    etl_app_base = config.etl_app_base_url
+
     urls = {}
 
     # Vector job → OGC Features URLs
@@ -372,9 +384,9 @@ def _generate_data_access_urls(
                 'table': table_name
             }
             urls['ogc_features'] = {
-                'collection': f"{base_url}/api/features/collections/{table_name}",
-                'items': f"{base_url}/api/features/collections/{table_name}/items",
-                'web_map': f"{web_map_url}/?collection={table_name}"
+                'collection': f"{ogc_features_base}/collections/{table_name}",
+                'items': f"{ogc_features_base}/collections/{table_name}/items",
+                'viewer': f"{etl_app_base}/api/vector/viewer?collection={table_name}"
             }
 
     # Raster job → STAC + TiTiler URLs
@@ -385,16 +397,16 @@ def _generate_data_access_urls(
 
         if collection_id:
             urls['stac'] = {
-                'collection': f"{base_url}/api/collections/{collection_id}",
-                'items': f"{base_url}/api/collections/{collection_id}/items",
-                'search': f"{base_url}/api/search"
+                'collection': f"{ogc_stac_app_base}/api/collections/{collection_id}",
+                'items': f"{ogc_stac_app_base}/api/collections/{collection_id}/items",
+                'search': f"{ogc_stac_app_base}/api/search"
             }
 
         if cog_url:
             urls['titiler'] = {
-                'preview': f"{base_url}/cog/preview?url={cog_url}",
-                'info': f"{base_url}/cog/info?url={cog_url}",
-                'tiles': f"{base_url}/cog/tiles/{{z}}/{{x}}/{{y}}?url={cog_url}"
+                'preview': f"{titiler_base}/cog/preview?url={cog_url}",
+                'info': f"{titiler_base}/cog/info?url={cog_url}",
+                'tiles': f"{titiler_base}/cog/tiles/{{z}}/{{x}}/{{y}}?url={cog_url}"
             }
 
     return urls

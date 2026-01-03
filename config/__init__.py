@@ -6,12 +6,18 @@ This package provides application configuration using a composition-based approa
 Structure:
     config/
     ├── __init__.py              # This file - exports and singleton
+    ├── defaults.py              # Single source of truth for all default values
     ├── app_config.py            # Main config (composes domain configs)
+    ├── app_mode_config.py       # Multi-Function App deployment modes
     ├── storage_config.py        # COG tiers, multi-account storage
     ├── database_config.py       # PostgreSQL/PostGIS
     ├── raster_config.py         # Raster pipeline settings
     ├── vector_config.py         # Vector pipeline settings
-    └── queue_config.py          # Service Bus queues
+    ├── queue_config.py          # Service Bus queues
+    ├── analytics_config.py      # DuckDB and columnar analytics
+    ├── h3_config.py             # H3 hexagonal spatial indexing
+    ├── platform_config.py       # DDH platform integration
+    └── metrics_config.py        # Pipeline observability metrics
 
 Usage:
     from config import get_config

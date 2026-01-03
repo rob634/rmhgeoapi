@@ -1,24 +1,122 @@
 """
 Configuration Defaults - Single source of truth for all default values.
 
-FAIL-FAST DESIGN (12 DEC 2025):
-Tenant-specific defaults use INTENTIONALLY INVALID placeholder values.
-This ensures deployments fail loudly if required environment variables aren't set.
+================================================================================
+CORPORATE QA/PROD DEPLOYMENT GUIDE
+================================================================================
 
-Organization:
-    - AzureDefaults: MUST be overridden - uses invalid placeholders (fail-fast)
-    - StorageDefaults.DEFAULT_ACCOUNT_NAME: MUST be overridden (fail-fast)
-    - AppModeDefaults.DEFAULT_APP_NAME: MUST be overridden (fail-fast)
-    - All other *Defaults: Safe universal defaults that work for any deployment
+This file defines ALL environment variables required for deployment. Before
+deploying to QA or PROD, file service requests to create the Azure resources
+listed below, then configure the corresponding environment variables.
 
-Required Environment Variables (will fail if not set):
-    DB_ADMIN_MANAGED_IDENTITY_NAME - PostgreSQL managed identity name
-    TITILER_BASE_URL - TiTiler tile server URL
-    OGC_STAC_APP_URL - OGC/STAC API URL
-    ETL_APP_URL - ETL/Admin Function App URL
-    BRONZE_STORAGE_ACCOUNT - Bronze zone storage account name
-    SILVER_STORAGE_ACCOUNT - Silver zone storage account name
-    APP_NAME - Function App name for task tracking
+FAIL-FAST DESIGN:
+    Tenant-specific defaults use INTENTIONALLY INVALID placeholder values
+    (e.g., "your-managed-identity-name"). If you see these in error messages,
+    the corresponding environment variable was not set.
+
+--------------------------------------------------------------------------------
+REQUIRED AZURE RESOURCES (Service Requests Needed)
+--------------------------------------------------------------------------------
+
+1. POSTGRESQL FLEXIBLE SERVER
+   Service Request: "Create Azure Database for PostgreSQL Flexible Server"
+   - SKU: Standard_D4s_v3 or higher for production
+   - Enable AAD authentication
+   - Create schemas: app, geo, pgstac, h3
+
+   Environment Variables:
+     POSTGIS_HOST          = {server-name}.postgres.database.azure.com
+     POSTGIS_DATABASE      = {database-name}
+     POSTGIS_SCHEMA        = geo
+     APP_SCHEMA            = app
+     PGSTAC_SCHEMA         = pgstac
+     H3_SCHEMA             = h3
+
+2. USER-ASSIGNED MANAGED IDENTITY (Database Admin)
+   Service Request: "Create User-Assigned Managed Identity for PostgreSQL"
+   - Name: {app-name}-db-admin
+   - Role: Azure AD Authentication Administrator on PostgreSQL server
+   - Assign to: Function App, TiTiler Web App
+
+   Environment Variable:
+     DB_ADMIN_MANAGED_IDENTITY_NAME = {identity-name}
+
+3. STORAGE ACCOUNTS (Trust Zones)
+   Service Request: "Create Storage Accounts for geospatial data tiers"
+   - Bronze: Raw uploads (blob, private access)
+   - Silver: Processed COGs (blob, SAS for TiTiler)
+   - Gold: Analytics exports (optional)
+
+   Environment Variables:
+     BRONZE_STORAGE_ACCOUNT = {bronze-account-name}
+     SILVER_STORAGE_ACCOUNT = {silver-account-name}
+     GOLD_STORAGE_ACCOUNT   = {gold-account-name}  # Optional
+
+4. SERVICE BUS NAMESPACE
+   Service Request: "Create Azure Service Bus Namespace"
+   - SKU: Standard or Premium
+   - Create queues: geospatial-jobs, raster-tasks, vector-tasks
+
+   Environment Variables:
+     SERVICE_BUS_NAMESPACE         = {namespace-name}
+     SERVICE_BUS_CONNECTION_STRING = {connection-string}  # Or use managed identity
+
+5. FUNCTION APPS
+   Service Request: "Create Azure Function Apps"
+   - ETL App: Job orchestration, admin endpoints, web interfaces
+   - OGC/STAC App: Public API endpoints (optional, can be same as ETL)
+
+   Environment Variables:
+     ETL_APP_URL      = https://{etl-app-name}.azurewebsites.net
+     OGC_STAC_APP_URL = https://{ogc-app-name}.azurewebsites.net
+     APP_NAME         = {etl-app-name}
+
+6. TITILER WEB APP
+   Service Request: "Create Azure Web App for TiTiler tile server"
+   - Container: ghcr.io/stac-utils/titiler-pgstac
+   - Requires: PostgreSQL access, blob storage SAS
+
+   Environment Variable:
+     TITILER_BASE_URL = https://{titiler-app-name}.azurewebsites.net
+
+--------------------------------------------------------------------------------
+DEPLOYMENT VERIFICATION
+--------------------------------------------------------------------------------
+
+After setting all environment variables, verify with:
+
+    curl https://{app-url}/api/health
+
+Expected response includes:
+    "database": {"status": "healthy"}
+    "service_bus": {"status": "healthy"}
+    "storage": {"status": "healthy"}
+
+Common Failure Messages:
+    STARTUP_FAILED: POSTGIS_HOST not configured
+    STARTUP_FAILED: DB_ADMIN_MANAGED_IDENTITY_NAME not configured
+    Connection refused: PostgreSQL server not accessible (check VNet/firewall)
+
+--------------------------------------------------------------------------------
+ORGANIZATION
+--------------------------------------------------------------------------------
+
+Classes in this file:
+    - AzureDefaults: MUST override - invalid placeholders (fail-fast)
+    - StorageDefaults: Container names (universal), account names (must override)
+    - DatabaseDefaults: Reference values for schema names
+    - QueueDefaults: Service Bus queue names
+    - AppModeDefaults: Multi-Function App deployment modes
+    - TaskRoutingDefaults: Task type to queue mapping
+    - RasterDefaults: COG processing settings
+    - VectorDefaults: PostGIS ETL settings
+    - AnalyticsDefaults: DuckDB settings
+    - H3Defaults: Spatial indexing settings
+    - PlatformDefaults: DDH integration settings
+    - FathomDefaults: Flood data ETL settings
+    - STACDefaults: Catalog configuration
+    - AppDefaults: Application-wide settings
+    - KeyVaultDefaults: Key Vault integration (future)
 
 Usage:
     from config.defaults import DatabaseDefaults, AzureDefaults
@@ -38,18 +136,75 @@ Usage:
 
 class AzureDefaults:
     """
-    Defaults that MUST be overridden for a new Azure tenant deployment.
+    Azure resource defaults that MUST be overridden for deployment.
 
-    FAIL-FAST DESIGN (12 DEC 2025):
-    These defaults are INTENTIONALLY INVALID to cause loud failures if not overridden.
-    If you see errors referencing these placeholder values, you need to set the
-    corresponding environment variables for your deployment.
+    ============================================================================
+    FAIL-FAST DESIGN
+    ============================================================================
+    These defaults are INTENTIONALLY INVALID placeholder values. If you see
+    error messages containing "your-managed-identity-name" or similar, the
+    corresponding environment variable was not configured.
 
-    Required Environment Variables:
-        DB_ADMIN_MANAGED_IDENTITY_NAME - PostgreSQL managed identity name
-        TITILER_BASE_URL - TiTiler tile server URL
-        OGC_STAC_APP_URL - OGC/STAC API URL (or same as ETL_APP_URL for standalone)
-        ETL_APP_URL - ETL/Admin Function App URL
+    ============================================================================
+    SERVICE REQUESTS REQUIRED
+    ============================================================================
+
+    1. MANAGED IDENTITY
+       ----------------
+       Environment Variable: DB_ADMIN_MANAGED_IDENTITY_NAME
+
+       Service Request Template:
+           "Create User-Assigned Managed Identity:
+            - Name: {app-name}-db-admin
+            - Resource Group: {your-resource-group}
+
+            Role Assignments:
+            - 'Azure Database for PostgreSQL Flexible Server AAD Administrator'
+              Scope: PostgreSQL server resource
+
+            Assign Identity To:
+            - Function App: {etl-app-name}
+            - Function App: {ogc-stac-app-name} (if separate)
+            - Web App: {titiler-app-name}"
+
+       Verification:
+           curl https://{app-url}/api/health
+           # database.status should be "healthy"
+
+    2. TITILER WEB APP
+       ----------------
+       Environment Variable: TITILER_BASE_URL
+
+       Service Request Template:
+           "Create Azure Web App for Container:
+            - Name: {titiler-app-name}
+            - Container: ghcr.io/stac-utils/titiler-pgstac:latest
+            - App Settings:
+              - POSTGRES_HOST={server}.postgres.database.azure.com
+              - POSTGRES_DBNAME={database}
+              - AZURE_STORAGE_ACCOUNT={silver-account}
+            - Managed Identity: Assign {app-name}-db-admin"
+
+       Verification:
+           curl https://{titiler-url}/healthz
+
+    3. FUNCTION APPS
+       --------------
+       Environment Variables: ETL_APP_URL, OGC_STAC_APP_URL
+
+       Service Request Template:
+           "Create Azure Function App (Python 3.11):
+            - Name: {app-name}
+            - Plan: B3 Basic or higher (30min timeout needed)
+            - Managed Identity: Assign {app-name}-db-admin
+            - App Settings: See deployment checklist"
+
+    4. RESOURCE GROUP
+       ---------------
+       Environment Variable: ADF_RESOURCE_GROUP (for Data Factory operations)
+
+       Note: Usually already exists. Only needed if using Azure Data Factory
+       for large file transfers.
     """
 
     # Managed Identity (Admin) - Override: DB_ADMIN_MANAGED_IDENTITY_NAME
@@ -65,6 +220,9 @@ class AzureDefaults:
 
     # ETL/Admin Function App - Override: ETL_APP_URL
     ETL_APP_URL = "https://your-etl-app-url"
+
+    # Azure Resource Group - Override: ADF_RESOURCE_GROUP
+    RESOURCE_GROUP = "your-resource-group-name"
 
 
 # =============================================================================

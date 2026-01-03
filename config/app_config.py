@@ -47,7 +47,7 @@ from .analytics_config import AnalyticsConfig
 from .h3_config import H3Config
 from .platform_config import PlatformConfig
 from .metrics_config import MetricsConfig
-from .defaults import AzureDefaults, AppDefaults, KeyVaultDefaults
+from .defaults import AzureDefaults, AppDefaults, KeyVaultDefaults, StorageDefaults
 
 
 # ============================================================================
@@ -299,7 +299,7 @@ class AppConfig(BaseModel):
     )
 
     adf_resource_group: Optional[str] = Field(
-        default_factory=lambda: os.environ.get("ADF_RESOURCE_GROUP", "rmhazure_rg"),
+        default_factory=lambda: os.environ.get("ADF_RESOURCE_GROUP", AzureDefaults.RESOURCE_GROUP),
         description="Resource group containing the Data Factory instance"
     )
 
@@ -496,7 +496,7 @@ class AppConfig(BaseModel):
             container = config.resolved_intermediate_tiles_container
             # Returns: "silver-cogs" (or custom value if env var set)
         """
-        return self.raster.intermediate_tiles_container or "silver-cogs"
+        return self.raster.intermediate_tiles_container or StorageDefaults.SILVER_COGS
 
     @property
     def titiler_pgstac_base_url(self) -> str:

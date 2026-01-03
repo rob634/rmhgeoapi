@@ -1027,9 +1027,9 @@ def platform_submit(req: func.HttpRequest) -> func.HttpResponse:
             "dataset_id": "landsat-8",
             "resource_id": "LC08_L1TP_044034_20210622",
             "version_id": "v1.0",
-            "data_type": "raster",
-            "source_location": "https://rmhazuregeo.blob.core.windows.net/bronze/...",
-            "parameters": {},
+            "container_name": "bronze-rasters",
+            "file_name": "example.tif",
+            "service_name": "Landsat 8 Scene",
             "client_id": "ddh"
         }
 

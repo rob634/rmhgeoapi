@@ -489,21 +489,167 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         """
         Check Azure Service Bus queue health using ServiceBusRepository.
 
-        Updated 11 DEC 2025 (No Legacy Fallbacks): Only 3 queues:
+        Updated 03 JAN 2026: Enhanced error tracking and network diagnostics.
+        All queues must be accessible for Service Bus to be healthy.
+
+        Queues checked:
         - geospatial-jobs: Job orchestration + stage_complete signals
         - raster-tasks: Memory-intensive GDAL operations (low concurrency)
         - vector-tasks: DB-bound and lightweight operations (high concurrency)
         """
+        def classify_error(error_str: str, exception: Exception) -> dict:
+            """Classify Service Bus errors for actionable diagnostics."""
+            error_lower = error_str.lower()
+            exc_type = type(exception).__name__
+
+            # DNS resolution failure
+            if "name or service not known" in error_lower or "errno -2" in error_lower:
+                return {
+                    "error_type": "DNS_RESOLUTION",
+                    "category": "network",
+                    "error": error_str[:300],
+                    "diagnosis": "Cannot resolve Service Bus namespace hostname",
+                    "likely_causes": [
+                        "SERVICE_BUS_NAMESPACE env var has wrong value",
+                        "VNet DNS configuration issue",
+                        "Private DNS zone not linked to VNet",
+                        "Network isolation blocking DNS"
+                    ],
+                    "fix": "Verify SERVICE_BUS_NAMESPACE is correct FQDN (e.g., myns.servicebus.windows.net)"
+                }
+
+            # Socket/connection errors (VNet, firewall)
+            if "socket" in error_lower or "connection refused" in error_lower or "errno 111" in error_lower:
+                return {
+                    "error_type": "CONNECTION_REFUSED",
+                    "category": "network",
+                    "error": error_str[:300],
+                    "diagnosis": "TCP connection to Service Bus failed",
+                    "likely_causes": [
+                        "VNet/subnet not configured for Service Bus access",
+                        "Private endpoint not configured",
+                        "NSG blocking outbound port 5671/5672 (AMQP)",
+                        "Firewall blocking Service Bus IPs"
+                    ],
+                    "fix": "Check VNet service endpoints or private endpoint configuration"
+                }
+
+            # Timeout errors
+            if "timeout" in error_lower or "timed out" in error_lower:
+                return {
+                    "error_type": "TIMEOUT",
+                    "category": "network",
+                    "error": error_str[:300],
+                    "diagnosis": "Connection to Service Bus timed out",
+                    "likely_causes": [
+                        "Network latency or congestion",
+                        "Service Bus namespace overloaded",
+                        "Partial network connectivity (packets dropping)"
+                    ],
+                    "fix": "Check network path and Service Bus namespace health in Azure portal"
+                }
+
+            # Authentication/authorization errors
+            if "unauthorized" in error_lower or "401" in error_str or "403" in error_str:
+                return {
+                    "error_type": "AUTH_FAILED",
+                    "category": "authentication",
+                    "error": error_str[:300],
+                    "diagnosis": "Authentication to Service Bus failed",
+                    "likely_causes": [
+                        "Managed identity not assigned Azure Service Bus Data Owner role",
+                        "Connection string invalid or expired",
+                        "Wrong Service Bus namespace"
+                    ],
+                    "fix": "Verify managed identity role assignment: az role assignment list --assignee <identity>"
+                }
+
+            # Queue not found
+            if "not found" in error_lower or "404" in error_str or "MessagingEntityNotFoundError" in exc_type:
+                return {
+                    "error_type": "QUEUE_NOT_FOUND",
+                    "category": "configuration",
+                    "error": "Queue does not exist",
+                    "diagnosis": "Queue has not been created in Service Bus namespace",
+                    "likely_causes": [
+                        "Queue never created",
+                        "Queue was deleted",
+                        "Wrong queue name in configuration"
+                    ],
+                    "fix": "Run schema rebuild: POST /api/dbadmin/maintenance?action=full-rebuild&confirm=yes"
+                }
+
+            # SSL/TLS errors
+            if "ssl" in error_lower or "certificate" in error_lower:
+                return {
+                    "error_type": "TLS_ERROR",
+                    "category": "security",
+                    "error": error_str[:300],
+                    "diagnosis": "TLS/SSL handshake failed",
+                    "likely_causes": [
+                        "Certificate validation failure",
+                        "TLS version mismatch",
+                        "Proxy intercepting TLS traffic"
+                    ],
+                    "fix": "Check if corporate proxy is intercepting traffic"
+                }
+
+            # Generic/unknown error
+            return {
+                "error_type": "UNKNOWN",
+                "category": "unknown",
+                "error": error_str[:300],
+                "exception_type": exc_type,
+                "diagnosis": "Unclassified Service Bus error",
+                "likely_causes": ["See error message for details"],
+                "fix": "Check Application Insights for full stack trace"
+            }
+
         def check_service_bus():
+            import socket
             from infrastructure.service_bus import ServiceBusRepository
             from config import get_config
 
             config = get_config()
-            service_bus_repo = ServiceBusRepository()
-
             queue_status = {}
 
-            # Check all 3 queues (11 DEC 2025 - No Legacy Fallbacks)
+            # Network diagnostics - check DNS resolution before attempting connections
+            namespace = config.service_bus_namespace
+            dns_check = {"namespace": namespace}
+
+            try:
+                # Extract hostname (handle both FQDN and short name)
+                hostname = namespace if "." in namespace else f"{namespace}.servicebus.windows.net"
+                dns_check["hostname_used"] = hostname
+
+                # Attempt DNS resolution
+                ip_addresses = socket.getaddrinfo(hostname, 5671, socket.AF_UNSPEC, socket.SOCK_STREAM)
+                resolved_ips = list(set([addr[4][0] for addr in ip_addresses]))
+                dns_check["resolved"] = True
+                dns_check["ip_addresses"] = resolved_ips[:5]  # Limit to 5 IPs
+                dns_check["is_private_ip"] = any(
+                    ip.startswith("10.") or ip.startswith("172.") or ip.startswith("192.168.")
+                    for ip in resolved_ips
+                )
+                if dns_check["is_private_ip"]:
+                    dns_check["note"] = "Private IP detected - using Private Endpoint or VNet integration"
+            except socket.gaierror as e:
+                dns_check["resolved"] = False
+                dns_check["dns_error"] = str(e)
+                dns_check["diagnosis"] = "DNS resolution failed - check VNet DNS or namespace name"
+
+            queue_status["_network_diagnostics"] = dns_check
+
+            # If DNS failed, we know connections will fail - but still try for specific errors
+            try:
+                service_bus_repo = ServiceBusRepository()
+            except Exception as e:
+                queue_status["_status"] = "unhealthy"
+                queue_status["error"] = f"Failed to initialize ServiceBusRepository: {str(e)[:200]}"
+                queue_status["_repository_error"] = classify_error(str(e), e)
+                return queue_status
+
+            # Check all 3 queues
             queues_to_check = [
                 {"name": config.service_bus_jobs_queue, "purpose": "Job orchestration + stage_complete signals"},
                 {"name": config.queues.raster_tasks_queue, "purpose": "Raster tasks (GDAL, low concurrency)"},
@@ -512,6 +658,8 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
 
             queues_accessible = 0
             queues_missing = 0
+            queues_connection_error = 0
+            error_categories = set()
 
             for queue_config in queues_to_check:
                 queue_name = queue_config["name"]
@@ -525,39 +673,65 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                         "note": "Count is approximate (peek limit: 100)"
                     }
                     queues_accessible += 1
+
                 except Exception as e:
-                    error_str = str(e)
-                    # Check if this is a "queue not found" error
-                    if "not found" in error_str.lower() or "404" in error_str or "MessagingEntityNotFoundError" in error_str:
+                    error_info = classify_error(str(e), e)
+                    error_categories.add(error_info["category"])
+
+                    if error_info["error_type"] == "QUEUE_NOT_FOUND":
                         queue_status[queue_name] = {
                             "status": "missing",
                             "purpose": queue_config["purpose"],
-                            "error": "Queue does not exist",
-                            "fix": "Run schema rebuild to auto-create: POST /api/dbadmin/maintenance/full-rebuild?confirm=yes"
+                            **error_info
                         }
                         queues_missing += 1
                     else:
                         queue_status[queue_name] = {
-                            "status": "error",
+                            "status": "connection_error",
                             "purpose": queue_config["purpose"],
-                            "error": error_str[:200]
+                            **error_info
                         }
+                        queues_connection_error += 1
 
-            # Add summary for Multi-Function App readiness
+            # Summary with all error counts
+            total_errors = queues_missing + queues_connection_error
+            all_healthy = total_errors == 0
+
             queue_status["_summary"] = {
                 "total_queues": len(queues_to_check),
                 "accessible": queues_accessible,
                 "missing": queues_missing,
-                "multi_function_app_ready": queues_missing == 0,
-                "note": "All 4 queues required for Multi-Function App Architecture" if queues_missing == 0 else f"{queues_missing} queue(s) missing - run full-rebuild to create"
+                "connection_errors": queues_connection_error,
+                "error_categories": list(error_categories) if error_categories else None,
+                "all_queues_healthy": all_healthy,
+                "multi_function_app_ready": all_healthy
             }
 
-            # Add repository info
+            # Repository info
             queue_status["_repository_info"] = {
                 "singleton_id": id(service_bus_repo),
                 "type": "ServiceBusRepository",
-                "namespace": config.service_bus_namespace
+                "namespace": namespace,
+                "connection_method": "managed_identity" if not os.getenv("SERVICE_BUS_CONNECTION_STRING") else "connection_string"
             }
+
+            # Set explicit status - ANY error means unhealthy
+            if not all_healthy:
+                queue_status["_status"] = "unhealthy"
+
+                # Create top-level error summary for check_component_health detection
+                error_parts = []
+                if queues_connection_error > 0:
+                    queue_status["error"] = f"{queues_connection_error} queue(s) with connection errors"
+                    error_parts.append(f"{queues_connection_error} connection error(s)")
+                if queues_missing > 0:
+                    error_parts.append(f"{queues_missing} missing queue(s)")
+
+                queue_status["_error_summary"] = {
+                    "message": " + ".join(error_parts),
+                    "categories": list(error_categories),
+                    "recommendation": self._get_service_bus_fix_recommendation(error_categories)
+                }
 
             return queue_status
 
@@ -566,6 +740,16 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             check_service_bus,
             description="Azure Service Bus message queues for job and task orchestration"
         )
+
+    def _get_service_bus_fix_recommendation(self, error_categories: set) -> str:
+        """Get prioritized fix recommendation based on error categories."""
+        if "network" in error_categories:
+            return "PRIORITY: Check VNet configuration, Private Endpoints, and DNS settings"
+        if "authentication" in error_categories:
+            return "Check managed identity role assignments (Azure Service Bus Data Owner)"
+        if "configuration" in error_categories:
+            return "Run full-rebuild to create missing queues"
+        return "Check Application Insights for detailed error logs"
 
     def _check_database(self) -> Dict[str, Any]:
         """Enhanced PostgreSQL database health check with query metrics.

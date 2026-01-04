@@ -2229,9 +2229,65 @@ if _app_mode.listens_to_long_running_tasks:
 # Validate each required queue exists
 if _required_queues:
     try:
+        import socket
         from infrastructure.service_bus import ServiceBusRepository
+
+        # STEP 1: DNS Resolution Check (03 JAN 2026)
+        # Check if we can resolve the Service Bus namespace BEFORE attempting connections.
+        # This distinguishes "VNet/DNS issue" from "queue doesn't exist".
+        _namespace = _config.service_bus_namespace
+        _hostname = _namespace if "." in _namespace else f"{_namespace}.servicebus.windows.net"
+
+        _startup_logger.info(f"🔍 STARTUP: Checking DNS for Service Bus namespace: {_hostname}")
+
+        try:
+            _dns_results = socket.getaddrinfo(_hostname, 5671, socket.AF_UNSPEC, socket.SOCK_STREAM)
+            _resolved_ips = list(set([addr[4][0] for addr in _dns_results]))
+            _is_private = any(ip.startswith("10.") or ip.startswith("172.") or ip.startswith("192.168.") for ip in _resolved_ips)
+
+            _startup_logger.info(f"✅ STARTUP: DNS resolved {_hostname} → {_resolved_ips[:3]}")
+            if _is_private:
+                _startup_logger.info("   ℹ️ Private IP detected - using Private Endpoint or VNet integration")
+
+        except socket.gaierror as _dns_error:
+            # DNS RESOLUTION FAILED - This is a VNet/network issue, NOT a queue issue
+            _startup_logger.critical(
+                f"❌ STARTUP_FAILED: Cannot resolve Service Bus namespace DNS\n"
+                f"   Hostname: {_hostname}\n"
+                f"   Error: {_dns_error}\n"
+                f"   \n"
+                f"   This is a NETWORK issue, not a queue configuration issue.\n"
+                f"   \n"
+                f"   Likely causes:\n"
+                f"   - SERVICE_BUS_NAMESPACE env var has wrong value\n"
+                f"   - VNet DNS configuration issue (ASE/Private Endpoint)\n"
+                f"   - Private DNS zone not linked to VNet\n"
+                f"   - Network isolation blocking DNS resolution\n"
+                f"   \n"
+                f"   Check Azure Portal → Service Bus → Networking settings"
+            )
+            raise RuntimeError(
+                f"\n{'='*80}\n"
+                f"FATAL: Cannot resolve Service Bus namespace (DNS failure)\n"
+                f"{'='*80}\n"
+                f"Hostname: {_hostname}\n"
+                f"Error: {_dns_error}\n"
+                f"\n"
+                f"This is a NETWORK/DNS issue, NOT a missing queue.\n"
+                f"\n"
+                f"Likely causes:\n"
+                f"  - SERVICE_BUS_NAMESPACE env var incorrect\n"
+                f"  - VNet/ASE DNS not configured for Service Bus\n"
+                f"  - Private DNS zone missing or not linked\n"
+                f"\n"
+                f"Fix: Check Azure Portal → Service Bus → Networking\n"
+                f"{'='*80}\n"
+            )
+
+        # STEP 2: Queue Existence Check (only if DNS resolved)
         _sb_repo = ServiceBusRepository()
         _missing_queues = []
+        _connection_errors = []
 
         for _queue_info in _required_queues:
             _queue_name = _queue_info["name"]
@@ -2241,15 +2297,65 @@ if _required_queues:
                     _startup_logger.warning(f"❌ Queue missing: {_queue_name} ({_queue_info['purpose']})")
                 else:
                     _startup_logger.info(f"✅ Queue exists: {_queue_name}")
+
             except Exception as _qe:
-                # If we can't check, treat as missing (fail safe)
-                _missing_queues.append(_queue_info)
-                _startup_logger.warning(f"❌ Queue check failed: {_queue_name} - {_qe}")
+                _error_str = str(_qe).lower()
+
+                # Classify the error
+                if "unauthorized" in _error_str or "401" in str(_qe) or "403" in str(_qe):
+                    _queue_info["error_type"] = "AUTH_FAILED"
+                    _queue_info["error"] = str(_qe)[:200]
+                    _queue_info["fix"] = "Check managed identity role: Azure Service Bus Data Owner"
+                elif "timeout" in _error_str or "timed out" in _error_str:
+                    _queue_info["error_type"] = "TIMEOUT"
+                    _queue_info["error"] = str(_qe)[:200]
+                    _queue_info["fix"] = "Network connectivity issue - check NSG/firewall rules"
+                elif "socket" in _error_str or "connection" in _error_str:
+                    _queue_info["error_type"] = "CONNECTION_FAILED"
+                    _queue_info["error"] = str(_qe)[:200]
+                    _queue_info["fix"] = "Check VNet service endpoints or private endpoint config"
+                else:
+                    _queue_info["error_type"] = "UNKNOWN"
+                    _queue_info["error"] = str(_qe)[:200]
+                    _queue_info["fix"] = "Check Application Insights for details"
+
+                _connection_errors.append(_queue_info)
+                _startup_logger.warning(
+                    f"❌ Queue connection error: {_queue_name}\n"
+                    f"   Type: {_queue_info['error_type']}\n"
+                    f"   Error: {_queue_info['error']}\n"
+                    f"   Fix: {_queue_info['fix']}"
+                )
+
+        # STEP 3: Report results with clear categorization
+        if _connection_errors:
+            # Connection errors are more severe than missing queues
+            _startup_logger.critical(
+                f"❌ STARTUP_FAILED: Service Bus connection errors for APP_MODE='{_app_mode.mode.value}'\n"
+                f"   This is a CONNECTIVITY issue (auth, network, or firewall).\n"
+                f"   DNS resolved successfully, but cannot connect to queues."
+            )
+            raise RuntimeError(
+                f"\n{'='*80}\n"
+                f"FATAL: Service Bus connection errors (not missing queues)\n"
+                f"{'='*80}\n"
+                f"APP_MODE: {_app_mode.mode.value}\n"
+                f"DNS: ✅ Resolved ({_hostname} → {_resolved_ips[:2]})\n"
+                f"\n"
+                f"Connection errors:\n" +
+                "\n".join([
+                    f"  - {q['name']}: {q['error_type']}\n"
+                    f"    Error: {q['error']}\n"
+                    f"    Fix: {q['fix']}"
+                    for q in _connection_errors
+                ]) +
+                f"\n{'='*80}\n"
+            )
 
         if _missing_queues:
             _missing_names = [q["name"] for q in _missing_queues]
             _startup_logger.critical(
-                f"❌ STARTUP_FAILED: Missing required Service Bus queues for APP_MODE='{_app_mode.mode.value}': "
+                f"❌ STARTUP_FAILED: Missing Service Bus queues for APP_MODE='{_app_mode.mode.value}': "
                 f"{_missing_names}. Create queues or change APP_MODE."
             )
             raise RuntimeError(
@@ -2257,6 +2363,9 @@ if _required_queues:
                 f"FATAL: Required Service Bus queues do not exist\n"
                 f"{'='*80}\n"
                 f"APP_MODE: {_app_mode.mode.value}\n"
+                f"DNS: ✅ Resolved ({_hostname})\n"
+                f"Connection: ✅ Working\n"
+                f"\n"
                 f"Missing queues:\n" +
                 "\n".join([f"  - {q['name']}: {q['purpose']} (required by {q['flag']})" for q in _missing_queues]) +
                 f"\n\nFix options:\n"
@@ -2265,14 +2374,14 @@ if _required_queues:
                 f"  3. Change APP_MODE to a mode that doesn't require these queues\n"
                 f"{'='*80}\n"
             )
-        else:
-            _startup_logger.info(f"✅ STARTUP: All {len(_required_queues)} required queues validated")
+
+        _startup_logger.info(f"✅ STARTUP: All {len(_required_queues)} required queues validated")
 
     except ImportError as _ie:
         _startup_logger.warning(f"⚠️ STARTUP: Could not import ServiceBusRepository for queue validation: {_ie}")
         # Don't fail startup - let the trigger registration fail naturally if needed
     except RuntimeError:
-        # Re-raise our own RuntimeError (missing queues)
+        # Re-raise our own RuntimeError (DNS failure, connection errors, or missing queues)
         raise
     except Exception as _e:
         _startup_logger.warning(f"⚠️ STARTUP: Queue validation skipped due to error: {_e}")

@@ -1,3 +1,11 @@
+# ============================================================================
+# JANITOR AUDIT MODELS
+# ============================================================================
+# STATUS: Core - Maintenance operation audit trail
+# PURPOSE: Track janitor runs for task watchdog, job health, orphan detection
+# LAST_REVIEWED: 03 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Janitor Audit Models.
 

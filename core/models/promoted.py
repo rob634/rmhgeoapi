@@ -1,12 +1,10 @@
 # ============================================================================
-# CLAUDE CONTEXT - PROMOTED DATASET MODELS
+# PROMOTED DATASET MODELS
 # ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: Data models - Promoted datasets for special display
-# PURPOSE: Define models for the dataset promotion/gallery system
-# LAST_REVIEWED: 22 DEC 2025
-# EXPORTS: PromotedDataset, PromotedDatasetType
-# DEPENDENCIES: pydantic
+# STATUS: Core - Dataset promotion and gallery system
+# PURPOSE: Metadata layer on top of STAC for featured/gallery display
+# LAST_REVIEWED: 03 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
 # ============================================================================
 """
 Promoted Dataset Models.

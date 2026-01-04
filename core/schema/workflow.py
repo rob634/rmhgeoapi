@@ -1,3 +1,11 @@
+# ============================================================================
+# WORKFLOW SCHEMA DEFINITIONS
+# ============================================================================
+# STATUS: Core - Declarative multi-stage job orchestration
+# PURPOSE: Type-safe workflow, stage, and parameter specifications
+# LAST_REVIEWED: 03 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Workflow Schema Definitions - Job→Stage→Task Orchestration.
 

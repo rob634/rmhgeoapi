@@ -1,3 +1,11 @@
+# ============================================================================
+# RASTER BAND MAPPING MODELS
+# ============================================================================
+# STATUS: Core - Band index mapping with JSON key conversion
+# PURPOSE: Convert JSON string keys to integer band indices for rasterio
+# LAST_REVIEWED: 03 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Pydantic models for band mapping with automatic JSON string key → int conversion.
 

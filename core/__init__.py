@@ -1,3 +1,11 @@
+# ============================================================================
+# CORE ORCHESTRATION PACKAGE
+# ============================================================================
+# STATUS: Core - Package initialization with lazy imports
+# PURPOSE: Export core orchestration classes without circular dependencies
+# LAST_REVIEWED: 03 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Core Orchestration Components.
 

@@ -1,12 +1,10 @@
 # ============================================================================
-# CLAUDE CONTEXT - DDL UTILITIES
+# DDL UTILITIES - SHARED SQL GENERATION PATTERNS
 # ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: Infrastructure - Shared DDL Generation Utilities
-# PURPOSE: DRY consolidation of SQL DDL patterns across schema generators
-# LAST_REVIEWED: 01 JAN 2026
-# EXPORTS: IndexBuilder, TriggerBuilder, CommentBuilder, TYPE_MAP
-# DEPENDENCIES: psycopg
+# STATUS: Core - DRY utilities for SQL DDL generation
+# PURPOSE: Index, trigger, comment, and constraint builders using psycopg.sql
+# LAST_REVIEWED: 03 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
 # ============================================================================
 """
 DDL Utilities - Shared SQL Generation Patterns.

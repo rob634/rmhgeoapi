@@ -1,3 +1,11 @@
+# ============================================================================
+# BUSINESS CALCULATIONS FOR JOBS AND TASKS
+# ============================================================================
+# STATUS: Core - Pure calculation functions
+# PURPOSE: Success rate, completion percentage, and task aggregation logic
+# LAST_REVIEWED: 03 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Business Calculations for Jobs and Tasks.
 

@@ -1,3 +1,11 @@
+# ============================================================================
+# REPOSITORY UPDATE MODELS - CONTRACT ENFORCEMENT
+# ============================================================================
+# STATUS: Core - Type-safe repository update contracts
+# PURPOSE: Replace Dict[str,Any] with strongly-typed update models
+# LAST_REVIEWED: 03 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Repository Update Models - Contract Enforcement.
 

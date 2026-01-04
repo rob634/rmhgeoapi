@@ -1,3 +1,11 @@
+# ============================================================================
+# DETERMINISTIC TASK ID GENERATION
+# ============================================================================
+# STATUS: Core - Task lineage through deterministic IDs
+# PURPOSE: Generate predictable task IDs for cross-stage lineage tracking
+# LAST_REVIEWED: 03 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Deterministic Task ID Generation
 

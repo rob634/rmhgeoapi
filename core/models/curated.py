@@ -1,3 +1,11 @@
+# ============================================================================
+# CURATED DATASET MODELS
+# ============================================================================
+# STATUS: Core - System-managed geospatial data models
+# PURPOSE: Registry and audit models for auto-updating curated datasets
+# LAST_REVIEWED: 03 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Curated Dataset Models.
 

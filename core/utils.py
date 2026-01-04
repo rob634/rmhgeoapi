@@ -1,3 +1,11 @@
+# ============================================================================
+# CORE UTILITY FUNCTIONS
+# ============================================================================
+# STATUS: Core - Job ID generation and validation utilities
+# PURPOSE: Deterministic job ID generation and schema validation exceptions
+# LAST_REVIEWED: 03 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Core Utility Functions and Exceptions.
 

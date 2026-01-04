@@ -1,3 +1,11 @@
+# ============================================================================
+# CORE SCHEMA PACKAGE
+# ============================================================================
+# STATUS: Core - Schema definitions and SQL generation
+# PURPOSE: Export schema models, SQL generators, and DDL utilities
+# LAST_REVIEWED: 03 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Core Database Schema Management Package.
 

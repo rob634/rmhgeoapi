@@ -1,3 +1,11 @@
+# ============================================================================
+# EXECUTION RESULT DATA MODELS
+# ============================================================================
+# STATUS: Core - Pure result data structures
+# PURPOSE: TaskResult, StageResultContract, and job completion models
+# LAST_REVIEWED: 03 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Execution Result Data Models.
 

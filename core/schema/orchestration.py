@@ -1,3 +1,11 @@
+# ============================================================================
+# DYNAMIC ORCHESTRATION SCHEMAS
+# ============================================================================
+# STATUS: Core - Stage 1 → Stage 2 dynamic task creation
+# PURPOSE: Pydantic models for analyze-and-orchestrate pattern
+# LAST_REVIEWED: 03 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Dynamic Orchestration Schemas - Dual Pipeline Support.
 

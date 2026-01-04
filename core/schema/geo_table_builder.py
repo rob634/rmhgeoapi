@@ -1,3 +1,11 @@
+# ============================================================================
+# GEO TABLE BUILDER - STANDARDIZED GEO SCHEMA DDL
+# ============================================================================
+# STATUS: Core - Dynamic geo table creation from GeoDataFrames
+# PURPOSE: Generate CREATE TABLE, INDEX, TRIGGER DDL for geo schema
+# LAST_REVIEWED: 03 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 GeoTableBuilder - Standardized Geo Schema Table Creation.
 

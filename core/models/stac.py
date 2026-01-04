@@ -1,13 +1,10 @@
 # ============================================================================
-# CLAUDE CONTEXT - STAC DATA MODELS
+# STAC DATA MODELS
 # ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: Data models - Centralized STAC property schemas
-# PURPOSE: Enforce consistent data models across all STAC operations
-# LAST_REVIEWED: 22 DEC 2025
-# EXPORTS: STACItemProperties, PlatformProperties, AppProperties, GeoProperties,
-#          AzureProperties, PostGISProperties, STAC_VERSION
-# DEPENDENCIES: pydantic
+# STATUS: Core - Centralized STAC property schemas
+# PURPOSE: Type-safe Pydantic models for all STAC property namespaces
+# LAST_REVIEWED: 03 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
 # ============================================================================
 """
 STAC Data Models.

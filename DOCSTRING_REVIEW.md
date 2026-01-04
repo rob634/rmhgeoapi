@@ -715,63 +715,63 @@ Applied systematic 8-check review to both files:
 
 | Status | File | Notes |
 |--------|------|-------|
-| [ ] | `__init__.py` | |
+| [x] | `__init__.py` | Checks 1-7 applied - added header (53 lines) |
 | [x] | `core_controller.py` | Checks 1-7 applied - added header, enhanced architecture docs (374 lines) |
 | [x] | `error_handler.py` | Checks 1-7 applied - added header, App Insights docs (206 lines) |
 | [x] | `errors.py` | Checks 1-7 applied - added header, enhanced exports list (285 lines) |
 | [x] | `machine.py` | Checks 1-7 applied - added header, enhanced docstring (2228 lines) |
 | [x] | `orchestration_manager.py` | Checks 1-7 applied - added header, enhanced docstring (415 lines) |
 | [x] | `state_manager.py` | Checks 1-7 applied - added header, enhanced docstring (992 lines) |
-| [ ] | `task_id.py` | |
-| [ ] | `utils.py` | |
+| [x] | `task_id.py` | Checks 1-7 applied - added header (123 lines) |
+| [x] | `utils.py` | Checks 1-7 applied - added header (51 lines) |
 
 ### core/contracts/
 
 | Status | File | Notes |
 |--------|------|-------|
-| [ ] | `__init__.py` | |
+| [x] | `__init__.py` | Checks 1-7 applied - added header (220 lines) |
 
 ### core/logic/
 
 | Status | File | Notes |
 |--------|------|-------|
-| [ ] | `__init__.py` | |
-| [ ] | `calculations.py` | |
-| [ ] | `transitions.py` | |
+| [x] | `__init__.py` | Checks 1-7 applied - added header (60 lines) |
+| [x] | `calculations.py` | Checks 1-7 applied - added header (180 lines) |
+| [x] | `transitions.py` | Checks 1-7 applied - added header (172 lines) |
 
 ### core/models/ (15 files)
 
 | Status | File | Notes |
 |--------|------|-------|
-| [ ] | `__init__.py` | |
-| [ ] | `band_mapping.py` | |
-| [ ] | `context.py` | |
-| [ ] | `curated.py` | |
-| [ ] | `enums.py` | |
-| [ ] | `etl.py` | |
-| [ ] | `janitor.py` | |
-| [ ] | `job.py` | |
-| [ ] | `platform.py` | |
-| [ ] | `promoted.py` | |
-| [ ] | `results.py` | |
-| [ ] | `stac.py` | |
-| [ ] | `stage.py` | |
-| [ ] | `task.py` | |
-| [ ] | `unpublish.py` | |
+| [x] | `__init__.py` | Checks 1-7 applied - added header (166 lines) |
+| [x] | `band_mapping.py` | Checks 1-7 applied - added header (128 lines) |
+| [x] | `context.py` | Checks 1-7 applied - added header (83 lines) |
+| [x] | `curated.py` | Checks 1-7 applied - added header (curated datasets) |
+| [x] | `enums.py` | Checks 1-7 applied - added header (pure enums) |
+| [x] | `etl.py` | Checks 1-7 applied - added header (ETL tracking) |
+| [x] | `janitor.py` | Checks 1-7 applied - added header (janitor audit) |
+| [x] | `job.py` | Checks 1-7 applied - added header (JobRecord) |
+| [x] | `platform.py` | Checks 1-7 applied - added header (Platform ACL) |
+| [x] | `promoted.py` | Checks 1-7 applied - updated header format |
+| [x] | `results.py` | Checks 1-7 applied - added header (TaskResult, StageResultContract) |
+| [x] | `stac.py` | Checks 1-7 applied - updated header format |
+| [x] | `stage.py` | Checks 1-7 applied - simplified header (reference schema) |
+| [x] | `task.py` | Checks 1-7 applied - added header (TaskRecord) |
+| [x] | `unpublish.py` | Checks 1-7 applied - added header (unpublish audit) |
 
 ### core/schema/ (9 files)
 
 | Status | File | Notes |
 |--------|------|-------|
-| [ ] | `__init__.py` | |
-| [ ] | `ddl_utils.py` | |
-| [ ] | `deployer.py` | |
-| [ ] | `geo_table_builder.py` | |
-| [ ] | `orchestration.py` | |
-| [ ] | `queue.py` | |
-| [ ] | `sql_generator.py` | |
-| [ ] | `updates.py` | |
-| [ ] | `workflow.py` | |
+| [x] | `__init__.py` | Checks 1-7 applied - added header (75 lines) |
+| [x] | `ddl_utils.py` | Checks 1-7 applied - updated header format (647 lines) |
+| [x] | `deployer.py` | Checks 1-7 applied - added header (491 lines) |
+| [x] | `geo_table_builder.py` | Checks 1-7 applied - added header (521 lines) |
+| [x] | `orchestration.py` | Checks 1-7 applied - added header (528 lines) |
+| [x] | `queue.py` | Checks 1-7 applied - added header (199 lines) |
+| [x] | `sql_generator.py` | Checks 1-7 applied - added header (1074 lines) |
+| [x] | `updates.py` | Checks 1-7 applied - added header (110 lines) |
+| [x] | `workflow.py` | Checks 1-7 applied - added header (487 lines) |
 
 ---
 
@@ -1216,7 +1216,7 @@ Applied systematic 8-check review to both files:
 | Category | Total | Reviewed | Remaining |
 |----------|-------|----------|-----------|
 | config/ | 13 | 13 | 0 |
-| core/ | 36 | 6 | 30 |
+| core/ | 36 | 36 | 0 |
 | infrastructure/ | 31 | 3 | 28 |
 | jobs/ | 30 | 0 | 30 |
 | services/ | 47 | 0 | 47 |
@@ -1227,7 +1227,7 @@ Applied systematic 8-check review to both files:
 | scripts/ | 4 | 0 | 4 |
 | test/ | 20 | 0 | 20 |
 | Root files | 3 | 3 | 0 |
-| **TOTAL** | **302** | **26** | **276** |
+| **TOTAL** | **302** | **56** | **246** |
 
 ---
 
@@ -1258,3 +1258,5 @@ Applied systematic 8-check review to both files:
 | 02 JAN 2026 | Session 19 | Applied Checks 1-7 to `core/core_controller.py` - added header, enhanced architecture (374 lines) |
 | 02 JAN 2026 | Session 20 | Applied Checks 1-7 to `core/error_handler.py` - added header, App Insights docs (206 lines) |
 | 02 JAN 2026 | Session 21 | Applied Checks 1-7 to `core/errors.py` - added header, error categories docs (285 lines) |
+| 03 JAN 2026 | Session 22 | Applied Checks 1-7 to 10 core/ files: `__init__.py`, `task_id.py`, `utils.py`, `contracts/__init__.py`, `logic/__init__.py`, `logic/calculations.py`, `logic/transitions.py`, `models/__init__.py`, `models/band_mapping.py`, `models/context.py` - all added file headers |
+| 03 JAN 2026 | Session 23 | Applied Checks 1-7 to remaining core/ files: 12 core/models/ files + 9 core/schema/ files (21 total) - completed core/ directory review |

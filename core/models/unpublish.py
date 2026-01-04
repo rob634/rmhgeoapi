@@ -1,3 +1,11 @@
+# ============================================================================
+# UNPUBLISH AUDIT MODELS
+# ============================================================================
+# STATUS: Core - Audit trail for unpublish operations
+# PURPOSE: Track deletions for audit, idempotency, and potential recovery
+# LAST_REVIEWED: 03 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Unpublish Audit Models.
 

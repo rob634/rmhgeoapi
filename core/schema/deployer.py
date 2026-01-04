@@ -1,3 +1,11 @@
+# ============================================================================
+# POSTGRESQL SCHEMA DEPLOYMENT AND MANAGEMENT
+# ============================================================================
+# STATUS: Core - Schema deployment orchestrator
+# PURPOSE: Validate and initialize APP_SCHEMA with tables and functions
+# LAST_REVIEWED: 03 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 PostgreSQL Schema Deployment and Management.
 

@@ -1,3 +1,11 @@
+# ============================================================================
+# TASK DATABASE MODELS - PERSISTENCE BOUNDARY
+# ============================================================================
+# STATUS: Core - TaskRecord and TaskDefinition models
+# PURPOSE: Database representation of tasks with execution and audit fields
+# LAST_REVIEWED: 03 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Task Database Models - Persistence Boundary.
 

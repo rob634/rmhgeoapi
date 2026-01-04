@@ -1,3 +1,11 @@
+# ============================================================================
+# ETL SOURCE FILE TRACKING MODELS
+# ============================================================================
+# STATUS: Core - General-purpose ETL pipeline tracking
+# PURPOSE: Track source files through multi-phase processing (FATHOM, raster, vector)
+# LAST_REVIEWED: 03 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 ETL Source File Tracking Models.
 

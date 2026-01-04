@@ -1,3 +1,11 @@
+# ============================================================================
+# CORE BUSINESS LOGIC PACKAGE
+# ============================================================================
+# STATUS: Core - Business logic separated from data models
+# PURPOSE: State transitions, calculations, and aggregation logic
+# LAST_REVIEWED: 03 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Core Business Logic Package.
 

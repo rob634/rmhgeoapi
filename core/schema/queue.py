@@ -1,3 +1,11 @@
+# ============================================================================
+# QUEUE MESSAGE SCHEMAS - TRANSPORT BOUNDARY
+# ============================================================================
+# STATUS: Core - Service Bus message contracts
+# PURPOSE: JobQueueMessage, TaskQueueMessage for queue transport
+# LAST_REVIEWED: 03 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Queue Message Schemas - Transport Boundary.
 

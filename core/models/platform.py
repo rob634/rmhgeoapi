@@ -1,3 +1,11 @@
+# ============================================================================
+# PLATFORM LAYER DATA MODELS - THIN TRACKING
+# ============================================================================
+# STATUS: Core - Anti-Corruption Layer (ACL) for DDH API
+# PURPOSE: Translate DDH requests to CoreMachine with 1:1 job mapping
+# LAST_REVIEWED: 03 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Platform Layer Data Models - Thin Tracking Pattern.
 

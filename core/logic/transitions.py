@@ -1,3 +1,11 @@
+# ============================================================================
+# STATE TRANSITION LOGIC
+# ============================================================================
+# STATUS: Core - Valid state transition rules
+# PURPOSE: Business rules for job and task state machine transitions
+# LAST_REVIEWED: 03 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 State Transition Logic for Jobs and Tasks.
 

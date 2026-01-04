@@ -1,3 +1,11 @@
+# ============================================================================
+# PURE ENUMERATION TYPES
+# ============================================================================
+# STATUS: Core - Type definitions without business logic
+# PURPOSE: Job, Task, and Stage status enums plus RasterType classification
+# LAST_REVIEWED: 03 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Pure Enumeration Types for Core Framework.
 

@@ -1,3 +1,11 @@
+# ============================================================================
+# PYDANTIC TO POSTGRESQL SCHEMA GENERATOR
+# ============================================================================
+# STATUS: Core - DDL generation from Pydantic models
+# PURPOSE: Generate PostgreSQL CREATE statements using psycopg.sql composition
+# LAST_REVIEWED: 03 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Pydantic to PostgreSQL Schema Generator.
 

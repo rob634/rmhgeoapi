@@ -1,3 +1,11 @@
+# ============================================================================
+# CORE DATA CONTRACTS - BASE PYDANTIC MODELS
+# ============================================================================
+# STATUS: Core - Foundational data contracts for Task and Job entities
+# PURPOSE: Base classes with identity and classification, specialized at boundaries
+# LAST_REVIEWED: 03 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Core Data Contracts - Base Pydantic Models.
 

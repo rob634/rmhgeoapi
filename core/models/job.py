@@ -1,3 +1,11 @@
+# ============================================================================
+# JOB DATABASE MODELS
+# ============================================================================
+# STATUS: Core - JobRecord persistence boundary
+# PURPOSE: Database representation of jobs with orchestration and audit fields
+# LAST_REVIEWED: 03 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Job Database Models.
 

@@ -1,62 +1,12 @@
 # ============================================================================
-# ⚠️ PYDANTIC MODEL - NOT USED BY ACTUAL JOBS ⚠️
+# STAGE MODEL - REFERENCE SCHEMA (NOT USED BY JOBS)
 # ============================================================================
-# EPOCH: 4 - REFERENCE ONLY
-# STATUS: Unused by jobs - kept as reference schema documentation
-# PURPOSE: Pydantic Stage model (planned but not used by production jobs)
-# ACTUAL USAGE: Jobs use List[Dict[str, Any]] for stages, not List[Stage]
-#
-# THIS PYDANTIC MODEL EXISTS BUT IS NOT USED BY JOBS.
-# Production jobs use plain dicts for stages. CoreMachine reads these dicts
-# directly without Pydantic validation (could be added in future).
-#
-# PLANNED ARCHITECTURE (Workflow ABC pattern - unused):
-#   from core.models import Stage
-#
-#   class HelloWorldWorkflow(Workflow):
-#       def define_stages(self) -> List[Stage]:  # ← This Pydantic model
-#           return [
-#               Stage(stage_num=1, stage_name="greeting", task_types=["greet"])
-#           ]
-#
-# ACTUAL ARCHITECTURE (Pattern B - used by all 10 jobs):
-#   class HelloWorldJob:
-#       stages: List[Dict[str, Any]] = [  # ← Plain dicts.
-#           {
-#               "number": 1,
-#               "name": "greeting",
-#               "task_type": "hello_world_greeting",
-#               "parallelism": "dynamic"
-#           }
-#       ]
-#
-# WHY PLAIN DICTS:
-# 1. Simpler for job authors (no Pydantic imports in job files)
-# 2. Jobs focus on declarative blueprints (WHAT to do)
-# 3. CoreMachine handles orchestration (HOW to do it)
-# 4. Pydantic used at CoreMachine boundaries (TaskDefinition, TaskResult)
-# 5. All 10 production jobs work perfectly with plain dicts
-#
-# PYDANTIC IS STILL USED FOR TYPE SAFETY:
-# - Jobs output plain dicts → CoreMachine converts to Pydantic
-# - TaskDefinition (Pydantic) - task specifications
-# - TaskResult (Pydantic) - handler results
-# - JobRecord/TaskRecord (Pydantic) - database models
-# - SQL ↔ Python ↔ Service Bus all use Pydantic for type safety
-#
-# FUTURE ENHANCEMENT (OPTIONAL):
-# Could add runtime validation in CoreMachine.__init__():
-#   from core.models.stage import Stage
-#
-#   for job_type, job_class in all_jobs.items():
-#       for stage_dict in job_class.stages:
-#           Stage(**stage_dict)  # Validates structure, fails fast on startup
-#
-# This would give Pydantic validation without requiring jobs to import Stage.
-# Jobs stay simple (plain dicts), CoreMachine ensures type safety.
-#
-# 
-# Date: 30 SEP 2025 (created), 15 OCT 2025 (documented as unused by jobs)
+# STATUS: Core - Reference schema documentation only
+# PURPOSE: Pydantic Stage model for potential runtime validation
+# LAST_REVIEWED: 03 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# NOTE: Production jobs use plain dicts for stages, not this Pydantic model.
+#       Kept as reference and for potential future CoreMachine validation.
 # ============================================================================
 
 """

@@ -1,3 +1,11 @@
+# ============================================================================
+# PGSTAC BOOTSTRAP
+# ============================================================================
+# STATUS: Infrastructure - PgSTAC schema installation and verification
+# PURPOSE: Idempotent PgSTAC extension installation and configuration
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 STAC Infrastructure Management.
 

@@ -1,12 +1,10 @@
 # ============================================================================
-# CLAUDE CONTEXT - JOB PROGRESS TRACKER
+# JOB PROGRESS TRACKER
 # ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: Infrastructure - Universal Job Progress Tracking
-# PURPOSE: Real-time progress tracking for long-running jobs
-# LAST_REVIEWED: 28 DEC 2025
-# EXPORTS: JobProgressTracker, JobProgressSnapshot
-# DEPENDENCIES: infrastructure.metrics_repository, config
+# STATUS: Infrastructure - Universal job progress tracking
+# PURPOSE: Real-time progress, rates, ETAs for long-running jobs
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
 # ============================================================================
 """
 Universal Job Progress Tracker.

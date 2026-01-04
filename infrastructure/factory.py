@@ -1,3 +1,11 @@
+# ============================================================================
+# REPOSITORY FACTORY
+# ============================================================================
+# STATUS: Infrastructure - Central factory for all repository instantiation
+# PURPOSE: Single point of repository creation with configuration injection
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Repository Factory.
 

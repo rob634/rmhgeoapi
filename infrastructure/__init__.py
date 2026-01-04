@@ -1,3 +1,11 @@
+# ============================================================================
+# INFRASTRUCTURE PACKAGE - LAZY LOADING
+# ============================================================================
+# STATUS: Infrastructure - Repository pattern with Azure Functions cold start fix
+# PURPOSE: Lazy import mechanism to defer env var reads until runtime ready
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Infrastructure Package - Lazy Loading Implementation.
 

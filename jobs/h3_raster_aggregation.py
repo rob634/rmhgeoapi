@@ -1,12 +1,10 @@
 # ============================================================================
-# CLAUDE CONTEXT - H3 RASTER AGGREGATION JOB
+# H3 RASTER AGGREGATION JOB
 # ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: Job Definition - H3 Raster Zonal Statistics
-# PURPOSE: Aggregate COG rasters to H3 hexagonal grid cells
-# LAST_REVIEWED: 22 DEC 2025
-# EXPORTS: H3RasterAggregationJob
-# DEPENDENCIES: jobs.base, jobs.mixins, infrastructure.h3_repository
+# STATUS: Jobs - 3-stage raster zonal statistics workflow
+# PURPOSE: Compute zonal stats from COG rasters and store in h3.zonal_stats
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
 # ============================================================================
 """
 H3 Raster Aggregation Job - 3-Stage Workflow.

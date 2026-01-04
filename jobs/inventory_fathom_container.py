@@ -78,6 +78,12 @@ class InventoryFathomContainerJob(JobBaseMixin, JobBase):
             "default": FathomDefaults.SOURCE_CONTAINER,
             "description": "Container to inventory (default: bronze-fathom)"
         },
+        "base_prefix": {
+            "type": "str",
+            "required": False,
+            "default": "",
+            "description": "Country/region prefix (e.g., 'rwa' for Rwanda, 'ci' for Côte d'Ivoire)"
+        },
         "flood_types": {
             "type": "list",
             "required": False,
@@ -175,6 +181,7 @@ class InventoryFathomContainerJob(JobBaseMixin, JobBase):
                 "task_type": task_type,
                 "parameters": {
                     "source_container": job_params.get("source_container", FathomDefaults.SOURCE_CONTAINER),
+                    "base_prefix": job_params.get("base_prefix", ""),
                     "flood_types": job_params.get("flood_types"),
                     "years": job_params.get("years"),
                     "ssp_scenarios": job_params.get("ssp_scenarios"),
@@ -278,11 +285,13 @@ class InventoryFathomContainerJob(JobBaseMixin, JobBase):
         Generate deterministic job ID for idempotency.
 
         Excludes dry_run from hash so re-runs can use force.
+        Includes base_prefix so different regions get different job IDs.
         """
         # Create stable hash from significant parameters
         hash_params = {
             "job_type": "inventory_fathom_container",
             "source_container": params.get("source_container", FathomDefaults.SOURCE_CONTAINER),
+            "base_prefix": params.get("base_prefix", ""),
             "flood_types": sorted(params.get("flood_types") or []),
             "years": sorted(params.get("years") or []),
             "ssp_scenarios": sorted(params.get("ssp_scenarios") or [])

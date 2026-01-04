@@ -1,3 +1,11 @@
+# ============================================================================
+# PLATFORM REPOSITORY
+# ============================================================================
+# STATUS: Infrastructure - Platform API request tracking
+# PURPOSE: Thin tracking for Platform → CoreMachine job mapping (1:1)
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Platform Repository - Thin Tracking Pattern.
 

@@ -1,12 +1,10 @@
 # ============================================================================
-# CLAUDE CONTEXT - H3 SOURCE CATALOG REPOSITORY
+# H3 SOURCE CATALOG REPOSITORY
 # ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: Infrastructure - H3 Source Catalog Data Access
+# STATUS: Infrastructure - Source metadata data access layer
 # PURPOSE: CRUD operations for h3.source_catalog table
-# LAST_REVIEWED: 27 DEC 2025
-# EXPORTS: H3SourceRepository
-# DEPENDENCIES: psycopg, infrastructure.postgresql
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
 # ============================================================================
 """
 H3 Source Catalog Repository - Safe PostgreSQL Operations for Source Metadata.

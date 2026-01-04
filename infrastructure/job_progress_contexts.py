@@ -1,13 +1,10 @@
 # ============================================================================
-# CLAUDE CONTEXT - JOB PROGRESS CONTEXT MIXINS
+# JOB PROGRESS CONTEXT MIXINS
 # ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: Infrastructure - Domain-Specific Progress Tracking
+# STATUS: Infrastructure - Domain-specific progress tracking mixins
 # PURPOSE: Context mixins for H3, FATHOM, and Raster job tracking
-# LAST_REVIEWED: 28 DEC 2025
-# EXPORTS: H3AggregationContext, FathomETLContext, RasterCollectionContext,
-#          H3AggregationTracker, FathomETLTracker, RasterCollectionTracker
-# DEPENDENCIES: infrastructure.job_progress
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
 # ============================================================================
 """
 Domain-Specific Progress Context Mixins.

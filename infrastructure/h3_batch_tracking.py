@@ -1,3 +1,11 @@
+# ============================================================================
+# H3 BATCH TRACKING REPOSITORY
+# ============================================================================
+# STATUS: Infrastructure - Batch-level idempotency for resumable H3 jobs
+# PURPOSE: Track batch completion for resumable fan-out stage processing
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 H3 Batch Tracking Repository - Batch-Level Idempotency for H3 Operations.
 

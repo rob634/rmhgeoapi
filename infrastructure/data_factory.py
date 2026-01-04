@@ -1,3 +1,11 @@
+# ============================================================================
+# AZURE DATA FACTORY REPOSITORY
+# ============================================================================
+# STATUS: Infrastructure - ADF pipeline orchestration
+# PURPOSE: Trigger, monitor, and wait for ADF pipelines from CoreMachine jobs
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - config in AppConfig)
+# ============================================================================
 """
 Azure Data Factory Repository Implementation.
 

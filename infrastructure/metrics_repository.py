@@ -1,12 +1,10 @@
 # ============================================================================
-# CLAUDE CONTEXT - METRICS REPOSITORY
+# METRICS REPOSITORY
 # ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: Repository - Pipeline Observability Metrics Storage
+# STATUS: Infrastructure - Pipeline observability metrics storage
 # PURPOSE: PostgreSQL storage for real-time job progress metrics
-# LAST_REVIEWED: 28 DEC 2025
-# EXPORTS: MetricsRepository
-# DEPENDENCIES: infrastructure.postgresql, psycopg
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
 # ============================================================================
 """
 Pipeline Observability Metrics Repository.

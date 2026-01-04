@@ -1,3 +1,11 @@
+# ============================================================================
+# CREATE H3 BASE GRID JOB
+# ============================================================================
+# STATUS: Jobs - Two-stage H3 grid generation (res 0-4)
+# PURPOSE: Generate complete unfiltered H3 hexagonal grids + STAC metadata
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Create H3 Base Grid Job - Hexagonal Grid Generation.
 

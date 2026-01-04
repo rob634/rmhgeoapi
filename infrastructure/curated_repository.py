@@ -1,3 +1,11 @@
+# ============================================================================
+# CURATED DATASET REPOSITORY
+# ============================================================================
+# STATUS: Infrastructure - System-managed dataset persistence
+# PURPOSE: CRUD operations for curated_datasets registry and audit logging
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Curated Dataset Repository.
 

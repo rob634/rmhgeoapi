@@ -1,3 +1,11 @@
+# ============================================================================
+# POSTGIS UTILITY FUNCTIONS
+# ============================================================================
+# STATUS: Infrastructure - PostGIS database helper functions
+# PURPOSE: Standalone utilities for PostGIS table existence checks
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 PostGIS Utility Functions.
 

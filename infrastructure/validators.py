@@ -1,3 +1,11 @@
+# ============================================================================
+# PRE-FLIGHT RESOURCE VALIDATORS
+# ============================================================================
+# STATUS: Infrastructure - Resource validation before job creation
+# PURPOSE: Validate external resources exist before creating jobs
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Pre-Flight Resource Validators.
 

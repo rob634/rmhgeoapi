@@ -775,40 +775,40 @@ Applied systematic 8-check review to both files:
 
 ---
 
-## infrastructure/ (31 files)
+## infrastructure/ (30 files) - COMPLETE
 
 | Status | File | Notes |
 |--------|------|-------|
-| [ ] | `__init__.py` | |
-| [ ] | `base.py` | |
+| [x] | `__init__.py` | Checks 1-7 applied - added header (266 lines, lazy loading) |
+| [x] | `base.py` | Checks 1-7 applied - added header (556 lines) |
 | [x] | `blob.py` | Check 8 ref to storage_config.py, added deployment note |
-| [ ] | `curated_repository.py` | |
-| [ ] | `data_factory.py` | |
-| [ ] | `database_utils.py` | |
-| [ ] | `decorators_blob.py` | |
-| [ ] | `duckdb_query.py` | |
-| [ ] | `duckdb.py` | |
-| [ ] | `factory.py` | |
-| [ ] | `h3_batch_tracking.py` | |
-| [ ] | `h3_repository.py` | |
-| [ ] | `h3_schema.py` | |
-| [ ] | `h3_source_repository.py` | |
-| [ ] | `h3_source_seeds.py` | |
-| [ ] | `interface_repository.py` | |
-| [ ] | `janitor_repository.py` | |
-| [ ] | `job_progress_contexts.py` | |
-| [ ] | `job_progress.py` | |
-| [ ] | `jobs_tasks.py` | |
-| [ ] | `metrics_repository.py` | |
-| [ ] | `pgstac_bootstrap.py` | |
-| [ ] | `pgstac_repository.py` | |
-| [ ] | `platform.py` | |
-| [ ] | `postgis.py` | |
+| [x] | `curated_repository.py` | Checks 1-7 applied - added header (470 lines) |
+| [x] | `data_factory.py` | Checks 1-7 applied - added header (639 lines) |
+| [x] | `database_utils.py` | Checks 1-7 applied - added header (227 lines) |
+| [x] | `decorators_blob.py` | Checks 1-7 applied - added header (215 lines) |
+| [x] | `duckdb_query.py` | Checks 1-7 applied - added header (396 lines) |
+| [x] | `duckdb.py` | Checks 1-7 applied - added header (686 lines) |
+| [x] | `factory.py` | Checks 1-7 applied - added header (387 lines) |
+| [x] | `h3_batch_tracking.py` | Checks 1-7 applied - added header (480 lines) |
+| [x] | `h3_repository.py` | Checks 1-7 applied - added header (2131 lines) |
+| [x] | `h3_schema.py` | Checks 1-7 applied - updated header format (1162 lines) |
+| [x] | `h3_source_repository.py` | Checks 1-7 applied - updated header format (459 lines) |
+| [x] | `h3_source_seeds.py` | Checks 1-7 applied - updated header format (272 lines) |
+| [x] | `interface_repository.py` | Checks 1-7 applied - added header (675 lines) |
+| [x] | `janitor_repository.py` | Checks 1-7 applied - added header |
+| [x] | `job_progress_contexts.py` | Checks 1-7 applied - updated header format |
+| [x] | `job_progress.py` | Checks 1-7 applied - updated header format |
+| [x] | `jobs_tasks.py` | Checks 1-7 applied - added header |
+| [x] | `metrics_repository.py` | Checks 1-7 applied - updated header format |
+| [x] | `pgstac_bootstrap.py` | Checks 1-7 applied - added header |
+| [x] | `pgstac_repository.py` | Checks 1-7 applied - added header |
+| [x] | `platform.py` | Checks 1-7 applied - added header |
+| [x] | `postgis.py` | Checks 1-7 applied - added header |
 | [x] | `postgresql.py` | Check 8 ref to database_config.py, added deployment note |
-| [ ] | `promoted_repository.py` | |
+| [x] | `promoted_repository.py` | Checks 1-7 applied - updated header format |
 | [x] | `service_bus.py` | Check 8 ref to queue_config.py, added deployment note |
-| [ ] | `validators.py` | |
-| [ ] | `vault.py` | |
+| [x] | `validators.py` | Checks 1-7 applied - added header |
+| [x] | `vault.py` | Checks 1-7 applied - added header |
 
 ---
 
@@ -816,16 +816,16 @@ Applied systematic 8-check review to both files:
 
 | Status | File | Notes |
 |--------|------|-------|
-| [ ] | `__init__.py` | |
-| [ ] | `base.py` | |
-| [ ] | `bootstrap_h3_land_grid_pyramid.py` | |
-| [ ] | `container_summary.py` | |
-| [ ] | `create_h3_base.py` | |
-| [ ] | `curated_update.py` | |
-| [ ] | `generate_h3_level4.py` | |
-| [ ] | `h3_export_dataset.py` | |
-| [ ] | `h3_raster_aggregation.py` | |
-| [ ] | `h3_register_dataset.py` | |
+| [x] | `__init__.py` | Checks 1-7 applied - added header (explicit registry) |
+| [x] | `base.py` | Checks 1-7 applied - added header (6-method interface ABC) |
+| [x] | `bootstrap_h3_land_grid_pyramid.py` | Checks 1-7 applied - added header (3-stage cascade) |
+| [x] | `container_summary.py` | Checks 1-7 applied - added header (single-stage) |
+| [x] | `create_h3_base.py` | Checks 1-7 applied - added header (2-stage res 0-4) |
+| [x] | `curated_update.py` | Checks 1-7 applied - added header (4-stage WDPA/Admin0) |
+| [x] | `generate_h3_level4.py` | Checks 1-7 applied - added header (2-stage land filter) |
+| [x] | `h3_export_dataset.py` | Checks 1-7 applied - updated header (3-stage export) |
+| [x] | `h3_raster_aggregation.py` | Checks 1-7 applied - updated header (3-stage zonal stats) |
+| [x] | `h3_register_dataset.py` | Checks 1-7 applied - updated header (single-stage) |
 | [ ] | `hello_world.py` | |
 | [ ] | `ingest_collection.py` | |
 | [ ] | `inventory_container_contents.py` | |
@@ -1119,24 +1119,24 @@ Applied systematic 8-check review to both files:
 
 ---
 
-## utils/ (3 files)
+## utils/ (3 files) - COMPLETE
 
 | Status | File | Notes |
 |--------|------|-------|
-| [ ] | `__init__.py` | |
-| [ ] | `contract_validator.py` | |
-| [ ] | `import_validator.py` | |
+| [x] | `__init__.py` | Checks 1-7 applied - added header (20 lines) |
+| [x] | `contract_validator.py` | Checks 1-7 applied - added header (348 lines) |
+| [x] | `import_validator.py` | Checks 1-7 applied - added header (501 lines) |
 
 ---
 
-## scripts/ (4 files)
+## scripts/ (4 files) - COMPLETE
 
 | Status | File | Notes |
 |--------|------|-------|
-| [ ] | `copy_era5_subset.py` | |
-| [ ] | `copy_gridmet_subset.py` | |
-| [ ] | `test_database_stats.py` | |
-| [ ] | `validate_config.py` | |
+| [x] | `copy_era5_subset.py` | Checks 1-7 applied - added header (406 lines) |
+| [x] | `copy_gridmet_subset.py` | Checks 1-7 applied - added header (254 lines) |
+| [x] | `test_database_stats.py` | Checks 1-7 applied - added header (251 lines) |
+| [x] | `validate_config.py` | Checks 1-7 applied - added header (100 lines) |
 
 ---
 
@@ -1217,17 +1217,17 @@ Applied systematic 8-check review to both files:
 |----------|-------|----------|-----------|
 | config/ | 13 | 13 | 0 |
 | core/ | 36 | 36 | 0 |
-| infrastructure/ | 31 | 3 | 28 |
-| jobs/ | 30 | 0 | 30 |
+| infrastructure/ | 30 | 30 | 0 |
+| jobs/ | 30 | 10 | 20 |
 | services/ | 47 | 0 | 47 |
 | triggers/ | 35 | 1 | 34 |
 | API modules | 24 | 0 | 24 |
 | web_interfaces/ | 56 | 0 | 56 |
-| utils/ | 3 | 0 | 3 |
-| scripts/ | 4 | 0 | 4 |
+| utils/ | 3 | 3 | 0 |
+| scripts/ | 4 | 4 | 0 |
 | test/ | 20 | 0 | 20 |
 | Root files | 3 | 3 | 0 |
-| **TOTAL** | **302** | **56** | **246** |
+| **TOTAL** | **301** | **100** | **201** |
 
 ---
 
@@ -1260,3 +1260,8 @@ Applied systematic 8-check review to both files:
 | 02 JAN 2026 | Session 21 | Applied Checks 1-7 to `core/errors.py` - added header, error categories docs (285 lines) |
 | 03 JAN 2026 | Session 22 | Applied Checks 1-7 to 10 core/ files: `__init__.py`, `task_id.py`, `utils.py`, `contracts/__init__.py`, `logic/__init__.py`, `logic/calculations.py`, `logic/transitions.py`, `models/__init__.py`, `models/band_mapping.py`, `models/context.py` - all added file headers |
 | 03 JAN 2026 | Session 23 | Applied Checks 1-7 to remaining core/ files: 12 core/models/ files + 9 core/schema/ files (21 total) - completed core/ directory review |
+| 04 JAN 2026 | Session 24 | Applied Checks 1-7 to 5 infrastructure/ files: `__init__.py`, `base.py`, `curated_repository.py`, `data_factory.py`, `database_utils.py` |
+| 04 JAN 2026 | Session 25 | Applied Checks 1-7 to 10 infrastructure/ files: `decorators_blob.py`, `duckdb_query.py`, `duckdb.py`, `factory.py`, `h3_batch_tracking.py`, `h3_repository.py`, `h3_schema.py`, `h3_source_repository.py`, `h3_source_seeds.py`, `interface_repository.py` |
+| 04 JAN 2026 | Session 26 | Completed infrastructure/ directory: 12 remaining files - added/updated headers for `janitor_repository.py`, `job_progress_contexts.py`, `job_progress.py`, `jobs_tasks.py`, `metrics_repository.py`, `pgstac_bootstrap.py`, `pgstac_repository.py`, `platform.py`, `postgis.py`, `promoted_repository.py`, `validators.py`, `vault.py` - infrastructure/ 30/30 COMPLETE |
+| 04 JAN 2026 | Session 27 | Completed utils/ (3 files) and scripts/ (4 files) - added headers, analyzed for consolidation opportunities |
+| 04 JAN 2026 | Session 28 | Applied Checks 1-7 to first 10 jobs/ files: `__init__.py`, `base.py`, `bootstrap_h3_land_grid_pyramid.py`, `container_summary.py`, `create_h3_base.py`, `curated_update.py`, `generate_h3_level4.py`, `h3_export_dataset.py`, `h3_raster_aggregation.py`, `h3_register_dataset.py` |

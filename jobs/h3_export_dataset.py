@@ -1,12 +1,10 @@
 # ============================================================================
-# CLAUDE CONTEXT - H3 EXPORT DATASET JOB
+# H3 EXPORT DATASET JOB
 # ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: Job Definition - H3 Export to GeoParquet-style Tables
-# PURPOSE: Create denormalized wide-format exports from H3 zonal_stats
-# LAST_REVIEWED: 28 DEC 2025
-# EXPORTS: H3ExportDatasetJob
-# DEPENDENCIES: jobs.base, jobs.mixins, infrastructure.h3_repository
+# STATUS: Jobs - 3-stage H3 export to denormalized wide-format tables
+# PURPOSE: Create GeoParquet-style exports from H3 zonal_stats for mapping
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
 # ============================================================================
 """
 H3 Export Dataset Job - 3-Stage Workflow.

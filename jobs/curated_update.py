@@ -1,3 +1,11 @@
+# ============================================================================
+# CURATED DATASET UPDATE JOB
+# ============================================================================
+# STATUS: Jobs - 4-stage curated dataset update workflow
+# PURPOSE: Update curated datasets from external sources (WDPA, Admin0, etc.)
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Curated Dataset Update Job.
 

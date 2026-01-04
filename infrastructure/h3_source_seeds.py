@@ -1,12 +1,10 @@
 # ============================================================================
-# CLAUDE CONTEXT - H3 SOURCE CATALOG SEED DATA
+# H3 SOURCE CATALOG SEED DATA
 # ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: Infrastructure - Seed Data for Source Catalog
-# PURPOSE: Pre-defined source entries for common data sources
-# LAST_REVIEWED: 27 DEC 2025
-# EXPORTS: seed_planetary_computer_sources, COP_DEM_GLO_30
-# DEPENDENCIES: infrastructure.h3_source_repository
+# STATUS: Infrastructure - Seed data for h3.source_catalog table
+# PURPOSE: Pre-defined source entries (Planetary Computer, NASADEM, ESA WorldCover)
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
 # ============================================================================
 """
 H3 Source Catalog Seed Data.

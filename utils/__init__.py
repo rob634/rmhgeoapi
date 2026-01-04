@@ -1,3 +1,11 @@
+# ============================================================================
+# UTILITIES PACKAGE
+# ============================================================================
+# STATUS: Utility - Cross-cutting validation and contract enforcement
+# PURPOSE: Export ImportValidator for startup checks and enforce_contract decorator
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Utilities Package.
 

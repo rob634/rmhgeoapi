@@ -1,3 +1,11 @@
+# ============================================================================
+# H3 REPOSITORY
+# ============================================================================
+# STATUS: Infrastructure - H3 hexagonal grid data access layer
+# PURPOSE: Safe PostgreSQL operations for h3.grids, h3.cells, and h3.zonal_stats
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 H3 Repository - Safe PostgreSQL Operations for H3 Hexagonal Grids.
 

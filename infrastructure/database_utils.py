@@ -1,3 +1,11 @@
+# ============================================================================
+# POSTGRESQL BULK OPERATION UTILITIES
+# ============================================================================
+# STATUS: Infrastructure - High-performance batch database operations
+# PURPOSE: Batched executemany() for 20x faster bulk inserts (sync and async)
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Shared PostgreSQL Bulk Operation Utilities.
 

@@ -1,3 +1,11 @@
+# ============================================================================
+# DUCKDB SAFE SQL QUERY COMPOSITION
+# ============================================================================
+# STATUS: Infrastructure - SQL injection prevention for DuckDB queries
+# PURPOSE: Safe SQL composition with parameterization and identifier validation
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 DuckDB Safe SQL Query Composition.
 

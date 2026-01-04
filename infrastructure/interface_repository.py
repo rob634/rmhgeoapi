@@ -1,3 +1,11 @@
+# ============================================================================
+# REPOSITORY ABSTRACT BASE CLASSES
+# ============================================================================
+# STATUS: Infrastructure - Interface definitions for all repository types
+# PURPOSE: Enforce exact method signatures and parameter names across implementations
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Repository Abstract Base Classes - Single Point of Truth.
 

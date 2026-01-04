@@ -1,3 +1,11 @@
+# ============================================================================
+# GENERATE H3 LEVEL 4 LAND GRID JOB
+# ============================================================================
+# STATUS: Jobs - Two-stage land-filtered H3 Level 4 grid generation
+# PURPOSE: Generate global Level 4 H3 grid filtered by land + STAC metadata
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Generate H3 Level 4 Land Grid Job.
 

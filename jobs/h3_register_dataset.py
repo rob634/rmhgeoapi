@@ -1,12 +1,10 @@
 # ============================================================================
-# CLAUDE CONTEXT - H3 REGISTER DATASET JOB
+# H3 REGISTER DATASET JOB
 # ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: Job Definition - H3 Dataset Registration
+# STATUS: Jobs - Single-stage dataset registration workflow
 # PURPOSE: Register datasets in h3.dataset_registry before aggregation
-# LAST_REVIEWED: 22 DEC 2025
-# EXPORTS: H3RegisterDatasetJob
-# DEPENDENCIES: jobs.base, jobs.mixins, infrastructure.h3_repository
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
 # ============================================================================
 """
 H3 Register Dataset Job - Single-Stage Registration.

@@ -1,3 +1,11 @@
+# ============================================================================
+# AZURE KEY VAULT REPOSITORY
+# ============================================================================
+# STATUS: Infrastructure - Secure credential management via Key Vault
+# PURPOSE: Access sensitive configuration (passwords, secrets) with caching
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Azure Key Vault Repository - Secure Credential Management.
 

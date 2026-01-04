@@ -1,12 +1,10 @@
 # ============================================================================
-# CLAUDE CONTEXT - H3 NORMALIZED SCHEMA DEPLOYER
+# H3 NORMALIZED SCHEMA DEPLOYER
 # ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: Infrastructure - H3 OLTP Schema DDL
+# STATUS: Infrastructure - H3 OLTP schema DDL and deployment
 # PURPOSE: Deploy normalized H3 schema (cells, admin mappings, stats tables)
-# LAST_REVIEWED: 01 JAN 2026
-# EXPORTS: H3SchemaDeployer, deploy_h3_normalized_schema
-# DEPENDENCIES: psycopg, pydantic
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
 # ============================================================================
 """
 H3 Normalized Schema Deployment.

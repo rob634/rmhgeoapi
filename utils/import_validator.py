@@ -1,14 +1,25 @@
+# ============================================================================
+# IMPORT VALIDATOR
+# ============================================================================
+# STATUS: Utility - Fail-fast import validation for Azure Functions
+# PURPOSE: Validate critical dependencies at startup with caching and health integration
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
-Import Validation System.
+Python Module Import Validator.
 
-Provides fail-first import validation that ensures all critical dependencies
-are available before the Azure Function app starts processing requests.
+Fail-fast validation of Python module imports at Azure Functions startup.
+Ensures all critical dependencies (azure.functions, pydantic, psycopg, etc.)
+are importable before the app starts processing requests.
+
+NOT related to data imports - this validates Python 'import' statements work.
 
 Key Features:
-    - Fail-fast startup validation
+    - Fail-fast startup validation (catches missing packages early)
     - Cached validation results (5-minute TTL)
-    - Environment-based activation
-    - Health check integration
+    - Environment-based activation (Azure Functions vs local dev)
+    - Health check integration via get_health_status()
 
 Exports:
     ImportValidator: Import validation class

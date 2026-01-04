@@ -1,3 +1,11 @@
+# ============================================================================
+# JANITOR REPOSITORY
+# ============================================================================
+# STATUS: Infrastructure - Maintenance and cleanup operations
+# PURPOSE: Detect stale tasks, failed jobs, orphaned entities, and cleanup
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Janitor Repository - Maintenance Database Queries.
 

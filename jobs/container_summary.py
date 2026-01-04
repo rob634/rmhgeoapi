@@ -1,3 +1,11 @@
+# ============================================================================
+# CONTAINER SUMMARY JOB
+# ============================================================================
+# STATUS: Jobs - Single-stage container statistics workflow
+# PURPOSE: Generate aggregate statistics about blob container contents
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Container Summary Job - Container Statistics.
 

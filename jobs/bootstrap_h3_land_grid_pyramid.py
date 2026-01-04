@@ -1,3 +1,11 @@
+# ============================================================================
+# H3 LAND GRID PYRAMID BOOTSTRAP JOB
+# ============================================================================
+# STATUS: Jobs - 3-stage cascade H3 grid generation (res 2-7)
+# PURPOSE: Generate complete land-filtered H3 pyramid with batched parallelism
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 H3 Land Grid Pyramid Bootstrap Job - 3-Stage Cascade Architecture.
 

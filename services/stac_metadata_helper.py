@@ -237,6 +237,69 @@ class RasterVisualizationMetadata:
             nodata=result.get('nodata')
         )
 
+    @classmethod
+    def from_raster_type_params(cls, raster_type_info: Dict[str, Any]) -> 'RasterVisualizationMetadata':
+        """
+        Factory method to extract RasterVisualizationMetadata from job params raster_type dict.
+
+        This handles the flattened structure passed through job parameters:
+            {
+                "detected_type": "multispectral",
+                "band_count": 8,
+                "data_type": "uint16",
+                "optimal_cog_settings": {}
+            }
+
+        Args:
+            raster_type_info: raster_type dict from job params (NOT full validation result)
+
+        Returns:
+            RasterVisualizationMetadata with band_count and rgb_bands properly set
+        """
+        if not raster_type_info or not isinstance(raster_type_info, dict):
+            return cls()
+
+        detected_type = raster_type_info.get('detected_type', 'unknown')
+        band_count = raster_type_info.get('band_count', 0)
+        # Note: params use 'data_type', validation uses 'dtype'
+        dtype = raster_type_info.get('data_type') or raster_type_info.get('dtype')
+
+        # Determine colormap based on raster type
+        colormap = None
+        if detected_type == 'dem':
+            colormap = 'terrain'
+        elif detected_type in ['ndvi', 'vegetation_index']:
+            colormap = 'rdylgn'
+        elif band_count == 1:
+            colormap = 'viridis'
+
+        # Determine RGB bands for multi-band imagery (04 JAN 2026)
+        # Critical for TiTiler to avoid dimension errors on 4+ band rasters
+        rgb_bands = None
+        if band_count == 4:
+            # RGBA - use first 3 bands
+            rgb_bands = [1, 2, 3]
+        elif band_count == 8:
+            # WorldView-2/3: use bands 5,3,2 for natural color (Red, Green, Blue)
+            rgb_bands = [5, 3, 2]
+        elif band_count >= 10:
+            # Sentinel-2/Landsat style: use bands 4,3,2 for natural color
+            rgb_bands = [4, 3, 2]
+        elif band_count > 3:
+            # Generic multi-band: use first 3 bands
+            rgb_bands = [1, 2, 3]
+
+        return cls(
+            raster_type=detected_type,
+            band_count=band_count,
+            dtype=dtype,
+            colorinterp=None,
+            rgb_bands=rgb_bands,
+            rescale=None,
+            colormap=colormap,
+            nodata=raster_type_info.get('nodata')
+        )
+
     def to_stac_properties(self) -> Dict[str, Any]:
         """
         Convert to STAC properties dict with app:* prefix.

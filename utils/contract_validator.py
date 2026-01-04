@@ -1,3 +1,11 @@
+# ============================================================================
+# CONTRACT VALIDATOR
+# ============================================================================
+# STATUS: Utility - Runtime type enforcement at method boundaries
+# PURPOSE: Decorator for fail-fast parameter and return type validation
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Contract Validator - Runtime Type Enforcement.
 

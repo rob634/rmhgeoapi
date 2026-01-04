@@ -1,3 +1,11 @@
+# ============================================================================
+# JOB BASE CLASS
+# ============================================================================
+# STATUS: Jobs - Abstract base class enforcing 6-method interface contract
+# PURPOSE: Define job interface that CoreMachine expects (validate, create, queue, etc.)
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 JobBase - Abstract base class for all jobs.
 

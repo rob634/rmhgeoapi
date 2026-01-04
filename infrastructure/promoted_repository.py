@@ -1,12 +1,10 @@
 # ============================================================================
-# CLAUDE CONTEXT - PROMOTED DATASET REPOSITORY
+# PROMOTED DATASET REPOSITORY
 # ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: Repository - Database operations for promoted datasets
-# PURPOSE: CRUD operations for app.promoted_datasets table
-# LAST_REVIEWED: 22 DEC 2025
-# EXPORTS: PromotedDatasetRepository
-# DEPENDENCIES: psycopg, core.models.promoted
+# STATUS: Infrastructure - Promoted datasets CRUD operations
+# PURPOSE: Database operations for app.promoted_datasets table
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
 # ============================================================================
 """
 Promoted Dataset Repository.

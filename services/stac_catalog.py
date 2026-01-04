@@ -238,7 +238,7 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
             logger.info(f"📡 STEP 3: Starting STAC extraction from blob (this may take 30-60s)...")
             extract_start = datetime.utcnow()
 
-            # STEP 3A: Extract platform, app, and raster metadata for STAC enrichment (25 NOV 2025, updated 01 JAN 2026)
+            # STEP 3A: Extract platform, app, and raster metadata for STAC enrichment (25 NOV 2025, updated 04 JAN 2026)
             platform_meta = None
             app_meta = None
             raster_meta = None
@@ -249,16 +249,14 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
                     job_id=params.get('_job_id'),
                     job_type=params.get('_job_type', 'stac_catalog_container')
                 )
-                # Create raster visualization metadata from raster_type (01 JAN 2026)
-                # This enables DEM-specific colormaps in STAC preview/thumbnail URLs
+                # Create raster visualization metadata from raster_type (04 JAN 2026)
+                # Uses factory method to properly extract band_count and set rgb_bands
+                # Critical for multi-band rasters (>3 bands) to generate bidx params in TiTiler URLs
                 raster_type_info = params.get('raster_type')
-                if raster_type_info:
-                    detected_type = raster_type_info.get('detected_type') if isinstance(raster_type_info, dict) else raster_type_info
-                    raster_meta = RasterVisualizationMetadata(
-                        raster_type=detected_type,
-                        colormap='terrain' if detected_type == 'dem' else None
-                    )
-                    logger.debug(f"   Step 3A: Raster metadata created - type={detected_type}")
+                if raster_type_info and isinstance(raster_type_info, dict):
+                    raster_meta = RasterVisualizationMetadata.from_raster_type_params(raster_type_info)
+                    logger.debug(f"   Step 3A: Raster metadata created - type={raster_meta.raster_type}, "
+                                f"bands={raster_meta.band_count}, rgb_bands={raster_meta.rgb_bands}")
                 logger.debug(f"   Step 3A: Platform/App metadata extracted - job_id={params.get('_job_id')}")
             except Exception as meta_err:
                 logger.warning(f"   Step 3A: Metadata extraction failed (non-critical): {meta_err}")

@@ -1,3 +1,11 @@
+# ============================================================================
+# DUCKDB REPOSITORY
+# ============================================================================
+# STATUS: Infrastructure - Analytical query engine with Azure Blob integration
+# PURPOSE: Serverless queries over GeoParquet, spatial analytics, and H3 operations
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 DuckDB Repository - Analytical Query Engine.
 

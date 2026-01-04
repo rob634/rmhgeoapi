@@ -1,3 +1,11 @@
+# ============================================================================
+# BLOB VALIDATION DECORATORS
+# ============================================================================
+# STATUS: Infrastructure - Fail-fast pre-flight validation for blob operations
+# PURPOSE: DRY validation decorators for container/blob existence checks
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Blob Validation Decorators - Fail-Fast Pre-Flight Checks.
 

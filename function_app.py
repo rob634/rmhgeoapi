@@ -134,30 +134,77 @@ logging.getLogger("azure.storage").setLevel(logging.WARNING)
 logging.getLogger("azure.core").setLevel(logging.WARNING)
 logging.getLogger("msal").setLevel(logging.WARNING)  # Microsoft Authentication Library
 
-# ========================================================================
-# STARTUP VALIDATION - Fail-fast import validation for critical dependencies
-# ========================================================================
-# FIXED: util_logger now uses dataclasses instead of Pydantic (stdlib only)
+# ============================================================================
+# PHASE 1: PROBE ENDPOINTS (03 JAN 2026 - STARTUP_REFORM.md)
+# ============================================================================
+# Register Kubernetes-style health probes FIRST, before any validation.
+# This ensures /api/livez and /api/readyz are ALWAYS available, even when
+# startup validation fails. Enables diagnostics in VNet/ASE environments.
+#
+# See STARTUP_REFORM.md for full design documentation.
+# ============================================================================
 
-# Application modules (our code) - Utilities
-from utils import validator
+# Initialize function app EARLY - before any imports that might fail
+app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
-# Perform fail-fast startup validation (only in Azure Functions or when explicitly enabled)
-validator.ensure_startup_ready()
+# Import startup state (zero dependencies) and register probes IMMEDIATELY
+from startup_state import STARTUP_STATE, ValidationResult
+from triggers.probes import bp as probes_bp
+
+# Register probes BEFORE any validation - they must always be available
+app.register_functions(probes_bp)
+
+_startup_logger = logging.getLogger("startup")
+_startup_logger.info("✅ STARTUP: Phase 1 complete - Probe endpoints registered (/api/livez, /api/readyz)")
+
+# ============================================================================
+# PHASE 2: SOFT VALIDATION (Store errors, don't crash)
+# ============================================================================
+# All validation is wrapped in try/except. Results are stored in STARTUP_STATE
+# for the readyz and health endpoints to report. The app continues even if
+# validation fails - but Service Bus triggers are only registered if all pass.
+# ============================================================================
+
+_startup_logger.info("🔍 STARTUP: Phase 2 - Running soft validation...")
+
+# --- IMPORT VALIDATION ---
+# Validate that critical modules can be imported
+_startup_logger.info("🔍 STARTUP: Checking import validation...")
+try:
+    from utils import validator
+    validator.ensure_startup_ready()
+    STARTUP_STATE.imports = ValidationResult(
+        name="imports",
+        passed=True,
+        details={"message": "All critical imports successful"}
+    )
+    _startup_logger.info("✅ STARTUP: Import validation passed")
+except Exception as _import_error:
+    STARTUP_STATE.imports = ValidationResult(
+        name="imports",
+        passed=False,
+        error_type="IMPORT_FAILED",
+        error_message=str(_import_error),
+        details={
+            "exception_type": type(_import_error).__name__,
+            "likely_causes": [
+                "Missing Python package in requirements.txt",
+                "Circular import issue",
+                "Incompatible package version"
+            ]
+        }
+    )
+    _startup_logger.critical(f"❌ STARTUP: Import validation failed: {_import_error}")
 
 # ========================================================================
 # APPLICATION IMPORTS - Our modules (validated at startup)
 # ========================================================================
 
-# ========================================================================
-# PRE-FLIGHT ENV VAR CHECK (23 DEC 2025)
-# ========================================================================
+# --- ENV VAR VALIDATION ---
 # Check critical env vars BEFORE heavy imports that require them.
 # This ensures errors are LOGGED to Application Insights before the app fails.
 # Goal: "If app 404s, check Application Insights for STARTUP_FAILED"
-# ========================================================================
-_startup_logger = logging.getLogger("startup")
-_startup_logger.info("🚀 STARTUP: Pre-flight environment variable check...")
+_startup_logger.info("🔍 STARTUP: Checking environment variables...")
 
 _REQUIRED_ENV_VARS = [
     ("POSTGIS_HOST", "PostgreSQL host"),
@@ -174,10 +221,24 @@ for var_name, description in _REQUIRED_ENV_VARS:
         _missing_vars.append(f"{var_name} ({description})")
 
 if _missing_vars:
-    _error_msg = f"❌ STARTUP_FAILED: Missing required environment variables: {', '.join(_missing_vars)}"
-    _startup_logger.critical(_error_msg)
-    # Let the natural import error occur - but now it's logged
+    _error_msg = f"Missing required environment variables: {', '.join(_missing_vars)}"
+    STARTUP_STATE.env_vars = ValidationResult(
+        name="env_vars",
+        passed=False,
+        error_type="MISSING_ENV_VARS",
+        error_message=_error_msg,
+        details={
+            "missing": [v.split(" (")[0] for v in _missing_vars],
+            "fix": "Add missing variables via Azure Portal → Function App → Configuration"
+        }
+    )
+    _startup_logger.critical(f"❌ STARTUP: {_error_msg}")
 else:
+    STARTUP_STATE.env_vars = ValidationResult(
+        name="env_vars",
+        passed=True,
+        details={"checked": [v[0] for v in _REQUIRED_ENV_VARS]}
+    )
     _startup_logger.info("✅ STARTUP: All required environment variables present")
 
 # ========================================================================
@@ -221,7 +282,7 @@ from core.machine import CoreMachine
 # Application modules (our code) - HTTP Trigger Classes
 # Import directly from modules to control when instances are created
 from triggers.health import health_check_trigger
-from triggers.livez import livez_trigger
+# NOTE: livez is now provided by triggers/probes.py (registered in Phase 1)
 from triggers.submit_job import submit_job_trigger
 from triggers.get_job_status import get_job_status_trigger
 from triggers.schema_pydantic_deploy import pydantic_deploy_trigger
@@ -383,8 +444,9 @@ logger.info(f"   Registered jobs: {list(ALL_JOBS.keys())}")
 logger.info(f"   Registered handlers: {list(ALL_HANDLERS.keys())}")
 logger.info(f"   ✅ Platform callback registered (will be connected on Platform trigger load)")
 
-# Initialize function app with HTTP auth level
-app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
+# NOTE: app = func.FunctionApp() is now created at the TOP of the file (Phase 1)
+# This ensures probe endpoints are registered BEFORE any validation runs.
+# See STARTUP_REFORM.md for rationale.
 
 # ============================================================================
 # BLUEPRINT REGISTRATIONS (15 DEC 2025, updated 02 JAN 2026)
@@ -409,10 +471,8 @@ def health(req: func.HttpRequest) -> func.HttpResponse:
     return health_check_trigger.handle_request(req)
 
 
-@app.route(route="livez", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
-def livez(req: func.HttpRequest) -> func.HttpResponse:
-    """Liveness probe - is the app alive? No dependencies checked."""
-    return livez_trigger.handle_request(req)
+# NOTE: /api/livez is now registered in Phase 1 via triggers/probes.py
+# See STARTUP_REFORM.md - probes must be available even when startup fails
 
 
 @app.route(route="system/stats", methods=["GET"])
@@ -2183,16 +2243,18 @@ def openapi_spec(req: func.HttpRequest) -> func.HttpResponse:
 # ============================================================================
 
 # ============================================================================
-# STARTUP QUEUE VALIDATION (29 DEC 2025)
+# STARTUP QUEUE VALIDATION (29 DEC 2025, updated 03 JAN 2026 - STARTUP_REFORM.md)
 # ============================================================================
 # Validate that required Service Bus queues exist BEFORE registering triggers.
 # This catches missing queue errors at deployment time, not 30 seconds later
 # when the first message arrives and the trigger silently fails.
 #
-# Query failures with: traces | where message contains 'STARTUP_FAILED'
+# SOFT VALIDATION: Store results in STARTUP_STATE, don't crash.
+# Service Bus triggers only register if STARTUP_STATE.all_passed is True.
+#
+# Query failures with: GET /api/readyz or /api/health
 # ============================================================================
-_startup_logger = logging.getLogger("startup")
-_startup_logger.info("🔍 STARTUP: Validating Service Bus queue existence...")
+_startup_logger.info("🔍 STARTUP: Validating Service Bus (DNS + queues)...")
 
 # Build list of required queues based on APP_MODE
 _required_queues = []
@@ -2226,15 +2288,14 @@ if _app_mode.listens_to_long_running_tasks:
         "flag": "listens_to_long_running_tasks"
     })
 
-# Validate each required queue exists
+# --- SERVICE BUS DNS VALIDATION ---
+_sb_dns_passed = False
+_hostname = None
+_resolved_ips = []
+
 if _required_queues:
     try:
         import socket
-        from infrastructure.service_bus import ServiceBusRepository
-
-        # STEP 1: DNS Resolution Check (03 JAN 2026)
-        # Check if we can resolve the Service Bus namespace BEFORE attempting connections.
-        # This distinguishes "VNet/DNS issue" from "queue doesn't exist".
         _namespace = _config.service_bus_namespace
         _hostname = _namespace if "." in _namespace else f"{_namespace}.servicebus.windows.net"
 
@@ -2245,49 +2306,70 @@ if _required_queues:
             _resolved_ips = list(set([addr[4][0] for addr in _dns_results]))
             _is_private = any(ip.startswith("10.") or ip.startswith("172.") or ip.startswith("192.168.") for ip in _resolved_ips)
 
+            STARTUP_STATE.service_bus_dns = ValidationResult(
+                name="service_bus_dns",
+                passed=True,
+                details={
+                    "hostname": _hostname,
+                    "resolved_ips": _resolved_ips[:3],
+                    "is_private_endpoint": _is_private
+                }
+            )
+            _sb_dns_passed = True
             _startup_logger.info(f"✅ STARTUP: DNS resolved {_hostname} → {_resolved_ips[:3]}")
             if _is_private:
                 _startup_logger.info("   ℹ️ Private IP detected - using Private Endpoint or VNet integration")
 
         except socket.gaierror as _dns_error:
             # DNS RESOLUTION FAILED - This is a VNet/network issue, NOT a queue issue
-            _startup_logger.critical(
-                f"❌ STARTUP_FAILED: Cannot resolve Service Bus namespace DNS\n"
-                f"   Hostname: {_hostname}\n"
-                f"   Error: {_dns_error}\n"
-                f"   \n"
-                f"   This is a NETWORK issue, not a queue configuration issue.\n"
-                f"   \n"
-                f"   Likely causes:\n"
-                f"   - SERVICE_BUS_NAMESPACE env var has wrong value\n"
-                f"   - VNet DNS configuration issue (ASE/Private Endpoint)\n"
-                f"   - Private DNS zone not linked to VNet\n"
-                f"   - Network isolation blocking DNS resolution\n"
-                f"   \n"
-                f"   Check Azure Portal → Service Bus → Networking settings"
+            STARTUP_STATE.service_bus_dns = ValidationResult(
+                name="service_bus_dns",
+                passed=False,
+                error_type="DNS_RESOLUTION_FAILED",
+                error_message=str(_dns_error),
+                details={
+                    "hostname": _hostname,
+                    "likely_causes": [
+                        "SERVICE_BUS_NAMESPACE env var has wrong value",
+                        "VNet DNS configuration issue (ASE/Private Endpoint)",
+                        "Private DNS zone not linked to VNet",
+                        "Network isolation blocking DNS resolution"
+                    ],
+                    "fix": "Check Azure Portal → Service Bus → Networking settings"
+                }
             )
-            raise RuntimeError(
-                f"\n{'='*80}\n"
-                f"FATAL: Cannot resolve Service Bus namespace (DNS failure)\n"
-                f"{'='*80}\n"
-                f"Hostname: {_hostname}\n"
-                f"Error: {_dns_error}\n"
-                f"\n"
-                f"This is a NETWORK/DNS issue, NOT a missing queue.\n"
-                f"\n"
-                f"Likely causes:\n"
-                f"  - SERVICE_BUS_NAMESPACE env var incorrect\n"
-                f"  - VNet/ASE DNS not configured for Service Bus\n"
-                f"  - Private DNS zone missing or not linked\n"
-                f"\n"
-                f"Fix: Check Azure Portal → Service Bus → Networking\n"
-                f"{'='*80}\n"
+            _startup_logger.critical(
+                f"❌ STARTUP: DNS resolution failed for {_hostname}: {_dns_error}"
             )
 
-        # STEP 2: Queue Existence Check (only if DNS resolved)
+    except Exception as _dns_exc:
+        STARTUP_STATE.service_bus_dns = ValidationResult(
+            name="service_bus_dns",
+            passed=False,
+            error_type="DNS_CHECK_EXCEPTION",
+            error_message=str(_dns_exc),
+            details={"exception_type": type(_dns_exc).__name__}
+        )
+        _startup_logger.critical(f"❌ STARTUP: DNS check exception: {_dns_exc}")
+else:
+    # No queues to validate - mark DNS as passed (not applicable)
+    STARTUP_STATE.service_bus_dns = ValidationResult(
+        name="service_bus_dns",
+        passed=True,
+        details={"message": "No queues configured - DNS check skipped"}
+    )
+    _sb_dns_passed = True
+    _startup_logger.info("⏭️ STARTUP: No queue validation needed (APP_MODE doesn't listen to any queues)")
+
+# --- SERVICE BUS QUEUE VALIDATION ---
+# Only run if DNS passed
+if _sb_dns_passed and _required_queues:
+    try:
+        from infrastructure.service_bus import ServiceBusRepository
         _sb_repo = ServiceBusRepository()
         _missing_queues = []
         _connection_errors = []
+        _validated_queues = []
 
         for _queue_info in _required_queues:
             _queue_name = _queue_info["name"]
@@ -2296,6 +2378,7 @@ if _required_queues:
                     _missing_queues.append(_queue_info)
                     _startup_logger.warning(f"❌ Queue missing: {_queue_name} ({_queue_info['purpose']})")
                 else:
+                    _validated_queues.append(_queue_name)
                     _startup_logger.info(f"✅ Queue exists: {_queue_name}")
 
             except Exception as _qe:
@@ -2321,92 +2404,124 @@ if _required_queues:
 
                 _connection_errors.append(_queue_info)
                 _startup_logger.warning(
-                    f"❌ Queue connection error: {_queue_name}\n"
-                    f"   Type: {_queue_info['error_type']}\n"
-                    f"   Error: {_queue_info['error']}\n"
-                    f"   Fix: {_queue_info['fix']}"
+                    f"❌ Queue connection error: {_queue_name} - {_queue_info['error_type']}"
                 )
 
-        # STEP 3: Report results with clear categorization
-        if _connection_errors:
-            # Connection errors are more severe than missing queues
+        # Store results
+        if _connection_errors or _missing_queues:
+            STARTUP_STATE.service_bus_queues = ValidationResult(
+                name="service_bus_queues",
+                passed=False,
+                error_type="QUEUE_VALIDATION_FAILED",
+                error_message=f"{len(_connection_errors)} connection errors, {len(_missing_queues)} missing queues",
+                details={
+                    "connection_errors": [
+                        {"name": q["name"], "error_type": q["error_type"], "fix": q["fix"]}
+                        for q in _connection_errors
+                    ],
+                    "missing_queues": [q["name"] for q in _missing_queues],
+                    "validated_queues": _validated_queues
+                }
+            )
             _startup_logger.critical(
-                f"❌ STARTUP_FAILED: Service Bus connection errors for APP_MODE='{_app_mode.mode.value}'\n"
-                f"   This is a CONNECTIVITY issue (auth, network, or firewall).\n"
-                f"   DNS resolved successfully, but cannot connect to queues."
+                f"❌ STARTUP: Service Bus queue validation failed - "
+                f"{len(_connection_errors)} errors, {len(_missing_queues)} missing"
             )
-            raise RuntimeError(
-                f"\n{'='*80}\n"
-                f"FATAL: Service Bus connection errors (not missing queues)\n"
-                f"{'='*80}\n"
-                f"APP_MODE: {_app_mode.mode.value}\n"
-                f"DNS: ✅ Resolved ({_hostname} → {_resolved_ips[:2]})\n"
-                f"\n"
-                f"Connection errors:\n" +
-                "\n".join([
-                    f"  - {q['name']}: {q['error_type']}\n"
-                    f"    Error: {q['error']}\n"
-                    f"    Fix: {q['fix']}"
-                    for q in _connection_errors
-                ]) +
-                f"\n{'='*80}\n"
+        else:
+            STARTUP_STATE.service_bus_queues = ValidationResult(
+                name="service_bus_queues",
+                passed=True,
+                details={"validated_queues": _validated_queues}
             )
-
-        if _missing_queues:
-            _missing_names = [q["name"] for q in _missing_queues]
-            _startup_logger.critical(
-                f"❌ STARTUP_FAILED: Missing Service Bus queues for APP_MODE='{_app_mode.mode.value}': "
-                f"{_missing_names}. Create queues or change APP_MODE."
-            )
-            raise RuntimeError(
-                f"\n{'='*80}\n"
-                f"FATAL: Required Service Bus queues do not exist\n"
-                f"{'='*80}\n"
-                f"APP_MODE: {_app_mode.mode.value}\n"
-                f"DNS: ✅ Resolved ({_hostname})\n"
-                f"Connection: ✅ Working\n"
-                f"\n"
-                f"Missing queues:\n" +
-                "\n".join([f"  - {q['name']}: {q['purpose']} (required by {q['flag']})" for q in _missing_queues]) +
-                f"\n\nFix options:\n"
-                f"  1. Create missing queues in Azure Service Bus\n"
-                f"  2. Run POST /api/dbadmin/maintenance?action=full-rebuild&confirm=yes\n"
-                f"  3. Change APP_MODE to a mode that doesn't require these queues\n"
-                f"{'='*80}\n"
-            )
-
-        _startup_logger.info(f"✅ STARTUP: All {len(_required_queues)} required queues validated")
+            _startup_logger.info(f"✅ STARTUP: All {len(_required_queues)} required queues validated")
 
     except ImportError as _ie:
-        _startup_logger.warning(f"⚠️ STARTUP: Could not import ServiceBusRepository for queue validation: {_ie}")
-        # Don't fail startup - let the trigger registration fail naturally if needed
-    except RuntimeError:
-        # Re-raise our own RuntimeError (DNS failure, connection errors, or missing queues)
-        raise
-    except Exception as _e:
-        _startup_logger.warning(f"⚠️ STARTUP: Queue validation skipped due to error: {_e}")
-        # Don't fail startup for unexpected errors - let health check catch it later
-else:
-    _startup_logger.info("⏭️ STARTUP: No queue validation needed (APP_MODE doesn't listen to any queues)")
+        STARTUP_STATE.service_bus_queues = ValidationResult(
+            name="service_bus_queues",
+            passed=False,
+            error_type="IMPORT_FAILED",
+            error_message=str(_ie),
+            details={"message": "Could not import ServiceBusRepository"}
+        )
+        _startup_logger.warning(f"⚠️ STARTUP: Could not import ServiceBusRepository: {_ie}")
 
-# 16 DEC 2025: Verbose logging for trigger registration
+    except Exception as _e:
+        STARTUP_STATE.service_bus_queues = ValidationResult(
+            name="service_bus_queues",
+            passed=False,
+            error_type="VALIDATION_EXCEPTION",
+            error_message=str(_e),
+            details={"exception_type": type(_e).__name__}
+        )
+        _startup_logger.warning(f"⚠️ STARTUP: Queue validation exception: {_e}")
+
+elif not _sb_dns_passed:
+    # DNS failed - skip queue validation
+    STARTUP_STATE.service_bus_queues = ValidationResult(
+        name="service_bus_queues",
+        passed=False,
+        error_type="SKIPPED",
+        error_message="Skipped due to DNS resolution failure",
+        details={"reason": "DNS must resolve before queue validation can run"}
+    )
+else:
+    # No queues to validate
+    STARTUP_STATE.service_bus_queues = ValidationResult(
+        name="service_bus_queues",
+        passed=True,
+        details={"message": "No queues configured"}
+    )
+
+# ============================================================================
+# PHASE 2 COMPLETE: Finalize Startup State
+# ============================================================================
+STARTUP_STATE.finalize()
+
+if STARTUP_STATE.all_passed:
+    _startup_logger.info("✅ STARTUP: Phase 2 complete - All validations PASSED")
+else:
+    _failed_checks = STARTUP_STATE.get_failed_checks()
+    _startup_logger.warning(
+        f"⚠️ STARTUP: Phase 2 complete - {len(_failed_checks)} validation(s) FAILED: "
+        f"{[f.name for f in _failed_checks]}"
+    )
+    _startup_logger.warning("   ⚠️ Service Bus triggers will NOT be registered")
+    _startup_logger.warning("   ℹ️ App will respond to /api/livez, /api/readyz, /api/health only")
+
+# ============================================================================
+# PHASE 3: CONDITIONAL TRIGGER REGISTRATION (03 JAN 2026 - STARTUP_REFORM.md)
+# ============================================================================
+# Service Bus triggers are ONLY registered if all startup validations passed.
+# This ensures we don't register triggers for queues that are inaccessible.
+# ============================================================================
+
 logger.info("=" * 70)
 logger.info("🔌 SERVICE BUS TRIGGER REGISTRATION STARTING")
 logger.info("=" * 70)
 logger.info(f"   APP_MODE: {_app_mode.mode.value}")
 logger.info(f"   APP_NAME: {_app_mode.app_name}")
+logger.info(f"   STARTUP_STATE.all_passed: {STARTUP_STATE.all_passed}")
 logger.info(f"   listens_to_jobs_queue: {_app_mode.listens_to_jobs_queue}")
 logger.info(f"   listens_to_raster_tasks: {_app_mode.listens_to_raster_tasks}")
 logger.info(f"   listens_to_vector_tasks: {_app_mode.listens_to_vector_tasks}")
 logger.info("-" * 70)
 
+# CRITICAL: Only register Service Bus triggers if startup validation passed
+if not STARTUP_STATE.all_passed:
+    logger.warning("⏭️ SKIPPING ALL SERVICE BUS TRIGGERS - Startup validation failed")
+    logger.warning("   App will only respond to: /api/livez, /api/readyz, /api/health")
+    _failed = STARTUP_STATE.get_failed_checks()
+    logger.warning(f"   Failed checks: {[f.name for f in _failed]}")
+
 # Jobs Queue Trigger - Platform modes only (job orchestration + stage_complete signals)
-if _app_mode.listens_to_jobs_queue:
+if STARTUP_STATE.all_passed and _app_mode.listens_to_jobs_queue:
     logger.info("✅ REGISTERING: geospatial-jobs queue trigger (job orchestration)")
+elif _app_mode.listens_to_jobs_queue:
+    logger.warning("⏭️ SKIPPING: geospatial-jobs queue trigger (validation failed)")
 else:
     logger.warning("⏭️ SKIPPING: geospatial-jobs queue trigger (APP_MODE=%s)", _app_mode.mode.value)
 
-if _app_mode.listens_to_jobs_queue:
+if STARTUP_STATE.all_passed and _app_mode.listens_to_jobs_queue:
     @app.service_bus_queue_trigger(
         arg_name="msg",
         queue_name="geospatial-jobs",
@@ -2568,12 +2683,14 @@ if _app_mode.listens_to_jobs_queue:
 
 
 # Raster Tasks Queue Trigger - Raster worker/platform_raster/standalone modes
-if _app_mode.listens_to_raster_tasks:
+if STARTUP_STATE.all_passed and _app_mode.listens_to_raster_tasks:
     logger.info("✅ REGISTERING: raster-tasks queue trigger (GDAL/COG operations)")
+elif _app_mode.listens_to_raster_tasks:
+    logger.warning("⏭️ SKIPPING: raster-tasks queue trigger (validation failed)")
 else:
     logger.warning("⏭️ SKIPPING: raster-tasks queue trigger (APP_MODE=%s)", _app_mode.mode.value)
 
-if _app_mode.listens_to_raster_tasks:
+if STARTUP_STATE.all_passed and _app_mode.listens_to_raster_tasks:
     @app.service_bus_queue_trigger(
         arg_name="msg",
         queue_name="raster-tasks",
@@ -2720,33 +2837,38 @@ if _app_mode.listens_to_raster_tasks:
 
 
 # Vector Tasks Queue Trigger - Vector worker/platform_vector/standalone modes
-if _app_mode.listens_to_vector_tasks:
+if STARTUP_STATE.all_passed and _app_mode.listens_to_vector_tasks:
     logger.info("✅ REGISTERING: vector-tasks queue trigger (PostGIS/geopandas operations)")
+elif _app_mode.listens_to_vector_tasks:
+    logger.warning("⏭️ SKIPPING: vector-tasks queue trigger (validation failed)")
 else:
     logger.warning("⏭️ SKIPPING: vector-tasks queue trigger (APP_MODE=%s)", _app_mode.mode.value)
 
-# 16 DEC 2025: Summary of trigger registration
+# Summary of trigger registration (updated 03 JAN 2026 for STARTUP_REFORM.md)
 _registered_triggers = []
-if _app_mode.listens_to_jobs_queue:
+if STARTUP_STATE.all_passed and _app_mode.listens_to_jobs_queue:
     _registered_triggers.append("geospatial-jobs")
-if _app_mode.listens_to_raster_tasks:
+if STARTUP_STATE.all_passed and _app_mode.listens_to_raster_tasks:
     _registered_triggers.append("raster-tasks")
-if _app_mode.listens_to_vector_tasks:
+if STARTUP_STATE.all_passed and _app_mode.listens_to_vector_tasks:
     _registered_triggers.append("vector-tasks")
 
 logger.info("-" * 70)
 logger.info(f"🔌 SERVICE BUS TRIGGER REGISTRATION COMPLETE")
 logger.info(f"   Triggers registered: {len(_registered_triggers)}/3")
 logger.info(f"   Queues: {_registered_triggers}")
-if len(_registered_triggers) == 0:
-    logger.error("❌ NO SERVICE BUS TRIGGERS REGISTERED - APP WILL NOT PROCESS MESSAGES!")
+if not STARTUP_STATE.all_passed:
+    logger.warning("⚠️ NO TRIGGERS REGISTERED - Startup validation failed")
+    logger.warning("   Use GET /api/readyz to see validation errors")
+elif len(_registered_triggers) == 0:
+    logger.warning("⚠️ NO TRIGGERS REGISTERED - APP_MODE doesn't listen to any queues")
 elif len(_registered_triggers) < 3:
     logger.warning(f"⚠️ Partial trigger registration (APP_MODE={_app_mode.mode.value})")
 else:
     logger.info("✅ All 3 Service Bus triggers registered (standalone mode)")
 logger.info("=" * 70)
 
-if _app_mode.listens_to_vector_tasks:
+if STARTUP_STATE.all_passed and _app_mode.listens_to_vector_tasks:
     @app.service_bus_queue_trigger(
         arg_name="msg",
         queue_name="vector-tasks",

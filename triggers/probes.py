@@ -25,18 +25,25 @@ Design Principles:
 
 Usage in function_app.py:
     # At the VERY TOP, before any imports that might fail:
-    from triggers.probes import register_probes
-    register_probes(app)
+    from triggers.probes import bp as probes_bp
+    app.register_functions(probes_bp)
 
 See STARTUP_REFORM.md for full design documentation.
+
+Exports:
+    bp: Blueprint with livez/readyz routes
+    get_probe_status(): Helper for health endpoint integration
 """
 
 import json
 import azure.functions as func
-from typing import Optional
+from azure.functions import Blueprint
 
 # Import startup state - this module has zero dependencies
 from startup_state import STARTUP_STATE
+
+# Create Blueprint for probe endpoints
+bp = Blueprint()
 
 
 class LivezProbe:
@@ -140,61 +147,48 @@ _livez_probe = LivezProbe()
 _readyz_probe = ReadyzProbe()
 
 
-def register_probes(app: func.FunctionApp) -> None:
+# ============================================================================
+# BLUEPRINT ROUTES
+# ============================================================================
+# These routes are registered via Blueprint pattern for consistency with
+# other trigger modules (admin_db.py, admin_servicebus.py, h3_sources).
+# ============================================================================
+
+@bp.route(
+    route="livez",
+    methods=["GET"],
+    auth_level=func.AuthLevel.ANONYMOUS
+)
+def livez(req: func.HttpRequest) -> func.HttpResponse:
     """
-    Register probe endpoints on the function app.
+    Liveness probe - Is the process alive?
 
-    IMPORTANT: Call this at the VERY TOP of function_app.py,
-    BEFORE any imports that might fail or any validation code.
+    Always returns 200 if the Python process loaded successfully.
+    Used by load balancers to detect crashed processes.
 
-    Args:
-        app: The Azure Functions app instance
-
-    Example:
-        import azure.functions as func
-        app = func.FunctionApp()
-
-        # Register probes FIRST
-        from triggers.probes import register_probes
-        register_probes(app)
-
-        # Now do imports and validation...
+    Returns:
+        200: {"status": "alive", "probe": "livez"}
     """
+    return _livez_probe.handle(req)
 
-    @app.route(
-        route="livez",
-        methods=["GET"],
-        auth_level=func.AuthLevel.ANONYMOUS
-    )
-    def livez(req: func.HttpRequest) -> func.HttpResponse:
-        """
-        Liveness probe - Is the process alive?
 
-        Always returns 200 if the Python process loaded successfully.
-        Used by load balancers to detect crashed processes.
+@bp.route(
+    route="readyz",
+    methods=["GET"],
+    auth_level=func.AuthLevel.ANONYMOUS
+)
+def readyz(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Readiness probe - Is the app ready to handle requests?
 
-        Returns:
-            200: {"status": "alive", "probe": "livez"}
-        """
-        return _livez_probe.handle(req)
+    Returns 200 if all startup validations passed.
+    Returns 503 if any validation failed (with error details).
 
-    @app.route(
-        route="readyz",
-        methods=["GET"],
-        auth_level=func.AuthLevel.ANONYMOUS
-    )
-    def readyz(req: func.HttpRequest) -> func.HttpResponse:
-        """
-        Readiness probe - Is the app ready to handle requests?
-
-        Returns 200 if all startup validations passed.
-        Returns 503 if any validation failed (with error details).
-
-        Returns:
-            200: {"status": "ready", "probe": "readyz", ...}
-            503: {"status": "not_ready", "probe": "readyz", "errors": [...]}
-        """
-        return _readyz_probe.handle(req)
+    Returns:
+        200: {"status": "ready", "probe": "readyz", ...}
+        503: {"status": "not_ready", "probe": "readyz", "errors": [...]}
+    """
+    return _readyz_probe.handle(req)
 
 
 def get_probe_status() -> dict:

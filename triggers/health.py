@@ -37,6 +37,7 @@ For full deployment verification steps, see CLAUDE.md → Post-Deployment Valida
 Comprehensive system health monitoring endpoint for GET /api/health.
 
 Components Monitored:
+    - Startup Validation (03 JAN 2026) - env_vars, imports, Service Bus DNS/queues
     - Import Validation
     - Service Bus Queues
     - Database Configuration
@@ -143,6 +144,15 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         if import_health["status"] == "unhealthy":
             health_data["status"] = "unhealthy"
             health_data["errors"].extend(import_health.get("errors", []))
+
+        # Check startup validation state (03 JAN 2026 - STARTUP_REFORM.md)
+        # Shows results from Phase 2 soft validation (env_vars, DNS, queues)
+        startup_health = self._check_startup_validation()
+        health_data["components"]["startup_validation"] = startup_health
+        if startup_health["status"] == "unhealthy":
+            health_data["status"] = "unhealthy"
+            if startup_health.get("errors"):
+                health_data["errors"].extend(startup_health["errors"])
 
         # Check critical storage containers (08 DEC 2025)
         storage_containers_health = self._check_storage_containers()
@@ -1030,7 +1040,86 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
     def _should_check_database(self) -> bool:
         """Check if database health check is enabled."""
         return os.getenv("ENABLE_DATABASE_HEALTH_CHECK", "false").lower() == "true"
-    
+
+    def _check_startup_validation(self) -> Dict[str, Any]:
+        """
+        Check startup validation state from STARTUP_STATE (03 JAN 2026 - STARTUP_REFORM.md).
+
+        This component shows the results of Phase 2 soft validation that runs
+        during function_app.py startup. It checks:
+        - env_vars: Required environment variables present
+        - imports: Critical Python modules importable
+        - service_bus_dns: Service Bus namespace DNS resolution
+        - service_bus_queues: Required queues exist and accessible
+
+        If any validation failed, Service Bus triggers are NOT registered,
+        but diagnostic endpoints (/api/livez, /api/readyz, /api/health) remain
+        available to help diagnose the issue.
+
+        Returns:
+            Dict with startup validation status and any failures
+        """
+        def check_startup():
+            from startup_state import STARTUP_STATE
+
+            # Check if validation has completed
+            if not STARTUP_STATE.validation_complete:
+                return {
+                    "validation_complete": False,
+                    "all_passed": False,
+                    "message": "Startup validation still in progress",
+                    "startup_time": STARTUP_STATE.startup_time
+                }
+
+            # Get summary from STARTUP_STATE
+            summary = STARTUP_STATE.get_summary()
+
+            # Build detailed check results
+            checks = {}
+            for check_name in ["env_vars", "imports", "service_bus_dns", "service_bus_queues"]:
+                check_result = getattr(STARTUP_STATE, check_name, None)
+                if check_result:
+                    checks[check_name] = check_result.to_dict()
+
+            result = {
+                "validation_complete": STARTUP_STATE.validation_complete,
+                "all_passed": STARTUP_STATE.all_passed,
+                "startup_time": STARTUP_STATE.startup_time,
+                "summary": summary,
+                "checks": checks
+            }
+
+            # Add critical error if present
+            if STARTUP_STATE.critical_error:
+                result["critical_error"] = STARTUP_STATE.critical_error
+
+            # Add service bus trigger status
+            result["triggers_registered"] = STARTUP_STATE.all_passed
+
+            return result
+
+        # Use check_component_health wrapper for consistent formatting
+        component_result = self.check_component_health(
+            "startup_validation",
+            check_startup,
+            description="Startup validation state (env_vars, imports, Service Bus DNS/queues)"
+        )
+
+        # Override status based on STARTUP_STATE.all_passed
+        # The check_component_health only sees exceptions, not logical failures
+        try:
+            from startup_state import STARTUP_STATE
+            if STARTUP_STATE.validation_complete and not STARTUP_STATE.all_passed:
+                component_result["status"] = "unhealthy"
+                failed = STARTUP_STATE.get_failed_checks()
+                component_result["errors"] = [
+                    f"{f.name}: {f.error_message or f.error_type}" for f in failed
+                ]
+        except Exception:
+            pass  # If we can't import STARTUP_STATE, the check already failed
+
+        return component_result
+
     def _check_import_validation(self) -> Dict[str, Any]:
         """
         Lightweight import validation check (12 DEC 2025 - Performance Fix).

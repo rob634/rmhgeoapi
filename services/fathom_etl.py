@@ -437,20 +437,43 @@ def fathom_band_stack(params: dict, context: dict = None) -> dict:
     # Idempotency check (check silver for existing output)
     if not force_reprocess and silver_repo.blob_exists(output_container, output_blob_path):
         logger.info(f"⏭️ SKIP: Output already exists: {output_container}/{output_blob_path}")
+
+        # Read bounds from existing file for STAC registration
+        bounds_dict = None
+        try:
+            import rasterio
+            from io import BytesIO
+            blob_bytes = silver_repo.read_blob(output_container, output_blob_path)
+            with rasterio.open(BytesIO(blob_bytes)) as src:
+                bounds = src.bounds
+                bounds_dict = {
+                    "west": bounds.left,
+                    "south": bounds.bottom,
+                    "east": bounds.right,
+                    "north": bounds.top
+                }
+            logger.info(f"   📐 Read bounds from existing COG: {bounds_dict}")
+        except Exception as e:
+            logger.warning(f"   ⚠️ Could not read bounds from existing COG: {e}")
+
+        result = {
+            "output_blob": output_blob_path,
+            "output_container": output_container,
+            "output_name": output_name,
+            "tile": tile,
+            "flood_type": tile_group["flood_type"],
+            "defense": tile_group["defense"],
+            "year": tile_group["year"],
+            "ssp": tile_group.get("ssp"),
+            "message": "Output COG already exists - skipped processing"
+        }
+        if bounds_dict:
+            result["bounds"] = bounds_dict
+
         return {
             "success": True,
             "skipped": True,
-            "result": {
-                "output_blob": output_blob_path,
-                "output_container": output_container,
-                "output_name": output_name,
-                "tile": tile,
-                "flood_type": tile_group["flood_type"],
-                "defense": tile_group["defense"],
-                "year": tile_group["year"],
-                "ssp": tile_group.get("ssp"),
-                "message": "Output COG already exists - skipped processing"
-            }
+            "result": result
         }
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -901,21 +924,44 @@ def fathom_spatial_merge(params: dict, context: dict = None) -> dict:
     # Idempotency check
     if not force_reprocess and blob_repo.blob_exists(output_container, output_blob_path):
         logger.info(f"⏭️ SKIP: Output already exists: {output_container}/{output_blob_path}")
+
+        # Read bounds from existing file for STAC registration
+        bounds_dict = None
+        try:
+            import rasterio
+            from io import BytesIO
+            blob_bytes = blob_repo.read_blob(output_container, output_blob_path)
+            with rasterio.open(BytesIO(blob_bytes)) as src:
+                bounds = src.bounds
+                bounds_dict = {
+                    "west": bounds.left,
+                    "south": bounds.bottom,
+                    "east": bounds.right,
+                    "north": bounds.top
+                }
+            logger.info(f"   📐 Read bounds from existing COG: {bounds_dict}")
+        except Exception as e:
+            logger.warning(f"   ⚠️ Could not read bounds from existing COG: {e}")
+
+        result = {
+            "output_blob": output_blob_path,
+            "output_container": output_container,
+            "output_name": output_name,
+            "grid_cell": grid_cell,
+            "flood_type": grid_group["flood_type"],
+            "defense": grid_group["defense"],
+            "year": grid_group["year"],
+            "ssp": grid_group.get("ssp"),
+            "tile_count": len(tiles),
+            "message": "Output COG already exists - skipped processing"
+        }
+        if bounds_dict:
+            result["bounds"] = bounds_dict
+
         return {
             "success": True,
             "skipped": True,
-            "result": {
-                "output_blob": output_blob_path,
-                "output_container": output_container,
-                "output_name": output_name,
-                "grid_cell": grid_cell,
-                "flood_type": grid_group["flood_type"],
-                "defense": grid_group["defense"],
-                "year": grid_group["year"],
-                "ssp": grid_group.get("ssp"),
-                "tile_count": len(tiles),
-                "message": "Output COG already exists - skipped processing"
-            }
+            "result": result
         }
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -1258,6 +1304,11 @@ def fathom_stac_register(params: dict, context: dict = None) -> dict:
     for cog_result in cog_results:
         output_blob = cog_result["output_blob"]
         output_name = cog_result["output_name"]
+
+        # Skip items without bounds (e.g., skipped due to idempotency)
+        if "bounds" not in cog_result:
+            logger.warning(f"   ⚠️ Skipping STAC item for {output_name} - no bounds (likely skipped task)")
+            continue
 
         # Build STAC item
         item_id = output_name

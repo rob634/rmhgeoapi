@@ -24,6 +24,9 @@ from triggers.admin.servicebus import ServiceBusAdminTrigger, servicebus_admin_t
 from triggers.admin.admin_db import bp as admin_db_bp
 from triggers.admin.admin_servicebus import bp as admin_servicebus_bp
 
+# Phase 4: System Snapshot Blueprint (04 JAN 2026)
+from triggers.admin.snapshot import bp as snapshot_bp, SnapshotAdminTrigger, snapshot_admin_trigger
+
 # Export all admin triggers
 __all__ = [
     # Phase 1: Database Admin - Classes
@@ -48,4 +51,8 @@ __all__ = [
     # Phase 3: Admin Blueprints
     'admin_db_bp',
     'admin_servicebus_bp',
+    # Phase 4: System Snapshot (04 JAN 2026)
+    'snapshot_bp',
+    'SnapshotAdminTrigger',
+    'snapshot_admin_trigger',
 ]

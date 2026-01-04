@@ -452,14 +452,15 @@ logger.info(f"   ✅ Platform callback registered (will be connected on Platform
 # BLUEPRINT REGISTRATIONS (15 DEC 2025, updated 02 JAN 2026)
 # ============================================================================
 # DEV/Admin endpoints in triggers/admin/ Blueprint modules
-from triggers.admin import admin_db_bp, admin_servicebus_bp
+from triggers.admin import admin_db_bp, admin_servicebus_bp, snapshot_bp
 from web_interfaces.h3_sources import bp as h3_sources_bp
 
 app.register_functions(admin_db_bp)
 app.register_functions(admin_servicebus_bp)
 app.register_functions(h3_sources_bp)
+app.register_functions(snapshot_bp)
 
-logger.info("✅ Blueprints registered: admin_db, admin_servicebus, h3_sources")
+logger.info("✅ Blueprints registered: admin_db, admin_servicebus, h3_sources, snapshot")
 
 
 
@@ -2479,6 +2480,29 @@ STARTUP_STATE.finalize()
 
 if STARTUP_STATE.all_passed:
     _startup_logger.info("✅ STARTUP: Phase 2 complete - All validations PASSED")
+
+    # ========================================================================
+    # STARTUP SNAPSHOT CAPTURE (04 JAN 2026)
+    # ========================================================================
+    # Capture system configuration snapshot on cold start for drift detection.
+    # This runs after all validations pass to capture baseline config state.
+    # Wrapped in try/except to ensure startup continues even if snapshot fails.
+    # ========================================================================
+    try:
+        from services.snapshot_service import snapshot_service
+        _snapshot_result = snapshot_service.capture_startup_snapshot()
+        if _snapshot_result.get("success"):
+            _startup_logger.info(
+                f"✅ STARTUP: Snapshot captured (id={_snapshot_result.get('snapshot_id')}, "
+                f"drift={_snapshot_result.get('has_drift')})"
+            )
+            if _snapshot_result.get("has_drift"):
+                _startup_logger.warning("⚠️ STARTUP: Configuration drift detected since last snapshot!")
+        else:
+            _startup_logger.warning(f"⚠️ STARTUP: Snapshot capture failed: {_snapshot_result.get('error')}")
+    except Exception as _snapshot_error:
+        _startup_logger.warning(f"⚠️ STARTUP: Snapshot capture skipped (non-critical): {_snapshot_error}")
+
 else:
     _failed_checks = STARTUP_STATE.get_failed_checks()
     _startup_logger.warning(
@@ -3323,6 +3347,52 @@ def curated_dataset_scheduler(timer: func.TimerRequest) -> None:
     Schedule: Daily at 2 AM UTC (most datasets update weekly at most)
     """
     curated_scheduler_trigger.handle_timer(timer)
+
+
+# ============================================================================
+# SYSTEM SNAPSHOT SCHEDULER (04 JAN 2026)
+# ============================================================================
+# Hourly timer trigger to capture system configuration snapshots.
+# Detects configuration drift in Azure platform settings.
+# Snapshots are also captured at startup and via manual endpoint.
+# ============================================================================
+
+@app.timer_trigger(
+    schedule="0 0 * * * *",  # Every hour on the hour
+    arg_name="timer",
+    run_on_startup=False
+)
+def system_snapshot_timer(timer: func.TimerRequest) -> None:
+    """
+    Timer trigger: Capture system configuration snapshot hourly.
+
+    Captures current system configuration including network/VNet settings,
+    instance info, and config sources. Compares to previous snapshot and
+    logs if configuration drift is detected.
+
+    Schedule: Every hour on the hour (aligns with instance scaling)
+    """
+    from services.snapshot_service import snapshot_service
+    from util_logger import LoggerFactory, ComponentType
+
+    timer_logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, "snapshot_timer")
+    timer_logger.info("⏰ Timer: Starting system snapshot capture")
+
+    if timer.past_due:
+        timer_logger.warning("⏰ Timer: System snapshot timer is past due!")
+
+    result = snapshot_service.capture_scheduled_snapshot()
+
+    if result.get("success"):
+        timer_logger.info(
+            f"⏰ Timer: Snapshot captured - id={result.get('snapshot_id')}, "
+            f"drift={result.get('has_drift')}, "
+            f"duration={result.get('duration_seconds')}s"
+        )
+        if result.get("has_drift"):
+            timer_logger.warning("⚠️ DRIFT DETECTED: Configuration changed since last snapshot!")
+    else:
+        timer_logger.error(f"⏰ Timer: Snapshot failed - {result.get('error')}")
 
 
 # ============================================================================

@@ -209,19 +209,22 @@ persist this data for drift detection and audit trails.
 | Health: network_environment | Captures all WEBSITE_*/AZURE_* vars | ✅ Deployed |
 | Health: instance_info | Instance ID, worker config, cold start detection | ✅ Committed |
 | Scale controller logging | `SCALE_CONTROLLER_LOGGING_ENABLED=AppInsights:Verbose` | ✅ Enabled |
+| Blueprint pattern investigation | Reviewed probes.py; snapshot follows same Blueprint pattern | ✅ |
+| Snapshot capture service | `services/snapshot_service.py` - capture + drift detection | ✅ |
+| Config hash computation | SHA256 of stable config fields for drift detection | ✅ |
+| Drift diff computation | Compare current vs previous snapshot, identify changes | ✅ |
+| Startup trigger | Capture snapshot in `function_app.py` after Phase 2 validation | ✅ |
+| Scheduled trigger | Timer trigger (hourly) in `function_app.py` | ✅ |
+| Manual trigger | `POST /api/admin/snapshot` + `GET /api/admin/snapshot/drift` | ✅ |
+| Version bump | 0.7.2.1 → 0.7.3 | ✅ |
 
-### Pending Implementation
+### Pending Deployment
 
 | Task | Description | Priority |
 |------|-------------|----------|
-| **Investigate Blueprint pattern** | Review how probes.py uses Blueprint for triggers; determine if snapshot triggers should follow same pattern | 🔴 High |
-| Snapshot capture service | `services/snapshot_service.py` - core capture logic | 🔴 High |
-| Config hash computation | SHA256 of stable config fields for drift detection | 🔴 High |
-| Drift diff computation | Compare current vs previous snapshot, identify changes | 🟡 Medium |
-| Startup trigger | Capture snapshot in `function_app.py` after startup validation | 🟡 Medium |
-| Scheduled trigger | Timer trigger (hourly) for periodic snapshots | 🟡 Medium |
-| Manual trigger | `POST /api/admin/snapshot` endpoint | 🟡 Medium |
-| Deploy schema | Run full-rebuild to create `system_snapshots` table | 🟡 Medium |
+| Deploy changes | Deploy v0.7.3 to Azure | 🔴 High |
+| Deploy schema | Run full-rebuild to create `system_snapshots` table | 🔴 High |
+| Verify endpoints | Test `/api/admin/snapshot` endpoints | 🟡 Medium |
 
 ### Snapshot Trigger Types
 
@@ -236,11 +239,11 @@ persist this data for drift detection and audit trails.
 
 | File | Purpose |
 |------|---------|
-| `core/models/system_snapshot.py` | Pydantic model (NEW) |
-| `core/schema/sql_generator.py` | DDL generation (MODIFIED) |
-| `triggers/probes.py` | Blueprint pattern reference |
-| `services/snapshot_service.py` | Capture service (TO CREATE) |
-| `triggers/scheduled.py` | Timer triggers (TO CREATE or extend) |
+| `core/models/system_snapshot.py` | Pydantic model + SnapshotTriggerType enum |
+| `core/schema/sql_generator.py` | DDL generation for system_snapshots table |
+| `services/snapshot_service.py` | SnapshotService + SnapshotRepository |
+| `triggers/admin/snapshot.py` | Blueprint with HTTP endpoints |
+| `function_app.py` | Timer trigger + startup capture (lines 2484-2504, 3352-3395) |
 
 ### Application Insights Queries
 

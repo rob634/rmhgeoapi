@@ -1298,8 +1298,9 @@ def fathom_stac_register(params: dict, context: dict = None) -> dict:
 
     # Create STAC items for each COG
     items_created = 0
-    # Silver zone storage account for STAC asset URLs
-    storage_base = f"https://{config.storage.silver.account_name}.blob.core.windows.net/{output_container}"
+    # Use /vsiaz/ path format for OAuth-compatible TiTiler-pgSTAC access
+    # Pattern matches service_stac_metadata.py Step G.5 and stac_collection.py
+    storage_base = f"/vsiaz/{output_container}"
 
     for cog_result in cog_results:
         output_blob = cog_result["output_blob"]
@@ -1389,6 +1390,38 @@ def fathom_stac_register(params: dict, context: dict = None) -> dict:
                     "type": "application/json"
                 }
             ]
+        }
+
+        # Add TiTiler visualization links (04 JAN 2026)
+        # 8-band COGs need bidx parameter; default to band 5 (1-in-100 year return period)
+        # Pattern matches service_stac_metadata.py and stac_metadata_helper.py
+        import urllib.parse
+        titiler_base = config.titiler_base_url.rstrip('/')
+        vsiaz_encoded = urllib.parse.quote(asset_href, safe='')
+        # Visualization params: band 5, rescale 0-300cm, blues colormap
+        viz_params = "bidx=5&rescale=0,300&colormap_name=blues"
+
+        item["links"].extend([
+            {
+                "rel": "preview",
+                "href": f"{titiler_base}/cog/WebMercatorQuad/map.html?url={vsiaz_encoded}&{viz_params}",
+                "type": "text/html",
+                "title": "Interactive map viewer (TiTiler) - 1-in-100 year flood"
+            },
+            {
+                "rel": "tilejson",
+                "href": f"{titiler_base}/cog/WebMercatorQuad/tilejson.json?url={vsiaz_encoded}&{viz_params}",
+                "type": "application/json",
+                "title": "TileJSON specification"
+            }
+        ])
+
+        # Add thumbnail asset
+        item["assets"]["thumbnail"] = {
+            "href": f"{titiler_base}/cog/preview.png?url={vsiaz_encoded}&max_size=256&{viz_params}",
+            "type": "image/png",
+            "roles": ["thumbnail"],
+            "title": "Preview thumbnail (1-in-100 year flood depth)"
         }
 
         # Insert item (note: PgStacBootstrap.insert_item signature is (item, collection_id))

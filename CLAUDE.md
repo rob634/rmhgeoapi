@@ -1,6 +1,6 @@
 # CLAUDE.md - Project Context
 
-**Last Updated**: 29 DEC 2025
+**Last Updated**: 04 JAN 2026
 
 ---
 
@@ -98,6 +98,25 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 ```bash
 func azure functionapp publish rmhazuregeoapi --python --build remote
 ```
+
+### Versioning Convention
+
+Version format: `0.v.i.d` (defined 04 JAN 2026)
+
+| Segment | Meaning | When to Increment |
+|---------|---------|-------------------|
+| `0` | Pre-production | Stays 0 until production release (then 1.0.0) |
+| `v` | Version | Major feature set / architectural epoch |
+| `i` | Iteration | Work batch (features, refactoring, reviews) |
+| `d` | Deployment | Optional - hotfixes between iterations |
+
+**Examples:**
+- `0.7.3` → Version 7, iteration 3
+- `0.7.3.1` → Deployment fix after 0.7.3 (no new features)
+- `0.7.4` → New iteration with features
+- `0.8.0` → New major version/epoch
+
+**Version location**: `config/__init__.py` → `__version__`
 
 ### Post-Deployment Validation (REQUIRED)
 

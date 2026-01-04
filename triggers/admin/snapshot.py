@@ -227,7 +227,7 @@ snapshot_admin_trigger = SnapshotAdminTrigger.instance()
 # ============================================================================
 
 @bp.route(
-    route="admin/snapshot",
+    route="system/snapshot",
     methods=["POST"],
     auth_level=func.AuthLevel.ANONYMOUS
 )
@@ -235,8 +235,8 @@ def admin_snapshot_capture(req: func.HttpRequest) -> func.HttpResponse:
     """
     Capture a manual system configuration snapshot.
 
-    POST /api/admin/snapshot
-    POST /api/admin/snapshot?notes=Reason+for+snapshot
+    POST /api/system/snapshot
+    POST /api/system/snapshot?notes=Reason+for+snapshot
 
     Captures current system configuration including:
         - Network environment (VNet, DNS, ASE)
@@ -254,7 +254,7 @@ def admin_snapshot_capture(req: func.HttpRequest) -> func.HttpResponse:
 
 
 @bp.route(
-    route="admin/snapshot",
+    route="system/snapshot",
     methods=["GET"],
     auth_level=func.AuthLevel.ANONYMOUS
 )
@@ -262,7 +262,7 @@ def admin_snapshot_latest(req: func.HttpRequest) -> func.HttpResponse:
     """
     Get the latest system configuration snapshot summary.
 
-    GET /api/admin/snapshot
+    GET /api/system/snapshot
 
     Returns summary of most recent snapshot including:
         - snapshot_id
@@ -280,7 +280,7 @@ def admin_snapshot_latest(req: func.HttpRequest) -> func.HttpResponse:
 
 
 @bp.route(
-    route="admin/snapshot/drift",
+    route="system/snapshot/drift",
     methods=["GET"],
     auth_level=func.AuthLevel.ANONYMOUS
 )
@@ -288,8 +288,8 @@ def admin_snapshot_drift(req: func.HttpRequest) -> func.HttpResponse:
     """
     Get history of configuration drift events.
 
-    GET /api/admin/snapshot/drift
-    GET /api/admin/snapshot/drift?limit=100
+    GET /api/system/snapshot/drift
+    GET /api/system/snapshot/drift?limit=100
 
     Returns list of snapshots where configuration drift was detected,
     including what changed from the previous snapshot.

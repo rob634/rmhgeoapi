@@ -215,7 +215,7 @@ persist this data for drift detection and audit trails.
 | Drift diff computation | Compare current vs previous snapshot, identify changes | ✅ |
 | Startup trigger | Capture snapshot in `function_app.py` after Phase 2 validation | ✅ |
 | Scheduled trigger | Timer trigger (hourly) in `function_app.py` | ✅ |
-| Manual trigger | `POST /api/admin/snapshot` + `GET /api/admin/snapshot/drift` | ✅ |
+| Manual trigger | `POST /api/system/snapshot` + `GET /api/system/snapshot/drift` | ✅ |
 | Version bump | 0.7.2.1 → 0.7.3 | ✅ |
 
 ### Pending Deployment

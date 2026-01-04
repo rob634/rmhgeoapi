@@ -1,3 +1,11 @@
+# ============================================================================
+# STAC CATALOG CONTAINER JOB
+# ============================================================================
+# STATUS: Jobs - 2-stage bulk raster STAC cataloging (fan-out pattern)
+# PURPOSE: Enumerate container rasters and extract STAC metadata to pgSTAC
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 STAC Catalog Container Job - Two-Stage Fan-Out Pattern.
 

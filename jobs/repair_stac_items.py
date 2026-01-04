@@ -1,12 +1,10 @@
 # ============================================================================
-# CLAUDE CONTEXT - STAC REPAIR JOB
+# REPAIR STAC ITEMS JOB
 # ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: Job - Scan and repair STAC catalog items
-# PURPOSE: Find and fix non-compliant STAC items in pgSTAC
-# LAST_REVIEWED: 22 DEC 2025
-# EXPORTS: RepairStacItemsJob
-# DEPENDENCIES: jobs.base, jobs.mixins, services.stac_validation
+# STATUS: Jobs - 2-stage STAC catalog repair workflow
+# PURPOSE: Scan and fix non-compliant STAC items in pgSTAC (version, datetime, geometry)
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
 # ============================================================================
 """
 STAC Repair Job.

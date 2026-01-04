@@ -1,3 +1,11 @@
+# ============================================================================
+# VALIDATE RASTER JOB
+# ============================================================================
+# STATUS: Jobs - Single-stage standalone raster validation
+# PURPOSE: Pre-flight validation without COG processing (CRS, bit-depth, type)
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Validate Raster Job - Standalone Validation.
 

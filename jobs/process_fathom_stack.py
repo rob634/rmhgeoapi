@@ -1,3 +1,11 @@
+# ============================================================================
+# PROCESS FATHOM STACK JOB
+# ============================================================================
+# STATUS: Jobs - Phase 1 Fathom band stacking workflow
+# PURPOSE: Stack 8 return period files into multi-band COGs (~1M outputs)
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Process Fathom Stack Job - Phase 1: Band Stacking.
 

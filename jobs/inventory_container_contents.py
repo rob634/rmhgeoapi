@@ -1,3 +1,11 @@
+# ============================================================================
+# INVENTORY CONTAINER CONTENTS JOB
+# ============================================================================
+# STATUS: Jobs - 3-stage container inventory with analysis modes
+# PURPOSE: Consolidated container inventory with basic or geospatial analysis
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Inventory Container Contents Job.
 

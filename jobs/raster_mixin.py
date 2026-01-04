@@ -1,3 +1,11 @@
+# ============================================================================
+# RASTER MIXIN
+# ============================================================================
+# STATUS: Jobs - Shared schema constants and helpers for raster workflows
+# PURPOSE: Composable parameter schemas for all raster processing jobs
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Raster Mixin - Shared Infrastructure for Raster Workflows.
 

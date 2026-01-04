@@ -189,6 +189,80 @@ themes:
 
 ---
 
+## System Diagnostics & Configuration Drift Detection
+
+**Added**: 04 JAN 2026
+**Purpose**: Capture Azure platform configuration snapshots to detect changes in corporate environments
+
+### Background
+
+Corporate Azure environments (ASE, VNet) have configurations that can change without warning.
+The enhanced health endpoint now captures 90+ environment variables. System snapshots will
+persist this data for drift detection and audit trails.
+
+### Completed (04 JAN 2026)
+
+| Task | Description | Status |
+|------|-------------|--------|
+| Database schema | `app.system_snapshots` table with Pydantic model | ✅ |
+| SQL generator | Enum, table, indexes added to `sql_generator.py` | ✅ |
+| Health: network_environment | Captures all WEBSITE_*/AZURE_* vars | ✅ Deployed |
+| Health: instance_info | Instance ID, worker config, cold start detection | ✅ Committed |
+| Scale controller logging | `SCALE_CONTROLLER_LOGGING_ENABLED=AppInsights:Verbose` | ✅ Enabled |
+
+### Pending Implementation
+
+| Task | Description | Priority |
+|------|-------------|----------|
+| **Investigate Blueprint pattern** | Review how probes.py uses Blueprint for triggers; determine if snapshot triggers should follow same pattern | 🔴 High |
+| Snapshot capture service | `services/snapshot_service.py` - core capture logic | 🔴 High |
+| Config hash computation | SHA256 of stable config fields for drift detection | 🔴 High |
+| Drift diff computation | Compare current vs previous snapshot, identify changes | 🟡 Medium |
+| Startup trigger | Capture snapshot in `function_app.py` after startup validation | 🟡 Medium |
+| Scheduled trigger | Timer trigger (hourly) for periodic snapshots | 🟡 Medium |
+| Manual trigger | `POST /api/admin/snapshot` endpoint | 🟡 Medium |
+| Deploy schema | Run full-rebuild to create `system_snapshots` table | 🟡 Medium |
+
+### Snapshot Trigger Types
+
+| Trigger | When | Purpose |
+|---------|------|---------|
+| `startup` | App cold start | Baseline for each instance |
+| `scheduled` | Timer (hourly) | Detect drift over time |
+| `manual` | Admin endpoint | On-demand debugging |
+| `drift_detected` | Hash changed | Record moment of change |
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `core/models/system_snapshot.py` | Pydantic model (NEW) |
+| `core/schema/sql_generator.py` | DDL generation (MODIFIED) |
+| `triggers/probes.py` | Blueprint pattern reference |
+| `services/snapshot_service.py` | Capture service (TO CREATE) |
+| `triggers/scheduled.py` | Timer triggers (TO CREATE or extend) |
+
+### Application Insights Queries
+
+```kusto
+-- Scale controller decisions
+traces
+| where customDimensions.Category == "ScaleControllerLogs"
+| where message == "Instance count changed"
+| project timestamp,
+    PreviousCount = customDimensions.PreviousInstanceCount,
+    NewCount = customDimensions.CurrentInstanceCount,
+    Reason = customDimensions.Reason
+
+-- Active instances in last 30 min
+performanceCounters
+| where timestamp > ago(30m)
+| summarize LastSeen=max(timestamp) by cloud_RoleInstance
+| order by LastSeen desc
+```
+
+---
+
 ## DevOps / Non-Geospatial Tasks
 
 Tasks suitable for a colleague with Azure/Python/pipeline expertise but without geospatial domain knowledge.
@@ -209,6 +283,12 @@ Tasks suitable for a colleague with Azure/Python/pipeline expertise but without 
 
 | Date | Item | Epic |
 |------|------|------|
+| 04 JAN 2026 | System snapshots schema (Pydantic model + DDL) | — |
+| 04 JAN 2026 | Health: network_environment (90+ Azure vars) | — |
+| 04 JAN 2026 | Health: instance_info (cold start detection) | — |
+| 04 JAN 2026 | Scale controller logging enabled | — |
+| 04 JAN 2026 | SERVICE_BUS_NAMESPACE explicit env var | — |
+| 04 JAN 2026 | Version bump to 0.7.1 | — |
 | 03 JAN 2026 | STARTUP_REFORM.md Phases 1-4 (livez/readyz probes) | — |
 | 03 JAN 2026 | Blueprint refactor for probes.py | — |
 | 30 DEC 2025 | Platform API Submit UI COMPLETE | E3 |

@@ -658,7 +658,9 @@ def create_cog(params: dict) -> dict:
                 "overview_levels": overviews,
                 "overview_resampling": overview_resampling,
                 "reproject_resampling": reproject_resampling if needs_reprojection else None,
-                "raster_type": raster_type,
+                # Return full raster_type dict for downstream STAC metadata (04 JAN 2026)
+                # Contains: detected_type, band_count, data_type - needed for TiTiler bidx params
+                "raster_type": raster_metadata if raster_metadata else {"detected_type": raster_type},
                 "processing_time_seconds": round(elapsed_time, 2),
                 "tier_profile": {
                     "tier": output_tier.value,

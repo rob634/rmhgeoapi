@@ -1,3 +1,11 @@
+# ============================================================================
+# UNPUBLISH VECTOR JOB
+# ============================================================================
+# STATUS: Jobs - 3-stage surgical vector removal (PostGIS+metadata+STAC)
+# PURPOSE: Drop tables and cleanup with dry_run safety by default
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 UnpublishVectorJob - Surgical removal of vector PostGIS tables and metadata.
 

@@ -60,6 +60,7 @@ from ..models import (
     CuratedUpdateStatus
 )
 from ..models.promoted import PromotedDataset, SystemRole, Classification  # Promoted datasets (23 DEC 2025)
+from ..models.system_snapshot import SystemSnapshotRecord, SnapshotTriggerType  # System snapshots (04 JAN 2026)
 
 
 class PydanticToSQL:
@@ -508,6 +509,20 @@ class PydanticToSQL:
             indexes.append(IndexBuilder.btree(s, "promoted_datasets", "system_role", name="idx_promoted_datasets_system_role",
                                               partial_where="system_role IS NOT NULL"))
 
+        elif table_name == "system_snapshots":
+            # System snapshots for configuration drift detection (04 JAN 2026)
+            indexes.append(IndexBuilder.btree(s, "system_snapshots", "captured_at", name="idx_system_snapshots_captured_at", descending=True))
+            indexes.append(IndexBuilder.btree(s, "system_snapshots", "trigger_type", name="idx_system_snapshots_trigger_type"))
+            indexes.append(IndexBuilder.btree(s, "system_snapshots", "config_hash", name="idx_system_snapshots_config_hash"))
+            indexes.append(IndexBuilder.btree(s, "system_snapshots", "instance_id", name="idx_system_snapshots_instance_id",
+                                              partial_where="instance_id IS NOT NULL"))
+            # Drift detection queries
+            indexes.append(IndexBuilder.btree(s, "system_snapshots", "has_drift", name="idx_system_snapshots_has_drift",
+                                              partial_where="has_drift = true"))
+            # Config quality monitoring
+            indexes.append(IndexBuilder.btree(s, "system_snapshots", "config_defaults_count", name="idx_system_snapshots_defaults_count",
+                                              partial_where="config_defaults_count > 0"))
+
         self.logger.debug(f"✅ Generated {len(indexes)} indexes for table {table_name}")
         return indexes
     
@@ -860,6 +875,7 @@ $$""").format(
         composed.extend(self.generate_enum("curated_update_status", CuratedUpdateStatus))
         composed.extend(self.generate_enum("system_role", SystemRole))  # Promoted datasets (23 DEC 2025)
         composed.extend(self.generate_enum("classification", Classification))
+        composed.extend(self.generate_enum("snapshot_trigger_type", SnapshotTriggerType))  # System snapshots (04 JAN 2026)
 
         # For tables, indexes, functions, and triggers, we still need string format
         # because they are complex multi-line statements
@@ -876,6 +892,7 @@ $$""").format(
         composed.append(self.generate_table_composed(CuratedDataset, "curated_datasets"))  # Curated datasets (15 DEC 2025)
         composed.append(self.generate_table_composed(CuratedUpdateLog, "curated_update_log"))
         composed.append(self.generate_table_composed(PromotedDataset, "promoted_datasets"))  # Promoted datasets (23 DEC 2025)
+        composed.append(self.generate_table_composed(SystemSnapshotRecord, "system_snapshots"))  # System snapshots (04 JAN 2026)
 
         # Indexes - now using composed SQL
         composed.extend(self.generate_indexes_composed("jobs", JobRecord))
@@ -887,6 +904,7 @@ $$""").format(
         composed.extend(self.generate_indexes_composed("curated_datasets", CuratedDataset))  # Curated datasets (15 DEC 2025)
         composed.extend(self.generate_indexes_composed("curated_update_log", CuratedUpdateLog))
         composed.extend(self.generate_indexes_composed("promoted_datasets", PromotedDataset))  # Promoted datasets (23 DEC 2025)
+        composed.extend(self.generate_indexes_composed("system_snapshots", SystemSnapshotRecord))  # System snapshots (04 JAN 2026)
 
         # Functions - already sql.Composed objects
         composed.extend(self.generate_static_functions())

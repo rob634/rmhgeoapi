@@ -826,25 +826,25 @@ Applied systematic 8-check review to both files:
 | [x] | `h3_export_dataset.py` | Checks 1-7 applied - updated header (3-stage export) |
 | [x] | `h3_raster_aggregation.py` | Checks 1-7 applied - updated header (3-stage zonal stats) |
 | [x] | `h3_register_dataset.py` | Checks 1-7 applied - updated header (single-stage) |
-| [ ] | `hello_world.py` | |
-| [ ] | `ingest_collection.py` | |
-| [ ] | `inventory_container_contents.py` | |
-| [ ] | `inventory_fathom_container.py` | |
-| [ ] | `mixins.py` | |
-| [ ] | `process_fathom_merge.py` | |
-| [ ] | `process_fathom_stack.py` | |
-| [ ] | `process_large_raster_v2.py` | |
-| [ ] | `process_raster_collection_v2.py` | |
-| [ ] | `process_raster_v2.py` | |
-| [ ] | `process_vector.py` | |
-| [ ] | `raster_mixin.py` | |
-| [ ] | `raster_workflows_base.py` | |
-| [ ] | `repair_stac_items.py` | |
-| [ ] | `stac_catalog_container.py` | |
-| [ ] | `stac_catalog_vectors.py` | |
-| [ ] | `unpublish_raster.py` | |
-| [ ] | `unpublish_vector.py` | |
-| [ ] | `validate_raster_job.py` | |
+| [x] | `hello_world.py` | Checks 1-7 applied - added header (2-stage test workflow) |
+| [x] | `ingest_collection.py` | Checks 1-7 applied - updated header (5-stage COG ingest) |
+| [x] | `inventory_container_contents.py` | Checks 1-7 applied - added header (3-stage analysis) |
+| [x] | `inventory_fathom_container.py` | Checks 1-7 applied - added header (4-stage Fathom) |
+| [x] | `mixins.py` | Checks 1-7 applied - added header (core mixin, 77% boilerplate reduction) |
+| [x] | `process_fathom_merge.py` | Checks 1-7 applied - added header (Phase 2 spatial merge) |
+| [x] | `process_fathom_stack.py` | Checks 1-7 applied - added header (Phase 1 band stacking) |
+| [x] | `process_large_raster_v2.py` | Checks 1-7 applied - added header (5-stage 1-30GB tiling) |
+| [x] | `process_raster_collection_v2.py` | Checks 1-7 applied - added header (4-stage tile collection) |
+| [x] | `process_raster_v2.py` | Checks 1-7 applied - added header (3-stage small raster) |
+| [x] | `process_vector.py` | Checks 1-7 applied - added header (3-stage idempotent ETL) |
+| [x] | `raster_mixin.py` | Checks 1-7 applied - added header (composable schemas) |
+| [x] | `raster_workflows_base.py` | Checks 1-7 applied - added header (shared finalization) |
+| [x] | `repair_stac_items.py` | Checks 1-7 applied - updated header (2-stage repair) |
+| [x] | `stac_catalog_container.py` | Checks 1-7 applied - added header (2-stage bulk catalog) |
+| [x] | `stac_catalog_vectors.py` | Checks 1-7 applied - added header (single-stage vector) |
+| [x] | `unpublish_raster.py` | Checks 1-7 applied - added header (3-stage surgical removal) |
+| [x] | `unpublish_vector.py` | Checks 1-7 applied - added header (3-stage table drop) |
+| [x] | `validate_raster_job.py` | Checks 1-7 applied - added header (single-stage validation) |
 
 ---
 
@@ -1218,7 +1218,7 @@ Applied systematic 8-check review to both files:
 | config/ | 13 | 13 | 0 |
 | core/ | 36 | 36 | 0 |
 | infrastructure/ | 30 | 30 | 0 |
-| jobs/ | 30 | 10 | 20 |
+| jobs/ | 30 | 30 | 0 |
 | services/ | 47 | 0 | 47 |
 | triggers/ | 35 | 1 | 34 |
 | API modules | 24 | 0 | 24 |
@@ -1227,7 +1227,7 @@ Applied systematic 8-check review to both files:
 | scripts/ | 4 | 4 | 0 |
 | test/ | 20 | 0 | 20 |
 | Root files | 3 | 3 | 0 |
-| **TOTAL** | **301** | **100** | **201** |
+| **TOTAL** | **301** | **119** | **182** |
 
 ---
 
@@ -1265,3 +1265,5 @@ Applied systematic 8-check review to both files:
 | 04 JAN 2026 | Session 26 | Completed infrastructure/ directory: 12 remaining files - added/updated headers for `janitor_repository.py`, `job_progress_contexts.py`, `job_progress.py`, `jobs_tasks.py`, `metrics_repository.py`, `pgstac_bootstrap.py`, `pgstac_repository.py`, `platform.py`, `postgis.py`, `promoted_repository.py`, `validators.py`, `vault.py` - infrastructure/ 30/30 COMPLETE |
 | 04 JAN 2026 | Session 27 | Completed utils/ (3 files) and scripts/ (4 files) - added headers, analyzed for consolidation opportunities |
 | 04 JAN 2026 | Session 28 | Applied Checks 1-7 to first 10 jobs/ files: `__init__.py`, `base.py`, `bootstrap_h3_land_grid_pyramid.py`, `container_summary.py`, `create_h3_base.py`, `curated_update.py`, `generate_h3_level4.py`, `h3_export_dataset.py`, `h3_raster_aggregation.py`, `h3_register_dataset.py` |
+| 04 JAN 2026 | Session 29 | Applied Checks 1-7 to jobs/ files 11-20: `hello_world.py`, `ingest_collection.py`, `inventory_container_contents.py`, `inventory_fathom_container.py`, `mixins.py`, `process_fathom_merge.py`, `process_fathom_stack.py`, `process_large_raster_v2.py`, `process_raster_collection_v2.py`, `process_raster_v2.py` |
+| 04 JAN 2026 | Session 30 | Completed jobs/ directory (30/30): `process_vector.py`, `raster_mixin.py`, `raster_workflows_base.py`, `repair_stac_items.py`, `stac_catalog_container.py`, `stac_catalog_vectors.py`, `unpublish_raster.py`, `unpublish_vector.py`, `validate_raster_job.py` - jobs/ COMPLETE |

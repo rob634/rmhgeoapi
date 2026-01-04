@@ -1,3 +1,11 @@
+# ============================================================================
+# STAC CATALOG VECTORS JOB
+# ============================================================================
+# STATUS: Jobs - Single-stage PostGIS vector STAC cataloging
+# PURPOSE: Extract STAC metadata from PostGIS tables and insert into pgSTAC
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 STAC Catalog Vectors Job - PostGIS Vector Cataloging.
 

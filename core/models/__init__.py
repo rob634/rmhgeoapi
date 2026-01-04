@@ -106,6 +106,12 @@ from .promoted import (
     Classification
 )
 
+# System snapshot models (04 JAN 2026)
+from .system_snapshot import (
+    SystemSnapshotRecord,
+    SnapshotTriggerType
+)
+
 __all__ = [
     # Enums
     'JobStatus',
@@ -170,5 +176,9 @@ __all__ = [
     'PromotedDataset',
     'PromotedDatasetType',
     'SystemRole',
-    'Classification'
+    'Classification',
+
+    # System snapshot models (04 JAN 2026)
+    'SystemSnapshotRecord',
+    'SnapshotTriggerType'
 ]

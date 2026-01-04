@@ -1,12 +1,10 @@
 # ============================================================================
-# CLAUDE CONTEXT - INGEST COLLECTION JOB
+# INGEST COLLECTION JOB
 # ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: Job Definition - Ingest Pre-Processed COG Collections
-# PURPOSE: Copy COGs from bronze to silver and register in pgSTAC
-# LAST_REVIEWED: 29 DEC 2025
-# EXPORTS: IngestCollectionJob
-# DEPENDENCIES: jobs.base, jobs.mixins
+# STATUS: Jobs - 5-stage COG collection ingestion
+# PURPOSE: Copy pre-processed COGs from bronze to silver and register in pgSTAC
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
 # ============================================================================
 """
 Ingest Collection Job - 5-Stage Workflow.

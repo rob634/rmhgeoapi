@@ -1,3 +1,11 @@
+# ============================================================================
+# PROCESS VECTOR JOB
+# ============================================================================
+# STATUS: Jobs - 3-stage idempotent vector ETL pipeline
+# PURPOSE: Bronze→PostGIS+STAC with DELETE+INSERT idempotency pattern
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Process Vector Job.
 

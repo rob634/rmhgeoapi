@@ -1,3 +1,11 @@
+# ============================================================================
+# RASTER WORKFLOWS BASE
+# ============================================================================
+# STATUS: Jobs - Shared finalization logic for COG→MosaicJSON→STAC patterns
+# PURPOSE: DRY principle - common completion pattern for raster collection jobs
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Raster Workflows Base Class.
 

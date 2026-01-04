@@ -1,3 +1,11 @@
+# ============================================================================
+# HELLO WORLD JOB
+# ============================================================================
+# STATUS: Jobs - Test/infrastructure validation workflow
+# PURPOSE: Two-stage greeting workflow for testing Job→Stage→Task patterns
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 HelloWorld Job - Test/Infrastructure Validation.
 

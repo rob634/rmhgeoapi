@@ -1,3 +1,11 @@
+# ============================================================================
+# PROCESS RASTER V2 JOB
+# ============================================================================
+# STATUS: Jobs - 3-stage small raster to COG pipeline
+# PURPOSE: Process small rasters (<=1GB) to COG + STAC metadata
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Process Raster V2 - Raster to COG Pipeline.
 

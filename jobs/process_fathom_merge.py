@@ -1,3 +1,11 @@
+# ============================================================================
+# PROCESS FATHOM MERGE JOB
+# ============================================================================
+# STATUS: Jobs - Phase 2 Fathom spatial merge workflow
+# PURPOSE: Merge NxN stacked tiles into consolidated COGs (~40K outputs)
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Process Fathom Merge Job - Phase 2: Spatial Merge.
 

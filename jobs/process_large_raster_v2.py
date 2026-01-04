@@ -1,3 +1,11 @@
+# ============================================================================
+# PROCESS LARGE RASTER V2 JOB
+# ============================================================================
+# STATUS: Jobs - 5-stage large raster tiling pipeline
+# PURPOSE: Process 1-30GB rasters to tiled COG mosaic + MosaicJSON + STAC
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Process Large Raster V2 Job.
 

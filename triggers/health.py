@@ -3,7 +3,7 @@
 # ============================================================================
 # STATUS: Trigger - Deployment verification endpoint
 # PURPOSE: GET /api/health - Comprehensive system health monitoring
-# LAST_REVIEWED: 02 JAN 2026
+# LAST_REVIEWED: 04 JAN 2026
 # REVIEW_STATUS: Checks 1-7 Applied (Check 8: Deployment verification endpoint)
 # ============================================================================
 """
@@ -38,6 +38,7 @@ Comprehensive system health monitoring endpoint for GET /api/health.
 
 Components Monitored:
     - Startup Validation (03 JAN 2026) - env_vars, imports, Service Bus DNS/queues
+    - Network Environment (04 JAN 2026) - VNet, ASE, DNS, all WEBSITE_* vars
     - Import Validation
     - Service Bus Queues
     - Database Configuration
@@ -133,6 +134,11 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         # Check hardware/runtime environment (21 DEC 2025)
         hardware_health = self._check_hardware_environment()
         health_data["components"]["hardware"] = hardware_health
+
+        # Check network/VNet/ASE environment (04 JAN 2026)
+        # Critical for diagnosing corporate Azure environments where configs change without warning
+        network_health = self._check_network_environment()
+        health_data["components"]["network_environment"] = network_health
 
         # Task routing coverage REMOVED (12 DEC 2025)
         # Moved to services/__init__.py (startup validation) and scripts/validate_config.py (pre-deployment)
@@ -2321,6 +2327,178 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             "hardware",
             check_hardware,
             description="Runtime hardware environment (CPU, RAM, platform)"
+        )
+
+    def _check_network_environment(self) -> Dict[str, Any]:
+        """
+        Check network/VNet/ASE environment configuration (04 JAN 2026).
+
+        Captures ALL available Azure platform environment variables related to
+        networking, VNet integration, and App Service Environment (ASE) settings.
+
+        Environment-responsive: Works in both standard deployments and ASE/VNet
+        environments. Variables that don't exist in the current environment are
+        simply omitted from the response.
+
+        This is critical for diagnosing corporate Azure environments where:
+        - ASE configurations may change without warning
+        - VNet routing affects outbound connectivity
+        - DNS settings determine service resolution
+        - Private endpoints may be required
+
+        Returns:
+            Dict with network configuration including:
+            - vnet: VNet integration settings (private IP, routing, DNS)
+            - ase: App Service Environment settings (if applicable)
+            - platform: General Azure platform identifiers
+            - dns: DNS server configuration
+            - discovered: Any other WEBSITE_*/AZURE_* vars found dynamically
+        """
+        def check_network():
+            # ================================================================
+            # KNOWN ENVIRONMENT VARIABLES - Organized by Category
+            # ================================================================
+
+            # VNet Integration Variables
+            vnet_vars = {
+                'private_ip': 'WEBSITE_PRIVATE_IP',              # IP from VNet subnet
+                'vnet_route_all': 'WEBSITE_VNET_ROUTE_ALL',      # Route all traffic through VNet
+                'content_over_vnet': 'WEBSITE_CONTENTOVERVNET',  # Storage shares via VNet
+                'swap_vnet': 'WEBSITE_SWAP_WARMUP_VNET',         # VNet during slot swap
+            }
+
+            # DNS Configuration
+            dns_vars = {
+                'dns_server': 'WEBSITE_DNS_SERVER',              # Primary DNS
+                'dns_alt_server': 'WEBSITE_DNS_ALT_SERVER',      # Alternate DNS
+            }
+
+            # App Service Environment (ASE) Variables
+            ase_vars = {
+                'ase_name': 'WEBSITE_ASE_NAME',                  # ASE name if deployed to ASE
+                'home_stampname': 'WEBSITE_HOME_STAMPNAME',      # Stamp/scale unit name
+                'stamp_deployment_id': 'WEBSITE_STAMP_DEPLOYMENT_ID',
+                'worker_id': 'WEBSITE_WORKER_ID',                # Worker instance
+                'roleinstance_id': 'WEBSITE_ROLEINSTANCE_ID',    # Role instance
+            }
+
+            # Platform/Identity Variables
+            platform_vars = {
+                'site_name': 'WEBSITE_SITE_NAME',                # App name
+                'hostname': 'WEBSITE_HOSTNAME',                  # Primary hostname
+                'instance_id': 'WEBSITE_INSTANCE_ID',            # VM instance ID
+                'sku': 'WEBSITE_SKU',                            # SKU tier
+                'compute_mode': 'WEBSITE_COMPUTE_MODE',          # Shared vs Dedicated
+                'slot_name': 'WEBSITE_SLOT_NAME',                # Deployment slot
+                'owner_name': 'WEBSITE_OWNER_NAME',              # Subscription+RG
+                'resource_group': 'WEBSITE_RESOURCE_GROUP',      # Resource group
+                'region_name': 'REGION_NAME',                    # Azure region
+                'platform_version': 'WEBSITE_PLATFORM_VERSION',  # Platform version
+                'node_default_version': 'WEBSITE_NODE_DEFAULT_VERSION',
+            }
+
+            # Storage/Content Variables
+            storage_vars = {
+                'contentazurefileconnectionstring': 'WEBSITE_CONTENTAZUREFILECONNECTIONSTRING',
+                'contentshare': 'WEBSITE_CONTENTSHARE',
+                'run_from_package': 'WEBSITE_RUN_FROM_PACKAGE',
+                'use_zip_deploy': 'WEBSITE_USE_ZIP_DEPLOY',
+            }
+
+            # Functions-specific Variables
+            functions_vars = {
+                'functions_extension_version': 'FUNCTIONS_EXTENSION_VERSION',
+                'functions_worker_runtime': 'FUNCTIONS_WORKER_RUNTIME',
+                'azure_functions_environment': 'AZURE_FUNCTIONS_ENVIRONMENT',
+                'scm_run_from_package': 'SCM_RUN_FROM_PACKAGE',
+            }
+
+            # Security/Auth Variables
+            auth_vars = {
+                'auth_enabled': 'WEBSITE_AUTH_ENABLED',
+                'auth_encryption_key': 'WEBSITE_AUTH_ENCRYPTION_KEY',  # Existence only
+                'https_only': 'WEBSITE_HTTPSONLY',
+            }
+
+            # Helper to get env vars (returns None if not set)
+            def get_vars(var_map: dict) -> dict:
+                result = {}
+                for key, env_name in var_map.items():
+                    value = os.environ.get(env_name)
+                    if value is not None:
+                        # Mask sensitive values but show they exist
+                        if 'connection' in key.lower() or 'key' in key.lower():
+                            result[key] = f"[SET - {len(value)} chars]"
+                        # Truncate very long values
+                        elif len(value) > 200:
+                            result[key] = value[:200] + f"... [{len(value)} chars total]"
+                        else:
+                            result[key] = value
+                return result
+
+            # Collect all known variables
+            network_config = {
+                'vnet': get_vars(vnet_vars),
+                'dns': get_vars(dns_vars),
+                'ase': get_vars(ase_vars),
+                'platform': get_vars(platform_vars),
+                'storage': get_vars(storage_vars),
+                'functions': get_vars(functions_vars),
+                'auth': get_vars(auth_vars),
+            }
+
+            # Remove empty categories
+            network_config = {k: v for k, v in network_config.items() if v}
+
+            # ================================================================
+            # DYNAMIC DISCOVERY - Find any WEBSITE_* or AZURE_* vars we missed
+            # ================================================================
+            known_vars = set()
+            for var_map in [vnet_vars, dns_vars, ase_vars, platform_vars,
+                           storage_vars, functions_vars, auth_vars]:
+                known_vars.update(var_map.values())
+
+            discovered = {}
+            for env_name, env_value in os.environ.items():
+                # Look for Azure-related vars we haven't explicitly captured
+                if env_name.startswith(('WEBSITE_', 'AZURE_', 'APPSETTING_')):
+                    if env_name not in known_vars:
+                        # Mask potentially sensitive values
+                        if any(s in env_name.lower() for s in ['key', 'secret', 'password', 'connection', 'token']):
+                            discovered[env_name] = f"[SET - {len(env_value)} chars]"
+                        elif len(env_value) > 200:
+                            discovered[env_name] = env_value[:200] + f"... [{len(env_value)} chars total]"
+                        else:
+                            discovered[env_name] = env_value
+
+            if discovered:
+                network_config['discovered'] = discovered
+
+            # ================================================================
+            # ENVIRONMENT SUMMARY
+            # ================================================================
+            # Determine environment type based on what variables are present
+            env_type = "standard"
+            if network_config.get('ase', {}).get('ase_name'):
+                env_type = "ase"
+            elif network_config.get('vnet', {}).get('private_ip'):
+                env_type = "vnet_integrated"
+
+            network_config['_summary'] = {
+                'environment_type': env_type,
+                'has_vnet_integration': bool(network_config.get('vnet')),
+                'has_ase': bool(network_config.get('ase')),
+                'has_custom_dns': bool(network_config.get('dns')),
+                'total_vars_captured': sum(len(v) for v in network_config.values() if isinstance(v, dict)),
+                'discovered_count': len(discovered),
+            }
+
+            return network_config
+
+        return self.check_component_health(
+            "network_environment",
+            check_network,
+            description="Azure network/VNet/ASE environment configuration"
         )
 
     def _get_config_sources(self) -> Dict[str, Any]:

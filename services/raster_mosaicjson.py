@@ -98,9 +98,17 @@ def create_mosaicjson(
         task_id = params.get('_task_id')
 
         # Extract parameters from fan_in pattern
-        # CoreMachine passes: {"previous_results": [...], "job_parameters": {...}}
-        previous_results = params.get("previous_results", [])
-        job_parameters = params.get("job_parameters", {})
+        # DATABASE REFERENCE PATTERN (05 JAN 2026): CoreMachine now passes fan_in_source
+        # instead of embedding previous_results. Handler queries DB directly.
+        if "fan_in_source" in params:
+            from core.fan_in import load_fan_in_results, get_job_parameters
+            previous_results = load_fan_in_results(params)
+            job_parameters = get_job_parameters(params)
+            logger.info(f"📊 Fan-in DB reference: loaded {len(previous_results)} results")
+        else:
+            # Legacy path: previous_results embedded in params
+            previous_results = params.get("previous_results", [])
+            job_parameters = params.get("job_parameters", {})
 
         # Get collection_id from job_parameters (passed by controller)
         collection_id = job_parameters.get("collection_id")

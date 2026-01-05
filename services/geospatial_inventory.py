@@ -320,8 +320,16 @@ def aggregate_geospatial_inventory(params: dict) -> Dict[str, Any]:
         }
     """
     try:
-        previous_results = params.get("previous_results", [])
-        job_params = params.get("job_parameters", {})
+        # DATABASE REFERENCE PATTERN (05 JAN 2026): CoreMachine now passes fan_in_source
+        # instead of embedding previous_results. Handler queries DB directly.
+        if "fan_in_source" in params:
+            from core.fan_in import load_fan_in_results, get_job_parameters
+            previous_results = load_fan_in_results(params)
+            job_params = get_job_parameters(params)
+            logger.info(f"📊 Fan-in DB reference: loaded {len(previous_results)} results")
+        else:
+            previous_results = params.get("previous_results", [])
+            job_params = params.get("job_parameters", {})
 
         container_name = job_params.get("container_name", "unknown")
         grouping_mode = job_params.get("grouping_mode", "auto")

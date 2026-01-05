@@ -2168,11 +2168,19 @@ class CoreMachine:
         job_parameters: dict
     ) -> list[dict]:
         """
-        Auto-create single aggregation task for fan-in stage.
+        Auto-create single aggregation task for fan-in stage using DB reference pattern.
 
         This method is called when a stage has parallelism="fan_in".
-        CoreMachine automatically creates a single task that receives ALL
-        results from the previous stage for aggregation.
+        CoreMachine automatically creates a single task that will query the database
+        for previous stage results (instead of embedding them in task params).
+
+        DATABASE REFERENCE PATTERN (05 JAN 2026):
+        Fan-in tasks NEVER embed previous_results in parameters. Instead, they
+        receive a reference (job_id + source_stage) and query the database directly.
+        This avoids the Service Bus 256KB message limit for large result sets.
+
+        Before: params = {"previous_results": [1924 items]} → 1.09MB → FAILS
+        After:  params = {"fan_in_source": {job_id, stage}} → 200 bytes → SUCCESS
 
         Example:
             Stage 1: 1 task  → Lists files
@@ -2182,7 +2190,7 @@ class CoreMachine:
         Args:
             job_id: Job ID
             stage: Current stage number (the fan-in stage)
-            previous_results: All results from previous stage (N results from fan-out)
+            previous_results: All results from previous stage (used for count/validation only)
             stage_definition: Stage definition dict from job.stages
             job_parameters: Original job parameters
 
@@ -2190,11 +2198,15 @@ class CoreMachine:
             List with single task dict containing:
             - task_id: Deterministic ID for aggregation task
             - task_type: From stage_definition["task_type"]
-            - parameters: Includes previous_results + job_parameters
+            - parameters: Includes fan_in_source reference + job_parameters
 
         Raises:
             ValueError: If previous_results is empty (nothing to aggregate)
             KeyError: If stage_definition missing required "task_type"
+
+        Handler Contract:
+            Fan-in handlers MUST use core.fan_in.load_fan_in_results(params) to
+            retrieve previous stage results from the database.
         """
         from core.task_id import generate_deterministic_task_id
 
@@ -2215,31 +2227,36 @@ class CoreMachine:
 
         self.logger.info(
             f"🔷 Fan-In Stage {stage}: Creating aggregation task of type '{task_type}' "
-            f"to aggregate {len(previous_results)} results from Stage {stage - 1}"
+            f"with DB reference to {len(previous_results)} Stage {stage - 1} results"
         )
 
         # Generate deterministic task ID
         task_id = generate_deterministic_task_id(job_id, stage, "fan_in_aggregate")
 
-        # Create single aggregation task
-        # Task handler receives ALL previous results + job parameters
+        # Create single aggregation task with DATABASE REFERENCE pattern
+        # Handler will query database directly instead of receiving embedded results
         task = {
             "task_id": task_id,
             "task_type": task_type,
             "parameters": {
-                "previous_results": previous_results,  # All N results from Stage N-1
-                "job_parameters": job_parameters,      # Original job parameters
+                # DATABASE REFERENCE: Handler queries DB using this info
+                "fan_in_source": {
+                    "job_id": job_id,
+                    "source_stage": stage - 1,
+                    "expected_count": len(previous_results)
+                },
+                "job_parameters": job_parameters,
                 "aggregation_metadata": {
                     "stage": stage,
                     "previous_stage": stage - 1,
                     "result_count": len(previous_results),
-                    "pattern": "fan_in"
+                    "pattern": "fan_in_reference"
                 }
             }
         }
 
         self.logger.debug(f"   Task ID: {task_id}")
         self.logger.debug(f"   Task Type: {task_type}")
-        self.logger.debug(f"   Aggregating: {len(previous_results)} results")
+        self.logger.debug(f"   DB Reference: job={job_id[:16]}..., stage={stage - 1}, count={len(previous_results)}")
 
         return [task]

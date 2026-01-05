@@ -211,7 +211,14 @@ def aggregate_blob_analysis(params: dict) -> dict[str, Any]:
     try:
         start_time = datetime.now(timezone.utc)
 
-        previous_results = params.get("previous_results", [])
+        # DATABASE REFERENCE PATTERN (05 JAN 2026): CoreMachine now passes fan_in_source
+        # instead of embedding previous_results. Handler queries DB directly.
+        if "fan_in_source" in params:
+            from core.fan_in import load_fan_in_results
+            previous_results = load_fan_in_results(params)
+            logger.info(f"📊 Fan-in DB reference: loaded {len(previous_results)} results")
+        else:
+            previous_results = params.get("previous_results", [])
         job_params = params.get("job_parameters", {})
 
         if not previous_results:

@@ -1218,14 +1218,30 @@ def fathom_stac_register(params: dict, context: dict = None) -> dict:
         "fathom_stac_register"
     )
 
-    # Handle both direct params and CoreMachine fan-in structure
-    # CoreMachine's _create_fan_in_task passes:
-    #   - previous_results: results from previous stage
+    # ==========================================================================
+    # LOAD COG RESULTS - Universal Database Reference Pattern (05 JAN 2026)
+    # ==========================================================================
+    # CoreMachine fan-in tasks now use database reference pattern:
+    #   - fan_in_source: {job_id, source_stage, expected_count}
     #   - job_parameters: original job parameters
-    if "job_parameters" in params:
-        # CoreMachine fan-in structure
+    # Handler queries database directly instead of receiving embedded results.
+    # ==========================================================================
+
+    if "fan_in_source" in params:
+        # NEW PATTERN: CoreMachine database reference (05 JAN 2026)
+        from core.fan_in import load_fan_in_results, get_job_parameters
+        cog_results = load_fan_in_results(params)
+        job_params = get_job_parameters(params)
+        region_code = job_params["region_code"].lower()
+        collection_id = job_params.get("collection_id", FathomDefaults.PHASE1_COLLECTION_ID)
+        output_container = job_params.get("output_container", FathomDefaults.PHASE1_OUTPUT_CONTAINER)
+        dry_run = job_params.get("dry_run", False)
+        logger.info(f"📚 Fan-in mode (DB reference): loaded {len(cog_results)} COG results")
+
+    elif "job_parameters" in params:
+        # LEGACY: Old CoreMachine fan-in with embedded previous_results
+        # Kept for backward compatibility during transition
         job_params = params["job_parameters"]
-        # Extract successful results from previous_results
         previous_results = params.get("previous_results", [])
         cog_results = [
             r.get("result", r) for r in previous_results
@@ -1235,35 +1251,38 @@ def fathom_stac_register(params: dict, context: dict = None) -> dict:
         collection_id = job_params.get("collection_id", FathomDefaults.PHASE1_COLLECTION_ID)
         output_container = job_params.get("output_container", FathomDefaults.PHASE1_OUTPUT_CONTAINER)
         dry_run = job_params.get("dry_run", False)
-        logger.info(f"📚 Fan-in mode: extracted {len(cog_results)} successful COGs from {len(previous_results)} previous results")
+        logger.info(f"📚 Fan-in mode (legacy embedded): {len(cog_results)} COGs from {len(previous_results)} results")
+
+    elif "job_id" in params and "cog_results" not in params:
+        # DIRECT: Job-level database reference (from process_fathom_stack/merge)
+        source_job_id = params["job_id"]
+        source_stage = params.get("stage", 2)
+        expected_count = params.get("cog_count", 0)
+        logger.info(f"📊 Direct DB query: {expected_count} Stage {source_stage} results from job {source_job_id[:16]}...")
+
+        from repositories.job_repository import JobRepository
+        job_repo = JobRepository()
+        tasks = job_repo.get_tasks_for_job(source_job_id)
+
+        cog_results = []
+        for task in tasks:
+            if task.stage == source_stage and task.status.value == "completed" and task.result_data:
+                result = task.result_data.get("result")
+                if result:
+                    cog_results.append(result)
+
+        logger.info(f"   Retrieved {len(cog_results)} COG results from database")
+        if expected_count and len(cog_results) != expected_count:
+            logger.warning(f"   ⚠️ Expected {expected_count} but got {len(cog_results)} results")
+
+        region_code = params["region_code"].lower()
+        collection_id = params.get("collection_id", FathomDefaults.PHASE2_COLLECTION_ID)
+        output_container = params.get("output_container", FathomDefaults.PHASE2_OUTPUT_CONTAINER)
+        dry_run = params.get("dry_run", False)
+
     else:
-        # Direct params structure (from job's create_tasks_for_stage)
-        # Check if we need to query database for results (to avoid 256KB Service Bus limit)
-        if "job_id" in params and "cog_results" not in params:
-            # Query database for Stage 2 task results
-            source_job_id = params["job_id"]
-            source_stage = params.get("stage", 2)
-            expected_count = params.get("cog_count", 0)
-            logger.info(f"📊 Querying database for {expected_count} Stage {source_stage} results from job {source_job_id[:16]}...")
-
-            from repositories.job_repository import JobRepository
-            job_repo = JobRepository()
-            tasks = job_repo.get_tasks_for_job(source_job_id)
-
-            # Filter for completed Stage 2 tasks with results
-            cog_results = []
-            for task in tasks:
-                if task.stage == source_stage and task.status.value == "completed" and task.result_data:
-                    result = task.result_data.get("result")
-                    if result:
-                        cog_results.append(result)
-
-            logger.info(f"   Retrieved {len(cog_results)} COG results from database")
-            if expected_count and len(cog_results) != expected_count:
-                logger.warning(f"   ⚠️ Expected {expected_count} but got {len(cog_results)} results")
-        else:
-            cog_results = params.get("cog_results", [])
-
+        # LEGACY: Direct params with embedded cog_results
+        cog_results = params.get("cog_results", [])
         region_code = params["region_code"].lower()
         collection_id = params.get("collection_id", FathomDefaults.PHASE2_COLLECTION_ID)
         output_container = params.get("output_container", FathomDefaults.PHASE2_OUTPUT_CONTAINER)

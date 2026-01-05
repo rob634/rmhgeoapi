@@ -4,7 +4,7 @@
 # EPOCH: 4 - ACTIVE
 # STATUS: Trigger - H3 Dataset Registration API
 # PURPOSE: CRUD operations for h3.dataset_registry (dev/testing)
-# LAST_REVIEWED: 22 DEC 2025
+# LAST_REVIEWED: 05 JAN 2026
 # EXPORTS: AdminH3DatasetsTrigger, admin_h3_datasets_trigger
 # DEPENDENCIES: infrastructure.h3_repository
 # ============================================================================

@@ -1,3 +1,13 @@
+# ============================================================================
+# RASTER API CONFIGURATION
+# ============================================================================
+# STATUS: API module config - Environment-based settings for raster operations
+# PURPOSE: Configuration for raster convenience API with named locations
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: RasterAPIConfig, get_raster_api_config
+# DEPENDENCIES: Standard library only
+# ============================================================================
 """
 Raster API Configuration.
 

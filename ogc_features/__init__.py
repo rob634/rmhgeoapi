@@ -1,3 +1,13 @@
+# ============================================================================
+# OGC FEATURES API MODULE
+# ============================================================================
+# STATUS: API module - Self-contained OGC API Features implementation
+# PURPOSE: OGC API - Features Core 1.0 compliant endpoints for PostGIS data
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: OGCFeaturesConfig, OGCFeaturesService, get_ogc_triggers
+# DEPENDENCIES: pydantic, psycopg, azure.functions
+# ============================================================================
 """
 OGC Features API module.
 

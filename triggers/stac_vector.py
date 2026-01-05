@@ -1,3 +1,13 @@
+# ============================================================================
+# STAC VECTOR CATALOGING TRIGGER
+# ============================================================================
+# STATUS: Trigger layer - POST /api/stac/vector
+# PURPOSE: Catalog PostGIS vector tables in STAC
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: handle_request
+# DEPENDENCIES: services.service_stac_vector, infrastructure.pgstac_bootstrap
+# ============================================================================
 """
 STAC Vector Cataloging Trigger.
 

@@ -82,6 +82,7 @@ Usage:
 # Standard library imports
 import os
 import logging
+import threading
 import concurrent.futures
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
@@ -174,7 +175,8 @@ class BlobRepository(IBlobRepository):
     Design Principles:
     - Single source of authentication for all blob operations
     - Separate connection pools per storage account (Bronze/Silver/SilverExternal)
-    - Thread-safe multi-instance singleton implementation
+    - Thread-safe multi-instance singleton (05 JAN 2026: uses locks for 8+ instances)
+    - Double-checked locking for container client caching
     - Consistent error handling and logging
 
     Usage:
@@ -191,6 +193,7 @@ class BlobRepository(IBlobRepository):
 
     # Multi-instance singleton: one instance per storage account
     _instances: Dict[str, 'BlobRepository'] = {}
+    _instances_lock = threading.Lock()  # Thread-safe singleton creation (05 JAN 2026)
 
     def __new__(cls, account_name: str = None, connection_string: Optional[str] = None, *args, **kwargs):
         """
@@ -209,12 +212,13 @@ class BlobRepository(IBlobRepository):
             from config import get_config
             account_name = get_config().storage.silver.account_name
 
-        # Check if instance exists for this account
-        if account_name not in cls._instances:
-            instance = super().__new__(cls)
-            cls._instances[account_name] = instance
-
-        return cls._instances[account_name]
+        # Thread-safe singleton creation (05 JAN 2026)
+        # Prevents race condition when multiple threads create instances simultaneously
+        with cls._instances_lock:
+            if account_name not in cls._instances:
+                instance = super().__new__(cls)
+                cls._instances[account_name] = instance
+            return cls._instances[account_name]
     
     def __init__(self, account_name: str = None, connection_string: Optional[str] = None):
         """
@@ -253,8 +257,9 @@ class BlobRepository(IBlobRepository):
                     credential=self.credential
                 )
 
-            # Cache container clients
+            # Cache container clients with thread-safe lock (05 JAN 2026)
             self._container_clients: Dict[str, ContainerClient] = {}
+            self._container_clients_lock = threading.Lock()
 
             # Pre-cache containers for THIS account
             self._pre_cache_containers(config)
@@ -370,6 +375,10 @@ class BlobRepository(IBlobRepository):
         Uses connection pooling by caching container clients.
         Optionally validates container existence for fail-fast error handling.
 
+        Thread-safe implementation (05 JAN 2026):
+        Uses double-checked locking pattern to minimize lock contention while
+        preventing race conditions during container client creation.
+
         Args:
             container: Container name
             validate: If True, verify container exists before returning client (default: False)
@@ -380,7 +389,17 @@ class BlobRepository(IBlobRepository):
         Raises:
             ResourceNotFoundError: If validate=True and container doesn't exist
         """
-        if container not in self._container_clients:
+        # Fast path: check without lock (common case - container already cached)
+        if container in self._container_clients:
+            return self._container_clients[container]
+
+        # Slow path: acquire lock for thread-safe creation
+        with self._container_clients_lock:
+            # Double-check after acquiring lock (another thread may have created it)
+            if container in self._container_clients:
+                return self._container_clients[container]
+
+            # Create new container client
             container_client = self.blob_service.get_container_client(container)
 
             # Validate container exists if requested
@@ -395,8 +414,7 @@ class BlobRepository(IBlobRepository):
 
             self._container_clients[container] = container_client
             logger.debug(f"Created new container client for: {container}")
-
-        return self._container_clients[container]
+            return container_client
     
     # ========================================================================
     # VALIDATION OPERATIONS

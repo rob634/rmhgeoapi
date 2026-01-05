@@ -1,3 +1,13 @@
+# ============================================================================
+# XARRAY API OUTPUT HELPERS
+# ============================================================================
+# STATUS: API module utilities - Output format conversion
+# PURPOSE: Convert xarray results to GeoTIFF, PNG with colormaps
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: render_png, create_geotiff, create_geotiff_rgb
+# DEPENDENCIES: numpy, PIL, rasterio
+# ============================================================================
 """
 xarray API Output Helpers.
 

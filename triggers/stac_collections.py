@@ -1,3 +1,13 @@
+# ============================================================================
+# STAC COLLECTION MANAGEMENT TRIGGER
+# ============================================================================
+# STATUS: Trigger layer - GET/POST /api/stac/collections
+# PURPOSE: Create and manage STAC collections mapped to Azure Storage containers
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: StacCollectionsTrigger, stac_collections_trigger
+# DEPENDENCIES: infrastructure.pgstac_bootstrap
+# ============================================================================
 """
 STAC Collection Management Trigger.
 

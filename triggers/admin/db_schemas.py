@@ -1,3 +1,12 @@
+# ============================================================================
+# DATABASE SCHEMAS ADMIN TRIGGER
+# ============================================================================
+# STATUS: Trigger layer - GET /api/dbadmin/schemas
+# PURPOSE: Schema-level inspection of PostgreSQL database
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: AdminDbSchemasTrigger, admin_db_schemas_trigger
+# ============================================================================
 """
 Database Schemas Admin Trigger.
 

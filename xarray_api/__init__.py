@@ -1,3 +1,13 @@
+# ============================================================================
+# XARRAY API MODULE
+# ============================================================================
+# STATUS: API module - Direct Zarr access for time-series operations
+# PURPOSE: xarray + fsspec endpoints for efficient chunked reads
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: get_xarray_triggers
+# DEPENDENCIES: services.stac_client, services.xarray_reader
+# ============================================================================
 """
 xarray API Portable Module.
 

@@ -1,3 +1,13 @@
+# ============================================================================
+# RASTER API MODULE
+# ============================================================================
+# STATUS: API module - TiTiler convenience wrapper endpoints
+# PURPOSE: STAC item lookup and TiTiler proxy for raster operations
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: get_raster_triggers
+# DEPENDENCIES: services.stac_client, services.titiler_client
+# ============================================================================
 """
 Raster API Portable Module.
 

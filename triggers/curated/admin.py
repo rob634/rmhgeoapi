@@ -1,3 +1,13 @@
+# ============================================================================
+# CURATED DATASET ADMIN TRIGGER
+# ============================================================================
+# STATUS: Trigger layer - /api/curated/datasets/* endpoints
+# PURPOSE: CRUD operations for curated dataset registry
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: CuratedAdminTrigger, curated_admin_trigger
+# DEPENDENCIES: services.curated.registry_service
+# ============================================================================
 """
 Curated Dataset Admin Trigger.
 

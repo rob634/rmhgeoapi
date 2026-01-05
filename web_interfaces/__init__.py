@@ -407,6 +407,12 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Could not import Submit Raster Collection interface: {e}")
 
+try:
+    from .database import interface as _database
+    logger.info("✅ Imported Database interface module")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import Database interface: {e}")
+
 
 # Public API
 __all__ = [

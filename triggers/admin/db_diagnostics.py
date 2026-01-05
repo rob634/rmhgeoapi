@@ -1,3 +1,12 @@
+# ============================================================================
+# DATABASE DIAGNOSTICS ADMIN TRIGGER
+# ============================================================================
+# STATUS: Trigger layer - GET /api/dbadmin/diagnostics
+# PURPOSE: Database diagnostics and system testing endpoints
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: AdminDbDiagnosticsTrigger, admin_db_diagnostics_trigger
+# ============================================================================
 """
 Database Diagnostics Admin Trigger.
 

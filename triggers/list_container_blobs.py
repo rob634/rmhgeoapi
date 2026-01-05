@@ -1,3 +1,13 @@
+# ============================================================================
+# LIST CONTAINER BLOBS HTTP TRIGGER
+# ============================================================================
+# STATUS: Trigger layer - GET /api/containers/{container_name}/blobs
+# PURPOSE: Synchronous blob listing with suffix/metadata filtering
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: list_container_blobs_handler
+# DEPENDENCIES: azure.functions, infrastructure.blob
+# ============================================================================
 """
 List Container Blobs HTTP Trigger.
 

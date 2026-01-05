@@ -1,3 +1,13 @@
+# ============================================================================
+# OGC FEATURES API CONFIGURATION
+# ============================================================================
+# STATUS: API module config - Environment-based settings with managed identity
+# PURPOSE: Standalone configuration for OGC Features API with Azure auth support
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: OGCFeaturesConfig, get_ogc_config
+# DEPENDENCIES: pydantic, azure.identity
+# ============================================================================
 """
 OGC Features API configuration.
 

@@ -1,3 +1,13 @@
+# ============================================================================
+# ORPHAN DETECTOR TIMER TRIGGER
+# ============================================================================
+# STATUS: Trigger layer - Timer trigger (every 15 minutes)
+# PURPOSE: Detect orphaned tasks, zombie jobs, and ancient stale records
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: orphan_detector_handler
+# DEPENDENCIES: services.janitor_service
+# ============================================================================
 """
 Orphan Detector Timer Trigger.
 

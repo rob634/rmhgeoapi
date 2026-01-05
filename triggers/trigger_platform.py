@@ -1,3 +1,13 @@
+# ============================================================================
+# PLATFORM REQUEST HTTP TRIGGER
+# ============================================================================
+# STATUS: Trigger layer - POST /api/platform/*
+# PURPOSE: Anti-Corruption Layer translating DDH requests to CoreMachine jobs
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: platform_request_submit, platform_raster_submit, platform_raster_collection_submit, platform_unpublish_vector, platform_unpublish_raster
+# DEPENDENCIES: infrastructure.PlatformRepository, infrastructure.service_bus
+# ============================================================================
 """
 Platform Request HTTP Trigger.
 

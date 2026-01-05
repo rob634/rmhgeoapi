@@ -4,7 +4,7 @@
 # EPOCH: 4 - ACTIVE
 # STATUS: Admin trigger - Direct STAC repair testing
 # PURPOSE: HTTP endpoint to test STAC repair handlers without job orchestration
-# LAST_REVIEWED: 23 DEC 2025
+# LAST_REVIEWED: 05 JAN 2026
 # EXPORTS: stac_repair_inventory_handler, stac_repair_test_handler
 # DEPENDENCIES: services.stac_repair_handlers
 # ============================================================================

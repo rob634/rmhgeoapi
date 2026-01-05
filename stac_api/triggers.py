@@ -1,3 +1,13 @@
+# ============================================================================
+# STAC API HTTP TRIGGERS
+# ============================================================================
+# STATUS: API module triggers - Azure Functions HTTP endpoint handlers
+# PURPOSE: HTTP handlers for STAC API v1.0.0 endpoints
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: get_stac_triggers
+# DEPENDENCIES: azure.functions, stac_api.service, stac_api.config
+# ============================================================================
 """
 STAC API HTTP Triggers.
 

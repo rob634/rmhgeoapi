@@ -1,3 +1,13 @@
+# ============================================================================
+# STAC INITIALIZATION TRIGGER
+# ============================================================================
+# STATUS: Trigger layer - POST /api/stac/init
+# PURPOSE: Initialize STAC production collections for Bronze/Silver/Gold tiers
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: handle_request
+# DEPENDENCIES: infrastructure.pgstac_bootstrap, config.defaults.STACDefaults
+# ============================================================================
 """
 STAC Initialization Trigger.
 

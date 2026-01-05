@@ -1,3 +1,13 @@
+# ============================================================================
+# H3 DEBUG ADMIN TRIGGER
+# ============================================================================
+# STATUS: Trigger layer - GET /api/h3/debug/*
+# PURPOSE: H3 bootstrap monitoring and debugging endpoints
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: AdminH3DebugTrigger, admin_h3_debug_trigger
+# DEPENDENCIES: infrastructure.h3_repository
+# ============================================================================
 """
 H3 Debug Admin Trigger.
 

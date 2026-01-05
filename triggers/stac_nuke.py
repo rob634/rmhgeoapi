@@ -1,3 +1,13 @@
+# ============================================================================
+# STAC NUCLEAR BUTTON HTTP TRIGGER
+# ============================================================================
+# STATUS: Trigger layer - POST /api/stac/nuke
+# PURPOSE: DEV/TEST only - Clear STAC data without dropping schema
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: StacNukeTrigger, stac_nuke_trigger
+# DEPENDENCIES: infrastructure.pgstac_bootstrap
+# ============================================================================
 """
 STAC Nuclear Button HTTP Trigger.
 

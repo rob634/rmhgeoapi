@@ -1,3 +1,13 @@
+# ============================================================================
+# HTTP TRIGGER BASE CLASS
+# ============================================================================
+# STATUS: Trigger layer - Abstract base classes for HTTP triggers
+# PURPOSE: Provide consistent infrastructure patterns for request/response handling
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: BaseHttpTrigger, JobManagementTrigger, SystemMonitoringTrigger
+# DEPENDENCIES: azure.functions, util_logger
+# ============================================================================
 """
 HTTP Trigger Base Class.
 

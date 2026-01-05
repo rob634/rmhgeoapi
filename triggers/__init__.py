@@ -1,3 +1,12 @@
+# ============================================================================
+# TRIGGERS PACKAGE
+# ============================================================================
+# STATUS: Trigger layer - Package init for HTTP/Timer triggers
+# PURPOSE: Export Azure Functions HTTP and timer trigger implementations
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: BaseHttpTrigger, SystemMonitoringTrigger, JobManagementTrigger
+# ============================================================================
 """
 Triggers Package.
 

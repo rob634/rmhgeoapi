@@ -1,6 +1,6 @@
 # Working Backlog
 
-**Last Updated**: 04 JAN 2026
+**Last Updated**: 05 JAN 2026
 **Source of Truth**: [docs/epics/README.md](/docs/epics/README.md) — Epic/Feature/Story definitions
 **Purpose**: Sprint-level task tracking and delegation
 
@@ -267,6 +267,75 @@ performanceCounters
 
 ---
 
+## Thread Safety Investigation
+
+**Added**: 05 JAN 2026
+**Trigger**: KeyError race condition in BlobRepository when scaled to 8 instances
+**Status**: Initial fix applied, broader investigation needed
+
+### Background
+
+With `maxConcurrentCalls: 4` and 8 instances = 32 parallel task executions, we hit race conditions in BlobRepository's container client caching. Root cause: **check-then-act pattern without locking**.
+
+### Key Concepts (05 JAN 2026 Discussion)
+
+| Coordination Type | Scope | Lock Mechanism | Example |
+|-------------------|-------|----------------|---------|
+| **Distributed** | Across instances/processes | PostgreSQL `pg_advisory_xact_lock` | "Last task turns out lights" |
+| **Local** | Within single process | Python `threading.Lock` | Dict caching in singletons |
+
+**Why PostgreSQL can't help with local coordination**: The `_container_clients` dict exists only in Python process memory. PostgreSQL can only lock things it knows about (database rows/tables).
+
+**The race condition pattern**:
+```python
+# UNSAFE: Three separate bytecode ops, GIL releases between them
+if key not in dict:      # ① CHECK
+    dict[key] = value    # ② STORE (may trigger dict resize!)
+return dict[key]         # ③ RETURN (KeyError during resize!)
+```
+
+**The fix (double-checked locking)**:
+```python
+# SAFE: Lock protects entire sequence
+if key in dict:                    # Fast path (no lock)
+    return dict[key]
+with lock:                         # Slow path (locked)
+    if key not in dict:            # Double-check
+        dict[key] = create_value()
+    return dict[key]
+```
+
+### Completed (05 JAN 2026)
+
+| Task | Description | Status |
+|------|-------------|--------|
+| BlobRepository fix | Added `_instances_lock` and `_container_clients_lock` | ✅ |
+| Double-checked locking | `_get_container_client()` uses fast path + locked slow path | ✅ |
+| Documentation | Explained pattern in docstrings | ✅ |
+
+### Future Investigation
+
+| Area | Concern | Priority |
+|------|---------|----------|
+| Other singletons | PostgreSQLRepository, other repos - same pattern? | 🟡 Medium |
+| GDAL/rasterio threading | GDAL releases GIL - potential issues with concurrent raster ops | 🟡 Medium |
+| Connection pools | psycopg3 pool thread safety under high concurrency | 🟡 Medium |
+| Azure SDK clients | BlobServiceClient thread safety documentation | 🟢 Low |
+
+### Key Files
+
+| File | What Was Fixed |
+|------|----------------|
+| `infrastructure/blob.py` | `_instances_lock`, `_container_clients_lock`, double-checked locking |
+
+### Related Context
+
+- **CoreMachine uses PostgreSQL advisory locks** for distributed coordination (see `core/state_manager.py`, `core/schema/sql_generator.py`)
+- **OOM concerns** have historically limited multi-threading exploration
+- **GDAL threading issues** are separate from Python GIL (GDAL has own thread pool)
+
+---
+
 ## DevOps / Non-Geospatial Tasks
 
 Tasks suitable for a colleague with Azure/Python/pipeline expertise but without geospatial domain knowledge.
@@ -287,6 +356,10 @@ Tasks suitable for a colleague with Azure/Python/pipeline expertise but without 
 
 | Date | Item | Epic |
 |------|------|------|
+| 05 JAN 2026 | **Docstring Review COMPLETE** (236/236 stable files, archived to docs_claude/) | — |
+| 05 JAN 2026 | Thread-safety fixes for BlobRepository (concurrent pipeline support) | — |
+| 05 JAN 2026 | FATHOM tile deduplication bug fix (8x duplicates) | E9 |
+| 05 JAN 2026 | Database admin interface added to web_interfaces | E12 |
 | 04 JAN 2026 | TiTiler-xarray deployed to DEV (Zarr tile serving) | E9 |
 | 04 JAN 2026 | System snapshots schema (Pydantic model + DDL) | — |
 | 04 JAN 2026 | Health: network_environment (90+ Azure vars) | — |

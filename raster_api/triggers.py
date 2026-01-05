@@ -4,7 +4,7 @@
 # EPOCH: 4 - ACTIVE
 # STATUS: Trigger Layer - HTTP handlers for raster convenience endpoints
 # PURPOSE: Azure Functions HTTP handlers for raster API
-# LAST_REVIEWED: 19 DEC 2025
+# LAST_REVIEWED: 05 JAN 2026
 # EXPORTS: get_raster_triggers
 # DEPENDENCIES: azure-functions, .service
 # PORTABLE: Yes - works in rmhgeoapi and rmhogcapi

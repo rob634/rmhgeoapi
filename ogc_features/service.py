@@ -1,3 +1,13 @@
+# ============================================================================
+# OGC FEATURES API SERVICE
+# ============================================================================
+# STATUS: API module service - Business logic orchestration for OGC endpoints
+# PURPOSE: Generate OGC-compliant responses with pagination and link generation
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: OGCFeaturesService
+# DEPENDENCIES: ogc_features.config, ogc_features.repository, ogc_features.models
+# ============================================================================
 """
 OGC Features service layer.
 

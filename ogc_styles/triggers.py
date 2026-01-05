@@ -4,7 +4,7 @@
 # EPOCH: 4 - ACTIVE
 # STATUS: HTTP handlers - Azure Functions triggers for OGC Styles
 # PURPOSE: Handle HTTP requests for style list and style retrieval
-# LAST_REVIEWED: 18 DEC 2025
+# LAST_REVIEWED: 05 JAN 2026
 # EXPORTS: get_styles_triggers
 # DEPENDENCIES: azure.functions, ogc_styles.service
 # ============================================================================

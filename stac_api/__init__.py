@@ -1,3 +1,13 @@
+# ============================================================================
+# STAC API MODULE
+# ============================================================================
+# STATUS: API module - STAC API v1.0.0 compliant portable module
+# PURPOSE: Self-contained STAC API endpoints for pgSTAC data
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: get_stac_triggers
+# DEPENDENCIES: infrastructure.pgstac_bootstrap, azure.functions
+# ============================================================================
 """
 STAC API Portable Module
 

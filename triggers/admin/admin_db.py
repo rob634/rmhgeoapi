@@ -1,3 +1,12 @@
+# ============================================================================
+# DATABASE ADMIN BLUEPRINT
+# ============================================================================
+# STATUS: Trigger layer - Blueprint for /api/dbadmin/* routes
+# PURPOSE: DEV/QA database administration endpoints (remove before PROD)
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: bp (Blueprint)
+# ============================================================================
 """
 Database Admin Blueprint - All dbadmin/* routes.
 

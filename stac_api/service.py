@@ -1,3 +1,13 @@
+# ============================================================================
+# STAC API SERVICE
+# ============================================================================
+# STATUS: API module service - Business logic for STAC endpoints
+# PURPOSE: Orchestrate STAC API responses with link generation
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: STACAPIService
+# DEPENDENCIES: infrastructure.pgstac_bootstrap, stac_api.config
+# ============================================================================
 """
 STAC API Service Layer
 

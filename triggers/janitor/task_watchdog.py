@@ -1,3 +1,13 @@
+# ============================================================================
+# TASK WATCHDOG TIMER TRIGGER
+# ============================================================================
+# STATUS: Trigger layer - Timer trigger (every 5 minutes)
+# PURPOSE: Detect and mark stale PROCESSING tasks as FAILED
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: task_watchdog_handler
+# DEPENDENCIES: services.janitor_service
+# ============================================================================
 """
 Task Watchdog Timer Trigger.
 

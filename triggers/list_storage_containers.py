@@ -1,3 +1,13 @@
+# ============================================================================
+# LIST STORAGE CONTAINERS HTTP TRIGGER
+# ============================================================================
+# STATUS: Trigger layer - GET /api/storage/containers
+# PURPOSE: List containers across all storage zones (bronze, silver, gold)
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: list_storage_containers_handler
+# DEPENDENCIES: azure.functions, infrastructure.blob, config
+# ============================================================================
 """
 List Storage Containers - Sync endpoint to list containers across all zones.
 

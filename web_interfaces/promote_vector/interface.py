@@ -828,6 +828,31 @@ class PromoteVectorInterface(BaseInterface):
                             </div>
                         </div>
 
+                        <div class="form-group">
+                            <label>System Settings</label>
+                            <div class="toggle-row">
+                                <div class="toggle-label">
+                                    System Reserved
+                                    <span class="hint">Mark as critical system dataset (protected from demotion)</span>
+                                </div>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="isSystemReserved" onchange="toggleSystemRole()">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="toggle-row" id="systemRoleRow" style="display: none;">
+                                <div class="toggle-label">
+                                    System Role
+                                    <span class="hint">How this dataset is used by the platform</span>
+                                </div>
+                                <select id="systemRole" class="form-input short">
+                                    <option value="">Select role...</option>
+                                    <option value="admin0_boundaries">Admin0 Boundaries (country polygons)</option>
+                                    <option value="h3_land_grid">H3 Land Grid (H3 cells over land)</option>
+                                </select>
+                            </div>
+                        </div>
+
                         <div class="submit-section">
                             <button class="btn btn-secondary" onclick="resetForm()">Reset</button>
                             <button id="promoteBtn" class="btn-promote" onclick="submitPromotion()" disabled>
@@ -1214,6 +1239,15 @@ class PromoteVectorInterface(BaseInterface):
             element.querySelector('input').checked = true;
         }
 
+        // Toggle system role dropdown visibility
+        function toggleSystemRole() {
+            const isChecked = document.getElementById('isSystemReserved').checked;
+            document.getElementById('systemRoleRow').style.display = isChecked ? 'flex' : 'none';
+            if (!isChecked) {
+                document.getElementById('systemRole').value = '';
+            }
+        }
+
         // Refresh preview
         function refreshPreview() {
             if (sampleFeatures) {
@@ -1239,6 +1273,10 @@ class PromoteVectorInterface(BaseInterface):
             document.getElementById('inGallery').checked = true;
             document.getElementById('galleryOrder').value = '1';
             document.querySelectorAll('.classification-option')[0].click();
+            // Reset system settings
+            document.getElementById('isSystemReserved').checked = false;
+            document.getElementById('systemRole').value = '';
+            document.getElementById('systemRoleRow').style.display = 'none';
         }
 
         // Submit promotion
@@ -1259,6 +1297,10 @@ class PromoteVectorInterface(BaseInterface):
             btn.innerHTML = '<span>⏳</span> Promoting...';
 
             try {
+                // Build payload with system settings
+                const isSystemReserved = document.getElementById('isSystemReserved').checked;
+                const systemRole = document.getElementById('systemRole').value || null;
+
                 const payload = {
                     promoted_id: promotedId,
                     // Use the OGC Features collection as the source
@@ -1270,6 +1312,8 @@ class PromoteVectorInterface(BaseInterface):
                     gallery: document.getElementById('inGallery').checked,
                     gallery_order: document.getElementById('inGallery').checked ?
                         parseInt(document.getElementById('galleryOrder').value) : null,
+                    is_system_reserved: isSystemReserved,
+                    system_role: isSystemReserved ? systemRole : null,
                     style: {
                         title: promotedId + ' Style',
                         spec: buildCartoSymStyle()
@@ -1301,19 +1345,33 @@ class PromoteVectorInterface(BaseInterface):
         function showSuccess(result) {
             document.getElementById('form-container').style.display = 'none';
 
+            // Build status message
+            let statusMsg = `<strong>${result.promoted_id}</strong> has been promoted`;
+            if (result.style_id) {
+                statusMsg += ` with style <code>${result.style_id}</code>`;
+            }
+            if (result.is_system_reserved) {
+                statusMsg += `.<br><span style="color: #0369a1;">🔒 System Reserved</span>`;
+                if (result.system_role) {
+                    statusMsg += ` as <code>${result.system_role}</code>`;
+                }
+            }
+            statusMsg += '.';
+
             const container = document.getElementById('success-container');
             container.style.display = 'block';
             container.innerHTML = `
                 <div class="panel success-panel">
                     <h3>🎉 Dataset Promoted Successfully!</h3>
                     <p style="color: #065F46; margin: 16px 0;">
-                        <strong>${result.promoted_id}</strong> has been promoted${result.style_id ? ' with style <code>' + result.style_id + '</code>' : ''}.
+                        ${statusMsg}
                     </p>
                     <div class="success-links">
                         ${result.viewer_url ? `<a href="${result.viewer_url}" target="_blank" class="success-link">🗺️ Open Viewer</a>` : ''}
                         <a href="/api/promote/${result.promoted_id}" target="_blank" class="success-link">📋 View Details</a>
+                        ${result.is_system_reserved ? `<a href="/api/promote/system?role=${result.system_role}" target="_blank" class="success-link">🔍 System Query</a>` : ''}
                         <a href="/api/interface/gallery" class="success-link">🖼️ Go to Gallery</a>
-                        <a href="/api/interface/promote" class="success-link">➕ Promote Another</a>
+                        <a href="/api/interface/promote-vector" class="success-link">➕ Promote Another</a>
                     </div>
                 </div>
             `;

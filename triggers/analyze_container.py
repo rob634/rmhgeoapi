@@ -1,3 +1,13 @@
+# ============================================================================
+# CONTAINER ANALYSIS HTTP TRIGGER
+# ============================================================================
+# STATUS: Trigger layer - GET /api/containers/analyze
+# PURPOSE: On-demand analysis of list_container_contents job results
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: AnalyzeContainerTrigger, analyze_container_trigger
+# DEPENDENCIES: azure.functions, services.container_analysis
+# ============================================================================
 """
 Container Analysis HTTP Trigger.
 

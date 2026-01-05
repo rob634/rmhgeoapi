@@ -4,7 +4,7 @@
 # EPOCH: 4 - ACTIVE
 # STATUS: Data access - PostgreSQL operations for style storage
 # PURPOSE: CRUD operations for geo.feature_collection_styles table
-# LAST_REVIEWED: 18 DEC 2025
+# LAST_REVIEWED: 05 JAN 2026
 # EXPORTS: OGCStylesRepository
 # DEPENDENCIES: psycopg, ogc_features.config
 # ============================================================================

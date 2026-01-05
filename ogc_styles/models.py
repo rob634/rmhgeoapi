@@ -4,7 +4,7 @@
 # EPOCH: 4 - ACTIVE
 # STATUS: Data models - CartoSym-JSON and API response schemas
 # PURPOSE: Define type-safe models for OGC API Styles
-# LAST_REVIEWED: 18 DEC 2025
+# LAST_REVIEWED: 05 JAN 2026
 # EXPORTS: CartoSym* models, OGCStyle* models, Leaflet/Mapbox response models
 # DEPENDENCIES: pydantic
 # ============================================================================

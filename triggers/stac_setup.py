@@ -1,3 +1,13 @@
+# ============================================================================
+# STAC SETUP HTTP TRIGGER
+# ============================================================================
+# STATUS: Trigger layer - GET/POST /api/stac/setup
+# PURPOSE: PgSTAC installation and status checking endpoints
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: StacSetupTrigger, stac_setup_trigger
+# DEPENDENCIES: infrastructure.pgstac_bootstrap
+# ============================================================================
 """
 STAC Setup HTTP Trigger.
 

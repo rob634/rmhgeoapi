@@ -1,3 +1,13 @@
+# ============================================================================
+# CURATED DATASET SCHEDULER TRIGGER
+# ============================================================================
+# STATUS: Trigger layer - Timer trigger for daily dataset updates
+# PURPOSE: Check and submit update jobs for curated datasets (2 AM UTC)
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: CuratedSchedulerTrigger, curated_scheduler_trigger
+# DEPENDENCIES: services.curated.registry_service
+# ============================================================================
 """
 Curated Dataset Scheduler Trigger.
 

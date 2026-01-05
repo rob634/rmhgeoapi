@@ -1,3 +1,13 @@
+# ============================================================================
+# STAC METADATA EXTRACTION TRIGGER
+# ============================================================================
+# STATUS: Trigger layer - POST /api/stac/extract
+# PURPOSE: Extract STAC metadata from raster blobs and insert into PgSTAC
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: handle_request
+# DEPENDENCIES: services.service_stac_metadata (lazy-loaded for GDAL)
+# ============================================================================
 """
 STAC Metadata Extraction Trigger.
 

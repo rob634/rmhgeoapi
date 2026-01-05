@@ -1,3 +1,13 @@
+# ============================================================================
+# JOB HEALTH MONITOR TIMER TRIGGER
+# ============================================================================
+# STATUS: Trigger layer - Timer trigger (every 10 minutes)
+# PURPOSE: Detect jobs with failed tasks and propagate failure upward
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: job_health_handler
+# DEPENDENCIES: services.janitor_service
+# ============================================================================
 """
 Job Health Monitor Timer Trigger.
 

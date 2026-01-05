@@ -1,3 +1,13 @@
+# ============================================================================
+# OGC FEATURES API HTTP TRIGGERS
+# ============================================================================
+# STATUS: API module triggers - Azure Functions HTTP endpoint handlers
+# PURPOSE: HTTP trigger handlers for OGC API Features Core endpoints
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: get_ogc_triggers
+# DEPENDENCIES: azure.functions, ogc_features.service, ogc_features.models
+# ============================================================================
 """
 OGC Features HTTP triggers.
 

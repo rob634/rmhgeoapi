@@ -1,3 +1,12 @@
+# ============================================================================
+# DATABASE HEALTH ADMIN TRIGGER
+# ============================================================================
+# STATUS: Trigger layer - GET /api/dbadmin/health
+# PURPOSE: Database health monitoring and performance metrics
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: AdminDbHealthTrigger, admin_db_health_trigger
+# ============================================================================
 """
 Database Health Admin Trigger.
 

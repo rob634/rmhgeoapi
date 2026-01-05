@@ -4,7 +4,7 @@
 # EPOCH: 4 - ACTIVE
 # STATUS: Service Layer - Raster extraction and transformation
 # PURPOSE: Business logic for raster endpoints - bbox extraction, point queries
-# LAST_REVIEWED: 19 DEC 2025
+# LAST_REVIEWED: 05 JAN 2026
 # EXPORTS: RasterAPIService
 # DEPENDENCIES: services.stac_client, services.titiler_client
 # PORTABLE: Yes - uses config-independent service clients

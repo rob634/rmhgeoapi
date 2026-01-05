@@ -1,3 +1,12 @@
+# ============================================================================
+# DATABASE QUERIES ADMIN TRIGGER
+# ============================================================================
+# STATUS: Trigger layer - GET /api/dbadmin/activity
+# PURPOSE: PostgreSQL query analysis and connection monitoring
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: AdminDbQueriesTrigger, admin_db_queries_trigger
+# ============================================================================
 """
 Database Queries Admin Trigger.
 

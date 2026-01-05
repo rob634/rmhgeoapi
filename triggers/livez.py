@@ -4,7 +4,7 @@
 # EPOCH: 4 - ACTIVE
 # STATUS: HTTP Trigger - Ultra-lightweight liveness probe
 # PURPOSE: Fast endpoint for load balancer/Kubernetes liveness checks
-# LAST_REVIEWED: 12 DEC 2025
+# LAST_REVIEWED: 05 JAN 2026
 # EXPORTS: LivenessCheckTrigger, livez_trigger
 # INTERFACES: SystemMonitoringTrigger (http_base.py)
 # DEPENDENCIES: azure.functions (no external service dependencies!)

@@ -1,3 +1,12 @@
+# ============================================================================
+# JANITOR TRIGGERS PACKAGE
+# ============================================================================
+# STATUS: Trigger layer - Package init for system maintenance triggers
+# PURPOSE: Export timer and HTTP triggers for janitor operations
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: task_watchdog_handler, job_health_handler, orphan_detector_handler, janitor_*_handler
+# ============================================================================
 """
 Janitor Triggers Package.
 

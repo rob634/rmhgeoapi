@@ -1,3 +1,13 @@
+# ============================================================================
+# SERVICE BUS ADMIN HTTP TRIGGER
+# ============================================================================
+# STATUS: Trigger layer - GET/POST /api/servicebus/*
+# PURPOSE: Service Bus queue monitoring and management endpoints
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: ServiceBusAdminTrigger, servicebus_admin_trigger
+# DEPENDENCIES: azure.servicebus
+# ============================================================================
 """
 Service Bus Admin HTTP Trigger.
 

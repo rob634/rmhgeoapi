@@ -1,3 +1,12 @@
+# ============================================================================
+# DATABASE TABLES ADMIN TRIGGER
+# ============================================================================
+# STATUS: Trigger layer - GET /api/dbadmin/tables/{table_identifier}
+# PURPOSE: Table-level inspection with PostGIS support
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: AdminDbTablesTrigger, admin_db_tables_trigger
+# ============================================================================
 """
 Database Tables Admin Trigger.
 

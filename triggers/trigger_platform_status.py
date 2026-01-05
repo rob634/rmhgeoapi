@@ -1,3 +1,13 @@
+# ============================================================================
+# PLATFORM REQUEST STATUS HTTP TRIGGER
+# ============================================================================
+# STATUS: Trigger layer - GET /api/platform/status/{request_id}
+# PURPOSE: Query Platform request status via thin tracking pattern
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: platform_request_status
+# DEPENDENCIES: infrastructure.PlatformRepository, infrastructure.JobRepository
+# ============================================================================
 """
 Platform Request Status HTTP Trigger.
 

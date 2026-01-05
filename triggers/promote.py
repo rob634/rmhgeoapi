@@ -4,7 +4,7 @@
 # EPOCH: 4 - ACTIVE
 # STATUS: HTTP triggers for dataset promotion system
 # PURPOSE: CRUD + gallery operations for promoted datasets
-# LAST_REVIEWED: 22 DEC 2025
+# LAST_REVIEWED: 05 JAN 2026
 # EXPORTS: handle_promote, handle_promote_item, handle_gallery, handle_gallery_list
 # DEPENDENCIES: services.promote_service
 # ============================================================================

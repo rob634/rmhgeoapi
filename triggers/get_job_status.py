@@ -1,3 +1,13 @@
+# ============================================================================
+# JOB STATUS HTTP TRIGGER
+# ============================================================================
+# STATUS: Trigger layer - GET /api/jobs/status/{job_id}
+# PURPOSE: Real-time job status and progress tracking
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: JobStatusTrigger, get_job_status_trigger
+# DEPENDENCIES: azure.functions, triggers.http_base, infrastructure.TaskRepository
+# ============================================================================
 """
 Job Status HTTP Trigger.
 

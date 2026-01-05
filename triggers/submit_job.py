@@ -1,3 +1,13 @@
+# ============================================================================
+# JOB SUBMISSION HTTP TRIGGER
+# ============================================================================
+# STATUS: Trigger layer - POST /api/jobs/{job_type}
+# PURPOSE: Idempotent job creation with SHA256 deduplication
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: JobSubmissionTrigger, submit_job_trigger
+# DEPENDENCIES: azure.functions, triggers.http_base
+# ============================================================================
 """
 Job Submission HTTP Trigger.
 

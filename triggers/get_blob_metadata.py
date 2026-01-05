@@ -1,3 +1,13 @@
+# ============================================================================
+# GET BLOB METADATA HTTP TRIGGER
+# ============================================================================
+# STATUS: Trigger layer - GET /api/containers/{container_name}/blob
+# PURPOSE: Single-blob metadata endpoint for Pipeline Dashboard UI
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: get_blob_metadata_handler
+# DEPENDENCIES: azure.functions, infrastructure.blob
+# ============================================================================
 """
 Get Blob Metadata HTTP Trigger.
 

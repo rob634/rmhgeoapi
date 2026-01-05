@@ -1,3 +1,13 @@
+# ============================================================================
+# OGC FEATURES API REPOSITORY
+# ============================================================================
+# STATUS: API module repository - PostGIS data access with SQL injection prevention
+# PURPOSE: Direct PostgreSQL/PostGIS access with ST_AsGeoJSON optimization
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: OGCFeaturesRepository
+# DEPENDENCIES: psycopg, ogc_features.config
+# ============================================================================
 """
 OGC Features repository layer.
 

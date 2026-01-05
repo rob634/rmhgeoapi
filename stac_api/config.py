@@ -1,3 +1,13 @@
+# ============================================================================
+# STAC API CONFIGURATION
+# ============================================================================
+# STATUS: API module config - Minimal config with auto-detected base URL
+# PURPOSE: Configuration for STAC catalog metadata and base URL settings
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: STACAPIConfig, get_stac_config
+# DEPENDENCIES: pydantic
+# ============================================================================
 """
 STAC API Configuration
 

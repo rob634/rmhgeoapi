@@ -4,7 +4,7 @@
 # EPOCH: 4 - ACTIVE
 # STATUS: Service Layer - xarray direct access for time-series operations
 # PURPOSE: Business logic for xarray endpoints - point timeseries, regional stats
-# LAST_REVIEWED: 19 DEC 2025
+# LAST_REVIEWED: 05 JAN 2026
 # EXPORTS: XarrayAPIService
 # DEPENDENCIES: services.stac_client, services.xarray_reader
 # PORTABLE: Yes - uses config-independent service clients

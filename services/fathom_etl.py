@@ -713,27 +713,42 @@ def fathom_grid_inventory(params: dict, context: dict = None) -> dict:
     # - source_container stores the ORIGINAL source (bronze-fathom)
     # - The job's source_container param refers to Phase 1 OUTPUT location (silver-fathom)
     # - Filtering by phase1_completed_at IS NOT NULL is sufficient
+    # BUG FIX (05 JAN 2026): Use DISTINCT to deduplicate tiles
+    # Each tile+scenario has 8 source files (one per return period) that all share
+    # the same phase1_output_blob. Without DISTINCT, we'd get 8x duplicates.
     sql = """
+        WITH unique_tiles AS (
+            SELECT DISTINCT ON (phase2_group_key, source_metadata->>'tile')
+                phase2_group_key,
+                source_metadata->>'grid_cell' as grid_cell,
+                source_metadata->>'flood_type' as flood_type,
+                source_metadata->>'defense' as defense,
+                (source_metadata->>'year')::int as year,
+                source_metadata->>'ssp' as ssp,
+                source_metadata->>'tile' as tile,
+                phase1_output_blob
+            FROM app.etl_source_files
+            WHERE etl_type = 'fathom'
+              AND phase1_completed_at IS NOT NULL
+              AND phase2_completed_at IS NULL
+              AND source_metadata->>'grid_cell' IS NOT NULL
+              AND phase1_output_blob IS NOT NULL
+            ORDER BY phase2_group_key, source_metadata->>'tile'
+        )
         SELECT
             phase2_group_key,
-            source_metadata->>'grid_cell' as grid_cell,
-            source_metadata->>'flood_type' as flood_type,
-            source_metadata->>'defense' as defense,
-            (source_metadata->>'year')::int as year,
-            source_metadata->>'ssp' as ssp,
+            grid_cell,
+            flood_type,
+            defense,
+            year,
+            ssp,
             json_agg(
-                json_build_object('tile', source_metadata->>'tile', 'blob_path', phase1_output_blob)
-                ORDER BY source_metadata->>'tile'
+                json_build_object('tile', tile, 'blob_path', phase1_output_blob)
+                ORDER BY tile
             ) as tiles,
             COUNT(*) as tile_count
-        FROM app.etl_source_files
-        WHERE etl_type = 'fathom'
-          AND phase1_completed_at IS NOT NULL
-          AND phase2_completed_at IS NULL
-          AND source_metadata->>'grid_cell' IS NOT NULL
-          AND phase1_output_blob IS NOT NULL
-        GROUP BY phase2_group_key, source_metadata->>'grid_cell', source_metadata->>'flood_type',
-                 source_metadata->>'defense', source_metadata->>'year', source_metadata->>'ssp'
+        FROM unique_tiles
+        GROUP BY phase2_group_key, grid_cell, flood_type, defense, year, ssp
         ORDER BY phase2_group_key
     """
 

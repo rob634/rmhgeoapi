@@ -1,3 +1,13 @@
+# ============================================================================
+# XARRAY API CONFIGURATION
+# ============================================================================
+# STATUS: API module config - Environment-based settings for xarray operations
+# PURPOSE: Configuration for xarray direct access API with named locations
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: XarrayAPIConfig, get_xarray_api_config
+# DEPENDENCIES: Standard library only
+# ============================================================================
 """
 xarray API Configuration.
 

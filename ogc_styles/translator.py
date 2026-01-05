@@ -4,7 +4,7 @@
 # EPOCH: 4 - ACTIVE
 # STATUS: Service - CartoSym-JSON to client format translation
 # PURPOSE: Convert OGC CartoSym-JSON to Leaflet/Mapbox GL formats
-# LAST_REVIEWED: 18 DEC 2025
+# LAST_REVIEWED: 05 JAN 2026
 # EXPORTS: StyleTranslator
 # DEPENDENCIES: Standard library only
 # ============================================================================

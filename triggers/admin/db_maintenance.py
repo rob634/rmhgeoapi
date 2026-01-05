@@ -1,3 +1,12 @@
+# ============================================================================
+# DATABASE MAINTENANCE ADMIN TRIGGER
+# ============================================================================
+# STATUS: Trigger layer - POST /api/dbadmin/maintenance
+# PURPOSE: Database maintenance operations (nuke, redeploy, cleanup, full-rebuild)
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: AdminDbMaintenanceTrigger, admin_db_maintenance_trigger
+# ============================================================================
 """
 Database Maintenance Admin Trigger.
 

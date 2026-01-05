@@ -1,3 +1,13 @@
+# ============================================================================
+# JANITOR HTTP TRIGGERS
+# ============================================================================
+# STATUS: Trigger layer - /api/admin/janitor/* endpoints
+# PURPOSE: Manual janitor operations and status monitoring
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: janitor_run_handler, janitor_status_handler, janitor_history_handler
+# DEPENDENCIES: services.janitor_service
+# ============================================================================
 """
 Janitor HTTP Triggers.
 

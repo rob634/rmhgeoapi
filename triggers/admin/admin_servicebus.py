@@ -1,3 +1,12 @@
+# ============================================================================
+# SERVICE BUS ADMIN BLUEPRINT
+# ============================================================================
+# STATUS: Trigger layer - Blueprint for /api/servicebus/* routes
+# PURPOSE: DEV endpoints for Service Bus administration (remove before PROD)
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: bp (Blueprint)
+# ============================================================================
 """
 Service Bus Admin Blueprint - All servicebus/* routes.
 

@@ -1,3 +1,13 @@
+# ============================================================================
+# OGC FEATURES API MODELS
+# ============================================================================
+# STATUS: API module models - OGC API Features Core 1.0 response models
+# PURPOSE: Pydantic models implementing OGC API Features specification
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: OGCLink, OGCLandingPage, OGCConformance, OGCCollection, OGCFeatureCollection, OGCQueryParameters
+# DEPENDENCIES: pydantic
+# ============================================================================
 """
 OGC API - Features Pydantic models.
 

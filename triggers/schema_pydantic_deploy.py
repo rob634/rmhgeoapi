@@ -1,3 +1,13 @@
+# ============================================================================
+# PYDANTIC SCHEMA DEPLOYMENT TRIGGER
+# ============================================================================
+# STATUS: Trigger layer - POST /api/schema/deploy
+# PURPOSE: Deploy Pydantic-generated schema to PostgreSQL database
+# LAST_REVIEWED: 05 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: PydanticSchemaDeployTrigger, pydantic_schema_deploy_trigger
+# DEPENDENCIES: psycopg, core.schema.sql_generator
+# ============================================================================
 """
 Pydantic Schema Deployment Trigger.
 

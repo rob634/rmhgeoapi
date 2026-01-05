@@ -173,8 +173,8 @@ az identity create \
 Connect to the `postgres` database (NOT your application database) as the Entra ID Administrator:
 
 ```sql
--- For Admin identity (full access)
-SELECT * FROM pgaadauth_create_principal('<ADMIN_IDENTITY_NAME>', true, false);
+-- For Admin identity (NOT as azure_pg_admin - use is_admin=false)
+SELECT * FROM pgaadauth_create_principal('<ADMIN_IDENTITY_NAME>', false, false);
 
 -- For Reader identity (read-only)
 SELECT * FROM pgaadauth_create_principal('<READER_IDENTITY_NAME>', false, false);
@@ -182,30 +182,45 @@ SELECT * FROM pgaadauth_create_principal('<READER_IDENTITY_NAME>', false, false)
 
 **Parameters**:
 - First parameter: Role name (must match the managed identity name exactly)
-- Second parameter (`is_admin`): `true` grants azure_pg_admin membership
+- Second parameter (`is_admin`): `false` - do NOT grant azure_pg_admin (not needed!)
 - Third parameter (`is_mfa`): `false` for service accounts
 
-#### 4. Grant Schema Permissions
+#### 4. Grant Admin Identity Permissions
 
-Connect to your application database and grant appropriate permissions:
+The admin identity needs minimal permissions - no azure_pg_admin required:
 
-**For Admin Identity**:
 ```sql
-GRANT ALL PRIVILEGES ON SCHEMA <schema_name> TO <admin_identity>;
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA <schema_name> TO <admin_identity>;
-ALTER DEFAULT PRIVILEGES IN SCHEMA <schema_name>
-    GRANT ALL PRIVILEGES ON TABLES TO <admin_identity>;
+-- Database-level: allows CREATE SCHEMA
+GRANT CREATE ON DATABASE <database_name> TO "<admin_identity>";
+
+-- pgstac roles WITH ADMIN OPTION (required for pypgstac migrate)
+GRANT pgstac_admin TO "<admin_identity>" WITH ADMIN OPTION;
+GRANT pgstac_ingest TO "<admin_identity>" WITH ADMIN OPTION;
+GRANT pgstac_read TO "<admin_identity>" WITH ADMIN OPTION;
+
+-- PostGIS access
+GRANT USAGE ON SCHEMA public TO "<admin_identity>";
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO "<admin_identity>";
 ```
 
-**For Reader Identity**:
+**Note**: The admin identity creates schemas itself via `CREATE SCHEMA IF NOT EXISTS`, so it automatically owns them.
+
+#### 5. Grant Reader Identity Permissions
+
+Run AFTER admin identity has created schemas:
+
 ```sql
-GRANT USAGE ON SCHEMA <schema_name> TO <reader_identity>;
-GRANT SELECT ON ALL TABLES IN SCHEMA <schema_name> TO <reader_identity>;
-ALTER DEFAULT PRIVILEGES IN SCHEMA <schema_name>
-    GRANT SELECT ON TABLES TO <reader_identity>;
+GRANT USAGE ON SCHEMA <schema_name> TO "<reader_identity>";
+GRANT SELECT ON ALL TABLES IN SCHEMA <schema_name> TO "<reader_identity>";
+
+-- For future tables created by admin
+ALTER DEFAULT PRIVILEGES FOR ROLE "<admin_identity>" IN SCHEMA <schema_name>
+    GRANT SELECT ON TABLES TO "<reader_identity>";
 ```
 
-#### 5. Assign Identity to Function App
+See [DATABASE_IDENTITY_RUNBOOK.md](DATABASE_IDENTITY_RUNBOOK.md) for complete setup instructions.
+
+#### 6. Assign Identity to Function App
 
 ```bash
 IDENTITY_ID=$(az identity show \

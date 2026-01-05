@@ -1,57 +1,37 @@
 # Database Identity Runbook: Managed Identity Setup for Azure PostgreSQL
 
-**Date**: 03 DEC 2025
+**Date**: 05 JAN 2026
 **Status**: Production
-**Purpose**: Operational runbook with actual values for setting up managed identity database access
+**Purpose**: Operational runbook for setting up managed identity database access with minimal permissions
 **Audience**: DevOps, Database Administrators
 
 ---
 
 ## Overview
 
-This runbook contains the actual commands and credentials needed to set up managed identity access for Azure PostgreSQL Flexible Server. It covers two identities:
+This runbook provides the minimal permissions needed for managed identity access to Azure PostgreSQL Flexible Server.
 
-| Identity | Purpose | Access Level |
-|----------|---------|--------------|
-| **rmhpgflexadmin** | ETL system, schema management | Full DDL + DML |
-| **rmhpgflexreader** | Read-only APIs (OGC, TiTiler) | SELECT only |
+**Key Principle**: Managed identities do NOT require `azure_pg_admin`. They only need:
+- `CREATE ON DATABASE` - to create schemas
+- `WITH ADMIN OPTION` on pgstac roles - for pypgstac migrate
+- Schema ownership (automatic when identity creates the schema)
 
-**For conceptual overview and generic setup instructions, see**: [WIKI_API_DATABASE.md](WIKI_API_DATABASE.md)
+### Four Managed Identities
 
----
+| Identity | Environment | Purpose | Access Level |
+|----------|-------------|---------|--------------|
+| **Internal DB Admin** | DEV/Sandbox | ETL system, schema management | Full DDL + DML |
+| **Internal DB Reader** | DEV/Sandbox | Read-only APIs (OGC, STAC) | SELECT only |
+| **External DB Admin** | QA/PROD | ETL system, schema management | Full DDL + DML |
+| **External DB Reader** | QA/PROD | Read-only APIs (OGC, STAC) | SELECT only |
 
-## Identity Reference
-
-### Admin Identity: rmhpgflexadmin
-
-| Property | Value |
-|----------|-------|
-| **Name** | `rmhpgflexadmin` |
-| **Client ID** | `a533cb80-a590-4fad-8e52-1eb1f72659d7` |
-| **Principal ID (Object ID)** | `ab45e154-ae11-4e99-9e96-76da5fe51656` |
-| **Resource Group** | `rmhazure_rg` |
-| **Location** | eastus |
-| **Tenant ID** | `086aef7e-db12-4161-8a9f-777deb499cfa` |
-| **PostgreSQL Admin** | Yes (azure_pg_admin member) |
-| **Assigned To** | rmhazuregeoapi (ETL Function App) |
-
-### Reader Identity: rmhpgflexreader
-
-| Property | Value |
-|----------|-------|
-| **Name** | `rmhpgflexreader` |
-| **Client ID** | `1c79a2fe-42cb-4f30-8fe9-c1dfc04f142f` |
-| **Principal ID (Object ID)** | `789cc11a-d667-4915-b4de-88e76eda1cfb` |
-| **Resource Group** | `rmhazure_rg` |
-| **Location** | eastus |
-| **Tenant ID** | `086aef7e-db12-4161-8a9f-777deb499cfa` |
-| **PostgreSQL Admin** | No |
-| **Assigned To** | rmhogcapi, TiTiler |
+**Internal** = Personal Azure tenant (sandbox development)
+**External** = Corporate Azure tenant (QA/PROD deployment)
 
 ### Permission Comparison
 
-| Permission | rmhpgflexadmin | rmhpgflexreader |
-|------------|----------------|-----------------|
+| Permission | DB Admin | DB Reader |
+|------------|----------|-----------|
 | SELECT | ✅ | ✅ |
 | INSERT | ✅ | ❌ |
 | UPDATE | ✅ | ❌ |
@@ -64,367 +44,308 @@ This runbook contains the actual commands and credentials needed to set up manag
 
 ---
 
-## PostgreSQL Server Details
+## Part 1: DBA Prerequisites (One-Time Setup)
 
-| Property | Value |
-|----------|-------|
-| **Server** | `rmhpgflex.postgres.database.azure.com` |
-| **Database** | `geopgflex` |
-| **PostgreSQL Version** | 17.6 |
-| **Entra ID Auth** | Enabled |
-| **Password Auth** | Enabled (hybrid mode) |
+These commands require `azure_pg_admin` and are run ONCE by the DBA before application deployment.
 
----
+### Step 1.1: Create Extensions
 
-## Part 1: Create PostgreSQL Roles
+**Must be run by azure_pg_admin** - the managed identity cannot create extensions.
 
-### Prerequisites
+```sql
+-- ============================================================================
+-- EXTENSIONS (requires azure_pg_admin)
+-- Run on: geoapp database
+-- ============================================================================
 
-You must be the Entra ID Administrator for the PostgreSQL server. Verify with:
+CREATE EXTENSION IF NOT EXISTS postgis;
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+CREATE EXTENSION IF NOT EXISTS unaccent;
 
-```bash
-az postgres flexible-server show \
-    --resource-group rmhazure_rg \
-    --name rmhpgflex \
-    --query "authConfig" \
-    --output json
+-- Verify
+SELECT extname, extversion FROM pg_extension
+WHERE extname IN ('postgis', 'btree_gist', 'unaccent');
 ```
 
-### Step 1.1: Get Azure AD Token
+### Step 1.2: Create pgSTAC Roles
 
-```bash
-# Get your current Azure user (must be Entra ID admin)
-az account show --query "user.name" --output tsv
-# Expected: {managed_identity}@{tenant}.onmicrosoft.com
+The pypgstac library expects these roles to exist. They must be created by DBA.
 
-# Get access token for PostgreSQL
-TOKEN=$(az account get-access-token --resource-type oss-rdbms --query accessToken --output tsv)
+```sql
+-- ============================================================================
+-- PGSTAC ROLES (run once by DBA)
+-- These roles are used by pypgstac library
+-- ============================================================================
 
-# Verify token was acquired
-echo "Token acquired: ${TOKEN:0:50}..."
-```
+DO $$ BEGIN CREATE ROLE pgstac_admin; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE ROLE pgstac_ingest; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE ROLE pgstac_read; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-### Step 1.2: Create Admin Role (rmhpgflexadmin)
-
-**IMPORTANT**: Run on `postgres` database, NOT `geopgflex`!
-
-```bash
-TOKEN=$(az account get-access-token --resource-type oss-rdbms --query accessToken --output tsv)
-
-PGPASSWORD="$TOKEN" psql \
-    -h rmhpgflex.postgres.database.azure.com \
-    -U "{managed_identity}@{tenant}.onmicrosoft.com" \
-    -d postgres \
-    -c "SELECT * FROM pgaadauth_create_principal('rmhpgflexadmin', true, false);"
-```
-
-**Parameters**:
-- `'rmhpgflexadmin'` - Role name (must match managed identity name)
-- `true` - is_admin: Grants azure_pg_admin membership, CREATEROLE, CREATEDB
-- `false` - is_mfa: No MFA required for service accounts
-
-**Expected output**:
-```
-pgaadauth_create_principal
-----------------------------------
- Created role for rmhpgflexadmin
-(1 row)
-```
-
-### Step 1.3: Create Reader Role (rmhpgflexreader)
-
-```bash
-TOKEN=$(az account get-access-token --resource-type oss-rdbms --query accessToken --output tsv)
-
-PGPASSWORD="$TOKEN" psql \
-    -h rmhpgflex.postgres.database.azure.com \
-    -U "{managed_identity}@{tenant}.onmicrosoft.com" \
-    -d postgres \
-    -c "SELECT * FROM pgaadauth_create_principal('rmhpgflexreader', false, false);"
-```
-
-**Parameters**:
-- `'rmhpgflexreader'` - Role name
-- `false` - is_admin: NOT a PostgreSQL admin
-- `false` - is_mfa: No MFA required
-
-### Step 1.4: Verify Role Creation
-
-```bash
-TOKEN=$(az account get-access-token --resource-type oss-rdbms --query accessToken --output tsv)
-
-PGPASSWORD="$TOKEN" psql \
-    -h rmhpgflex.postgres.database.azure.com \
-    -U "{managed_identity}@{tenant}.onmicrosoft.com" \
-    -d postgres \
-    -c "SELECT rolname, rolcanlogin, rolcreaterole, rolcreatedb FROM pg_roles WHERE rolname LIKE 'rmhpgflex%';"
-```
-
-**Expected output**:
-```
-     rolname      | rolcanlogin | rolcreaterole | rolcreatedb
-------------------+-------------+---------------+-------------
- rmhpgflexadmin   | t           | t             | t
- rmhpgflexreader  | t           | f             | f
-(2 rows)
+-- Verify
+SELECT rolname FROM pg_roles WHERE rolname LIKE 'pgstac%';
 ```
 
 ---
 
-## Part 2: Grant Schema Permissions
+## Part 2: Create Managed Identity Users
 
-### Step 2.1: Grant Admin Permissions (rmhpgflexadmin)
+### Step 2.1: Create Admin Identity
 
-Connect to `geopgflex` as schema owner:
-
-```bash
-PGPASSWORD='<SCHEMA_OWNER_PASSWORD>' psql \
-    -h rmhpgflex.postgres.database.azure.com \
-    -U {db_superuser} \
-    -d geopgflex
-```
-
-Run the following SQL:
+**IMPORTANT**: Use `is_admin=false` - we do NOT want azure_pg_admin membership.
 
 ```sql
 -- ============================================================================
--- ADMIN PERMISSIONS: rmhpgflexadmin (Full DDL + DML)
+-- CREATE ADMIN IDENTITY (NOT as azure_pg_admin!)
+-- Run on: postgres database (pgaadauth functions are in postgres DB)
 -- ============================================================================
 
--- Schema: geo (Vector data from ETL)
-GRANT ALL PRIVILEGES ON SCHEMA geo TO rmhpgflexadmin;
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA geo TO rmhpgflexadmin;
-GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA geo TO rmhpgflexadmin;
-GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA geo TO rmhpgflexadmin;
-ALTER DEFAULT PRIVILEGES IN SCHEMA geo GRANT ALL PRIVILEGES ON TABLES TO rmhpgflexadmin;
-ALTER DEFAULT PRIVILEGES IN SCHEMA geo GRANT ALL PRIVILEGES ON SEQUENCES TO rmhpgflexadmin;
-ALTER DEFAULT PRIVILEGES IN SCHEMA geo GRANT ALL PRIVILEGES ON FUNCTIONS TO rmhpgflexadmin;
-
--- Schema: pgstac (STAC metadata catalog)
-GRANT ALL PRIVILEGES ON SCHEMA pgstac TO rmhpgflexadmin;
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA pgstac TO rmhpgflexadmin;
-GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA pgstac TO rmhpgflexadmin;
-GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA pgstac TO rmhpgflexadmin;
-ALTER DEFAULT PRIVILEGES IN SCHEMA pgstac GRANT ALL PRIVILEGES ON TABLES TO rmhpgflexadmin;
-ALTER DEFAULT PRIVILEGES IN SCHEMA pgstac GRANT ALL PRIVILEGES ON SEQUENCES TO rmhpgflexadmin;
-ALTER DEFAULT PRIVILEGES IN SCHEMA pgstac GRANT ALL PRIVILEGES ON FUNCTIONS TO rmhpgflexadmin;
-
--- Schema: h3 (H3 hexagon grids)
-GRANT ALL PRIVILEGES ON SCHEMA h3 TO rmhpgflexadmin;
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA h3 TO rmhpgflexadmin;
-GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA h3 TO rmhpgflexadmin;
-GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA h3 TO rmhpgflexadmin;
-ALTER DEFAULT PRIVILEGES IN SCHEMA h3 GRANT ALL PRIVILEGES ON TABLES TO rmhpgflexadmin;
-ALTER DEFAULT PRIVILEGES IN SCHEMA h3 GRANT ALL PRIVILEGES ON SEQUENCES TO rmhpgflexadmin;
-ALTER DEFAULT PRIVILEGES IN SCHEMA h3 GRANT ALL PRIVILEGES ON FUNCTIONS TO rmhpgflexadmin;
-
--- Schema: app (CoreMachine jobs/tasks)
-GRANT ALL PRIVILEGES ON SCHEMA app TO rmhpgflexadmin;
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA app TO rmhpgflexadmin;
-GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA app TO rmhpgflexadmin;
-GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA app TO rmhpgflexadmin;
-ALTER DEFAULT PRIVILEGES IN SCHEMA app GRANT ALL PRIVILEGES ON TABLES TO rmhpgflexadmin;
-ALTER DEFAULT PRIVILEGES IN SCHEMA app GRANT ALL PRIVILEGES ON SEQUENCES TO rmhpgflexadmin;
-ALTER DEFAULT PRIVILEGES IN SCHEMA app GRANT ALL PRIVILEGES ON FUNCTIONS TO rmhpgflexadmin;
-
--- Schema: platform (ETL orchestration)
-GRANT ALL PRIVILEGES ON SCHEMA platform TO rmhpgflexadmin;
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA platform TO rmhpgflexadmin;
-GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA platform TO rmhpgflexadmin;
-GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA platform TO rmhpgflexadmin;
-ALTER DEFAULT PRIVILEGES IN SCHEMA platform GRANT ALL PRIVILEGES ON TABLES TO rmhpgflexadmin;
-ALTER DEFAULT PRIVILEGES IN SCHEMA platform GRANT ALL PRIVILEGES ON SEQUENCES TO rmhpgflexadmin;
-ALTER DEFAULT PRIVILEGES IN SCHEMA platform GRANT ALL PRIVILEGES ON FUNCTIONS TO rmhpgflexadmin;
-
--- Schema: silver (Processed data tier)
-GRANT ALL PRIVILEGES ON SCHEMA silver TO rmhpgflexadmin;
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA silver TO rmhpgflexadmin;
-GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA silver TO rmhpgflexadmin;
-GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA silver TO rmhpgflexadmin;
-ALTER DEFAULT PRIVILEGES IN SCHEMA silver GRANT ALL PRIVILEGES ON TABLES TO rmhpgflexadmin;
-ALTER DEFAULT PRIVILEGES IN SCHEMA silver GRANT ALL PRIVILEGES ON SEQUENCES TO rmhpgflexadmin;
-ALTER DEFAULT PRIVILEGES IN SCHEMA silver GRANT ALL PRIVILEGES ON FUNCTIONS TO rmhpgflexadmin;
+-- Parameters: (principal_name, is_admin, is_mfa)
+-- is_admin=false: Does NOT grant azure_pg_admin (correct!)
+-- is_mfa=false: No MFA for service accounts
+SELECT * FROM pgaadauth_create_principal('<admin_identity_name>', false, false);
 ```
 
-### Step 2.2: Grant Reader Permissions (rmhpgflexreader)
+### Step 2.2: Create Reader Identity
 
 ```sql
 -- ============================================================================
--- READER PERMISSIONS: rmhpgflexreader (SELECT only)
+-- CREATE READER IDENTITY
+-- Run on: postgres database
 -- ============================================================================
 
--- Schema: geo (Vector data)
-GRANT USAGE ON SCHEMA geo TO rmhpgflexreader;
-GRANT SELECT ON ALL TABLES IN SCHEMA geo TO rmhpgflexreader;
-ALTER DEFAULT PRIVILEGES IN SCHEMA geo GRANT SELECT ON TABLES TO rmhpgflexreader;
-
--- Schema: pgstac (STAC metadata)
-GRANT USAGE ON SCHEMA pgstac TO rmhpgflexreader;
-GRANT SELECT ON ALL TABLES IN SCHEMA pgstac TO rmhpgflexreader;
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgstac TO rmhpgflexreader;
-ALTER DEFAULT PRIVILEGES IN SCHEMA pgstac GRANT SELECT ON TABLES TO rmhpgflexreader;
-ALTER DEFAULT PRIVILEGES IN SCHEMA pgstac GRANT EXECUTE ON FUNCTIONS TO rmhpgflexreader;
-
--- Schema: h3 (H3 hexagon grids)
-GRANT USAGE ON SCHEMA h3 TO rmhpgflexreader;
-GRANT SELECT ON ALL TABLES IN SCHEMA h3 TO rmhpgflexreader;
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA h3 TO rmhpgflexreader;
-ALTER DEFAULT PRIVILEGES IN SCHEMA h3 GRANT SELECT ON TABLES TO rmhpgflexreader;
-ALTER DEFAULT PRIVILEGES IN SCHEMA h3 GRANT EXECUTE ON FUNCTIONS TO rmhpgflexreader;
-
--- Schema: public (for PostGIS functions)
-GRANT USAGE ON SCHEMA public TO rmhpgflexreader;
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO rmhpgflexreader;
+SELECT * FROM pgaadauth_create_principal('<reader_identity_name>', false, false);
 ```
 
-### Step 2.3: Verify Permissions
+### Step 2.3: Verify Users Created
 
 ```sql
--- Check admin permissions
+-- Verify both users exist (run on postgres database)
+SELECT rolname, rolcanlogin, rolcreaterole, rolcreatedb
+FROM pg_roles
+WHERE rolname IN ('<admin_identity_name>', '<reader_identity_name>');
+
+-- Expected output:
+--      rolname           | rolcanlogin | rolcreaterole | rolcreatedb
+-- -----------------------+-------------+---------------+-------------
+--  <admin_identity_name> | t           | f             | f
+--  <reader_identity_name>| t           | f             | f
+```
+
+---
+
+## Part 3: Grant Admin Identity Permissions
+
+### Step 3.1: Database-Level Permissions
+
+```sql
+-- ============================================================================
+-- ADMIN: DATABASE PERMISSIONS
+-- Run on: geoapp database
+-- ============================================================================
+
+-- Allow creating schemas (this is how the app creates app/geo/h3/pgstac schemas)
+GRANT CREATE ON DATABASE geoapp TO "<admin_identity_name>";
+
+-- Verify
+SELECT has_database_privilege('<admin_identity_name>', 'geoapp', 'CREATE') as can_create;
+-- Expected: true
+```
+
+### Step 3.2: pgSTAC Role Grants (CRITICAL)
+
+**This is the key permission for pypgstac migrate.** The `WITH ADMIN OPTION` is required because pypgstac runs `GRANT pgstac_admin TO current_user` even if already granted.
+
+```sql
+-- ============================================================================
+-- ADMIN: PGSTAC ROLE GRANTS WITH ADMIN OPTION
+-- CRITICAL: pypgstac migrate will fail without ADMIN OPTION
+-- ============================================================================
+
+GRANT pgstac_admin TO "<admin_identity_name>" WITH ADMIN OPTION;
+GRANT pgstac_ingest TO "<admin_identity_name>" WITH ADMIN OPTION;
+GRANT pgstac_read TO "<admin_identity_name>" WITH ADMIN OPTION;
+
+-- Verify (all should show has_admin_option = true)
+SELECT r.rolname AS role_name,
+       m.rolname AS granted_to,
+       am.admin_option AS has_admin_option
+FROM pg_auth_members am
+JOIN pg_roles r ON am.roleid = r.oid
+JOIN pg_roles m ON am.member = m.oid
+WHERE r.rolname IN ('pgstac_admin', 'pgstac_ingest', 'pgstac_read')
+AND m.rolname = '<admin_identity_name>'
+ORDER BY r.rolname;
+
+-- Expected: 3 rows, all with has_admin_option = true
+```
+
+### Step 3.3: PostGIS Function Access
+
+```sql
+-- ============================================================================
+-- ADMIN: POSTGIS ACCESS
+-- Required for spatial operations
+-- ============================================================================
+
+GRANT USAGE ON SCHEMA public TO "<admin_identity_name>";
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO "<admin_identity_name>";
+```
+
+---
+
+## Part 4: Grant Reader Identity Permissions
+
+The reader identity only needs SELECT access. These grants use `DEFAULT PRIVILEGES` to ensure future tables are accessible.
+
+### Step 4.1: Schema Access
+
+```sql
+-- ============================================================================
+-- READER: SCHEMA ACCESS
+-- Run AFTER admin identity has created the schemas
+-- ============================================================================
+
+-- geo schema (vector data)
+GRANT USAGE ON SCHEMA geo TO "<reader_identity_name>";
+GRANT SELECT ON ALL TABLES IN SCHEMA geo TO "<reader_identity_name>";
+
+-- pgstac schema (STAC metadata)
+GRANT USAGE ON SCHEMA pgstac TO "<reader_identity_name>";
+GRANT SELECT ON ALL TABLES IN SCHEMA pgstac TO "<reader_identity_name>";
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgstac TO "<reader_identity_name>";
+
+-- h3 schema (H3 grids)
+GRANT USAGE ON SCHEMA h3 TO "<reader_identity_name>";
+GRANT SELECT ON ALL TABLES IN SCHEMA h3 TO "<reader_identity_name>";
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA h3 TO "<reader_identity_name>";
+
+-- public schema (PostGIS functions)
+GRANT USAGE ON SCHEMA public TO "<reader_identity_name>";
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO "<reader_identity_name>";
+
+-- pgstac_read role (for STAC search functions)
+GRANT pgstac_read TO "<reader_identity_name>";
+```
+
+### Step 4.2: Default Privileges for Future Tables
+
+**Run as the ADMIN identity** to ensure tables it creates are accessible to reader:
+
+```sql
+-- ============================================================================
+-- DEFAULT PRIVILEGES FOR FUTURE TABLES
+-- Run as: <admin_identity_name> (or have DBA run FOR ROLE)
+-- ============================================================================
+
+ALTER DEFAULT PRIVILEGES FOR ROLE "<admin_identity_name>" IN SCHEMA geo
+    GRANT SELECT ON TABLES TO "<reader_identity_name>";
+
+ALTER DEFAULT PRIVILEGES FOR ROLE "<admin_identity_name>" IN SCHEMA pgstac
+    GRANT SELECT ON TABLES TO "<reader_identity_name>";
+
+ALTER DEFAULT PRIVILEGES FOR ROLE "<admin_identity_name>" IN SCHEMA h3
+    GRANT SELECT ON TABLES TO "<reader_identity_name>";
+```
+
+---
+
+## Part 5: Verification Queries
+
+### Step 5.1: Admin Permissions Check
+
+```sql
+-- ============================================================================
+-- VERIFY ADMIN PERMISSIONS
+-- ============================================================================
+
+-- Database CREATE permission
+SELECT has_database_privilege('<admin_identity_name>', 'geoapp', 'CREATE') as can_create_schema;
+
+-- pgstac roles with ADMIN OPTION
+SELECT r.rolname AS role_name,
+       am.admin_option AS has_admin_option
+FROM pg_auth_members am
+JOIN pg_roles r ON am.roleid = r.oid
+JOIN pg_roles m ON am.member = m.oid
+WHERE r.rolname LIKE 'pgstac%'
+AND m.rolname = '<admin_identity_name>';
+
+-- Expected: can_create_schema=true, 3 rows with has_admin_option=true
+```
+
+### Step 5.2: Reader Permissions Check
+
+```sql
+-- ============================================================================
+-- VERIFY READER PERMISSIONS
+-- ============================================================================
+
 SELECT
     n.nspname as schema,
-    has_schema_privilege('rmhpgflexadmin', n.nspname, 'USAGE') as has_usage,
-    has_schema_privilege('rmhpgflexadmin', n.nspname, 'CREATE') as has_create
-FROM pg_namespace n
-WHERE n.nspname IN ('geo', 'pgstac', 'h3', 'app', 'platform', 'silver', 'public')
-ORDER BY n.nspname;
-
--- Check reader permissions
-SELECT
-    n.nspname as schema,
-    has_schema_privilege('rmhpgflexreader', n.nspname, 'USAGE') as has_usage,
-    has_schema_privilege('rmhpgflexreader', n.nspname, 'CREATE') as has_create
+    has_schema_privilege('<reader_identity_name>', n.nspname, 'USAGE') as has_usage
 FROM pg_namespace n
 WHERE n.nspname IN ('geo', 'pgstac', 'h3', 'public')
 ORDER BY n.nspname;
+
+-- Expected: all has_usage = true
 ```
 
 ---
 
-## Part 3: Assign Identities to Function Apps
+## Part 6: Application Configuration
 
-### Step 3.1: Assign Admin Identity to ETL App
+### Function App Environment Variables
 
-```bash
-# Get the full resource ID of the admin identity
-IDENTITY_ID=$(az identity show \
-    --name rmhpgflexadmin \
-    --resource-group rmhazure_rg \
-    --query id \
-    --output tsv)
-
-echo "Identity ID: $IDENTITY_ID"
-
-# Assign to ETL Function App
-az functionapp identity assign \
-    --name rmhazuregeoapi \
-    --resource-group rmhazure_rg \
-    --identities "$IDENTITY_ID"
+**ETL Function App (uses Admin Identity)**:
+```
+USE_MANAGED_IDENTITY=true
+DB_ADMIN_MANAGED_IDENTITY_NAME=<admin_identity_name>
+DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID=<admin_client_id>
+POSTGIS_HOST=<server>.postgres.database.azure.com
+POSTGIS_DATABASE=geoapp
 ```
 
-### Step 3.2: Assign Reader Identity to API App
-
-```bash
-# Get the full resource ID of the reader identity
-IDENTITY_ID=$(az identity show \
-    --name rmhpgflexreader \
-    --resource-group rmhazure_rg \
-    --query id \
-    --output tsv)
-
-echo "Identity ID: $IDENTITY_ID"
-
-# Assign to OGC API Function App
-az functionapp identity assign \
-    --name rmhogcapi \
-    --resource-group rmhazure_rg \
-    --identities "$IDENTITY_ID"
+**API Function App (uses Reader Identity)**:
 ```
-
-### Step 3.3: Configure Application Settings
-
-**For ETL App (rmhazuregeoapi)**:
-```bash
-az functionapp config appsettings set \
-    --name rmhazuregeoapi \
-    --resource-group rmhazure_rg \
-    --settings \
-        "USE_MANAGED_IDENTITY=true" \
-        "AZURE_CLIENT_ID=a533cb80-a590-4fad-8e52-1eb1f72659d7" \
-        "POSTGIS_USER=rmhpgflexadmin"
-```
-
-**For OGC API App (rmhogcapi)**:
-```bash
-az functionapp config appsettings set \
-    --name rmhogcapi \
-    --resource-group rmhazure_rg \
-    --settings \
-        "USE_MANAGED_IDENTITY=true" \
-        "AZURE_CLIENT_ID=1c79a2fe-42cb-4f30-8fe9-c1dfc04f142f" \
-        "POSTGIS_USER=rmhpgflexreader"
-```
-
----
-
-## Part 4: Application Code
-
-### Python Token Acquisition
-
-```python
-from azure.identity import ManagedIdentityCredential
-
-# For Admin (ETL system)
-credential = ManagedIdentityCredential(
-    client_id="a533cb80-a590-4fad-8e52-1eb1f72659d7"
-)
-
-# For Reader (API services)
-credential = ManagedIdentityCredential(
-    client_id="1c79a2fe-42cb-4f30-8fe9-c1dfc04f142f"
-)
-
-# Get token for PostgreSQL
-token = credential.get_token("https://ossrdbms-aad.database.windows.net/.default")
-
-# Use token as password in connection string
-conn_string = f"postgresql://rmhpgflexadmin:{token.token}@rmhpgflex.postgres.database.azure.com:5432/geopgflex?sslmode=require"
-```
-
-### Connection String Format
-
-```
-postgresql://<IDENTITY_NAME>:<TOKEN>@rmhpgflex.postgres.database.azure.com:5432/geopgflex?sslmode=require
+USE_MANAGED_IDENTITY=true
+DB_ADMIN_MANAGED_IDENTITY_NAME=<reader_identity_name>
+DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID=<reader_client_id>
+POSTGIS_HOST=<server>.postgres.database.azure.com
+POSTGIS_DATABASE=geoapp
 ```
 
 ---
 
 ## Troubleshooting
 
-### Error: "function pgaadauth_create_principal does not exist"
+### Error: "permission denied to grant role pgstac_admin"
 
-**Cause**: Connected to wrong database.
+**Cause**: Missing `WITH ADMIN OPTION` on pgstac roles.
 
-**Solution**: Connect to `postgres` database, NOT `geopgflex`:
-```bash
-# Wrong
-PGPASSWORD="$TOKEN" psql -h ... -d geopgflex
-
-# Correct
-PGPASSWORD="$TOKEN" psql -h ... -d postgres
+**Solution**:
+```sql
+GRANT pgstac_admin TO "<admin_identity_name>" WITH ADMIN OPTION;
+GRANT pgstac_ingest TO "<admin_identity_name>" WITH ADMIN OPTION;
+GRANT pgstac_read TO "<admin_identity_name>" WITH ADMIN OPTION;
 ```
 
-### Error: "password authentication failed for user"
+### Error: "permission denied to create schema"
 
-**Cause**: Role was created as password-based, not Entra ID role.
+**Cause**: Missing `CREATE ON DATABASE` permission.
 
-**Solution**: Role must be created using `pgaadauth_create_principal()`, not `CREATE ROLE`.
+**Solution**:
+```sql
+GRANT CREATE ON DATABASE geoapp TO "<admin_identity_name>";
+```
 
-### Error: "permission denied for schema"
+### Error: "type geometry does not exist"
 
-**Cause**: GRANT statements not run or not run by schema owner.
+**Cause**: PostGIS extension not created.
 
-**Solution**: Connect as schema owner ({db_superuser}) and re-run GRANT statements.
+**Solution**: Have `azure_pg_admin` run:
+```sql
+CREATE EXTENSION IF NOT EXISTS postgis;
+```
 
 ### Error: "Could not validate AAD user"
 
@@ -432,58 +353,47 @@ PGPASSWORD="$TOKEN" psql -h ... -d postgres
 
 **Solution**: Ensure role name exactly matches the managed identity name in Azure.
 
-### Verify pgaadauth Functions Exist
-
-```bash
-TOKEN=$(az account get-access-token --resource-type oss-rdbms --query accessToken --output tsv)
-
-PGPASSWORD="$TOKEN" psql \
-    -h rmhpgflex.postgres.database.azure.com \
-    -U "{managed_identity}@{tenant}.onmicrosoft.com" \
-    -d postgres \
-    -c "SELECT proname FROM pg_proc WHERE proname LIKE 'pgaadauth%' ORDER BY proname;"
-```
-
 ---
 
-## Security Notes
+## Quick Reference: Complete DBA Script
 
-1. **No passwords stored**: Authentication uses Azure AD tokens, no secrets in app settings
-2. **Token expiration**: Tokens expire after ~1 hour, automatically refreshed by azure-identity SDK
-3. **Audit trail**: All access logged through Azure AD and PostgreSQL logs
-4. **Least privilege**: Use reader identity for apps that only need SELECT access
-5. **Separate concerns**: ETL apps get admin, API apps get reader
+```sql
+-- ============================================================================
+-- COMPLETE DBA SETUP SCRIPT
+-- Run as: azure_pg_admin
+-- Database: geoapp
+-- Replace: <admin_identity>, <reader_identity>
+-- ============================================================================
 
----
+-- 1. Extensions (requires azure_pg_admin)
+CREATE EXTENSION IF NOT EXISTS postgis;
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+CREATE EXTENSION IF NOT EXISTS unaccent;
 
-## Quick Reference
+-- 2. Create pgstac roles
+DO $$ BEGIN CREATE ROLE pgstac_admin; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE ROLE pgstac_ingest; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE ROLE pgstac_read; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-### Connection Strings
+-- 3. Create AAD principals (run on postgres database!)
+-- \c postgres
+-- SELECT * FROM pgaadauth_create_principal('<admin_identity>', false, false);
+-- SELECT * FROM pgaadauth_create_principal('<reader_identity>', false, false);
+-- \c geoapp
 
-**Admin (ETL)**:
+-- 4. Admin permissions
+GRANT CREATE ON DATABASE geoapp TO "<admin_identity>";
+GRANT pgstac_admin TO "<admin_identity>" WITH ADMIN OPTION;
+GRANT pgstac_ingest TO "<admin_identity>" WITH ADMIN OPTION;
+GRANT pgstac_read TO "<admin_identity>" WITH ADMIN OPTION;
+GRANT USAGE ON SCHEMA public TO "<admin_identity>";
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO "<admin_identity>";
+
+-- 5. Reader permissions (run AFTER schemas exist)
+GRANT USAGE ON SCHEMA public TO "<reader_identity>";
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO "<reader_identity>";
+-- Additional reader grants after app creates schemas (see Part 4)
 ```
-host=rmhpgflex.postgres.database.azure.com
-port=5432
-dbname=geopgflex
-user=rmhpgflexadmin
-sslmode=require
-password=<AZURE_AD_TOKEN>
-```
-
-**Reader (APIs)**:
-```
-host=rmhpgflex.postgres.database.azure.com
-port=5432
-dbname=geopgflex
-user=rmhpgflexreader
-sslmode=require
-password=<AZURE_AD_TOKEN>
-```
-
-### Client IDs (for copy/paste)
-
-- **Admin**: `a533cb80-a590-4fad-8e52-1eb1f72659d7`
-- **Reader**: `1c79a2fe-42cb-4f30-8fe9-c1dfc04f142f`
 
 ---
 
@@ -491,8 +401,8 @@ password=<AZURE_AD_TOKEN>
 
 - [Microsoft Learn - Connect With Managed Identity](https://learn.microsoft.com/en-us/azure/postgresql/flexible-server/how-to-connect-with-managed-identity)
 - [Microsoft Learn - Manage Microsoft Entra Users](https://learn.microsoft.com/en-us/azure/postgresql/flexible-server/how-to-manage-azure-ad-users)
-- [Microsoft Learn - Microsoft Entra Authentication Concepts](https://learn.microsoft.com/en-us/azure/postgresql/flexible-server/concepts-azure-ad-authentication)
+- [pypgstac Documentation](https://stac-utils.github.io/pgstac/)
 
 ---
 
-**Last Updated**: 03 DEC 2025
+**Last Updated**: 05 JAN 2026

@@ -2,7 +2,7 @@
 
 > **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [All Jobs](WIKI_API_JOB_SUBMISSION.md) | [Errors](WIKI_API_ERRORS.md) | [Glossary](WIKI_API_GLOSSARY.md)
 
-**Date**: 07 DEC 2025
+**Date**: 05 JAN 2026
 **Status**: Reference Documentation
 **Wiki**: Azure DevOps Wiki - Database schema rebuild instructions
 **Purpose**: Manual SQL instructions for rebuilding `app` and `pgstac` schemas
@@ -74,12 +74,12 @@ CREATE EXTENSION IF NOT EXISTS unaccent;
 
 ### Required Permissions
 
-The executing user needs:
-- `CREATE` on database
-- `DROP` privilege on existing schemas
-- `CREATEROLE` privilege (for pypgstac to create pgstac_admin, pgstac_ingest, pgstac_read roles)
+The executing user (managed identity) needs:
+- `CREATE ON DATABASE` - to create schemas
+- Schema ownership (automatic when identity creates the schema)
+- `WITH ADMIN OPTION` on pgstac roles - for pypgstac migrate
 
-**Note**: Superuser or `azure_pg_admin` is NOT required if extensions are pre-created.
+**Note**: `azure_pg_admin` is NOT required for the managed identity. Extensions and pgstac roles must be pre-created by DBA. See [DATABASE_IDENTITY_RUNBOOK.md](DATABASE_IDENTITY_RUNBOOK.md) for complete setup.
 
 ---
 
@@ -754,4 +754,4 @@ GRANT pgstac_admin TO <your_user>;
 
 ---
 
-**Last Updated**: 07 DEC 2025 - Updated to 9-step process with geo schema at Step 4
+**Last Updated**: 05 JAN 2026 - Updated permissions to use WITH ADMIN OPTION (no CREATEROLE needed)

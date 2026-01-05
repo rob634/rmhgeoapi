@@ -169,8 +169,8 @@ themes:
 
 | Story | Description | Status |
 |-------|-------------|--------|
-| S2.2.5 | Fix TiTiler URLs for >3 band rasters | 📋 |
-| S2.2.6 | Auto-rescale DEM TiTiler URLs | 📋 |
+| S2.2.5 | Fix TiTiler URLs for >3 band rasters | ✅ Complete (stac_metadata_helper.py bidx handling) |
+| S2.2.6 | Auto-rescale DEM TiTiler URLs | ✅ Complete (04 JAN 2026, smart dtype defaults) |
 | F2.9 | STAC-Integrated Raster Viewer | 📋 |
 
 ### E3: DDH Platform Integration
@@ -360,6 +360,8 @@ Tasks suitable for a colleague with Azure/Python/pipeline expertise but without 
 | 05 JAN 2026 | Thread-safety fixes for BlobRepository (concurrent pipeline support) | — |
 | 05 JAN 2026 | FATHOM tile deduplication bug fix (8x duplicates) | E9 |
 | 05 JAN 2026 | Database admin interface added to web_interfaces | E12 |
+| 04 JAN 2026 | S2.2.5: Multi-band TiTiler URLs with bidx params | E2 |
+| 04 JAN 2026 | S2.2.6: Auto-rescale for DEMs and non-uint8 rasters | E2 |
 | 04 JAN 2026 | TiTiler-xarray deployed to DEV (Zarr tile serving) | E9 |
 | 04 JAN 2026 | System snapshots schema (Pydantic model + DDL) | — |
 | 04 JAN 2026 | Health: network_environment (90+ Azure vars) | — |

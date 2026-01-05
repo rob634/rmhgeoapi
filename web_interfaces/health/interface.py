@@ -434,18 +434,151 @@ class HealthInterface(BaseInterface):
             </div>
 
             <!-- Environment Info -->
-            <div id="environment-info" class="environment-info hidden"></div>
+            <div id="environment-info" class="environment-info skeleton-section">
+                <h3>Environment</h3>
+                <div class="env-grid">
+                    <div class="env-item skeleton-item">
+                        <div class="env-label">Version</div>
+                        <div class="env-value"><span class="skeleton-text">Loading...</span></div>
+                    </div>
+                    <div class="env-item skeleton-item">
+                        <div class="env-label">Environment</div>
+                        <div class="env-value"><span class="skeleton-text">Loading...</span></div>
+                    </div>
+                    <div class="env-item skeleton-item">
+                        <div class="env-label">Debug Mode</div>
+                        <div class="env-value"><span class="skeleton-text">Loading...</span></div>
+                    </div>
+                    <div class="env-item skeleton-item">
+                        <div class="env-label">Hostname</div>
+                        <div class="env-value"><span class="skeleton-text">Loading...</span></div>
+                    </div>
+                </div>
+            </div>
 
             <!-- Components Grid -->
             <div id="components-grid" class="components-grid">
-                <!-- Components will be inserted here -->
+                <!-- Skeleton component cards - will be replaced when data loads -->
+                <div class="component-card skeleton-card" data-skeleton="database">
+                    <div class="component-header">
+                        <div>
+                            <div class="component-name">Database</div>
+                            <div class="component-description">PostgreSQL connection</div>
+                        </div>
+                        <span class="status-badge skeleton-badge">Loading</span>
+                    </div>
+                </div>
+                <div class="component-card skeleton-card" data-skeleton="service_bus">
+                    <div class="component-header">
+                        <div>
+                            <div class="component-name">Service Bus</div>
+                            <div class="component-description">Azure Service Bus queues</div>
+                        </div>
+                        <span class="status-badge skeleton-badge">Loading</span>
+                    </div>
+                </div>
+                <div class="component-card skeleton-card" data-skeleton="storage_containers">
+                    <div class="component-header">
+                        <div>
+                            <div class="component-name">Storage Containers</div>
+                            <div class="component-description">Azure Blob Storage</div>
+                        </div>
+                        <span class="status-badge skeleton-badge">Loading</span>
+                    </div>
+                </div>
+                <div class="component-card skeleton-card" data-skeleton="imports">
+                    <div class="component-header">
+                        <div>
+                            <div class="component-name">Imports</div>
+                            <div class="component-description">Python dependencies</div>
+                        </div>
+                        <span class="status-badge skeleton-badge">Loading</span>
+                    </div>
+                </div>
+                <div class="component-card skeleton-card" data-skeleton="jobs">
+                    <div class="component-header">
+                        <div>
+                            <div class="component-name">Jobs</div>
+                            <div class="component-description">Job registry</div>
+                        </div>
+                        <span class="status-badge skeleton-badge">Loading</span>
+                    </div>
+                </div>
+                <div class="component-card skeleton-card" data-skeleton="pgstac">
+                    <div class="component-header">
+                        <div>
+                            <div class="component-name">Pgstac</div>
+                            <div class="component-description">STAC catalog</div>
+                        </div>
+                        <span class="status-badge skeleton-badge">Loading</span>
+                    </div>
+                </div>
+                <div class="component-card skeleton-card" data-skeleton="titiler">
+                    <div class="component-header">
+                        <div>
+                            <div class="component-name">Titiler</div>
+                            <div class="component-description">Raster tile server</div>
+                        </div>
+                        <span class="status-badge skeleton-badge">Loading</span>
+                    </div>
+                </div>
+                <div class="component-card skeleton-card" data-skeleton="ogc_features">
+                    <div class="component-header">
+                        <div>
+                            <div class="component-name">OGC Features</div>
+                            <div class="component-description">Vector features API</div>
+                        </div>
+                        <span class="status-badge skeleton-badge">Loading</span>
+                    </div>
+                </div>
             </div>
 
             <!-- Schema Summary (from schema_summary component) -->
-            <div id="schema-summary" class="schema-summary hidden">
+            <div id="schema-summary" class="schema-summary skeleton-section">
                 <h3>Database Schemas</h3>
                 <div id="schema-cards" class="schema-cards">
-                    <!-- Schema cards will be inserted here -->
+                    <!-- Skeleton schema cards -->
+                    <div class="schema-card skeleton-card">
+                        <div class="schema-card-header">
+                            <div class="schema-name"><span class="schema-icon">&#x1F4CA;</span> Summary</div>
+                        </div>
+                        <div class="schema-stats">
+                            <div class="schema-stat full-width">
+                                <div class="stat-label">Total Tables</div>
+                                <div class="stat-value"><span class="skeleton-text">--</span></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="schema-card skeleton-card">
+                        <div class="schema-card-header">
+                            <div class="schema-name"><span class="schema-icon">&#x2699;</span> Application</div>
+                            <span class="schema-badge skeleton-badge">Loading</span>
+                        </div>
+                        <div class="schema-stats">
+                            <div class="schema-stat"><div class="stat-label">Tables</div><div class="stat-value"><span class="skeleton-text">--</span></div></div>
+                            <div class="schema-stat"><div class="stat-label">Rows</div><div class="stat-value"><span class="skeleton-text">--</span></div></div>
+                        </div>
+                    </div>
+                    <div class="schema-card skeleton-card">
+                        <div class="schema-card-header">
+                            <div class="schema-name"><span class="schema-icon">&#x1F5FA;</span> PostGIS</div>
+                            <span class="schema-badge skeleton-badge">Loading</span>
+                        </div>
+                        <div class="schema-stats">
+                            <div class="schema-stat"><div class="stat-label">Tables</div><div class="stat-value"><span class="skeleton-text">--</span></div></div>
+                            <div class="schema-stat"><div class="stat-label">Rows</div><div class="stat-value"><span class="skeleton-text">--</span></div></div>
+                        </div>
+                    </div>
+                    <div class="schema-card skeleton-card">
+                        <div class="schema-card-header">
+                            <div class="schema-name"><span class="schema-icon">&#x1F4E6;</span> STAC Catalog</div>
+                            <span class="schema-badge skeleton-badge">Loading</span>
+                        </div>
+                        <div class="schema-stats">
+                            <div class="schema-stat"><div class="stat-label">Tables</div><div class="stat-value"><span class="skeleton-text">--</span></div></div>
+                            <div class="schema-stat"><div class="stat-label">Rows</div><div class="stat-value"><span class="skeleton-text">--</span></div></div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -1281,6 +1414,70 @@ class HealthInterface(BaseInterface):
             border-color: #5BB381;
         }
 
+        /* ========== Skeleton Loading Styles ========== */
+        @keyframes skeleton-pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .skeleton-section {
+            opacity: 0.7;
+        }
+
+        .skeleton-card {
+            border-left: 4px solid #D1D5DB !important;
+            opacity: 0.8;
+        }
+
+        .skeleton-card .component-name,
+        .skeleton-card .schema-name {
+            color: #9CA3AF;
+        }
+
+        .skeleton-card .component-description {
+            color: #D1D5DB;
+        }
+
+        .skeleton-badge {
+            background: #E5E7EB !important;
+            color: #9CA3AF !important;
+            animation: skeleton-pulse 1.5s ease-in-out infinite;
+        }
+
+        .skeleton-text {
+            color: #9CA3AF;
+            animation: skeleton-pulse 1.5s ease-in-out infinite;
+        }
+
+        .skeleton-item {
+            opacity: 0.7;
+        }
+
+        .skeleton-item .env-value {
+            color: #9CA3AF;
+        }
+
+        /* Transition for when data loads */
+        .component-card,
+        .schema-card,
+        .env-item {
+            transition: opacity 0.3s ease, border-color 0.3s ease;
+        }
+
+        .component-card.loaded,
+        .schema-card.loaded {
+            opacity: 1;
+        }
+
+        /* Hide skeleton sections when they get real class */
+        .environment-info.hidden {
+            display: none;
+        }
+
+        .schema-summary.hidden {
+            display: none;
+        }
+
         /* Hardware/Function App Resources Section */
         .hardware-section {
             margin-top: 20px;
@@ -1458,14 +1655,23 @@ class HealthInterface(BaseInterface):
             const overallStatus = document.getElementById('overall-status');
             const errorBanner = document.getElementById('error-banner');
             const componentsGrid = document.getElementById('components-grid');
+            const envInfo = document.getElementById('environment-info');
+            const schemaSummary = document.getElementById('schema-summary');
 
             // Disable refresh button and show loading
             refreshBtn.disabled = true;
             refreshBtn.textContent = 'Loading...';
             overallStatus.className = 'overall-status loading';
-            overallStatus.innerHTML = '<div class="spinner"></div><span>Loading health status...</span>';
+            overallStatus.innerHTML = '<div class="spinner"></div><div><span>Loading health status...</span><div class="loading-hint">Health check may take up to 60 seconds</div></div>';
             errorBanner.classList.add('hidden');
-            componentsGrid.innerHTML = '';
+
+            // Keep skeleton cards visible - don't clear componentsGrid
+            // Add skeleton class to sections if not already present
+            envInfo.classList.add('skeleton-section');
+            schemaSummary.classList.add('skeleton-section');
+            componentsGrid.querySelectorAll('.component-card').forEach(card => {{
+                card.classList.add('skeleton-card');
+            }});
 
             try {{
                 const data = await fetchJSON(`${{API_BASE_URL}}/api/health`);
@@ -1546,6 +1752,9 @@ class HealthInterface(BaseInterface):
         function renderEnvironmentInfo(data) {{
             const envInfo = document.getElementById('environment-info');
             const env = data.environment || {{}};
+
+            // Remove skeleton class
+            envInfo.classList.remove('skeleton-section');
 
             if (Object.keys(env).length === 0) {{
                 envInfo.classList.add('hidden');
@@ -1695,12 +1904,15 @@ class HealthInterface(BaseInterface):
         const COMPONENT_LINKS = {{
             'storage_containers': {{ url: '/api/interface/storage', label: 'Storage Browser', icon: '📁' }},
             'service_bus': {{ url: '/api/interface/queues', label: 'Queue Monitor', icon: '📨' }},
-            'database': {{ url: '#', label: 'Database (coming soon)', icon: '🐘', disabled: true }}
+            'database': {{ url: '/api/interface/database', label: 'Database Monitor', icon: '🐘' }}
         }};
 
         // Render component cards
         function renderComponents(components) {{
             const grid = document.getElementById('components-grid');
+
+            // Remove all skeleton cards first
+            grid.querySelectorAll('.skeleton-card').forEach(card => card.remove());
 
             if (!components || Object.keys(components).length === 0) {{
                 grid.innerHTML = '<p style="color: #626F86; text-align: center; padding: 40px;">No components to display</p>';
@@ -1798,6 +2010,9 @@ class HealthInterface(BaseInterface):
         function renderSchemaSummary(components) {{
             const schemaSummary = document.getElementById('schema-summary');
             const schemaCards = document.getElementById('schema-cards');
+
+            // Remove skeleton class
+            schemaSummary.classList.remove('skeleton-section');
 
             // Get schema_summary from components
             const schemaSummaryData = components?.schema_summary?.details;

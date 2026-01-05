@@ -105,6 +105,25 @@ class TasksInterface(BaseInterface):
                 <div class="spinner"></div>
             </div>
 
+            <!-- Processing Rate Banner -->
+            <div id="processing-rate-banner" class="processing-rate-banner hidden">
+                <div class="rate-item">
+                    <span class="rate-icon">⚡</span>
+                    <span class="rate-value" id="rate-tasks-per-min">--</span>
+                    <span class="rate-label">tasks/min</span>
+                </div>
+                <div class="rate-item">
+                    <span class="rate-icon">⏱️</span>
+                    <span class="rate-value" id="rate-eta">--</span>
+                    <span class="rate-label">ETA</span>
+                </div>
+                <div class="rate-item">
+                    <span class="rate-icon">📊</span>
+                    <span class="rate-value" id="rate-avg-time">--</span>
+                    <span class="rate-label">avg time</span>
+                </div>
+            </div>
+
             <!-- Workflow Diagram -->
             <div id="workflow-diagram" class="workflow-diagram">
                 <div class="spinner"></div>
@@ -283,6 +302,42 @@ class TasksInterface(BaseInterface):
         @keyframes pulse {
             0%, 100% { transform: scale(1); }
             50% { transform: scale(1.05); }
+        }
+
+        /* Processing Rate Banner */
+        .processing-rate-banner {
+            background: linear-gradient(135deg, #0071BC 0%, #00A3DA 100%);
+            border-radius: 8px;
+            padding: 16px 24px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: center;
+            gap: 40px;
+            box-shadow: 0 4px 12px rgba(0, 113, 188, 0.3);
+        }
+
+        .rate-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: white;
+        }
+
+        .rate-icon {
+            font-size: 20px;
+        }
+
+        .rate-value {
+            font-size: 24px;
+            font-weight: 700;
+            font-family: 'Monaco', 'Courier New', monospace;
+        }
+
+        .rate-label {
+            font-size: 12px;
+            opacity: 0.9;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
 
         /* Job Summary Card */
@@ -502,6 +557,10 @@ class TasksInterface(BaseInterface):
 
         .stage-metrics .metric-value.rate {
             color: #10B981;
+        }
+
+        .stage-metrics .metric-value.memory {
+            color: #8B5CF6;
         }
 
         /* Processing metrics panel */
@@ -1584,6 +1643,9 @@ class TasksInterface(BaseInterface):
                 </div>
             `;
 
+            // Show processing rate if we have metrics
+            window.currentJobSummary = {{ job, total, completed, failed, processing }};
+
             // Add overall progress bar if there are tasks
             if (total > 0) {{
                 const counts = {{ pending, queued, processing, completed, failed }};
@@ -1654,8 +1716,55 @@ class TasksInterface(BaseInterface):
             document.getElementById('job-summary-card').innerHTML = html;
         }}
 
+        // Update the processing rate banner at the top
+        function updateProcessingRateBanner(metrics, job) {{
+            const banner = document.getElementById('processing-rate-banner');
+            if (!banner) return;
+
+            // Find the stage with the most tasks (usually stage 2)
+            let bestMetrics = null;
+            let totalPending = 0;
+            Object.values(metrics).forEach(m => {{
+                if (m && m.tasks_per_minute && (!bestMetrics || m.completed > bestMetrics.completed)) {{
+                    bestMetrics = m;
+                }}
+                if (m && m.pending) totalPending += m.pending;
+            }});
+
+            if (!bestMetrics || !bestMetrics.tasks_per_minute) {{
+                banner.classList.add('hidden');
+                return;
+            }}
+
+            banner.classList.remove('hidden');
+
+            // Tasks per minute
+            document.getElementById('rate-tasks-per-min').textContent = bestMetrics.tasks_per_minute;
+
+            // Average time
+            document.getElementById('rate-avg-time').textContent = bestMetrics.avg_execution_time_formatted || '--';
+
+            // ETA calculation
+            if (totalPending > 0 && bestMetrics.avg_execution_time_ms) {{
+                const remainingMs = totalPending * bestMetrics.avg_execution_time_ms;
+                const remainingMin = Math.ceil(remainingMs / 60000);
+                if (remainingMin > 60) {{
+                    document.getElementById('rate-eta').textContent = (remainingMin / 60).toFixed(1) + 'h';
+                }} else {{
+                    document.getElementById('rate-eta').textContent = remainingMin + 'm';
+                }}
+            }} else if (job.status === 'completed') {{
+                document.getElementById('rate-eta').textContent = 'Done';
+            }} else {{
+                document.getElementById('rate-eta').textContent = '--';
+            }}
+        }}
+
         // Render metrics panel with processing rate and execution time stats
         function renderMetricsPanel(metrics, job) {{
+            // Update the processing rate banner first
+            updateProcessingRateBanner(metrics, job);
+
             // Only show if we have meaningful metrics
             const hasMetrics = Object.values(metrics).some(m => m.avg_execution_time_ms !== null);
             if (!hasMetrics) {{
@@ -1723,6 +1832,27 @@ class TasksInterface(BaseInterface):
             const metricsDiv = document.createElement('div');
             metricsDiv.innerHTML = html;
             workflowDiagram.parentNode.insertBefore(metricsDiv.firstElementChild, workflowDiagram.nextSibling);
+        }}
+
+        // Helper: Get peak memory for a stage from tasks
+        function getStagePeakMemoryFromTasks(tasks, stageNumber) {{
+            const stageTasks = tasks.filter(t => t.stage === stageNumber);
+            let maxPeak = 0;
+
+            stageTasks.forEach(task => {{
+                const peak = getPeakMemory(task);
+                if (peak && peak.rss_mb > maxPeak) {{
+                    maxPeak = peak.rss_mb;
+                }}
+            }});
+
+            if (maxPeak === 0) return null;
+
+            // Format the memory value
+            if (maxPeak >= 1024) {{
+                return (maxPeak / 1024).toFixed(1) + ' GB';
+            }}
+            return Math.round(maxPeak) + ' MB';
         }}
 
         // Helper: Get expected Stage 2 task count from Stage 1 result
@@ -1810,7 +1940,12 @@ class TasksInterface(BaseInterface):
                 `;
 
                 if (totalTasks === 0) {{
-                    html += `<span class="count-badge count-queued">No tasks</span>`;
+                    // Show expected count or "?" for stages with no tasks yet
+                    if (stage.expectCountFromStage1 && expectedStage2Count) {{
+                        html += `<span class="count-badge count-pending">0 / ${{expectedStage2Count}}</span>`;
+                    }} else {{
+                        html += `<span class="count-badge count-queued">? tasks</span>`;
+                    }}
                 }} else {{
                     if (stageCounts.pending > 0) {{
                         html += `<span class="count-badge count-pending">P:${{stageCounts.pending}}</span>`;
@@ -1831,16 +1966,43 @@ class TasksInterface(BaseInterface):
 
                 html += `</div>`;
 
-                // Add progress bar if there are tasks
-                if (totalTasks > 0) {{
-                    html += renderProgressBar(stageCounts, totalTasks);
+                // Always show progress bar - with placeholder if no tasks yet
+                // Determine expected total for this stage
+                let expectedTotal = totalTasks;
+                if (stage.expectCountFromStage1 && expectedStage2Count) {{
+                    expectedTotal = expectedStage2Count;
+                }}
+
+                if (expectedTotal > 0 || totalTasks > 0) {{
+                    html += renderProgressBar(stageCounts, expectedTotal || totalTasks);
+                }} else {{
+                    // Show placeholder bar for stages with no tasks yet
+                    html += `
+                        <div class="stage-progress">
+                            <div class="progress-bar-container">
+                                <div class="progress-bar-fill">
+                                    <div class="progress-segment pending" style="width: 100%"></div>
+                                </div>
+                            </div>
+                            <div class="progress-text">
+                                <span class="progress-percent">Waiting</span>
+                                <span class="progress-count">? tasks</span>
+                            </div>
+                        </div>
+                    `;
                 }}
 
                 // Add stage metrics if available
                 const stageMetrics = metrics[stage.number];
-                if (stageMetrics && stageMetrics.avg_execution_time_ms) {{
-                    html += `
-                        <div class="stage-metrics">
+
+                // Get peak memory for this stage from tasks
+                const stagePeakMemory = getStagePeakMemoryFromTasks(tasks, stage.number);
+
+                if ((stageMetrics && stageMetrics.avg_execution_time_ms) || stagePeakMemory) {{
+                    html += `<div class="stage-metrics">`;
+
+                    if (stageMetrics && stageMetrics.avg_execution_time_ms) {{
+                        html += `
                             <div class="metric-row">
                                 <span class="metric-label">Avg:</span>
                                 <span class="metric-value">${{stageMetrics.avg_execution_time_formatted}}</span>
@@ -1849,8 +2011,19 @@ class TasksInterface(BaseInterface):
                                 <span class="metric-label">Rate:</span>
                                 <span class="metric-value rate">${{stageMetrics.tasks_per_minute || '-'}} /min</span>
                             </div>
-                        </div>
-                    `;
+                        `;
+                    }}
+
+                    if (stagePeakMemory) {{
+                        html += `
+                            <div class="metric-row">
+                                <span class="metric-label">Peak:</span>
+                                <span class="metric-value memory">${{stagePeakMemory}}</span>
+                            </div>
+                        `;
+                    }}
+
+                    html += `</div>`;
                 }}
 
                 html += `</div>`;
@@ -1913,6 +2086,34 @@ class TasksInterface(BaseInterface):
                 // Add progress bar
                 if (totalTasks > 0) {{
                     html += renderProgressBar(stageCounts, totalTasks);
+                }} else {{
+                    // Show placeholder bar
+                    html += `
+                        <div class="stage-progress">
+                            <div class="progress-bar-container">
+                                <div class="progress-bar-fill">
+                                    <div class="progress-segment pending" style="width: 100%"></div>
+                                </div>
+                            </div>
+                            <div class="progress-text">
+                                <span class="progress-percent">Waiting</span>
+                                <span class="progress-count">? tasks</span>
+                            </div>
+                        </div>
+                    `;
+                }}
+
+                // Add peak memory for this stage
+                const stagePeakMemory = getStagePeakMemoryFromTasks(tasks, parseInt(stageNum));
+                if (stagePeakMemory) {{
+                    html += `
+                        <div class="stage-metrics">
+                            <div class="metric-row">
+                                <span class="metric-label">Peak:</span>
+                                <span class="metric-value memory">${{stagePeakMemory}}</span>
+                            </div>
+                        </div>
+                    `;
                 }}
 
                 html += `</div>`;

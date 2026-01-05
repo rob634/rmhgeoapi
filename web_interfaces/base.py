@@ -681,40 +681,43 @@ class BaseInterface(ABC):
             bottom: 0;
             left: 0;
             right: 0;
-            background: #1a1a2e;
+            background: linear-gradient(180deg, #1a1a2e 0%, #0d0d1a 100%);
             color: #e0e0e0;
-            padding: 8px 20px;
+            padding: 12px 24px;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            font-size: 12px;
+            font-size: 13px;
             z-index: 1000;
-            border-top: 1px solid #333;
+            border-top: 2px solid #333;
+            min-height: 5vh;
         }
 
         .status-bar-left,
         .status-bar-right {
             display: flex;
-            gap: 20px;
+            gap: 28px;
             align-items: center;
         }
 
         .status-bar-item {
             display: flex;
             align-items: center;
-            gap: 6px;
+            gap: 10px;
         }
 
         .status-bar-label {
             color: #888;
-            font-size: 10px;
+            font-size: 11px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+            font-weight: 600;
         }
 
         .status-bar-value {
-            font-weight: 600;
+            font-weight: 700;
             font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 14px;
         }
 
         .status-bar-value.good {
@@ -730,34 +733,36 @@ class BaseInterface(ABC):
         }
 
         .status-bar-meter {
-            width: 60px;
-            height: 6px;
+            width: 120px;
+            height: 14px;
             background: #333;
-            border-radius: 3px;
+            border-radius: 7px;
             overflow: hidden;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.3);
         }
 
         .status-bar-meter-fill {
             height: 100%;
             transition: width 0.3s, background 0.3s;
+            border-radius: 7px;
         }
 
         .status-bar-meter-fill.good {
-            background: #4ade80;
+            background: linear-gradient(90deg, #4ade80, #22c55e);
         }
 
         .status-bar-meter-fill.warning {
-            background: #fbbf24;
+            background: linear-gradient(90deg, #fbbf24, #f59e0b);
         }
 
         .status-bar-meter-fill.critical {
-            background: #f87171;
+            background: linear-gradient(90deg, #f87171, #ef4444);
         }
 
         .status-bar-divider {
             width: 1px;
-            height: 20px;
-            background: #333;
+            height: 28px;
+            background: linear-gradient(180deg, transparent, #444, transparent);
         }
 
         /* Activity log toggle button */

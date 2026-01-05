@@ -3,8 +3,8 @@
 **Type**: Business
 **Value Statement**: We can host and serve FATHOM/CMIP6-scale data.
 **Runs On**: E7 (Pipeline Infrastructure)
-**Status**: 🚧 PARTIAL (F9.1 🚧, F9.5 ✅)
-**Last Updated**: 31 DEC 2025
+**Status**: 🚧 PARTIAL (F9.1 🚧, F9.5 ✅, F9.6 🚧)
+**Last Updated**: 04 JAN 2026
 
 **Strategic Context**:
 > E9 is the "data hosting" epic. It handles ingesting, processing, and serving very large datasets
@@ -32,7 +32,7 @@ Raw Data                  Processing                Serving
 | F9.3 | 📋 | VirtualiZarr Pipeline (NetCDF → Zarr references) |
 | F9.4 | 📋 | CMIP6 Data Hosting |
 | F9.5 | ✅ | xarray Service Layer |
-| F9.6 | 📋 | TiTiler Services (COG + Zarr) |
+| F9.6 | 🚧 | TiTiler Services (COG ✅ + Zarr ✅) |
 | F9.7 | ⬜ | Reader App Migration |
 | F9.8 | 📋 | Pre-prepared Raster Ingest |
 | F9.9 | 📋 | FATHOM Query API |
@@ -157,16 +157,22 @@ NetCDF Files (unchanged)     Reference Generation      TiTiler Zarr Service
 
 ---
 
-### Feature F9.6: TiTiler Services 📋 PLANNED
+### Feature F9.6: TiTiler Services 🚧 PARTIAL
 
 **Deliverable**: Unified tile serving for COG and Zarr data
+**Updated**: 04 JAN 2026 - TiTiler-xarray deployed to DEV
 
 | Story | Status | Description |
 |-------|--------|-------------|
-| S9.6.1 | 📋 | TiTiler COG configuration for FATHOM merged COGs |
-| S9.6.2 | 📋 | TiTiler Zarr configuration for VirtualiZarr references |
+| S9.6.1 | ✅ | TiTiler COG deployed and operational |
+| S9.6.2 | ✅ | TiTiler-xarray (Zarr) deployed to DEV |
 | S9.6.3 | 📋 | STAC-based asset discovery for dynamic tiling |
 | S9.6.4 | 📋 | Colormap configuration for flood depth visualization |
+| S9.6.5 | 📋 | VirtualiZarr reference consumption validation |
+
+**DEV Deployment**:
+- TiTiler COG: Operational
+- TiTiler-xarray: Deployed 04 JAN 2026, supports native Zarr tile serving
 
 ---
 

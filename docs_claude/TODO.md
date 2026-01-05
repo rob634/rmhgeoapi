@@ -150,6 +150,7 @@ themes:
 |---------|-------------|--------|
 | F9.1: FATHOM ETL | Band stacking + spatial merge | 🚧 Rwanda focus |
 | F9.5: xarray Service | Time-series endpoints | ✅ Complete |
+| F9.6: TiTiler Services | COG + Zarr tile serving | 🚧 TiTiler-xarray deployed 04 JAN |
 | F9.8: Pre-prepared Ingest | COG copy + STAC from params | 📋 After Rwanda |
 
 ### E8: GeoAnalytics Pipeline
@@ -286,6 +287,7 @@ Tasks suitable for a colleague with Azure/Python/pipeline expertise but without 
 
 | Date | Item | Epic |
 |------|------|------|
+| 04 JAN 2026 | TiTiler-xarray deployed to DEV (Zarr tile serving) | E9 |
 | 04 JAN 2026 | System snapshots schema (Pydantic model + DDL) | — |
 | 04 JAN 2026 | Health: network_environment (90+ Azure vars) | — |
 | 04 JAN 2026 | Health: instance_info (cold start detection) | — |

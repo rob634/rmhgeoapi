@@ -1,3 +1,11 @@
+# ============================================================================
+# H3 GRID GENERATION HANDLER
+# ============================================================================
+# STATUS: Services - Universal H3 grid generator (res 0-15)
+# PURPOSE: Base/cascade generation with flexible spatial filtering
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Universal H3 Grid Generation Handler.
 

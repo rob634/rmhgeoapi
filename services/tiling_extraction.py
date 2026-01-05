@@ -1,3 +1,13 @@
+# ============================================================================
+# TILING EXTRACTION SERVICE
+# ============================================================================
+# STATUS: Service layer - Stage 2 of Big Raster ETL workflow
+# PURPOSE: Extract tiles from large rasters via GDAL VSI for Azure blob storage
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: extract_tiles
+# DEPENDENCIES: rasterio, azure-storage-blob
+# ============================================================================
 """
 Tiling Extraction Service - Stage 2 of Big Raster ETL.
 

@@ -1,3 +1,13 @@
+# ============================================================================
+# STAC VECTOR CATALOGING HANDLERS
+# ============================================================================
+# STATUS: Service layer - STAC metadata extraction from PostGIS tables
+# PURPOSE: Create and register STAC Items for vector tables in pgSTAC
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: create_vector_stac, extract_vector_stac_metadata
+# DEPENDENCIES: psycopg, stac-pydantic
+# ============================================================================
 """
 STAC Vector Cataloging Handlers
 

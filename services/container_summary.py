@@ -1,3 +1,11 @@
+# ============================================================================
+# CONTAINER SUMMARY SERVICE
+# ============================================================================
+# STATUS: Services - Memory-efficient container statistics
+# PURPOSE: Generate aggregate stats using streaming generator pattern
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Container Summary Service - Container Statistics.
 

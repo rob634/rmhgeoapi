@@ -1,3 +1,11 @@
+# ============================================================================
+# H3 PYRAMID FINALIZATION HANDLER
+# ============================================================================
+# STATUS: Services - Final stage of H3 bootstrap workflow
+# PURPOSE: Verify cell counts, update metadata, run VACUUM ANALYZE
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 H3 Pyramid Finalization Handler.
 

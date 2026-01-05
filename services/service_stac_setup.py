@@ -1,3 +1,13 @@
+# ============================================================================
+# STAC DATABASE SETUP SERVICE
+# ============================================================================
+# STATUS: Service layer - PgSTAC installation and configuration handlers
+# PURPOSE: Handle one-time database setup operations for STAC catalog
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: get_connection_string, install_pgstac, configure_pgstac_roles, verify_pgstac_installation
+# DEPENDENCIES: psycopg, pypgstac
+# ============================================================================
 """
 STAC Database Setup Service.
 

@@ -1,3 +1,13 @@
+# ============================================================================
+# STAC METADATA EXTRACTION SERVICE
+# ============================================================================
+# STATUS: Service layer - STAC metadata extraction from raster files
+# PURPOSE: Extract and validate STAC Item metadata using rio-stac library
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: StacMetadataService
+# DEPENDENCIES: rio-stac, stac-pydantic, rasterio
+# ============================================================================
 """
 STAC Metadata Extraction Service.
 
@@ -348,6 +358,42 @@ class StacMetadataService:
             # Fail fast - these fields are mandatory for pgSTAC compatibility
             raise RuntimeError(f"Failed to add required STAC fields: {e}")
 
+        # STEP G.1b: Extract band statistics for rescale calculation (04 JAN 2026)
+        # rio-stac populates raster:bands with min/max/mean/stddev when with_raster=True
+        # Use these to calculate appropriate rescale values for TiTiler URLs
+        try:
+            logger.debug("   Step G.1b: Extracting band statistics for rescale calculation...")
+            data_asset = item_dict.get('assets', {}).get('data', {})
+            raster_bands = data_asset.get('raster:bands', [])
+
+            if raster_bands and raster_meta:
+                # Get the bands that will be displayed
+                display_bands = raster_meta.rgb_bands or [1, 2, 3]
+
+                # Extract max values from displayed bands (1-indexed)
+                band_maxes = []
+                for band_idx in display_bands:
+                    if band_idx <= len(raster_bands):
+                        band_stats = raster_bands[band_idx - 1].get('statistics', {})
+                        band_max = band_stats.get('maximum')
+                        if band_max is not None:
+                            band_maxes.append(band_max)
+                            logger.debug(f"      Band {band_idx}: max={band_max}")
+
+                if band_maxes:
+                    # Use the maximum of displayed bands, with 10% headroom
+                    # This prevents clipping while maintaining good contrast
+                    max_value = max(band_maxes)
+                    rescale_max = int(max_value * 1.1)  # 10% headroom
+                    raster_meta.rescale = {'min': 0, 'max': rescale_max}
+                    logger.info(f"   ✅ Step G.1b: Calculated rescale from band stats: 0,{rescale_max} (bands {display_bands})")
+                else:
+                    logger.debug("   ⚠️  Step G.1b: No band statistics available, using dtype defaults")
+            else:
+                logger.debug("   ⚠️  Step G.1b: No raster:bands or raster_meta, skipping rescale calculation")
+        except Exception as e:
+            logger.warning(f"   ⚠️  Step G.1b: Band statistics extraction failed (non-fatal): {e}")
+
         # STEP G.2: Add metadata via STACMetadataHelper (25 NOV 2025)
         # Adds: platform:*, app:*, geo:* properties + TiTiler links/assets
         # Replaces inline ISO3 code with centralized ISO3AttributionService
@@ -363,7 +409,7 @@ class StacMetadataService:
                 blob_name=blob_name,
                 platform=platform_meta,
                 app=app_meta,
-                raster=raster_meta,  # For DEM colormap in preview URLs (01 JAN 2026)
+                raster=raster_meta,  # Now includes calculated rescale (04 JAN 2026)
                 include_iso3=True,
                 include_titiler=True  # Adds TiTiler links + thumbnail asset
             )

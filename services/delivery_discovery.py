@@ -1,3 +1,11 @@
+# ============================================================================
+# DELIVERY DISCOVERY SERVICE
+# ============================================================================
+# STATUS: Services - Vendor delivery folder structure analysis
+# PURPOSE: Detect manifests, tile patterns, vendor types (Maxar, Vivid)
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Vendor Delivery Discovery Service.
 

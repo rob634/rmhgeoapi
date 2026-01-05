@@ -1,3 +1,13 @@
+# ============================================================================
+# STAC CATALOG SERVICES
+# ============================================================================
+# STATUS: Service layer - STAC metadata extraction handlers
+# PURPOSE: Implement two-stage pattern for bulk STAC extraction (list + extract)
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: list_raster_files, extract_stac_metadata
+# DEPENDENCIES: azure-storage-blob, stac-pydantic
+# ============================================================================
 """
 STAC Catalog Services - Two-Stage Pattern for Bulk STAC Extraction
 

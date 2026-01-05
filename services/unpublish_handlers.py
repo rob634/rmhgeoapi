@@ -1,3 +1,13 @@
+# ============================================================================
+# UNPUBLISH WORKFLOW HANDLERS
+# ============================================================================
+# STATUS: Service layer - Task handlers for unpublish jobs
+# PURPOSE: Provide surgical data removal for raster and vector assets
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: inventory_raster_item, inventory_vector_item, delete_blob, drop_postgis_table, delete_stac_and_audit
+# DEPENDENCIES: psycopg, azure-storage-blob
+# ============================================================================
 """
 Unpublish Workflow Handlers.
 

@@ -1,3 +1,11 @@
+# ============================================================================
+# H3 NATIVE STREAMING HANDLER
+# ============================================================================
+# STATUS: Services - High-performance H3 generation via h3-py C bindings
+# PURPOSE: Stream H3 cells to PostGIS (3-4x faster than DuckDB approach)
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 H3 Native Streaming Handler.
 

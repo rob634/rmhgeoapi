@@ -1,3 +1,11 @@
+# ============================================================================
+# FATHOM CONTAINER INVENTORY HANDLERS
+# ============================================================================
+# STATUS: Services - Blob scanning and etl_source_files population for Fathom
+# PURPOSE: Generate scan prefixes, scan blobs, assign grid cells, summarize
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Fathom Container Inventory Handlers.
 

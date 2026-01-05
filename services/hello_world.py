@@ -1,3 +1,11 @@
+# ============================================================================
+# HELLO WORLD TASK HANDLERS
+# ============================================================================
+# STATUS: Services - Test/validation handlers for HelloWorld workflow
+# PURPOSE: Pure functions demonstrating Job→Stage→Task handler pattern
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Hello World Task Handlers.
 

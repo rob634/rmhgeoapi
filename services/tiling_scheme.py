@@ -1,3 +1,13 @@
+# ============================================================================
+# TILING SCHEME GENERATION SERVICE
+# ============================================================================
+# STATUS: Service layer - Stage 1 of Big Raster ETL workflow
+# PURPOSE: Generate GeoJSON tiling schemes for large rasters in EPSG:4326
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: generate_tiling_scheme
+# DEPENDENCIES: rasterio, shapely
+# ============================================================================
 """
 Tiling Scheme Generation Service.
 

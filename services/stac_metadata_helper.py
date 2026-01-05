@@ -1,3 +1,13 @@
+# ============================================================================
+# STAC METADATA HELPER
+# ============================================================================
+# STATUS: Service layer - Centralized metadata enrichment for STAC items
+# PURPOSE: Ensure consistent metadata across all STAC items (raster and vector)
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: STACMetadataHelper, PlatformMetadata, AppMetadata, VisualizationMetadata, RasterVisualizationMetadata
+# DEPENDENCIES: stac-pydantic
+# ============================================================================
 """
 STAC Metadata Helper - Centralized Metadata Enrichment.
 
@@ -586,12 +596,31 @@ class STACMetadataHelper:
                 # Assume first 3 bands are RGB
                 params.extend(["bidx=1", "bidx=2", "bidx=3"])
 
-            # Add rescale for non-uint8 data
-            if dtype not in ['uint8', ''] and raster_meta.rescale:
-                min_val = raster_meta.rescale.get('min')
-                max_val = raster_meta.rescale.get('max')
-                if min_val is not None and max_val is not None:
-                    params.append(f"rescale={min_val},{max_val}")
+            # Add rescale for non-uint8 multi-band data (04 JAN 2026)
+            # TiTiler requires one rescale param per displayed band for proper visualization
+            if dtype not in ['uint8', '']:
+                if raster_meta.rescale:
+                    # Use provided rescale values
+                    min_val = raster_meta.rescale.get('min', 0)
+                    max_val = raster_meta.rescale.get('max', 10000)
+                    rescale_str = f"{min_val},{max_val}"
+                else:
+                    # Smart defaults based on dtype (04 JAN 2026)
+                    # WorldView/satellite uint16 typically ranges 0-2000 for reflectance
+                    # Use conservative range that works for most satellite imagery
+                    if dtype == 'uint16':
+                        rescale_str = "0,2000"
+                    elif dtype in ['int16']:
+                        rescale_str = "-1000,1000"
+                    elif dtype in ['float32', 'float64']:
+                        rescale_str = "0,1"
+                    else:
+                        rescale_str = "0,10000"
+
+                # Add one rescale per displayed band (3 for RGB display)
+                num_display_bands = len(raster_meta.rgb_bands) if raster_meta.rgb_bands else 3
+                for _ in range(num_display_bands):
+                    params.append(f"rescale={rescale_str}")
 
         return "&".join(params)
 

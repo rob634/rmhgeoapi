@@ -1,3 +1,13 @@
+# ============================================================================
+# STAC COLLECTION SERVICE
+# ============================================================================
+# STATUS: Service layer - STAC collection creation for multi-tile rasters
+# PURPOSE: Create STAC collections with MosaicJSON assets for tile datasets
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: create_stac_collection
+# DEPENDENCIES: pystac, psycopg, azure-storage-blob
+# ============================================================================
 """
 STAC Collection Service.
 

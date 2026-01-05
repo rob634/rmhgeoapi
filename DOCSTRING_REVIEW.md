@@ -854,85 +854,85 @@ Applied systematic 8-check review to both files:
 
 | Status | File | Notes |
 |--------|------|-------|
-| [ ] | `__init__.py` | |
-| [ ] | `container_analysis.py` | |
-| [ ] | `container_inventory.py` | |
-| [ ] | `container_summary.py` | |
-| [ ] | `delivery_discovery.py` | |
-| [ ] | `fathom_container_inventory.py` | |
-| [ ] | `fathom_etl.py` | |
-| [ ] | `geospatial_inventory.py` | |
-| [ ] | `handler_cascade_h3_descendants.py` | |
-| [ ] | `handler_create_h3_stac.py` | |
-| [ ] | `handler_finalize_h3_pyramid.py` | |
-| [ ] | `handler_generate_h3_grid.py` | |
-| [ ] | `handler_h3_native_streaming.py` | |
-| [ ] | `hello_world.py` | |
-| [ ] | `iso3_attribution.py` | |
-| [ ] | `janitor_service.py` | |
-| [ ] | `pgstac_search_registration.py` | |
-| [ ] | `promote_service.py` | |
-| [ ] | `raster_cog.py` | |
-| [ ] | `raster_mosaicjson.py` | |
-| [ ] | `raster_validation.py` | |
-| [ ] | `registry.py` | |
-| [ ] | `service_hello_world.py` | |
-| [ ] | `service_stac_metadata.py` | |
-| [ ] | `service_stac_setup.py` | |
-| [ ] | `service_stac_vector.py` | |
-| [ ] | `stac_catalog.py` | |
-| [ ] | `stac_client.py` | |
-| [ ] | `stac_collection.py` | |
-| [ ] | `stac_metadata_helper.py` | |
-| [ ] | `stac_repair_handlers.py` | |
-| [ ] | `stac_validation.py` | |
-| [ ] | `stac_vector_catalog.py` | |
-| [ ] | `task.py` | |
-| [ ] | `tiling_extraction.py` | |
-| [ ] | `tiling_scheme.py` | |
-| [ ] | `titiler_client.py` | |
-| [ ] | `titiler_search_service.py` | |
-| [ ] | `unpublish_handlers.py` | |
-| [ ] | `xarray_reader.py` | |
+| [x] | `__init__.py` | Checks 1-7 applied - added header (explicit registry, no decorators) |
+| [x] | `container_analysis.py` | Checks 1-7 applied - added header (blob analysis) |
+| [x] | `container_inventory.py` | Checks 1-7 applied - added header (3-stage handlers) |
+| [x] | `container_summary.py` | Checks 1-7 applied - added header (streaming stats) |
+| [x] | `delivery_discovery.py` | Checks 1-7 applied - added header (vendor patterns) |
+| [x] | `fathom_container_inventory.py` | Checks 1-7 applied - added header (etl_source_files) |
+| [x] | `fathom_etl.py` | Checks 1-7 applied - added header (Phase 1+2 handlers) |
+| [x] | `geospatial_inventory.py` | Checks 1-7 applied - added header (classification) |
+| [x] | `handler_cascade_h3_descendants.py` | Checks 1-7 applied - added header (multi-res cascade) |
+| [x] | `handler_create_h3_stac.py` | Checks 1-7 applied - added header (STAC for H3) |
+| [x] | `handler_finalize_h3_pyramid.py` | Checks 1-7 applied - added header (verify+VACUUM) |
+| [x] | `handler_generate_h3_grid.py` | Checks 1-7 applied - added header (universal gen) |
+| [x] | `handler_h3_native_streaming.py` | Checks 1-7 applied - added header (h3-py C bindings) |
+| [x] | `hello_world.py` | Checks 1-7 applied - added header (test handlers) |
+| [x] | `iso3_attribution.py` | Checks 1-7 applied - added header (admin0 query) |
+| [x] | `janitor_service.py` | Checks 1-7 applied - added header (maintenance ops) |
+| [x] | `pgstac_search_registration.py` | Checks 1-7 applied - added header (ETL-owned writes) |
+| [x] | `promote_service.py` | Checks 1-7 applied - updated header (gallery mgmt) |
+| [x] | `raster_cog.py` | Checks 1-7 applied - added header (rio-cogeo) |
+| [x] | `raster_mosaicjson.py` | Checks 1-7 applied - added header (virtual mosaic) |
+| [x] | `raster_validation.py` | Checks 1-7 applied - added header (Stage 1 validation) |
+| [x] | `registry.py` | Checks 1-7 applied - added header (task handler registry) |
+| [x] | `service_hello_world.py` | Checks 1-7 applied - added header (test handlers) |
+| [x] | `service_stac_metadata.py` | Checks 1-7 applied - added header (rio-stac extraction) |
+| [x] | `service_stac_setup.py` | Checks 1-7 applied - added header (pgSTAC setup) |
+| [x] | `service_stac_vector.py` | Checks 1-7 applied - added header (PostGIS vector metadata) |
+| [x] | `stac_catalog.py` | Checks 1-7 applied - added header (two-stage pattern) |
+| [~] | `stac_client.py` | Already had EPOCH 4 header |
+| [x] | `stac_collection.py` | Checks 1-7 applied - added header (MosaicJSON collections) |
+| [x] | `stac_metadata_helper.py` | Checks 1-7 applied - added header (centralized enrichment) |
+| [~] | `stac_repair_handlers.py` | Already had EPOCH 4 header |
+| [~] | `stac_validation.py` | Already had EPOCH 4 header |
+| [x] | `stac_vector_catalog.py` | Checks 1-7 applied - added header (vector STAC) |
+| [x] | `task.py` | Checks 1-7 applied - added header (TaskExecutor ABC) |
+| [x] | `tiling_extraction.py` | Checks 1-7 applied - added header (Stage 2 tile extract) |
+| [x] | `tiling_scheme.py` | Checks 1-7 applied - added header (Stage 1 scheme gen) |
+| [~] | `titiler_client.py` | Already had EPOCH 4 header |
+| [x] | `titiler_search_service.py` | Checks 1-7 applied - added header (search registration) |
+| [x] | `unpublish_handlers.py` | Checks 1-7 applied - added header (surgical removal) |
+| [~] | `xarray_reader.py` | Already had EPOCH 4 header |
 
 ### services/curated/
 
 | Status | File | Notes |
 |--------|------|-------|
-| [ ] | `__init__.py` | |
-| [ ] | `registry_service.py` | |
-| [ ] | `wdpa_handler.py` | |
+| [x] | `__init__.py` | Checks 1-7 applied - added header (package init) |
+| [x] | `registry_service.py` | Checks 1-7 applied - added header (CRUD service) |
+| [x] | `wdpa_handler.py` | Checks 1-7 applied - added header (IBAT API handler) |
 
 ### services/h3_aggregation/
 
 | Status | File | Notes |
 |--------|------|-------|
-| [ ] | `__init__.py` | |
-| [ ] | `base.py` | |
-| [ ] | `handler_export.py` | |
-| [ ] | `handler_finalize.py` | |
-| [ ] | `handler_inventory.py` | |
-| [ ] | `handler_raster_zonal.py` | |
-| [ ] | `handler_register.py` | |
+| [~] | `__init__.py` | Already had EPOCH 4 header |
+| [~] | `base.py` | Already had EPOCH 4 header |
+| [~] | `handler_export.py` | Already had EPOCH 4 header |
+| [~] | `handler_finalize.py` | Already had EPOCH 4 header |
+| [~] | `handler_inventory.py` | Already had EPOCH 4 header |
+| [~] | `handler_raster_zonal.py` | Already had EPOCH 4 header |
+| [~] | `handler_register.py` | Already had EPOCH 4 header |
 
 ### services/ingest/
 
 | Status | File | Notes |
 |--------|------|-------|
-| [ ] | `__init__.py` | |
-| [ ] | `handler_copy.py` | |
-| [ ] | `handler_inventory.py` | |
-| [ ] | `handler_register.py` | |
+| [~] | `__init__.py` | Already had EPOCH 4 header |
+| [~] | `handler_copy.py` | Already had EPOCH 4 header |
+| [~] | `handler_inventory.py` | Already had EPOCH 4 header |
+| [~] | `handler_register.py` | Already had EPOCH 4 header |
 
 ### services/vector/
 
 | Status | File | Notes |
 |--------|------|-------|
-| [ ] | `__init__.py` | |
-| [ ] | `converters.py` | |
-| [ ] | `helpers.py` | |
-| [ ] | `postgis_handler.py` | |
-| [ ] | `process_vector_tasks.py` | |
+| [x] | `__init__.py` | Checks 1-7 applied - added header (package init) |
+| [x] | `converters.py` | Checks 1-7 applied - added header (format converters) |
+| [x] | `helpers.py` | Checks 1-7 applied - added header (xy/wkt utilities) |
+| [x] | `postgis_handler.py` | Checks 1-7 applied - added header (upload handler) |
+| [x] | `process_vector_tasks.py` | Checks 1-7 applied - added header (DELETE+INSERT) |
 
 ---
 
@@ -1219,7 +1219,7 @@ Applied systematic 8-check review to both files:
 | core/ | 36 | 36 | 0 |
 | infrastructure/ | 30 | 30 | 0 |
 | jobs/ | 30 | 30 | 0 |
-| services/ | 47 | 0 | 47 |
+| services/ | 47 | 47 | 0 |
 | triggers/ | 35 | 1 | 34 |
 | API modules | 24 | 0 | 24 |
 | web_interfaces/ | 56 | 0 | 56 |
@@ -1227,7 +1227,7 @@ Applied systematic 8-check review to both files:
 | scripts/ | 4 | 4 | 0 |
 | test/ | 20 | 0 | 20 |
 | Root files | 3 | 3 | 0 |
-| **TOTAL** | **301** | **119** | **182** |
+| **TOTAL** | **301** | **166** | **135** |
 
 ---
 
@@ -1267,3 +1267,5 @@ Applied systematic 8-check review to both files:
 | 04 JAN 2026 | Session 28 | Applied Checks 1-7 to first 10 jobs/ files: `__init__.py`, `base.py`, `bootstrap_h3_land_grid_pyramid.py`, `container_summary.py`, `create_h3_base.py`, `curated_update.py`, `generate_h3_level4.py`, `h3_export_dataset.py`, `h3_raster_aggregation.py`, `h3_register_dataset.py` |
 | 04 JAN 2026 | Session 29 | Applied Checks 1-7 to jobs/ files 11-20: `hello_world.py`, `ingest_collection.py`, `inventory_container_contents.py`, `inventory_fathom_container.py`, `mixins.py`, `process_fathom_merge.py`, `process_fathom_stack.py`, `process_large_raster_v2.py`, `process_raster_collection_v2.py`, `process_raster_v2.py` |
 | 04 JAN 2026 | Session 30 | Completed jobs/ directory (30/30): `process_vector.py`, `raster_mixin.py`, `raster_workflows_base.py`, `repair_stac_items.py`, `stac_catalog_container.py`, `stac_catalog_vectors.py`, `unpublish_raster.py`, `unpublish_vector.py`, `validate_raster_job.py` - jobs/ COMPLETE |
+| 04 JAN 2026 | Session 31 | Applied Checks 1-7 to first 20 services/ files: `__init__.py`, `container_analysis.py`, `container_inventory.py`, `container_summary.py`, `delivery_discovery.py`, `fathom_container_inventory.py`, `fathom_etl.py`, `geospatial_inventory.py`, `handler_cascade_h3_descendants.py`, `handler_create_h3_stac.py`, `handler_finalize_h3_pyramid.py`, `handler_generate_h3_grid.py`, `handler_h3_native_streaming.py`, `hello_world.py`, `iso3_attribution.py`, `janitor_service.py`, `pgstac_search_registration.py`, `promote_service.py`, `raster_cog.py`, `raster_mosaicjson.py` |
+| 04 JAN 2026 | Session 32 | Completed services/ directory (47/47): Added headers to 23 files needing them (15 main folder + 3 curated/ + 5 vector/). Verified 11 files already had EPOCH 4 headers (5 main folder + 7 h3_aggregation/ + 4 ingest/). services/ COMPLETE |

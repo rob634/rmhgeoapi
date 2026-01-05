@@ -1,3 +1,12 @@
+# ============================================================================
+# RASTER VALIDATION SERVICE
+# ============================================================================
+# STATUS: Service layer - Raster file validation and analysis
+# PURPOSE: Validate raster files before COG processing, determine output tiers
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: validate_raster
+# ============================================================================
 """
 Raster Validation Service - Stage 1 of Raster Pipeline.
 

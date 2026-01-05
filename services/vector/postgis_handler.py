@@ -1,3 +1,13 @@
+# ============================================================================
+# VECTOR TO POSTGIS HANDLER
+# ============================================================================
+# STATUS: Service layer - PostGIS vector upload handler
+# PURPOSE: Prepare, validate, and upload vector data to PostGIS geo schema
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: VectorToPostGISHandler
+# DEPENDENCIES: geopandas, psycopg
+# ============================================================================
 """
 Vector to PostGIS Handler.
 

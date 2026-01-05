@@ -1,3 +1,11 @@
+# ============================================================================
+# H3 CASCADE DESCENDANTS HANDLER
+# ============================================================================
+# STATUS: Services - Multi-resolution H3 descendant generation
+# PURPOSE: Generate all children from parent cells across resolution levels
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 H3 Multi-Level Cascade Handler.
 

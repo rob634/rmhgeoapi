@@ -1,3 +1,11 @@
+# ============================================================================
+# RASTER COG SERVICE
+# ============================================================================
+# STATUS: Services - Cloud Optimized GeoTIFF creation with rio-cogeo
+# PURPOSE: Single-pass reprojection + COG creation with type-specific optimization
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Raster COG Creation Service - Stage 2 of Raster Pipeline.
 

@@ -1,3 +1,11 @@
+# ============================================================================
+# CONTAINER ANALYSIS SERVICE
+# ============================================================================
+# STATUS: Services - Blob container analysis and insights
+# PURPOSE: Analyze container listings for categorization, patterns, duplicates
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Container Analysis Service - Blob Container Analysis.
 

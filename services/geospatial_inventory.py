@@ -1,3 +1,11 @@
+# ============================================================================
+# GEOSPATIAL INVENTORY SERVICE
+# ============================================================================
+# STATUS: Services - Geospatial file classification and collection grouping
+# PURPOSE: Stage 2/3 handlers for inventory_container_contents (geospatial mode)
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Geospatial Inventory Service.
 

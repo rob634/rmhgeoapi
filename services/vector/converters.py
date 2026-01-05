@@ -1,3 +1,13 @@
+# ============================================================================
+# FORMAT-SPECIFIC VECTOR CONVERTERS
+# ============================================================================
+# STATUS: Service layer - File format conversion functions
+# PURPOSE: Convert CSV, GeoJSON, GPKG, KML, KMZ, Shapefile to GeoDataFrame
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: _convert_csv, _convert_geojson, _convert_geopackage, _convert_kml, _convert_kmz, _convert_shapefile
+# DEPENDENCIES: geopandas, pandas
+# ============================================================================
 """
 Format-Specific Vector Converters.
 

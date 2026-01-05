@@ -1,3 +1,13 @@
+# ============================================================================
+# TITILER SEARCH SERVICE
+# ============================================================================
+# STATUS: Service layer - TiTiler-PgSTAC search registration
+# PURPOSE: Register pgSTAC searches with TiTiler for mosaic visualization
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: TiTilerSearchService
+# DEPENDENCIES: httpx
+# ============================================================================
 """
 TiTiler-PgSTAC Search Service.
 

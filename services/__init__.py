@@ -1,3 +1,11 @@
+# ============================================================================
+# SERVICE HANDLER REGISTRY
+# ============================================================================
+# STATUS: Services - Explicit task handler registration (no decorators)
+# PURPOSE: Central registry mapping task_type strings to handler functions
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Service Handler Registry - Explicit Registration (No Decorators!)
 

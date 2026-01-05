@@ -1,3 +1,13 @@
+# ============================================================================
+# PROCESS VECTOR TASK HANDLERS
+# ============================================================================
+# STATUS: Service layer - Vector ETL workflow handlers
+# PURPOSE: Idempotent vector processing with DELETE+INSERT pattern
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: process_vector_prepare, process_vector_upload
+# DEPENDENCIES: geopandas, infrastructure.blob
+# ============================================================================
 """
 Process Vector Task Handlers.
 

@@ -1,3 +1,11 @@
+# ============================================================================
+# H3 STAC CREATION HANDLER
+# ============================================================================
+# STATUS: Services - STAC item creation for H3 grids in PostGIS
+# PURPOSE: Create STAC catalog entries for H3 hexagonal grids
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 H3 Grid STAC Item Creation Handler.
 

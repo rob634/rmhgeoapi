@@ -1,3 +1,12 @@
+# ============================================================================
+# TASK REGISTRY
+# ============================================================================
+# STATUS: Service layer - Task handler registration system
+# PURPOSE: Provide decorator-based registration for task handlers
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: TASK_REGISTRY, register_task, get_task, list_registered_tasks, is_registered
+# ============================================================================
 """
 Task Registry - Task Handler Registration System.
 

@@ -1,3 +1,12 @@
+# ============================================================================
+# CURATED DATASET REGISTRY SERVICE
+# ============================================================================
+# STATUS: Service layer - Business logic for curated dataset management
+# PURPOSE: Provide CRUD operations and validation for curated datasets
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: CuratedRegistryService, curated_registry_service
+# ============================================================================
 """
 Curated Dataset Registry Service.
 

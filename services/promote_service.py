@@ -1,12 +1,10 @@
 # ============================================================================
-# CLAUDE CONTEXT - PROMOTE SERVICE
+# PROMOTE SERVICE
 # ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: Service - Business logic for dataset promotion
-# PURPOSE: Promote/demote STAC collections/items with gallery management
-# LAST_REVIEWED: 22 DEC 2025
-# EXPORTS: PromoteService
-# DEPENDENCIES: infrastructure.promoted_repository, infrastructure.pgstac_repository
+# STATUS: Services - Dataset promotion and gallery management
+# PURPOSE: Promote/demote STAC collections/items, manage featured datasets
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
 # ============================================================================
 """
 Promote Service.

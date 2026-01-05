@@ -1,3 +1,13 @@
+# ============================================================================
+# STAC VECTOR METADATA SERVICE
+# ============================================================================
+# STATUS: Service layer - STAC metadata extraction from PostGIS tables
+# PURPOSE: Extract STAC Item metadata from vector tables stored in PostGIS
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# EXPORTS: StacVectorService
+# DEPENDENCIES: psycopg, stac-pydantic, shapely
+# ============================================================================
 """
 STAC Vector Metadata Service.
 

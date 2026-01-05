@@ -71,7 +71,7 @@ def load_fan_in_results(params: dict) -> list[dict]:
         >>> len(results)
         100
     """
-    from repositories.job_repository import JobRepository
+    from infrastructure.jobs_tasks import JobRepository
 
     if "fan_in_source" not in params:
         raise KeyError(

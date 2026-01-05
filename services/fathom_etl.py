@@ -1260,7 +1260,7 @@ def fathom_stac_register(params: dict, context: dict = None) -> dict:
         expected_count = params.get("cog_count", 0)
         logger.info(f"📊 Direct DB query: {expected_count} Stage {source_stage} results from job {source_job_id[:16]}...")
 
-        from repositories.job_repository import JobRepository
+        from infrastructure.jobs_tasks import JobRepository
         job_repo = JobRepository()
         tasks = job_repo.get_tasks_for_job(source_job_id)
 

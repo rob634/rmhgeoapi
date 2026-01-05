@@ -239,11 +239,15 @@ class ProcessFathomMergeJob(JobBaseMixin, JobBase):
             if not successful_cogs and not job_params.get("dry_run", False):
                 raise ValueError("Stage 2 failed - no successful merges")
 
+            # Pass job_id instead of cog_results to avoid Service Bus 256KB limit
+            # The handler will query the database for Stage 2 task results
             return [{
                 "task_id": f"{job_id[:8]}-s3-stac",
                 "task_type": "fathom_stac_register",
                 "parameters": {
-                    "cog_results": successful_cogs,
+                    "job_id": job_id,
+                    "stage": 2,  # Query Stage 2 results
+                    "cog_count": len(successful_cogs),  # For validation
                     "region_code": job_params["region_code"],
                     "collection_id": job_params.get("collection_id", FathomDefaults.PHASE2_COLLECTION_ID),
                     "output_container": job_params.get("output_container", FathomDefaults.PHASE2_OUTPUT_CONTAINER)

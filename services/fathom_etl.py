@@ -1,3 +1,11 @@
+# ============================================================================
+# FATHOM ETL TASK HANDLERS
+# ============================================================================
+# STATUS: Services - Phase 1 band stacking + Phase 2 spatial merge handlers
+# PURPOSE: Transform 8M raw Fathom tiles → 1M stacked → 40K merged COGs
+# LAST_REVIEWED: 04 JAN 2026
+# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# ============================================================================
 """
 Fathom ETL Task Handlers.
 
@@ -469,6 +477,10 @@ def fathom_band_stack(params: dict, context: dict = None) -> dict:
         }
         if bounds_dict:
             result["bounds"] = bounds_dict
+
+        # Update ETL tracking even on skip (04 JAN 2026)
+        # Phase 2 depends on phase1_completed_at being set
+        _update_phase1_processed(output_name, output_blob_path, job_id, logger)
 
         return {
             "success": True,
@@ -958,6 +970,10 @@ def fathom_spatial_merge(params: dict, context: dict = None) -> dict:
         if bounds_dict:
             result["bounds"] = bounds_dict
 
+        # Update ETL tracking even on skip (04 JAN 2026)
+        # This ensures phase2_completed_at is set for tracking purposes
+        _update_phase2_processed(output_name, output_blob_path, job_id, logger)
+
         return {
             "success": True,
             "skipped": True,
@@ -1222,7 +1238,32 @@ def fathom_stac_register(params: dict, context: dict = None) -> dict:
         logger.info(f"📚 Fan-in mode: extracted {len(cog_results)} successful COGs from {len(previous_results)} previous results")
     else:
         # Direct params structure (from job's create_tasks_for_stage)
-        cog_results = params.get("cog_results", [])
+        # Check if we need to query database for results (to avoid 256KB Service Bus limit)
+        if "job_id" in params and "cog_results" not in params:
+            # Query database for Stage 2 task results
+            source_job_id = params["job_id"]
+            source_stage = params.get("stage", 2)
+            expected_count = params.get("cog_count", 0)
+            logger.info(f"📊 Querying database for {expected_count} Stage {source_stage} results from job {source_job_id[:16]}...")
+
+            from repositories.job_repository import JobRepository
+            job_repo = JobRepository()
+            tasks = job_repo.get_tasks_for_job(source_job_id)
+
+            # Filter for completed Stage 2 tasks with results
+            cog_results = []
+            for task in tasks:
+                if task.stage == source_stage and task.status.value == "completed" and task.result_data:
+                    result = task.result_data.get("result")
+                    if result:
+                        cog_results.append(result)
+
+            logger.info(f"   Retrieved {len(cog_results)} COG results from database")
+            if expected_count and len(cog_results) != expected_count:
+                logger.warning(f"   ⚠️ Expected {expected_count} but got {len(cog_results)} results")
+        else:
+            cog_results = params.get("cog_results", [])
+
         region_code = params["region_code"].lower()
         collection_id = params.get("collection_id", FathomDefaults.PHASE2_COLLECTION_ID)
         output_container = params.get("output_container", FathomDefaults.PHASE2_OUTPUT_CONTAINER)

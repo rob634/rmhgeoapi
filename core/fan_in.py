@@ -71,7 +71,7 @@ def load_fan_in_results(params: dict) -> list[dict]:
         >>> len(results)
         100
     """
-    from infrastructure.jobs_tasks import JobRepository
+    from infrastructure.jobs_tasks import TaskRepository
 
     if "fan_in_source" not in params:
         raise KeyError(
@@ -91,8 +91,8 @@ def load_fan_in_results(params: dict) -> list[dict]:
     )
 
     # Query database for completed tasks from source stage
-    job_repo = JobRepository()
-    tasks = job_repo.get_tasks_for_job(job_id)
+    task_repo = TaskRepository()
+    tasks = task_repo.get_tasks_for_job(job_id)
 
     # Filter for completed tasks in the source stage with results
     results = []

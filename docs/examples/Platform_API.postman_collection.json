@@ -1,0 +1,337 @@
+{
+	"info": {
+		"_postman_id": "platform-api-collection",
+		"name": "Platform API",
+		"description": "Platform API endpoints for publishing, accessing, and unpublishing geospatial data.\n\n**Last Updated**: 06 JAN 2026\n\n## Overview\n\nThe Platform API provides a DDH-friendly anti-corruption layer over the CoreMachine job system. It uses dataset_id/resource_id/version_id identifiers instead of internal job parameters.\n\n## Workflow\n\n1. **Publish** - Submit data for processing\n2. **Check Status** - Poll until job completes\n3. **Access** - Use OGC/STAC APIs (separate collection)\n4. **Unpublish** - Remove data when no longer needed",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net",
+			"type": "string"
+		},
+		{
+			"key": "bronze_container",
+			"value": "rmhazuregeobronze",
+			"type": "string"
+		},
+		{
+			"key": "dataset_id",
+			"value": "test-dataset",
+			"type": "string"
+		},
+		{
+			"key": "resource_id",
+			"value": "test-resource",
+			"type": "string"
+		},
+		{
+			"key": "version_id",
+			"value": "v1",
+			"type": "string"
+		},
+		{
+			"key": "request_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "job_id",
+			"value": "",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "1. Publish",
+			"item": [
+				{
+					"name": "Submit Vector",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200 || pm.response.code === 202) {",
+									"    var jsonData = pm.response.json();",
+									"    if (jsonData.request_id) {",
+									"        pm.collectionVariables.set('request_id', jsonData.request_id);",
+									"        console.log('Saved request_id: ' + jsonData.request_id);",
+									"    }",
+									"    if (jsonData.job_id) {",
+									"        pm.collectionVariables.set('job_id', jsonData.job_id);",
+									"        console.log('Saved job_id: ' + jsonData.job_id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"dataset_id\": \"{{dataset_id}}\",\n    \"resource_id\": \"{{resource_id}}\",\n    \"version_id\": \"{{version_id}}\",\n    \"container_name\": \"{{bronze_container}}\",\n    \"file_name\": \"8.geojson\",\n    \"service_name\": \"Test Vector\",\n    \"description\": \"Test vector submission via Postman\",\n    \"access_level\": \"OUO\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/platform/submit",
+							"host": ["{{base_url}}"],
+							"path": ["api", "platform", "submit"]
+						},
+						"description": "Submit a vector file (GeoJSON, Shapefile, GeoPackage) for ingestion into PostGIS.\n\n**Required Parameters:**\n- `dataset_id` - Top-level identifier\n- `resource_id` - Resource identifier\n- `version_id` - Version identifier\n- `container_name` - Source container\n- `file_name` - Blob path to vector file\n\n**Optional Parameters:**\n- `service_name` - Human-readable name\n- `description` - Dataset description\n- `access_level` - Access classification (default: OUO)\n\n**Output:**\n- Creates PostGIS table: `{dataset_id}_{resource_id}_{version_id}`\n- Creates STAC item in `system-vectors` collection"
+					},
+					"response": []
+				},
+				{
+					"name": "Submit Single Raster",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200 || pm.response.code === 202) {",
+									"    var jsonData = pm.response.json();",
+									"    if (jsonData.request_id) {",
+									"        pm.collectionVariables.set('request_id', jsonData.request_id);",
+									"        console.log('Saved request_id: ' + jsonData.request_id);",
+									"    }",
+									"    if (jsonData.job_id) {",
+									"        pm.collectionVariables.set('job_id', jsonData.job_id);",
+									"        console.log('Saved job_id: ' + jsonData.job_id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"dataset_id\": \"{{dataset_id}}\",\n    \"resource_id\": \"{{resource_id}}\",\n    \"version_id\": \"{{version_id}}\",\n    \"container_name\": \"{{bronze_container}}\",\n    \"file_name\": \"dctest.tif\",\n    \"service_name\": \"Test Raster\",\n    \"description\": \"Test raster submission via Postman\",\n    \"access_level\": \"OUO\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/platform/raster",
+							"host": ["{{base_url}}"],
+							"path": ["api", "platform", "raster"]
+						},
+						"description": "Submit a single raster file for COG conversion and STAC cataloging.\n\n**Required Parameters:**\n- `dataset_id` - Top-level identifier\n- `resource_id` - Resource identifier\n- `version_id` - Version identifier\n- `container_name` - Source container\n- `file_name` - Blob path to raster file\n\n**Optional Parameters:**\n- `service_name` - Human-readable name\n- `description` - Dataset description\n- `access_level` - Access classification (default: OUO)\n\n**Size Routing:**\n- ≤800 MB → Standard COG conversion\n- >800 MB → Auto-routes to tiled workflow\n\n**Output:**\n- Creates COG in `silver-cogs` container\n- Creates STAC item: `{dataset_id}-{resource_id}-{version_id}`"
+					},
+					"response": []
+				},
+				{
+					"name": "Submit Raster Collection",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200 || pm.response.code === 202) {",
+									"    var jsonData = pm.response.json();",
+									"    if (jsonData.request_id) {",
+									"        pm.collectionVariables.set('request_id', jsonData.request_id);",
+									"        console.log('Saved request_id: ' + jsonData.request_id);",
+									"    }",
+									"    if (jsonData.job_id) {",
+									"        pm.collectionVariables.set('job_id', jsonData.job_id);",
+									"        console.log('Saved job_id: ' + jsonData.job_id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"dataset_id\": \"{{dataset_id}}\",\n    \"resource_id\": \"{{resource_id}}\",\n    \"version_id\": \"{{version_id}}\",\n    \"container_name\": \"{{bronze_container}}\",\n    \"file_name\": [\n        \"namangan/namangan14aug2019_R1C1cog.tif\",\n        \"namangan/namangan14aug2019_R1C2cog.tif\",\n        \"namangan/namangan14aug2019_R2C1cog.tif\",\n        \"namangan/namangan14aug2019_R2C2cog.tif\"\n    ],\n    \"service_name\": \"Test Collection\",\n    \"description\": \"Test raster collection via Postman\",\n    \"access_level\": \"OUO\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/platform/raster-collection",
+							"host": ["{{base_url}}"],
+							"path": ["api", "platform", "raster-collection"]
+						},
+						"description": "Submit multiple raster files as a unified collection with MosaicJSON.\n\n**Required Parameters:**\n- `dataset_id` - Top-level identifier\n- `resource_id` - Resource identifier\n- `version_id` - Version identifier\n- `container_name` - Source container\n- `file_name` - **Array** of blob paths (2-20 files)\n\n**Optional Parameters:**\n- `service_name` - Human-readable name\n- `description` - Dataset description\n- `access_level` - Access classification (default: OUO)\n\n**Limits:**\n- Min 2 files, Max 20 files\n- Each file must be ≤800 MB\n\n**Output:**\n- Creates COGs in `silver-cogs` container\n- Creates MosaicJSON for unified tile access\n- Creates STAC collection with multiple items"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "2. Check Status",
+			"item": [
+				{
+					"name": "Get Platform Status (by request_id)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/platform/status/{{request_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "platform", "status", "{{request_id}}"]
+						},
+						"description": "Check status of a Platform request using the request_id returned from submission.\n\n**Path Parameters:**\n- `request_id` - 32-character request hash from Platform submission\n\n**Response includes:**\n- `success` - Whether the request was found\n- `job_status` - Current job status (queued, processing, completed, failed)\n- `job_stage` - Current stage number\n- `data_type` - vector or raster\n- `task_summary` - Task completion counts\n- `result_data` - Output URLs and metadata (when completed)"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Job Status (by job_id)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/jobs/status/{{job_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "jobs", "status", "{{job_id}}"]
+						},
+						"description": "Check status of a CoreMachine job using the job_id.\n\n**Path Parameters:**\n- `job_id` - 64-character SHA256 job hash\n\n**Response includes:**\n- `status` - queued, processing, completed, failed\n- `stage` / `totalStages` - Current progress\n- `taskSummary` - Count of tasks by status\n- `resultData` - Output data (when completed)\n- `error_details` - Error message (when failed)"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "3. Unpublish",
+			"item": [
+				{
+					"name": "Unpublish Vector (Dry Run)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"dataset_id\": \"{{dataset_id}}\",\n    \"resource_id\": \"{{resource_id}}\",\n    \"version_id\": \"{{version_id}}\",\n    \"dry_run\": true\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/platform/unpublish/vector",
+							"host": ["{{base_url}}"],
+							"path": ["api", "platform", "unpublish", "vector"]
+						},
+						"description": "Preview what would be deleted when unpublishing a vector dataset.\n\n**Option 1: By DDH Identifiers (Preferred)**\n- `dataset_id` - Original dataset_id\n- `resource_id` - Original resource_id\n- `version_id` - Original version_id\n\n**Option 2: By Request ID**\n- `request_id` - Original request_id from publish\n\n**Option 3: Cleanup Mode**\n- `table_name` - Direct PostGIS table name\n- `schema_name` - Schema name (default: geo)\n\n**Always include:**\n- `dry_run` - true (preview) or false (actually delete)\n\n**Safety:** Defaults to dry_run=true"
+					},
+					"response": []
+				},
+				{
+					"name": "Unpublish Vector (Execute)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"dataset_id\": \"{{dataset_id}}\",\n    \"resource_id\": \"{{resource_id}}\",\n    \"version_id\": \"{{version_id}}\",\n    \"dry_run\": false\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/platform/unpublish/vector",
+							"host": ["{{base_url}}"],
+							"path": ["api", "platform", "unpublish", "vector"]
+						},
+						"description": "**DANGER: Actually deletes data!**\n\nRemove vector data from the platform:\n- Drops PostGIS table\n- Removes STAC item\n\nSet `dry_run: false` to execute the deletion."
+					},
+					"response": []
+				},
+				{
+					"name": "Unpublish Raster (Dry Run)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"dataset_id\": \"{{dataset_id}}\",\n    \"resource_id\": \"{{resource_id}}\",\n    \"version_id\": \"{{version_id}}\",\n    \"dry_run\": true\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/platform/unpublish/raster",
+							"host": ["{{base_url}}"],
+							"path": ["api", "platform", "unpublish", "raster"]
+						},
+						"description": "Preview what would be deleted when unpublishing a raster dataset.\n\n**Option 1: By DDH Identifiers (Preferred)**\n- `dataset_id` - Original dataset_id\n- `resource_id` - Original resource_id\n- `version_id` - Original version_id\n\n**Option 2: By Request ID**\n- `request_id` - Original request_id from publish\n\n**Option 3: Cleanup Mode**\n- `stac_item_id` - STAC item ID\n- `collection_id` - STAC collection\n\n**Always include:**\n- `dry_run` - true (preview) or false (actually delete)\n\n**Safety:** Defaults to dry_run=true"
+					},
+					"response": []
+				},
+				{
+					"name": "Unpublish Raster (Execute)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"dataset_id\": \"{{dataset_id}}\",\n    \"resource_id\": \"{{resource_id}}\",\n    \"version_id\": \"{{version_id}}\",\n    \"dry_run\": false\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/platform/unpublish/raster",
+							"host": ["{{base_url}}"],
+							"path": ["api", "platform", "unpublish", "raster"]
+						},
+						"description": "**DANGER: Actually deletes data!**\n\nRemove raster data from the platform:\n- Deletes COG blobs from storage\n- Removes STAC item(s)\n- For collections: removes MosaicJSON and all items\n\nSet `dry_run: false` to execute the deletion."
+					},
+					"response": []
+				},
+				{
+					"name": "Unpublish by Request ID (Dry Run)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"request_id\": \"{{request_id}}\",\n    \"dry_run\": true\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/platform/unpublish/raster",
+							"host": ["{{base_url}}"],
+							"path": ["api", "platform", "unpublish", "raster"]
+						},
+						"description": "Unpublish using the original request_id from the publish response.\n\nThis works for both vector and raster data - the endpoint auto-detects the data type from the request_id.\n\n**Parameters:**\n- `request_id` - 32-character request hash from original publish\n- `dry_run` - true (preview) or false (delete)"
+					},
+					"response": []
+				}
+			]
+		}
+	]
+}

@@ -1,7 +1,7 @@
 # FATHOM Flood Data ETL Pipeline
 
-**Last Updated**: 21 DEC 2025
-**Status**: Phase 1 Complete, Phase 2 In Testing
+**Last Updated**: 07 JAN 2026
+**Status**: Phase 1 & 2 Complete (RWA), Region Filtering Fixed
 **Author**: Robert and Claude
 
 ---
@@ -178,33 +178,134 @@ Example: n00-n05_w005-w010
 
 ---
 
-## Performance Metrics (21 DEC 2025)
+## Performance Metrics
+
+**Last Updated**: 07 JAN 2026
 
 ### Infrastructure
 - Azure Functions B3 (PremiumV3)
 - 2 vCPUs, 7.7 GB RAM per worker
-- 2 minimum instances configured
+- 4 instances × 2 workers = **8 concurrent workers**
 
-### Phase 1 (Band Stack)
-| Metric | Value |
-|--------|-------|
-| Peak memory | ~2-3 GB RSS |
-| Task duration | ~30-60 seconds |
-| Côte d'Ivoire | 32 tiles processed |
+### Rwanda Baseline (07 JAN 2026)
 
-### Phase 2 (Spatial Merge, grid_size=3)
-| Metric | Value |
-|--------|-------|
-| Peak memory | ~4-5 GB RSS (90%+ system usage) |
-| System available | ~750 MB at peak |
-| Avg task duration | 96.8 seconds |
-| Min task duration | 4.4 seconds (sparse data) |
-| Max task duration | 277.6 seconds |
+RWA is a small test region with 6 tiles. This provides a clean baseline for throughput calculations.
+
+| Phase | Tasks | Duration | Throughput | Avg Task Time |
+|-------|-------|----------|------------|---------------|
+| Inventory | 68 | 51 sec | ~80/min | <1s |
+| **Phase 1** (band stack) | 234 | 7m 10s | **33/min** | **17.3s** |
+| **Phase 2** (spatial merge) | 39 | 7m 48s | **5/min** | **100s** |
+| **Total Pipeline** | 341 | **~17 min** | - | - |
+
+### Per-Task Duration Analysis
+| Phase | Metric | Value |
+|-------|--------|-------|
+| Phase 1 | Peak memory | ~2-3 GB RSS |
+| Phase 1 | Avg task duration | 17.3 seconds |
+| Phase 2 | Peak memory | ~4-5 GB RSS (90%+ system usage) |
+| Phase 2 | Avg task duration | 100 seconds |
+| Phase 2 | Min task duration | 4.4 seconds (sparse data) |
+| Phase 2 | Max task duration | 277.6 seconds |
 
 ### Memory Limits
 - **grid_size=3**: Works (9 tiles → ~5 GB peak)
-- **grid_size=4**: Likely OOM (16 tiles → would exceed memory)
+- **grid_size=4**: Works with current config (16 tiles → near memory limit)
+- **grid_size=5+**: Likely OOM (would exceed memory)
 - **Effective memory budget**: ~4 GB (3.5 GB consumed by OS/runtime overhead)
+
+### Scaling Projections
+
+Based on RWA baseline throughput with 8 workers:
+
+| Region | Tiles | Phase 1 Tasks | Phase 2 Tasks | Estimated Time |
+|--------|-------|---------------|---------------|----------------|
+| Rwanda (RWA) | 6 | 234 | 39 | ~17 min |
+| Côte d'Ivoire (CIV) | 50 | 1,924 | ~312 | ~2 hours |
+| West Africa | ~500 | ~20,000 | ~3,000 | ~15-20 hours |
+| Global (8TB) | ~100,000 | ~4M+ | ~600K+ | **Several days** |
+
+**Scaling formula** (approximate):
+- Phase 1: `tasks ÷ 33/min`
+- Phase 2: `tasks × 100s ÷ 8 workers`
+
+---
+
+## Instance & Worker Monitoring
+
+Application Insights logs include instance and worker identifiers for calculating actual concurrency.
+
+### Key Fields
+| Field | Source | Description |
+|-------|--------|-------------|
+| `cloud_RoleInstance` | App Insights | Function App instance hash (unique per VM) |
+| `HostInstanceId` | customDimensions | Worker GUID within an instance |
+| `ProcessId` | customDimensions | Process ID within worker |
+
+### Count Active Instances
+```bash
+# Query: How many instances processed tasks?
+traces
+| where timestamp >= ago(2h)
+| where message contains 'task_id' and message contains 'Result'
+| summarize task_count=count() by cloud_RoleInstance
+| order by task_count desc
+```
+
+### Count Workers Per Instance
+```bash
+# Query: How many workers per instance? (should be 2)
+traces
+| where timestamp >= ago(2h)
+| where message contains 'task_id' and message contains 'Result'
+| extend hostId = tostring(parse_json(customDimensions).HostInstanceId)
+| summarize task_count=count() by cloud_RoleInstance, hostId
+| order by cloud_RoleInstance, task_count desc
+```
+
+### Example Output (RWA Pipeline, 07 JAN 2026)
+```
+Instance (cloud_RoleInstance)  | Worker (HostInstanceId)                | Tasks
+-------------------------------|----------------------------------------|------
+cbefa55aa015...                | cb58e3e4-5780-4cae-adab-2c100d9012a7   | 237
+cbefa55aa015...                | 6ad84b40-431d-4cf1-bbf1-b016cfbb1b29   | 112
+6f2767c2e010...                | 45639263-e784-4724-b03b-754fc50ca824   | 203
+6f2767c2e010...                | ae1020a5-0287-42a6-aa9a-eadd1be1bd49   | 79
+64fcec8b11e2...                | 0a176ad9-64fd-4616-ac3c-aad3c7296c91   | 237
+64fcec8b11e2...                | 35e46522-dfc8-49f6-82cf-aab2f67a3e85   | 99
+50bd00d9b926...                | 76acb5c2-f7f0-4059-a68d-3907ede8600a   | 216
+50bd00d9b926...                | 6d2b3b9b-f9e9-4e84-b722-8e5afb27ac86   | 116
+-------------------------------|----------------------------------------|------
+4 instances                    | 8 workers total                        | 1,299
+```
+
+### Calculate Actual Processing Rate
+```bash
+# Query: Task duration distribution
+traces
+| where timestamp >= ago(2h)
+| where message contains 'Result' and message contains 'task_id'
+| extend task_type = extract(@"task_type.*?'([^']+)'", 1, message)
+| summarize
+    count=count(),
+    avg_duration_s=avg(duration) / 1000,
+    min_duration_s=min(duration) / 1000,
+    max_duration_s=max(duration) / 1000
+  by task_type
+```
+
+### Verify Concurrency
+To confirm all workers are active, check task start times overlap:
+```bash
+traces
+| where timestamp >= ago(1h)
+| where message contains 'Starting task'
+| summarize count() by bin(timestamp, 1s)
+| order by timestamp desc
+| take 30
+```
+
+If you see 8+ tasks starting in the same second, full concurrency is being utilized.
 
 ---
 
@@ -247,32 +348,58 @@ WHERE phase1_completed_at IS NOT NULL
 
 ## Processing Status
 
-### Table Migration (21 DEC 2025)
+**Last Updated**: 07 JAN 2026
 
-**IMPORTANT**: Migrated from `app.etl_fathom` to generalized `app.etl_source_files` table.
+### Region Filtering Fix (07 JAN 2026)
 
-Before testing, you must:
-1. Deploy to Azure: `func azure functionapp publish rmhazuregeoapi --python --build remote`
-2. Full rebuild schema: `POST /api/dbadmin/maintenance?action=full-rebuild&confirm=yes`
-3. Re-run FATHOM inventory: `POST /api/jobs/submit/inventory_fathom_container`
-4. Process with Phase 1 + Phase 2 jobs
+Fixed critical bug where inventory/Phase 1/Phase 2 queries returned ALL fathom records regardless of region.
 
-### Côte d'Ivoire (CI) - Previous Test Region (Before Migration)
+**Root cause**: `source_metadata` JSONB wasn't being filtered by `region` field.
+
+**Files modified**:
+- `services/fathom_container_inventory.py` - Added region extraction and filtering
+- `services/fathom_etl.py` - Added `source_metadata->>'region'` WHERE clauses
+- `jobs/inventory_fathom_container.py` - Pass `base_prefix` to summary task
+
+### Rwanda (RWA) - Current Test Region ✅
 
 | Phase | Status | Details |
 |-------|--------|---------|
-| Bronze inventory | ⚠️ Needs Rerun | Old table structure |
-| Phase 1 (stack) | ⚠️ Needs Rerun | Old table structure |
-| Phase 2 (merge) | ⚠️ Needs Rerun | Old table structure |
-| STAC registration | ⚠️ Needs Rerun | Old table structure |
+| Bronze inventory | ✅ Complete | 6 tiles, 234 Phase 1 groups, 39 Phase 2 groups |
+| Phase 1 (stack) | ✅ Complete | 234/234 tasks, 0 failures |
+| Phase 2 (merge) | ✅ Complete | 39/39 tasks, 0 failures |
+| STAC registration | ⏳ Pending | Not yet run |
 
-**Note**: Previous CI processing used the old `etl_fathom` table. After schema rebuild,
-the COG files still exist in Azure blob storage but the tracking table is reset.
+### Côte d'Ivoire (CIV) - Previous Test Region
 
-### Next Steps
-1. Deploy and rebuild schema (creates new `etl_source_files` table)
-2. Run inventory job to populate new table
-3. Run Phase 1 + Phase 2 to validate new JSONB structure
+| Phase | Status | Details |
+|-------|--------|---------|
+| Bronze inventory | ⏳ Pending | 50 tiles expected |
+| Phase 1 (stack) | ✅ Files exist | 1,924 COGs in silver-fathom/fathom-stacked/civ/ |
+| Phase 2 (merge) | ✅ Files exist | 87 merged COGs in silver-fathom/fathom/civ/ |
+| Database tracking | ⏳ Needs sync | Blobs exist but etl_source_files table was reset |
+
+**Note**: CIV was processed with grid_size=3 before region filtering fix. Output files preserved.
+To sync database with existing outputs, run inventory with `base_prefix: "civ"`.
+
+### Running a New Region
+
+```bash
+# 1. Inventory (scan bronze-fathom for region)
+curl -X POST "https://rmhazuregeoapi.../api/jobs/submit/inventory_fathom_container" \
+  -H "Content-Type: application/json" \
+  -d '{"base_prefix": "rwa"}'
+
+# 2. Phase 1 (band stacking)
+curl -X POST "https://rmhazuregeoapi.../api/jobs/submit/process_fathom_stack" \
+  -H "Content-Type: application/json" \
+  -d '{"region_code": "rwa"}'
+
+# 3. Phase 2 (spatial merge)
+curl -X POST "https://rmhazuregeoapi.../api/jobs/submit/process_fathom_merge" \
+  -H "Content-Type: application/json" \
+  -d '{"region_code": "rwa", "grid_size": 4}'
+```
 
 ---
 

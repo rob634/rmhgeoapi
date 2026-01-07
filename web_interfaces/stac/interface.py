@@ -264,6 +264,18 @@ class StacInterface(BaseInterface):
             padding: 3px 8px !important;
         }
 
+        /* Items button */
+        .link-badge-info {
+            background: linear-gradient(135deg, #3B82F6 0%, #2563EB 100%) !important;
+            color: white !important;
+            border-color: #2563EB !important;
+            text-decoration: none !important;
+        }
+
+        .link-badge-info:hover {
+            background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%) !important;
+        }
+
         /* Promote button */
         .link-badge-promote {
             background: linear-gradient(135deg, #10B981 0%, #059669 100%) !important;
@@ -606,8 +618,14 @@ class StacInterface(BaseInterface):
                     `[${bbox.map(v => v.toFixed(2)).join(', ')}]` :
                     'No extent';
 
-                // Build action buttons - Map, Promote, Delete
+                // Build action buttons - Items, Map, Promote, Delete
                 const actionButtons = `
+                    <a class="link-badge link-badge-info"
+                       href="/api/interface/stac-collection?id=${c.id}"
+                       onclick="event.stopPropagation()"
+                       title="View all items in collection">
+                        📄 Items
+                    </a>
                     <button class="link-badge link-badge-primary"
                             onclick="openMapView('${c.id}', event)"
                             title="Open in raster viewer">

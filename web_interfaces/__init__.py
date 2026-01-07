@@ -413,6 +413,12 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Could not import Database interface: {e}")
 
+try:
+    from .stac_collection import interface as _stac_collection
+    logger.info("✅ Imported STAC Collection interface module")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import STAC Collection interface: {e}")
+
 
 # Public API
 __all__ = [

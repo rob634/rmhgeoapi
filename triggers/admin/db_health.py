@@ -352,7 +352,7 @@ class AdminDbHealthTrigger:
                     # Sequential scans
                     cursor.execute("""
                         SELECT
-                            schemaname || '.' || tablename as table_name,
+                            schemaname || '.' || relname as table_name,
                             seq_scan
                         FROM pg_stat_user_tables
                         WHERE seq_scan > 100

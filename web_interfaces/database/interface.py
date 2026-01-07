@@ -609,8 +609,8 @@ class DatabaseInterface(BaseInterface):
             errorState.classList.add('hidden');
 
             try {
-                // Fetch health and performance data in parallel
-                const [healthResponse, performanceResponse] = await Promise.all([
+                // Fetch health and performance data in parallel, handling errors individually
+                const [healthResult, performanceResult] = await Promise.allSettled([
                     fetchJSON(`${API_BASE_URL}/api/dbadmin/health`),
                     fetchJSON(`${API_BASE_URL}/api/dbadmin/health/performance`)
                 ]);
@@ -619,12 +619,28 @@ class DatabaseInterface(BaseInterface):
                 const lastUpdated = document.getElementById('last-updated');
                 lastUpdated.textContent = 'Updated: ' + formatTime(new Date());
 
-                // Render all sections
-                renderSummary(healthResponse);
-                renderConnectionPool(healthResponse.connection_pool);
-                renderDatabaseSizes(healthResponse.database_size);
-                renderHealthChecks(healthResponse.checks);
-                renderPerformanceMetrics(performanceResponse);
+                // Handle health endpoint
+                if (healthResult.status === 'fulfilled') {
+                    const healthResponse = healthResult.value;
+                    renderSummary(healthResponse);
+                    renderConnectionPool(healthResponse.connection_pool);
+                    renderDatabaseSizes(healthResponse.database_size);
+                    renderHealthChecks(healthResponse.checks);
+                } else {
+                    console.error('Health endpoint failed:', healthResult.reason);
+                    summaryCard.innerHTML = '<p style="color: #ef4444;">Failed to load health data</p>';
+                    connectionPool.innerHTML = '<p style="color: #626F86;">Health data unavailable</p>';
+                    dbSizes.innerHTML = '<p style="color: #626F86;">Health data unavailable</p>';
+                    healthChecks.innerHTML = '<p style="color: #626F86;">Health data unavailable</p>';
+                }
+
+                // Handle performance endpoint
+                if (performanceResult.status === 'fulfilled') {
+                    renderPerformanceMetrics(performanceResult.value);
+                } else {
+                    console.error('Performance endpoint failed:', performanceResult.reason);
+                    performanceMetrics.innerHTML = '<p style="color: #626F86;">Performance metrics unavailable</p>';
+                }
 
             } catch (error) {
                 console.error('Error loading database data:', error);

@@ -1,6 +1,6 @@
 # Working Backlog
 
-**Last Updated**: 05 JAN 2026
+**Last Updated**: 06 JAN 2026
 **Source of Truth**: [docs/epics/README.md](/docs/epics/README.md) — Epic/Feature/Story definitions
 **Purpose**: Sprint-level task tracking and delegation
 
@@ -51,10 +51,13 @@
 | S9.1.R4 | Run Phase 2 spatial merge (6 tiles → merged COGs) | 📋 |
 | S9.1.R5 | Verify outputs in silver-fathom storage | 📋 |
 | S9.1.R6 | Register merged COGs in STAC catalog | 📋 |
+| S9.1.R7 | Change FATHOM grid from 5×5 to 4×4 degrees | ✅ Done (06 JAN) |
+
+**NEXT SESSION (07 JAN 2026)**: Deploy with 4×4 grid and rerun full RWA pipeline from inventory.
 
 **Expected Outputs**:
-- Phase 1: ~78 stacked COGs (3 flood types × 13 scenarios × 6 tiles ÷ 8 bands grouped)
-- Phase 2: ~39 merged COGs (3 flood types × 13 scenarios)
+- Phase 1: ~1,924 stacked COGs (44 tiles × ~44 scenarios)
+- Phase 2: ~312 merged COGs (with 4×4 grid: max 16 tiles per merge, ~3-4 GB peak memory)
 
 **Key Files**:
 - `jobs/inventory_fathom_container.py` - Needs `base_prefix` parameter

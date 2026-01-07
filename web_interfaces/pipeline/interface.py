@@ -53,53 +53,53 @@ class PipelineInterface(BaseInterface):
         return """
             .dashboard-header {
                 background: white;
-                padding: 25px 30px;
+                padding: 14px 20px;
                 border-radius: 3px;
                 box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-                margin-bottom: 20px;
+                margin-bottom: 12px;
                 border-left: 4px solid #0071BC;
             }
 
             .dashboard-header h1 {
                 color: #053657;
-                font-size: 24px;
-                margin-bottom: 8px;
+                font-size: 20px;
+                margin-bottom: 4px;
                 font-weight: 700;
             }
 
             .subtitle {
                 color: #626F86;
-                font-size: 14px;
+                font-size: 13px;
                 margin: 0;
             }
 
             .section {
                 background: white;
-                border-radius: 8px;
-                padding: 24px;
-                margin-bottom: 20px;
+                border-radius: 6px;
+                padding: 16px;
+                margin-bottom: 12px;
                 box-shadow: 0 2px 4px rgba(0,0,0,0.08);
             }
 
             .section h2 {
                 color: var(--ds-navy);
-                font-size: 20px;
-                margin: 0 0 16px 0;
-                padding-bottom: 12px;
+                font-size: 16px;
+                margin: 0 0 12px 0;
+                padding-bottom: 8px;
                 border-bottom: 2px solid var(--ds-blue-primary);
             }
 
             .pipeline-grid {
                 display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-                gap: 20px;
+                grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+                gap: 12px;
             }
 
             .pipeline-card {
                 background: var(--ds-bg);
                 border: 2px solid var(--ds-gray-light);
-                border-radius: 8px;
-                padding: 20px;
+                border-radius: 6px;
+                padding: 14px;
                 transition: all 0.2s;
                 display: flex;
                 flex-direction: column;
@@ -112,51 +112,51 @@ class PipelineInterface(BaseInterface):
 
             .pipeline-card h3 {
                 color: var(--ds-navy);
-                font-size: 18px;
-                margin: 0 0 8px 0;
+                font-size: 15px;
+                margin: 0 0 6px 0;
                 display: flex;
                 align-items: center;
-                gap: 10px;
+                gap: 8px;
             }
 
             .pipeline-card .icon {
-                font-size: 24px;
+                font-size: 20px;
             }
 
             .pipeline-card .description {
                 color: var(--ds-gray);
-                font-size: 14px;
-                margin-bottom: 16px;
-                line-height: 1.5;
+                font-size: 12px;
+                margin-bottom: 10px;
+                line-height: 1.4;
             }
 
             .pipeline-stages {
                 display: flex;
                 align-items: center;
-                gap: 8px;
-                margin-bottom: 16px;
+                gap: 4px;
+                margin-bottom: 10px;
                 flex-wrap: wrap;
             }
 
             .stage {
                 background: white;
                 border: 1px solid var(--ds-gray-light);
-                padding: 6px 12px;
-                border-radius: 4px;
-                font-size: 12px;
+                padding: 3px 8px;
+                border-radius: 3px;
+                font-size: 10px;
                 font-weight: 600;
                 color: var(--ds-navy);
             }
 
             .stage-arrow {
                 color: var(--ds-blue-primary);
-                font-size: 16px;
+                font-size: 12px;
             }
 
             .pipeline-stats {
                 display: flex;
-                gap: 16px;
-                padding-top: 12px;
+                gap: 12px;
+                padding-top: 8px;
                 border-top: 1px solid var(--ds-gray-light);
             }
 
@@ -165,13 +165,13 @@ class PipelineInterface(BaseInterface):
             }
 
             .stat-value {
-                font-size: 20px;
+                font-size: 16px;
                 font-weight: 700;
                 color: var(--ds-blue-primary);
             }
 
             .stat-label {
-                font-size: 11px;
+                font-size: 10px;
                 color: var(--ds-gray);
                 text-transform: uppercase;
             }
@@ -179,21 +179,21 @@ class PipelineInterface(BaseInterface):
             /* Pipeline action button */
             .pipeline-action {
                 margin-top: auto;
-                padding-top: 16px;
+                padding-top: 10px;
                 border-top: 1px solid var(--ds-gray-light);
             }
 
             .btn-submit {
                 display: inline-block;
                 width: 100%;
-                padding: 10px 16px;
+                padding: 8px 12px;
                 background: var(--ds-blue-primary);
                 color: white;
                 text-align: center;
                 text-decoration: none;
-                border-radius: 6px;
+                border-radius: 4px;
                 font-weight: 600;
-                font-size: 14px;
+                font-size: 12px;
                 transition: background 0.2s;
             }
 
@@ -204,43 +204,24 @@ class PipelineInterface(BaseInterface):
             .btn-placeholder {
                 display: inline-block;
                 width: 100%;
-                padding: 10px 16px;
+                padding: 8px 12px;
                 background: #e5e7eb;
                 color: #9ca3af;
                 text-align: center;
-                border-radius: 6px;
+                border-radius: 4px;
                 font-weight: 600;
-                font-size: 14px;
+                font-size: 12px;
                 cursor: not-allowed;
-            }
-
-            /* Custom pipelines section */
-            .coming-soon {
-                background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-                border: 2px dashed var(--ds-gray-light);
-                border-radius: 8px;
-                padding: 30px;
-                text-align: center;
-            }
-
-            .coming-soon h3 {
-                color: var(--ds-navy);
-                margin: 0 0 8px 0;
-            }
-
-            .coming-soon p {
-                color: var(--ds-gray);
-                margin: 0;
             }
 
             /* Jobs Filter Bar */
             .filter-bar {
                 background: var(--ds-bg);
-                border-radius: 8px;
-                padding: 1rem;
-                margin-bottom: 1rem;
+                border-radius: 6px;
+                padding: 0.75rem;
+                margin-bottom: 0.75rem;
                 display: flex;
-                gap: 1.5rem;
+                gap: 1rem;
                 align-items: flex-end;
                 flex-wrap: wrap;
             }
@@ -248,21 +229,21 @@ class PipelineInterface(BaseInterface):
             .filter-group {
                 display: flex;
                 flex-direction: column;
-                gap: 0.5rem;
-                min-width: 120px;
+                gap: 0.25rem;
+                min-width: 100px;
             }
 
             .filter-group label {
-                font-size: 0.875rem;
+                font-size: 0.75rem;
                 font-weight: 500;
                 color: #374151;
             }
 
             .filter-select {
-                padding: 0.5rem 0.75rem;
+                padding: 0.375rem 0.5rem;
                 border: 1px solid #d1d5db;
-                border-radius: 6px;
-                font-size: 0.875rem;
+                border-radius: 4px;
+                font-size: 0.8rem;
                 background: white;
                 cursor: pointer;
             }
@@ -270,39 +251,39 @@ class PipelineInterface(BaseInterface):
             .filter-select:focus {
                 outline: none;
                 border-color: var(--ds-blue-primary);
-                box-shadow: 0 0 0 3px rgba(0, 113, 188, 0.1);
+                box-shadow: 0 0 0 2px rgba(0, 113, 188, 0.1);
             }
 
             .filter-actions {
                 display: flex;
-                gap: 0.75rem;
+                gap: 0.5rem;
                 margin-left: auto;
             }
 
             /* Jobs Stats Banner */
             .stats-banner {
                 display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-                gap: 1rem;
-                margin-bottom: 1rem;
+                grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+                gap: 0.5rem;
+                margin-bottom: 0.75rem;
             }
 
             .stat-card {
                 background: var(--ds-bg);
-                border-radius: 8px;
-                padding: 1rem;
+                border-radius: 6px;
+                padding: 0.5rem;
                 text-align: center;
             }
 
             .stat-card .stat-label {
-                font-size: 0.75rem;
+                font-size: 0.65rem;
                 color: #6b7280;
-                margin-bottom: 0.25rem;
+                margin-bottom: 0.125rem;
                 text-transform: uppercase;
             }
 
             .stat-card .stat-value {
-                font-size: 1.5rem;
+                font-size: 1.25rem;
                 font-weight: 700;
                 color: #1f2937;
             }
@@ -316,7 +297,7 @@ class PipelineInterface(BaseInterface):
             .data-table {
                 width: 100%;
                 border-collapse: collapse;
-                font-size: 14px;
+                font-size: 12px;
             }
 
             .data-table thead {
@@ -324,18 +305,18 @@ class PipelineInterface(BaseInterface):
             }
 
             .data-table th {
-                padding: 1rem;
+                padding: 0.5rem 0.75rem;
                 text-align: left;
-                font-size: 0.875rem;
+                font-size: 0.75rem;
                 font-weight: 600;
                 color: #374151;
                 border-bottom: 2px solid #e5e7eb;
             }
 
             .data-table td {
-                padding: 1rem;
+                padding: 0.5rem 0.75rem;
                 border-bottom: 1px solid #e5e7eb;
-                font-size: 0.875rem;
+                font-size: 0.8rem;
             }
 
             .data-table tbody tr:hover {
@@ -613,16 +594,7 @@ class PipelineInterface(BaseInterface):
                 </div>
             </div>
 
-            <!-- Custom Pipelines (Coming Soon) -->
-            <div class="section">
-                <h2>Custom Pipelines</h2>
-                <div class="coming-soon">
-                    <h3>Coming Soon</h3>
-                    <p>Custom pipeline definitions will appear here. Build your own ETL workflows with configurable stages.</p>
-                </div>
-            </div>
-
-            <!-- Recent Jobs (Full Jobs Interface) -->
+            <!-- Recent Jobs -->
             <div class="section">
                 <h2>Recent Jobs</h2>
 

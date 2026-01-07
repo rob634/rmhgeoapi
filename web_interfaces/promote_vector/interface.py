@@ -998,10 +998,23 @@ class PromoteVectorInterface(BaseInterface):
             }
 
             selectedCollection = collectionId;
-            await loadCollectionPreview(collectionId);
+
+            // Enable promote button immediately - don't wait for map preview
+            document.getElementById('promoteBtn').disabled = false;
+
+            // Show collection info with loading state
+            const meta = collectionMetadata[collectionId] || {};
+            document.getElementById('collectionInfo').style.display = 'block';
+            document.getElementById('infoTitle').textContent = meta.title || collectionId;
+            document.getElementById('infoDescription').textContent = meta.description || '--';
+            document.getElementById('geometryBadge').textContent = 'Loading...';
+            document.getElementById('infoFeatures').textContent = 'Loading...';
+
+            // Load map preview in background (non-blocking)
+            loadCollectionPreview(collectionId);
         }
 
-        // Load collection preview
+        // Load collection preview (non-blocking, button already enabled)
         async function loadCollectionPreview(collectionId) {
             try {
                 // Get features from OGC Features API
@@ -1012,13 +1025,11 @@ class PromoteVectorInterface(BaseInterface):
                 const meta = collectionMetadata[collectionId] || {};
                 displayFeatures(data, meta.title || collectionId, meta.description);
             } catch (err) {
-                console.error('Failed to load collection:', err);
-                document.getElementById('collectionInfo').style.display = 'block';
-                document.getElementById('infoTitle').textContent = collectionId;
-                document.getElementById('infoDescription').textContent = 'Error loading features';
+                console.error('Failed to load collection preview:', err);
+                // Update info panel with error but keep button enabled
                 document.getElementById('geometryBadge').textContent = 'Unknown';
-                document.getElementById('infoFeatures').textContent = '--';
-                document.getElementById('promoteBtn').disabled = true;
+                document.getElementById('infoFeatures').textContent = 'Preview unavailable';
+                // Button stays enabled - user can still promote without preview
             }
         }
 
@@ -1033,12 +1044,11 @@ class PromoteVectorInterface(BaseInterface):
                 setGeometryType(geomType);
             }
 
-            // Update info panel
+            // Update info panel (button already enabled by onCollectionChange)
             document.getElementById('collectionInfo').style.display = 'block';
             document.getElementById('infoTitle').textContent = title;
             document.getElementById('infoDescription').textContent = description || '--';
             document.getElementById('infoFeatures').textContent = features.length.toLocaleString() + (features.length === 100 ? '+' : '');
-            document.getElementById('promoteBtn').disabled = false;
 
             // Update map
             featureLayer.clearLayers();

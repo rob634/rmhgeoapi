@@ -713,7 +713,7 @@ class FathomDefaults:
     two-phase Fathom processing architecture.
 
     Phase 1: Band stacking (8M → 1M files, 8× reduction)
-    Phase 2: Spatial merge (1M → 40K files with 5×5 grid)
+    Phase 2: Spatial merge (1M → 60K files with 4×4 grid)
     """
 
     # Source data (Fathom Global Flood Maps v3)
@@ -730,7 +730,9 @@ class FathomDefaults:
     PHASE2_COLLECTION_ID = "fathom-flood"
 
     # Merge configuration
-    DEFAULT_GRID_SIZE = 5  # 5×5 degree grid cells
+    # Changed from 5 to 4 (06 JAN 2026): 5×5 grids caused OOM with 24 tiles @ 5-6GB each
+    # 4×4 grids = max 16 tiles @ ~3-4GB peak memory, fits in 8GB instance
+    DEFAULT_GRID_SIZE = 4  # 4×4 degree grid cells
 
     # Return periods (bands in output COGs)
     RETURN_PERIODS = ["1in5", "1in10", "1in20", "1in50", "1in100", "1in200", "1in500", "1in1000"]

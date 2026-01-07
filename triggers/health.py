@@ -3,7 +3,7 @@
 # ============================================================================
 # STATUS: Trigger - Deployment verification endpoint
 # PURPOSE: GET /api/health - Comprehensive system health monitoring
-# LAST_REVIEWED: 05 JAN 2026
+# LAST_REVIEWED: 07 JAN 2026
 # REVIEW_STATUS: Checks 1-7 Applied (Check 8: Deployment verification endpoint)
 # ============================================================================
 """
@@ -38,8 +38,8 @@ Comprehensive system health monitoring endpoint for GET /api/health.
 
 Components Monitored:
     - Startup Validation (03 JAN 2026) - env_vars, imports, Service Bus DNS/queues
+    - Runtime Environment (07 JAN 2026) - hardware, instance, process, memory (merged)
     - Network Environment (04 JAN 2026) - VNet, ASE, DNS, all WEBSITE_* vars
-    - Instance Info (04 JAN 2026) - instance ID, worker config, cold start detection
     - Import Validation
     - Service Bus Queues
     - Database Configuration
@@ -132,19 +132,15 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         app_mode_health = self._check_app_mode()
         health_data["components"]["app_mode"] = app_mode_health
 
-        # Check hardware/runtime environment (21 DEC 2025)
-        hardware_health = self._check_hardware_environment()
-        health_data["components"]["hardware"] = hardware_health
+        # Check runtime environment (07 JAN 2026 - merged hardware + instance_info)
+        # Single psutil call for hardware specs, instance ID, process details, memory
+        runtime_health = self._check_runtime_environment()
+        health_data["components"]["runtime"] = runtime_health
 
         # Check network/VNet/ASE environment (04 JAN 2026)
         # Critical for diagnosing corporate Azure environments where configs change without warning
         network_health = self._check_network_environment()
         health_data["components"]["network_environment"] = network_health
-
-        # Check instance info (04 JAN 2026)
-        # Instance ID, worker config, process details, cold start detection
-        instance_health = self._check_instance_info()
-        health_data["components"]["instance_info"] = instance_health
 
         # Task routing coverage REMOVED (12 DEC 2025)
         # Moved to services/__init__.py (startup validation) and scripts/validate_config.py (pre-deployment)
@@ -2257,82 +2253,152 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             description="OGC API - Features for PostGIS vector queries"
         )
 
-    def _check_hardware_environment(self) -> Dict[str, Any]:
+    def _check_runtime_environment(self) -> Dict[str, Any]:
         """
-        Check hardware/runtime environment (21 DEC 2025).
+        Check runtime environment including hardware and instance info (07 JAN 2026).
 
-        Reports CPU, RAM, and platform info for capacity planning and debugging.
-        Uses cached runtime environment from util_logger (computed once per process).
+        Merged from separate hardware and instance_info checks to eliminate
+        redundant psutil calls. Single check provides comprehensive view of:
+        - Hardware specs (CPU, RAM, platform)
+        - Instance identification (for log correlation)
+        - Process details (uptime, threads, memory)
+        - Cold start detection
+        - Worker configuration
 
         Returns:
-            Dict with hardware specs including:
-            - cpu_count: Logical CPU count
-            - total_ram_gb: Total system RAM
-            - available_ram_mb: Current available RAM
-            - ram_utilization_percent: Current RAM usage %
-            - cpu_utilization_percent: Current CPU usage %
-            - platform: OS and kernel version
-            - azure_site_name: Function app name
-            - azure_sku: App Service Plan SKU
+            Dict with sections:
+            - hardware: CPU count, RAM, platform, SKU
+            - instance: Instance IDs for log correlation
+            - process: PID, uptime, threads
+            - memory: System and process memory stats
+            - cold_start: Cold start detection flags
+            - worker_config: Function worker settings
+            - scale_controller: Scale logging status
         """
-        def check_hardware():
+        def check_runtime():
             import psutil
-            from util_logger import get_runtime_environment, get_memory_stats
+            import threading
+            import multiprocessing
+            from datetime import datetime, timezone
 
-            # Get cached runtime environment (computed once per process)
-            runtime = get_runtime_environment()
+            # Single psutil Process object for all process-related queries
+            process = psutil.Process()
+            mem = psutil.virtual_memory()
+            mem_info = process.memory_info()
 
-            # Get current memory/CPU stats
-            stats = get_memory_stats() or {}
+            # Process timing
+            process_create_time = datetime.fromtimestamp(
+                process.create_time(), tz=timezone.utc
+            )
+            now = datetime.now(timezone.utc)
+            process_uptime_seconds = (now - process_create_time).total_seconds()
 
-            # Fallback to direct psutil if util_logger debug mode is off
-            if not runtime:
-                mem = psutil.virtual_memory()
-                runtime = {
-                    'cpu_count': psutil.cpu_count() or 0,
-                    'total_ram_gb': round(mem.total / (1024**3), 1),
-                    'platform': f"{os.sys.platform}",
-                    'azure_site_name': os.environ.get('WEBSITE_SITE_NAME', 'local'),
-                    'azure_sku': os.environ.get('WEBSITE_SKU', 'unknown'),
-                    'azure_instance_id': os.environ.get('WEBSITE_INSTANCE_ID', '')[:16],
-                }
+            def format_uptime(seconds: float) -> str:
+                """Format uptime in human-readable form."""
+                if seconds < 60:
+                    return f"{int(seconds)}s (cold)"
+                elif seconds < 3600:
+                    return f"{int(seconds // 60)}m {int(seconds % 60)}s"
+                elif seconds < 86400:
+                    hours = int(seconds // 3600)
+                    mins = int((seconds % 3600) // 60)
+                    return f"{hours}h {mins}m"
+                else:
+                    days = int(seconds // 86400)
+                    hours = int((seconds % 86400) // 3600)
+                    return f"{days}d {hours}h"
 
-            if not stats:
-                mem = psutil.virtual_memory()
-                stats = {
-                    'system_available_mb': round(mem.available / (1024**2), 1),
-                    'system_percent': round(mem.percent, 1),
-                    'system_cpu_percent': round(psutil.cpu_percent(interval=None), 1),
-                    'process_rss_mb': round(psutil.Process().memory_info().rss / (1024**2), 1),
-                }
+            # Hardware specs
+            total_ram_gb = round(mem.total / (1024**3), 1)
+            hardware = {
+                "cpu_count": psutil.cpu_count() or 0,
+                "total_ram_gb": total_ram_gb,
+                "platform": os.sys.platform,
+                "python_version": sys.version.split()[0],
+                "azure_sku": os.environ.get('WEBSITE_SKU', 'unknown'),
+                "azure_site_name": os.environ.get('WEBSITE_SITE_NAME', 'local'),
+            }
+
+            # Instance identification (for correlating with Application Insights logs)
+            instance_id_full = os.environ.get('WEBSITE_INSTANCE_ID', 'local')
+            instance = {
+                "instance_id": instance_id_full,
+                "instance_id_short": instance_id_full[:16] + '...' if len(instance_id_full) > 16 else instance_id_full,
+            }
+            # Add optional ASE-specific fields if present
+            role_instance = os.environ.get('WEBSITE_ROLE_INSTANCE_ID')
+            if role_instance:
+                instance["role_instance_id"] = role_instance
+            worker_id = os.environ.get('WEBSITE_WORKER_ID')
+            if worker_id:
+                instance["worker_id"] = worker_id
+
+            # Process details
+            process_info = {
+                "pid": process.pid,
+                "uptime_seconds": round(process_uptime_seconds, 1),
+                "uptime_human": format_uptime(process_uptime_seconds),
+                "start_time": process_create_time.isoformat(),
+                "thread_count": threading.active_count(),
+                "thread_names": [t.name for t in threading.enumerate()][:10],
+            }
+
+            # Memory stats (system and process combined)
+            memory = {
+                "system_total_gb": total_ram_gb,
+                "system_available_mb": round(mem.available / (1024**2), 1),
+                "system_percent": round(mem.percent, 1),
+                "process_rss_mb": round(mem_info.rss / (1024**2), 1),
+                "process_vms_mb": round(mem_info.vms / (1024**2), 1),
+                "process_percent": round(process.memory_percent(), 2),
+                "cpu_percent": round(psutil.cpu_percent(interval=None), 1),
+            }
+
+            # Cold start detection
+            cold_start = {
+                "likely_cold_start": process_uptime_seconds < 60,
+                "likely_warm": process_uptime_seconds > 300,
+            }
+
+            # Worker configuration
+            worker_config = {
+                "process_count": os.environ.get('FUNCTIONS_WORKER_PROCESS_COUNT', '1'),
+                "runtime": os.environ.get('FUNCTIONS_WORKER_RUNTIME', 'python'),
+            }
+            max_concurrent = os.environ.get('FUNCTIONS_MAX_CONCURRENT_REQUESTS')
+            if max_concurrent:
+                worker_config["max_concurrent_requests"] = max_concurrent
+
+            # Scale controller logging status
+            scale_logging = os.environ.get('SCALE_CONTROLLER_LOGGING_ENABLED')
+            scale_controller = {
+                "logging_enabled": scale_logging or 'disabled',
+            }
+            if not scale_logging:
+                scale_controller["tip"] = "Set SCALE_CONTROLLER_LOGGING_ENABLED=AppInsights:Verbose"
+
+            # Capacity thresholds for reference
+            capacity = {
+                "safe_file_limit_mb": round((total_ram_gb * 1024) / 4, 0),
+                "warning_threshold_percent": 80,
+                "critical_threshold_percent": 90,
+            }
 
             return {
-                # Static hardware specs (from cached runtime)
-                "cpu_count": runtime.get('cpu_count'),
-                "total_ram_gb": runtime.get('total_ram_gb'),
-                "platform": runtime.get('platform'),
-                "python_version": runtime.get('python_version'),
-                # Azure environment
-                "azure_site_name": runtime.get('azure_site_name'),
-                "azure_sku": runtime.get('azure_sku'),
-                "azure_instance_id": runtime.get('azure_instance_id'),
-                # Current utilization
-                "available_ram_mb": stats.get('system_available_mb'),
-                "ram_utilization_percent": stats.get('system_percent'),
-                "cpu_utilization_percent": stats.get('system_cpu_percent'),
-                "process_rss_mb": stats.get('process_rss_mb'),
-                # Capacity thresholds
-                "capacity_notes": {
-                    "safe_file_limit_mb": round((runtime.get('total_ram_gb', 7) * 1024) / 4, 0),
-                    "warning_threshold_percent": 80,
-                    "critical_threshold_percent": 90,
-                }
+                "hardware": hardware,
+                "instance": instance,
+                "process": process_info,
+                "memory": memory,
+                "cold_start": cold_start,
+                "worker_config": worker_config,
+                "scale_controller": scale_controller,
+                "capacity_thresholds": capacity,
             }
 
         return self.check_component_health(
-            "hardware",
-            check_hardware,
-            description="Runtime hardware environment (CPU, RAM, platform)"
+            "runtime",
+            check_runtime,
+            description="Runtime environment (hardware, instance, process, memory)"
         )
 
     def _check_network_environment(self) -> Dict[str, Any]:
@@ -2505,125 +2571,6 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             "network_environment",
             check_network,
             description="Azure network/VNet/ASE environment configuration"
-        )
-
-    def _check_instance_info(self) -> Dict[str, Any]:
-        """
-        Check current instance and scaling information (04 JAN 2026).
-
-        Reports details about the current Function App instance including:
-        - Instance identifiers (for correlating with logs)
-        - Worker process configuration
-        - Python process/thread details
-        - Memory allocation per instance
-
-        This helps diagnose:
-        - Which instance handled a request (correlate with Application Insights)
-        - Worker process configuration affecting parallelism
-        - Memory pressure per instance
-        - Cold start detection (process start time)
-
-        Note: To see ALL instances and scaling decisions, enable:
-            SCALE_CONTROLLER_LOGGING_ENABLED=AppInsights:Verbose
-
-        Returns:
-            Dict with instance identification and process details
-        """
-        def check_instance():
-            import threading
-            import multiprocessing
-            import psutil
-            from datetime import datetime, timezone
-
-            # Get current process info
-            process = psutil.Process()
-            process_create_time = datetime.fromtimestamp(
-                process.create_time(), tz=timezone.utc
-            )
-            now = datetime.now(timezone.utc)
-            process_uptime_seconds = (now - process_create_time).total_seconds()
-
-            # Instance identification
-            instance_info = {
-                'instance_id': os.environ.get('WEBSITE_INSTANCE_ID', 'local'),
-                'instance_id_short': os.environ.get('WEBSITE_INSTANCE_ID', 'local')[:16] + '...' if len(os.environ.get('WEBSITE_INSTANCE_ID', '')) > 16 else os.environ.get('WEBSITE_INSTANCE_ID', 'local'),
-                'role_instance_id': os.environ.get('WEBSITE_ROLE_INSTANCE_ID'),
-                'worker_id': os.environ.get('WEBSITE_WORKER_ID'),  # ASE only
-            }
-            # Remove None values
-            instance_info = {k: v for k, v in instance_info.items() if v is not None}
-
-            # Worker process configuration
-            worker_config = {
-                'worker_process_count': os.environ.get('FUNCTIONS_WORKER_PROCESS_COUNT', '1'),
-                'worker_runtime': os.environ.get('FUNCTIONS_WORKER_RUNTIME', 'python'),
-                'max_concurrent_requests': os.environ.get('FUNCTIONS_MAX_CONCURRENT_REQUESTS'),
-                'worker_indexing_enabled': os.environ.get('PYTHON_ISOLATE_WORKER_DEPENDENCIES'),
-            }
-            worker_config = {k: v for k, v in worker_config.items() if v is not None}
-
-            # Python process details
-            process_info = {
-                'pid': process.pid,
-                'process_uptime_seconds': round(process_uptime_seconds, 1),
-                'process_uptime_human': _format_uptime(process_uptime_seconds),
-                'process_start_time': process_create_time.isoformat(),
-                'thread_count': threading.active_count(),
-                'thread_names': [t.name for t in threading.enumerate()][:10],  # Limit to 10
-                'cpu_count_logical': multiprocessing.cpu_count(),
-            }
-
-            # Memory details for this process
-            mem_info = process.memory_info()
-            memory_info = {
-                'process_rss_mb': round(mem_info.rss / (1024 * 1024), 1),
-                'process_vms_mb': round(mem_info.vms / (1024 * 1024), 1),
-                'process_memory_percent': round(process.memory_percent(), 2),
-            }
-
-            # Cold start detection
-            # If process uptime < 60 seconds, likely a cold start or recent scale-out
-            cold_start_info = {
-                'likely_cold_start': process_uptime_seconds < 60,
-                'likely_warm': process_uptime_seconds > 300,
-            }
-
-            # Scale controller logging status
-            scale_logging = os.environ.get('SCALE_CONTROLLER_LOGGING_ENABLED')
-            scale_controller_info = {
-                'scale_controller_logging': scale_logging or 'disabled',
-                'scale_logging_tip': 'Set SCALE_CONTROLLER_LOGGING_ENABLED=AppInsights:Verbose for scaling insights' if not scale_logging else None,
-            }
-            scale_controller_info = {k: v for k, v in scale_controller_info.items() if v is not None}
-
-            return {
-                'instance': instance_info,
-                'worker_config': worker_config,
-                'process': process_info,
-                'memory': memory_info,
-                'cold_start': cold_start_info,
-                'scale_controller': scale_controller_info,
-            }
-
-        def _format_uptime(seconds: float) -> str:
-            """Format uptime in human-readable form."""
-            if seconds < 60:
-                return f"{int(seconds)}s (cold)"
-            elif seconds < 3600:
-                return f"{int(seconds // 60)}m {int(seconds % 60)}s"
-            elif seconds < 86400:
-                hours = int(seconds // 3600)
-                mins = int((seconds % 3600) // 60)
-                return f"{hours}h {mins}m"
-            else:
-                days = int(seconds // 86400)
-                hours = int((seconds % 86400) // 3600)
-                return f"{days}d {hours}h"
-
-        return self.check_component_health(
-            "instance_info",
-            check_instance,
-            description="Current instance identification and process details"
         )
 
     def _get_config_sources(self) -> Dict[str, Any]:

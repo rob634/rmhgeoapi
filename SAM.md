@@ -298,102 +298,130 @@ az vm create \
 
 ### 2. Connect to VM
 
-**Option A: JupyterHub (Recommended)**
-1. Get VM public IP from portal
-2. Open browser: `https://<ip>:8000`
-3. Login with VM credentials
-4. You're in a Jupyter environment
+**Option A: JupyterHub (Recommended for interactive work)**
+```
+https://<VM_PUBLIC_IP>:8000
+Username: azureuser
+Password: (your VM password)
+```
 
 **Option B: SSH**
 ```bash
-ssh azureuser@<ip>
+ssh azureuser@<VM_PUBLIC_IP>
+```
+
+**Option C: VS Code Remote SSH**
+```
+Ctrl+Shift+P → "Remote-SSH: Connect to Host" → azureuser@<IP>
 ```
 
 ### 3. Environment Setup
 
-In JupyterHub terminal or SSH:
-
 ```bash
-# Create conda environment
+# DSVM already has conda - create isolated environment
 conda create -n sam python=3.10 -y
 conda activate sam
 
-# Install SAM and dependencies
-pip install segment-anything torch torchvision
-pip install rasterio geopandas pyproj h3 opencv-python
-pip install networkx  # for connected components
-pip install azure-storage-blob  # for blob access
+# Verify GPU is visible
+nvidia-smi
+# Should show V100 GPU
 
-# Download SAM model weights (~2.5GB)
+# PyTorch with CUDA (ensure correct version)
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+
+# SAM
+pip install segment-anything
+
+# Geospatial
+pip install rasterio geopandas pyproj shapely
+pip install pyarrow  # For GeoParquet output
+
+# Azure blob access
+pip install azure-storage-blob azure-identity
+
+# Image processing (SAM dependency)
+pip install opencv-python-headless
+```
+
+### 4. Download SAM Model Weights
+
+```bash
 mkdir -p ~/models
 cd ~/models
+
+# SAM ViT-H (largest, best quality) - 2.4GB
 wget https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth
+
+# Verify download
+ls -lh sam_vit_h_4b8939.pth
+# Should show ~2.4GB
 ```
 
-### 4. Mount Blob Storage
-
-**Create config file:**
+**Alternative models** (if memory constrained):
 ```bash
-cat > ~/fuse_config.yaml << 'EOF'
-allow-other: true
-logging:
-  type: syslog
-  level: log_warning
-components:
-  - libfuse
-  - file_cache
-  - attr_cache
-  - azstorage
-libfuse:
-  attribute-expiration-sec: 120
-  entry-expiration-sec: 120
-file_cache:
-  path: /tmp/blobfuse_cache
-  timeout-sec: 120
-  max-size-mb: 4096
-attr_cache:
-  timeout-sec: 7200
-azstorage:
-  type: block
-  account-name: YOUR_STORAGE_ACCOUNT
-  account-key: YOUR_STORAGE_KEY
-  container: YOUR_TILE_CONTAINER
-  endpoint: https://YOUR_STORAGE_ACCOUNT.blob.core.windows.net
-EOF
+# ViT-L (1.2GB) - good balance
+wget https://dl.fbaipublicfiles.com/segment_anything/sam_vit_l_0b3195.pth
+
+# ViT-B (375MB) - fastest, lower quality
+wget https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth
 ```
 
-**Mount:**
+### 5. Configure Blob Storage Access
+
+**Option A: Connection String (Simple)**
 ```bash
-mkdir -p ~/tiles ~/output
-blobfuse2 mount ~/tiles --config-file=~/fuse_config.yaml
+# Add to ~/.bashrc
+export AZURE_STORAGE_CONNECTION_STRING="DefaultEndpointsProtocol=https;AccountName=rmhazuregeobronze;AccountKey=..."
+source ~/.bashrc
 ```
 
-**Alternative - Azure SDK (if blobfuse is problematic):**
+**Option B: Managed Identity (Recommended for production)**
+```bash
+# Assign identity to VM in Azure Portal:
+# VM → Identity → System assigned → On
+# Then grant "Storage Blob Data Reader" role on storage account
+```
+
+**Create blob access helper** (`~/blob_config.py`):
 ```python
+import os
 from azure.storage.blob import BlobServiceClient
-conn_str = "your_connection_string"
-blob_service = BlobServiceClient.from_connection_string(conn_str)
-container = blob_service.get_container_client("your-container")
+from azure.identity import DefaultAzureCredential
 
-# Download tiles to local disk
-for blob in container.list_blobs(name_starts_with="juba/"):
-    local_path = f"/tmp/tiles/{blob.name}"
-    with open(local_path, "wb") as f:
-        f.write(container.download_blob(blob.name).readall())
+def get_blob_client():
+    """Get blob client using connection string or managed identity."""
+    conn_str = os.environ.get("AZURE_STORAGE_CONNECTION_STRING")
+    if conn_str:
+        return BlobServiceClient.from_connection_string(conn_str)
+    else:
+        # Falls back to managed identity
+        return BlobServiceClient(
+            account_url="https://rmhazuregeobronze.blob.core.windows.net",
+            credential=DefaultAzureCredential()
+        )
 ```
 
-### 5. Run SAM Inference
+### 6. Verify SAM Installation
 
-See `sam_inference.py` notebook/script (to be developed). Key components:
-
+Create `~/test_sam.py`:
 ```python
+#!/usr/bin/env python3
+"""Quick SAM verification script."""
+
+import torch
 from segment_anything import sam_model_registry, SamAutomaticMaskGenerator
 
-# Load model
-sam = sam_model_registry["vit_h"](checkpoint="~/models/sam_vit_h_4b8939.pth")
-sam.to("cuda")
+print(f"PyTorch version: {torch.__version__}")
+print(f"CUDA available: {torch.cuda.is_available()}")
+print(f"GPU: {torch.cuda.get_device_name(0)}")
 
-# Configure mask generator
+# Load model
+print("\nLoading SAM model...")
+sam = sam_model_registry["vit_h"](checkpoint="/home/azureuser/models/sam_vit_h_4b8939.pth")
+sam.to("cuda")
+print("✅ SAM loaded successfully on GPU!")
+
+# Create mask generator
 mask_generator = SamAutomaticMaskGenerator(
     sam,
     points_per_side=32,
@@ -401,35 +429,250 @@ mask_generator = SamAutomaticMaskGenerator(
     stability_score_thresh=0.92,
     min_mask_region_area=100,
 )
+print("✅ Mask generator ready!")
 
-# Process tiles, filter for buildings, convert to polygons
-# Output: GeoParquet with (geometry, confidence, tile_id, area)
+# Test with dummy image
+import numpy as np
+dummy_image = np.random.randint(0, 255, (1024, 1024, 3), dtype=np.uint8)
+print("\nRunning inference on dummy image...")
+masks = mask_generator.generate(dummy_image)
+print(f"✅ Generated {len(masks)} masks!")
+
+print("\n🎉 SAM is working correctly!")
 ```
 
-### 6. Run Deduplication
+Run verification:
+```bash
+conda activate sam
+python ~/test_sam.py
+```
 
+### 7. SAM Inference Script
+
+Create `~/sam_inference.py`:
 ```python
+#!/usr/bin/env python3
+"""
+SAM Building Footprint Extraction.
+
+Reads COG tiles from Azure Blob, runs SAM inference, outputs GeoParquet.
+"""
+
+import os
+import sys
+import tempfile
+from pathlib import Path
+
+import numpy as np
+import rasterio
+from rasterio.windows import Window
 import geopandas as gpd
-import h3
-import networkx as nx
-from shapely.ops import unary_union
+from shapely.geometry import shape
+from shapely.affinity import affine_transform
+import torch
+from segment_anything import sam_model_registry, SamAutomaticMaskGenerator
+from azure.storage.blob import BlobServiceClient
 
-# Load raw polygons
-gdf = gpd.read_parquet("~/output/buildings_raw.parquet")
+# ============================================================================
+# CONFIGURATION - Update these for your project
+# ============================================================================
+MODEL_PATH = "/home/azureuser/models/sam_vit_h_4b8939.pth"
+INPUT_CONTAINER = "bronze"
+INPUT_PREFIX = "maxar/juba/"  # Folder containing COG tiles
+OUTPUT_CONTAINER = "bronze"
+OUTPUT_PREFIX = "sam_output/juba/"
 
-# Add H3 index
-gdf['h3_10'] = gdf.geometry.centroid.apply(
-    lambda p: h3.latlng_to_cell(p.y, p.x, 10)
-)
+# Building filter thresholds
+MIN_AREA_SQM = 20       # Minimum building size
+MAX_AREA_SQM = 50000    # Maximum (filter out large non-buildings)
+MIN_SOLIDITY = 0.7      # How "solid" vs irregular (buildings are usually solid)
 
-# Find overlapping pairs within same H3 cell
-# Build graph, find connected components
-# Merge geometries in each component
 
-# Output: deduplicated GeoParquet/GPKG
+def get_blob_client():
+    """Get Azure blob client."""
+    conn_str = os.environ.get("AZURE_STORAGE_CONNECTION_STRING")
+    return BlobServiceClient.from_connection_string(conn_str)
+
+
+def load_sam_model():
+    """Load SAM model to GPU."""
+    print("Loading SAM model...")
+    sam = sam_model_registry["vit_h"](checkpoint=MODEL_PATH)
+    sam.to("cuda")
+
+    mask_generator = SamAutomaticMaskGenerator(
+        sam,
+        points_per_side=32,
+        pred_iou_thresh=0.86,
+        stability_score_thresh=0.92,
+        min_mask_region_area=100,
+    )
+    print("✅ Model loaded!")
+    return mask_generator
+
+
+def mask_to_polygon(mask, transform):
+    """Convert binary mask to georeferenced polygon."""
+    from rasterio.features import shapes
+
+    polygons = []
+    for geom, value in shapes(mask.astype(np.uint8), transform=transform):
+        if value == 1:
+            polygons.append(shape(geom))
+
+    return polygons
+
+
+def filter_buildings(polygons, crs):
+    """Filter polygons that look like buildings."""
+    buildings = []
+
+    for poly in polygons:
+        # Calculate area in square meters (approximate)
+        area = poly.area
+
+        # Solidity = area / convex_hull_area
+        if poly.convex_hull.area > 0:
+            solidity = area / poly.convex_hull.area
+        else:
+            solidity = 0
+
+        # Apply filters
+        if MIN_AREA_SQM <= area <= MAX_AREA_SQM and solidity >= MIN_SOLIDITY:
+            buildings.append({
+                'geometry': poly,
+                'area_sqm': area,
+                'solidity': solidity
+            })
+
+    return buildings
+
+
+def process_tile(blob_name: str, mask_generator, blob_client) -> list:
+    """Process a single COG tile through SAM."""
+    print(f"Processing: {blob_name}")
+
+    # Download tile to temp file
+    container = blob_client.get_container_client(INPUT_CONTAINER)
+    blob_data = container.download_blob(blob_name).readall()
+
+    with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
+        tmp.write(blob_data)
+        tmp_path = tmp.name
+
+    try:
+        with rasterio.open(tmp_path) as src:
+            # Read RGB bands
+            rgb = src.read([1, 2, 3]).transpose(1, 2, 0)  # CHW -> HWC
+            transform = src.transform
+            crs = src.crs
+
+        # Run SAM inference
+        masks = mask_generator.generate(rgb)
+        print(f"  Generated {len(masks)} masks")
+
+        # Convert masks to polygons
+        all_buildings = []
+        for mask_data in masks:
+            mask = mask_data['segmentation']
+            confidence = mask_data['predicted_iou']
+
+            polygons = mask_to_polygon(mask, transform)
+            buildings = filter_buildings(polygons, crs)
+
+            for b in buildings:
+                b['confidence'] = confidence
+                b['source_tile'] = blob_name
+
+            all_buildings.extend(buildings)
+
+        print(f"  Filtered to {len(all_buildings)} building candidates")
+        return all_buildings, crs
+
+    finally:
+        os.unlink(tmp_path)
+
+
+def main():
+    """Main inference pipeline."""
+    blob_client = get_blob_client()
+    mask_generator = load_sam_model()
+
+    # List input tiles
+    container = blob_client.get_container_client(INPUT_CONTAINER)
+    blobs = list(container.list_blobs(name_starts_with=INPUT_PREFIX))
+    tif_blobs = [b.name for b in blobs if b.name.endswith('.tif')]
+
+    print(f"Found {len(tif_blobs)} tiles to process")
+
+    # Process all tiles
+    all_buildings = []
+    crs = None
+
+    for blob_name in tif_blobs:
+        buildings, tile_crs = process_tile(blob_name, mask_generator, blob_client)
+        all_buildings.extend(buildings)
+        crs = tile_crs  # Assume all tiles have same CRS
+
+    print(f"\nTotal buildings extracted: {len(all_buildings)}")
+
+    # Create GeoDataFrame
+    gdf = gpd.GeoDataFrame(all_buildings, crs=crs)
+
+    # Save to GeoParquet
+    output_path = f"/tmp/buildings_raw.parquet"
+    gdf.to_parquet(output_path)
+    print(f"Saved to {output_path}")
+
+    # Upload to blob storage
+    output_blob = f"{OUTPUT_PREFIX}buildings_raw.parquet"
+    output_container = blob_client.get_container_client(OUTPUT_CONTAINER)
+    with open(output_path, "rb") as f:
+        output_container.upload_blob(output_blob, f, overwrite=True)
+
+    print(f"✅ Uploaded to {OUTPUT_CONTAINER}/{output_blob}")
+
+
+if __name__ == "__main__":
+    main()
 ```
 
-### 7. Cleanup
+Run the inference:
+```bash
+conda activate sam
+python ~/sam_inference.py
+```
+
+### 8. Trigger rmhgeoapi Deduplication
+
+Once SAM output is in blob storage, call rmhgeoapi to deduplicate and ingest:
+
+```bash
+curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/deduplicate_building_polygons" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input_blob": "sam_output/juba/buildings_raw.parquet",
+    "city": "juba",
+    "h3_resolution": 10
+  }'
+```
+
+### 9. File Locations Reference
+
+```
+~/models/
+  └── sam_vit_h_4b8939.pth     # SAM weights (2.4GB)
+
+~/
+  ├── blob_config.py           # Azure blob helper
+  ├── test_sam.py              # Verification script
+  └── sam_inference.py         # Main inference script
+
+/tmp/
+  └── buildings_raw.parquet    # Local output before upload
+```
+
+### 10. Cleanup
 
 **Stop VM (preserves disk, stops compute charges):**
 ```bash

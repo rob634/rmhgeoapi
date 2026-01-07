@@ -1,6 +1,6 @@
 # SAFe Epic & Feature Registry
 
-**Last Updated**: 31 DEC 2025
+**Last Updated**: 07 JAN 2026
 **Framework**: SAFe (Scaled Agile Framework)
 **Purpose**: Master reference for Azure DevOps Boards import
 **Source of Truth**: This directory defines Epic/Feature numbers; TODO.md should align
@@ -59,7 +59,7 @@
 | E1 | Vector Data as API | Business | Vector garbage → clean, API-accessible data | 🚧 Partial | 8 | [E1](E1_vector_data.md) |
 | E2 | Raster Data as API | Business | Any imagery → analysis-ready and tileable | 🚧 Partial | 9 | [E2](E2_raster_data.md) |
 | E9 | Large & Multidimensional | Business | Host FATHOM/CMIP6 at scale | 🚧 Partial | 10 | [E9](E9_large_data.md) |
-| E8 | GeoAnalytics Pipeline | Business | Raw data → H3-aggregated, analysis-ready | 🚧 Partial | 12 | [E8](E8_geoanalytics.md) |
+| E8 | GeoAnalytics Pipeline | Business | Raw data → H3-aggregated, analysis-ready | 🚧 Partial | 14 | [E8](E8_geoanalytics.md) |
 | E3 | DDH Integration | Enabler | DDH consumes geospatial services | 🚧 Partial | 8 | [E3](E3_ddh_integration.md) |
 | E4 | Externalization & Security | Enabler | Data movement to external zones | 📋 Planned | 5 | [E4](E4_security_zones.md) |
 | E12 | Integration Onboarding | Enabler | Self-service onboarding for integrators | 🚧 Partial | 10 | [E12](E12_interfaces.md) |

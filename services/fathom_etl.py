@@ -157,7 +157,7 @@ def fathom_tile_inventory(params: dict, context: dict = None) -> dict:
 
     Args:
         params: Task parameters
-            - region_code: ISO country code (e.g., "CI") - NOT USED, queries all
+            - region_code: ISO country code (e.g., "rwa") - FILTERS by source_metadata->>'region'
             - source_container: Container filter (default: bronze-fathom)
             - flood_types: Filter by flood types (optional)
             - years: Filter by years (optional)
@@ -176,8 +176,8 @@ def fathom_tile_inventory(params: dict, context: dict = None) -> dict:
         "fathom_tile_inventory"
     )
 
-    # region_code is informational only - we query all unprocessed records
-    region_code = params.get("region_code", "ALL").upper()
+    # region_code filters by source_metadata->>'region' (07 JAN 2026 fix)
+    region_code = params.get("region_code", "").lower() if params.get("region_code") else None
     source_container = params.get("source_container", FathomDefaults.SOURCE_CONTAINER)
     filter_flood_types = params.get("flood_types")
     filter_years = params.get("years")
@@ -187,6 +187,7 @@ def fathom_tile_inventory(params: dict, context: dict = None) -> dict:
     dry_run = params.get("dry_run", False)
 
     logger.info(f"📋 Starting Fathom TILE inventory from database")
+    logger.info(f"   Region filter: {region_code or 'ALL (no filter)'}")
     logger.info(f"   Source container filter: {source_container}")
     if bbox:
         logger.info(f"   Spatial filter (bbox): {bbox}")
@@ -199,6 +200,12 @@ def fathom_tile_inventory(params: dict, context: dict = None) -> dict:
         "source_container = %(source_container)s"
     ]
     query_params = {"source_container": source_container}
+
+    # Filter by region (07 JAN 2026 fix for multi-region support)
+    if region_code:
+        where_clauses.append("source_metadata->>'region' = %(region)s")
+        query_params["region"] = region_code
+        logger.info(f"   Filter: region = {region_code}")
 
     if filter_flood_types:
         # Convert raw flood types to normalized (e.g., COASTAL_DEFENDED → coastal, defended)
@@ -350,12 +357,12 @@ def fathom_tile_inventory(params: dict, context: dict = None) -> dict:
     if dry_run:
         logger.info("   🔍 DRY RUN - no files will be processed")
 
-    full_collection_id = f"{collection_id}-{region_code.lower()}"
+    full_collection_id = f"{collection_id}-{region_code}" if region_code else collection_id
 
     return {
         "success": True,
         "result": {
-            "region_code": region_code,
+            "region_code": region_code or "all",
             "total_files": total_files,
             "unique_tiles": unique_tiles,
             "tile_group_count": len(tile_groups),
@@ -680,7 +687,7 @@ def fathom_grid_inventory(params: dict, context: dict = None) -> dict:
 
     Args:
         params: Task parameters
-            - region_code: ISO country code (informational only)
+            - region_code: ISO country code - FILTERS by source_metadata->>'region'
             - grid_size: Grid cell size in degrees (informational - DB already has grid_cell)
             - source_container: Container filter (default: bronze-fathom)
             - bbox: Optional bounding box [west, south, east, north] to filter
@@ -696,13 +703,15 @@ def fathom_grid_inventory(params: dict, context: dict = None) -> dict:
         "fathom_grid_inventory"
     )
 
-    region_code = params.get("region_code", "all").lower()
+    # region_code filters by source_metadata->>'region' (07 JAN 2026 fix)
+    region_code = params.get("region_code", "").lower() if params.get("region_code") else None
     grid_size = params.get("grid_size", FathomDefaults.DEFAULT_GRID_SIZE)
     source_container = params.get("source_container", FathomDefaults.SOURCE_CONTAINER)
     bbox = params.get("bbox")  # [west, south, east, north]
     collection_id = params.get("collection_id", FathomDefaults.PHASE2_COLLECTION_ID)
 
     logger.info(f"📋 Starting grid inventory from database")
+    logger.info(f"   Region filter: {region_code or 'ALL (no filter)'}")
     logger.info(f"   Grid size: {grid_size}×{grid_size} degrees")
     if bbox:
         logger.info(f"   Spatial filter (bbox): {bbox}")
@@ -716,7 +725,17 @@ def fathom_grid_inventory(params: dict, context: dict = None) -> dict:
     # BUG FIX (05 JAN 2026): Use DISTINCT to deduplicate tiles
     # Each tile+scenario has 8 source files (one per return period) that all share
     # the same phase1_output_blob. Without DISTINCT, we'd get 8x duplicates.
-    sql = """
+    # BUG FIX (07 JAN 2026): Add region filter to prevent cross-region contamination
+
+    # Build region filter clause
+    region_filter = ""
+    query_params = {}
+    if region_code:
+        region_filter = "AND source_metadata->>'region' = %(region)s"
+        query_params["region"] = region_code
+        logger.info(f"   Filter: region = {region_code}")
+
+    sql = f"""
         WITH unique_tiles AS (
             SELECT DISTINCT ON (phase2_group_key, source_metadata->>'tile')
                 phase2_group_key,
@@ -733,6 +752,7 @@ def fathom_grid_inventory(params: dict, context: dict = None) -> dict:
               AND phase2_completed_at IS NULL
               AND source_metadata->>'grid_cell' IS NOT NULL
               AND phase1_output_blob IS NOT NULL
+              {region_filter}
             ORDER BY phase2_group_key, source_metadata->>'tile'
         )
         SELECT
@@ -755,7 +775,7 @@ def fathom_grid_inventory(params: dict, context: dict = None) -> dict:
     repo = PostgreSQLRepository()
     with repo._get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(sql)
+            cur.execute(sql, query_params)
             rows = cur.fetchall()  # Returns list of dicts due to dict_row factory
 
     logger.info(f"   Query returned {len(rows)} grid groups")
@@ -822,12 +842,12 @@ def fathom_grid_inventory(params: dict, context: dict = None) -> dict:
     logger.info(f"   Grid groups (output COGs): {len(grid_groups)}")
     logger.info(f"   Total source tiles: {total_tiles}")
 
-    full_collection_id = f"{collection_id}-{region_code}"
+    full_collection_id = f"{collection_id}-{region_code}" if region_code else collection_id
 
     return {
         "success": True,
         "result": {
-            "region_code": region_code,
+            "region_code": region_code or "all",
             "grid_size": grid_size,
             "unique_grid_cells": unique_grid_cells,
             "grid_group_count": len(grid_groups),

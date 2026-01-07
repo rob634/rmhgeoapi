@@ -4,7 +4,7 @@
 **Value Statement**: Raw hosted data becomes H3-aggregated, analysis-ready output.
 **Runs On**: E7 (Pipeline Infrastructure)
 **Status**: 🚧 PARTIAL (F8.1-F8.3 ✅, F8.8 ✅, F8.9 ✅)
-**Last Updated**: 31 DEC 2025
+**Last Updated**: 07 JAN 2026
 
 **Strategic Context**:
 > E8 is the "transform and export" epic. Data hosted in E9 (FATHOM, CMIP6) gets aggregated to H3
@@ -32,12 +32,14 @@ E9: Large Data             E8: GeoAnalytics              Outputs
 | F8.4 | ⬜ | Vector→H3 Aggregation |
 | F8.5 | 📋 | GeoParquet Export (res 2-8, 100s columns) |
 | F8.6 | 🚧 | Analytics API |
-| F8.7 | 📋 | Building Exposure Analysis |
+| F8.7 | 📋 | Building Exposure Analysis (MS/Google footprints) |
 | F8.8 | ✅ | Source Catalog |
 | F8.9 | ✅ | H3 Export to OGC Features (~~E14~~) |
 | F8.10 | 📋 | Analytics Data Browser (~~E11~~) |
 | F8.11 | 📋 | H3 Visualization UI (~~E11~~) |
 | F8.12 | 📋 | Analytics Export UI (~~E11~~) |
+| F8.13 | 📋 | **Rwanda H3 Aggregation** (Priority 2) |
+| F8.14 | 📋 | **SAM Building Deduplication** (DuckDB + PostGIS) |
 
 ### Feature F8.1: H3 Grid Infrastructure ✅
 
@@ -304,6 +306,107 @@ POST /api/jobs/submit/h3_export_dataset
 | S8.12.4 | 📋 | STAC item JSON download | `/api/stac/items/*` ✅ |
 
 ---
+
+### Feature F8.13: Rwanda H3 Aggregation 📋 PRIORITY 2
+
+**Deliverable**: H3 aggregation of FATHOM flood data for Rwanda test region
+**Dependency**: E9 F9.1 (FATHOM merged COGs in STAC)
+**Timeline**: After FATHOM Rwanda pipeline complete
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S8.13.1 | 📋 | Seed Rwanda H3 cells (res 4-7, country-filtered) |
+| S8.13.2 | 📋 | Add FATHOM merged COGs to source_catalog |
+| S8.13.3 | 📋 | Run H3 raster aggregation on Rwanda FATHOM |
+| S8.13.4 | 📋 | Verify zonal_stats populated for flood themes |
+| S8.13.5 | 📋 | Test H3 export endpoint with Rwanda data |
+
+**H3 Theme Structure** (flood data):
+```
+themes:
+  flood_risk:
+    - fathom_fluvial_defended_2020_1in100
+    - fathom_fluvial_defended_2050_ssp245_1in100
+    - fathom_pluvial_defended_2020_1in100
+    ...
+```
+
+---
+
+### Feature F8.14: SAM Building Deduplication Pipeline 📋 NEW
+
+**Deliverable**: Deduplicate SAM-extracted building polygons and serve via OGC Features
+**Documentation**: [SAM.md](/SAM.md)
+**Context**: GPU inference runs externally on Azure VM; rmhgeoapi handles post-processing
+**Added**: 07 JAN 2026
+
+**Architecture**:
+```
+GPU VM (External)                    rmhgeoapi (This Feature)
+─────────────────                    ────────────────────────
+SAM inference on COG tiles
+    ↓
+GeoParquet → Blob (bronze)  ──────→  F8.14: Deduplication Job
+                                         ↓
+                                     DuckDB: H3 clustering + ST_Union
+                                         ↓
+                                     PostGIS: geo.buildings_sam
+                                         ↓
+                                     STAC + OGC Features API
+```
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S8.14.1 | 📋 | Create `deduplicate_building_polygons` job definition |
+| S8.14.2 | 📋 | Stage 1: DuckDB deduplication handler (query blob GeoParquet directly) |
+| S8.14.3 | 📋 | - Add H3 cell index to polygons |
+| S8.14.4 | 📋 | - ST_ClusterDBSCAN or H3-based grouping |
+| S8.14.5 | 📋 | - ST_Union_Agg per cluster |
+| S8.14.6 | 📋 | - Write deduplicated GeoParquet to silver tier |
+| S8.14.7 | 📋 | Stage 2: Ingest to PostGIS (geo.buildings_sam table) |
+| S8.14.8 | 📋 | Stage 3: Create STAC item (postgis:// asset link) |
+| S8.14.9 | 📋 | End-to-end test: Juba SAM output → OGC Features |
+
+**Job Parameters**:
+```json
+{
+    "input_blob": "sam_output/juba/buildings_raw.parquet",
+    "city": "juba",
+    "h3_resolution": 10,
+    "output_table": "buildings_sam_juba",
+    "cluster_distance_m": 0
+}
+```
+
+**DuckDB Deduplication Query** (core logic):
+```sql
+-- Query GeoParquet DIRECTLY from Azure blob storage (no ingestion!)
+SELECT
+    h3_latlng_to_cell(
+        ST_Y(ST_Centroid(geometry)),
+        ST_X(ST_Centroid(geometry)),
+        10  -- H3 resolution 10
+    ) AS h3_cell,
+    ST_Union_Agg(geometry) AS merged_geom,
+    COUNT(*) AS building_count,
+    SUM(area_sqm) AS total_area
+FROM read_parquet('azure://bronze/sam_output/juba_buildings_*.parquet')
+GROUP BY h3_cell;
+```
+
+**Key Technical Points**:
+- DuckDB queries GeoParquet in-place (no download/ingestion step)
+- Disk spillover handles larger-than-memory datasets
+- H3 clustering provides deterministic, reproducible deduplication
+- Output compatible with existing vector pipeline patterns
+
+**Dependencies**:
+- DuckDB infrastructure (✅ exists: `infrastructure/duckdb.py`)
+- H3 extension for DuckDB (✅ exists)
+- Azure extension for DuckDB (✅ exists)
+- Vector → PostGIS pattern (✅ exists: E1)
+
+**Scale-Up Path**: When processing 10+ cities (>5M polygons), consider Databricks + Mosaic.
 
 ---
 

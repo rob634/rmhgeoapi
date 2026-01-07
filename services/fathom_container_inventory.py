@@ -213,7 +213,8 @@ def fathom_scan_prefix(params: Dict[str, Any]) -> Dict[str, Any]:
             "ssp": parsed["ssp"],
             "return_period": parsed["return_period"],
             "tile": parsed["tile"],
-            "phase1_group_key": parsed["phase1_group_key"]
+            "phase1_group_key": parsed["phase1_group_key"],
+            "region": parsed["region"]  # Region prefix or None for root-level
         })
 
     logger.info(f"   Found {len(records)} TIF files, {parse_errors} parse errors")
@@ -259,11 +260,11 @@ def _parse_fathom_blob_path(path: str) -> Optional[Dict[str, Any]]:
     - Future: [country/]FLOOD_TYPE/YEAR/SSP/RETURN_PERIOD/filename_TILE.tif
 
     Examples:
-        COASTAL_DEFENDED/2020/1in100/... (CI at root)
-        rwa/FLUVIAL_DEFENDED/2020/1in100/... (RWA with prefix)
+        COASTAL_DEFENDED/2020/1in100/... (CIV at root - region=None)
+        rwa/FLUVIAL_DEFENDED/2020/1in100/... (RWA with prefix - region='rwa')
 
     Returns:
-        Dict with flood_type, defense, year, ssp, return_period, tile, phase1_group_key
+        Dict with flood_type, defense, year, ssp, return_period, tile, phase1_group_key, region
     """
     try:
         parts = path.split("/")
@@ -274,12 +275,14 @@ def _parse_fathom_blob_path(path: str) -> Optional[Dict[str, Any]]:
         # Check if first part is a flood type or a country prefix
         flood_type_raw = parts[0]
         offset = 0
+        region = None  # Region prefix (e.g., 'rwa', 'civ') or None for root-level data
 
         if flood_type_raw not in FLOOD_TYPE_MAP:
             # First part might be country prefix (e.g., "rwa", "ci")
             # Try next part
             if len(parts) < 5:
                 return None
+            region = parts[0].lower()  # Extract region prefix
             flood_type_raw = parts[1]
             offset = 1
             if flood_type_raw not in FLOOD_TYPE_MAP:
@@ -329,7 +332,8 @@ def _parse_fathom_blob_path(path: str) -> Optional[Dict[str, Any]]:
             "ssp": ssp,
             "return_period": return_period,
             "tile": tile,
-            "phase1_group_key": phase1_group_key
+            "phase1_group_key": phase1_group_key,
+            "region": region  # None for root-level, 'rwa'/'civ'/etc for prefixed
         }
 
     except Exception as e:
@@ -366,7 +370,8 @@ def _batch_insert_etl_records(records: List[Dict[str, Any]], batch_size: int) ->
                             "year": record["year"],
                             "ssp": record["ssp"],
                             "return_period": record["return_period"],
-                            "tile": record["tile"]
+                            "tile": record["tile"],
+                            "region": record.get("region")  # Region prefix or None
                         }
 
                         cur.execute(
@@ -540,10 +545,12 @@ def fathom_inventory_summary(params: Dict[str, Any]) -> Dict[str, Any]:
     Generate summary statistics of the inventory.
 
     Queries app.etl_source_files with etl_type='fathom'.
+    Optionally filters by region (from base_prefix).
 
     Args:
         params: {
             source_container: Container name
+            base_prefix: Region prefix (e.g., "rwa") - filters by source_metadata->>'region'
             dry_run: If True, indicate this was a dry run
         }
 
@@ -551,74 +558,87 @@ def fathom_inventory_summary(params: Dict[str, Any]) -> Dict[str, Any]:
         {success: True, result: {total_files: N, by_flood_type: {...}, ...}}
     """
     source_container = params.get("source_container", FathomDefaults.SOURCE_CONTAINER)
+    base_prefix = params.get("base_prefix", "")
     dry_run = params.get("dry_run", False)
 
+    # Normalize base_prefix to region (remove trailing slash, lowercase)
+    region = base_prefix.rstrip("/").lower() if base_prefix else None
+
     logger.info(f"📊 Generating inventory summary for {source_container}")
+    if region:
+        logger.info(f"   Region filter: {region}")
 
     try:
         repo = PostgreSQLRepository()
 
+        # Build region filter clause (07 JAN 2026 fix)
+        region_filter = ""
+        query_params = {}
+        if region:
+            region_filter = "AND source_metadata->>'region' = %(region)s"
+            query_params["region"] = region
+
         with repo._get_connection() as conn:
             with conn.cursor() as cur:
                 # Total files
-                cur.execute(sql.SQL("""
-                    SELECT COUNT(*) as cnt FROM {schema}.etl_source_files
-                    WHERE etl_type = 'fathom'
-                """).format(schema=sql.Identifier("app")))
+                cur.execute(f"""
+                    SELECT COUNT(*) as cnt FROM app.etl_source_files
+                    WHERE etl_type = 'fathom' {region_filter}
+                """, query_params)
                 total_files = cur.fetchone()["cnt"]
 
                 # Unique tiles (from source_metadata JSONB)
-                cur.execute(sql.SQL("""
+                cur.execute(f"""
                     SELECT COUNT(DISTINCT source_metadata->>'tile') as cnt
-                    FROM {schema}.etl_source_files
-                    WHERE etl_type = 'fathom'
-                """).format(schema=sql.Identifier("app")))
+                    FROM app.etl_source_files
+                    WHERE etl_type = 'fathom' {region_filter}
+                """, query_params)
                 unique_tiles = cur.fetchone()["cnt"]
 
                 # Unique phase1 groups
-                cur.execute(sql.SQL("""
+                cur.execute(f"""
                     SELECT COUNT(DISTINCT phase1_group_key) as cnt
-                    FROM {schema}.etl_source_files
-                    WHERE etl_type = 'fathom'
-                """).format(schema=sql.Identifier("app")))
+                    FROM app.etl_source_files
+                    WHERE etl_type = 'fathom' {region_filter}
+                """, query_params)
                 phase1_groups = cur.fetchone()["cnt"]
 
                 # Unique phase2 groups
-                cur.execute(sql.SQL("""
+                cur.execute(f"""
                     SELECT COUNT(DISTINCT phase2_group_key) as cnt
-                    FROM {schema}.etl_source_files
-                    WHERE etl_type = 'fathom' AND phase2_group_key IS NOT NULL
-                """).format(schema=sql.Identifier("app")))
+                    FROM app.etl_source_files
+                    WHERE etl_type = 'fathom' AND phase2_group_key IS NOT NULL {region_filter}
+                """, query_params)
                 phase2_groups = cur.fetchone()["cnt"]
 
                 # By flood type (from source_metadata JSONB)
-                cur.execute(sql.SQL("""
+                cur.execute(f"""
                     SELECT source_metadata->>'flood_type' as flood_type,
                            source_metadata->>'defense' as defense,
                            COUNT(*) as cnt
-                    FROM {schema}.etl_source_files
-                    WHERE etl_type = 'fathom'
+                    FROM app.etl_source_files
+                    WHERE etl_type = 'fathom' {region_filter}
                     GROUP BY source_metadata->>'flood_type', source_metadata->>'defense'
                     ORDER BY 1, 2
-                """).format(schema=sql.Identifier("app")))
+                """, query_params)
                 by_flood_type = {f"{row['flood_type']}_{row['defense']}": row['cnt'] for row in cur.fetchall()}
 
                 # By year (from source_metadata JSONB)
-                cur.execute(sql.SQL("""
+                cur.execute(f"""
                     SELECT source_metadata->>'year' as year, COUNT(*) as cnt
-                    FROM {schema}.etl_source_files
-                    WHERE etl_type = 'fathom'
+                    FROM app.etl_source_files
+                    WHERE etl_type = 'fathom' {region_filter}
                     GROUP BY source_metadata->>'year'
                     ORDER BY 1
-                """).format(schema=sql.Identifier("app")))
+                """, query_params)
                 by_year = {str(row['year']): row['cnt'] for row in cur.fetchall()}
 
                 # Total file size
-                cur.execute(sql.SQL("""
+                cur.execute(f"""
                     SELECT COALESCE(SUM(file_size_bytes), 0) as total_bytes
-                    FROM {schema}.etl_source_files
-                    WHERE etl_type = 'fathom'
-                """).format(schema=sql.Identifier("app")))
+                    FROM app.etl_source_files
+                    WHERE etl_type = 'fathom' {region_filter}
+                """, query_params)
                 total_size_bytes = cur.fetchone()["total_bytes"]
 
         # Handle potential Decimal type from SUM
@@ -635,6 +655,7 @@ def fathom_inventory_summary(params: Dict[str, Any]) -> Dict[str, Any]:
             "total_size_bytes": total_size_bytes,
             "total_size_gb": round(total_size_bytes / (1024**3), 2) if total_size_bytes else 0,
             "source_container": source_container,
+            "region": region,  # Region filter applied (07 JAN 2026)
             "dry_run": dry_run
         }
 

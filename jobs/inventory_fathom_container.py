@@ -236,11 +236,14 @@ class InventoryFathomContainerJob(JobBaseMixin, JobBase):
 
         elif stage_name == "generate_summary":
             # Stage 4: Single task for summary statistics
+            # Pass base_prefix for region filtering (07 JAN 2026 fix)
+            base_prefix = job_params.get("base_prefix", "")
             return [{
                 "task_id": f"{job_short}-s{stage}-summary",
                 "task_type": task_type,
                 "parameters": {
                     "source_container": job_params.get("source_container", FathomDefaults.SOURCE_CONTAINER),
+                    "base_prefix": base_prefix,
                     "dry_run": job_params.get("dry_run", False)
                 }
             }]

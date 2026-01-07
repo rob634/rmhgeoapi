@@ -410,6 +410,48 @@ class TasksInterface(BaseInterface):
             font-weight: 700;
         }
 
+        /* Duration display styles */
+        .duration-item {
+            background: linear-gradient(135deg, #E0F2FE 0%, #BAE6FD 100%);
+            border: 1px solid #7DD3FC;
+        }
+
+        .duration-value {
+            color: #0369A1 !important;
+            font-family: 'Monaco', 'Courier New', monospace;
+        }
+
+        .running-indicator {
+            color: #10B981;
+            animation: pulse-dot 1s ease-in-out infinite;
+            font-size: 12px;
+        }
+
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        /* Stage duration badge */
+        .stage-duration-badge {
+            background: rgba(255,255,255,0.2);
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 13px;
+            font-weight: 600;
+            margin-left: 12px;
+            font-family: 'Monaco', 'Courier New', monospace;
+        }
+
+        .stage-duration-badge.running {
+            background: rgba(16, 185, 129, 0.2);
+        }
+
+        .running-dot {
+            color: #34D399;
+            animation: pulse-dot 1s ease-in-out infinite;
+        }
+
         /* Workflow Diagram */
         .workflow-diagram {
             background: white;
@@ -561,6 +603,11 @@ class TasksInterface(BaseInterface):
 
         .stage-metrics .metric-value.memory {
             color: #8B5CF6;
+        }
+
+        .stage-metrics .metric-value.duration {
+            color: #0369A1;
+            font-family: 'Monaco', 'Courier New', monospace;
         }
 
         /* Processing metrics panel */
@@ -1575,6 +1622,9 @@ class TasksInterface(BaseInterface):
             // Get Stage 1 metadata if available
             const stage1Meta = getStage1Metadata(job, tasks);
 
+            // Calculate job duration
+            const jobDuration = calculateJobDuration(job);
+
             let statusClass = 'status-' + (job.status || 'queued');
             let html = '';
 
@@ -1613,6 +1663,18 @@ class TasksInterface(BaseInterface):
                 }}
             }}
 
+            // Build duration display
+            let durationItem = '';
+            if (jobDuration) {{
+                const runningIndicator = jobDuration.isRunning ? ' <span class="running-indicator">●</span>' : '';
+                durationItem = `
+                    <div class="summary-item duration-item">
+                        <span class="summary-label">Duration</span>
+                        <span class="summary-value duration-value">${{jobDuration.formatted}}${{runningIndicator}}</span>
+                    </div>
+                `;
+            }}
+
             html += `
                 <div class="job-summary-grid">
                     <div class="summary-item">
@@ -1627,6 +1689,7 @@ class TasksInterface(BaseInterface):
                         <span class="summary-label">Stage</span>
                         <span class="summary-value">${{job.stage || 0}} / ${{job.total_stages || '?'}}</span>
                     </div>
+                    ${{durationItem}}
                     ${{stage1MetaItems}}
                     <div class="summary-item">
                         <span class="summary-label">Tasks</span>
@@ -1998,8 +2061,23 @@ class TasksInterface(BaseInterface):
                 // Get peak memory for this stage from tasks
                 const stagePeakMemory = getStagePeakMemoryFromTasks(tasks, stage.number);
 
-                if ((stageMetrics && stageMetrics.avg_execution_time_ms) || stagePeakMemory) {{
+                // Get stage duration from tasks
+                const stageTasksForDuration = tasks.filter(t => t.stage === stage.number);
+                const stageDuration = calculateStageDuration(stageTasksForDuration);
+
+                if ((stageMetrics && stageMetrics.avg_execution_time_ms) || stagePeakMemory || stageDuration) {{
                     html += `<div class="stage-metrics">`;
+
+                    // Show wall-clock duration first
+                    if (stageDuration) {{
+                        const runningDot = stageDuration.isRunning ? ' <span class="running-dot">●</span>' : '';
+                        html += `
+                            <div class="metric-row">
+                                <span class="metric-label">Duration:</span>
+                                <span class="metric-value duration">${{stageDuration.formatted}}${{runningDot}}</span>
+                            </div>
+                        `;
+                    }}
 
                     if (stageMetrics && stageMetrics.avg_execution_time_ms) {{
                         html += `
@@ -2103,17 +2181,34 @@ class TasksInterface(BaseInterface):
                     `;
                 }}
 
-                // Add peak memory for this stage
+                // Add peak memory and duration for this stage
                 const stagePeakMemory = getStagePeakMemoryFromTasks(tasks, parseInt(stageNum));
-                if (stagePeakMemory) {{
-                    html += `
-                        <div class="stage-metrics">
+                const stageTasksForDuration = tasks.filter(t => t.stage === parseInt(stageNum));
+                const stageDuration = calculateStageDuration(stageTasksForDuration);
+
+                if (stagePeakMemory || stageDuration) {{
+                    html += `<div class="stage-metrics">`;
+
+                    if (stageDuration) {{
+                        const runningDot = stageDuration.isRunning ? ' <span class="running-dot">●</span>' : '';
+                        html += `
+                            <div class="metric-row">
+                                <span class="metric-label">Duration:</span>
+                                <span class="metric-value duration">${{stageDuration.formatted}}${{runningDot}}</span>
+                            </div>
+                        `;
+                    }}
+
+                    if (stagePeakMemory) {{
+                        html += `
                             <div class="metric-row">
                                 <span class="metric-label">Peak:</span>
                                 <span class="metric-value memory">${{stagePeakMemory}}</span>
                             </div>
-                        </div>
-                    `;
+                        `;
+                    }}
+
+                    html += `</div>`;
                 }}
 
                 html += `</div>`;
@@ -2204,6 +2299,16 @@ class TasksInterface(BaseInterface):
                 // Get memory stats
                 const memoryStats = getStageMemoryStats(stageTasks);
 
+                // Calculate stage wall-clock duration
+                const stageDuration = calculateStageDuration(stageTasks);
+
+                // Build duration badge for header
+                const durationBadge = stageDuration ? `
+                    <span class="stage-duration-badge${{stageDuration.isRunning ? ' running' : ''}}">
+                        ⏱ ${{stageDuration.formatted}}${{stageDuration.isRunning ? ' <span class="running-dot">●</span>' : ''}}
+                    </span>
+                ` : '';
+
                 html += `
                     <div class="stage-summary-card" id="stage-group-${{stage}}">
                         <div class="stage-summary-header">
@@ -2213,6 +2318,7 @@ class TasksInterface(BaseInterface):
                                     <h4>Stage ${{stage}}</h4>
                                     <span class="task-type-label">${{taskType}}</span>
                                 </div>
+                                ${{durationBadge}}
                             </div>
                             <div class="stage-status-counts">
                                 ${{pending > 0 ? `<span class="count-badge count-pending">P: ${{pending}}</span>` : ''}}
@@ -2315,6 +2421,91 @@ class TasksInterface(BaseInterface):
             if (ms < 60000) return (ms / 1000).toFixed(1) + 's';
             if (ms < 3600000) return (ms / 60000).toFixed(1) + 'm';
             return (ms / 3600000).toFixed(1) + 'h';
+        }}
+
+        // Format duration for display (longer form for job totals)
+        function formatDurationLong(ms) {{
+            if (ms < 1000) return ms.toFixed(0) + ' ms';
+            if (ms < 60000) return (ms / 1000).toFixed(1) + ' sec';
+            if (ms < 3600000) {{
+                const mins = Math.floor(ms / 60000);
+                const secs = Math.round((ms % 60000) / 1000);
+                return mins + 'm ' + secs + 's';
+            }}
+            const hrs = Math.floor(ms / 3600000);
+            const mins = Math.round((ms % 3600000) / 60000);
+            return hrs + 'h ' + mins + 'm';
+        }}
+
+        // Calculate job total duration
+        function calculateJobDuration(job) {{
+            if (!job.created_at) return null;
+
+            const startTime = new Date(job.created_at);
+            let endTime;
+
+            if (job.status === 'completed' || job.status === 'failed') {{
+                endTime = job.updated_at ? new Date(job.updated_at) : new Date();
+            }} else {{
+                endTime = new Date(); // Still running
+            }}
+
+            const durationMs = endTime - startTime;
+            return {{
+                ms: durationMs,
+                formatted: formatDurationLong(durationMs),
+                isRunning: job.status !== 'completed' && job.status !== 'failed'
+            }};
+        }}
+
+        // Calculate stage wall-clock duration from tasks
+        function calculateStageDuration(stageTasks) {{
+            if (!stageTasks || stageTasks.length === 0) return null;
+
+            // Find earliest start and latest end
+            let earliestStart = null;
+            let latestEnd = null;
+
+            stageTasks.forEach(task => {{
+                // Use execution_started_at if available, otherwise created_at
+                const startStr = task.execution_started_at || task.created_at;
+                const endStr = task.updated_at;
+
+                if (startStr) {{
+                    const start = new Date(startStr);
+                    if (!earliestStart || start < earliestStart) {{
+                        earliestStart = start;
+                    }}
+                }}
+
+                if (endStr && (task.status === 'completed' || task.status === 'failed')) {{
+                    const end = new Date(endStr);
+                    if (!latestEnd || end > latestEnd) {{
+                        latestEnd = end;
+                    }}
+                }}
+            }});
+
+            if (!earliestStart) return null;
+
+            // If stage is still running, use current time
+            const hasRunningTasks = stageTasks.some(t =>
+                t.status === 'processing' || t.status === 'queued' || t.status === 'pending'
+            );
+
+            if (!latestEnd || hasRunningTasks) {{
+                latestEnd = new Date();
+            }}
+
+            const durationMs = latestEnd - earliestStart;
+
+            return {{
+                ms: durationMs,
+                formatted: formatDurationLong(durationMs),
+                startTime: earliestStart,
+                endTime: latestEnd,
+                isRunning: hasRunningTasks
+            }};
         }}
 
         // Get memory stats for a stage

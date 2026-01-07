@@ -1,6 +1,6 @@
 # CLAUDE.md - Project Context
 
-**Last Updated**: 04 JAN 2026
+**Last Updated**: 06 JAN 2026
 
 ---
 
@@ -89,10 +89,12 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 |----------|-------|
 | **Function App** | `rmhazuregeoapi` (B3 Basic) |
 | **URL** | https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net |
-| **Database** | rmhpgflex.postgres.database.azure.com |
+| **Database** | rmhpostgres.postgres.database.azure.com |
 | **Resource Group** | `rmhazure_rg` |
 
 **DEPRECATED APPS** (never use): `rmhazurefn`, `rmhgeoapi`, `rmhgeoapifn`, `rmhgeoapibeta`
+
+**DEPRECATED DATABASE**: `rmhpgflex.postgres.database.azure.com` (decommissioned)
 
 ### Deploy Command
 ```bash

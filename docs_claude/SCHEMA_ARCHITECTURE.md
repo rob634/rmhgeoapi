@@ -379,7 +379,7 @@ curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.ne
 
 ### H3 Schema (manual)
 ```bash
-PGPASSWORD='...' psql -h rmhpgflex.postgres.database.azure.com -U {db_superuser} -d geopgflex \
+PGPASSWORD='...' psql -h rmhpostgres.postgres.database.azure.com -U {db_superuser} -d geopgflex \
   < sql/init/00_create_h3_schema.sql
 ```
 

@@ -602,7 +602,7 @@ def create_tasks_for_stage(stage, job_params, job_id, previous_results):
 ## 🗄️ Database Schemas
 
 ```
-PostgreSQL (rmhpgflex.postgres.database.azure.com):
+PostgreSQL (rmhpostgres.postgres.database.azure.com):
 ├── app      - CoreMachine (jobs, tasks tables)
 ├── geo      - PostGIS vector data
 ├── pgstac   - STAC metadata catalog
@@ -823,7 +823,7 @@ curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.ne
 
 - **Epoch**: 4 (Declarative Job→Stage→Task)
 - **Active Function App**: `rmhazuregeoapi`
-- **Database**: PostgreSQL Flexible Server (`rmhpgflex.postgres.database.azure.com`)
+- **Database**: PostgreSQL Flexible Server (`rmhpostgres.postgres.database.azure.com`)
 - **Messaging**: Azure Service Bus (Storage Queues deprecated)
 - **Python**: 3.11
 - **Key Libraries**: Azure Functions, Pydantic, psycopg3, GDAL/rasterio

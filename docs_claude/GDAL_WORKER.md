@@ -563,7 +563,7 @@ az webapp config appsettings set \
   --settings \
     APP_NAME=gdal-docker-worker \
     WORKER_TIMEOUT_MINUTES=60 \
-    POSTGIS_HOST=rmhpgflex.postgres.database.azure.com \
+    POSTGIS_HOST=rmhpostgres.postgres.database.azure.com \
     POSTGIS_DATABASE=geo
 ```
 

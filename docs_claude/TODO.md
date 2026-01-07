@@ -222,13 +222,13 @@ persist this data for drift detection and audit trails.
 | Manual trigger | `POST /api/system/snapshot` + `GET /api/system/snapshot/drift` | ✅ |
 | Version bump | 0.7.2.1 → 0.7.3 | ✅ |
 
-### Pending Deployment
+### Deployment Complete (06 JAN 2026)
 
-| Task | Description | Priority |
-|------|-------------|----------|
-| Deploy changes | Deploy v0.7.3 to Azure | 🔴 High |
-| Deploy schema | Run full-rebuild to create `system_snapshots` table | 🔴 High |
-| Verify endpoints | Test `/api/admin/snapshot` endpoints | 🟡 Medium |
+| Task | Description | Status |
+|------|-------------|--------|
+| Deploy changes | Deploy v0.7.4.3 to Azure | ✅ |
+| Deploy schema | Run full-rebuild to create `system_snapshots` table | ✅ |
+| Verify endpoints | Scheduled trigger capturing snapshots hourly | ✅ |
 
 ### Snapshot Trigger Types
 

@@ -42,7 +42,7 @@ curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/job
 - **Region**: East US
 
 ### Database
-- **Server**: rmhpgflex.postgres.database.azure.com
+- **Server**: rmhpostgres.postgres.database.azure.com
 - **Database**: geopgflex
 - **Schemas**: app, pgstac, geo, h3, platform
 - **Version**: PostgreSQL 14
@@ -81,7 +81,7 @@ az functionapp identity assign \
 
 **2. Setup PostgreSQL User**
 ```bash
-psql "host=rmhpgflex.postgres.database.azure.com dbname=geopgflex sslmode=require" \
+psql "host=rmhpostgres.postgres.database.azure.com dbname=geopgflex sslmode=require" \
   < scripts/setup_managed_identity_postgres.sql
 ```
 
@@ -225,7 +225,7 @@ Create `local.settings.json`:
     "BRONZE_STORAGE_ACCOUNT": "rmhazuregeo",
     "SILVER_STORAGE_ACCOUNT": "rmhazuregeo",
     "STORAGE_ACCOUNT_KEY": "[See Azure Portal]",
-    "POSTGRES_HOST": "rmhpgflex.postgres.database.azure.com",
+    "POSTGRES_HOST": "rmhpostgres.postgres.database.azure.com",
     "POSTGRES_DB": "geopgflex",
     "USE_MANAGED_IDENTITY": "false",
     "POSTGIS_PASSWORD": "your-password"

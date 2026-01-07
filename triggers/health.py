@@ -331,6 +331,14 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             schema_summary_health = self._check_schema_summary()
             health_data["components"]["schema_summary"] = schema_summary_health
 
+        # Check public database if configured (07 JAN 2026)
+        # This is the external-facing OGC Features database
+        if config.is_public_database_configured():
+            public_db_health = self._check_public_database()
+            health_data["components"]["public_database"] = public_db_health
+            if public_db_health["status"] == "unhealthy":
+                health_data["warnings"].append("Public database unavailable (external OGC Features impacted)")
+
         # ====================================================================
         # PARALLEL EXTERNAL SERVICE CHECKS (07 JAN 2026)
         # ====================================================================
@@ -2113,6 +2121,123 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             "schema_summary",
             check_schemas,
             description="Database schema inventory with table counts and STAC statistics"
+        )
+
+    def _check_public_database(self) -> Dict[str, Any]:
+        """
+        Check public database health (07 JAN 2026).
+
+        The public database is a separate PostgreSQL instance used for
+        public-facing OGC Feature Collections. It's optional - only
+        checked if PUBLIC_DB_* environment variables are configured.
+
+        Returns:
+            Dict with public database health status including:
+            - host: Database hostname
+            - database: Database name
+            - schema: Target schema (usually 'geo')
+            - connected: Whether connection succeeded
+            - version: PostgreSQL version if connected
+            - table_count: Number of tables in schema
+        """
+        def check_public_db():
+            import psycopg
+            import time
+            from config import get_config
+            from infrastructure.postgresql import PostgreSQLRepository
+
+            config = get_config()
+            start_time = time.time()
+
+            # Get public database configuration
+            if not config.is_public_database_configured():
+                return {
+                    "configured": False,
+                    "message": "Public database not configured (PUBLIC_DB_* env vars not set)"
+                }
+
+            public_config = config.public_database
+
+            # Initialize repository for public database
+            try:
+                repo = PostgreSQLRepository(
+                    config=config,
+                    target_database="public"
+                )
+                conn_str = repo.conn_string
+            except Exception as repo_error:
+                return {
+                    "configured": True,
+                    "host": public_config.host,
+                    "database": public_config.database,
+                    "connected": False,
+                    "error": f"Failed to initialize repository: {str(repo_error)[:200]}",
+                    "error_type": type(repo_error).__name__
+                }
+
+            # Try to connect and get basic info
+            try:
+                with psycopg.connect(conn_str, autocommit=True) as conn:
+                    with conn.cursor() as cur:
+                        connection_time_ms = round((time.time() - start_time) * 1000, 2)
+
+                        # Get PostgreSQL version
+                        cur.execute("SELECT version()")
+                        pg_version = cur.fetchone()[0].split(',')[0]  # Just the version part
+
+                        # Check if PostGIS is available
+                        try:
+                            cur.execute("SELECT PostGIS_Version()")
+                            postgis_version = cur.fetchone()[0]
+                        except Exception:
+                            postgis_version = "not installed"
+
+                        # Check target schema exists
+                        target_schema = public_config.db_schema
+                        cur.execute("""
+                            SELECT EXISTS(
+                                SELECT 1 FROM pg_namespace WHERE nspname = %s
+                            ) as schema_exists
+                        """, (target_schema,))
+                        schema_exists = cur.fetchone()[0]
+
+                        # Count tables in schema
+                        table_count = 0
+                        if schema_exists:
+                            cur.execute("""
+                                SELECT COUNT(*) FROM information_schema.tables
+                                WHERE table_schema = %s AND table_type = 'BASE TABLE'
+                            """, (target_schema,))
+                            table_count = cur.fetchone()[0]
+
+                        return {
+                            "configured": True,
+                            "host": public_config.host,
+                            "database": public_config.database,
+                            "schema": target_schema,
+                            "connected": True,
+                            "connection_time_ms": connection_time_ms,
+                            "postgres_version": pg_version,
+                            "postgis_version": postgis_version,
+                            "schema_exists": schema_exists,
+                            "table_count": table_count,
+                            "purpose": "Public-facing OGC Feature Collections"
+                        }
+
+            except Exception as conn_error:
+                return {
+                    "configured": True,
+                    "host": public_config.host,
+                    "database": public_config.database,
+                    "connected": False,
+                    "error": str(conn_error)[:200],
+                    "error_type": type(conn_error).__name__
+                }
+
+        return self.check_component_health(
+            "public_database",
+            check_public_db,
+            description="Public-facing database for OGC Feature Collections"
         )
 
     def _check_titiler_health(self) -> Dict[str, Any]:

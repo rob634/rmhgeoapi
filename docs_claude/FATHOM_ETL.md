@@ -4,6 +4,9 @@
 **Status**: Phase 1 & 2 Complete (RWA), Region Filtering Fixed
 **Author**: Robert and Claude
 
+> **User-Facing Documentation**: See [docs/wiki/WIKI_JOB_FATHOM_ETL.md](../docs/wiki/WIKI_JOB_FATHOM_ETL.md) for the canonical wiki version.
+> This file (`docs_claude/`) provides AI context; the wiki file is the user-readable reference.
+
 ---
 
 ## Overview

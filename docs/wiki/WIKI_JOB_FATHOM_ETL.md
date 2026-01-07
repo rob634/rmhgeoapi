@@ -5,6 +5,9 @@
 **Date**: 07 JAN 2026
 **Status**: Production (Phase 1 & 2 Complete)
 
+> **Source of Truth**: This wiki file is the canonical user-facing documentation.
+> See also: [docs_claude/FATHOM_ETL.md](../../docs_claude/FATHOM_ETL.md) (AI context version with additional implementation details)
+
 ---
 
 ## Overview

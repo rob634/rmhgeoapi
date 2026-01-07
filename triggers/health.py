@@ -83,7 +83,81 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
     def get_allowed_methods(self) -> List[str]:
         """Health check only supports GET."""
         return ["GET"]
-    
+
+    def _run_checks_parallel(
+        self,
+        checks: List[tuple],
+        max_workers: int = 4,
+        timeout_seconds: float = 30.0
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Run multiple health checks in parallel using ThreadPoolExecutor.
+
+        This is ideal for I/O-bound checks like HTTP calls to external services
+        (TiTiler, OGC Features) where most time is spent waiting for responses.
+        Python's GIL doesn't block I/O operations.
+
+        Args:
+            checks: List of (name, check_method) tuples
+                    e.g., [("titiler", self._check_titiler_health), ...]
+            max_workers: Maximum concurrent threads (default 4)
+            timeout_seconds: Max time to wait for all checks (default 30s)
+
+        Returns:
+            Dict mapping check names to their results
+            e.g., {"titiler": {...}, "ogc_features": {...}}
+
+        Example:
+            results = self._run_checks_parallel([
+                ("titiler", self._check_titiler_health),
+                ("ogc_features", self._check_ogc_features_health),
+                ("external_api", self._check_some_other_service),
+            ])
+            for name, result in results.items():
+                health_data["components"][name] = result
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
+        from datetime import datetime, timezone
+
+        results = {}
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all checks - they start immediately
+            future_to_name = {
+                executor.submit(check_method): name
+                for name, check_method in checks
+            }
+
+            # Collect results as they complete
+            try:
+                for future in as_completed(future_to_name, timeout=timeout_seconds):
+                    name = future_to_name[future]
+                    try:
+                        results[name] = future.result()
+                    except Exception as e:
+                        # Individual check failed - record error but continue
+                        self.logger.error(f"Parallel check '{name}' failed: {e}")
+                        results[name] = {
+                            "component": name,
+                            "status": "error",
+                            "error": str(e)[:200],
+                            "error_type": type(e).__name__,
+                            "checked_at": datetime.now(timezone.utc).isoformat()
+                        }
+            except TimeoutError:
+                # Some checks didn't complete in time
+                self.logger.warning(f"Parallel checks timed out after {timeout_seconds}s")
+                for future, name in future_to_name.items():
+                    if name not in results:
+                        results[name] = {
+                            "component": name,
+                            "status": "timeout",
+                            "error": f"Check timed out after {timeout_seconds}s",
+                            "checked_at": datetime.now(timezone.utc).isoformat()
+                        }
+
+        return results
+
     def process_request(self, req: func.HttpRequest) -> Dict[str, Any]:
         """
         Perform comprehensive health check.
@@ -257,25 +331,35 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             schema_summary_health = self._check_schema_summary()
             health_data["components"]["schema_summary"] = schema_summary_health
 
-        # Check TiTiler raster tile server (13 DEC 2025)
-        # TiTiler is always an external Docker app - check its health endpoints
-        titiler_health = self._check_titiler_health()
+        # ====================================================================
+        # PARALLEL EXTERNAL SERVICE CHECKS (07 JAN 2026)
+        # ====================================================================
+        # These checks make HTTP calls to external services and can run in
+        # parallel since they're I/O-bound. Future external checks can be
+        # added to this list.
+        external_checks = [
+            ("titiler", self._check_titiler_health),
+            ("ogc_features", self._check_ogc_features_health),
+            # Add future external service checks here:
+            # ("new_service", self._check_new_service_health),
+        ]
+
+        parallel_results = self._run_checks_parallel(external_checks, timeout_seconds=25.0)
+
+        # Process TiTiler result
+        titiler_health = parallel_results.get("titiler", {"status": "error", "error": "Check not completed"})
         health_data["components"]["titiler"] = titiler_health
-        # TiTiler is optional for core ETL - don't fail overall health
         titiler_status = titiler_health.get("status")
         if titiler_status == "unhealthy":
             health_data["errors"].append("TiTiler unavailable (raster tile visualization disabled)")
         elif titiler_status == "warning":
             health_data["warnings"].append("TiTiler degraded - alive but /healthz failing (PGSTAC connection issue?)")
-            # Set overall status to degraded if not already unhealthy
             if health_data["status"] == "healthy":
                 health_data["status"] = "degraded"
 
-        # Check OGC Features API (13 DEC 2025)
-        # Can be self-hosted or external - check its health endpoint
-        ogc_features_health = self._check_ogc_features_health()
+        # Process OGC Features result
+        ogc_features_health = parallel_results.get("ogc_features", {"status": "error", "error": "Check not completed"})
         health_data["components"]["ogc_features"] = ogc_features_health
-        # OGC Features is optional for core ETL - don't fail overall health
         if ogc_features_health.get("status") == "unhealthy":
             health_data["errors"].append("OGC Features API unavailable (vector feature queries disabled)")
 

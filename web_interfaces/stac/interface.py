@@ -100,7 +100,7 @@ class StacInterface(BaseInterface):
                 <div class="detail-nav">
                     <button class="back-button" onclick="showCollectionsList()">← Back to Collections</button>
                     <a id="titiler-viewer-btn" class="titiler-button hidden" href="#" target="_blank">
-                        🗺️ Open in TiTiler Viewer
+                        🗺️ Open in Raster Viewer
                     </a>
                 </div>
 
@@ -1100,34 +1100,34 @@ class StacInterface(BaseInterface):
                     return;
                 }
 
-                // Find first preview link for the header button (exclude system-rasters)
-                let firstPreviewUrl = null;
+                // Find first COG URL for the header button (exclude system-rasters)
+                let firstCogUrl = null;
                 if (collectionId !== 'system-rasters') {
                     for (const item of items) {
-                        const previewLink = (item.links || []).find(l => l.rel === 'preview');
-                        if (previewLink?.href) {
-                            firstPreviewUrl = previewLink.href;
+                        const cogUrl = getCogUrlFromItem(item);
+                        if (cogUrl) {
+                            firstCogUrl = cogUrl;
                             break;
                         }
                     }
                 }
 
-                // Show TiTiler button if we have a preview
-                if (firstPreviewUrl) {
-                    titilerBtn.href = firstPreviewUrl;
+                // Show raster viewer button if we have a COG
+                if (firstCogUrl) {
+                    titilerBtn.href = `/api/interface/raster-viewer?url=${encodeURIComponent(firstCogUrl)}`;
                     titilerBtn.classList.remove('hidden');
                 }
 
-                // Render items with preview links
+                // Render items with raster viewer links
                 tbody.innerHTML = items.map(item => {
                     const assetCount = Object.keys(item.assets || {}).length;
                     const propCount = Object.keys(item.properties || {}).length;
                     const geomType = item.geometry?.type || 'None';
 
-                    // Find preview link for this item
-                    const previewLink = (item.links || []).find(l => l.rel === 'preview');
-                    const previewHtml = previewLink?.href
-                        ? `<a href="${previewLink.href}" target="_blank" class="preview-link">🗺️ View</a>`
+                    // Find COG URL for this item
+                    const cogUrl = getCogUrlFromItem(item);
+                    const previewHtml = cogUrl
+                        ? `<a href="/api/interface/raster-viewer?url=${encodeURIComponent(cogUrl)}" target="_blank" class="preview-link">🗺️ View</a>`
                         : '<span class="no-preview">—</span>';
 
                     return `
@@ -1148,6 +1148,34 @@ class StacInterface(BaseInterface):
                 spinner.classList.add('hidden');
                 emptyState.classList.remove('hidden');
             }
+        }
+
+        // Extract COG URL from a STAC item's assets
+        function getCogUrlFromItem(item) {
+            const assets = item.assets || {};
+            const assetKeys = Object.keys(assets);
+
+            // Priority order for asset keys
+            const assetPriority = ['cog', 'data', 'visual', 'image', 'raster'];
+            for (const key of assetPriority) {
+                if (assets[key]?.href) {
+                    return assets[key].href;
+                }
+            }
+
+            // Fallback to first asset with a .tif or .tiff extension
+            for (const [key, asset] of Object.entries(assets)) {
+                if (asset.href && (asset.href.endsWith('.tif') || asset.href.endsWith('.tiff'))) {
+                    return asset.href;
+                }
+            }
+
+            // Final fallback - just use first asset
+            if (assetKeys.length > 0) {
+                return assets[assetKeys[0]]?.href || null;
+            }
+
+            return null;
         }
 
         // Show collections list

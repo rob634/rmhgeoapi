@@ -2,8 +2,8 @@
 
 **Type**: Foundational Enabler
 **Value Statement**: The ETL brain that makes everything else possible.
-**Status**: 🚧 PARTIAL (F7.1 ✅, F7.3 ✅, F7.4 ✅)
-**Last Updated**: 31 DEC 2025
+**Status**: 🚧 PARTIAL (F7.1 ✅, F7.2 🚧, F7.3 ✅, F7.4 ✅)
+**Last Updated**: 07 JAN 2026
 
 **This is the substrate.** E1, E2, E8, and E9 all run on E7. Without it, nothing processes.
 
@@ -24,10 +24,12 @@
 | Feature | Status | Description |
 |---------|--------|-------------|
 | F7.1 | ✅ | Pipeline Infrastructure (registry, scheduler) |
-| F7.2 | 📋 | Reference Data Pipelines (Admin0, WDPA) |
+| F7.2 | 🚧 | IBAT Reference Data (WDPA, KBAs - quarterly) |
 | F7.3 | ✅ | Collection Ingestion Pipeline (~~E15~~) |
 | F7.4 | ✅ | Pipeline Observability (~~E13~~) |
 | F7.5 | 📋 | Pipeline Builder UI |
+| F7.6 | 📋 | ACLED Conflict Data (twice weekly) |
+| F7.7 | 📋 | Static Reference Data (Admin0, manual) |
 
 ---
 
@@ -50,15 +52,30 @@
 
 ---
 
-### Feature F7.2: Reference Data Pipelines 📋 PLANNED
+### Feature F7.2: IBAT Reference Data 🚧 PARTIAL
 
-**Deliverable**: Common reference datasets for spatial joins
+**Deliverable**: IBAT-sourced reference datasets (WDPA, KBAs) for spatial analysis
+**Documentation**: [IBAT.md](/IBAT.md)
+**Data Source**: IBAT Alliance API (https://api.ibat-alliance.org)
+**Update Frequency**: Quarterly
+**Auth**: Shared `IBAT_AUTH_KEY` + `IBAT_AUTH_TOKEN` env vars
 
 | Story | Status | Description |
 |-------|--------|-------------|
-| S7.2.1 | 📋 | Admin0 handler (Natural Earth boundaries) |
-| S7.2.2 | 📋 | WDPA updates (protected areas) |
-| S7.2.3 | 📋 | Style integration (depends on E5) |
+| S7.2.1 | ✅ | IBAT base handler (shared auth, version checking) |
+| S7.2.2 | ✅ | WDPA handler (World Database on Protected Areas, ~250K polygons) |
+| S7.2.3 | 📋 | KBAs handler (Key Biodiversity Areas, ~16K polygons) |
+| S7.2.4 | 📋 | Style integration (IUCN categories for WDPA, KBA status) |
+| S7.2.5 | 📋 | Manual trigger endpoint (currently placeholder) |
+
+**Key Files**:
+- `services/curated/wdpa_handler.py` (reference implementation)
+- `core/models/curated.py`
+- `infrastructure/curated_repository.py`
+
+**Target Tables**:
+- `geo.curated_wdpa_protected_areas`
+- `geo.curated_kbas` (planned)
 
 ---
 
@@ -135,5 +152,68 @@ POST /api/jobs/submit/ingest_collection
 | S7.5.4 | 📋 | Add execution monitoring view |
 
 ---
+
+### Feature F7.6: ACLED Conflict Data 📋 LOW PRIORITY
+
+**Deliverable**: Armed Conflict Location & Event Data for risk analysis
+**Documentation**: [ACLED.md](/ACLED.md)
+**Data Source**: ACLED API (https://acleddata.com)
+**Update Frequency**: Twice weekly (Monday, Thursday)
+**Auth**: Separate `ACLED_API_KEY` + `ACLED_EMAIL` env vars
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S7.6.1 | 📋 | ACLED handler (API auth, pagination) |
+| S7.6.2 | 📋 | Event data ETL (point geometry, conflict categories) |
+| S7.6.3 | 📋 | Incremental updates (upsert by event_id, not full replace) |
+| S7.6.4 | 📋 | Schedule config (twice-weekly timer or cron) |
+| S7.6.5 | 📋 | Style integration (conflict type symbology) |
+
+**Key Differences from IBAT**:
+- **Frequency**: Twice weekly vs quarterly
+- **Update Strategy**: `upsert` (incremental) vs `full_replace`
+- **Geometry**: Points (events) vs Polygons (areas)
+- **Volume**: High frequency, smaller batches
+
+**Target Table**: `geo.curated_acled_events`
+
+**Schema** (planned):
+```sql
+CREATE TABLE geo.curated_acled_events (
+    event_id BIGINT PRIMARY KEY,
+    event_date DATE,
+    event_type VARCHAR(100),
+    sub_event_type VARCHAR(100),
+    actor1 TEXT,
+    actor2 TEXT,
+    country VARCHAR(100),
+    admin1 VARCHAR(200),
+    location TEXT,
+    fatalities INTEGER,
+    geom GEOMETRY(Point, 4326),
+    source_url TEXT,
+    updated_at TIMESTAMPTZ
+);
+```
+
+---
+
+### Feature F7.7: Static Reference Data 📋 LOW PRIORITY
+
+**Deliverable**: Manually-updated reference datasets (no automated API)
+**Update Frequency**: Manual (on Natural Earth releases, ~annually)
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S7.7.1 | 📋 | Admin0 handler (Natural Earth country boundaries) |
+| S7.7.2 | 📋 | Admin1 handler (Natural Earth state/province boundaries) |
+| S7.7.3 | 📋 | Coastlines/land polygons (optional) |
+| S7.7.4 | 📋 | Manual trigger UI (no scheduler needed) |
+
+**Target Tables**:
+- `geo.curated_admin0`
+- `geo.curated_admin1` (optional)
+
+**Note**: These use `source_type: manual` in the curated_datasets registry - no automatic scheduling.
 
 ---

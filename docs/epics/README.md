@@ -55,7 +55,7 @@
 
 | Epic | Name | Type | Value Statement | Status | Features | Link |
 |------|------|------|-----------------|--------|:--------:|:----:|
-| E7 | Pipeline Infrastructure | Foundational | The ETL brain that makes everything possible | 🚧 Partial | 5 | [E7](E7_pipeline_infra.md) |
+| E7 | Pipeline Infrastructure | Foundational | The ETL brain that makes everything possible | 🚧 Partial | 7 | [E7](E7_pipeline_infra.md) |
 | E1 | Vector Data as API | Business | Vector garbage → clean, API-accessible data | 🚧 Partial | 8 | [E1](E1_vector_data.md) |
 | E2 | Raster Data as API | Business | Any imagery → analysis-ready and tileable | 🚧 Partial | 9 | [E2](E2_raster_data.md) |
 | E9 | Large & Multidimensional | Business | Host FATHOM/CMIP6 at scale | 🚧 Partial | 10 | [E9](E9_large_data.md) |

@@ -517,6 +517,56 @@ After implementation, verify:
 
 ---
 
+## Reference Data Pipelines (Low Priority)
+
+**Epic**: E7 Pipeline Infrastructure
+**Goal**: Automated updates of reference datasets for spatial analysis
+**Infrastructure**: Curated Datasets System (F7.1 ✅) - timer scheduler, 4-stage job, registry
+
+### F7.2: IBAT Reference Data (Quarterly)
+
+**Documentation**: [IBAT.md](/IBAT.md)
+**Data Source**: IBAT Alliance API
+**Auth**: `IBAT_AUTH_KEY` + `IBAT_AUTH_TOKEN`
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| S7.2.1 | IBAT base handler (shared auth) | ✅ Done |
+| S7.2.2 | WDPA handler (protected areas, ~250K polygons) | ✅ Done |
+| S7.2.3 | KBAs handler (Key Biodiversity Areas, ~16K polygons) | 📋 |
+| S7.2.4 | Style integration (IUCN categories) | 📋 |
+| S7.2.5 | Manual trigger endpoint | 📋 |
+
+**Target Tables**: `geo.curated_wdpa_protected_areas`, `geo.curated_kbas`
+
+### F7.6: ACLED Conflict Data (Twice Weekly)
+
+**Documentation**: [ACLED.md](/ACLED.md)
+**Data Source**: ACLED API
+**Auth**: `ACLED_API_KEY` + `ACLED_EMAIL`
+**Update Strategy**: `upsert` (incremental by event_id)
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| S7.6.1 | ACLED handler (API auth, pagination) | 📋 |
+| S7.6.2 | Event data ETL (point geometry, conflict categories) | 📋 |
+| S7.6.3 | Incremental updates (upsert vs full replace) | 📋 |
+| S7.6.4 | Schedule config (Monday/Thursday timer) | 📋 |
+| S7.6.5 | Style integration (conflict type symbology) | 📋 |
+
+**Target Table**: `geo.curated_acled_events`
+
+### F7.7: Static Reference Data (Manual)
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| S7.7.1 | Admin0 handler (Natural Earth countries) | 📋 |
+| S7.7.2 | Admin1 handler (states/provinces) | 📋 |
+
+**Target Tables**: `geo.curated_admin0`, `geo.curated_admin1`
+
+---
+
 ## DevOps / Non-Geospatial Tasks
 
 Tasks suitable for a colleague with Azure/Python/pipeline expertise but without geospatial domain knowledge.

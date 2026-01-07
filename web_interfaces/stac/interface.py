@@ -606,11 +606,11 @@ class StacInterface(BaseInterface):
                     `[${bbox.map(v => v.toFixed(2)).join(', ')}]` :
                     'No extent';
 
-                // Build action buttons - Map (placeholder), Promote (placeholder), Delete
+                // Build action buttons - Map, Promote, Delete
                 const actionButtons = `
                     <button class="link-badge link-badge-primary"
                             onclick="openMapView('${c.id}', event)"
-                            title="Open in map viewer (coming soon)">
+                            title="Open in raster viewer">
                         🗺️ Map
                     </button>
                     <button class="link-badge link-badge-promote"
@@ -653,15 +653,90 @@ class StacInterface(BaseInterface):
             }).join('');
         }
 
-        // Placeholder: Open map view
-        function openMapView(collectionId, event) {
+        // Open map view - loads first item's COG in raster viewer
+        async function openMapView(collectionId, event) {
             event.stopPropagation();
-            showResultModal(
-                'Map View',
-                'Map viewer integration is coming soon. This will open the collection in TiTiler viewer.',
-                { 'Collection': collectionId },
-                '🗺️'
-            );
+
+            // Get collection type
+            const collection = allCollections.find(c => c.id === collectionId);
+            const collectionType = collection?.type || 'raster';
+
+            // For vector collections, use the vector map
+            if (collectionType === 'vector') {
+                window.open(`${API_BASE_URL}/api/interface/map?collection=${collectionId}`, '_blank');
+                return;
+            }
+
+            // For raster collections, get first item's COG URL
+            try {
+                const itemsResp = await fetchJSON(`${API_BASE_URL}/api/stac/collections/${collectionId}/items?limit=1`);
+                const items = itemsResp.features || [];
+
+                if (items.length === 0) {
+                    showResultModal(
+                        'No Items',
+                        `Collection <strong>${collectionId}</strong> has no items to display.`,
+                        { 'Collection': collectionId },
+                        'ℹ️'
+                    );
+                    return;
+                }
+
+                const item = items[0];
+
+                // Find COG URL from assets - look for 'cog', 'data', 'visual', or first asset
+                let cogUrl = null;
+                const assets = item.assets || {};
+
+                // Priority order for asset keys
+                const assetPriority = ['cog', 'data', 'visual', 'image', 'raster'];
+                for (const key of assetPriority) {
+                    if (assets[key]?.href) {
+                        cogUrl = assets[key].href;
+                        break;
+                    }
+                }
+
+                // Fallback to first asset with a .tif or .tiff extension
+                if (!cogUrl) {
+                    for (const [key, asset] of Object.entries(assets)) {
+                        if (asset.href && (asset.href.endsWith('.tif') || asset.href.endsWith('.tiff'))) {
+                            cogUrl = asset.href;
+                            break;
+                        }
+                    }
+                }
+
+                // Final fallback - just use first asset
+                if (!cogUrl) {
+                    const firstAsset = Object.values(assets)[0];
+                    if (firstAsset?.href) {
+                        cogUrl = firstAsset.href;
+                    }
+                }
+
+                if (!cogUrl) {
+                    showResultModal(
+                        'No COG Found',
+                        `Could not find a COG asset in collection <strong>${collectionId}</strong>.`,
+                        { 'Collection': collectionId, 'Item': item.id },
+                        '⚠️'
+                    );
+                    return;
+                }
+
+                // Open raster viewer with the COG URL
+                window.open(`${API_BASE_URL}/api/interface/raster-viewer?url=${encodeURIComponent(cogUrl)}`, '_blank');
+
+            } catch (error) {
+                console.error('Error opening map view:', error);
+                showResultModal(
+                    'Error',
+                    `Failed to load collection items: ${error.message}`,
+                    { 'Collection': collectionId },
+                    '❌'
+                );
+            }
         }
 
         // Placeholder: Promote collection

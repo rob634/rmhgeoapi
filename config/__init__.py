@@ -77,7 +77,7 @@ from .storage_config import (
     StorageConfig,
     determine_applicable_tiers
 )
-from .database_config import DatabaseConfig, BusinessDatabaseConfig, get_postgres_connection_string
+from .database_config import DatabaseConfig, PublicDatabaseConfig, get_postgres_connection_string
 from .raster_config import RasterConfig
 from .vector_config import VectorConfig
 from .queue_config import QueueConfig, QueueNames
@@ -134,8 +134,8 @@ def debug_config() -> dict:
 
             # Database
             'database': config.database.debug_dict(),
-            'business_database': config.business_database.debug_dict() if config.business_database else None,
-            'business_database_configured': config.is_business_database_configured(),
+            'public_database': config.public_database.debug_dict() if config.public_database else None,
+            'public_database_configured': config.is_public_database_configured(),
 
             # Raster (field names match env vars - 23 DEC 2025)
             'raster': {
@@ -232,7 +232,7 @@ __all__ = [
 
     # Database
     'DatabaseConfig',
-    'BusinessDatabaseConfig',
+    'PublicDatabaseConfig',
     'get_postgres_connection_string',
 
     # Raster

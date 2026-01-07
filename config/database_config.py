@@ -2,8 +2,8 @@
 # POSTGRESQL DATABASE CONFIGURATION
 # ============================================================================
 # STATUS: Configuration - PostgreSQL connection and managed identity
-# PURPOSE: Configure database connections for app and business databases
-# LAST_REVIEWED: 02 JAN 2026
+# PURPOSE: Configure database connections for app and public databases
+# LAST_REVIEWED: 07 JAN 2026
 # REVIEW_STATUS: Check 8 Applied - Full operational deployment guide
 # ============================================================================
 
@@ -151,14 +151,15 @@ Two databases may be configured:
         - Contains: app, pgstac, h3 schemas
         - Can be nuked/rebuilt for development
 
-    Business Database (BusinessDatabaseConfig) - Optional:
+    Public Database (PublicDatabaseConfig) - Optional:
         - Restricted CRUD (NO DROP SCHEMA)
-        - Contains: geo schema (ETL outputs)
+        - Contains: geo schema (public OGC Features)
         - Protected from accidental destruction
+        - Serves public-facing OGC Feature Collections
 
 Exports:
     DatabaseConfig: App database configuration
-    BusinessDatabaseConfig: Business database configuration (optional)
+    PublicDatabaseConfig: Public database configuration (optional)
     get_postgres_connection_string: Connection string factory (deprecated)
 """
 
@@ -508,61 +509,63 @@ class DatabaseConfig(BaseModel):
 
 
 # ============================================================================
-# BUSINESS DATABASE CONFIGURATION (29 NOV 2025)
+# PUBLIC DATABASE CONFIGURATION (07 JAN 2026 - renamed from BusinessDatabaseConfig)
 # ============================================================================
 
-class BusinessDatabaseConfig(BaseModel):
+class PublicDatabaseConfig(BaseModel):
     """
-    Business data database configuration for ETL pipeline outputs.
+    Public-facing database configuration for OGC Feature Collections.
 
-    This is a SEPARATE database from the app database, used exclusively for
-    process_vector ETL outputs. Uses the SAME managed identity but with
-    RESTRICTED permissions - specifically NO DROP SCHEMA.
+    This is a SEPARATE database from the app database, used for public-facing
+    OGC Features API data. Intended for deployment behind Cloudflare or similar
+    CDN in corporate Azure environments.
 
     ============================================================================
     OPTIONAL - SKIP IF USING SINGLE DATABASE
     ============================================================================
     This configuration is OPTIONAL. If not configured, the system uses the
-    app database geo schema for all ETL outputs. Configure this only when
-    you need to protect business data from accidental deletion.
+    app database geo schema for all outputs. Configure this when you need
+    a separate public-facing database.
 
     Architecture:
-        App Database:
+        App Database (internal):
             - Full DDL: CREATE/DROP SCHEMA, ALL PRIVILEGES
             - Contains: app, pgstac, h3 schemas
+            - ETL engine, job management, STAC catalog
             - Can be nuked/rebuilt for development
 
-        Business Database (Optional):
+        Public Database (external-facing):
             - Restricted: CREATE TABLE, INSERT, UPDATE, DELETE, SELECT
             - NO DROP SCHEMA permission
-            - Contains: geo schema (ETL outputs only)
+            - Contains: geo schema (published vector data)
+            - Serves public OGC Feature Collections
             - Protected from accidental destruction
 
     Environment Variables:
-        BUSINESS_DB_HOST: PostgreSQL host (defaults to POSTGIS_HOST if not set)
-        BUSINESS_DB_PORT: Port (default: 5432)
-        BUSINESS_DB_NAME: Database name
-        BUSINESS_DB_SCHEMA: Schema for ETL outputs (default: "geo")
-        BUSINESS_DB_MANAGED_IDENTITY_NAME: Identity name (uses DB_ADMIN_MANAGED_IDENTITY_NAME)
-        BUSINESS_DB_MANAGED_IDENTITY_CLIENT_ID: Client ID (optional, uses DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID if not set)
+        PUBLIC_DB_HOST: PostgreSQL host (defaults to POSTGIS_HOST if not set)
+        PUBLIC_DB_PORT: Port (default: 5432)
+        PUBLIC_DB_NAME: Database name
+        PUBLIC_DB_SCHEMA: Schema for public data (default: "geo")
+        PUBLIC_DB_MANAGED_IDENTITY_NAME: Identity name (uses DB_ADMIN_MANAGED_IDENTITY_NAME)
+        PUBLIC_DB_MANAGED_IDENTITY_CLIENT_ID: Client ID (optional)
 
     Usage:
         from config import get_config
         config = get_config()
 
-        # Check if business database is configured
-        if config.business_database and config.business_database.is_configured:
-            # Use business database for ETL outputs
-            business_config = config.business_database
+        # Check if public database is configured
+        if config.public_database and config.public_database.is_configured:
+            # Use public database for OGC Features
+            public_config = config.public_database
         else:
             # Fall back to app database geo schema
-            business_config = config.database
+            public_config = config.database
     """
 
     # Connection settings
     host: str = Field(
         ...,
-        description="PostgreSQL server hostname for business database"
+        description="PostgreSQL server hostname for public database"
     )
 
     port: int = Field(
@@ -572,12 +575,12 @@ class BusinessDatabaseConfig(BaseModel):
 
     database: str = Field(
         ...,
-        description="Business database name (separate from app database). Set via BUSINESS_DB_NAME."
+        description="Public database name (separate from app database). Set via PUBLIC_DB_NAME."
     )
 
     db_schema: str = Field(
         default=DatabaseDefaults.POSTGIS_SCHEMA,
-        description="Schema for ETL outputs (process_vector results)"
+        description="Schema for public data (default: geo)"
     )
 
     # Managed identity settings (same identity as app database, different permissions)
@@ -591,9 +594,9 @@ class BusinessDatabaseConfig(BaseModel):
         description="""Admin managed identity name - uses SAME identity as app database.
 
         The key difference is not the identity, but the PERMISSIONS granted
-        to this identity on the business database:
+        to this identity on the public database:
         - App database: Full DDL (CREATE/DROP SCHEMA)
-        - Business database: Restricted CRUD (NO DROP SCHEMA)
+        - Public database: Restricted CRUD (NO DROP SCHEMA)
         """
     )
 
@@ -611,15 +614,15 @@ class BusinessDatabaseConfig(BaseModel):
     @property
     def is_configured(self) -> bool:
         """
-        Check if business database is explicitly configured.
+        Check if public database is explicitly configured.
 
-        Returns True if BUSINESS_DB_HOST or BUSINESS_DB_NAME environment
+        Returns True if PUBLIC_DB_HOST or PUBLIC_DB_NAME environment
         variables are set. This allows the system to fall back to app
-        database when business database is not configured.
+        database when public database is not configured.
         """
         return (
-            os.environ.get("BUSINESS_DB_HOST") is not None or
-            os.environ.get("BUSINESS_DB_NAME") is not None
+            os.environ.get("PUBLIC_DB_HOST") is not None or
+            os.environ.get("PUBLIC_DB_NAME") is not None
         )
 
     def debug_dict(self) -> dict:
@@ -636,33 +639,33 @@ class BusinessDatabaseConfig(BaseModel):
         }
 
     @classmethod
-    def from_environment(cls) -> "BusinessDatabaseConfig":
+    def from_environment(cls) -> "PublicDatabaseConfig":
         """
-        Load BusinessDatabaseConfig from environment variables.
+        Load PublicDatabaseConfig from environment variables.
 
-        Falls back to app database values when business database
+        Falls back to app database values when public database
         environment variables are not set.
         """
         return cls(
-            # Host: Use BUSINESS_DB_HOST, fall back to POSTGIS_HOST
-            host=os.environ.get("BUSINESS_DB_HOST", os.environ.get("POSTGIS_HOST", "")),
-            port=int(os.environ.get("BUSINESS_DB_PORT", str(DatabaseDefaults.PORT))),
-            database=os.environ.get("BUSINESS_DB_NAME", ""),  # Required if business DB is configured
-            db_schema=os.environ.get("BUSINESS_DB_SCHEMA", DatabaseDefaults.POSTGIS_SCHEMA),
+            # Host: Use PUBLIC_DB_HOST, fall back to POSTGIS_HOST
+            host=os.environ.get("PUBLIC_DB_HOST", os.environ.get("POSTGIS_HOST", "")),
+            port=int(os.environ.get("PUBLIC_DB_PORT", str(DatabaseDefaults.PORT))),
+            database=os.environ.get("PUBLIC_DB_NAME", ""),  # Required if public DB is configured
+            db_schema=os.environ.get("PUBLIC_DB_SCHEMA", DatabaseDefaults.POSTGIS_SCHEMA),
             use_managed_identity=os.environ.get(
-                "BUSINESS_DB_USE_MANAGED_IDENTITY",
+                "PUBLIC_DB_USE_MANAGED_IDENTITY",
                 os.environ.get("USE_MANAGED_IDENTITY", "true")
             ).lower() == "true",
             # managed_identity_admin_name: Use env vars, fall back to AzureDefaults
             managed_identity_admin_name=os.environ.get(
-                "BUSINESS_DB_MANAGED_IDENTITY_ADMIN_NAME",
+                "PUBLIC_DB_MANAGED_IDENTITY_ADMIN_NAME",
                 os.environ.get("DB_ADMIN_MANAGED_IDENTITY_NAME", AzureDefaults.MANAGED_IDENTITY_NAME)
             ),
             managed_identity_client_id=os.environ.get(
-                "BUSINESS_DB_MANAGED_IDENTITY_CLIENT_ID",
+                "PUBLIC_DB_MANAGED_IDENTITY_CLIENT_ID",
                 os.environ.get("DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID")
             ),
-            connection_timeout_seconds=int(os.environ.get("BUSINESS_DB_CONNECTION_TIMEOUT", str(DatabaseDefaults.CONNECTION_TIMEOUT_SECONDS)))
+            connection_timeout_seconds=int(os.environ.get("PUBLIC_DB_CONNECTION_TIMEOUT", str(DatabaseDefaults.CONNECTION_TIMEOUT_SECONDS)))
         )
 
 

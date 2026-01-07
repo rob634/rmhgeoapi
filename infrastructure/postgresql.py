@@ -48,7 +48,7 @@ Key Features:
     - Atomic operations for race condition prevention
     - Connection pooling and management
     - Transaction support
-    - Dual database routing (app vs business schemas)
+    - Dual database routing (app vs public schemas)
 
 Exports:
     PostgreSQLRepository: Base PostgreSQL repository
@@ -72,7 +72,7 @@ from datetime import datetime, timezone
 from contextlib import contextmanager
 import logging
 
-from config import AppConfig, get_config, BusinessDatabaseConfig
+from config import AppConfig, get_config, PublicDatabaseConfig
 from core.models import (
     JobRecord, TaskRecord, JobStatus, TaskStatus,
     StageAdvancementResult, TaskResult
@@ -185,7 +185,7 @@ class PostgreSQLRepository(BaseRepository):
     def __init__(self, connection_string: Optional[str] = None,
                  schema_name: Optional[str] = None,
                  config: Optional[AppConfig] = None,
-                 target_database: Literal["app", "business"] = "app"):
+                 target_database: Literal["app", "public"] = "app"):
         """
         Initialize PostgreSQL repository with configuration.
 
@@ -251,14 +251,14 @@ class PostgreSQLRepository(BaseRepository):
             Configuration object. If not provided, uses get_config().
             This allows for dependency injection in testing.
 
-        target_database : Literal["app", "business"]
-            Which database to connect to (29 NOV 2025):
-            - "app" (default): App database (geopgflex) - jobs, tasks, pgstac, h3
-            - "business": Business database (ddhgeodb) - ETL outputs only
+        target_database : Literal["app", "public"]
+            Which database to connect to (07 JAN 2026):
+            - "app" (default): App database - jobs, tasks, pgstac, h3
+            - "public": Public database - OGC Features, public data
 
-            When "business" is specified and BusinessDatabaseConfig is configured,
-            connects to the business database with restricted permissions.
-            Falls back to app database if business database not configured.
+            When "public" is specified and PublicDatabaseConfig is configured,
+            connects to the public database with restricted permissions.
+            Falls back to app database if public database not configured.
 
         Raises:
         ------
@@ -277,8 +277,8 @@ class PostgreSQLRepository(BaseRepository):
         # Use global configuration (app database)
         repo = PostgreSQLRepository()
 
-        # Connect to business database for ETL outputs
-        repo = PostgreSQLRepository(target_database="business")
+        # Connect to public database for OGC Features
+        repo = PostgreSQLRepository(target_database="public")
 
         # Override with specific connection
         repo = PostgreSQLRepository(
@@ -299,8 +299,8 @@ class PostgreSQLRepository(BaseRepository):
         # Determine schema name based on target database
         if schema_name:
             self.schema_name = schema_name
-        elif target_database == "business" and self.config.is_business_database_configured():
-            self.schema_name = self.config.business_database.db_schema
+        elif target_database == "public" and self.config.is_public_database_configured():
+            self.schema_name = self.config.public_database.db_schema
         else:
             self.schema_name = self.config.app_schema
 
@@ -314,9 +314,9 @@ class PostgreSQLRepository(BaseRepository):
         self._ensure_schema_exists()
 
         # Log which database we're connected to
-        if target_database == "business" and self.config.is_business_database_configured():
-            db_name = self.config.business_database.database
-            logger.info(f"✅ PostgreSQLRepository initialized with BUSINESS database: {db_name}, schema: {self.schema_name}")
+        if target_database == "public" and self.config.is_public_database_configured():
+            db_name = self.config.public_database.database
+            logger.info(f"✅ PostgreSQLRepository initialized with PUBLIC database: {db_name}, schema: {self.schema_name}")
         else:
             logger.info(f"✅ PostgreSQLRepository initialized with APP database, schema: {self.schema_name}")
     
@@ -339,11 +339,11 @@ class PostgreSQLRepository(BaseRepository):
         - Azure Functions with system-assigned identity (simpler setup)
         - Local development with password (developer machines)
 
-        Database Selection (29 NOV 2025):
+        Database Selection (07 JAN 2026):
         ---------------------------------
         Uses self.target_database to determine which database to connect to:
-        - "app": Uses config.database (geopgflex) - default
-        - "business": Uses config.business_database (ddhgeodb) if configured
+        - "app": Uses config.database - default
+        - "public": Uses config.public_database if configured
 
         Returns:
         -------
@@ -358,15 +358,15 @@ class PostgreSQLRepository(BaseRepository):
         RuntimeError
             If managed identity token acquisition fails.
         """
-        # Determine which database config to use (29 NOV 2025)
-        use_business_db = (
-            self.target_database == "business" and
-            self.config.is_business_database_configured()
+        # Determine which database config to use (07 JAN 2026)
+        use_public_db = (
+            self.target_database == "public" and
+            self.config.is_public_database_configured()
         )
 
-        if use_business_db:
-            db_config = self.config.business_database
-            logger.debug(f"🔌 Building connection string for BUSINESS database: {db_config.database}")
+        if use_public_db:
+            db_config = self.config.public_database
+            logger.debug(f"🔌 Building connection string for PUBLIC database: {db_config.database}")
         else:
             db_config = None  # Will use legacy app database properties
             logger.debug("🔌 Building connection string for APP database")
@@ -375,7 +375,7 @@ class PostgreSQLRepository(BaseRepository):
 
         # Get credentials from config - SINGLE SOURCE OF TRUTH (08 DEC 2025)
         # Config loads all env vars at startup via DatabaseConfig.from_environment()
-        if use_business_db and db_config:
+        if use_public_db and db_config:
             client_id = db_config.managed_identity_client_id
             identity_name = db_config.managed_identity_admin_name
         else:
@@ -408,8 +408,8 @@ class PostgreSQLRepository(BaseRepository):
         # Priority 3: Password Authentication
         if password:
             logger.info("🔑 [AUTH] Using PASSWORD authentication (local development mode)")
-            if use_business_db and db_config:
-                # Build password connection string for business database
+            if use_public_db and db_config:
+                # Build password connection string for public database
                 conn_str = self._build_password_connection_string(db_config)
             else:
                 conn_str = self.config.postgis_connection_string
@@ -432,14 +432,14 @@ class PostgreSQLRepository(BaseRepository):
         logger.error(error_msg)
         raise ValueError(error_msg)
 
-    def _build_password_connection_string(self, db_config: BusinessDatabaseConfig) -> str:
+    def _build_password_connection_string(self, db_config: PublicDatabaseConfig) -> str:
         """
-        Build password-based connection string for business database (29 NOV 2025).
+        Build password-based connection string for public database (07 JAN 2026).
 
-        Used for local development when connecting to business database with password auth.
+        Used for local development when connecting to public database with password auth.
 
         Args:
-            db_config: BusinessDatabaseConfig with host, port, database settings
+            db_config: PublicDatabaseConfig with host, port, database settings
 
         Returns:
             PostgreSQL connection string with password authentication
@@ -453,14 +453,14 @@ class PostgreSQLRepository(BaseRepository):
             f"{db_config.host}:{db_config.port}/"
             f"{db_config.database}?sslmode=require"
         )
-        logger.debug(f"🔗 Password connection string built for business database: {db_config.database}")
+        logger.debug(f"🔗 Password connection string built for public database: {db_config.database}")
         return conn_str
 
     def _build_managed_identity_connection_string(
         self,
         client_id: Optional[str] = None,
         identity_name: str = None,  # Required - caller must provide from config
-        db_config: Optional[BusinessDatabaseConfig] = None
+        db_config: Optional[PublicDatabaseConfig] = None
     ) -> str:
         """
         Build PostgreSQL connection string using Azure Managed Identity.
@@ -479,9 +479,9 @@ class PostgreSQLRepository(BaseRepository):
             PostgreSQL user name matching the managed identity.
             Required - caller must provide from config (default in database_config.py).
 
-        db_config : Optional[BusinessDatabaseConfig]
-            Business database configuration (29 NOV 2025).
-            If provided, uses business database host/port/database.
+        db_config : Optional[PublicDatabaseConfig]
+            Public database configuration (07 JAN 2026).
+            If provided, uses public database host/port/database.
             If None, uses app database from self.config.
 
         Connection String Format:

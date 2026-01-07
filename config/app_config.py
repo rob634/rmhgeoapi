@@ -54,7 +54,7 @@ Exports:
 Dependencies:
     pydantic: BaseModel for configuration validation
     config.storage_config: StorageConfig
-    config.database_config: DatabaseConfig, BusinessDatabaseConfig
+    config.database_config: DatabaseConfig, PublicDatabaseConfig
     config.raster_config: RasterConfig
     config.vector_config: VectorConfig
     config.queue_config: QueueConfig
@@ -78,7 +78,7 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 from .storage_config import StorageConfig
-from .database_config import DatabaseConfig, BusinessDatabaseConfig
+from .database_config import DatabaseConfig, PublicDatabaseConfig
 from .raster_config import RasterConfig
 from .vector_config import VectorConfig
 from .queue_config import QueueConfig
@@ -276,20 +276,23 @@ class AppConfig(BaseModel):
         description="PostgreSQL/PostGIS configuration for app database (full DDL permissions)"
     )
 
-    business_database: Optional[BusinessDatabaseConfig] = Field(
+    public_database: Optional[PublicDatabaseConfig] = Field(
         default=None,
-        description="""Business database configuration for ETL pipeline outputs.
+        description="""Public database configuration for OGC Feature Collections.
 
         Separate database from app database with RESTRICTED permissions:
-        - App Database (geopgflex): Full DDL (CREATE/DROP SCHEMA) - can nuke/rebuild
-        - Business Database (geodata): CRUD only (NO DROP SCHEMA) - protected
+        - App Database: Full DDL (CREATE/DROP SCHEMA) - can nuke/rebuild
+        - Public Database: CRUD only (NO DROP SCHEMA) - protected
 
-        If not configured (BUSINESS_DB_* env vars not set), falls back to app database
-        geo schema for backward compatibility during migration.
+        Used for public-facing OGC Features API, typically deployed behind
+        Cloudflare or similar CDN in corporate Azure environments.
+
+        If not configured (PUBLIC_DB_* env vars not set), falls back to app database
+        geo schema for backward compatibility.
 
         Environment Variables:
-            BUSINESS_DB_HOST, BUSINESS_DB_NAME, BUSINESS_DB_SCHEMA,
-            BUSINESS_DB_MANAGED_IDENTITY_NAME (all optional - uses app db if not set)
+            PUBLIC_DB_HOST, PUBLIC_DB_NAME, PUBLIC_DB_SCHEMA,
+            PUBLIC_DB_MANAGED_IDENTITY_NAME (all optional - uses app db if not set)
         """
     )
 
@@ -543,48 +546,48 @@ class AppConfig(BaseModel):
         return self.titiler_base_url
 
     # ========================================================================
-    # Business Database Helper Methods (29 NOV 2025)
+    # Public Database Helper Methods (07 JAN 2026 - renamed from business_database)
     # ========================================================================
 
-    def get_business_database_config(self) -> DatabaseConfig | BusinessDatabaseConfig:
+    def get_public_database_config(self) -> DatabaseConfig | PublicDatabaseConfig:
         """
-        Get configuration for business data operations.
+        Get configuration for public-facing OGC Features database.
 
-        Returns BusinessDatabaseConfig if explicitly configured (BUSINESS_DB_* env vars set),
+        Returns PublicDatabaseConfig if explicitly configured (PUBLIC_DB_* env vars set),
         otherwise falls back to app database for backward compatibility.
 
         This allows gradual migration:
-        - Phase 1: No BUSINESS_DB_* vars → uses app database geo schema
-        - Phase 2: Set BUSINESS_DB_* vars → uses dedicated business database
+        - Phase 1: No PUBLIC_DB_* vars → uses app database geo schema
+        - Phase 2: Set PUBLIC_DB_* vars → uses dedicated public database
 
         Usage:
             from config import get_config
             config = get_config()
 
-            # Get appropriate config for ETL outputs
-            business_config = config.get_business_database_config()
+            # Get appropriate config for public data
+            public_config = config.get_public_database_config()
 
-            # Check if using dedicated business database
-            if isinstance(business_config, BusinessDatabaseConfig):
-                logger.info(f"Using business database: {business_config.database}")
+            # Check if using dedicated public database
+            if isinstance(public_config, PublicDatabaseConfig):
+                logger.info(f"Using public database: {public_config.database}")
             else:
                 logger.info("Using app database geo schema (fallback)")
 
         Returns:
-            BusinessDatabaseConfig if configured, DatabaseConfig otherwise
+            PublicDatabaseConfig if configured, DatabaseConfig otherwise
         """
-        if self.business_database and self.business_database.is_configured:
-            return self.business_database
+        if self.public_database and self.public_database.is_configured:
+            return self.public_database
         return self.database
 
-    def is_business_database_configured(self) -> bool:
+    def is_public_database_configured(self) -> bool:
         """
-        Check if dedicated business database is configured.
+        Check if dedicated public database is configured.
 
         Returns:
-            True if BUSINESS_DB_HOST or BUSINESS_DB_NAME environment variables are set
+            True if PUBLIC_DB_HOST or PUBLIC_DB_NAME environment variables are set
         """
-        return self.business_database is not None and self.business_database.is_configured
+        return self.public_database is not None and self.public_database.is_configured
 
     # ========================================================================
     # URL Generation Methods (Legacy Compatibility)
@@ -816,9 +819,9 @@ class AppConfig(BaseModel):
             # Domain configs
             storage=StorageConfig.from_environment(),
             database=DatabaseConfig.from_environment(),
-            # Business database: only instantiate if explicitly configured
-            business_database=BusinessDatabaseConfig.from_environment()
-                if (os.environ.get("BUSINESS_DB_HOST") or os.environ.get("BUSINESS_DB_NAME"))
+            # Public database: only instantiate if explicitly configured
+            public_database=PublicDatabaseConfig.from_environment()
+                if (os.environ.get("PUBLIC_DB_HOST") or os.environ.get("PUBLIC_DB_NAME"))
                 else None,
             raster=RasterConfig.from_environment(),
             vector=VectorConfig.from_environment(),

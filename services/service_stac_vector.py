@@ -205,10 +205,10 @@ class StacVectorService:
             # Non-fatal: Log warning but continue - STAC item can exist without enrichment
             logger.warning(f"Metadata enrichment failed (non-fatal): {e}")
 
-        # Build asset with postgis:// link (29 NOV 2025: use correct database based on target)
-        if self.target_database == "business" and self.config.is_business_database_configured():
-            db_host = self.config.business_database.host
-            db_name = self.config.business_database.database
+        # Build asset with postgis:// link (07 JAN 2026: use correct database based on target)
+        if self.target_database == "public" and self.config.is_public_database_configured():
+            db_host = self.config.public_database.host
+            db_name = self.config.public_database.database
         else:
             db_host = self.config.postgis_host
             db_name = self.config.postgis_database

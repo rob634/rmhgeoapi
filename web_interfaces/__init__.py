@@ -419,6 +419,12 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Could not import STAC Collection interface: {e}")
 
+try:
+    from .fathom_viewer import interface as _fathom_viewer
+    logger.info("✅ Imported FATHOM Viewer interface module")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import FATHOM Viewer interface: {e}")
+
 
 # Public API
 __all__ = [

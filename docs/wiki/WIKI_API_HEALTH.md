@@ -1,0 +1,330 @@
+# Health & Diagnostic Endpoints
+
+> **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [All Jobs](WIKI_API_JOB_SUBMISSION.md) | [Errors](WIKI_API_ERRORS.md) | **Health**
+
+**Last Updated**: 08 JAN 2026
+**Status**: Reference Documentation
+**Purpose**: Health probes, startup validation, and diagnostic endpoints
+
+---
+
+## Overview
+
+The platform provides three diagnostic endpoints following Kubernetes-style health probe patterns:
+
+| Endpoint | Purpose | Always Available |
+|----------|---------|------------------|
+| `/api/livez` | Liveness probe - is the process alive? | Yes |
+| `/api/readyz` | Readiness probe - is the app ready for traffic? | Yes |
+| `/api/health` | Comprehensive health check with component status | After startup |
+
+---
+
+## Quick Reference
+
+```bash
+# Check if process is alive (always 200 if running)
+curl https://YOUR_APP.azurewebsites.net/api/livez
+
+# Check if app is ready to handle requests
+curl https://YOUR_APP.azurewebsites.net/api/readyz
+
+# Full health check with component status
+curl https://YOUR_APP.azurewebsites.net/api/health
+```
+
+---
+
+## Endpoint Details
+
+### GET /api/livez - Liveness Probe
+
+**Purpose**: Detect if the Python process is alive. Used by load balancers to detect crashed processes.
+
+**Response**: Always 200 if the process loaded successfully.
+
+```json
+{
+  "status": "alive",
+  "probe": "livez",
+  "message": "Process is running"
+}
+```
+
+**When to use**: Configure Azure Front Door or load balancer health probes to hit this endpoint.
+
+---
+
+### GET /api/readyz - Readiness Probe
+
+**Purpose**: Determine if the app should receive traffic. Returns 503 with detailed errors if startup validation failed.
+
+**Success Response (200)**:
+```json
+{
+  "status": "ready",
+  "probe": "readyz",
+  "message": "All startup validations passed",
+  "summary": {
+    "validation_complete": true,
+    "all_passed": true,
+    "checks_passed": 4,
+    "checks_failed": 0,
+    "failed_check_names": []
+  }
+}
+```
+
+**Failure Response (503)**:
+```json
+{
+  "status": "not_ready",
+  "probe": "readyz",
+  "message": "env_vars: 1 environment variable(s) invalid",
+  "summary": {
+    "validation_complete": true,
+    "all_passed": false,
+    "checks_passed": 3,
+    "checks_failed": 1,
+    "failed_check_names": ["env_vars"]
+  },
+  "errors": [
+    {
+      "name": "env_vars",
+      "error_type": "ENV_VALIDATION_FAILED",
+      "message": "1 environment variable(s) invalid",
+      "fix": "Review the errors above and update environment variables via Azure Portal",
+      "validation_errors": [
+        {
+          "var_name": "SERVICE_BUS_FQDN",
+          "message": "Invalid format",
+          "current_value": "myservicebus",
+          "expected_pattern": "Must be full FQDN ending in .servicebus.windows.net",
+          "fix_suggestion": "Use full URL like 'myservicebus.servicebus.windows.net'"
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Initializing Response (503)**:
+```json
+{
+  "status": "initializing",
+  "probe": "readyz",
+  "message": "Startup validation in progress",
+  "startup_time": "2026-01-08T10:30:00Z"
+}
+```
+
+---
+
+### GET /api/health - Comprehensive Health Check
+
+**Purpose**: Full system health check including database, Service Bus, storage, and component status.
+
+**Response includes**:
+- Database connectivity
+- Service Bus connectivity
+- Storage account status
+- Environment variable validation
+- Startup validation summary
+- Component capabilities
+
+---
+
+## Startup Validation Flow
+
+The app validates configuration in phases to ensure diagnostic endpoints are always available:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ Phase 1: Register Probes (FIRST)                                │
+│   • /api/livez and /api/readyz registered immediately           │
+│   • Always available, even if later phases fail                 │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ Phase 2: Soft Validation (stores errors, doesn't crash)         │
+│   1. Import validation - can Python load critical modules?      │
+│   2. Env var validation - format checking with regex patterns   │
+│   3. Service Bus DNS - does namespace resolve?                  │
+│   4. Service Bus ports - are 5671/443 reachable?                │
+│   5. Queue validation - do required queues exist?               │
+│                                                                 │
+│   Results stored in STARTUP_STATE (not raised as exceptions)    │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ STARTUP_STATE.finalize()                                        │
+│   • Sets validation_complete = True                             │
+│   • Computes all_passed = all checks passed?                    │
+│   • Sets critical_error = first failure message                 │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ Phase 3: Conditional Registration                               │
+│   IF all_passed:                                                │
+│     • Register Service Bus triggers                             │
+│     • App fully operational                                     │
+│   ELSE:                                                         │
+│     • Skip Service Bus triggers                                 │
+│     • Only diagnostic endpoints available                       │
+│     • readyz returns 503 with error details                     │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Environment Variable Validation (08 JAN 2026)
+
+Environment variables are validated at startup with **regex patterns** to catch format errors early.
+
+### Validated Variables
+
+| Variable | Pattern | Example |
+|----------|---------|---------|
+| `SERVICE_BUS_FQDN` | Must end in `.servicebus.windows.net` | `mybus.servicebus.windows.net` |
+| `POSTGIS_HOST` | Must be `localhost` or end in `.postgres.database.azure.com` | `myserver.postgres.database.azure.com` |
+| `BRONZE_STORAGE_ACCOUNT` | Lowercase alphanumeric, 3-24 chars | `myappbronze` |
+| `SILVER_STORAGE_ACCOUNT` | Lowercase alphanumeric, 3-24 chars | `myappsilver` |
+| `POSTGIS_DATABASE` | Alphanumeric with underscore/hyphen | `geodb` |
+| `POSTGIS_SCHEMA` | Lowercase letters/numbers/underscore | `geo` |
+| `APP_SCHEMA` | Lowercase letters/numbers/underscore | `app` |
+| `PGSTAC_SCHEMA` | Lowercase letters/numbers/underscore | `pgstac` |
+| `H3_SCHEMA` | Lowercase letters/numbers/underscore | `h3` |
+
+### Common Validation Errors
+
+**SERVICE_BUS_FQDN missing suffix**:
+```
+SERVICE_BUS_FQDN: Invalid format
+  Current: 'myservicebus'
+  Expected: Must be full FQDN ending in .servicebus.windows.net
+  Fix: Use full URL like 'myservicebus.servicebus.windows.net' (not just 'myservicebus')
+```
+
+**POSTGIS_HOST missing Azure suffix**:
+```
+POSTGIS_HOST: Invalid format
+  Current: 'myserver'
+  Expected: Must be 'localhost' or Azure FQDN ending in .postgres.database.azure.com
+  Fix: Use full Azure FQDN like 'myserver.postgres.database.azure.com'
+```
+
+---
+
+## Troubleshooting
+
+### App returns 404 on all endpoints
+
+**Cause**: Startup failed before any HTTP routes were registered.
+
+**Solution**:
+1. Check `/api/livez` - if 404, the process crashed during import
+2. Check Application Insights for `STARTUP_FAILED` logs:
+   ```kusto
+   traces
+   | where message contains "STARTUP_FAILED"
+   | order by timestamp desc
+   | take 5
+   ```
+3. Common causes:
+   - Missing Python package in requirements.txt
+   - Circular import issue
+   - Invalid APP_MODE value
+
+### readyz returns 503 "not_ready"
+
+**Cause**: Startup validation detected a configuration problem.
+
+**Solution**:
+1. Check the `errors` array in the response
+2. Look for `validation_errors` field for detailed env var issues
+3. Fix the configuration in Azure Portal → Function App → Configuration
+4. Restart the app
+
+### readyz returns 503 "initializing"
+
+**Cause**: App is still starting up.
+
+**Solution**: Wait 30-60 seconds for cold start to complete. Azure Functions can take time to initialize Python environment.
+
+### Service Bus DNS validation fails
+
+**Cause**: DNS resolution failed for the Service Bus namespace.
+
+**Possible issues**:
+1. `SERVICE_BUS_FQDN` has wrong format (missing `.servicebus.windows.net`)
+2. VNet/Private Endpoint DNS not configured
+3. Namespace doesn't exist
+
+**Solution**: Check the `validation_errors` in readyz response for specific guidance.
+
+### Port connectivity check shows 5671 blocked
+
+**Cause**: Corporate firewall blocking AMQP port.
+
+**Response shows**:
+```json
+{
+  "port_connectivity": {
+    "5671": {"protocol": "AMQP", "reachable": false},
+    "443": {"protocol": "AMQP-over-WebSockets", "reachable": true}
+  },
+  "recommended_transport": "AMQP-over-WebSockets (port 443)",
+  "transport_warning": "Standard AMQP port 5671 blocked - consider configuring WebSocket transport"
+}
+```
+
+**Solution**: Configure Service Bus client to use WebSocket transport.
+
+---
+
+## Integration with Monitoring
+
+### Azure Front Door Health Probe
+
+Configure health probe:
+- Path: `/api/livez`
+- Interval: 30 seconds
+- Protocol: HTTPS
+- Expected status: 200
+
+### Kubernetes Deployment
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /api/livez
+    port: 80
+  initialDelaySeconds: 10
+  periodSeconds: 30
+
+readinessProbe:
+  httpGet:
+    path: /api/readyz
+    port: 80
+  initialDelaySeconds: 30
+  periodSeconds: 10
+```
+
+### Application Insights Availability Test
+
+Create availability test:
+- URL: `https://YOUR_APP.azurewebsites.net/api/health`
+- Frequency: 5 minutes
+- Alert on: Status code != 200
+
+---
+
+## Related Documentation
+
+- [Environment Variables](WIKI_ENVIRONMENT_VARIABLES.md) - All configuration options
+- [Service Bus](WIKI_API_SERVICE_BUS.md) - Queue configuration
+- [Errors](WIKI_API_ERRORS.md) - Error codes and troubleshooting
+- [Quick Start](WIKI_QUICK_START.md) - Getting started guide

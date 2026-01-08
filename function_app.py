@@ -200,46 +200,71 @@ except Exception as _import_error:
 # APPLICATION IMPORTS - Our modules (validated at startup)
 # ========================================================================
 
-# --- ENV VAR VALIDATION ---
-# Check critical env vars BEFORE heavy imports that require them.
+# --- ENV VAR VALIDATION (08 JAN 2026 - Regex-based format validation) ---
+# Check env vars with REGEX PATTERNS to catch format errors, not just missing vars.
+# Example: SERVICE_BUS_FQDN must end in .servicebus.windows.net
 # This ensures errors are LOGGED to Application Insights before the app fails.
 # Goal: "If app 404s, check Application Insights for STARTUP_FAILED"
-_startup_logger.info("🔍 STARTUP: Checking environment variables...")
+_startup_logger.info("🔍 STARTUP: Validating environment variables (format + presence)...")
 
-_REQUIRED_ENV_VARS = [
-    ("POSTGIS_HOST", "PostgreSQL host"),
-    ("POSTGIS_DATABASE", "PostgreSQL database"),
-    ("POSTGIS_SCHEMA", "PostGIS/geo schema name"),
-    ("APP_SCHEMA", "Application schema name"),
-    ("PGSTAC_SCHEMA", "PgSTAC schema name"),
-    ("H3_SCHEMA", "H3 schema name"),
-]
+try:
+    from config.env_validation import validate_environment, get_validation_summary
 
-_missing_vars = []
-for var_name, description in _REQUIRED_ENV_VARS:
-    if not os.environ.get(var_name):
-        _missing_vars.append(f"{var_name} ({description})")
+    _validation_errors = validate_environment()
 
-if _missing_vars:
-    _error_msg = f"Missing required environment variables: {', '.join(_missing_vars)}"
-    STARTUP_STATE.env_vars = ValidationResult(
-        name="env_vars",
-        passed=False,
-        error_type="MISSING_ENV_VARS",
-        error_message=_error_msg,
-        details={
-            "missing": [v.split(" (")[0] for v in _missing_vars],
-            "fix": "Add missing variables via Azure Portal → Function App → Configuration"
-        }
-    )
-    _startup_logger.critical(f"❌ STARTUP: {_error_msg}")
-else:
-    STARTUP_STATE.env_vars = ValidationResult(
-        name="env_vars",
-        passed=True,
-        details={"checked": [v[0] for v in _REQUIRED_ENV_VARS]}
-    )
-    _startup_logger.info("✅ STARTUP: All required environment variables present")
+    if _validation_errors:
+        # Build detailed error message
+        _error_details = []
+        for err in _validation_errors:
+            _error_details.append(f"  - {err.var_name}: {err.message}")
+            if err.current_value and "MASKED" not in str(err.current_value):
+                _error_details.append(f"    Current: '{err.current_value}'")
+            _error_details.append(f"    Expected: {err.expected_pattern}")
+            _error_details.append(f"    Fix: {err.fix_suggestion}")
+
+        _error_msg = f"Environment variable validation failed ({len(_validation_errors)} errors):\n" + "\n".join(_error_details)
+
+        STARTUP_STATE.env_vars = ValidationResult(
+            name="env_vars",
+            passed=False,
+            error_type="ENV_VALIDATION_FAILED",
+            error_message=f"{len(_validation_errors)} environment variable(s) invalid",
+            details={
+                "errors": [e.to_dict() for e in _validation_errors],
+                "fix": "Review the errors above and update environment variables via Azure Portal → Function App → Configuration"
+            }
+        )
+        _startup_logger.critical(f"❌ STARTUP: {_error_msg}")
+    else:
+        _summary = get_validation_summary()
+        STARTUP_STATE.env_vars = ValidationResult(
+            name="env_vars",
+            passed=True,
+            details={
+                "message": "All environment variables validated successfully",
+                "required_vars_checked": _summary["required_vars"]["total"],
+                "all_vars_validated": True
+            }
+        )
+        _startup_logger.info(f"✅ STARTUP: All environment variables validated ({_summary['required_vars']['total']} required vars checked)")
+
+except ImportError as _import_err:
+    # Fallback to basic check if validation module not found
+    _startup_logger.warning(f"⚠️ STARTUP: env_validation module not found, using basic check: {_import_err}")
+    _basic_required = ["POSTGIS_HOST", "POSTGIS_DATABASE", "POSTGIS_SCHEMA", "APP_SCHEMA", "PGSTAC_SCHEMA", "H3_SCHEMA"]
+    _missing = [v for v in _basic_required if not os.environ.get(v)]
+    if _missing:
+        STARTUP_STATE.env_vars = ValidationResult(
+            name="env_vars",
+            passed=False,
+            error_type="MISSING_ENV_VARS",
+            error_message=f"Missing: {', '.join(_missing)}",
+            details={"missing": _missing}
+        )
+        _startup_logger.critical(f"❌ STARTUP: Missing env vars: {', '.join(_missing)}")
+    else:
+        STARTUP_STATE.env_vars = ValidationResult(name="env_vars", passed=True)
+        _startup_logger.info("✅ STARTUP: Basic env var check passed")
 
 # ========================================================================
 # EXPLICIT REGISTRIES - Epoch 4 (NO DECORATORS!)

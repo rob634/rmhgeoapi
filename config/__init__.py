@@ -7,6 +7,7 @@ Structure:
     config/
     ├── __init__.py              # This file - exports and singleton
     ├── defaults.py              # Single source of truth for all default values
+    ├── env_validation.py        # Regex-based env var validation (08 JAN 2026)
     ├── app_config.py            # Main config (composes domain configs)
     ├── app_mode_config.py       # Multi-Function App deployment modes
     ├── storage_config.py        # COG tiers, multi-account storage
@@ -43,7 +44,7 @@ Created: 20 NOV 2025 as part of config.py god object refactoring
 # ============================================================================
 # VERSION
 # ============================================================================
-__version__ = "0.7.5.4"
+__version__ = "0.7.5.5"
 
 from typing import Optional
 
@@ -87,6 +88,16 @@ from .platform_config import PlatformConfig, generate_platform_request_id
 from .metrics_config import MetricsConfig
 from .app_config import AppConfig
 from .app_mode_config import AppMode, AppModeConfig, get_app_mode_config
+
+# Environment variable validation (08 JAN 2026)
+from .env_validation import (
+    ENV_VAR_RULES,
+    EnvVarRule,
+    ValidationError as EnvValidationError,
+    validate_environment,
+    validate_single_var,
+    get_validation_summary,
+)
 
 
 # ============================================================================
@@ -258,4 +269,12 @@ __all__ = [
 
     # Metrics (E13: Pipeline Observability)
     'MetricsConfig',
+
+    # Environment Variable Validation (08 JAN 2026)
+    'ENV_VAR_RULES',
+    'EnvVarRule',
+    'EnvValidationError',
+    'validate_environment',
+    'validate_single_var',
+    'get_validation_summary',
 ]

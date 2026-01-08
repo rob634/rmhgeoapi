@@ -353,28 +353,68 @@ ENVIRONMENT=prod
 
 ---
 
-## Validation
+## Validation (08 JAN 2026 - Regex-based)
 
-The `/api/health` endpoint shows configuration status:
+Environment variables are validated at startup with **regex patterns** to catch format errors, not just missing values. This prevents silent misconfigurations like setting `SERVICE_BUS_FQDN=myservicebus` instead of `SERVICE_BUS_FQDN=myservicebus.servicebus.windows.net`.
+
+### Validation Rules
+
+| Variable | Pattern | Example |
+|----------|---------|---------|
+| `SERVICE_BUS_FQDN` | Must end in `.servicebus.windows.net` | `mybus.servicebus.windows.net` |
+| `POSTGIS_HOST` | Must be `localhost` or end in `.postgres.database.azure.com` | `myserver.postgres.database.azure.com` |
+| `BRONZE_STORAGE_ACCOUNT` | Lowercase alphanumeric, 3-24 chars | `myappbronze` |
+| `*_SCHEMA` | Lowercase letters/numbers/underscore | `geo`, `app`, `pgstac` |
+
+### Health Check Validation
+
+The `/api/health` and `/api/readyz` endpoints show validation status:
 
 ```json
 {
-  "config": {
-    "storage_account": "configured",
-    "database": "connected",
-    "service_bus": "connected",
-    "managed_identity": "enabled"
-  },
-  "warnings": []
+  "env_vars": {
+    "passed": true,
+    "details": {
+      "message": "All environment variables validated successfully",
+      "required_vars_checked": 9
+    }
+  }
 }
 ```
 
-If required variables are missing, warnings will appear:
-- `"using_defaults": true` — Environment-specific values not set
-- `"missing_required": ["BRONZE_STORAGE_ACCOUNT", "APP_SCHEMA", ...]` — Critical variables missing
+### Validation Errors
+
+If validation fails, you'll see detailed error messages in Application Insights:
+
+```
+❌ STARTUP: Environment variable validation failed (1 errors):
+  - SERVICE_BUS_FQDN: Invalid format
+    Current: 'myservicebus'
+    Expected: Must be full FQDN ending in .servicebus.windows.net
+    Fix: Use full URL like 'myservicebus.servicebus.windows.net' (not just 'myservicebus')
+```
+
+### Adding New Validation Rules
+
+Validation rules are defined in `config/env_validation.py`:
+
+```python
+from config.env_validation import ENV_VAR_RULES, EnvVarRule
+import re
+
+# Add a new rule
+ENV_VAR_RULES["MY_NEW_VAR"] = EnvVarRule(
+    pattern=re.compile(r"^[a-z]+$"),
+    pattern_description="Lowercase letters only",
+    required=True,
+    fix_suggestion="Use lowercase letters",
+    example="myvalue",
+)
+```
 
 ---
 
 **See Also**:
 - [Component Glossary](./docs/epics/README.md#component-glossary) — Abstract component names
 - [config/defaults.py](./config/defaults.py) — Default values and fail-fast placeholders
+- [config/env_validation.py](./config/env_validation.py) — Validation rules and patterns

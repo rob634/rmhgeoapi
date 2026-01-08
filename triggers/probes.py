@@ -127,6 +127,9 @@ class ReadyzProbe:
                 error_info["likely_causes"] = check.details["likely_causes"]
             if check.details and "fix" in check.details:
                 error_info["fix"] = check.details["fix"]
+            # Include detailed validation errors (08 JAN 2026 - env var regex validation)
+            if check.details and "errors" in check.details:
+                error_info["validation_errors"] = check.details["errors"]
             errors.append(error_info)
 
         return func.HttpResponse(

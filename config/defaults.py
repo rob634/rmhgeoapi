@@ -386,6 +386,11 @@ class AppModeDefaults:
     # App name used for task tracking (INTENTIONALLY INVALID - set APP_NAME env var)
     DEFAULT_APP_NAME = "your-function-app-name"
 
+    # Docker worker integration (08 JAN 2026)
+    # When False, standalone mode skips long-running-tasks queue validation
+    # Set to True when a Docker worker is deployed and processing long-running-tasks
+    DOCKER_WORKER_ENABLED = False
+
 
 # =============================================================================
 # TASK ROUTING DEFAULTS (Task Type → Queue Mapping)

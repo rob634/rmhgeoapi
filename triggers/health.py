@@ -1990,15 +1990,18 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             return {
                 "mode": app_mode_config.mode.value,
                 "app_name": app_mode_config.app_name,
+                "docker_worker_enabled": app_mode_config.docker_worker_enabled,
                 "queues_listening": {
                     "jobs": app_mode_config.listens_to_jobs_queue,
                     "raster_tasks": app_mode_config.listens_to_raster_tasks,
                     "vector_tasks": app_mode_config.listens_to_vector_tasks,
+                    "long_running_tasks": app_mode_config.listens_to_long_running_tasks,
                 },
                 "queue_names": {
                     "jobs": config.queues.jobs_queue,
                     "raster_tasks": config.queues.raster_tasks_queue,
                     "vector_tasks": config.queues.vector_tasks_queue,
+                    "long_running_tasks": config.queues.long_running_tasks_queue,
                 },
                 "routing": {
                     "routes_raster_externally": app_mode_config.routes_raster_externally,
@@ -2013,7 +2016,8 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                 },
                 "environment_var": {
                     "APP_MODE": os.getenv("APP_MODE", "not_set (defaults to standalone)"),
-                    "APP_NAME": os.getenv("APP_NAME", "not_set (defaults to rmhazuregeoapi)")
+                    "APP_NAME": os.getenv("APP_NAME", "not_set (defaults to rmhazuregeoapi)"),
+                    "DOCKER_WORKER_ENABLED": os.getenv("DOCKER_WORKER_ENABLED", "not_set (defaults to false)")
                 }
             }
 

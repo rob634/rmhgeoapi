@@ -101,6 +101,7 @@ Optional:
     APP_NAME = {unique-app-identifier}  # Tracked on tasks for debugging
     RASTER_APP_URL = https://{raster-app}.azurewebsites.net  # Future cross-app routing
     VECTOR_APP_URL = https://{vector-app}.azurewebsites.net  # Future cross-app routing
+    DOCKER_WORKER_ENABLED = true | false  # Enable long-running-tasks queue validation (default: false)
 
 --------------------------------------------------------------------------------
 DEPLOYMENT VERIFICATION
@@ -223,6 +224,13 @@ class AppModeConfig(BaseModel):
         description="External vector Function App URL (future use)"
     )
 
+    # Docker worker integration (08 JAN 2026)
+    docker_worker_enabled: bool = Field(
+        default=False,
+        description="Whether a Docker worker is deployed for long-running tasks. "
+                    "When False, standalone mode skips long-running-tasks queue validation."
+    )
+
     # =========================================================================
     # QUEUE LISTENING PROPERTIES
     # =========================================================================
@@ -266,11 +274,20 @@ class AppModeConfig(BaseModel):
 
     @property
     def listens_to_long_running_tasks(self) -> bool:
-        """Whether this mode processes long-running raster tasks (Docker worker queue)."""
-        return self.mode in [
-            AppMode.STANDALONE,      # Standalone can process everything
-            AppMode.WORKER_DOCKER,   # Docker worker's primary queue
-        ]
+        """
+        Whether this mode processes long-running tasks (Docker worker queue).
+
+        In STANDALONE mode, this is only True if docker_worker_enabled=True.
+        This avoids validating the long-running-tasks queue when no Docker
+        worker is deployed.
+        """
+        if self.mode == AppMode.WORKER_DOCKER:
+            # Docker worker always listens to its queue
+            return True
+        if self.mode == AppMode.STANDALONE and self.docker_worker_enabled:
+            # Standalone only listens if Docker worker integration is enabled
+            return True
+        return False
 
     # =========================================================================
     # ROUTING PROPERTIES
@@ -325,6 +342,8 @@ class AppModeConfig(BaseModel):
             APP_NAME: Unique app identifier (default: AppModeDefaults.DEFAULT_APP_NAME)
             RASTER_APP_URL: External raster app URL (optional)
             VECTOR_APP_URL: External vector app URL (optional)
+            DOCKER_WORKER_ENABLED: Enable long-running-tasks queue validation (default: False)
+                                   Set to "true" when a Docker worker is deployed.
 
         Raises:
             ValueError: If APP_MODE is not a valid mode
@@ -395,11 +414,17 @@ class AppModeConfig(BaseModel):
                 f"This is expected for local development or Docker with non-Docker mode."
             )
 
+        # Docker worker integration (08 JAN 2026)
+        # Parse as boolean: "true", "1", "yes" → True, anything else → False
+        docker_worker_str = os.environ.get("DOCKER_WORKER_ENABLED", "").lower()
+        docker_worker_enabled = docker_worker_str in ("true", "1", "yes")
+
         return cls(
             mode=mode,
             app_name=os.environ.get("APP_NAME", AppModeDefaults.DEFAULT_APP_NAME),
             raster_app_url=os.environ.get("RASTER_APP_URL"),
             vector_app_url=os.environ.get("VECTOR_APP_URL"),
+            docker_worker_enabled=docker_worker_enabled,
         )
 
     # =========================================================================
@@ -416,6 +441,7 @@ class AppModeConfig(BaseModel):
         return {
             "mode": self.mode.value,
             "app_name": self.app_name,
+            "docker_worker_enabled": self.docker_worker_enabled,
             "queues_listening": {
                 "jobs": self.listens_to_jobs_queue,
                 "raster_tasks": self.listens_to_raster_tasks,

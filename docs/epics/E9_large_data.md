@@ -3,8 +3,8 @@
 **Type**: Business
 **Value Statement**: We can host and serve FATHOM/CMIP6-scale data.
 **Runs On**: E7 (Pipeline Infrastructure)
-**Status**: 🚧 PARTIAL (F9.1 🚧, F9.5 ✅, F9.6 🚧)
-**Last Updated**: 04 JAN 2026
+**Status**: 🚧 PARTIAL (F9.1 ✅ Rwanda, F9.5 ✅, F9.6 🚧)
+**Last Updated**: 08 JAN 2026
 
 **Strategic Context**:
 > E9 is the "data hosting" epic. It handles ingesting, processing, and serving very large datasets
@@ -40,22 +40,27 @@ Raw Data                  Processing                Serving
 
 ---
 
-### Feature F9.1: FATHOM ETL Operations 🚧 (formerly E10)
+### Feature F9.1: FATHOM ETL Operations ✅ RWANDA COMPLETE (formerly E10)
 
 **Deliverable**: Band stacking, spatial merge, STAC registration for FATHOM flood data
-**Documentation**: [FATHOM_ETL.md](docs_claude/FATHOM_ETL.md)
-**Status**: 🚧 Phase 1 ✅, Phase 2 46/47 tasks
+**Documentation**: [FATHOM_ETL.md](/docs_claude/FATHOM_ETL.md), [WIKI_JOB_FATHOM_ETL.md](/docs/wiki/WIKI_JOB_FATHOM_ETL.md)
+**Status**: ✅ Rwanda complete (07 JAN 2026), CIV files preserved
 
 | Story | Status | Description |
 |-------|--------|-------------|
 | S9.1.1 | ✅ | Phase 1: Band stacking (8 return periods → 1 COG) |
-| S9.1.2 | 🚧 | Phase 2: Spatial merge (N×N tiles → 1 COG) - 46/47 tasks |
+| S9.1.2 | ✅ | Phase 2: Spatial merge (N×N tiles → 1 COG) |
 | S9.1.3 | 📋 | Phase 3: STAC registration for merged COGs |
 | S9.1.4 | 📋 | Phase 4: West Africa / Africa scale processing |
+| S9.1.5 | ✅ | Region filtering fix (`source_metadata->>'region'`) |
 
-**Current Issue**: Phase 2 task `n10-n15_w005-w010` failed. Need retry with `force_reprocess=true`.
+**Rwanda Results (07 JAN 2026)**:
+- 6 tiles, 234 Phase 1 tasks, 39 Phase 2 tasks
+- 0 failures, ~17 minutes total
+- Performance: 33 tasks/min (Phase 1), 5 tasks/min (Phase 2)
+- 8 concurrent workers (4 instances × 2 workers)
 
-**Key Files**: `services/fathom/fathom_etl.py`, `jobs/fathom_*.py`
+**Key Files**: `services/fathom_etl.py`, `services/fathom_container_inventory.py`, `jobs/process_fathom_*.py`
 
 ---
 

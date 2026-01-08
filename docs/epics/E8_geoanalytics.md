@@ -3,8 +3,8 @@
 **Type**: Business
 **Value Statement**: Raw hosted data becomes H3-aggregated, analysis-ready output.
 **Runs On**: E7 (Pipeline Infrastructure)
-**Status**: 🚧 PARTIAL (F8.1-F8.3 ✅, F8.8 ✅, F8.9 ✅)
-**Last Updated**: 07 JAN 2026
+**Status**: 🚧 PARTIAL (F8.1-F8.3 ✅, F8.8 ✅, F8.9 ✅, F8.13 🚧)
+**Last Updated**: 08 JAN 2026
 
 **Strategic Context**:
 > E8 is the "transform and export" epic. Data hosted in E9 (FATHOM, CMIP6) gets aggregated to H3
@@ -153,40 +153,69 @@ E9: Large Data             E8: GeoAnalytics              Outputs
 
 ---
 
-### Feature F8.7: Building Exposure Analysis 📋 HIGH PRIORITY
+### Feature F8.7: Building Flood Exposure Pipeline 📋 PRIORITY 3
 
-**Deliverable**: Buildings → Raster Extract → H3 Aggregation pipeline
-**Documentation**: [BUILDING_EXPOSURE_PIPELINE.md](docs_claude/BUILDING_EXPOSURE_PIPELINE.md)
-**Timeline**: ~1 week
+**Deliverable**: MS Buildings → FATHOM sample → H3 aggregation (% buildings in flood zones)
+**Test Region**: Rwanda (after H3 bootstrap completes)
+**Initial Scenario**: `fluvial-defended-2020` (baseline)
 **Business Value**: Climate risk exposure analysis for high-profile projects
 
-**Workflow**:
+**Architecture** (08 JAN 2026 design):
 ```
-Buildings (MS/Google) → Centroids → Raster Sample → H3 Aggregate → GeoParquet
+┌─────────────────────────────────────────────────────────────────────┐
+│ STAGE 1: Load MS Building Footprints                                │
+│ Input: MS Buildings GeoJSON for Rwanda (~500K buildings)           │
+│ Output: buildings.footprints (id, centroid, h3_index_7, iso3)      │
+└─────────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ STAGE 2: Sample FATHOM at Building Centroids                        │
+│ Input: Building centroids + FATHOM COG (one scenario)              │
+│ Output: buildings.flood_exposure (building_id, depth, is_flooded)  │
+│ Binary: is_flooded = (flood_depth > 0)                             │
+└─────────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ STAGE 3: Aggregate to H3 Level 7                                    │
+│ SQL: GROUP BY h3_index_7                                            │
+│ Output: h3.building_flood_stats                                     │
+│   - total_buildings, flooded_buildings, pct_flooded                │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 | Story | Status | Description |
 |-------|--------|-------------|
-| S8.7.1 | 📋 | Create `h3.building_exposure` schema |
-| S8.7.2 | 📋 | Create `building_exposure_analysis` job definition |
-| S8.7.3 | 📋 | Stage 1: `building_centroid_extract` handler |
-| S8.7.4 | 📋 | Stage 2: `building_raster_sample` handler (rasterstats) |
-| S8.7.5 | 📋 | Stage 3: `building_h3_aggregate` handler (SQL aggregation) |
-| S8.7.6 | 📋 | Stage 4: `h3_export_geoparquet` handler |
-| S8.7.7 | 📋 | Query API endpoints |
-| S8.7.8 | 📋 | End-to-end test: Kenya + FATHOM + MS Buildings |
+| S8.7.1 | 📋 | Download MS Building Footprints for Rwanda |
+| S8.7.2 | 📋 | Create `buildings` schema (footprints, flood_exposure tables) |
+| S8.7.3 | 📋 | Create `BuildingFloodExposureJob` definition (4-stage) |
+| S8.7.4 | 📋 | Stage 1: `building_load_footprints` handler |
+| S8.7.5 | 📋 | Stage 2: `building_assign_h3` handler |
+| S8.7.6 | 📋 | Stage 3: `building_sample_fathom` handler |
+| S8.7.7 | 📋 | Stage 4: `building_aggregate_h3` handler |
+| S8.7.8 | 📋 | End-to-end test: Rwanda + fluvial-defended-2020 |
+| S8.7.9 | 📋 | Expand to all FATHOM scenarios (39 for Rwanda) |
 
-**Output per H3 Cell**:
-- `building_count`: Total buildings
-- `mean_exposure`: Average raster value
-- `max_exposure`: Maximum raster value
-- `pct_exposed_{threshold}`: % buildings above threshold
-- `count_exposed_{threshold}`: Count above threshold
+**Output Schema** (`h3.building_flood_stats`):
+```sql
+CREATE TABLE h3.building_flood_stats (
+    h3_index BIGINT,
+    scenario VARCHAR(100),        -- e.g., 'fluvial-defended-2020'
+    total_buildings INT,
+    flooded_buildings INT,
+    pct_flooded DECIMAL(5,2),     -- 0.00 to 100.00
+    PRIMARY KEY (h3_index, scenario)
+);
+```
+
+**Data Source**: Microsoft Building Footprints (direct download)
+- URL: `https://minedbuildings.z5.web.core.windows.net/global-buildings/dataset-links.csv`
+- Format: GeoJSON with polygon footprints
 
 **Dependencies**:
-- E10.F10.2 (FATHOM merge) for flood COGs
-- Planetary Computer for MS Building Footprints
-- rasterstats + geopandas for processing
+- F9.1 ✅ (FATHOM COGs for Rwanda)
+- F8.13 🚧 (H3 cells for Rwanda)
 
 ---
 
@@ -307,15 +336,15 @@ POST /api/jobs/submit/h3_export_dataset
 
 ---
 
-### Feature F8.13: Rwanda H3 Aggregation 📋 PRIORITY 2
+### Feature F8.13: Rwanda H3 Aggregation 🚧 PRIORITY 2
 
 **Deliverable**: H3 aggregation of FATHOM flood data for Rwanda test region
-**Dependency**: E9 F9.1 (FATHOM merged COGs in STAC)
-**Timeline**: After FATHOM Rwanda pipeline complete
+**Dependency**: E9 F9.1 ✅ (FATHOM merged COGs exist in silver-fathom)
+**Status**: H3 bootstrap running (08 JAN 2026)
 
 | Story | Status | Description |
 |-------|--------|-------------|
-| S8.13.1 | 📋 | Seed Rwanda H3 cells (res 4-7, country-filtered) |
+| S8.13.1 | 🚧 | Seed Rwanda H3 cells (res 3-7, country-filtered) - **RUNNING** |
 | S8.13.2 | 📋 | Add FATHOM merged COGs to source_catalog |
 | S8.13.3 | 📋 | Run H3 raster aggregation on Rwanda FATHOM |
 | S8.13.4 | 📋 | Verify zonal_stats populated for flood themes |

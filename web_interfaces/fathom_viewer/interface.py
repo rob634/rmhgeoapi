@@ -538,7 +538,7 @@ class FathomViewerInterface(BaseInterface):
         // Load items from STAC collection
         async function loadItems() {{
             try {{
-                const resp = await fetch(`${{API_BASE_URL}}/api/stac/collections/${{COLLECTION_ID}}/items?limit=1000`);
+                const resp = await fetch(`/api/stac/collections/${{COLLECTION_ID}}/items?limit=1000`);
                 const data = await resp.json();
                 allItems = data.features || [];
 

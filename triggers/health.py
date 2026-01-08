@@ -630,9 +630,10 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                         "VNet/subnet not configured for Service Bus access",
                         "Private endpoint not configured",
                         "NSG blocking outbound port 5671/5672 (AMQP)",
-                        "Firewall blocking Service Bus IPs"
+                        "Firewall blocking Service Bus IPs",
+                        "Corporate firewall blocking AMQP - try WebSocket transport (port 443)"
                     ],
-                    "fix": "Check VNet service endpoints or private endpoint configuration"
+                    "fix": "Check VNet service endpoints, or try AMQP-over-WebSockets if port 5671 is blocked"
                 }
 
             # Timeout errors
@@ -734,6 +735,42 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                 )
                 if dns_check["is_private_ip"]:
                     dns_check["note"] = "Private IP detected - using Private Endpoint or VNet integration"
+
+                # Port connectivity checks (08 JAN 2026)
+                # Check both AMQP (5671) and AMQP-over-WebSockets (443) ports
+                port_checks = {}
+                for port, protocol in [(5671, "AMQP"), (443, "AMQP-over-WebSockets")]:
+                    try:
+                        test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        test_socket.settimeout(5)  # 5 second timeout
+                        result = test_socket.connect_ex((hostname, port))
+                        test_socket.close()
+                        port_checks[port] = {
+                            "protocol": protocol,
+                            "reachable": result == 0,
+                            "error_code": result if result != 0 else None
+                        }
+                    except Exception as port_error:
+                        port_checks[port] = {
+                            "protocol": protocol,
+                            "reachable": False,
+                            "error": str(port_error)[:100]
+                        }
+
+                dns_check["port_connectivity"] = port_checks
+
+                # Determine transport recommendation
+                amqp_ok = port_checks.get(5671, {}).get("reachable", False)
+                websocket_ok = port_checks.get(443, {}).get("reachable", False)
+
+                if amqp_ok:
+                    dns_check["recommended_transport"] = "AMQP (port 5671)"
+                elif websocket_ok:
+                    dns_check["recommended_transport"] = "AMQP-over-WebSockets (port 443)"
+                    dns_check["transport_warning"] = "Standard AMQP port 5671 blocked - consider configuring WebSocket transport"
+                else:
+                    dns_check["transport_error"] = "Neither AMQP (5671) nor WebSocket (443) ports are reachable"
+
             except socket.gaierror as e:
                 dns_check["resolved"] = False
                 dns_check["dns_error"] = str(e)

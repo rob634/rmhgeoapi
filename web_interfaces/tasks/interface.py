@@ -2417,6 +2417,9 @@ class TasksInterface(BaseInterface):
 
         // Format duration from milliseconds
         function formatDuration(ms) {{
+            // Handle invalid/negative values
+            if (ms === null || ms === undefined || isNaN(ms) || ms < 0) return '--';
+
             if (ms < 1000) return ms.toFixed(0) + 'ms';
             if (ms < 60000) return (ms / 1000).toFixed(1) + 's';
             if (ms < 3600000) return (ms / 60000).toFixed(1) + 'm';
@@ -2425,6 +2428,9 @@ class TasksInterface(BaseInterface):
 
         // Format duration for display (longer form for job totals)
         function formatDurationLong(ms) {{
+            // Handle invalid/negative values
+            if (ms === null || ms === undefined || isNaN(ms) || ms < 0) return '--';
+
             if (ms < 1000) return ms.toFixed(0) + ' ms';
             if (ms < 60000) return (ms / 1000).toFixed(1) + ' sec';
             if (ms < 3600000) {{
@@ -2442,6 +2448,9 @@ class TasksInterface(BaseInterface):
             if (!job.created_at) return null;
 
             const startTime = new Date(job.created_at);
+            // Validate start time parsed correctly
+            if (isNaN(startTime.getTime())) return null;
+
             let endTime;
 
             if (job.status === 'completed' || job.status === 'failed') {{
@@ -2450,7 +2459,14 @@ class TasksInterface(BaseInterface):
                 endTime = new Date(); // Still running
             }}
 
+            // Validate end time
+            if (isNaN(endTime.getTime())) endTime = new Date();
+
             const durationMs = endTime - startTime;
+
+            // Guard against negative durations (clock skew, timezone issues)
+            if (durationMs < 0) return null;
+
             return {{
                 ms: durationMs,
                 formatted: formatDurationLong(durationMs),
@@ -2473,15 +2489,21 @@ class TasksInterface(BaseInterface):
 
                 if (startStr) {{
                     const start = new Date(startStr);
-                    if (!earliestStart || start < earliestStart) {{
-                        earliestStart = start;
+                    // Validate parsed date
+                    if (!isNaN(start.getTime())) {{
+                        if (!earliestStart || start < earliestStart) {{
+                            earliestStart = start;
+                        }}
                     }}
                 }}
 
                 if (endStr && (task.status === 'completed' || task.status === 'failed')) {{
                     const end = new Date(endStr);
-                    if (!latestEnd || end > latestEnd) {{
-                        latestEnd = end;
+                    // Validate parsed date
+                    if (!isNaN(end.getTime())) {{
+                        if (!latestEnd || end > latestEnd) {{
+                            latestEnd = end;
+                        }}
                     }}
                 }}
             }});
@@ -2498,6 +2520,9 @@ class TasksInterface(BaseInterface):
             }}
 
             const durationMs = latestEnd - earliestStart;
+
+            // Guard against negative durations (clock skew, timezone issues)
+            if (durationMs < 0) return null;
 
             return {{
                 ms: durationMs,

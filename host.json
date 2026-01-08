@@ -32,10 +32,10 @@
   "functionTimeout": "00:30:00",
   "extensions": {
     "serviceBus": {
-      "prefetchCount": 4,
+      "prefetchCount": 8,
       "messageHandlerOptions": {
         "autoComplete": true,
-        "maxConcurrentCalls": 1,
+        "maxConcurrentCalls": 2,
         "maxAutoLockRenewalDuration": "00:30:00"
       }
     },

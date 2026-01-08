@@ -361,7 +361,7 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         if titiler_status == "unhealthy":
             health_data["errors"].append("TiTiler unavailable (raster tile visualization disabled)")
         elif titiler_status == "warning":
-            health_data["warnings"].append("TiTiler degraded - alive but /healthz failing (PGSTAC connection issue?)")
+            health_data["warnings"].append("TiTiler degraded - alive but /health failing (PGSTAC connection issue?)")
             if health_data["status"] == "healthy":
                 health_data["status"] = "degraded"
 
@@ -2294,9 +2294,9 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             except Exception as e:
                 livez_error = f"Error: {str(e)[:100]}"
 
-            # Check /healthz endpoint (full readiness probe)
+            # Check /health endpoint (full readiness probe)
             try:
-                resp = requests.get(f"{titiler_url}/healthz", timeout=10)
+                resp = requests.get(f"{titiler_url}/health", timeout=10)
                 health_ok = resp.status_code == 200
                 health_response = {
                     "status_code": resp.status_code,
@@ -2320,13 +2320,13 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             # Neither responds → unhealthy (red)
             if livez_ok and health_ok:
                 overall_status = "healthy"
-                status_reason = "Both /livez and /healthz endpoints responding"
+                status_reason = "Both /livez and /health endpoints responding"
             elif livez_ok and not health_ok:
                 overall_status = "warning"
-                status_reason = "App is alive (/livez OK) but not fully ready (/healthz failed)"
+                status_reason = "App is alive (/livez OK) but not fully ready (/health failed)"
             else:
                 overall_status = "unhealthy"
-                status_reason = "TiTiler not responding - neither /livez nor /healthz accessible"
+                status_reason = "TiTiler not responding - neither /livez nor /health accessible"
 
             result = {
                 "configured": True,

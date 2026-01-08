@@ -195,7 +195,7 @@ class AzureDefaults:
             - Managed Identity: Assign {app-name}-db-admin"
 
        Verification:
-           curl https://{titiler-url}/healthz
+           curl https://{titiler-url}/health
 
     3. FUNCTION APPS
        --------------

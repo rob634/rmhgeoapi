@@ -4,7 +4,7 @@
 **Value Statement**: "Hi! Here's how to integrate me!" — Self-service onboarding for integrators.
 **Runs On**: E1, E2, E8, E9 (Data APIs)
 **Status**: 🚧 PARTIAL (Enablers ✅, Core Interfaces 📋)
-**Last Updated**: 31 DEC 2025
+**Last Updated**: 07 JAN 2026
 **Owner**: Geospatial Team
 
 **Strategic Context**:
@@ -42,7 +42,7 @@ Every button says "this is what you would copy." When integrators replicate this
 | F12.6 | 📋 | STAC & Raster Collections Browser |
 | F12.7 | 📋 | OGC Features Collections Browser |
 | F12.8 | 📋 | API Documentation Hub |
-| SP12.9 | 🔵 | NiceGUI Evaluation Spike (Backlog) |
+| SP12.9 | ✅ | NiceGUI Evaluation Spike (Not Pursuing) |
 
 **Architecture**:
 ```
@@ -399,24 +399,24 @@ Integration Onboarding UI (Azure Functions + HTMX)
 
 # BACKLOG
 
-### Spike SP12.9: NiceGUI Evaluation 🔵 BACKLOG
+### Spike SP12.9: NiceGUI Evaluation ✅ COMPLETE (Not Pursuing)
 
-**Deliverable**: Proof-of-concept NiceGUI app on Docker Web App
-**Status**: 🔵 Deferred - HTMX approach working well
-**Trigger**: Revisit if HTMX limitations become blocking
+**Deliverable**: Evaluate NiceGUI as alternative to HTMX
+**Status**: ✅ COMPLETE - **Decision: Not pursuing NiceGUI**
+**Completed**: 07 JAN 2026
 
 | Story | Status | Description |
 |-------|--------|-------------|
-| SP12.9.1 | 🔵 | Create NiceGUI project structure |
-| SP12.9.2 | 🔵 | Build Storage browser PoC with NiceGUI |
-| SP12.9.3 | 🔵 | Evaluate developer experience vs HTMX |
-| SP12.9.4 | 🔵 | Decision: Migrate more interfaces to NiceGUI? |
+| SP12.9.1 | ✅ | Evaluated NiceGUI architecture |
+| SP12.9.2 | ✅ | Compared with HTMX approach |
+| SP12.9.3 | ✅ | Assessed deployment requirements |
+| SP12.9.4 | ✅ | **Decision: Stay with HTMX** |
 
-**NiceGUI Considerations**:
-- Requires persistent WebSocket connection
-- Cannot run on Azure Functions (serverless)
-- Needs Docker Web App or Container Apps
-- Rich component library (AG Grid, Leaflet, charts)
+**Decision Rationale**:
+- NiceGUI requires persistent WebSocket → cannot run on Azure Functions
+- Would need separate Docker deployment (Container Apps)
+- HTMX approach working well, simpler architecture
+- No compelling benefit to justify additional infrastructure
 
 ---
 
@@ -435,7 +435,7 @@ Integration Onboarding UI (Azure Functions + HTMX)
 | F12.6: STAC & Raster Browser | 4 | 📋 Planned |
 | F12.7: OGC Features Browser | 4 | 📋 Planned |
 | F12.8: API Documentation Hub | 5 | 📋 Planned |
-| SP12.9: NiceGUI Spike | 4 | 🔵 Backlog |
+| SP12.9: NiceGUI Spike | 4 | ✅ Complete (Not Pursuing) |
 | **Total** | **46** | |
 
 ## Implementation Order
@@ -460,4 +460,4 @@ Phase 1 (Complete)           Phase 2 (Current)
 
 ---
 
-**Last Updated**: 31 DEC 2025 (Reframed as Integration Onboarding with CURL box strategy)
+**Last Updated**: 07 JAN 2026 (Reframed as Integration Onboarding with CURL box strategy)

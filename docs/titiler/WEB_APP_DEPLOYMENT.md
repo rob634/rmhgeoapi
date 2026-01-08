@@ -94,7 +94,7 @@ az webapp log download \
 
 ### Health Check
 ```bash
-curl https://rmhtitiler-ghcyd7g0bxdvc2hc.eastus-01.azurewebsites.net/healthz
+curl https://rmhtitiler-ghcyd7g0bxdvc2hc.eastus-01.azurewebsites.net/health
 ```
 
 ### API Documentation

@@ -477,4 +477,4 @@ class TiTilerClient:
 
     def health_check(self) -> TiTilerResponse:
         """Check TiTiler server health."""
-        return self._request("GET", "/healthz")
+        return self._request("GET", "/health")

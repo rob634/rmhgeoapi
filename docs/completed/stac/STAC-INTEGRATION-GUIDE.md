@@ -150,11 +150,11 @@ stac_item = create_stac_item("copy47_of_dctest3_R1C2_cog_analysis.tif")
    - `WebMercatorQuad` - EPSG:3857 (standard web maps) - **Use this one**
    - `WorldCRS84Quad` - EPSG:4326 (geographic coordinates)
 
-4. **Health Check:** Check `https://rmhtitiler-ghcyd7g0bxdvc2hc.eastus-01.azurewebsites.net/healthz` before batch processing to ensure service is ready
+4. **Health Check:** Check `https://rmhtitiler-ghcyd7g0bxdvc2hc.eastus-01.azurewebsites.net/health` before batch processing to ensure service is ready
 
 5. **Error Handling:**
    - HTTP 404: COG not found or path incorrect
-   - HTTP 403: Authentication issue (check `/healthz` for SAS token status)
+   - HTTP 403: Authentication issue (check `/health` for SAS token status)
    - HTTP 500: Server error (retry with backoff)
 
 6. **Rate Limiting:** Current setup has 1 worker - limit to 10-20 concurrent requests max during batch processing
@@ -243,7 +243,7 @@ open "https://rmhtitiler-ghcyd7g0bxdvc2hc.eastus-01.azurewebsites.net/cog/WebMer
 
 **Health Check:**
 ```bash
-curl "https://rmhtitiler-ghcyd7g0bxdvc2hc.eastus-01.azurewebsites.net/healthz"
+curl "https://rmhtitiler-ghcyd7g0bxdvc2hc.eastus-01.azurewebsites.net/health"
 ```
 
 Expected response:

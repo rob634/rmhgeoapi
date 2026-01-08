@@ -15,7 +15,7 @@
 | **Landing Page** | Main entry point with all links | ✅ Working | https://rmhtitiler-ghcyd7g0bxdvc2hc.eastus-01.azurewebsites.net/ |
 | **API Documentation** | Interactive Swagger UI | ✅ Working | https://rmhtitiler-ghcyd7g0bxdvc2hc.eastus-01.azurewebsites.net/api.html |
 | **OpenAPI Spec** | JSON API specification | ✅ Working | https://rmhtitiler-ghcyd7g0bxdvc2hc.eastus-01.azurewebsites.net/api |
-| **Health Check** | Service health status | ✅ Working | https://rmhtitiler-ghcyd7g0bxdvc2hc.eastus-01.azurewebsites.net/healthz |
+| **Health Check** | Service health status | ✅ Working | https://rmhtitiler-ghcyd7g0bxdvc2hc.eastus-01.azurewebsites.net/health |
 | **OGC Conformance** | Standards compliance | ✅ Working | https://rmhtitiler-ghcyd7g0bxdvc2hc.eastus-01.azurewebsites.net/conformance |
 
 ---

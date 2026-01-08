@@ -425,6 +425,12 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Could not import FATHOM Viewer interface: {e}")
 
+try:
+    from .h3_map import interface as _h3_map
+    logger.info("✅ Imported H3 Map interface module")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import H3 Map interface: {e}")
+
 
 # Public API
 __all__ = [

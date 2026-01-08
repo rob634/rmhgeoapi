@@ -31,7 +31,7 @@ Usage:
         name="env_vars",
         passed=False,
         error_type="MISSING_ENV_VARS",
-        error_message="Missing: POSTGIS_HOST, SERVICE_BUS_NAMESPACE"
+        error_message="Missing: POSTGIS_HOST, SERVICE_BUS_FQDN"
     )
 
     # Check if all validations passed

@@ -611,12 +611,12 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                     "error": error_str[:300],
                     "diagnosis": "Cannot resolve Service Bus namespace hostname",
                     "likely_causes": [
-                        "SERVICE_BUS_NAMESPACE env var has wrong value",
+                        "SERVICE_BUS_FQDN env var has wrong value",
                         "VNet DNS configuration issue",
                         "Private DNS zone not linked to VNet",
                         "Network isolation blocking DNS"
                     ],
-                    "fix": "Verify SERVICE_BUS_NAMESPACE is correct FQDN (e.g., myns.servicebus.windows.net)"
+                    "fix": "Verify SERVICE_BUS_FQDN is correct (e.g., myns.servicebus.windows.net)"
                 }
 
             # Socket/connection errors (VNet, firewall)
@@ -2855,12 +2855,14 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             "is_default": config.etl_app_base_url == AzureDefaults.ETL_APP_URL
         }
 
-        # Service Bus namespace
-        sb_env = os.getenv('SERVICE_BUS_NAMESPACE')
+        # Service Bus namespace (check both new SERVICE_BUS_FQDN and legacy SERVICE_BUS_NAMESPACE)
+        sb_fqdn = os.getenv('SERVICE_BUS_FQDN')
+        sb_namespace = os.getenv('SERVICE_BUS_NAMESPACE')
+        sb_env = sb_fqdn or sb_namespace
         sources['service_bus_namespace'] = {
             "value": config.service_bus_namespace,
-            "source": "ENV" if sb_env else "DEFAULT",
-            "env_var": "SERVICE_BUS_NAMESPACE",
+            "source": "ENV (SERVICE_BUS_FQDN)" if sb_fqdn else ("ENV (SERVICE_BUS_NAMESPACE)" if sb_namespace else "DEFAULT"),
+            "env_var": "SERVICE_BUS_FQDN",
             "is_default": not bool(sb_env)
         }
 

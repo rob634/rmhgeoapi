@@ -2331,7 +2331,7 @@ if _required_queues:
                 details={
                     "hostname": _hostname,
                     "likely_causes": [
-                        "SERVICE_BUS_NAMESPACE env var has wrong value",
+                        "SERVICE_BUS_FQDN env var has wrong value",
                         "VNet DNS configuration issue (ASE/Private Endpoint)",
                         "Private DNS zone not linked to VNet",
                         "Network isolation blocking DNS resolution"

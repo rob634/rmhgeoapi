@@ -67,7 +67,7 @@ REQUIRED AZURE RESOURCES (Service Requests Needed)
    - Create queues: geospatial-jobs, raster-tasks, vector-tasks
 
    Environment Variables:
-     SERVICE_BUS_NAMESPACE         = {namespace-name}
+     SERVICE_BUS_FQDN              = {namespace}.servicebus.windows.net  # Full FQDN required
      SERVICE_BUS_CONNECTION_STRING = {connection-string}  # Or use managed identity
 
 5. FUNCTION APPS

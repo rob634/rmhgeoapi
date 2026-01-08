@@ -125,7 +125,7 @@ class ServiceBusRepository(IQueueRepository):
     - Thread-safe singleton pattern
 
     Configuration (via environment variables):
-    - SERVICE_BUS_NAMESPACE: Service Bus namespace (e.g., "mynamespace")
+    - SERVICE_BUS_FQDN: Service Bus FQDN (e.g., "mynamespace.servicebus.windows.net")
     - SERVICE_BUS_CONNECTION_STRING: Full connection string (optional, uses DefaultAzureCredential if not provided)
     - SERVICE_BUS_MAX_BATCH_SIZE: Max messages per batch (default: 100)
     - SERVICE_BUS_RETRY_COUNT: Number of retries (default: 3)
@@ -189,7 +189,7 @@ class ServiceBusRepository(IQueueRepository):
 
                     if not fully_qualified_namespace:
                         logger.error("❌ Service Bus namespace not configured")
-                        logger.error("Please set SERVICE_BUS_NAMESPACE or ServiceBusConnection__fullyQualifiedNamespace")
+                        logger.error("Please set SERVICE_BUS_FQDN (e.g., mynamespace.servicebus.windows.net)")
 
                         raise ValueError(
                             "ServiceBusConnection__fullyQualifiedNamespace environment variable not set. "

@@ -22,7 +22,7 @@ These variables have **no defaults** or require environment-specific values. The
 |----------|-------------|---------|
 | `BRONZE_STORAGE_ACCOUNT` | **Bronze Storage Account** (raw uploads) | `myaboronze` |
 | `SILVER_STORAGE_ACCOUNT` | **Silver Storage Account** (processed data) | `myappsilver` |
-| `SERVICE_BUS_NAMESPACE` | **Service Bus** namespace (without `.servicebus.windows.net`) | `myservicebus` |
+| `SERVICE_BUS_FQDN` | **Service Bus** FQDN (full URL required) | `myservicebus.servicebus.windows.net` |
 | `POSTGIS_HOST` | **App Database** server hostname | `myserver.postgres.database.azure.com` |
 | `POSTGIS_DATABASE` | **App Database** name | `geodb` |
 | `APP_NAME` | **Function App** name for task tracking | `rmhazuregeoapi` |
@@ -308,7 +308,7 @@ Each trust zone can have its own storage account. Required accounts are in Secti
     "H3_SCHEMA": "h3",
 
     "APP_NAME": "local-dev",
-    "SERVICE_BUS_NAMESPACE": "your-servicebus",
+    "SERVICE_BUS_FQDN": "your-servicebus.servicebus.windows.net",
     "ServiceBusConnection": "Endpoint=sb://...",
 
     "ENVIRONMENT": "dev",
@@ -337,9 +337,9 @@ H3_SCHEMA=h3
 USE_MANAGED_IDENTITY=true
 DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID=<guid>
 
-# Service Bus
-SERVICE_BUS_NAMESPACE=prodservicebus
-ServiceBusConnection__fullyQualifiedNamespace=prodservicebus.servicebus.windows.net
+# Service Bus (use FQDN - full URL)
+SERVICE_BUS_FQDN=prodservicebus.servicebus.windows.net
+# Note: ServiceBusConnection__fullyQualifiedNamespace is set automatically by Azure Functions bindings
 
 # Service URLs
 TITILER_BASE_URL=https://prodtitiler.azurewebsites.net

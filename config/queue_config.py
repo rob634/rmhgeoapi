@@ -40,7 +40,7 @@ REQUIRED AZURE RESOURCES
        ServiceBusConnection = Endpoint=sb://{namespace}.servicebus.windows.net/;SharedAccessKeyName=...
 
    Option B - Managed Identity (Recommended):
-       SERVICE_BUS_NAMESPACE = {namespace}.servicebus.windows.net
+       SERVICE_BUS_FQDN = {namespace}.servicebus.windows.net
 
 2. SERVICE BUS QUEUES
    -------------------
@@ -96,7 +96,7 @@ AUTHENTICATION MODES
 
 1. MANAGED IDENTITY (Production - Recommended)
    - No connection strings stored
-   - Set SERVICE_BUS_NAMESPACE only
+   - Set SERVICE_BUS_FQDN only (full URL: {namespace}.servicebus.windows.net)
 
 2. CONNECTION STRING (Development)
    - Quick setup for local development
@@ -123,7 +123,7 @@ Test job submission:
 
 Common Failure Messages:
     ServiceBusConnectionError: Cannot connect to namespace
-        → Check SERVICE_BUS_NAMESPACE or ServiceBusConnection
+        → Check SERVICE_BUS_FQDN or ServiceBusConnection
 
     UnauthorizedAccess: Identity lacks queue access
         → Grant 'Azure Service Bus Data Sender/Receiver' roles
@@ -252,8 +252,8 @@ class QueueConfig(BaseModel):
         """Load from environment variables."""
         return cls(
             connection_string=os.environ.get("ServiceBusConnection"),
-            # Check both SERVICE_BUS_NAMESPACE and Azure Functions binding variable
-            namespace=os.environ.get("SERVICE_BUS_NAMESPACE") or os.environ.get("ServiceBusConnection__fullyQualifiedNamespace"),
+            # Check SERVICE_BUS_FQDN (full URL), legacy SERVICE_BUS_NAMESPACE, and Azure Functions binding variable
+            namespace=os.environ.get("SERVICE_BUS_FQDN") or os.environ.get("SERVICE_BUS_NAMESPACE") or os.environ.get("ServiceBusConnection__fullyQualifiedNamespace"),
             jobs_queue=os.environ.get("SERVICE_BUS_JOBS_QUEUE", QueueDefaults.JOBS_QUEUE),
             raster_tasks_queue=os.environ.get("SERVICE_BUS_RASTER_TASKS_QUEUE", QueueDefaults.RASTER_TASKS_QUEUE),
             vector_tasks_queue=os.environ.get("SERVICE_BUS_VECTOR_TASKS_QUEUE", QueueDefaults.VECTOR_TASKS_QUEUE),

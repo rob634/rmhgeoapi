@@ -76,39 +76,39 @@ class FathomViewerInterface(BaseInterface):
             <div class="control-panel">
                 <div class="selector-row">
                     <!-- 1. Flood Type -->
-                    <div class="selector-group">
+                    <div class="selector-group skeleton-group" id="group-flood-type">
                         <label for="flood-type">1. Flood Type</label>
-                        <select id="flood-type" onchange="onFloodTypeChange()">
-                            <option value="">Loading...</option>
+                        <select id="flood-type" onchange="onFloodTypeChange()" class="skeleton-select" disabled>
+                            <option value="">Loading scenarios...</option>
                         </select>
                     </div>
 
                     <!-- 2. Defense Status -->
-                    <div class="selector-group">
+                    <div class="selector-group" id="group-defense">
                         <label for="defense-status">2. Defense Status</label>
-                        <select id="defense-status" onchange="onDefenseChange()">
-                            <option value="">Select flood type first</option>
+                        <select id="defense-status" onchange="onDefenseChange()" disabled>
+                            <option value="">--</option>
                         </select>
                     </div>
 
                     <!-- 3. Year -->
-                    <div class="selector-group">
+                    <div class="selector-group" id="group-year">
                         <label for="year">3. Projection Year</label>
-                        <select id="year" onchange="onYearChange()">
-                            <option value="">Select defense first</option>
+                        <select id="year" onchange="onYearChange()" disabled>
+                            <option value="">--</option>
                         </select>
                     </div>
 
                     <!-- 4. Climate Scenario -->
-                    <div class="selector-group">
+                    <div class="selector-group" id="group-scenario">
                         <label for="scenario">4. Climate Scenario</label>
-                        <select id="scenario" onchange="onScenarioChange()">
-                            <option value="">Select year first</option>
+                        <select id="scenario" onchange="onScenarioChange()" disabled>
+                            <option value="">--</option>
                         </select>
                     </div>
 
                     <!-- 5. Return Period -->
-                    <div class="selector-group">
+                    <div class="selector-group" id="group-return">
                         <label for="return-period">5. Return Period</label>
                         <select id="return-period" onchange="onReturnPeriodChange()">
                             <option value="1">1-in-5 year</option>
@@ -124,8 +124,8 @@ class FathomViewerInterface(BaseInterface):
                 </div>
 
                 <!-- Current Selection Summary -->
-                <div class="selection-summary" id="selection-summary">
-                    <span class="summary-label">No scenario selected</span>
+                <div class="selection-summary skeleton-summary" id="selection-summary">
+                    <span class="summary-label">Loading flood scenarios...</span>
                 </div>
             </div>
 
@@ -480,6 +480,22 @@ class FathomViewerInterface(BaseInterface):
             to { transform: rotate(360deg); }
         }
 
+        /* Skeleton Loading Animation */
+        @keyframes skeleton-pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .skeleton-group .skeleton-select {
+            background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+            background-size: 200% 100%;
+            animation: skeleton-pulse 1.5s ease-in-out infinite;
+        }
+
+        .skeleton-summary {
+            animation: skeleton-pulse 1.5s ease-in-out infinite;
+        }
+
         /* Responsive */
         @media (max-width: 900px) {
             .selector-group {
@@ -523,10 +539,11 @@ class FathomViewerInterface(BaseInterface):
             8: '1-in-1000 year'
         }};
 
-        // Initialize on load
-        window.addEventListener('load', async function() {{
+        // Initialize map IMMEDIATELY (don't wait for data)
+        document.addEventListener('DOMContentLoaded', function() {{
             initMap();
-            await loadItems();
+            // Load data after map is ready
+            loadItems();
         }});
 
         // Initialize Leaflet map
@@ -540,21 +557,34 @@ class FathomViewerInterface(BaseInterface):
 
             // Click handler
             map.on('click', onMapClick);
+
+            console.log('Map initialized');
         }}
 
         // Load items from STAC collection
         async function loadItems() {{
             try {{
+                console.log('Fetching STAC items...');
                 const resp = await fetch(`/api/stac/collections/${{COLLECTION_ID}}/items?limit=1000`);
                 const data = await resp.json();
                 allItems = data.features || [];
 
+                console.log(`Loaded ${{allItems.length}} items`);
                 document.getElementById('data-info').textContent = `${{allItems.length}} scenarios available`;
+
+                // Remove skeleton loading state
+                document.getElementById('group-flood-type').classList.remove('skeleton-group');
+                document.getElementById('flood-type').classList.remove('skeleton-select');
+                document.getElementById('selection-summary').classList.remove('skeleton-summary');
 
                 populateFloodTypes();
             }} catch (error) {{
                 console.error('Error loading items:', error);
                 document.getElementById('data-info').textContent = 'Error loading data';
+                document.getElementById('flood-type').innerHTML = '<option value="">Error loading</option>';
+                // Remove skeleton on error too
+                document.getElementById('group-flood-type').classList.remove('skeleton-group');
+                document.getElementById('flood-type').classList.remove('skeleton-select');
             }}
         }}
 
@@ -596,9 +626,19 @@ class FathomViewerInterface(BaseInterface):
             const select = document.getElementById('flood-type');
             const types = getUniqueValues('fathom:flood_type');
 
+            console.log('Flood types found:', types);
+
+            if (types.length === 0) {{
+                select.innerHTML = '<option value="">No flood types found</option>';
+                return;
+            }}
+
             select.innerHTML = types.map(t =>
                 `<option value="${{t}}">${{formatLabel(t)}}</option>`
             ).join('');
+
+            // Enable the dropdown
+            select.disabled = false;
 
             // Trigger cascade
             onFloodTypeChange();

@@ -1,6 +1,6 @@
 # Working Backlog
 
-**Last Updated**: 08 JAN 2026
+**Last Updated**: 08 JAN 2026 (pg_cron + autovacuum implementation for table maintenance)
 **Source of Truth**: [docs/epics/README.md](/docs/epics/README.md) — Epic/Feature/Story definitions
 **Purpose**: Sprint-level task tracking and delegation
 
@@ -83,11 +83,25 @@
 
 | Story | Description | Status |
 |-------|-------------|--------|
-| S8.13.1 | Seed Rwanda H3 cells (res 3-7, country-filtered) | 🚧 Running |
+| S8.13.1 | Seed Rwanda H3 cells (res 2-7, country-filtered) | 🔴 Stage 3 timeout |
+| S8.13.1a | **Fix H3 finalize timeout** - pg_cron + autovacuum | ✅ Done (08 JAN) |
+| S8.13.1b | Enable pg_cron extension in Azure Portal | 📋 |
+| S8.13.1c | Run pg_cron_setup.sql on database | 📋 |
+| S8.13.1d | Re-run H3 bootstrap (run_vacuum=False) | 📋 |
 | S8.13.2 | Add FATHOM merged COGs to source_catalog | 📋 |
 | S8.13.3 | Run H3 raster aggregation on Rwanda FATHOM | 📋 |
 | S8.13.4 | Verify zonal_stats populated for flood themes | 📋 |
 | S8.13.5 | Test H3 export endpoint with Rwanda data | 📋 |
+
+**S8.13.1 Issue (08 JAN 2026)**: H3 bootstrap completed Stage 2 (114M cells inserted) but Stage 3 finalize timed out at 30 minutes. Root cause: `VACUUM ANALYZE h3.cells` on 114M rows exceeds Azure Functions timeout.
+
+**S8.13.1a Fix (08 JAN 2026)**: Implemented pg_cron + autovacuum tuning solution:
+- `services/table_maintenance.py` - Fire-and-forget VACUUM via pg_cron
+- `sql/pg_cron_setup.sql` - pg_cron extension + autovacuum tuning SQL
+- `handler_finalize_h3_pyramid.py` - Updated with `run_vacuum` param (default: False)
+- `docs_claude/TABLE_MAINTENANCE.md` - Setup guide
+
+See [TABLE_MAINTENANCE.md](./TABLE_MAINTENANCE.md) for pg_cron setup steps.
 
 **H3 Theme Structure** (flood data):
 ```
@@ -195,6 +209,60 @@ CREATE TABLE h3.building_flood_stats (
 | S7.5.4 | Pipeline Builder UI (visual orchestration) | 📋 |
 
 **Design Principle**: Build concrete implementations first (FATHOM, H3, Buildings), then extract patterns.
+
+---
+
+### ⚪ Future: Unified Metadata Architecture (Foundational)
+
+**Epic**: E7 Pipeline Infrastructure
+**Goal**: Pydantic-based metadata models providing single source of truth across all data types
+**Design Document**: [METADATA.md](/METADATA.md)
+**Timeline**: After Building Flood Exposure pipeline (Priority 3)
+
+#### F7.8: Unified Metadata Architecture
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| S7.8.1 | Create `core/models/unified_metadata.py` with BaseMetadata + VectorMetadata | 📋 |
+| S7.8.2 | Create `core/models/external_refs.py` with DDHRefs + ExternalRefs models | 📋 |
+| S7.8.3 | Create `app.dataset_refs` table DDL (cross-type external linkage) | 📋 |
+| S7.8.4 | Add `providers JSONB` and `custom_properties JSONB` to geo.table_metadata DDL | 📋 |
+| S7.8.5 | Refactor `ogc_features/repository.py` to return VectorMetadata model | 📋 |
+| S7.8.6 | Refactor `ogc_features/service.py` to use VectorMetadata.to_ogc_response() | 📋 |
+| S7.8.7 | Refactor `services/stac_vector_catalog.py` to use VectorMetadata.to_stac_item() | 📋 |
+| S7.8.8 | Wire Platform layer to populate app.dataset_refs on ingest | 📋 |
+| S7.8.9 | Document pattern for future data types (RasterMetadata, ZarrMetadata) | 📋 |
+| S7.8.10 | Archive METADATA.md design doc to docs/archive after implementation | 📋 |
+
+**Architecture**:
+```
+BaseMetadata (abstract)
+    ├── VectorMetadata      → geo.table_metadata
+    ├── RasterMetadata      → raster.cog_metadata (future E2)
+    ├── ZarrMetadata        → zarr.dataset_metadata (future E9)
+    └── NewFormatMetadata   → extensible for future formats
+
+app.dataset_refs (cross-type DDH linkage)
+    ├── dataset_id (our ID) + data_type
+    ├── ddh_dataset_id, ddh_resource_id, ddh_version_id (typed, indexed)
+    └── other_refs JSONB (future external systems)
+```
+
+**Principles**:
+1. Pydantic models as single source of truth
+2. Typed columns over JSONB (minimize JSONB to `providers`, `custom_properties`, `other_refs`)
+3. pgstac as catalog index (populated FROM metadata tables)
+4. Open/Closed Principle — extend via inheritance
+5. External refs in app schema — cross-cutting DDH linkage spans all data types
+
+**DDH Integration Flow**:
+```
+PlatformRequest.dataset_id  ───► app.dataset_refs.ddh_dataset_id
+PlatformRequest.resource_id ───► app.dataset_refs.ddh_resource_id
+PlatformRequest.version_id  ───► app.dataset_refs.ddh_version_id
+```
+
+**Enables**: E1 (Vector), E2 (Raster), E9 (Zarr), E8 (Analytics) — consistent metadata + DDH linkage across all data types.
 
 ---
 
@@ -640,6 +708,11 @@ Tasks suitable for a colleague with Azure/Python/pipeline expertise but without 
 
 | Date | Item | Epic |
 |------|------|------|
+| 08 JAN 2026 | **pg_cron + autovacuum implementation** (table_maintenance.py, pg_cron_setup.sql) | E8 |
+| 08 JAN 2026 | H3 finalize handler updated with run_vacuum param (default: False) | E8 |
+| 08 JAN 2026 | TABLE_MAINTENANCE.md documentation created | E8 |
+| 08 JAN 2026 | H3 finalize timeout root cause identified: VACUUM ANALYZE on 114M rows | E8 |
+| 08 JAN 2026 | h3-pg PostgreSQL extension spike: NOT available on Azure Flexible Server | E8 |
 | 07 JAN 2026 | **FATHOM Rwanda Pipeline COMPLETE** (234 Phase 1 + 39 Phase 2 tasks, 0 failures) | E9 |
 | 07 JAN 2026 | Region filtering bug fix (`source_metadata->>'region'` WHERE clauses) | E9 |
 | 07 JAN 2026 | WIKI_JOB_FATHOM_ETL.md created (performance metrics, instance monitoring) | — |
@@ -675,6 +748,7 @@ Tasks suitable for a colleague with Azure/Python/pipeline expertise but without 
 |----------|---------|
 | [FATHOM_ETL.md](./FATHOM_ETL.md) | FATHOM flood data pipeline |
 | [H3_REVIEW.md](./H3_REVIEW.md) | H3 aggregation implementation |
+| [TABLE_MAINTENANCE.md](./TABLE_MAINTENANCE.md) | pg_cron + autovacuum setup |
 | [ARCHITECTURE_REFERENCE.md](./ARCHITECTURE_REFERENCE.md) | Technical patterns |
 | [docs/epics/README.md](/docs/epics/README.md) | Master Epic/Feature/Story definitions |
 

@@ -1,7 +1,8 @@
 # METADATA.md - Unified Metadata Architecture
 
 **Created**: 08 JAN 2026
-**Status**: Design Document
+**Status**: Design Document → **APPROVED** (08 JAN 2026)
+**Epic**: E7 Pipeline Infrastructure → F7.8 Unified Metadata Architecture
 **Goal**: STAC-like universal metadata accessible from both OGC Features and STAC endpoints
 
 ---
@@ -783,6 +784,79 @@ def apply_template(template: MetadataTemplate, user_metadata: dict) -> UnifiedMe
 4. **STAC Alignment**: Use STAC extensions and field names where possible
 5. **Backward Compatible**: Existing API responses should not break
 6. **Template-Driven**: Common metadata patterns can be captured as reusable templates
+7. **External Refs in App Schema**: DDH linkage lives in `app.dataset_refs` (cross-type)
+
+---
+
+## External References Architecture (08 JAN 2026 Decision)
+
+### Problem
+
+Platform layer passes DDH identifiers (`dataset_id`, `resource_id`, `version_id`) that link back to DDH's metadata system. Where should these live?
+
+### Decision: Option C — Dedicated app.dataset_refs Table
+
+DDH linkage is:
+- Cross-cutting (applies to vector, raster, zarr)
+- Critical for integration (needs indexing)
+- Structured (known schema, not random properties)
+
+**Therefore**: Create `app.dataset_refs` table with typed columns for DDH IDs plus JSONB for future systems.
+
+### Implementation
+
+```python
+# core/models/external_refs.py
+
+class DDHRefs(BaseModel):
+    """DDH (Data Hub Dashboard) external system references."""
+    dataset_id: Optional[str] = None
+    resource_id: Optional[str] = None
+    version_id: Optional[str] = None
+
+class ExternalRefs(BaseModel):
+    """References to external catalog systems."""
+    ddh: Optional[DDHRefs] = None
+    # Future: other external systems
+```
+
+```sql
+-- app.dataset_refs (cross-type linkage)
+CREATE TABLE app.dataset_refs (
+    dataset_id VARCHAR(255) PRIMARY KEY,  -- Our ID
+    data_type VARCHAR(20) NOT NULL,       -- 'vector', 'raster', 'zarr'
+
+    -- DDH linkage (typed for indexing)
+    ddh_dataset_id VARCHAR(100),
+    ddh_resource_id VARCHAR(100),
+    ddh_version_id VARCHAR(100),
+
+    -- Future systems
+    other_refs JSONB DEFAULT '{}',
+
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_dataset_refs_ddh ON app.dataset_refs(ddh_dataset_id);
+```
+
+### Why Not Other Options?
+
+| Option | Rejected Because |
+|--------|-----------------|
+| Bake into BaseMetadata | Pollutes core schema with DDH-specific fields |
+| Use custom_properties | No validation, hard to query, mixes concerns |
+
+### Flow
+
+```
+PlatformRequest                    app.dataset_refs
+├── dataset_id     ─────────────► ddh_dataset_id
+├── resource_id    ─────────────► ddh_resource_id
+├── version_id     ─────────────► ddh_version_id
+└── source_url     ─────────────► dataset_id + data_type
+```
 
 ---
 

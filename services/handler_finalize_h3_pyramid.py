@@ -2,15 +2,20 @@
 # H3 PYRAMID FINALIZATION HANDLER
 # ============================================================================
 # STATUS: Services - Final stage of H3 bootstrap workflow
-# PURPOSE: Verify cell counts, update metadata, run VACUUM ANALYZE
-# LAST_REVIEWED: 04 JAN 2026
+# PURPOSE: Verify cell counts, update metadata, optionally schedule async VACUUM
+# LAST_REVIEWED: 08 JAN 2026
 # REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
 # ============================================================================
 """
 H3 Pyramid Finalization Handler.
 
-Verifies cell counts, updates h3.grid_metadata, and performs VACUUM ANALYZE
-after H3 bootstrap workflow completes.
+Verifies cell counts, updates h3.grid_metadata, and optionally schedules
+async VACUUM via pg_cron after H3 bootstrap workflow completes.
+
+VACUUM Strategy (08 JAN 2026):
+    - run_vacuum=False (default): Skip vacuum to avoid 30-min function timeout
+    - run_vacuum=True: Schedule async VACUUM via pg_cron (fire-and-forget)
+    - Nightly pg_cron job handles routine vacuum (see TABLE_MAINTENANCE.md)
 
 Final stage of bootstrap_h3_land_grid_pyramid workflow.
 
@@ -29,7 +34,7 @@ def finalize_h3_pyramid(params: Dict[str, Any], context: Dict[str, Any] = None) 
     Performs:
     1. Verify cell counts against expected values (tolerance check)
     2. Update h3.grid_metadata with completion status and statistics
-    3. Run VACUUM ANALYZE on h3.grids table for query optimization
+    3. Optionally schedule async VACUUM via pg_cron (fire-and-forget)
     4. Return comprehensive verification report
 
     Args:
@@ -38,6 +43,7 @@ def finalize_h3_pyramid(params: Dict[str, Any], context: Dict[str, Any] = None) 
             - resolutions (List[int]): Resolution levels to verify (e.g., [2, 3, 4, 5, 6, 7])
             - expected_cells (Dict[int, int]): Expected cell counts per resolution
             - source_job_id (str): Bootstrap job ID
+            - run_vacuum (bool): Schedule async VACUUM via pg_cron (default: False)
 
         context: Optional execution context (not used in this handler)
 
@@ -50,7 +56,7 @@ def finalize_h3_pyramid(params: Dict[str, Any], context: Dict[str, Any] = None) 
                 "total_cells": int,
                 "verification_details": Dict[str, Any],
                 "metadata_updated": bool,
-                "vacuum_completed": bool
+                "vacuum_status": Dict[str, Any]  # status, table, job_name or skip reason
             }
         }
 
@@ -116,8 +122,9 @@ def finalize_h3_pyramid(params: Dict[str, Any], context: Dict[str, Any] = None) 
             logger=logger
         )
 
-        # STEP 4: Run VACUUM ANALYZE on h3.grids for query optimization
-        vacuum_completed = _vacuum_analyze_grids(h3_repo, logger)
+        # STEP 4: Handle VACUUM (fire-and-forget via pg_cron or skip)
+        run_vacuum = params.get('run_vacuum', False)  # Default OFF to avoid timeout
+        vacuum_status = _handle_vacuum(h3_repo, run_vacuum, logger)
 
         # STEP 5: Build success result
         total_cells = verification_results['total_cells']
@@ -130,7 +137,7 @@ def finalize_h3_pyramid(params: Dict[str, Any], context: Dict[str, Any] = None) 
                 "total_cells": total_cells,
                 "verification_details": verification_results,
                 "metadata_updated": metadata_updated,
-                "vacuum_completed": vacuum_completed,
+                "vacuum_status": vacuum_status,
                 "grid_id_prefix": grid_id_prefix,
                 "source_job_id": source_job_id
             }
@@ -317,32 +324,51 @@ def _update_grid_metadata(
         return False
 
 
-def _vacuum_analyze_grids(h3_repo, logger) -> bool:
+def _handle_vacuum(h3_repo, run_vacuum: bool, logger) -> Dict[str, Any]:
     """
-    Run VACUUM ANALYZE on h3.cells table to optimize query performance.
+    Handle VACUUM for h3.cells table.
 
-    Uses NORMALIZED h3.cells table (not legacy h3.grids).
-    VACUUM reclaims storage and updates statistics for the PostgreSQL query planner.
+    Uses fire-and-forget pattern via pg_cron to avoid function timeout.
+    If run_vacuum=False, skips vacuum (relies on nightly pg_cron job).
 
     Args:
         h3_repo: H3Repository instance
+        run_vacuum: Whether to schedule async VACUUM
         logger: Logger instance
 
     Returns:
-        True if VACUUM ANALYZE completed successfully
+        Dict with vacuum status:
+        - {"status": "skipped", "reason": "..."} if run_vacuum=False
+        - {"status": "scheduled", "table": "h3.cells", ...} if scheduled
+        - {"status": "schedule_failed", "error": "..."} if failed
     """
-    logger.info("🧹 Running VACUUM ANALYZE on h3.cells...")
+    if not run_vacuum:
+        logger.info("⏭️ VACUUM skipped (run_vacuum=False) - relies on nightly pg_cron job")
+        return {
+            "status": "skipped",
+            "reason": "run_vacuum=False (default)",
+            "note": "VACUUM runs nightly via pg_cron job 'vacuum-h3-cells-nightly'"
+        }
+
+    logger.info("🧹 Scheduling async VACUUM for h3.cells via pg_cron...")
 
     try:
-        # VACUUM requires autocommit mode
-        with h3_repo._get_connection() as conn:
-            conn.autocommit = True
-            with conn.cursor() as cur:
-                cur.execute("VACUUM ANALYZE h3.cells")
+        from services.table_maintenance import schedule_vacuum_async
+        result = schedule_vacuum_async('h3.cells', h3_repo)
 
-        logger.info("✅ VACUUM ANALYZE completed")
-        return True
+        if result.get('status') == 'scheduled':
+            logger.info(f"✅ VACUUM scheduled: {result.get('job_name')} (executes within 1 min)")
+        elif result.get('status') == 'pg_cron_not_available':
+            logger.warning("⚠️ pg_cron not available - VACUUM not scheduled")
+        else:
+            logger.warning(f"⚠️ VACUUM scheduling issue: {result}")
+
+        return result
 
     except Exception as e:
-        logger.error(f"⚠️ VACUUM ANALYZE failed (non-critical): {e}")
-        return False
+        logger.warning(f"⚠️ Failed to schedule async VACUUM (non-critical): {e}")
+        return {
+            "status": "schedule_failed",
+            "error": str(e),
+            "note": "Run manually: VACUUM ANALYZE h3.cells"
+        }

@@ -2,8 +2,8 @@
 
 **Type**: Foundational Enabler
 **Value Statement**: The ETL brain that makes everything else possible.
-**Status**: 🚧 PARTIAL (F7.1 ✅, F7.2 🚧, F7.3 ✅, F7.4 ✅)
-**Last Updated**: 07 JAN 2026
+**Status**: 🚧 PARTIAL (F7.1 ✅, F7.2 🚧, F7.3 ✅, F7.4 ✅, F7.8 📋)
+**Last Updated**: 08 JAN 2026
 
 **This is the substrate.** E1, E2, E8, and E9 all run on E7. Without it, nothing processes.
 
@@ -30,6 +30,7 @@
 | F7.5 | 📋 | Pipeline Builder UI |
 | F7.6 | 📋 | ACLED Conflict Data (twice weekly) |
 | F7.7 | 📋 | Static Reference Data (Admin0, manual) |
+| F7.8 | 📋 | **Unified Metadata Architecture** (Pydantic models, extensible) |
 
 ---
 
@@ -215,5 +216,160 @@ CREATE TABLE geo.curated_acled_events (
 - `geo.curated_admin1` (optional)
 
 **Note**: These use `source_type: manual` in the curated_datasets registry - no automatic scheduling.
+
+---
+
+### Feature F7.8: Unified Metadata Architecture 📋 PRIORITY
+
+**Deliverable**: Pydantic-based metadata models providing single source of truth across all data types
+**Status**: 📋 PLANNED
+**Design Document**: [METADATA.md](/METADATA.md)
+**Added**: 08 JAN 2026
+
+**Problem Statement**:
+- Vector metadata in `geo.table_metadata`, raster metadata only in `pgstac.items`
+- No common interface for metadata across data types
+- JSONB soup for type-specific fields loses schema validation
+- Difficult to add new data formats (GeoParquet, point clouds, etc.)
+
+**Solution**: Pydantic inheritance pattern with typed columns (minimal JSONB)
+
+```
+BaseMetadata (abstract)
+    │
+    ├── VectorMetadata      → geo.table_metadata
+    ├── RasterMetadata      → raster.cog_metadata (future)
+    ├── ZarrMetadata        → zarr.dataset_metadata (future)
+    └── NewFormatMetadata   → extensible for future formats
+```
+
+**Architecture Principles**:
+1. **Pydantic models as single source of truth** — validation, serialization, documentation
+2. **Typed columns over JSONB** — `feature_count INT` not `properties->>'feature_count'`
+3. **Minimal JSONB for extensibility** — `providers`, `external_refs`, `custom_properties` only
+4. **pgstac as catalog index** — populated FROM metadata tables, not source of truth
+5. **Open/Closed Principle** — extend via inheritance, don't modify base
+6. **External refs in app schema** — cross-cutting DDH linkage lives in `app.dataset_refs`
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S7.8.1 | 📋 | Create `core/models/unified_metadata.py` with BaseMetadata + VectorMetadata |
+| S7.8.2 | 📋 | Create `core/models/external_refs.py` with DDHRefs + ExternalRefs models |
+| S7.8.3 | 📋 | Create `app.dataset_refs` table DDL (cross-type external linkage) |
+| S7.8.4 | 📋 | Add `providers JSONB` and `custom_properties JSONB` to geo.table_metadata DDL |
+| S7.8.5 | 📋 | Refactor `ogc_features/repository.py` to return VectorMetadata model |
+| S7.8.6 | 📋 | Refactor `ogc_features/service.py` to use VectorMetadata.to_ogc_response() |
+| S7.8.7 | 📋 | Refactor `services/stac_vector_catalog.py` to use VectorMetadata.to_stac_item() |
+| S7.8.8 | 📋 | Wire Platform layer to populate app.dataset_refs on ingest |
+| S7.8.9 | 📋 | Document pattern for future data types (RasterMetadata, ZarrMetadata) |
+| S7.8.10 | 📋 | Archive METADATA.md design doc to docs/archive after implementation |
+
+**Key Files** (planned):
+- `core/models/unified_metadata.py` — BaseMetadata, VectorMetadata, Provider
+- `core/models/external_refs.py` — DDHRefs, ExternalRefs (cross-type linkage)
+- `infrastructure/external_refs_repository.py` — CRUD for app.dataset_refs
+- `triggers/admin/db_maintenance.py` — DDL updates for new columns/tables
+- `ogc_features/repository.py` — return VectorMetadata instead of dict
+- `ogc_features/service.py` — use model methods for response building
+- `services/stac_vector_catalog.py` — use model methods for STAC item creation
+
+**BaseMetadata Common Fields**:
+```python
+class BaseMetadata(BaseModel):
+    id: str
+    data_type: Literal["vector", "raster", "zarr"]
+    title: Optional[str]
+    description: Optional[str]
+    bbox: Optional[List[float]]
+    temporal_start: Optional[datetime]
+    temporal_end: Optional[datetime]
+    license: Optional[str]  # SPDX identifier
+    providers: List[Provider]  # [{name, roles[], url}]
+    keywords: List[str]
+    etl_job_id: Optional[str]
+    stac_collection_id: Optional[str]
+    created_at: Optional[datetime]
+    updated_at: Optional[datetime]
+    custom_properties: Dict[str, Any]  # Extensibility
+```
+
+**VectorMetadata Type-Specific Fields**:
+```python
+class VectorMetadata(BaseMetadata):
+    data_type: Literal["vector"] = "vector"
+    feature_count: Optional[int]
+    geometry_type: Optional[str]
+    source_crs: Optional[str]
+    temporal_property: Optional[str]
+```
+
+**Future Extensibility Example**:
+```python
+class GeoParquetMetadata(BaseMetadata):
+    data_type: Literal["geoparquet"] = "geoparquet"
+    row_groups: int
+    compression: str
+    geometry_encoding: str
+```
+
+**External References Architecture** (DDH linkage):
+```python
+# core/models/external_refs.py
+
+class DDHRefs(BaseModel):
+    """DDH (Data Hub Dashboard) external system references."""
+    dataset_id: Optional[str] = None   # DDH dataset identifier
+    resource_id: Optional[str] = None  # DDH resource identifier
+    version_id: Optional[str] = None   # DDH version identifier
+
+class ExternalRefs(BaseModel):
+    """References to external catalog systems."""
+    ddh: Optional[DDHRefs] = None
+    # Future: other external systems
+    # acme_catalog: Optional[AcmeRefs] = None
+```
+
+**app.dataset_refs Table** (cross-type linkage):
+```sql
+-- Lives in app schema (not geo) because it spans all data types
+CREATE TABLE app.dataset_refs (
+    -- Internal reference
+    dataset_id VARCHAR(255) PRIMARY KEY,  -- Our ID (table_name, cog_path, zarr_path)
+    data_type VARCHAR(20) NOT NULL,       -- 'vector', 'raster', 'zarr'
+
+    -- DDH linkage (typed columns for indexing)
+    ddh_dataset_id VARCHAR(100),
+    ddh_resource_id VARCHAR(100),
+    ddh_version_id VARCHAR(100),
+
+    -- Future external systems (JSONB for extensibility)
+    other_refs JSONB DEFAULT '{}',
+
+    -- Audit
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+
+    -- Indexes for DDH lookups
+    CONSTRAINT idx_ddh_combo UNIQUE (ddh_dataset_id, ddh_resource_id, ddh_version_id)
+);
+
+-- Fast lookups by DDH IDs
+CREATE INDEX idx_dataset_refs_ddh_dataset ON app.dataset_refs(ddh_dataset_id);
+```
+
+**Platform Layer Flow**:
+```
+PlatformRequest                    app.dataset_refs
+├── dataset_id     ─────────────► ddh_dataset_id
+├── resource_id    ─────────────► ddh_resource_id
+├── version_id     ─────────────► ddh_version_id
+└── source_url     ─────────────► (determines data_type + dataset_id)
+```
+
+**Enables**:
+- E1 (Vector): Clean metadata for OGC Features API
+- E2 (Raster): Parallel `raster.cog_metadata` table with RasterMetadata
+- E9 (Zarr): Parallel `zarr.dataset_metadata` table with ZarrMetadata
+- E8 (Analytics): Consistent metadata across aggregation outputs
 
 ---

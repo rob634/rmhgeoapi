@@ -1,8 +1,9 @@
 # PIPELINE_OPERATIONS.md - Resilience Patterns for Long-Running Jobs
 
 **Created**: 05 JAN 2026
-**Status**: DESIGN PROPOSAL
-**Context**: FATHOM ETL processing revealed failure modes when scaling from Rwanda (234 COGs) to Côte d'Ivoire (1924 COGs)
+**Updated**: 08 JAN 2026
+**Status**: DESIGN PROPOSAL + ACTIVE ISSUES
+**Context**: FATHOM ETL processing revealed failure modes when scaling from Rwanda (234 COGs) to Côte d'Ivoire (1924 COGs). H3 bootstrap revealed VACUUM timeout issue.
 
 ---
 
@@ -116,6 +117,91 @@ Stage 3: 1 task (stac_register) ← Single point of failure
 | **Symptom** | Stage 2 completes, Stage 3 fails, no record of Stage 2 success |
 | **Root Cause** | `stage_results` only populated on job completion |
 | **Recovery** | Must re-query all Stage 2 tasks to rebuild state |
+
+---
+
+### Failure Mode 6: VACUUM ANALYZE Timeout in Finalize Tasks
+
+**Observed**: 08 JAN 2026 during Rwanda H3 bootstrap
+
+| Attribute | Value |
+|-----------|-------|
+| **Symptom** | Stage 3 (finalize) times out after 30 minutes |
+| **Root Cause** | `VACUUM ANALYZE h3.cells` on 114M rows exceeds function timeout |
+| **Function Timeout** | 30 minutes (Azure Functions limit on Consumption/Basic plans) |
+| **Error** | `FunctionTimeoutException: Timeout value of 00:30:00 was exceeded` |
+| **Data Loss** | None - Stage 2 cells are committed; only metadata/vacuum skipped |
+
+**Context**:
+- H3 bootstrap job: `bootstrap_h3_land_grid_pyramid`
+- Stage 2 completed: 580 cascade tasks, 114M cells inserted
+- Stage 3 finalize handler runs `VACUUM ANALYZE h3.cells` (line 341)
+- VACUUM on 114M rows takes 30-60+ minutes
+
+**Why VACUUM is in Finalize**:
+- Original design assumed small cell counts (< 1M)
+- VACUUM ANALYZE updates PostgreSQL statistics for query optimization
+- Required after bulk inserts for efficient query plans
+
+**Performance Data (08 JAN 2026)**:
+
+| Metric | Value |
+|--------|-------|
+| Total cells | ~114M |
+| Batches completed | 580 |
+| Avg insert time per batch | 191.6s |
+| Insert rate | 1,023 cells/sec |
+| Estimated VACUUM time | 30-60+ minutes |
+
+**Solution: Skip VACUUM in Handler**
+
+Add `run_vacuum` parameter to finalize handler (default: `False`):
+
+```python
+# In handler - make vacuum optional
+vacuum_enabled = params.get('run_vacuum', False)  # Default OFF
+if vacuum_enabled:
+    _vacuum_analyze_grids(h3_repo, logger)
+```
+
+Then run VACUUM separately via maintenance endpoint or scheduled job:
+
+```bash
+# Option 1: Maintenance endpoint (run manually after job completes)
+curl -X POST ".../api/dbadmin/maintenance?action=vacuum&table=h3.cells"
+
+# Option 2: Direct SQL (via psql or Azure Portal Query Editor)
+VACUUM ANALYZE h3.cells;
+```
+
+**Alternative Solutions Considered**:
+
+| Option | Pros | Cons | Recommendation |
+|--------|------|------|----------------|
+| Skip VACUUM in handler | Simple, immediate fix | Requires manual VACUUM later | ✅ **Recommended** |
+| Increase function timeout | No code change | Requires Premium plan ($$$), still might timeout | ❌ Not recommended |
+| Async VACUUM via pg_background | Runs in background | Requires pg_background extension (not on Azure) | ❌ Not available |
+| Scheduled VACUUM job | Automated, decoupled | Adds complexity | 🟡 Future enhancement |
+
+**Files to Modify**:
+- `services/handler_finalize_h3_pyramid.py` - Add `run_vacuum` parameter
+- `jobs/bootstrap_h3_land_grid_pyramid.py` - Pass `run_vacuum: False` in Stage 3 params
+
+**Recovery for Stuck Job**:
+
+The Stage 2 data is safe (cells are committed). To complete the job:
+
+```sql
+-- 1. Verify cells exist
+SELECT resolution, COUNT(*) FROM h3.cells
+WHERE resolution IN (2, 4, 5, 6, 7) GROUP BY resolution;
+
+-- 2. Manually run VACUUM (outside function timeout)
+VACUUM ANALYZE h3.cells;
+
+-- 3. Mark job complete (if needed)
+UPDATE app.jobs SET status = 'completed' WHERE job_id = '1a443fcb...';
+```
 
 ---
 

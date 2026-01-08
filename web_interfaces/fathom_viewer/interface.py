@@ -41,12 +41,19 @@ class FathomViewerInterface(BaseInterface):
         custom_css = self._generate_css()
         custom_js = self._generate_js(collection_id, titiler_url)
 
+        # Leaflet CSS and JS
+        head_extras = """
+        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+        """
+
         return self.wrap_html(
             title=f"FATHOM Flood Viewer - {collection_id}",
             content=content,
             custom_css=custom_css,
             custom_js=custom_js,
-            include_htmx=False
+            include_htmx=False,
+            head_extras=head_extras
         )
 
     def _generate_content(self, collection_id: str, titiler_url: str) -> str:

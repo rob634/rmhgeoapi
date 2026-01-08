@@ -1,6 +1,6 @@
 # Working Backlog
 
-**Last Updated**: 07 JAN 2026
+**Last Updated**: 08 JAN 2026
 **Source of Truth**: [docs/epics/README.md](/docs/epics/README.md) — Epic/Feature/Story definitions
 **Purpose**: Sprint-level task tracking and delegation
 
@@ -10,9 +10,9 @@
 
 | Priority | Epic | Name | Status | Next Action |
 |:--------:|------|------|--------|-------------|
-| **1** | E9 | **FATHOM Rwanda Pipeline** | 🚧 | F9.1: Rwanda inventory + processing |
-| **2** | E8 | **H3 Analytics (Rwanda)** | 📋 | F8.13: Rwanda H3 aggregation |
-| **3** | E8 | **Open Buildings Access** | 📋 | F8.7: Building Exposure Pipeline |
+| **1** | E9 | **FATHOM Rwanda Pipeline** | ✅ | Complete! STAC registration pending |
+| **2** | E8 | **H3 Analytics (Rwanda)** | 🚧 | H3 bootstrap running (res 3-7) |
+| **3** | E8 | **Building Flood Exposure** | 📋 | F8.7: MS Buildings → FATHOM → H3 |
 | 4 | E9 | Pre-prepared Raster Ingest | 📋 | F9.8: COG copy + STAC |
 | 5 | E2 | Raster Data as API | 🚧 | F2.7: Collection Processing |
 | 6 | E3 | DDH Platform Integration | 🚧 | F3.1: Validate Swagger UI |
@@ -25,11 +25,12 @@
 
 ## Current Sprint Focus
 
-### 🔴 Priority 1: FATHOM Rwanda Pipeline
+### ✅ Priority 1: FATHOM Rwanda Pipeline (COMPLETE)
 
 **Epic**: E9 Large Data Hosting
 **Goal**: End-to-end FATHOM processing on Rwanda data (1,872 TIF files, 1.85 GB)
 **Test Region**: Rwanda (6 tiles: s01e030, s02e029, s02e030, s03e028, s03e029, s03e030)
+**Completed**: 07 JAN 2026
 
 #### Rwanda Data Dimensions
 
@@ -45,23 +46,27 @@
 
 | Story | Description | Status |
 |-------|-------------|--------|
-| S9.1.R1 | Add `base_prefix` parameter to `inventory_fathom_container` job | 📋 |
-| S9.1.R2 | Deploy and run inventory for Rwanda (`base_prefix: "rwa"`) | 📋 |
-| S9.1.R3 | Run Phase 1 band stacking (8 return periods → 1 COG per scenario) | 📋 |
-| S9.1.R4 | Run Phase 2 spatial merge (6 tiles → merged COGs) | 📋 |
-| S9.1.R5 | Verify outputs in silver-fathom storage | 📋 |
-| S9.1.R6 | Register merged COGs in STAC catalog | 📋 |
+| S9.1.R1 | Add `base_prefix` parameter to `inventory_fathom_container` job | ✅ Done (07 JAN) |
+| S9.1.R2 | Deploy and run inventory for Rwanda (`base_prefix: "rwa"`) | ✅ Done (07 JAN) |
+| S9.1.R3 | Run Phase 1 band stacking (8 return periods → 1 COG per scenario) | ✅ Done (07 JAN) |
+| S9.1.R4 | Run Phase 2 spatial merge (6 tiles → merged COGs) | ✅ Done (07 JAN) |
+| S9.1.R5 | Verify outputs in silver-fathom storage | ✅ Done (07 JAN) |
+| S9.1.R6 | Register merged COGs in STAC catalog | 📋 Pending |
 | S9.1.R7 | Change FATHOM grid from 5×5 to 4×4 degrees | ✅ Done (06 JAN) |
+| S9.1.R8 | Fix region filtering bug (source_metadata->>'region') | ✅ Done (07 JAN) |
 
-**NEXT SESSION (07 JAN 2026)**: Deploy with 4×4 grid and rerun full RWA pipeline from inventory.
-
-**Expected Outputs**:
-- Phase 1: ~1,924 stacked COGs (44 tiles × ~44 scenarios)
-- Phase 2: ~312 merged COGs (with 4×4 grid: max 16 tiles per merge, ~3-4 GB peak memory)
+**Completed Results (07 JAN 2026)**:
+- Inventory: 6 tiles, 234 Phase 1 groups, 39 Phase 2 groups
+- Phase 1: 234/234 tasks completed, 0 failures (~7 min)
+- Phase 2: 39/39 tasks completed, 0 failures (~8 min)
+- Total pipeline: ~17 minutes
+- Performance: 33 tasks/min (Phase 1), 5 tasks/min (Phase 2)
+- See: [WIKI_JOB_FATHOM_ETL.md](/docs/wiki/WIKI_JOB_FATHOM_ETL.md)
 
 **Key Files**:
-- `jobs/inventory_fathom_container.py` - Needs `base_prefix` parameter
-- `services/fathom_container_inventory.py` - Handler already supports `base_prefix`
+- `jobs/inventory_fathom_container.py` - Inventory job with region filtering
+- `services/fathom_container_inventory.py` - Bronze scanner with region extraction
+- `services/fathom_etl.py` - Core handlers with region filtering
 - `jobs/process_fathom_stack.py` - Phase 1 job
 - `jobs/process_fathom_merge.py` - Phase 2 job
 
@@ -71,13 +76,14 @@
 
 **Epic**: E8 GeoAnalytics Pipeline
 **Goal**: H3 aggregation of FATHOM flood data for Rwanda
-**Dependency**: F9.1 (FATHOM merged COGs must exist in STAC)
+**Dependency**: F9.1 ✅ (FATHOM merged COGs exist in silver-fathom)
+**Status**: H3 bootstrap running (08 JAN 2026)
 
-#### F8.13: Rwanda H3 Aggregation (NEW)
+#### F8.13: Rwanda H3 Aggregation
 
 | Story | Description | Status |
 |-------|-------------|--------|
-| S8.13.1 | Seed Rwanda H3 cells (res 4-7, country-filtered) | 📋 |
+| S8.13.1 | Seed Rwanda H3 cells (res 3-7, country-filtered) | 🚧 Running |
 | S8.13.2 | Add FATHOM merged COGs to source_catalog | 📋 |
 | S8.13.3 | Run H3 raster aggregation on Rwanda FATHOM | 📋 |
 | S8.13.4 | Verify zonal_stats populated for flood themes | 📋 |
@@ -100,29 +106,76 @@ themes:
 
 ---
 
-### 🟢 Priority 3: Open Buildings Access
+### 🟢 Priority 3: Building Flood Exposure Pipeline
 
 **Epic**: E8 GeoAnalytics Pipeline
-**Goal**: Access building footprints for Rwanda to enable exposure analysis
-**Dependency**: F8.13 (H3 aggregation working)
+**Goal**: Calculate % of buildings in flood risk areas, aggregated to H3 level 7
+**Dependency**: F8.13 (H3 cells for Rwanda), F9.1 ✅ (FATHOM COGs)
+**Data Source**: Microsoft Building Footprints (direct download)
+**Initial Scenario**: `fluvial-defended-2020` (baseline)
 
-#### F8.7: Building Exposure Pipeline
+#### Pipeline Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ STAGE 1: Load MS Building Footprints                                │
+│ Input: MS Buildings GeoJSON/Parquet for Rwanda                      │
+│ Output: buildings.footprints (id, centroid, h3_index_7, iso3)      │
+└─────────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ STAGE 2: Sample FATHOM at Building Centroids                        │
+│ Input: Building centroids + FATHOM COG (one scenario)              │
+│ Output: buildings.flood_exposure (building_id, depth, is_flooded)  │
+│ Binary: is_flooded = (flood_depth > 0)                             │
+└─────────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ STAGE 3: Aggregate to H3 Level 7                                    │
+│ SQL: GROUP BY h3_index_7                                            │
+│ Output: h3.building_flood_stats                                     │
+│   - total_buildings, flooded_buildings, pct_flooded                │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+#### F8.7: Building Flood Exposure Job
 
 | Story | Description | Status |
 |-------|-------------|--------|
-| S8.7.1 | Verify Planetary Computer MS Buildings access | 📋 |
-| S8.7.2 | Alternative: Verify Google Open Buildings GCS access | 📋 |
-| S8.7.3 | Download/filter Rwanda building footprints | 📋 |
-| S8.7.4 | Ingest buildings to PostGIS (geo schema) | 📋 |
-| S8.7.5 | Vector→H3 aggregation (building count per cell) | 📋 |
-| S8.7.6 | Join buildings + flood depth for exposure analysis | 📋 |
-| S8.7.7 | Export building exposure by H3 cell | 📋 |
+| S8.7.1 | Download MS Building Footprints for Rwanda | 📋 |
+| S8.7.2 | Create `buildings` schema (footprints, flood_exposure tables) | 📋 |
+| S8.7.3 | Create `BuildingFloodExposureJob` definition (4-stage) | 📋 |
+| S8.7.4 | Stage 1 handler: `building_load_footprints` (GeoJSON → PostGIS) | 📋 |
+| S8.7.5 | Stage 2 handler: `building_assign_h3` (centroid → H3 index) | 📋 |
+| S8.7.6 | Stage 3 handler: `building_sample_fathom` (point → raster value) | 📋 |
+| S8.7.7 | Stage 4 handler: `building_aggregate_h3` (SQL aggregation) | 📋 |
+| S8.7.8 | End-to-end test: Rwanda + fluvial-defended-2020 | 📋 |
+| S8.7.9 | Expand to all FATHOM scenarios (39 for Rwanda) | 📋 |
 
-**Data Sources**:
-- Microsoft Building Footprints: `https://planetarycomputer.microsoft.com/dataset/ms-buildings`
-- Google Open Buildings: `gs://open-buildings-data/v3/`
+**Data Source**: Microsoft Building Footprints
+- Download: `https://minedbuildings.z5.web.core.windows.net/global-buildings/dataset-links.csv`
+- Rwanda file: ~500K buildings expected
+- Format: GeoJSON with polygon footprints
 
-**Output**: Buildings at flood risk by return period, H3 resolution, and climate scenario.
+**Output Schema** (`h3.building_flood_stats`):
+```sql
+CREATE TABLE h3.building_flood_stats (
+    h3_index BIGINT,
+    scenario VARCHAR(100),        -- e.g., 'fluvial-defended-2020'
+    total_buildings INT,
+    flooded_buildings INT,
+    pct_flooded DECIMAL(5,2),     -- 0.00 to 100.00
+    PRIMARY KEY (h3_index, scenario)
+);
+```
+
+**Key Files** (to create):
+- `jobs/building_flood_exposure.py` - Job definition
+- `services/building_exposure.py` - Handlers
+- `infrastructure/buildings_schema.py` - Schema DDL
+- `core/models/building.py` - Pydantic models
 
 ---
 
@@ -587,6 +640,9 @@ Tasks suitable for a colleague with Azure/Python/pipeline expertise but without 
 
 | Date | Item | Epic |
 |------|------|------|
+| 07 JAN 2026 | **FATHOM Rwanda Pipeline COMPLETE** (234 Phase 1 + 39 Phase 2 tasks, 0 failures) | E9 |
+| 07 JAN 2026 | Region filtering bug fix (`source_metadata->>'region'` WHERE clauses) | E9 |
+| 07 JAN 2026 | WIKI_JOB_FATHOM_ETL.md created (performance metrics, instance monitoring) | — |
 | 05 JAN 2026 | **Docstring Review COMPLETE** (236/236 stable files, archived to docs_claude/) | — |
 | 05 JAN 2026 | Thread-safety fixes for BlobRepository (concurrent pipeline support) | — |
 | 05 JAN 2026 | FATHOM tile deduplication bug fix (8x duplicates) | E9 |
@@ -625,7 +681,7 @@ Tasks suitable for a colleague with Azure/Python/pipeline expertise but without 
 ---
 
 **Workflow**:
-1. Complete Rwanda FATHOM pipeline (Priority 1)
-2. Run H3 aggregation on FATHOM outputs (Priority 2)
-3. Access Open Buildings, join with flood data (Priority 3)
+1. ~~Complete Rwanda FATHOM pipeline (Priority 1)~~ ✅ DONE
+2. Run H3 aggregation on FATHOM outputs (Priority 2) - 🚧 H3 bootstrap running
+3. Building flood exposure pipeline: MS Buildings → FATHOM sample → H3 aggregation (Priority 3)
 4. Generalize to Pipeline Builder (Future)

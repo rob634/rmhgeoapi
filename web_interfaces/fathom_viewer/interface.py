@@ -708,15 +708,29 @@ class FathomViewerInterface(BaseInterface):
                 return;
             }}
 
+            // 2020 is baseline - no SSP scenarios
+            if (year === 2020) {{
+                scenarioSelect.innerHTML = '<option value="baseline">Baseline (Historical)</option>';
+                scenarioSelect.disabled = true;  // Only one option, no need to select
+                onScenarioChange();
+                return;
+            }}
+
             const scenarios = getUniqueValues('fathom:ssp_scenario', {{
                 'fathom:flood_type': floodType,
                 'fathom:defense_status': defense,
                 'fathom:year': year
             }});
 
-            // Handle baseline (2020) vs SSP scenarios
+            // Handle SSP scenarios for future years
+            if (scenarios.length === 0) {{
+                scenarioSelect.innerHTML = '<option value="">No scenarios available</option>';
+                scenarioSelect.disabled = true;
+                return;
+            }}
+
             scenarioSelect.innerHTML = scenarios.map(s =>
-                `<option value="${{s || 'baseline'}}">${{formatScenario(s)}}</option>`
+                `<option value="${{s}}">${{formatScenario(s)}}</option>`
             ).join('');
             scenarioSelect.disabled = false;
 
@@ -735,24 +749,31 @@ class FathomViewerInterface(BaseInterface):
                 return;
             }}
 
-            // Find matching item
-            const filters = {{
-                'fathom:flood_type': floodType,
-                'fathom:defense_status': defense,
-                'fathom:year': year
-            }};
-
-            // Handle baseline vs SSP
-            if (scenario !== 'baseline') {{
-                filters['fathom:ssp_scenario'] = scenario;
+            // Find matching item - baseline (2020) has no ssp_scenario field
+            if (year === 2020 || scenario === 'baseline') {{
+                // For 2020/baseline, find item without ssp_scenario filter
+                currentItem = allItems.find(item => {{
+                    const props = item.properties || {{}};
+                    return props['fathom:flood_type'] === floodType &&
+                           props['fathom:defense_status'] === defense &&
+                           props['fathom:year'] === 2020;
+                }});
+            }} else {{
+                // For future years, include ssp_scenario in filter
+                currentItem = findItem({{
+                    'fathom:flood_type': floodType,
+                    'fathom:defense_status': defense,
+                    'fathom:year': year,
+                    'fathom:ssp_scenario': scenario
+                }});
             }}
 
-            currentItem = findItem(filters);
-
             if (currentItem) {{
+                console.log('Found item:', currentItem.id);
                 updateSummary(currentItem);
                 updateMap();
             }} else {{
+                console.log('No matching item found for:', {{ floodType, defense, year, scenario }});
                 updateSummary(null);
             }}
         }}

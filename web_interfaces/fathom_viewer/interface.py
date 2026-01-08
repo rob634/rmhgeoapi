@@ -526,6 +526,7 @@ class FathomViewerInterface(BaseInterface):
         let currentItem = null;
         let map = null;
         let tileLayer = null;
+        let countryLayer = null;
 
         // Return period band mapping
         const RETURN_PERIODS = {{
@@ -542,7 +543,8 @@ class FathomViewerInterface(BaseInterface):
         // Initialize map IMMEDIATELY (don't wait for data)
         document.addEventListener('DOMContentLoaded', function() {{
             initMap();
-            // Load data after map is ready
+            // Load country boundary and data in parallel
+            loadCountryBoundary();
             loadItems();
         }});
 
@@ -559,6 +561,51 @@ class FathomViewerInterface(BaseInterface):
             map.on('click', onMapClick);
 
             console.log('Map initialized');
+        }}
+
+        // Load country boundary from system admin0 table
+        async function loadCountryBoundary() {{
+            try {{
+                // First check if admin0 table exists via promoted datasets
+                const promotedResp = await fetch('/api/promoted');
+                const promotedData = await promotedResp.json();
+
+                // Find system-reserved admin0 dataset
+                const admin0Dataset = promotedData.datasets?.find(d =>
+                    d.is_system_reserved && d.system_role === 'admin0_boundaries'
+                );
+
+                if (!admin0Dataset) {{
+                    console.log('No admin0 boundaries dataset found');
+                    return;
+                }}
+
+                const tableName = admin0Dataset.table_name;
+                console.log('Found admin0 table:', tableName);
+
+                // Fetch Rwanda boundary from OGC Features API
+                const featuresResp = await fetch(
+                    `/api/features/collections/${{tableName}}/items?iso3=RWA&limit=1`
+                );
+                const featuresData = await featuresResp.json();
+
+                if (featuresData.features && featuresData.features.length > 0) {{
+                    // Add country outline to map
+                    countryLayer = L.geoJSON(featuresData.features, {{
+                        style: {{
+                            color: '#053657',
+                            weight: 2,
+                            fillOpacity: 0,
+                            dashArray: '5, 5'
+                        }}
+                    }}).addTo(map);
+
+                    console.log('Added Rwanda boundary');
+                }}
+            }} catch (error) {{
+                console.log('Could not load country boundary:', error.message);
+                // Non-critical - continue without boundary
+            }}
         }}
 
         // Load items from STAC collection
@@ -849,12 +896,13 @@ class FathomViewerInterface(BaseInterface):
             }}
 
             // Build TiTiler tile URL
+            // Use expression to mask 0 values (no flood) - only show flood risk areas
             const params = new URLSearchParams({{
                 url: cogUrl,
                 bidx: band,
-                rescale: '0,300',
+                rescale: '1,300',
                 colormap_name: 'blues',
-                nodata: '-32768'
+                nodata: '0'
             }});
 
             const tileUrl = `${{TITILER_URL}}/cog/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}@2x.png?${{params.toString()}}`;

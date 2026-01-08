@@ -2,8 +2,8 @@
 # DATABASE MAINTENANCE ADMIN TRIGGER
 # ============================================================================
 # STATUS: Trigger layer - POST /api/dbadmin/maintenance
-# PURPOSE: Database maintenance operations (nuke, redeploy, cleanup, full-rebuild)
-# LAST_REVIEWED: 05 JAN 2026
+# PURPOSE: Database maintenance operations (rebuild, cleanup)
+# LAST_REVIEWED: 08 JAN 2026
 # REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
 # EXPORTS: AdminDbMaintenanceTrigger, admin_db_maintenance_trigger
 # ============================================================================
@@ -12,8 +12,10 @@ Database Maintenance Admin Trigger.
 
 Database maintenance operations with SQL injection prevention.
 
-Consolidated endpoint pattern (15 DEC 2025):
-    POST /api/dbadmin/maintenance?action={nuke|redeploy|cleanup|full-rebuild}&target={app|pgstac}
+Consolidated endpoint pattern (08 JAN 2026):
+    POST /api/dbadmin/maintenance?action=rebuild&confirm=yes              # Both schemas (RECOMMENDED)
+    POST /api/dbadmin/maintenance?action=rebuild&target=app&confirm=yes   # App only (with warning)
+    POST /api/dbadmin/maintenance?action=rebuild&target=pgstac&confirm=yes # pgSTAC only (with warning)
 
 Exports:
     AdminDbMaintenanceTrigger: HTTP trigger class for maintenance operations
@@ -55,8 +57,11 @@ class AdminDbMaintenanceTrigger:
     Singleton pattern for consistent configuration across requests.
     All operations require confirmation parameters.
 
-    Consolidated API (15 DEC 2025):
-        POST /api/dbadmin/maintenance?action={nuke|redeploy|cleanup|full-rebuild|check-prerequisites}&target={app|pgstac}&confirm=yes
+    Consolidated API (08 JAN 2026):
+        POST /api/dbadmin/maintenance?action=rebuild&confirm=yes              # Both schemas (RECOMMENDED)
+        POST /api/dbadmin/maintenance?action=rebuild&target=app&confirm=yes   # App only (with warning)
+        POST /api/dbadmin/maintenance?action=rebuild&target=pgstac&confirm=yes # pgSTAC only (with warning)
+        POST /api/dbadmin/maintenance?action=cleanup&confirm=yes&days=30      # Clean old records
     """
 
     _instance: Optional['AdminDbMaintenanceTrigger'] = None
@@ -69,7 +74,7 @@ class AdminDbMaintenanceTrigger:
             route="dbadmin/maintenance",
             methods=["POST", "GET"],
             handler="handle_maintenance",
-            description="Consolidated maintenance: ?action={nuke|redeploy|cleanup|full-rebuild|check-prerequisites}&target={app|pgstac}"
+            description="Consolidated maintenance: ?action=rebuild[&target=app|pgstac] or ?action=cleanup"
         ),
         RouteDefinition(
             route="dbadmin/geo",
@@ -83,11 +88,10 @@ class AdminDbMaintenanceTrigger:
     # OPERATIONS REGISTRY - Maps action param to handler method
     # ========================================================================
     OPERATIONS = {
-        "nuke": "_nuke_schema",
-        "redeploy": "_redeploy_schema",
+        "rebuild": "_rebuild",  # Consolidated rebuild (08 JAN 2026)
         "cleanup": "_cleanup_old_records",
-        "full-rebuild": "_full_rebuild",
-        "check-prerequisites": "_check_pgstac_prerequisites",
+        # Legacy aliases (deprecated - will be removed in future version)
+        "full-rebuild": "_rebuild",  # Alias for backward compatibility
     }
 
     GEO_READ_OPERATIONS = {
@@ -132,20 +136,21 @@ class AdminDbMaintenanceTrigger:
 
     def handle_maintenance(self, req: func.HttpRequest) -> func.HttpResponse:
         """
-        Consolidated maintenance endpoint (15 DEC 2025).
+        Consolidated maintenance endpoint (08 JAN 2026).
 
-        POST /api/dbadmin/maintenance?action={nuke|redeploy|cleanup|full-rebuild|check-prerequisites}&target={app|pgstac}&confirm=yes
+        POST /api/dbadmin/maintenance?action=rebuild&confirm=yes              # Both schemas (RECOMMENDED)
+        POST /api/dbadmin/maintenance?action=rebuild&target=app&confirm=yes   # App only (with warning)
+        POST /api/dbadmin/maintenance?action=rebuild&target=pgstac&confirm=yes # pgSTAC only (with warning)
+        POST /api/dbadmin/maintenance?action=cleanup&confirm=yes&days=30      # Clean old records
 
         Query Parameters:
             action: Operation to perform (required)
-                - nuke: Drop all schema objects (DESTRUCTIVE)
-                - redeploy: Drop and recreate schema (target determines which)
+                - rebuild: Rebuild schema(s) - RECOMMENDED for fresh start
                 - cleanup: Remove old completed jobs/tasks
-                - full-rebuild: Atomic rebuild of both app+pgstac schemas
-                - check-prerequisites: Verify pgstac requirements
-            target: Schema target (default: app)
-                - app: Application schema (jobs, tasks)
-                - pgstac: STAC catalog schema
+            target: Schema target for rebuild (default: all)
+                - all: Both app+pgstac schemas (RECOMMENDED - maintains referential integrity)
+                - app: Application schema only (jobs, tasks) - WARNING: may orphan STAC items
+                - pgstac: STAC catalog schema only - WARNING: may orphan job references
             confirm: Must be 'yes' for destructive operations
             days: For cleanup, records older than N days (default: 30)
 
@@ -154,7 +159,7 @@ class AdminDbMaintenanceTrigger:
         """
         try:
             action = req.params.get('action')
-            target = req.params.get('target', 'app')
+            target = req.params.get('target', 'all')  # Default to 'all' for rebuild
 
             logger.info(f"📥 Maintenance request: action={action}, target={target}")
 
@@ -163,24 +168,21 @@ class AdminDbMaintenanceTrigger:
                 return func.HttpResponse(
                     body=json.dumps({
                         'error': "action parameter required",
-                        'valid_actions': list(self.OPERATIONS.keys()),
-                        'usage': 'POST /api/dbadmin/maintenance?action={action}&target={app|pgstac}&confirm=yes',
+                        'valid_actions': ['rebuild', 'cleanup'],
+                        'usage': 'POST /api/dbadmin/maintenance?action=rebuild&confirm=yes',
+                        'recommended': 'Use action=rebuild with no target for atomic rebuild of both schemas',
                         'timestamp': datetime.now(timezone.utc).isoformat()
                     }),
                     status_code=400,
                     mimetype='application/json'
                 )
 
-            # Handle pgstac-specific redeploy
-            if action == 'redeploy' and target == 'pgstac':
-                return self._redeploy_pgstac_schema(req)
-
             if action not in self.OPERATIONS:
                 return func.HttpResponse(
                     body=json.dumps({
                         'error': f"Invalid action: '{action}'",
-                        'valid_actions': list(self.OPERATIONS.keys()),
-                        'usage': 'POST /api/dbadmin/maintenance?action={action}&target={app|pgstac}&confirm=yes',
+                        'valid_actions': ['rebuild', 'cleanup'],
+                        'usage': 'POST /api/dbadmin/maintenance?action=rebuild&confirm=yes',
                         'timestamp': datetime.now(timezone.utc).isoformat()
                     }),
                     status_code=400,
@@ -490,11 +492,88 @@ class AdminDbMaintenanceTrigger:
                 mimetype='application/json'
             )
 
+    def _rebuild(self, req: func.HttpRequest) -> func.HttpResponse:
+        """
+        Consolidated rebuild endpoint (08 JAN 2026).
+
+        Routes to appropriate rebuild method based on target parameter.
+
+        POST /api/dbadmin/maintenance?action=rebuild&confirm=yes              # Both (RECOMMENDED)
+        POST /api/dbadmin/maintenance?action=rebuild&target=app&confirm=yes   # App only
+        POST /api/dbadmin/maintenance?action=rebuild&target=pgstac&confirm=yes # pgSTAC only
+
+        Query Parameters:
+            target: Schema target (default: all)
+                - all: Both app+pgstac schemas (RECOMMENDED - maintains referential integrity)
+                - app: Application schema only (WARNING: may orphan STAC items)
+                - pgstac: STAC catalog only (WARNING: may orphan job references)
+            confirm: Must be 'yes' (required)
+
+        Returns:
+            JSON response with rebuild results
+        """
+        target = req.params.get('target', 'all')
+        confirm = req.params.get('confirm')
+
+        # Validate target parameter
+        valid_targets = ['all', 'app', 'pgstac']
+        if target not in valid_targets:
+            return func.HttpResponse(
+                body=json.dumps({
+                    'error': f"Invalid target: '{target}'",
+                    'valid_targets': valid_targets,
+                    'usage': 'POST /api/dbadmin/maintenance?action=rebuild&confirm=yes',
+                    'recommended': 'Use target=all (default) for atomic rebuild of both schemas',
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                }),
+                status_code=400,
+                mimetype='application/json'
+            )
+
+        # Add warnings for partial rebuilds
+        if target == 'app':
+            logger.warning("⚠️ PARTIAL REBUILD: App schema only - STAC items may become orphaned")
+            # Call existing _redeploy_schema (app only)
+            response = self._redeploy_schema(req)
+            # Inject warning into response
+            try:
+                data = json.loads(response.get_body().decode('utf-8'))
+                data['warning'] = 'App schema rebuilt independently. STAC items may reference non-existent jobs. Consider full rebuild: POST /api/dbadmin/maintenance?action=rebuild&confirm=yes'
+                data['recommended'] = 'POST /api/dbadmin/maintenance?action=rebuild&confirm=yes'
+                return func.HttpResponse(
+                    body=json.dumps(data, indent=2),
+                    status_code=response.status_code,
+                    mimetype='application/json'
+                )
+            except Exception:
+                return response
+
+        elif target == 'pgstac':
+            logger.warning("⚠️ PARTIAL REBUILD: pgSTAC schema only - Job references may become orphaned")
+            # Call existing _redeploy_pgstac_schema
+            response = self._redeploy_pgstac_schema(req)
+            # Inject warning into response
+            try:
+                data = json.loads(response.get_body().decode('utf-8'))
+                data['warning'] = 'pgSTAC schema rebuilt independently. Jobs may reference non-existent STAC items. Consider full rebuild: POST /api/dbadmin/maintenance?action=rebuild&confirm=yes'
+                data['recommended'] = 'POST /api/dbadmin/maintenance?action=rebuild&confirm=yes'
+                return func.HttpResponse(
+                    body=json.dumps(data, indent=2),
+                    status_code=response.status_code,
+                    mimetype='application/json'
+                )
+            except Exception:
+                return response
+
+        else:  # target == 'all' (default, recommended)
+            logger.info("✅ FULL REBUILD: Both app + pgstac schemas atomically (RECOMMENDED)")
+            return self._full_rebuild(req)
+
     def _redeploy_schema(self, req: func.HttpRequest) -> func.HttpResponse:
         """
-        Nuke and redeploy schema in one operation (DESTRUCTIVE).
+        Rebuild app schema only (INTERNAL - use _rebuild with target=app).
 
-        POST /api/dbadmin/maintenance/redeploy?confirm=yes
+        POST /api/dbadmin/maintenance?action=rebuild&target=app&confirm=yes
 
         Query Parameters:
             confirm: Must be "yes" (required)
@@ -517,15 +596,16 @@ class AdminDbMaintenanceTrigger:
         if confirm != 'yes':
             return func.HttpResponse(
                 body=json.dumps({
-                    'error': 'Schema redeploy requires explicit confirmation',
-                    'usage': 'POST /api/dbadmin/maintenance/redeploy?confirm=yes',
-                    'warning': 'This will DESTROY ALL DATA and rebuild the schema'
+                    'error': 'Schema rebuild requires explicit confirmation',
+                    'usage': 'POST /api/dbadmin/maintenance?action=rebuild&target=app&confirm=yes',
+                    'recommended': 'POST /api/dbadmin/maintenance?action=rebuild&confirm=yes (both schemas)',
+                    'warning': 'This will DESTROY ALL app schema DATA. Consider full rebuild for consistency.'
                 }),
                 status_code=400,
                 mimetype='application/json'
             )
 
-        logger.warning("🔄 REDEPLOY: Nuking and redeploying schema")
+        logger.warning("🔄 REBUILD (app only): Nuking and redeploying app schema")
 
         results = {
             "operation": "schema_redeploy",
@@ -708,9 +788,9 @@ class AdminDbMaintenanceTrigger:
 
     def _redeploy_pgstac_schema(self, req: func.HttpRequest) -> func.HttpResponse:
         """
-        Nuke and redeploy pgSTAC schema using pypgstac migrate (DESTRUCTIVE).
+        Rebuild pgSTAC schema only (INTERNAL - use _rebuild with target=pgstac).
 
-        POST /api/dbadmin/maintenance/pgstac/redeploy?confirm=yes
+        POST /api/dbadmin/maintenance?action=rebuild&target=pgstac&confirm=yes
 
         Query Parameters:
             confirm: Must be "yes" (required)
@@ -727,26 +807,25 @@ class AdminDbMaintenanceTrigger:
                 "timestamp": "2025-11-18T..."
             }
 
-        Note: This is separate from app schema redeploy - allows independent
+        Note: This is separate from app schema rebuild - allows independent
               pgSTAC maintenance without affecting job/task tables.
-
-        
-        Date: 18 NOV 2025
+              However, rebuilding both together is RECOMMENDED for consistency.
         """
         confirm = req.params.get('confirm')
 
         if confirm != 'yes':
             return func.HttpResponse(
                 body=json.dumps({
-                    'error': 'pgSTAC schema redeploy requires explicit confirmation',
-                    'usage': 'POST /api/dbadmin/maintenance/pgstac/redeploy?confirm=yes',
-                    'warning': 'This will DESTROY ALL STAC DATA (collections, items, searches) and rebuild the pgstac schema'
+                    'error': 'pgSTAC schema rebuild requires explicit confirmation',
+                    'usage': 'POST /api/dbadmin/maintenance?action=rebuild&target=pgstac&confirm=yes',
+                    'recommended': 'POST /api/dbadmin/maintenance?action=rebuild&confirm=yes (both schemas)',
+                    'warning': 'This will DESTROY ALL STAC DATA. Consider full rebuild for consistency.'
                 }),
                 status_code=400,
                 mimetype='application/json'
             )
 
-        logger.warning("🔄 PGSTAC REDEPLOY: Nuking and redeploying pgstac schema")
+        logger.warning("🔄 REBUILD (pgstac only): Nuking and redeploying pgstac schema")
 
         results = {
             "operation": "pgstac_schema_redeploy",
@@ -944,8 +1023,8 @@ class AdminDbMaintenanceTrigger:
         if confirm != 'yes':
             return func.HttpResponse(
                 body=json.dumps({
-                    'error': 'Full rebuild requires explicit confirmation',
-                    'usage': 'POST /api/dbadmin/maintenance/full-rebuild?confirm=yes',
+                    'error': 'Rebuild requires explicit confirmation',
+                    'usage': 'POST /api/dbadmin/maintenance?action=rebuild&confirm=yes',
                     'warning': 'This will DESTROY ALL job/task data AND all STAC collections/items, then rebuild both schemas from code. geo schema (business data) is NOT touched.'
                 }),
                 status_code=400,

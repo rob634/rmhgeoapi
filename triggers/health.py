@@ -677,7 +677,7 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                         "Queue was deleted",
                         "Wrong queue name in configuration"
                     ],
-                    "fix": "Run schema rebuild: POST /api/dbadmin/maintenance?action=full-rebuild&confirm=yes"
+                    "fix": "Run schema rebuild: POST /api/dbadmin/maintenance?action=rebuild&confirm=yes"
                 }
 
             # SSL/TLS errors
@@ -849,7 +849,7 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         if "authentication" in error_categories:
             return "Check managed identity role assignments (Azure Service Bus Data Owner)"
         if "configuration" in error_categories:
-            return "Run full-rebuild to create missing queues"
+            return "Run rebuild to create missing queues"
         return "Check Application Insights for detailed error logs"
 
     def _check_database(self) -> Dict[str, Any]:
@@ -1026,7 +1026,7 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                     error_msg = None
                     impact_msg = None
                     if not app_schema_exists:
-                        error_msg = f"CRITICAL: App schema '{config.app_schema}' does not exist - run full-rebuild"
+                        error_msg = f"CRITICAL: App schema '{config.app_schema}' does not exist - run rebuild"
                         impact_msg = "Job/task orchestration completely unavailable"
                     elif not tables_ready:
                         error_msg = f"App schema exists but required tables missing: {table_management_results}"
@@ -1062,7 +1062,7 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                     if error_msg:
                         result["error"] = error_msg
                         result["impact"] = impact_msg
-                        result["fix"] = "POST /api/dbadmin/maintenance/full-rebuild?confirm=yes"
+                        result["fix"] = "POST /api/dbadmin/maintenance?action=rebuild&confirm=yes"
 
                     return result
 
@@ -1534,12 +1534,12 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
 
                         if not all_functions_exist:
                             warnings.extend(function_warnings)
-                            warnings.append("Search registration will fail - run /api/dbadmin/maintenance/pgstac/redeploy?confirm=yes")
+                            warnings.append("Search registration will fail - run /api/dbadmin/maintenance?action=rebuild&confirm=yes")
 
                         if warnings:
                             result["warnings"] = warnings
                             result["impact"] = "Cannot register pgSTAC searches for TiTiler visualization"
-                            result["fix"] = "Run /api/dbadmin/maintenance/pgstac/redeploy?confirm=yes to reinstall pgSTAC"
+                            result["fix"] = "POST /api/dbadmin/maintenance?action=rebuild&confirm=yes"
                             # Add error field to trigger unhealthy status when critical tables/functions missing
                             if not all_tables_exist or not all_functions_exist:
                                 result["error"] = f"PgSTAC incomplete: tables_ok={all_tables_exist}, functions_ok={all_functions_exist}"

@@ -338,16 +338,16 @@ az functionapp config appsettings set \
 After deploying the Function App, initialize the database schema:
 
 ```bash
-# Deploy schema via API endpoint
-curl -X POST "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/dbadmin/maintenance/redeploy?confirm=yes"
+# Deploy schema via API endpoint (rebuilds both app and pgstac schemas)
+curl -X POST "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/dbadmin/maintenance?action=rebuild&confirm=yes"
 ```
 
 **Expected response**:
 ```json
 {
   "status": "success",
-  "message": "Schema redeployed successfully",
-  "schemas_created": ["app", "geo"],
+  "operation": "full_rebuild",
+  "schemas_created": ["app", "pgstac"],
   "tables_created": ["jobs", "tasks"]
 }
 ```
@@ -526,14 +526,21 @@ curl "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/dbadmin/tasks?status=fai
 ### Schema Operations (Development Only)
 
 ```bash
-# Redeploy schema (drops and recreates all tables)
-curl -X POST "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/dbadmin/maintenance/redeploy?confirm=yes"
+# Rebuild both app and pgstac schemas (RECOMMENDED)
+curl -X POST "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/dbadmin/maintenance?action=rebuild&confirm=yes"
+
+# Rebuild app schema only (with warning about orphaned STAC items)
+curl -X POST "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/dbadmin/maintenance?action=rebuild&target=app&confirm=yes"
+
+# Rebuild pgstac schema only (with warning about orphaned job references)
+curl -X POST "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/dbadmin/maintenance?action=rebuild&target=pgstac&confirm=yes"
 
 # Cleanup old records (delete completed jobs older than N days)
-curl -X POST "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/dbadmin/maintenance/cleanup?confirm=yes&days=30"
+curl -X POST "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/dbadmin/maintenance?action=cleanup&confirm=yes&days=30"
 ```
 
 **WARNING**: Schema operations delete data. Use only in development/test environments.
+**RECOMMENDED**: Use `action=rebuild` without a target to rebuild both schemas atomically. This maintains referential integrity between app.jobs and pgstac.items.
 
 ### Geo Schema Management (11 DEC 2025)
 

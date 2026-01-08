@@ -77,7 +77,7 @@ Endpoints:
         GET  /api/dbadmin/stats - Database statistics
 
     Schema Management (DEV ONLY):
-        POST /api/dbadmin/maintenance/full-rebuild?confirm=yes - Atomic schema rebuild
+        POST /api/dbadmin/maintenance?action=rebuild&confirm=yes - Atomic schema rebuild (both app+pgstac)
 
     Geo Schema Management (DEV ONLY):
         GET  /api/dbadmin/geo/tables - List geo tables with tracking status

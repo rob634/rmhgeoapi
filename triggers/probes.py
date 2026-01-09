@@ -100,13 +100,30 @@ class ReadyzProbe:
 
         # Check if all validations passed
         if STARTUP_STATE.all_passed:
+            response = {
+                "status": "ready",
+                "probe": "readyz",
+                "message": "All startup validations passed",
+                "summary": STARTUP_STATE.get_summary()
+            }
+
+            # Include warnings for env vars using defaults (informational, not errors)
+            warnings = STARTUP_STATE.get_warnings()
+            if warnings:
+                response["warnings"] = warnings
+                response["message"] = f"Ready ({len(warnings)} env vars using defaults)"
+
+            # Deep mode: include lightweight diagnostics summary
+            deep_mode = req.params.get('deep', 'false').lower() == 'true'
+            if deep_mode:
+                try:
+                    from infrastructure.diagnostics import get_diagnostics_summary
+                    response["diagnostics"] = get_diagnostics_summary()
+                except Exception as e:
+                    response["diagnostics"] = {"error": str(e)}
+
             return func.HttpResponse(
-                json.dumps({
-                    "status": "ready",
-                    "probe": "readyz",
-                    "message": "All startup validations passed",
-                    "summary": STARTUP_STATE.get_summary()
-                }),
+                json.dumps(response, indent=2),
                 status_code=200,
                 mimetype="application/json"
             )
@@ -209,3 +226,97 @@ def get_probe_status() -> dict:
         "validation_complete": STARTUP_STATE.validation_complete,
         "startup_time": STARTUP_STATE.startup_time
     }
+
+
+# ============================================================================
+# DIAGNOSTICS ENDPOINT
+# ============================================================================
+
+class DiagnosticsProbe:
+    """
+    Diagnostics Probe - Deep system diagnostics for QA debugging.
+
+    Provides comprehensive diagnostics including:
+    - Dependency connectivity with latency measurement
+    - DNS resolution timing
+    - Connection pool statistics
+    - Instance/cold start information
+    - Network environment summary
+
+    Use this endpoint for debugging opaque corporate Azure environments
+    where VNet/ASE complexity may cause connectivity issues.
+    """
+
+    def handle(self, req: func.HttpRequest) -> func.HttpResponse:
+        """Handle GET /api/diagnostics request."""
+        try:
+            # Import here to avoid import-time failures
+            from infrastructure.diagnostics import get_diagnostics
+
+            # Parse query params for selective checks
+            check_deps = req.params.get('dependencies', 'true').lower() == 'true'
+            check_dns = req.params.get('dns', 'true').lower() == 'true'
+            check_pools = req.params.get('pools', 'true').lower() == 'true'
+            check_instance = req.params.get('instance', 'true').lower() == 'true'
+            check_network = req.params.get('network', 'true').lower() == 'true'
+
+            # Custom timeout (default 10s, max 30s)
+            timeout = min(float(req.params.get('timeout', '10')), 30.0)
+
+            # Run diagnostics
+            result = get_diagnostics(
+                check_dependencies=check_deps,
+                check_dns=check_dns,
+                check_pools=check_pools,
+                check_instance=check_instance,
+                check_network=check_network,
+                dependency_timeout=timeout,
+            )
+
+            return func.HttpResponse(
+                json.dumps(result.to_dict(), indent=2),
+                status_code=200,
+                mimetype="application/json"
+            )
+
+        except Exception as e:
+            return func.HttpResponse(
+                json.dumps({
+                    "status": "error",
+                    "probe": "diagnostics",
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                }, indent=2),
+                status_code=500,
+                mimetype="application/json"
+            )
+
+
+_diagnostics_probe = DiagnosticsProbe()
+
+
+@bp.route(
+    route="diagnostics",
+    methods=["GET"],
+    auth_level=func.AuthLevel.ANONYMOUS
+)
+def diagnostics(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Diagnostics endpoint - Deep system diagnostics for QA debugging.
+
+    Query Parameters:
+        dependencies: Check dependency connectivity (default: true)
+        dns: Check DNS resolution timing (default: true)
+        pools: Check connection pool stats (default: true)
+        instance: Check instance/cold start info (default: true)
+        network: Check network environment (default: true)
+        timeout: Timeout for connectivity checks in seconds (default: 10, max: 30)
+
+    Returns:
+        200: Full diagnostics report with timing information
+
+    Example:
+        GET /api/diagnostics
+        GET /api/diagnostics?dependencies=true&dns=true&timeout=5
+    """
+    return _diagnostics_probe.handle(req)

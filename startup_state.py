@@ -43,9 +43,33 @@ Usage:
     failed = STARTUP_STATE.get_failed_checks()
 """
 
+import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
+
+
+@dataclass
+class ConfigWarning:
+    """
+    Warning for a configuration value using its default.
+
+    These are not errors - the app works fine - but useful for debugging
+    when behavior differs between environments (DEV vs QA).
+    """
+    var_name: str
+    default_value: str
+    description: str
+    category: str = "config"  # config, metrics, debug
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dict for JSON serialization."""
+        return {
+            "var_name": self.var_name,
+            "default_value": self.default_value,
+            "description": self.description,
+            "category": self.category,
+        }
 
 
 @dataclass
@@ -120,6 +144,9 @@ class StartupState:
 
     # Error summary for quick access
     critical_error: Optional[str] = None
+
+    # Warnings for env vars using defaults (not errors, just informational)
+    config_warnings: List[ConfigWarning] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dict for JSON serialization."""
@@ -204,8 +231,123 @@ class StartupState:
             "checks_passed": len(passed),
             "checks_failed": len(failed),
             "failed_check_names": [f.name for f in failed],
-            "critical_error": self.critical_error
+            "critical_error": self.critical_error,
+            "warning_count": len(self.config_warnings),
         }
+
+    def get_warnings(self) -> List[Dict[str, Any]]:
+        """Get list of config warnings as dicts."""
+        return [w.to_dict() for w in self.config_warnings]
+
+    def detect_default_env_vars(self) -> None:
+        """
+        Detect which optional env vars are using defaults and add warnings.
+
+        Call this during startup after validation passes. These are not
+        errors - the app works fine - but help debug environment differences.
+        """
+        self.config_warnings = []
+
+        for var_name, info in ENV_VARS_WITH_DEFAULTS.items():
+            current_value = os.environ.get(var_name)
+            if current_value is None or current_value == "":
+                self.config_warnings.append(ConfigWarning(
+                    var_name=var_name,
+                    default_value=info["default"],
+                    description=info["description"],
+                    category=info.get("category", "config"),
+                ))
+
+
+# ============================================================================
+# ENV VARS WITH DEFAULTS - Registry for warning detection
+# ============================================================================
+# These are optional env vars that have sensible defaults. When not explicitly
+# set, the app works but behavior may differ between environments. Useful for
+# debugging "why does QA behave differently than DEV?"
+# ============================================================================
+
+ENV_VARS_WITH_DEFAULTS: Dict[str, Dict[str, str]] = {
+    # Debug/Metrics flags
+    "DEBUG_MODE": {
+        "default": "false",
+        "description": "Verbose diagnostics (set true for debugging)",
+        "category": "debug",
+    },
+    "DEBUG_LOGGING": {
+        "default": "false",
+        "description": "Additional logging output",
+        "category": "debug",
+    },
+    "METRICS_DEBUG_MODE": {
+        "default": "false",
+        "description": "Service latency tracking (set true for performance debugging)",
+        "category": "metrics",
+    },
+    "METRICS_ENABLED": {
+        "default": "true",
+        "description": "Master switch for job metrics collection",
+        "category": "metrics",
+    },
+    "SERVICE_LATENCY_SLOW_MS": {
+        "default": "2000",
+        "description": "Threshold (ms) for slow operation warnings",
+        "category": "metrics",
+    },
+
+    # Connection/Pool settings
+    "DB_POOL_MIN": {
+        "default": "1",
+        "description": "Minimum database connection pool size",
+        "category": "database",
+    },
+    "DB_POOL_MAX": {
+        "default": "10",
+        "description": "Maximum database connection pool size",
+        "category": "database",
+    },
+    "POSTGIS_PORT": {
+        "default": "5432",
+        "description": "PostgreSQL port",
+        "category": "database",
+    },
+
+    # Feature flags
+    "USE_MANAGED_IDENTITY": {
+        "default": "true",
+        "description": "Use Azure Managed Identity for auth (false = password auth)",
+        "category": "auth",
+    },
+
+    # Optional storage tiers
+    "SILVEREXT_STORAGE_ACCOUNT": {
+        "default": "(uses SILVER_STORAGE_ACCOUNT)",
+        "description": "External silver zone storage account",
+        "category": "storage",
+    },
+    "GOLD_STORAGE_ACCOUNT": {
+        "default": "(uses SILVER_STORAGE_ACCOUNT)",
+        "description": "Gold tier storage account for exports",
+        "category": "storage",
+    },
+
+    # Service URLs (optional)
+    "TITILER_BASE_URL": {
+        "default": "(not configured)",
+        "description": "TiTiler service URL for raster tiles",
+        "category": "services",
+    },
+    "OGC_BASE_URL": {
+        "default": "(auto-detected from request)",
+        "description": "OGC API base URL for self-links (set explicitly for consistent URLs)",
+        "category": "services",
+    },
+    "OGC_STAC_APP_URL": {
+        "default": "(not configured)",
+        "description": "Dedicated OGC/STAC app URL (for multi-app deployments)",
+        "category": "services",
+    },
+}
 
 
 # Global singleton instance - imported by diagnostic endpoints

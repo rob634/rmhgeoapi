@@ -2503,6 +2503,9 @@ else:
 # ============================================================================
 STARTUP_STATE.finalize()
 
+# Detect env vars using defaults (for readyz warnings - not errors, just informational)
+STARTUP_STATE.detect_default_env_vars()
+
 if STARTUP_STATE.all_passed:
     _startup_logger.info("✅ STARTUP: Phase 2 complete - All validations PASSED")
 

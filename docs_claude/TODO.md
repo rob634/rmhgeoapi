@@ -10,14 +10,15 @@
 
 | Priority | Epic | Name | Status | Next Action |
 |:--------:|------|------|--------|-------------|
-| **1** | E9 | **FATHOM Rwanda Pipeline** | ✅ | Complete! STAC registration pending |
+| **1** | E9 | **FATHOM Rwanda Pipeline** | ✅ | Complete! Run fathom_stac_rebuild |
 | **2** | E8 | **H3 Analytics (Rwanda)** | 🚧 | H3 bootstrap running (res 3-7) |
-| **3** | E7 | **Unified Metadata Architecture** | 🚧 | F7.8: Phase 1 complete (models + schema) |
-| 4 | E8 | Building Flood Exposure | 📋 | F8.7: MS Buildings → FATHOM → H3 |
-| 5 | E9 | Pre-prepared Raster Ingest | 📋 | F9.8: COG copy + STAC |
-| 6 | E2 | Raster Data as API | 🚧 | F2.7: Collection Processing |
-| 7 | E3 | DDH Platform Integration | 🚧 | F3.1: Validate Swagger UI |
-| 8 | E1 | Vector Data as API | 🚧 | F1.8: ETL Style Integration |
+| **3** | E7 | **Unified Metadata Architecture** | ✅ | F7.8 complete (VectorMetadata) |
+| **4** | E7→E2 | **RasterMetadata Architecture** | 🔴 | F7.9: CRITICAL - STAC depends on this |
+| 5 | E8 | Building Flood Exposure | 📋 | F8.7: MS Buildings → FATHOM → H3 |
+| 6 | E9 | Pre-prepared Raster Ingest | 📋 | F9.8: COG copy + STAC |
+| 7 | E2 | Raster Data as API | 🚧 | F2.7: Collection Processing |
+| 8 | E3 | DDH Platform Integration | 🚧 | F3.1: Validate Swagger UI |
+| 9 | E1 | Vector Data as API | 🚧 | F1.8: ETL Style Integration |
 | — | E7 | Pipeline Builder | 📋 | F7.5: Future (after concrete implementations) |
 
 **Focus**: Rwanda as test region for all analytics pipelines before scaling.
@@ -414,6 +415,153 @@ PlatformRequest.version_id  ───► app.dataset_refs.ddh_version_id
 ```
 
 **Enables**: E1 (Vector), E2 (Raster), E9 (Zarr), E8 (Analytics) — consistent metadata + DDH linkage across all data types.
+
+---
+
+### 🔴 Priority 4: RasterMetadata Architecture (CRITICAL)
+
+**Epic**: E7 Pipeline Infrastructure → E2 Raster Data as API
+**Goal**: RasterMetadata model providing single source of truth for STAC-based raster catalogs
+**Dependency**: F7.8 ✅ (BaseMetadata, VectorMetadata pattern established)
+**Status**: Not started
+**Priority**: CRITICAL - Raster is primary STAC use case
+
+#### F7.9: RasterMetadata Implementation
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| S7.9.1 | Create `RasterMetadata` class in `core/models/unified_metadata.py` | 📋 |
+| S7.9.2 | Create `app.cog_metadata` table DDL with typed columns | 📋 |
+| S7.9.3 | Create `RasterMetadataRepository` with CRUD operations | 📋 |
+| S7.9.4 | Implement `RasterMetadata.from_db_row()` factory method | 📋 |
+| S7.9.5 | Implement `RasterMetadata.to_stac_item()` conversion | 📋 |
+| S7.9.6 | Implement `RasterMetadata.to_stac_collection()` conversion | 📋 |
+| S7.9.7 | Refactor `service_stac_metadata.py` to use RasterMetadata | 📋 |
+| S7.9.8 | Refactor `stac_catalog.py` to use RasterMetadata | 📋 |
+| S7.9.9 | Wire raster ingest to populate raster.cog_metadata | 📋 |
+| S7.9.10 | Wire raster STAC handlers to upsert app.dataset_refs | 📋 |
+| S7.9.11 | Update `fathom_stac_register` to use RasterMetadata | 📋 |
+| S7.9.12 | Update `fathom_stac_rebuild` to use RasterMetadata | 📋 |
+
+**RasterMetadata Fields** (beyond BaseMetadata):
+```python
+class RasterMetadata(BaseMetadata):
+    # COG-specific fields
+    cog_url: str                    # /vsiaz/ path or HTTPS URL
+    container: str                  # Azure container name
+    blob_path: str                  # Path within container
+
+    # Raster properties
+    width: int                      # Pixel width
+    height: int                     # Pixel height
+    band_count: int                 # Number of bands
+    dtype: str                      # numpy dtype (uint8, int16, float32, etc.)
+    nodata: Optional[float]         # NoData value
+    crs: str                        # CRS as EPSG code or WKT
+    transform: List[float]          # Affine transform (6 values)
+    resolution: Tuple[float, float] # (x_res, y_res) in CRS units
+
+    # Band metadata
+    band_names: List[str]           # Band descriptions
+    band_units: Optional[List[str]] # Units per band
+
+    # Processing metadata
+    is_cog: bool                    # Cloud-optimized GeoTIFF?
+    overview_levels: List[int]      # COG overview levels
+    compression: Optional[str]      # DEFLATE, LZW, etc.
+    blocksize: Tuple[int, int]      # Internal tile size
+
+    # Visualization defaults
+    colormap: Optional[str]         # Default colormap name
+    rescale_range: Optional[Tuple[float, float]]  # Default min/max
+
+    # STAC extensions
+    eo_bands: Optional[List[dict]]  # EO extension band metadata
+    raster_bands: Optional[List[dict]]  # Raster extension metadata
+```
+
+**app.cog_metadata Table** (in existing app schema):
+```sql
+CREATE TABLE app.cog_metadata (
+    -- Identity
+    cog_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    collection_id TEXT NOT NULL,
+    item_id TEXT NOT NULL UNIQUE,
+
+    -- Location
+    container TEXT NOT NULL,
+    blob_path TEXT NOT NULL,
+    cog_url TEXT NOT NULL,
+
+    -- Spatial
+    bbox DOUBLE PRECISION[4],
+    geometry GEOMETRY(Polygon, 4326),
+    crs TEXT NOT NULL DEFAULT 'EPSG:4326',
+
+    -- Raster properties
+    width INTEGER NOT NULL,
+    height INTEGER NOT NULL,
+    band_count INTEGER NOT NULL,
+    dtype TEXT NOT NULL,
+    nodata DOUBLE PRECISION,
+    resolution DOUBLE PRECISION[2],
+
+    -- COG properties
+    is_cog BOOLEAN DEFAULT true,
+    compression TEXT,
+    blocksize INTEGER[2],
+    overview_levels INTEGER[],
+
+    -- Metadata
+    title TEXT,
+    description TEXT,
+    datetime TIMESTAMPTZ,
+    start_datetime TIMESTAMPTZ,
+    end_datetime TIMESTAMPTZ,
+
+    -- Band metadata (JSONB for flexibility)
+    band_names TEXT[],
+    eo_bands JSONB,
+    raster_bands JSONB,
+
+    -- Visualization
+    colormap TEXT,
+    rescale_min DOUBLE PRECISION,
+    rescale_max DOUBLE PRECISION,
+
+    -- Extensibility
+    providers JSONB,
+    custom_properties JSONB,
+
+    -- STAC linkage
+    stac_item_id TEXT,
+    stac_collection_id TEXT,
+
+    -- Audit
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+
+    UNIQUE(container, blob_path)
+);
+
+-- Indexes
+CREATE INDEX idx_cog_metadata_collection ON app.cog_metadata(collection_id);
+CREATE INDEX idx_cog_metadata_bbox ON app.cog_metadata USING GIST(geometry);
+CREATE INDEX idx_cog_metadata_datetime ON app.cog_metadata(datetime);
+```
+
+**Why Critical**:
+1. STAC is primarily a raster catalog standard
+2. Current raster STAC items built ad-hoc without metadata registry
+3. FATHOM, DEM, satellite imagery all need consistent metadata
+4. TiTiler integration requires predictable metadata structure
+5. DDH linkage for rasters depends on this
+
+**Current Gap**:
+- VectorMetadata has `geo.table_metadata` as source of truth
+- Raster has NO equivalent — STAC items built directly from COG headers
+- No way to query "all rasters for DDH dataset X"
+- No consistent visualization defaults stored
 
 ---
 

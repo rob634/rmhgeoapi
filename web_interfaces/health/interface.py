@@ -153,8 +153,9 @@ class HealthInterface(BaseInterface):
             'comp-titiler': f"{titiler_url}\nMode: {config.titiler_mode}",
             'comp-ogc-features': f"{ogc_url}\nOGC API - Features",
 
-            # Not implemented
-            'comp-container': f"Docker Worker\nQueue: {long_queue}\n(not implemented)",
+            # Docker Worker (controlled by DOCKER_WORKER_ENABLED env var)
+            'comp-long-queue': f"{service_bus_ns}\nQueue: {long_queue}\nEnabled: DOCKER_WORKER_ENABLED",
+            'comp-container': f"Docker Container Worker\nQueue: {long_queue}\nEnabled: DOCKER_WORKER_ENABLED",
 
             # Zarr/xarray components - TiTiler-xarray uses same TiTiler, Zarr uses same silver account
             'comp-titiler-xarray': f"{titiler_url}\nxarray/Zarr endpoint\nStatus: check available_features.xarray_zarr",
@@ -268,8 +269,8 @@ class HealthInterface(BaseInterface):
                     <!-- Arrow: Orchestrator -> Compute Task Queue -->
                     <path d="M 440 350 L 520 350" class="flow-arrow" marker-end="url(#arrowhead)"/>
 
-                    <!-- Arrow: Orchestrator -> Long Task Queue (NOT IMPLEMENTED) -->
-                    <path d="M 440 360 L 520 435" class="flow-arrow inactive" marker-end="url(#arrowhead-grey)"/>
+                    <!-- Arrow: Orchestrator -> Long Task Queue -->
+                    <path d="M 440 360 L 520 435" class="flow-arrow" marker-end="url(#arrowhead)"/>
 
                     <!-- ========== PARALLEL TASK PATH ========== -->
                     <g class="component" id="comp-parallel-queue" data-component="task_queue_parallel" data-tooltip="">
@@ -305,21 +306,22 @@ class HealthInterface(BaseInterface):
                         <circle cx="780" cy="330" r="8" class="status-indicator" data-status="unknown"/>
                     </g>
 
-                    <!-- ========== LONG-RUNNING TASK PATH - NOT IMPLEMENTED ========== -->
-                    <g class="component disabled" id="comp-long-queue" data-component="task_queue_long" data-tooltip="(not implemented)">
-                        <rect x="520" y="405" width="100" height="60" rx="6" class="comp-box inactive"/>
-                        <text x="570" y="430" class="comp-icon disabled">📨</text>
-                        <text x="570" y="450" class="comp-label disabled">Long Queue</text>
-                        <circle cx="610" cy="415" r="8" class="status-indicator" data-status="disabled"/>
+                    <!-- ========== LONG-RUNNING TASK PATH ========== -->
+                    <!-- Status driven by DOCKER_WORKER_ENABLED env var -->
+                    <g class="component" id="comp-long-queue" data-component="task_queue_long" data-tooltip="">
+                        <rect x="520" y="405" width="100" height="60" rx="6" class="comp-box servicebus"/>
+                        <text x="570" y="430" class="comp-icon">📨</text>
+                        <text x="570" y="450" class="comp-label">Long Queue</text>
+                        <circle cx="610" cy="415" r="8" class="status-indicator" data-status="unknown"/>
                     </g>
 
-                    <path d="M 620 435 L 680 435" class="flow-arrow inactive" marker-end="url(#arrowhead-grey)"/>
+                    <path d="M 620 435 L 680 435" class="flow-arrow" marker-end="url(#arrowhead)"/>
 
-                    <g class="component disabled" id="comp-container" data-component="worker_container" data-tooltip="(not implemented)">
-                        <rect x="680" y="405" width="110" height="60" rx="6" class="comp-box inactive"/>
-                        <text x="735" y="430" class="comp-icon disabled">🐳</text>
-                        <text x="735" y="450" class="comp-label disabled">Long Worker</text>
-                        <circle cx="780" cy="415" r="8" class="status-indicator" data-status="disabled"/>
+                    <g class="component" id="comp-container" data-component="worker_container" data-tooltip="">
+                        <rect x="680" y="405" width="110" height="60" rx="6" class="comp-box appservice"/>
+                        <text x="735" y="430" class="comp-icon">🐳</text>
+                        <text x="735" y="450" class="comp-label">Long Worker</text>
+                        <circle cx="780" cy="415" r="8" class="status-indicator" data-status="unknown"/>
                     </g>
 
                     <!-- ========== TASK COMPLETION -> Task Tables ========== -->
@@ -1610,6 +1612,9 @@ class HealthInterface(BaseInterface):
             'comp-zarr-store': 'xarray_zarr'             // Zarr uses same feature flag
         }};
 
+        // Components that derive status from DOCKER_WORKER_ENABLED setting
+        const DOCKER_WORKER_COMPONENTS = ['comp-long-queue', 'comp-container'];
+
         // Update architecture diagram status indicators
         function updateDiagramStatus(components) {{
             if (!components) return;
@@ -1619,6 +1624,10 @@ class HealthInterface(BaseInterface):
             const titilerComponent = components['titiler'];
             const titilerFeatures = titilerComponent?.details?.health?.body?.available_features || {{}};
 
+            // Get Docker Worker enabled setting from deployment_config
+            const deploymentConfig = components['deployment_config'];
+            const dockerWorkerEnabled = deploymentConfig?.details?.docker_worker_enabled === true;
+
             // Update each component in the diagram
             Object.entries(COMPONENT_MAPPING).forEach(([svgId, healthKey]) => {{
                 const indicator = document.querySelector(`#${{svgId}} .status-indicator`);
@@ -1626,9 +1635,21 @@ class HealthInterface(BaseInterface):
 
                 let status = 'unknown';
 
+                // Check if this is a Docker Worker component
+                if (DOCKER_WORKER_COMPONENTS.includes(svgId)) {{
+                    // Status based on DOCKER_WORKER_ENABLED setting
+                    // If disabled: grey (unknown) - feature not enabled
+                    // If enabled: would need health check (not implemented yet, so show warning)
+                    if (!dockerWorkerEnabled) {{
+                        status = 'unknown';  // Grey - not enabled
+                    }} else {{
+                        // Docker worker is enabled but we don't have health check yet
+                        status = 'warning';  // Yellow - enabled but no health check
+                    }}
+                }}
                 // Check if this is a TiTiler feature-based component
-                const featureKey = TITILER_FEATURE_COMPONENTS[svgId];
-                if (featureKey) {{
+                else if (TITILER_FEATURE_COMPONENTS[svgId]) {{
+                    const featureKey = TITILER_FEATURE_COMPONENTS[svgId];
                     // Status based on TiTiler's available_features flag
                     // Check both top-level status and details.overall_status for TiTiler health
                     const titilerStatus = titilerComponent?.details?.overall_status || titilerComponent?.status;

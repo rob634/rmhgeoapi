@@ -335,12 +335,12 @@ CREATE TABLE h3.building_flood_stats (
 
 ---
 
-### 🟡 Priority 3: Unified Metadata Architecture
+### ✅ Priority 3: Unified Metadata Architecture (Phase 2 Complete)
 
 **Epic**: E7 Pipeline Infrastructure
 **Goal**: Pydantic-based metadata models providing single source of truth across all data types
-**Design Document**: [METADATA.md](/METADATA.md)
-**Status**: Phase 1 complete (09 JAN 2026)
+**Design Document**: [docs/archive/METADATA.md](/docs/archive/METADATA.md) (archived)
+**Status**: Phase 2 complete (09 JAN 2026)
 
 #### F7.8: Unified Metadata Architecture
 
@@ -351,11 +351,11 @@ CREATE TABLE h3.building_flood_stats (
 | S7.8.3 | Create `app.dataset_refs` table DDL (cross-type external linkage) | ✅ Done (09 JAN) |
 | S7.8.4 | Add `providers JSONB` and `custom_properties JSONB` to geo.table_metadata DDL | ✅ Done (09 JAN) |
 | S7.8.5 | Refactor `ogc_features/repository.py` to return VectorMetadata model | ✅ Done (09 JAN) |
-| S7.8.6 | Refactor `ogc_features/service.py` to use VectorMetadata.to_ogc_response() | 📋 Phase 2 |
-| S7.8.7 | Refactor `services/stac_vector_catalog.py` to use VectorMetadata.to_stac_item() | 📋 Phase 2 |
-| S7.8.8 | Wire Platform layer to populate app.dataset_refs on ingest | 📋 Phase 2 |
-| S7.8.9 | Document pattern for future data types (RasterMetadata, ZarrMetadata) | 📋 Phase 2 |
-| S7.8.10 | Archive METADATA.md design doc to docs/archive after implementation | 📋 Phase 2 |
+| S7.8.6 | Refactor `ogc_features/service.py` to use VectorMetadata.to_ogc_collection() | ✅ Done (09 JAN) |
+| S7.8.7 | Refactor `services/service_stac_vector.py` to use VectorMetadata | ✅ Done (09 JAN) |
+| S7.8.8 | Wire Platform layer to populate app.dataset_refs on ingest | ✅ Done (09 JAN) |
+| S7.8.9 | Document pattern for future data types (RasterMetadata, ZarrMetadata) | ✅ Done (09 JAN) |
+| S7.8.10 | Archive METADATA.md design doc to docs/archive after implementation | ✅ Done (09 JAN) |
 
 **Phase 1 Complete (09 JAN 2026)**:
 - Created `core/models/unified_metadata.py` with:
@@ -378,11 +378,12 @@ CREATE TABLE h3.building_flood_stats (
 - `triggers/admin/db_maintenance.py` - DDL for geo.table_metadata F7.8 columns
 - `ogc_features/repository.py` - `get_vector_metadata()` method
 
-**Phase 2 (Pending)**:
-- Full service layer migration to use VectorMetadata model
-- STAC catalog migration to use model conversions
-- Platform layer integration for DDH linkage
-- Documentation of pattern for future data types
+**Phase 2 Complete (09 JAN 2026)**:
+- OGC Features service uses VectorMetadata.to_ogc_collection() (S7.8.6)
+- STAC vector service uses VectorMetadata for item enrichment (S7.8.7)
+- Platform layer wired to populate app.dataset_refs on ingest (S7.8.8)
+- Pattern documented for future RasterMetadata, ZarrMetadata (S7.8.9)
+- METADATA.md archived to docs/archive/ (S7.8.10)
 
 **Architecture**:
 ```

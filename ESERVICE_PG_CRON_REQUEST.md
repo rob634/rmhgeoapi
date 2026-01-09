@@ -205,6 +205,111 @@ After configuration, verify:
 
 ---
 
+## DEV Environment SQL (rmhpostgres - Ready to Run)
+
+**Status**: Azure server parameters configured 09 JAN 2026. Run this SQL when you have network access.
+
+```sql
+-- ============================================================================
+-- STEP 1: Create the pg_cron extension
+-- ============================================================================
+CREATE EXTENSION IF NOT EXISTS pg_cron;
+
+-- Verify installation
+SELECT extname, extversion FROM pg_extension WHERE extname = 'pg_cron';
+-- Expected: pg_cron | 1.6 (or similar version)
+
+
+-- ============================================================================
+-- STEP 2: Schedule nightly vacuum jobs
+-- ============================================================================
+
+-- H3 cells (2:00 AM UTC) - the big table (114M+ rows)
+SELECT cron.schedule('vacuum-h3-cells-nightly', '0 2 * * *', 'VACUUM ANALYZE h3.cells');
+
+-- H3 zonal stats (2:30 AM UTC)
+SELECT cron.schedule('vacuum-h3-zonal-stats-nightly', '30 2 * * *', 'VACUUM ANALYZE h3.zonal_stats');
+
+-- STAC items and collections (3:00 AM UTC)
+SELECT cron.schedule('vacuum-pgstac-nightly', '0 3 * * *', 'VACUUM ANALYZE pgstac.items; VACUUM ANALYZE pgstac.collections');
+
+-- App schema jobs and tasks (4:00 AM UTC)
+SELECT cron.schedule('vacuum-app-schema-nightly', '0 4 * * *', 'VACUUM ANALYZE app.jobs; VACUUM ANALYZE app.tasks');
+
+-- Verify scheduled jobs
+SELECT jobid, jobname, schedule, command, active FROM cron.job;
+
+
+-- ============================================================================
+-- STEP 3: Autovacuum tuning for large tables (recommended)
+-- ============================================================================
+
+-- H3 cells table (114M+ rows) - aggressive autovacuum settings
+ALTER TABLE h3.cells SET (
+    autovacuum_vacuum_scale_factor = 0.01,
+    autovacuum_vacuum_threshold = 10000,
+    autovacuum_analyze_scale_factor = 0.005,
+    autovacuum_vacuum_cost_delay = 0,
+    autovacuum_vacuum_cost_limit = 1000
+);
+
+-- H3 zonal stats
+ALTER TABLE h3.zonal_stats SET (
+    autovacuum_vacuum_scale_factor = 0.02,
+    autovacuum_vacuum_threshold = 5000,
+    autovacuum_vacuum_cost_delay = 0,
+    autovacuum_vacuum_cost_limit = 500
+);
+
+-- STAC items table
+ALTER TABLE pgstac.items SET (
+    autovacuum_vacuum_scale_factor = 0.05,
+    autovacuum_vacuum_threshold = 1000,
+    autovacuum_vacuum_cost_delay = 2,
+    autovacuum_vacuum_cost_limit = 400
+);
+
+-- App jobs table
+ALTER TABLE app.jobs SET (
+    autovacuum_vacuum_scale_factor = 0.1,
+    autovacuum_vacuum_threshold = 500,
+    autovacuum_vacuum_cost_delay = 2,
+    autovacuum_vacuum_cost_limit = 300
+);
+
+-- App tasks table
+ALTER TABLE app.tasks SET (
+    autovacuum_vacuum_scale_factor = 0.05,
+    autovacuum_vacuum_threshold = 1000,
+    autovacuum_vacuum_cost_delay = 0,
+    autovacuum_vacuum_cost_limit = 500
+);
+
+
+-- ============================================================================
+-- STEP 4: Verify setup (run after a day or two)
+-- ============================================================================
+
+-- Check scheduled jobs
+SELECT jobid, jobname, schedule, command, active FROM cron.job;
+
+-- Check recent job runs (last 24 hours)
+SELECT jobid, runid, command, status, return_message,
+       start_time, end_time, end_time - start_time as duration
+FROM cron.job_run_details
+WHERE start_time > NOW() - INTERVAL '24 hours'
+ORDER BY start_time DESC;
+
+-- Check autovacuum status
+SELECT schemaname, relname, last_vacuum, last_autovacuum,
+       n_dead_tup, n_live_tup
+FROM pg_stat_user_tables
+WHERE schemaname IN ('h3', 'geo', 'pgstac', 'app')
+ORDER BY n_dead_tup DESC;
+```
+
+---
+
 ## References
 
 - [pg_cron GitHub Repository](https://github.com/citusdata/pg_cron)

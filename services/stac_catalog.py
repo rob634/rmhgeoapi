@@ -485,6 +485,24 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
                 "stac_item": item_dict  # Include for debugging
             }
 
+        # STEP 7: Upsert DDH refs to app.dataset_refs (09 JAN 2026 - F7.8)
+        # This links internal dataset_id (COG blob path) to external DDH identifiers
+        try:
+            from infrastructure.dataset_refs_repository import get_dataset_refs_repository
+            refs_repo = get_dataset_refs_repository()
+            # Use blob_name as the internal dataset_id for rasters
+            refs_repo.upsert_ref(
+                dataset_id=blob_name,
+                data_type="raster",
+                ddh_dataset_id=params.get("dataset_id"),
+                ddh_resource_id=params.get("resource_id"),
+                ddh_version_id=params.get("version_id")
+            )
+            logger.debug(f"✅ STEP 7: Upserted app.dataset_refs for {blob_name}")
+        except Exception as refs_error:
+            # Non-fatal - STAC item was created
+            logger.warning(f"⚠️ STEP 7: Failed to upsert dataset_refs: {refs_error}")
+
         # SUCCESS - STAC metadata extracted (and inserted to pgstac if available)
         mode_msg = "degraded mode (JSON only)" if not pgstac_available else "full mode"
         logger.info(f"🎉 SUCCESS: STAC cataloging completed in {duration:.2f}s for {blob_name} [{mode_msg}]")

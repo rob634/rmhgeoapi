@@ -183,6 +183,23 @@ def create_vector_stac(params: dict) -> dict[str, Any]:
             # Non-fatal - STAC item was created, just the backlink failed
             logger.warning(f"⚠️ STEP 3: Failed to update table_metadata STAC link: {link_error}")
 
+        # STEP 4: Upsert DDH refs to app.dataset_refs (09 JAN 2026 - F7.8)
+        # This links internal dataset_id to external DDH identifiers
+        try:
+            from infrastructure.dataset_refs_repository import get_dataset_refs_repository
+            refs_repo = get_dataset_refs_repository()
+            refs_repo.upsert_ref(
+                dataset_id=table_name,
+                data_type="vector",
+                ddh_dataset_id=params.get("dataset_id"),
+                ddh_resource_id=params.get("resource_id"),
+                ddh_version_id=params.get("version_id")
+            )
+            logger.debug(f"✅ STEP 4: Upserted app.dataset_refs for {table_name}")
+        except Exception as refs_error:
+            # Non-fatal - STAC item and metadata were created
+            logger.warning(f"⚠️ STEP 4: Failed to upsert dataset_refs: {refs_error}")
+
         duration = (datetime.utcnow() - start_time).total_seconds()
 
         # SUCCESS

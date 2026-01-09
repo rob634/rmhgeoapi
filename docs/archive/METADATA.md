@@ -1,7 +1,10 @@
 # METADATA.md - Unified Metadata Architecture
 
+> **ARCHIVED**: 09 JAN 2026 - Implementation complete (F7.8 Phase 2)
+> See `core/models/unified_metadata.py` for active implementation.
+
 **Created**: 08 JAN 2026
-**Status**: Design Document → **APPROVED** (08 JAN 2026)
+**Status**: Design Document → **APPROVED** (08 JAN 2026) → **IMPLEMENTED** (09 JAN 2026)
 **Epic**: E7 Pipeline Infrastructure → F7.8 Unified Metadata Architecture
 **Goal**: STAC-like universal metadata accessible from both OGC Features and STAC endpoints
 

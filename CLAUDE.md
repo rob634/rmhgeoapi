@@ -1,6 +1,30 @@
 # CLAUDE.md - Project Context
 
-**Last Updated**: 06 JAN 2026
+**Last Updated**: 09 JAN 2026
+
+---
+
+## 🐍 PYTHON ENVIRONMENT
+
+**ALWAYS use the `azgeo` conda environment for this project.**
+
+```bash
+# Activate before running any Python
+conda activate azgeo
+
+# Or use full path for scripts
+/Users/robertharrison/anaconda3/envs/azgeo/bin/python
+
+# Verify correct environment
+which python  # Should show: .../anaconda3/envs/azgeo/bin/python
+```
+
+| Environment | Python | numpy | Status |
+|-------------|--------|-------|--------|
+| `azgeo` | 3.12 | 2.3.3 | ✅ **USE THIS** |
+| `base` | 3.11 | 1.26.4 | ❌ Broken dependencies |
+
+**DO NOT** use the base anaconda environment - it has broken geospatial dependencies.
 
 ---
 

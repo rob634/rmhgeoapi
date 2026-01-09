@@ -21,10 +21,33 @@ Design Principles:
     4. STAC Alignment - Use STAC extensions and field names where possible
 
 Architecture (from METADATA.md):
-    UnifiedMetadata (abstract concept)
+    BaseMetadata (abstract base)
         ├── VectorMetadata      → geo.table_metadata
         ├── RasterMetadata      → raster.cog_metadata (future E2)
         └── ZarrMetadata        → zarr.dataset_metadata (future E9)
+
+Pattern for Creating New Metadata Types (S7.8.9):
+    1. Create new class inheriting from BaseMetadata
+    2. Add type-specific fields (e.g., band_count for raster, chunks for zarr)
+    3. Implement factory method: from_db_row(row: Dict) -> "NewMetadata"
+    4. Implement conversion methods:
+       - to_ogc_properties() → Dict for OGC API properties block
+       - to_ogc_collection(base_url) → Dict for full OGC collection
+       - to_stac_collection(base_url) → Dict for STAC collection
+       - to_stac_item(base_url) → Dict for STAC item
+    5. Add type to DataType enum in external_refs.py
+    6. Wire into STAC cataloging handlers to call dataset_refs_repository
+
+Example RasterMetadata skeleton:
+    class RasterMetadata(BaseMetadata):
+        band_count: int
+        dtype: str  # uint8, float32, etc.
+        cog_url: str
+        resolution: float
+
+        @classmethod
+        def from_db_row(cls, row: Dict) -> "RasterMetadata": ...
+        def to_stac_item(self, base_url: str) -> Dict: ...
 
 Exports:
     ProviderRole: STAC provider roles enum

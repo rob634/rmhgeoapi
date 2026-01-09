@@ -155,8 +155,10 @@ class HealthInterface(BaseInterface):
 
             # Not implemented
             'comp-container': f"Docker Worker\nQueue: {long_queue}\n(not implemented)",
-            'comp-titiler-xarray': "TiTiler-xarray\n(not implemented)",
-            'comp-zarr-store': "Zarr Store\n(not implemented)",
+
+            # Zarr/xarray components - TiTiler-xarray uses same TiTiler, Zarr uses same silver account
+            'comp-titiler-xarray': f"{titiler_url}\nxarray/Zarr endpoint\nStatus: check available_features.xarray_zarr",
+            'comp-zarr-store': f"{silver_account}\nZarr datasets\n(same storage as Silver COGs)",
         }
 
     def _generate_html_content(self) -> str:
@@ -379,25 +381,25 @@ class HealthInterface(BaseInterface):
                         <circle cx="910" cy="105" r="8" class="status-indicator" data-status="unknown"/>
                     </g>
 
-                    <!-- ========== NEW COLUMN: Zarr/xarray (NOT IMPLEMENTED - grey) ========== -->
-                    <!-- TiTiler-xarray: above Zarr Store (x=1005 center) - NOT IMPLEMENTED -->
-                    <g class="component disabled" id="comp-titiler-xarray" data-tooltip="(not implemented)">
-                        <rect x="955" y="5" width="100" height="60" rx="6" class="comp-box inactive"/>
-                        <text x="1005" y="30" class="comp-icon disabled">🐳</text>
-                        <text x="1005" y="50" class="comp-label disabled">TiTiler-xarray</text>
-                        <circle cx="1045" cy="15" r="8" class="status-indicator" data-status="disabled"/>
+                    <!-- ========== NEW COLUMN: Zarr/xarray ========== -->
+                    <!-- TiTiler-xarray: above Zarr Store (x=1005 center) - uses same TiTiler instance -->
+                    <g class="component" id="comp-titiler-xarray" data-tooltip="">
+                        <rect x="955" y="5" width="100" height="60" rx="6" class="comp-box appservice"/>
+                        <text x="1005" y="30" class="comp-icon">🐳</text>
+                        <text x="1005" y="50" class="comp-label">TiTiler-xarray</text>
+                        <circle cx="1045" cy="15" r="8" class="status-indicator" data-status="unknown"/>
                     </g>
 
-                    <!-- Zarr Store: to the right of PostGIS (x=1005 center) - NOT IMPLEMENTED -->
-                    <g class="component disabled" id="comp-zarr-store" data-tooltip="(not implemented)">
-                        <rect x="955" y="95" width="100" height="60" rx="6" class="comp-box inactive"/>
-                        <text x="1005" y="120" class="comp-icon disabled">📦</text>
-                        <text x="1005" y="140" class="comp-label disabled">Zarr Store</text>
-                        <circle cx="1045" cy="105" r="8" class="status-indicator" data-status="disabled"/>
+                    <!-- Zarr Store: to the right of PostGIS (x=1005 center) - same account as Silver -->
+                    <g class="component" id="comp-zarr-store" data-tooltip="">
+                        <rect x="955" y="95" width="100" height="60" rx="6" class="comp-box storage"/>
+                        <text x="1005" y="120" class="comp-icon">📦</text>
+                        <text x="1005" y="140" class="comp-label">Zarr Store</text>
+                        <circle cx="1045" cy="105" r="8" class="status-indicator" data-status="unknown"/>
                     </g>
 
-                    <!-- Arrow: Zarr Store -> TiTiler-xarray (up) - grey/dashed for not implemented -->
-                    <path d="M 1005 95 L 1005 65" class="flow-arrow inactive" marker-end="url(#arrowhead-grey)"/>
+                    <!-- Arrow: Zarr Store -> TiTiler-xarray (up) -->
+                    <path d="M 1005 95 L 1005 65" class="flow-arrow" marker-end="url(#arrowhead)"/>
 
                     <!-- Arrows: Output Data -> TiTiler-pgstac (up) -->
                     <path d="M 735 95 L 735 65" class="flow-arrow" marker-end="url(#arrowhead)"/>
@@ -1597,20 +1599,47 @@ class HealthInterface(BaseInterface):
             'comp-output-storage': 'storage_containers', // Silver storage
             'comp-output-tables': 'pgstac',              // PostGIS/pgstac output
             'comp-titiler': 'titiler',                   // TiTiler-pgstac raster tile server
-            'comp-ogc-features': 'ogc_features'          // OGC Features API
+            'comp-ogc-features': 'ogc_features',         // OGC Features API
+            'comp-titiler-xarray': 'titiler_xarray',     // TiTiler xarray endpoint (special handling)
+            'comp-zarr-store': 'zarr_store'              // Zarr storage (special handling)
+        }};
+
+        // Special components that derive status from TiTiler's available_features
+        const TITILER_FEATURE_COMPONENTS = {{
+            'comp-titiler-xarray': 'xarray_zarr',        // TiTiler xarray/Zarr feature flag
+            'comp-zarr-store': 'xarray_zarr'             // Zarr uses same feature flag
         }};
 
         // Update architecture diagram status indicators
         function updateDiagramStatus(components) {{
             if (!components) return;
 
+            // Get TiTiler component for feature flag checks
+            const titilerComponent = components['titiler'];
+            const titilerFeatures = titilerComponent?.details?.available_features || {{}};
+
             // Update each component in the diagram
             Object.entries(COMPONENT_MAPPING).forEach(([svgId, healthKey]) => {{
-                const component = components[healthKey];
                 const indicator = document.querySelector(`#${{svgId}} .status-indicator`);
+                if (!indicator) return;
 
-                if (indicator) {{
-                    let status = 'unknown';
+                let status = 'unknown';
+
+                // Check if this is a TiTiler feature-based component
+                const featureKey = TITILER_FEATURE_COMPONENTS[svgId];
+                if (featureKey) {{
+                    // Status based on TiTiler's available_features flag
+                    // If TiTiler is healthy AND the feature is available, show healthy
+                    // If TiTiler is healthy but feature is false, show unhealthy (feature disabled)
+                    // If TiTiler is unhealthy, show unknown
+                    if (titilerComponent && titilerComponent.status === 'healthy') {{
+                        status = titilerFeatures[featureKey] === true ? 'healthy' : 'unhealthy';
+                    }} else if (titilerComponent) {{
+                        status = 'warning';  // TiTiler exists but not fully healthy
+                    }}
+                }} else {{
+                    // Standard component lookup
+                    const component = components[healthKey];
                     if (component) {{
                         // For TiTiler and OGC Features, check details.overall_status for nuanced status
                         // (these components can have warning state: livez OK but health not OK)
@@ -1624,8 +1653,9 @@ class HealthInterface(BaseInterface):
                         if (status === 'partial') status = 'warning';
                         if (status === 'disabled' || status === 'deprecated') status = 'unknown';
                     }}
-                    indicator.setAttribute('data-status', status);
                 }}
+
+                indicator.setAttribute('data-status', status);
             }});
         }}
 

@@ -483,6 +483,7 @@ class TaskRoutingDefaults:
         "fathom_tile_inventory",   # Phase 1: Query DB for unprocessed tiles
         "fathom_grid_inventory",   # Phase 2: Query DB for Phase 1 completed
         "fathom_stac_register",    # Shared: Create STAC items (DB + HTTP)
+        "fathom_stac_rebuild",     # Rebuild STAC from existing COGs (09 JAN 2026)
         # Hello world and test handlers (lightweight)
         "hello_world_greeting",
         "hello_world_reply",

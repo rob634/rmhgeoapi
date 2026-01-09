@@ -111,6 +111,8 @@ from .fathom_etl import (
     fathom_spatial_merge,
     # Shared
     fathom_stac_register,
+    # STAC Rebuild (09 JAN 2026) - rebuild STAC from existing COGs
+    fathom_stac_rebuild,
     # Legacy handlers ARCHIVED (05 DEC 2025) → docs/archive/jobs/fathom_legacy_dec2025/
 )
 from .geospatial_inventory import (
@@ -238,6 +240,8 @@ ALL_HANDLERS = {
     "fathom_spatial_merge": fathom_spatial_merge,     # Stage 2: Merge tiles band-by-band
     # Shared handler (both phases)
     "fathom_stac_register": fathom_stac_register,     # Stage 3: STAC collection/items
+    # STAC Rebuild (09 JAN 2026) - rebuild STAC from existing COGs
+    "fathom_stac_rebuild": fathom_stac_rebuild,
     # Legacy handlers ARCHIVED (05 DEC 2025) → docs/archive/jobs/fathom_legacy_dec2025/
     # Idempotent Vector ETL handlers (26 NOV 2025)
     "process_vector_prepare": process_vector_prepare,  # Stage 1: Load, validate, chunk, create table

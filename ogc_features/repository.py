@@ -28,6 +28,7 @@ import psycopg
 from psycopg import sql
 from psycopg.rows import dict_row
 
+from infrastructure.service_latency import track_db_operation
 from .config import OGCFeaturesConfig, get_ogc_config
 
 # Setup logging
@@ -91,6 +92,7 @@ class OGCFeaturesRepository:
     # COLLECTION DISCOVERY
     # ========================================================================
 
+    @track_db_operation("ogc.db.list_collections")
     def list_collections(self) -> List[Dict[str, Any]]:
         """
         List all vector collections (tables) in configured schema.
@@ -128,6 +130,7 @@ class OGCFeaturesRepository:
             logger.error(f"Error listing collections: {e}")
             raise
 
+    @track_db_operation("ogc.db.get_collection_metadata")
     def get_collection_metadata(self, collection_id: str) -> Dict[str, Any]:
         """
         Get metadata for a specific collection.
@@ -365,6 +368,7 @@ class OGCFeaturesRepository:
             logger.warning(f"Error querying geo.table_metadata for '{collection_id}': {e}")
             return None
 
+    @track_db_operation("ogc.db.get_vector_metadata")
     def get_vector_metadata(self, collection_id: str) -> Optional["VectorMetadata"]:
         """
         Get VectorMetadata model for a collection from geo.table_metadata registry.
@@ -469,6 +473,7 @@ class OGCFeaturesRepository:
     # FEATURE QUERIES
     # ========================================================================
 
+    @track_db_operation("ogc.db.query_features")
     def query_features(
         self,
         collection_id: str,
@@ -556,6 +561,7 @@ class OGCFeaturesRepository:
             logger.error(f"Error querying features from '{collection_id}': {e}")
             raise
 
+    @track_db_operation("ogc.db.get_feature_by_id")
     def get_feature_by_id(
         self,
         collection_id: str,

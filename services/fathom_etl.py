@@ -1537,3 +1537,387 @@ def fathom_stac_register(params: dict, context: dict = None) -> dict:
             "stac_catalog_url": f"{config.etl_app_base_url}/api/stac/collections/{full_collection_id}"
         }
     }
+
+
+# =============================================================================
+# STAC REBUILD (From Existing COGs - 09 JAN 2026)
+# =============================================================================
+
+def fathom_stac_rebuild(params: dict, context: dict = None) -> dict:
+    """
+    Rebuild STAC collection and items from existing FATHOM COGs.
+
+    This allows recreating STAC entries without reprocessing the GeoTIFFs.
+    Scans blob storage, extracts metadata from filenames and COG headers,
+    and creates/updates STAC collection and items.
+
+    Args:
+        params: Task parameters
+            - region_code: ISO country code (e.g., "rwa")
+            - phase: 1 or 2 (default: 2)
+            - dry_run: If True, only scan and report (no STAC writes)
+            - force_recreate: If True, delete existing items before recreating
+
+    Returns:
+        dict with rebuild summary
+
+    Example:
+        # Rebuild Rwanda Phase 2 STAC
+        curl -X POST .../api/jobs/submit/fathom_stac_rebuild -d '{"region_code": "rwa", "phase": 2}'
+    """
+    import re
+    from datetime import datetime, timezone
+    from infrastructure.pgstac_bootstrap import PgStacBootstrap
+    from infrastructure.blob import BlobRepository
+    from config import get_config
+
+    logger = LoggerFactory.create_logger(
+        ComponentType.SERVICE,
+        "fathom_stac_rebuild"
+    )
+
+    region_code = params.get("region_code", "").lower()
+    phase = params.get("phase", 2)
+    dry_run = params.get("dry_run", False)
+    force_recreate = params.get("force_recreate", False)
+
+    if not region_code:
+        return {"success": False, "error": "region_code is required"}
+
+    logger.info(f"🔄 STAC Rebuild: Phase {phase} for region {region_code.upper()}")
+    logger.info(f"   dry_run={dry_run}, force_recreate={force_recreate}")
+
+    config = get_config()
+
+    # Determine container and prefix based on phase
+    if phase == 1:
+        container = FathomDefaults.PHASE1_OUTPUT_CONTAINER
+        prefix = f"{FathomDefaults.PHASE1_OUTPUT_PREFIX}/{region_code}/"
+        collection_base = FathomDefaults.PHASE1_COLLECTION_ID
+    else:
+        container = FathomDefaults.PHASE2_OUTPUT_CONTAINER
+        prefix = f"{FathomDefaults.PHASE2_OUTPUT_PREFIX}/{region_code}/"
+        collection_base = FathomDefaults.PHASE2_COLLECTION_ID
+
+    full_collection_id = f"{collection_base}-{region_code}"
+
+    # List existing COGs
+    logger.info(f"📂 Scanning {container}/{prefix}...")
+    blob_repo = BlobRepository(zone="silver")
+    blobs = blob_repo.list_blobs(container, prefix=prefix, suffix=".tif")
+
+    if not blobs:
+        logger.warning(f"   No COGs found in {container}/{prefix}")
+        return {
+            "success": True,
+            "result": {
+                "collection_id": full_collection_id,
+                "cogs_found": 0,
+                "items_created": 0,
+                "message": "No COGs found to rebuild"
+            }
+        }
+
+    logger.info(f"   Found {len(blobs)} COGs")
+
+    if dry_run:
+        logger.info("🔍 DRY RUN - listing COGs only")
+        return {
+            "success": True,
+            "result": {
+                "dry_run": True,
+                "collection_id": full_collection_id,
+                "cogs_found": len(blobs),
+                "cog_list": [b["name"] for b in blobs[:20]],
+                "message": f"Found {len(blobs)} COGs (showing first 20)"
+            }
+        }
+
+    # Parse COG metadata from filenames and extract bounds
+    # Filename pattern: {flood_type}-{defense}-{year}[-{ssp}]-{grid}.tif
+    # Example: fluvial-defended-2030-ssp245-s00-s04_e028-e032.tif
+    cog_results = []
+
+    for blob in blobs:
+        blob_name = blob["name"]
+        filename = blob_name.split("/")[-1].replace(".tif", "")
+
+        # Parse filename components
+        parts = filename.split("-")
+        if len(parts) < 4:
+            logger.warning(f"   ⚠️ Cannot parse filename: {filename}")
+            continue
+
+        flood_type = parts[0]  # fluvial, pluvial, coastal
+        defense = parts[1]     # defended, undefended
+        year = int(parts[2])   # 2020, 2030, 2050, 2080
+
+        # SSP scenario (optional - only for future years)
+        if year > 2020 and len(parts) >= 5:
+            ssp = parts[3]  # ssp126, ssp245, ssp370, ssp585
+            grid_parts = parts[4:]
+        else:
+            ssp = None
+            grid_parts = parts[3:]
+
+        grid = "-".join(grid_parts)  # s00-s04_e028-e032
+
+        # Extract bounds from COG using rasterio
+        try:
+            import rasterio
+            from azure.storage.blob import BlobServiceClient
+
+            # Get blob URL with SAS or use managed identity
+            silver_account = config.silver_storage_account
+            blob_url = f"https://{silver_account}.blob.core.windows.net/{container}/{blob_name}"
+
+            # Use /vsiaz/ for GDAL/rasterio access
+            vsi_path = f"/vsiaz/{container}/{blob_name}"
+
+            with rasterio.open(vsi_path) as src:
+                bounds = src.bounds
+                cog_bounds = {
+                    "west": bounds.left,
+                    "south": bounds.bottom,
+                    "east": bounds.right,
+                    "north": bounds.top
+                }
+
+            cog_results.append({
+                "output_blob": blob_name,
+                "output_name": filename,
+                "bounds": cog_bounds,
+                "year": year,
+                "flood_type": flood_type,
+                "defense_status": defense,
+                "ssp_scenario": ssp,
+                "grid_cell": grid
+            })
+
+        except Exception as e:
+            logger.warning(f"   ⚠️ Cannot read bounds for {filename}: {e}")
+            # Try without bounds - use approximate from grid name
+            # Grid format: s{lat1}-s{lat2}_e{lon1}-e{lon2}
+            try:
+                grid_match = re.match(r's(\d+)-s(\d+)_e(\d+)-e(\d+)', grid)
+                if grid_match:
+                    s1, s2, e1, e2 = map(int, grid_match.groups())
+                    cog_bounds = {
+                        "west": e1,
+                        "south": -s2,
+                        "east": e2,
+                        "north": -s1
+                    }
+                    cog_results.append({
+                        "output_blob": blob_name,
+                        "output_name": filename,
+                        "bounds": cog_bounds,
+                        "year": year,
+                        "flood_type": flood_type,
+                        "defense_status": defense,
+                        "ssp_scenario": ssp,
+                        "grid_cell": grid
+                    })
+            except Exception:
+                logger.warning(f"   ⚠️ Skipping {filename} - cannot determine bounds")
+
+    logger.info(f"   Parsed {len(cog_results)} COGs with metadata")
+
+    if not cog_results:
+        return {
+            "success": False,
+            "error": "Could not parse any COG metadata"
+        }
+
+    # Now use fathom_stac_register logic to create collection and items
+    stac_repo = PgStacBootstrap()
+
+    # Handle force_recreate - delete existing collection
+    if force_recreate and stac_repo.collection_exists(full_collection_id):
+        logger.info(f"   🗑️ Deleting existing collection: {full_collection_id}")
+        try:
+            stac_repo.delete_collection(full_collection_id)
+        except Exception as e:
+            logger.warning(f"   ⚠️ Could not delete collection: {e}")
+
+    # Create collection if not exists
+    if not stac_repo.collection_exists(full_collection_id):
+        logger.info(f"   📚 Creating collection: {full_collection_id}")
+
+        # Calculate collection bounds from all COGs
+        all_bounds = [r["bounds"] for r in cog_results]
+        collection_bounds = [
+            min(b["west"] for b in all_bounds),
+            min(b["south"] for b in all_bounds),
+            max(b["east"] for b in all_bounds),
+            max(b["north"] for b in all_bounds)
+        ]
+
+        result = stac_repo.create_collection(
+            container=container,
+            tier="silver",
+            collection_id=full_collection_id,
+            title=f"Fathom Global Flood Hazard Maps - {region_code.upper()}",
+            description=(
+                f"Consolidated flood hazard data for {region_code.upper()} from Fathom Global v3. "
+                "Multi-band COGs with return periods (1in5 to 1in1000) as bands. "
+                "Flood depth values in centimeters."
+            ),
+            summaries={
+                "fathom:flood_type": list(set(r["flood_type"] for r in cog_results)),
+                "fathom:defense_status": list(set(r["defense_status"] for r in cog_results)),
+                "fathom:year": list(set(r["year"] for r in cog_results)),
+                "fathom:ssp_scenario": [s for s in set(r.get("ssp_scenario") for r in cog_results) if s]
+            },
+            license="proprietary",
+            extent={
+                "spatial": {"bbox": [collection_bounds]},
+                "temporal": {"interval": [["2020-01-01T00:00:00Z", "2080-12-31T23:59:59Z"]]}
+            },
+            keywords=["flood", "hazard", "fathom", "climate", region_code]
+        )
+        if result.get("success"):
+            logger.info(f"   ✅ Collection created")
+        else:
+            logger.warning(f"   ⚠️ Collection creation: {result}")
+
+    # Create STAC items (matching fathom_stac_register pattern)
+    items_created = 0
+    items_skipped = 0
+    storage_base = f"/vsiaz/{container}"
+
+    # TiTiler setup for visualization links
+    import urllib.parse
+    titiler_base = config.titiler_base_url.rstrip('/')
+
+    for cog_result in cog_results:
+        output_blob = cog_result["output_blob"]
+        output_name = cog_result["output_name"]
+        bounds = cog_result["bounds"]
+
+        item_id = output_name
+        year = cog_result["year"]
+        item_datetime = f"{year}-01-01T00:00:00Z"
+
+        asset_href = f"{storage_base}/{output_blob}"
+        bbox = [bounds["west"], bounds["south"], bounds["east"], bounds["north"]]
+
+        geometry = {
+            "type": "Polygon",
+            "coordinates": [[
+                [bounds["west"], bounds["south"]],
+                [bounds["east"], bounds["south"]],
+                [bounds["east"], bounds["north"]],
+                [bounds["west"], bounds["north"]],
+                [bounds["west"], bounds["south"]]
+            ]]
+        }
+
+        # Check if item already exists
+        if stac_repo.item_exists(item_id, full_collection_id):
+            items_skipped += 1
+            continue
+
+        # Build eo:bands metadata (matching fathom_stac_register)
+        eo_bands = []
+        for rp in RETURN_PERIODS:
+            eo_bands.append({
+                "name": rp,
+                "description": f"Flood depth for {rp.replace('in', '-in-')} year return period (cm)"
+            })
+
+        # Build STAC item (consistent with fathom_stac_register)
+        item = {
+            "type": "Feature",
+            "stac_version": "1.0.0",
+            "stac_extensions": [
+                "https://stac-extensions.github.io/eo/v1.0.0/schema.json",
+                "https://stac-extensions.github.io/raster/v1.1.0/schema.json"
+            ],
+            "id": item_id,
+            "collection": full_collection_id,
+            "geometry": geometry,
+            "bbox": bbox,
+            "properties": {
+                "datetime": item_datetime,
+                "fathom:flood_type": cog_result["flood_type"],
+                "fathom:defense_status": cog_result["defense_status"],
+                "fathom:year": year,
+                "fathom:ssp_scenario": cog_result.get("ssp_scenario"),
+                "fathom:depth_unit": "cm",
+                "fathom:grid_cell": cog_result["grid_cell"],
+                "eo:bands": eo_bands
+            },
+            "assets": {
+                "data": {
+                    "href": asset_href,
+                    "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+                    "title": f"Flood depth COG ({cog_result['flood_type']} {cog_result['defense_status']})",
+                    "roles": ["data"],
+                    "raster:bands": [
+                        {
+                            "data_type": "int16",
+                            "nodata": -32768,
+                            "unit": "cm",
+                            "description": f"Flood depth for {rp} return period"
+                        }
+                        for rp in RETURN_PERIODS
+                    ]
+                }
+            },
+            "links": [
+                {
+                    "rel": "collection",
+                    "href": f"./collection.json",
+                    "type": "application/json"
+                }
+            ]
+        }
+
+        # Add TiTiler visualization links (consistent with fathom_stac_register)
+        # 8-band COGs need bidx parameter; default to band 5 (1-in-100 year return period)
+        vsiaz_encoded = urllib.parse.quote(asset_href, safe='')
+        viz_params = "bidx=5&rescale=0,300&colormap_name=blues"
+
+        item["links"].extend([
+            {
+                "rel": "preview",
+                "href": f"{titiler_base}/cog/WebMercatorQuad/map.html?url={vsiaz_encoded}&{viz_params}",
+                "type": "text/html",
+                "title": "Interactive map viewer (TiTiler) - 1-in-100 year flood"
+            },
+            {
+                "rel": "tilejson",
+                "href": f"{titiler_base}/cog/WebMercatorQuad/tilejson.json?url={vsiaz_encoded}&{viz_params}",
+                "type": "application/json",
+                "title": "TileJSON specification"
+            }
+        ])
+
+        # Add thumbnail asset
+        item["assets"]["thumbnail"] = {
+            "href": f"{titiler_base}/cog/preview.png?url={vsiaz_encoded}&max_size=256&{viz_params}",
+            "type": "image/png",
+            "roles": ["thumbnail"],
+            "title": "Preview thumbnail (1-in-100 year flood depth)"
+        }
+
+        try:
+            stac_repo.insert_item(item, full_collection_id)
+            items_created += 1
+        except Exception as e:
+            logger.warning(f"   ⚠️ Failed to create item {item_id}: {e}")
+
+    logger.info(f"✅ STAC rebuild complete: {items_created} created, {items_skipped} skipped (already exist)")
+
+    return {
+        "success": True,
+        "result": {
+            "collection_id": full_collection_id,
+            "cogs_found": len(blobs),
+            "cogs_parsed": len(cog_results),
+            "items_created": items_created,
+            "items_skipped": items_skipped,
+            "stac_catalog_url": f"{config.etl_app_base_url}/api/stac/collections/{full_collection_id}"
+        }
+    }

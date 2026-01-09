@@ -27,6 +27,7 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
 from urllib.parse import urlencode, urlparse, parse_qs
 
+from infrastructure.service_latency import track_latency
 from .config import OGCFeaturesConfig, get_ogc_config
 from .repository import OGCFeaturesRepository
 from .models import (
@@ -138,6 +139,7 @@ class OGCFeaturesService:
     # COLLECTIONS
     # ========================================================================
 
+    @track_latency("ogc.list_collections")
     def list_collections(self, base_url: str) -> OGCCollectionList:
         """
         List all available collections (vector tables).
@@ -183,6 +185,7 @@ class OGCFeaturesService:
             links=links
         )
 
+    @track_latency("ogc.get_collection")
     def get_collection(self, collection_id: str, base_url: str) -> OGCCollection:
         """
         Get detailed metadata for a specific collection.
@@ -299,6 +302,7 @@ class OGCFeaturesService:
     # FEATURE QUERIES
     # ========================================================================
 
+    @track_latency("ogc.query_features")
     def query_features(
         self,
         collection_id: str,
@@ -381,6 +385,7 @@ class OGCFeaturesService:
 
         return feature_collection
 
+    @track_latency("ogc.get_feature")
     def get_feature(
         self,
         collection_id: str,

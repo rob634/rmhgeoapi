@@ -18,6 +18,8 @@ Updated: 11 NOV 2025 - Added all STAC v1.0.0 endpoints
 """
 
 from typing import Dict, Any, Optional
+
+from infrastructure.service_latency import track_latency
 from .config import STACAPIConfig
 
 
@@ -100,6 +102,7 @@ class STACAPIService:
             ]
         }
 
+    @track_latency("stac.get_collections")
     def get_collections(self, base_url: str) -> Dict[str, Any]:
         """
         Get all STAC collections with metadata.
@@ -174,6 +177,7 @@ class STACAPIService:
 
         return response
 
+    @track_latency("stac.get_collection")
     def get_collection(self, collection_id: str, base_url: str) -> Dict[str, Any]:
         """
         Get single collection metadata.
@@ -232,6 +236,7 @@ class STACAPIService:
 
         return response
 
+    @track_latency("stac.get_items")
     def get_items(
         self,
         collection_id: str,
@@ -297,6 +302,7 @@ class STACAPIService:
 
         return response
 
+    @track_latency("stac.get_item")
     def get_item(self, collection_id: str, item_id: str, base_url: str) -> Dict[str, Any]:
         """
         Get single item metadata.

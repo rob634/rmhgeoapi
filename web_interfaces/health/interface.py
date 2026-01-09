@@ -158,7 +158,7 @@ class HealthInterface(BaseInterface):
 
             # Zarr/xarray components - TiTiler-xarray uses same TiTiler, Zarr uses same silver account
             'comp-titiler-xarray': f"{titiler_url}\nxarray/Zarr endpoint\nStatus: check available_features.xarray_zarr",
-            'comp-zarr-store': f"{silver_account}\nZarr datasets\n(same storage as Silver COGs)",
+            'comp-zarr-store': f"{silver_account}\nZarr datasets",
         }
 
     def _generate_html_content(self) -> str:
@@ -1615,8 +1615,9 @@ class HealthInterface(BaseInterface):
             if (!components) return;
 
             // Get TiTiler component for feature flag checks
+            // available_features is nested in: titiler.details.health.body.available_features
             const titilerComponent = components['titiler'];
-            const titilerFeatures = titilerComponent?.details?.available_features || {{}};
+            const titilerFeatures = titilerComponent?.details?.health?.body?.available_features || {{}};
 
             // Update each component in the diagram
             Object.entries(COMPONENT_MAPPING).forEach(([svgId, healthKey]) => {{
@@ -1629,10 +1630,12 @@ class HealthInterface(BaseInterface):
                 const featureKey = TITILER_FEATURE_COMPONENTS[svgId];
                 if (featureKey) {{
                     // Status based on TiTiler's available_features flag
-                    // If TiTiler is healthy AND the feature is available, show healthy
-                    // If TiTiler is healthy but feature is false, show unhealthy (feature disabled)
-                    // If TiTiler is unhealthy, show unknown
-                    if (titilerComponent && titilerComponent.status === 'healthy') {{
+                    // Check both top-level status and details.overall_status for TiTiler health
+                    const titilerStatus = titilerComponent?.details?.overall_status || titilerComponent?.status;
+                    const titilerHealthy = titilerStatus === 'healthy';
+
+                    if (titilerComponent && titilerHealthy) {{
+                        // TiTiler is healthy - check if xarray_zarr feature is enabled
                         status = titilerFeatures[featureKey] === true ? 'healthy' : 'unhealthy';
                     }} else if (titilerComponent) {{
                         status = 'warning';  // TiTiler exists but not fully healthy

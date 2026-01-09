@@ -123,7 +123,12 @@ class EnvVarRule:
 # Common regex patterns (reusable)
 _AZURE_STORAGE_ACCOUNT = re.compile(r"^[a-z0-9]{3,24}$")
 _AZURE_HOST_FQDN = re.compile(r"^[a-z0-9][a-z0-9-]*\.(postgres\.database\.azure\.com|database\.windows\.net)$", re.IGNORECASE)
-_SERVICE_BUS_FQDN = re.compile(r"^[a-z0-9][a-z0-9-]*\.servicebus\.windows\.net$", re.IGNORECASE)
+# Service Bus FQDN: Accept multiple Azure cloud domains (09 JAN 2026)
+# - .servicebus.windows.net (Azure Public)
+# - .servicebus.usgovcloudapi.net (Azure Government)
+# - .servicebus.chinacloudapi.cn (Azure China)
+# - Any other .servicebus.*.net domain (future-proof)
+_SERVICE_BUS_FQDN = re.compile(r"^[a-z0-9][a-z0-9-]*\.servicebus\.[a-z0-9.-]+$", re.IGNORECASE)
 _LOCALHOST_OR_AZURE = re.compile(r"^(localhost|127\.0\.0\.1|[a-z0-9][a-z0-9-]*\.(postgres\.database\.azure\.com|database\.windows\.net))$", re.IGNORECASE)
 _SCHEMA_NAME = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
 _DATABASE_NAME = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]{0,62}$")
@@ -139,18 +144,18 @@ ENV_VAR_RULES: Dict[str, EnvVarRule] = {
     # =========================================================================
     "SERVICE_BUS_FQDN": EnvVarRule(
         pattern=_SERVICE_BUS_FQDN,
-        pattern_description="Must be full FQDN ending in .servicebus.windows.net",
+        pattern_description="Must be full FQDN containing .servicebus. (e.g., *.servicebus.windows.net)",
         required=True,
-        fix_suggestion="Use full URL like 'myservicebus.servicebus.windows.net' (not just 'myservicebus')",
+        fix_suggestion="Use full FQDN like 'myservicebus.servicebus.windows.net' (not just 'myservicebus')",
         example="myservicebus.servicebus.windows.net",
     ),
 
     # Legacy name - still validate if present
     "SERVICE_BUS_NAMESPACE": EnvVarRule(
         pattern=_SERVICE_BUS_FQDN,
-        pattern_description="Must be full FQDN ending in .servicebus.windows.net (DEPRECATED - use SERVICE_BUS_FQDN)",
+        pattern_description="Must be full FQDN containing .servicebus. (DEPRECATED - use SERVICE_BUS_FQDN)",
         required=False,
-        fix_suggestion="Rename to SERVICE_BUS_FQDN. Use full URL like 'myservicebus.servicebus.windows.net'",
+        fix_suggestion="Rename to SERVICE_BUS_FQDN. Use full FQDN like 'myservicebus.servicebus.windows.net'",
         example="myservicebus.servicebus.windows.net",
     ),
 

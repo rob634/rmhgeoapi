@@ -118,6 +118,9 @@ class HealthInterface(BaseInterface):
         vector_queue = config.queues.vector_tasks_queue
         long_queue = config.queues.long_running_tasks_queue
 
+        # Docker worker enabled status
+        docker_worker_enabled = config.app_mode.docker_worker_enabled
+
         # OGC Features URL - clean up for display
         ogc_url = config.ogc_features_base_url
         if ogc_url.startswith('https://'):
@@ -138,7 +141,6 @@ class HealthInterface(BaseInterface):
             'comp-job-queues': f"{service_bus_ns}\nQueue: {jobs_queue}",
             'comp-parallel-queue': f"{service_bus_ns}\nQueue: {vector_queue}",
             'comp-compute-queue': f"{service_bus_ns}\nQueue: {raster_queue}",
-            'comp-long-queue': f"Queue: {long_queue}\n(Docker worker - not implemented)",
 
             # Database
             'comp-job-tables': f"{db_host}\nDB: {db_name}\nSchema: {app_schema}.jobs",
@@ -154,8 +156,8 @@ class HealthInterface(BaseInterface):
             'comp-ogc-features': f"{ogc_url}\nOGC API - Features",
 
             # Docker Worker (controlled by DOCKER_WORKER_ENABLED env var)
-            'comp-long-queue': f"{service_bus_ns}\nQueue: {long_queue}\nEnabled: DOCKER_WORKER_ENABLED",
-            'comp-container': f"Docker Container Worker\nQueue: {long_queue}\nEnabled: DOCKER_WORKER_ENABLED",
+            'comp-long-queue': f"{service_bus_ns}\nQueue: {long_queue}\nDocker Worker: {'Enabled' if docker_worker_enabled else 'Disabled'}",
+            'comp-container': f"Docker Container Worker\nQueue: {long_queue}\nStatus: {'Enabled' if docker_worker_enabled else 'Disabled (set DOCKER_WORKER_ENABLED=true)'}",
 
             # Zarr/xarray components - TiTiler-xarray uses same TiTiler, Zarr uses same silver account
             'comp-titiler-xarray': f"{titiler_url}\nxarray/Zarr endpoint\nStatus: check available_features.xarray_zarr",

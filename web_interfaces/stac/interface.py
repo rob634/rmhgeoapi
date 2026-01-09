@@ -147,56 +147,15 @@ class StacInterface(BaseInterface):
         """Generate custom CSS for STAC dashboard.
 
         Note: Most styles now in COMMON_CSS (S12.1.1).
+        Header/action-bar consolidated S12.5.1-S12.5.2 (08 JAN 2026).
         Only STAC-specific styles remain here.
 
         Updated 31 DEC 2025: Match vector interface card style with Map/Promote/Delete buttons.
         """
         return """
-        /* Header with count - flex layout */
-        .header-with-count {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding-bottom: 12px;
-        }
-
-        .header-with-count h1 {
-            margin: 0;
-        }
-
-        .collection-count {
-            background: var(--ds-blue-primary);
-            color: white;
-            padding: 6px 14px;
-            border-radius: 20px;
-            font-size: 14px;
-            font-weight: 600;
-        }
-
-        /* Action bar with button and filters */
-        .action-bar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 16px;
-            gap: 16px;
-        }
-
-        .filter-group {
-            display: flex;
-            gap: 12px;
-            align-items: center;
-        }
-
+        /* STAC-specific: narrower search input in filter group */
         .filter-group .search-input {
             width: 200px;
-        }
-
-        .filter-select {
-            padding: 8px 12px;
-            border: 1px solid var(--ds-gray-light);
-            border-radius: 4px;
-            font-size: 13px;
         }
 
         /* Smaller cards - 4 per row */
@@ -896,24 +855,7 @@ class StacInterface(BaseInterface):
             }
         }
 
-        // Filter collections
-        function filterCollections() {
-            const searchTerm = document.getElementById('search-filter').value.toLowerCase();
-            const typeFilter = document.getElementById('type-filter').value;
-
-            const filtered = allCollections.filter(c => {
-                const matchesSearch = !searchTerm ||
-                    c.id.toLowerCase().includes(searchTerm) ||
-                    (c.title || '').toLowerCase().includes(searchTerm) ||
-                    (c.description || '').toLowerCase().includes(searchTerm);
-
-                const matchesType = !typeFilter || c.type === typeFilter;
-
-                return matchesSearch && matchesType;
-            });
-
-            renderCollections(filtered);
-        }
+        // filterCollections() now in COMMON_JS (S12.5.4 - 08 JAN 2026)
 
         // Show collection detail
         async function showCollectionDetail(collectionId) {

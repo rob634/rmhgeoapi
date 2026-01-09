@@ -43,12 +43,12 @@ class PipelineInterface(BaseInterface):
         return self.wrap_html(
             title="Pipeline Workflows",
             content=self._generate_html_content(),
-            custom_css=self._generate_css(),
-            custom_js=self._generate_js(),
+            custom_css=self._generate_custom_css(),
+            custom_js=self._generate_custom_js(),
             include_htmx=True
         )
 
-    def _generate_css(self) -> str:
+    def _generate_custom_css(self) -> str:
         """Pipeline-specific styles."""
         return """
             .dashboard-header {
@@ -697,7 +697,7 @@ class PipelineInterface(BaseInterface):
         </div>
         """
 
-    def _generate_js(self) -> str:
+    def _generate_custom_js(self) -> str:
         """JavaScript for loading job data."""
         return """
         // Pipeline job types to track for stats

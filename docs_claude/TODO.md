@@ -1,6 +1,6 @@
 # Working Backlog
 
-**Last Updated**: 08 JAN 2026 (pg_cron + autovacuum implementation for table maintenance)
+**Last Updated**: 08 JAN 2026 (Web Interface DRY Consolidation - in progress)
 **Source of Truth**: [docs/epics/README.md](/docs/epics/README.md) — Epic/Feature/Story definitions
 **Purpose**: Sprint-level task tracking and delegation
 
@@ -117,6 +117,124 @@ themes:
 - `services/h3_aggregation/` - Aggregation handlers
 - `jobs/h3_raster_aggregation.py` - Main job
 - `core/models/h3_sources.py` - source_catalog entries
+
+---
+
+### 🔵 Active: Web Interface DRY Consolidation
+
+**Epic**: E12 Interface Modernization
+**Goal**: Eliminate copy-pasted CSS/JS across web interfaces to improve maintainability and provide clean template for future frontend teams
+**Started**: 08 JAN 2026
+**Risk**: Low (additive CSS/JS changes, no logic changes)
+
+#### Background
+
+Code review identified significant DRY violations in `web_interfaces/`:
+- ~30K lines across 36 interfaces
+- Same CSS copied 4x (`.header-with-count`, `.action-bar`)
+- Same JS function copied 3x (`filterCollections()`)
+- Inconsistent method naming
+
+**Why It Matters**: This code serves as a template for future frontend teams. Copy-paste patterns will propagate as anti-patterns.
+
+#### F12.5: Web Interface DRY Consolidation
+
+| Story | Description | Status | Files |
+|-------|-------------|--------|-------|
+| S12.5.1 | Move `.header-with-count` CSS to COMMON_CSS | ✅ Done | `base.py` |
+| S12.5.2 | Move `.action-bar` + `.filter-group` CSS to COMMON_CSS | ✅ Done | `base.py` |
+| S12.5.3 | Remove duplicated CSS from interfaces | ✅ Done | `stac/`, `vector/` |
+| S12.5.4 | Add `filterCollections()` JS to COMMON_JS | ✅ Done | `base.py` |
+| S12.5.5 | Remove duplicated JS from interfaces | ✅ Done | `stac/`, `vector/` |
+| S12.5.6 | Fix naming: `_generate_css` → `_generate_custom_css` | ✅ Done | `pipeline/interface.py` |
+| S12.5.7 | Verify all affected interfaces render correctly | 📋 | Browser testing (post-deploy) |
+
+#### Implementation Details
+
+**S12.5.1 - CSS to add to COMMON_CSS**:
+```css
+/* Header with count badge - collection browsers */
+.header-with-count {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 12px;
+}
+.header-with-count h1 { margin: 0; }
+.collection-count {
+    background: var(--ds-blue-primary);
+    color: white;
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 14px;
+    font-weight: 600;
+}
+```
+
+**S12.5.2 - CSS to add to COMMON_CSS**:
+```css
+/* Action bar - button + filters layout */
+.action-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    gap: 16px;
+}
+.filter-group {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+.filter-select {
+    padding: 8px 12px;
+    border: 1px solid var(--ds-gray-light);
+    border-radius: 4px;
+    font-size: 13px;
+}
+```
+
+**S12.5.4 - JS to add to COMMON_JS**:
+```javascript
+/**
+ * Filter collection cards by search term and optional type.
+ * Requires: #search-filter input, optional #type-filter select
+ * Requires: global allCollections array and renderCollections(filtered) function
+ */
+function filterCollections() {
+    const searchTerm = (document.getElementById('search-filter')?.value || '').toLowerCase();
+    const typeFilter = document.getElementById('type-filter')?.value || '';
+
+    const filtered = allCollections.filter(c => {
+        const matchesSearch = !searchTerm ||
+            c.id.toLowerCase().includes(searchTerm) ||
+            (c.title || '').toLowerCase().includes(searchTerm) ||
+            (c.description || '').toLowerCase().includes(searchTerm);
+        const matchesType = !typeFilter || c.type === typeFilter;
+        return matchesSearch && matchesType;
+    });
+
+    renderCollections(filtered);
+}
+```
+
+**S12.5.3/S12.5.5 - Files to clean up**:
+| File | Remove CSS | Remove JS |
+|------|------------|-----------|
+| `stac/interface.py` | `.header-with-count`, `.action-bar`, `.filter-group`, `.filter-select` | `filterCollections()` |
+| `vector/interface.py` | `.header-with-count`, `.action-bar` | `filterCollections()` |
+| `stac_map/interface.py` | `.header-with-count` (if present) | Keep custom (DOM-based) |
+| `h3/interface.py` | `.header-with-count` (if present) | N/A |
+
+#### Verification Checklist
+
+**Implementation Complete (08 JAN 2026)** - All syntax/import checks pass locally.
+After deployment, verify in browser:
+- [ ] `/api/interface/stac` - header badge, search, type filter
+- [ ] `/api/interface/vector` - header badge, search
+- [ ] `/api/interface/stac-map` - header badge, search (uses own DOM-based filter)
+- [ ] `/api/interface/h3` - header badge (if applicable)
+- [ ] `/api/interface/pipeline` - renders without errors
 
 ---
 

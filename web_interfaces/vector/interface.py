@@ -96,46 +96,12 @@ class VectorInterface(BaseInterface):
         """Generate custom CSS for OGC Features dashboard.
 
         Note: Most styles now in COMMON_CSS (S12.1.1).
+        Header/action-bar consolidated S12.5.1-S12.5.2 (08 JAN 2026).
         Only vector-specific styles remain here.
 
         Updated 30 DEC 2025: Smaller cards, 4 per row, promoted badges, delete buttons.
         """
         return """
-        /* Header with count - flex layout */
-        .header-with-count {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding-bottom: 12px;
-        }
-
-        .header-with-count h1 {
-            margin: 0;
-        }
-
-        .collection-count {
-            background: var(--ds-blue-primary);
-            color: white;
-            padding: 6px 14px;
-            border-radius: 20px;
-            font-size: 14px;
-            font-weight: 600;
-        }
-
-        /* Action bar with button and search */
-        .action-bar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 16px;
-            gap: 16px;
-        }
-
-        .action-bar .search-input {
-            flex: 1;
-            max-width: 300px;
-        }
-
         /* Smaller cards - 4 per row */
         .collections-grid {
             grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)) !important;
@@ -535,18 +501,7 @@ class VectorInterface(BaseInterface):
             }).join('');
         }
 
-        // Filter collections
-        function filterCollections() {
-            const searchTerm = document.getElementById('search-filter').value.toLowerCase();
-
-            const filtered = allCollections.filter(c => {
-                return c.id.toLowerCase().includes(searchTerm) ||
-                       (c.title || '').toLowerCase().includes(searchTerm) ||
-                       (c.description || '').toLowerCase().includes(searchTerm);
-            });
-
-            renderCollections(filtered);
-        }
+        // filterCollections() now in COMMON_JS (S12.5.4 - 08 JAN 2026)
 
         // Show collection detail modal
         async function showCollectionDetail(collectionId, event) {

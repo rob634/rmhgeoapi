@@ -674,6 +674,54 @@ class BaseInterface(ABC):
         }
 
         /* ============================================================
+           HEADER WITH COUNT - Collection browsers (S12.5.1 - 08 JAN 2026)
+           Used by: stac, vector, stac_map, h3
+           ============================================================ */
+        .header-with-count {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 12px;
+        }
+
+        .header-with-count h1 {
+            margin: 0;
+        }
+
+        .collection-count {
+            background: var(--ds-blue-primary);
+            color: white;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        /* ============================================================
+           ACTION BAR - Button + filters layout (S12.5.2 - 08 JAN 2026)
+           Used by: stac, vector, stac_map
+           ============================================================ */
+        .action-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            gap: 16px;
+        }
+
+        .action-bar .search-input {
+            flex: 1;
+            max-width: 300px;
+        }
+
+        /* Inline filter group variant (horizontal layout) */
+        .filter-group.inline,
+        .action-bar .filter-group {
+            flex-direction: row;
+            min-width: auto;
+        }
+
+        /* ============================================================
            SYSTEM STATUS BAR - Fixed bottom status bar (28 DEC 2025)
            ============================================================ */
         .system-status-bar {
@@ -1271,6 +1319,44 @@ class BaseInterface(ABC):
             show(error);
             const msgEl = document.getElementById(errorMessage);
             if (msgEl) msgEl.textContent = message;
+        }
+
+        // ============================================================
+        // COLLECTION FILTERING - Common filter function (S12.5.4 - 08 JAN 2026)
+        // Used by: stac, vector interfaces
+        // Requires: global allCollections array and renderCollections() function
+        // ============================================================
+
+        /**
+         * Filter collection cards by search term and optional type.
+         * Expects: #search-filter input, optional #type-filter select
+         * Expects: global allCollections array and renderCollections(filtered) function
+         *
+         * Note: stac_map uses a DOM-based variant and should keep its own implementation.
+         */
+        function filterCollections() {
+            const searchTerm = (document.getElementById('search-filter')?.value || '').toLowerCase();
+            const typeFilter = document.getElementById('type-filter')?.value || '';
+
+            if (typeof allCollections === 'undefined') {
+                console.warn('filterCollections: allCollections not defined');
+                return;
+            }
+
+            const filtered = allCollections.filter(c => {
+                const matchesSearch = !searchTerm ||
+                    c.id.toLowerCase().includes(searchTerm) ||
+                    (c.title || '').toLowerCase().includes(searchTerm) ||
+                    (c.description || '').toLowerCase().includes(searchTerm);
+                const matchesType = !typeFilter || c.type === typeFilter;
+                return matchesSearch && matchesType;
+            });
+
+            if (typeof renderCollections === 'function') {
+                renderCollections(filtered);
+            } else {
+                console.warn('filterCollections: renderCollections function not defined');
+            }
         }
 
         // ============================================================

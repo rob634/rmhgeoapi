@@ -62,6 +62,7 @@ from ..models import (
 from ..models.promoted import PromotedDataset, SystemRole, Classification  # Promoted datasets (23 DEC 2025)
 from ..models.system_snapshot import SystemSnapshotRecord, SnapshotTriggerType  # System snapshots (04 JAN 2026)
 from ..models.external_refs import DatasetRefRecord  # External references (09 JAN 2026 - F7.8)
+from ..models.raster_metadata import CogMetadataRecord  # Raster metadata (09 JAN 2026 - F7.9)
 
 
 class PydanticToSQL:
@@ -404,6 +405,11 @@ class PydanticToSQL:
                     sql.Identifier("data_type")
                 )
             )
+        elif table_name == "cog_metadata":
+            # Raster metadata table (09 JAN 2026 - F7.9)
+            constraints.append(
+                sql.SQL("PRIMARY KEY ({})").format(sql.Identifier("cog_id"))
+            )
 
         # Combine columns and constraints
         all_parts = columns + constraints
@@ -541,6 +547,18 @@ class PydanticToSQL:
             indexes.append(IndexBuilder.btree(s, "dataset_refs", "ddh_resource_id", name="idx_dataset_refs_ddh_resource",
                                               partial_where="ddh_resource_id IS NOT NULL"))
             indexes.append(IndexBuilder.btree(s, "dataset_refs", "data_type", name="idx_dataset_refs_data_type"))
+
+        elif table_name == "cog_metadata":
+            # Raster metadata table (09 JAN 2026 - F7.9)
+            # Indexes for STAC and ETL queries
+            indexes.append(IndexBuilder.btree(s, "cog_metadata", "stac_collection_id", name="idx_cog_metadata_stac_collection",
+                                              partial_where="stac_collection_id IS NOT NULL"))
+            indexes.append(IndexBuilder.btree(s, "cog_metadata", "stac_item_id", name="idx_cog_metadata_stac_item",
+                                              partial_where="stac_item_id IS NOT NULL"))
+            indexes.append(IndexBuilder.btree(s, "cog_metadata", "etl_job_id", name="idx_cog_metadata_etl_job",
+                                              partial_where="etl_job_id IS NOT NULL"))
+            indexes.append(IndexBuilder.btree(s, "cog_metadata", "container", name="idx_cog_metadata_container"))
+            indexes.append(IndexBuilder.btree(s, "cog_metadata", "created_at", name="idx_cog_metadata_created_at", descending=True))
 
         self.logger.debug(f"✅ Generated {len(indexes)} indexes for table {table_name}")
         return indexes
@@ -913,6 +931,7 @@ $$""").format(
         composed.append(self.generate_table_composed(PromotedDataset, "promoted_datasets"))  # Promoted datasets (23 DEC 2025)
         composed.append(self.generate_table_composed(SystemSnapshotRecord, "system_snapshots"))  # System snapshots (04 JAN 2026)
         composed.append(self.generate_table_composed(DatasetRefRecord, "dataset_refs"))  # External references (09 JAN 2026 - F7.8)
+        composed.append(self.generate_table_composed(CogMetadataRecord, "cog_metadata"))  # Raster metadata (09 JAN 2026 - F7.9)
 
         # Indexes - now using composed SQL
         composed.extend(self.generate_indexes_composed("jobs", JobRecord))
@@ -926,6 +945,7 @@ $$""").format(
         composed.extend(self.generate_indexes_composed("promoted_datasets", PromotedDataset))  # Promoted datasets (23 DEC 2025)
         composed.extend(self.generate_indexes_composed("system_snapshots", SystemSnapshotRecord))  # System snapshots (04 JAN 2026)
         composed.extend(self.generate_indexes_composed("dataset_refs", DatasetRefRecord))  # External references (09 JAN 2026 - F7.8)
+        composed.extend(self.generate_indexes_composed("cog_metadata", CogMetadataRecord))  # Raster metadata (09 JAN 2026 - F7.9)
 
         # Functions - already sql.Composed objects
         composed.extend(self.generate_static_functions())

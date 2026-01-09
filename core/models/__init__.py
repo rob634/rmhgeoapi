@@ -120,7 +120,8 @@ from .unified_metadata import (
     TemporalExtent,
     Extent,
     BaseMetadata,
-    VectorMetadata
+    VectorMetadata,
+    RasterMetadata  # F7.9
 )
 
 # External references models (09 JAN 2026 - F7.8)
@@ -130,6 +131,11 @@ from .external_refs import (
     ExternalRefs,
     DatasetRef,
     DatasetRefRecord
+)
+
+# Raster metadata models (09 JAN 2026 - F7.9)
+from .raster_metadata import (
+    CogMetadataRecord
 )
 
 __all__ = [
@@ -210,11 +216,15 @@ __all__ = [
     'Extent',
     'BaseMetadata',
     'VectorMetadata',
+    'RasterMetadata',  # F7.9
 
     # External references models (09 JAN 2026 - F7.8)
     'ExternalDataType',
     'DDHRefs',
     'ExternalRefs',
     'DatasetRef',
-    'DatasetRefRecord'
+    'DatasetRefRecord',
+
+    # Raster metadata models (09 JAN 2026 - F7.9)
+    'CogMetadataRecord',
 ]

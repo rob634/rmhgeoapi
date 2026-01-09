@@ -418,30 +418,43 @@ PlatformRequest.version_id  ───► app.dataset_refs.ddh_version_id
 
 ---
 
-### 🔴 Priority 4: RasterMetadata Architecture (CRITICAL)
+### 🟡 Priority 4: RasterMetadata Architecture (IN PROGRESS)
 
 **Epic**: E7 Pipeline Infrastructure → E2 Raster Data as API
 **Goal**: RasterMetadata model providing single source of truth for STAC-based raster catalogs
 **Dependency**: F7.8 ✅ (BaseMetadata, VectorMetadata pattern established)
-**Status**: Not started
+**Status**: Phase 1 Complete (09 JAN 2026) - Models, DDL, Repository
 **Priority**: CRITICAL - Raster is primary STAC use case
 
 #### F7.9: RasterMetadata Implementation
 
 | Story | Description | Status |
 |-------|-------------|--------|
-| S7.9.1 | Create `RasterMetadata` class in `core/models/unified_metadata.py` | 📋 |
-| S7.9.2 | Create `app.cog_metadata` table DDL with typed columns | 📋 |
-| S7.9.3 | Create `RasterMetadataRepository` with CRUD operations | 📋 |
-| S7.9.4 | Implement `RasterMetadata.from_db_row()` factory method | 📋 |
-| S7.9.5 | Implement `RasterMetadata.to_stac_item()` conversion | 📋 |
-| S7.9.6 | Implement `RasterMetadata.to_stac_collection()` conversion | 📋 |
+| S7.9.1 | Create `RasterMetadata` class in `core/models/unified_metadata.py` | ✅ Done (09 JAN) |
+| S7.9.2 | Create `app.cog_metadata` table DDL with typed columns | ✅ Done (09 JAN) |
+| S7.9.3 | Create `RasterMetadataRepository` with CRUD operations | ✅ Done (09 JAN) |
+| S7.9.4 | Implement `RasterMetadata.from_db_row()` factory method | ✅ Done (09 JAN) |
+| S7.9.5 | Implement `RasterMetadata.to_stac_item()` conversion | ✅ Done (09 JAN) |
+| S7.9.6 | Implement `RasterMetadata.to_stac_collection()` conversion | ✅ Done (09 JAN) |
 | S7.9.7 | Refactor `service_stac_metadata.py` to use RasterMetadata | 📋 |
 | S7.9.8 | Refactor `stac_catalog.py` to use RasterMetadata | 📋 |
-| S7.9.9 | Wire raster ingest to populate raster.cog_metadata | 📋 |
+| S7.9.9 | Wire raster ingest to populate app.cog_metadata | 📋 |
 | S7.9.10 | Wire raster STAC handlers to upsert app.dataset_refs | 📋 |
 | S7.9.11 | Update `fathom_stac_register` to use RasterMetadata | 📋 |
 | S7.9.12 | Update `fathom_stac_rebuild` to use RasterMetadata | 📋 |
+
+**Phase 1 Complete (09 JAN 2026)**:
+- `RasterMetadata` class added to `core/models/unified_metadata.py`
+- `CogMetadataRecord` model in `core/models/raster_metadata.py` for DDL
+- DDL added to `sql_generator.py` (table + 5 indexes)
+- `RasterMetadataRepository` in `infrastructure/raster_metadata_repository.py`
+- Implements: from_db_row, to_stac_item, to_stac_collection
+
+**Key Files**:
+- `core/models/unified_metadata.py` - RasterMetadata domain model
+- `core/models/raster_metadata.py` - CogMetadataRecord for DDL
+- `core/schema/sql_generator.py` - Table/index generation
+- `infrastructure/raster_metadata_repository.py` - CRUD operations
 
 **RasterMetadata Fields** (beyond BaseMetadata):
 ```python

@@ -335,6 +335,11 @@ class JobsInterface(BaseInterface):
             <header class="dashboard-header">
                 <h1>⚙️ Job Monitor</h1>
                 <p class="subtitle">Monitor jobs and tasks from app.jobs table</p>
+                <div class="api-endpoint">
+                    <span class="api-label">API:</span>
+                    <a href="/api/dbadmin/jobs" target="_blank" class="api-link">/api/dbadmin/jobs</a>
+                    <span class="api-hint">(add ?status=failed&limit=10 for filtering)</span>
+                </div>
             </header>
 
             <!-- Filter Bar with HTMX -->
@@ -504,6 +509,38 @@ class JobsInterface(BaseInterface):
         .task-count-failed {
             background: var(--ds-status-failed-bg);
             color: var(--ds-status-failed-fg);
+        }
+
+        /* API Endpoint display */
+        .api-endpoint {
+            margin-top: 0.5rem;
+            font-size: 0.875rem;
+            color: var(--ds-gray);
+        }
+
+        .api-label {
+            font-weight: 600;
+            margin-right: 0.25rem;
+        }
+
+        .api-link {
+            font-family: monospace;
+            background: var(--ds-surface-secondary);
+            padding: 0.125rem 0.5rem;
+            border-radius: 4px;
+            color: var(--ds-blue-primary);
+            text-decoration: none;
+        }
+
+        .api-link:hover {
+            background: var(--ds-blue-primary);
+            color: white;
+        }
+
+        .api-hint {
+            margin-left: 0.5rem;
+            font-size: 0.75rem;
+            color: var(--ds-gray);
         }
         """
 

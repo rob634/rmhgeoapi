@@ -27,8 +27,10 @@ class DocsInterface(BaseInterface):
         - GET /api/platform/health - Platform health check
         - GET /api/platform/stats - Job statistics
         - GET /api/platform/failures - Recent failures
-        - POST /api/jobs/submit/unpublish_vector - Remove vector data
-        - POST /api/jobs/submit/unpublish_raster - Remove raster data
+        - POST /api/platform/unpublish/vector - Remove vector data
+        - POST /api/platform/unpublish/raster - Remove raster data
+
+    Updated 09 JAN 2026: Unpublish endpoints now use platform layer with DDH identifier support.
     """
 
     def render(self, request: func.HttpRequest) -> str:
@@ -36,12 +38,12 @@ class DocsInterface(BaseInterface):
         return self.wrap_html(
             title="Platform API Documentation - DDH Integration",
             content=self._generate_html_content(),
-            custom_css=self._generate_css(),
-            custom_js=self._generate_js(),
+            custom_css=self._generate_custom_css(),
+            custom_js=self._generate_custom_js(),
             include_htmx=True
         )
 
-    def _generate_css(self) -> str:
+    def _generate_custom_css(self) -> str:
         """Documentation-specific styles."""
         return """
             .dashboard-header {
@@ -404,8 +406,8 @@ class DocsInterface(BaseInterface):
                 <div class="toc-section">
                     <div class="toc-section-title">Unpublish / Delete</div>
                     <ul>
-                        <li><a href="#unpublish-vector">POST /api/jobs/submit/unpublish_vector</a> - Remove vector data</li>
-                        <li><a href="#unpublish-raster">POST /api/jobs/submit/unpublish_raster</a> - Remove raster data</li>
+                        <li><a href="#unpublish-vector">POST /api/platform/unpublish/vector</a> - Remove vector data</li>
+                        <li><a href="#unpublish-raster">POST /api/platform/unpublish/raster</a> - Remove raster data</li>
                     </ul>
                 </div>
             </div>
@@ -898,7 +900,7 @@ curl -X POST \\
     {
       <span class="key">"request_id"</span>: <span class="string">"def456..."</span>,
       <span class="key">"dataset_id"</span>: <span class="string">"parcels-2024"</span>,
-      <span class="key">"failed_at"</span>: <span class="string">"2025-12-07T09:15:00Z"</span>,
+      <span class="key">"failed_at"</span>: <span class="string">"2026-01-08T09:15:00Z"</span>,
       <span class="key">"error_category"</span>: <span class="string">"resource_not_found"</span>,
       <span class="key">"error_summary"</span>: <span class="string">"Source file not found in bronze-vectors container"</span>,
       <span class="key">"can_retry"</span>: true
@@ -914,7 +916,7 @@ curl -X POST \\
             <div id="unpublish-vector" class="endpoint-section">
                 <div class="endpoint-header">
                     <span class="method-badge post">POST</span>
-                    <code class="endpoint-path">/api/jobs/submit/unpublish_vector</code>
+                    <code class="endpoint-path">/api/platform/unpublish/vector</code>
                     <h2>Unpublish Vector Data</h2>
                 </div>
                 <div class="endpoint-body">
@@ -922,6 +924,9 @@ curl -X POST \\
                         Remove a vector dataset from the platform. Drops the PostGIS table,
                         deletes metadata from <code>geo.table_metadata</code>, and optionally removes
                         the associated STAC item. Supports dry run mode for safe previewing.
+                        <br><br>
+                        <strong>Three identification options:</strong> DDH identifiers (preferred),
+                        request_id from original submission, or direct table_name (cleanup mode).
                     </p>
 
                     <div class="params-section">
@@ -937,16 +942,46 @@ curl -X POST \\
                             </thead>
                             <tbody>
                                 <tr>
+                                    <td colspan="4" style="background: #f8f9fa; font-weight: 600;">Option 1: DDH Identifiers (Preferred)</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="param-name">dataset_id</span></td>
+                                    <td><span class="param-type">string</span></td>
+                                    <td><span class="param-required">Required*</span></td>
+                                    <td>DDH dataset identifier</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="param-name">resource_id</span></td>
+                                    <td><span class="param-type">string</span></td>
+                                    <td><span class="param-required">Required*</span></td>
+                                    <td>DDH resource identifier</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="param-name">version_id</span></td>
+                                    <td><span class="param-type">string</span></td>
+                                    <td><span class="param-required">Required*</span></td>
+                                    <td>DDH version identifier</td>
+                                </tr>
+                                <tr>
+                                    <td colspan="4" style="background: #f8f9fa; font-weight: 600;">Option 2: Request ID</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="param-name">request_id</span></td>
+                                    <td><span class="param-type">string</span></td>
+                                    <td><span class="param-required">Required*</span></td>
+                                    <td>Request ID from original platform submission</td>
+                                </tr>
+                                <tr>
+                                    <td colspan="4" style="background: #f8f9fa; font-weight: 600;">Option 3: Direct Table Name (Cleanup)</td>
+                                </tr>
+                                <tr>
                                     <td><span class="param-name">table_name</span></td>
                                     <td><span class="param-type">string</span></td>
-                                    <td><span class="param-required">Required</span></td>
+                                    <td><span class="param-required">Required*</span></td>
                                     <td>PostGIS table name to remove (e.g., "city_parcels_v1_0")</td>
                                 </tr>
                                 <tr>
-                                    <td><span class="param-name">schema_name</span></td>
-                                    <td><span class="param-type">string</span></td>
-                                    <td><span class="param-optional">Optional</span></td>
-                                    <td>PostgreSQL schema (default: "geo")</td>
+                                    <td colspan="4" style="background: #f8f9fa; font-weight: 600;">Common Options</td>
                                 </tr>
                                 <tr>
                                     <td><span class="param-name">dry_run</span></td>
@@ -956,6 +991,7 @@ curl -X POST \\
                                 </tr>
                             </tbody>
                         </table>
+                        <p style="font-size: 12px; color: #666; margin-top: 8px;">* Use ONE of the three identification options</p>
                     </div>
 
                     <div class="params-section">
@@ -991,25 +1027,37 @@ curl -X POST \\
                     <div class="params-section">
                         <h3>Example Request</h3>
                         <div class="example-tabs">
-                            <button class="example-tab active" onclick="showExample('unpublish-vector', 'preview')">Preview (Dry Run)</button>
-                            <button class="example-tab" onclick="showExample('unpublish-vector', 'execute')">Execute Delete</button>
+                            <button class="example-tab active" onclick="showExample('unpublish-vector', 'ddh')">DDH Identifiers</button>
+                            <button class="example-tab" onclick="showExample('unpublish-vector', 'request')">By Request ID</button>
+                            <button class="example-tab" onclick="showExample('unpublish-vector', 'table')">By Table Name</button>
                         </div>
 
-                        <div id="unpublish-vector-preview" class="code-block"><span class="comment"># Preview what will be deleted (safe - dry_run=true)</span>
+                        <div id="unpublish-vector-ddh" class="code-block"><span class="comment"># Unpublish using DDH identifiers (preferred)</span>
 curl -X POST \\
-  ${API_BASE_URL}/api/jobs/submit/unpublish_vector \\
+  ${API_BASE_URL}/api/platform/unpublish/vector \\
   -H 'Content-Type: application/json' \\
   -d '{
-    <span class="key">"table_name"</span>: <span class="string">"city_parcels_v1_0"</span>,
+    <span class="key">"dataset_id"</span>: <span class="string">"parcels-2024"</span>,
+    <span class="key">"resource_id"</span>: <span class="string">"downtown-district"</span>,
+    <span class="key">"version_id"</span>: <span class="string">"v1.0"</span>,
     <span class="key">"dry_run"</span>: true
   }'</div>
 
-                        <div id="unpublish-vector-execute" class="code-block" style="display: none;"><span class="comment"># Actually delete (set dry_run=false)</span>
+                        <div id="unpublish-vector-request" class="code-block" style="display: none;"><span class="comment"># Unpublish using request_id from original submission</span>
 curl -X POST \\
-  ${API_BASE_URL}/api/jobs/submit/unpublish_vector \\
+  ${API_BASE_URL}/api/platform/unpublish/vector \\
   -H 'Content-Type: application/json' \\
   -d '{
-    <span class="key">"table_name"</span>: <span class="string">"city_parcels_v1_0"</span>,
+    <span class="key">"request_id"</span>: <span class="string">"a3f2c1b8e9d7f6a5..."</span>,
+    <span class="key">"dry_run"</span>: true
+  }'</div>
+
+                        <div id="unpublish-vector-table" class="code-block" style="display: none;"><span class="comment"># Cleanup mode - direct table name</span>
+curl -X POST \\
+  ${API_BASE_URL}/api/platform/unpublish/vector \\
+  -H 'Content-Type: application/json' \\
+  -d '{
+    <span class="key">"table_name"</span>: <span class="string">"parcels_2024_downtown_district_v1_0"</span>,
     <span class="key">"dry_run"</span>: false
   }'</div>
                     </div>
@@ -1044,7 +1092,7 @@ curl -X POST \\
             <div id="unpublish-raster" class="endpoint-section">
                 <div class="endpoint-header">
                     <span class="method-badge post">POST</span>
-                    <code class="endpoint-path">/api/jobs/submit/unpublish_raster</code>
+                    <code class="endpoint-path">/api/platform/unpublish/raster</code>
                     <h2>Unpublish Raster Data</h2>
                 </div>
                 <div class="endpoint-body">
@@ -1052,6 +1100,9 @@ curl -X POST \\
                         Remove a raster dataset from the platform. Deletes the STAC item and
                         associated COG/MosaicJSON blobs from Azure storage. Supports dry run mode
                         for safe previewing.
+                        <br><br>
+                        <strong>Three identification options:</strong> DDH identifiers (preferred),
+                        request_id from original submission, or direct STAC identifiers (cleanup mode).
                     </p>
 
                     <div class="params-section">
@@ -1067,16 +1118,52 @@ curl -X POST \\
                             </thead>
                             <tbody>
                                 <tr>
+                                    <td colspan="4" style="background: #f8f9fa; font-weight: 600;">Option 1: DDH Identifiers (Preferred)</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="param-name">dataset_id</span></td>
+                                    <td><span class="param-type">string</span></td>
+                                    <td><span class="param-required">Required*</span></td>
+                                    <td>DDH dataset identifier</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="param-name">resource_id</span></td>
+                                    <td><span class="param-type">string</span></td>
+                                    <td><span class="param-required">Required*</span></td>
+                                    <td>DDH resource identifier</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="param-name">version_id</span></td>
+                                    <td><span class="param-type">string</span></td>
+                                    <td><span class="param-required">Required*</span></td>
+                                    <td>DDH version identifier</td>
+                                </tr>
+                                <tr>
+                                    <td colspan="4" style="background: #f8f9fa; font-weight: 600;">Option 2: Request ID</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="param-name">request_id</span></td>
+                                    <td><span class="param-type">string</span></td>
+                                    <td><span class="param-required">Required*</span></td>
+                                    <td>Request ID from original platform submission</td>
+                                </tr>
+                                <tr>
+                                    <td colspan="4" style="background: #f8f9fa; font-weight: 600;">Option 3: Direct STAC Identifiers (Cleanup)</td>
+                                </tr>
+                                <tr>
                                     <td><span class="param-name">stac_item_id</span></td>
                                     <td><span class="param-type">string</span></td>
-                                    <td><span class="param-required">Required</span></td>
-                                    <td>STAC item ID to remove (e.g., "aerial-imagery-2024-site-alpha-v1.0")</td>
+                                    <td><span class="param-required">Required*</span></td>
+                                    <td>STAC item ID to remove</td>
                                 </tr>
                                 <tr>
                                     <td><span class="param-name">collection_id</span></td>
                                     <td><span class="param-type">string</span></td>
-                                    <td><span class="param-required">Required</span></td>
-                                    <td>STAC collection containing the item (e.g., "aerial-imagery-2024")</td>
+                                    <td><span class="param-required">Required*</span></td>
+                                    <td>STAC collection containing the item</td>
+                                </tr>
+                                <tr>
+                                    <td colspan="4" style="background: #f8f9fa; font-weight: 600;">Common Options</td>
                                 </tr>
                                 <tr>
                                     <td><span class="param-name">dry_run</span></td>
@@ -1086,6 +1173,7 @@ curl -X POST \\
                                 </tr>
                             </tbody>
                         </table>
+                        <p style="font-size: 12px; color: #666; margin-top: 8px;">* Use ONE of the three identification options</p>
                     </div>
 
                     <div class="params-section">
@@ -1121,26 +1209,37 @@ curl -X POST \\
                     <div class="params-section">
                         <h3>Example Request</h3>
                         <div class="example-tabs">
-                            <button class="example-tab active" onclick="showExample('unpublish-raster', 'preview')">Preview (Dry Run)</button>
-                            <button class="example-tab" onclick="showExample('unpublish-raster', 'execute')">Execute Delete</button>
+                            <button class="example-tab active" onclick="showExample('unpublish-raster', 'ddh')">DDH Identifiers</button>
+                            <button class="example-tab" onclick="showExample('unpublish-raster', 'request')">By Request ID</button>
+                            <button class="example-tab" onclick="showExample('unpublish-raster', 'stac')">By STAC IDs</button>
                         </div>
 
-                        <div id="unpublish-raster-preview" class="code-block"><span class="comment"># Preview what will be deleted (safe - dry_run=true)</span>
+                        <div id="unpublish-raster-ddh" class="code-block"><span class="comment"># Unpublish using DDH identifiers (preferred)</span>
 curl -X POST \\
-  ${API_BASE_URL}/api/jobs/submit/unpublish_raster \\
+  ${API_BASE_URL}/api/platform/unpublish/raster \\
   -H 'Content-Type: application/json' \\
   -d '{
-    <span class="key">"stac_item_id"</span>: <span class="string">"aerial-imagery-2024-site-alpha-v1.0"</span>,
-    <span class="key">"collection_id"</span>: <span class="string">"aerial-imagery-2024"</span>,
+    <span class="key">"dataset_id"</span>: <span class="string">"aerial-imagery-2024"</span>,
+    <span class="key">"resource_id"</span>: <span class="string">"site-alpha"</span>,
+    <span class="key">"version_id"</span>: <span class="string">"v1.0"</span>,
     <span class="key">"dry_run"</span>: true
   }'</div>
 
-                        <div id="unpublish-raster-execute" class="code-block" style="display: none;"><span class="comment"># Actually delete (set dry_run=false)</span>
+                        <div id="unpublish-raster-request" class="code-block" style="display: none;"><span class="comment"># Unpublish using request_id from original submission</span>
 curl -X POST \\
-  ${API_BASE_URL}/api/jobs/submit/unpublish_raster \\
+  ${API_BASE_URL}/api/platform/unpublish/raster \\
   -H 'Content-Type: application/json' \\
   -d '{
-    <span class="key">"stac_item_id"</span>: <span class="string">"aerial-imagery-2024-site-alpha-v1.0"</span>,
+    <span class="key">"request_id"</span>: <span class="string">"b4e5d6c7..."</span>,
+    <span class="key">"dry_run"</span>: true
+  }'</div>
+
+                        <div id="unpublish-raster-stac" class="code-block" style="display: none;"><span class="comment"># Cleanup mode - direct STAC identifiers</span>
+curl -X POST \\
+  ${API_BASE_URL}/api/platform/unpublish/raster \\
+  -H 'Content-Type: application/json' \\
+  -d '{
+    <span class="key">"stac_item_id"</span>: <span class="string">"aerial-imagery-2024-site-alpha-v1-0"</span>,
     <span class="key">"collection_id"</span>: <span class="string">"aerial-imagery-2024"</span>,
     <span class="key">"dry_run"</span>: false
   }'</div>
@@ -1177,7 +1276,7 @@ curl -X POST \\
         </div>
         """
 
-    def _generate_js(self) -> str:
+    def _generate_custom_js(self) -> str:
         """JavaScript for interactive examples."""
         return """
         function showExample(endpoint, type) {

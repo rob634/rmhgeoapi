@@ -365,6 +365,106 @@ class OGCFeaturesRepository:
             logger.warning(f"Error querying geo.table_metadata for '{collection_id}': {e}")
             return None
 
+    def get_vector_metadata(self, collection_id: str) -> Optional["VectorMetadata"]:
+        """
+        Get VectorMetadata model for a collection from geo.table_metadata registry.
+
+        This method returns the unified VectorMetadata Pydantic model instead of
+        a raw dict. The VectorMetadata model provides:
+        - Type-safe access to all metadata fields
+        - to_ogc_properties() for OGC Features responses
+        - to_stac_collection() for STAC responses
+        - to_stac_item() for STAC item responses
+
+        This is the preferred method for new code (09 JAN 2026 - F7.8).
+
+        Args:
+            collection_id: Collection identifier (table name)
+
+        Returns:
+            VectorMetadata instance or None if not found
+
+        Example:
+            metadata = repo.get_vector_metadata("admin_boundaries")
+            if metadata:
+                ogc_props = metadata.to_ogc_properties()
+                stac_coll = metadata.to_stac_collection(base_url)
+        """
+        from core.models.unified_metadata import VectorMetadata
+
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    # Check if geo.table_metadata exists
+                    cur.execute("""
+                        SELECT EXISTS (
+                            SELECT 1 FROM information_schema.tables
+                            WHERE table_schema = 'geo'
+                            AND table_name = 'table_metadata'
+                        ) as table_exists
+                    """)
+                    result = cur.fetchone()
+                    table_exists = result['table_exists'] if result else False
+
+                    if not table_exists:
+                        logger.debug(f"geo.table_metadata table does not exist - returning None for {collection_id}")
+                        return None
+
+                    # Query all metadata columns including F7.8 additions
+                    cur.execute("""
+                        SELECT
+                            table_name,
+                            schema_name,
+                            etl_job_id,
+                            source_file,
+                            source_format,
+                            source_crs,
+                            stac_item_id,
+                            stac_collection_id,
+                            feature_count,
+                            geometry_type,
+                            created_at,
+                            updated_at,
+                            bbox_minx,
+                            bbox_miny,
+                            bbox_maxx,
+                            bbox_maxy,
+                            title,
+                            description,
+                            attribution,
+                            license,
+                            keywords,
+                            temporal_start,
+                            temporal_end,
+                            temporal_property,
+                            table_type,
+                            providers,
+                            stac_extensions,
+                            column_definitions,
+                            primary_geometry,
+                            processing_software,
+                            sci_doi,
+                            sci_citation,
+                            custom_properties
+                        FROM geo.table_metadata
+                        WHERE table_name = %s
+                    """, (collection_id,))
+
+                    row = cur.fetchone()
+
+                    if not row:
+                        logger.debug(f"No metadata found in geo.table_metadata for {collection_id}")
+                        return None
+
+                    # Use VectorMetadata.from_db_row() factory method
+                    metadata = VectorMetadata.from_db_row(dict(row))
+                    logger.debug(f"Retrieved VectorMetadata for {collection_id}")
+                    return metadata
+
+        except psycopg.Error as e:
+            logger.warning(f"Error querying geo.table_metadata for '{collection_id}': {e}")
+            return None
+
     # ========================================================================
     # FEATURE QUERIES
     # ========================================================================

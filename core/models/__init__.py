@@ -112,6 +112,26 @@ from .system_snapshot import (
     SnapshotTriggerType
 )
 
+# Unified metadata models (09 JAN 2026 - F7.8)
+from .unified_metadata import (
+    ProviderRole,
+    Provider,
+    SpatialExtent,
+    TemporalExtent,
+    Extent,
+    BaseMetadata,
+    VectorMetadata
+)
+
+# External references models (09 JAN 2026 - F7.8)
+from .external_refs import (
+    DataType as ExternalDataType,  # Avoid conflict with platform.DataType
+    DDHRefs,
+    ExternalRefs,
+    DatasetRef,
+    DatasetRefRecord
+)
+
 __all__ = [
     # Enums
     'JobStatus',
@@ -180,5 +200,21 @@ __all__ = [
 
     # System snapshot models (04 JAN 2026)
     'SystemSnapshotRecord',
-    'SnapshotTriggerType'
+    'SnapshotTriggerType',
+
+    # Unified metadata models (09 JAN 2026 - F7.8)
+    'ProviderRole',
+    'Provider',
+    'SpatialExtent',
+    'TemporalExtent',
+    'Extent',
+    'BaseMetadata',
+    'VectorMetadata',
+
+    # External references models (09 JAN 2026 - F7.8)
+    'ExternalDataType',
+    'DDHRefs',
+    'ExternalRefs',
+    'DatasetRef',
+    'DatasetRefRecord'
 ]

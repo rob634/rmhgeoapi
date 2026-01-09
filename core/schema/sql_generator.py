@@ -61,6 +61,7 @@ from ..models import (
 )
 from ..models.promoted import PromotedDataset, SystemRole, Classification  # Promoted datasets (23 DEC 2025)
 from ..models.system_snapshot import SystemSnapshotRecord, SnapshotTriggerType  # System snapshots (04 JAN 2026)
+from ..models.external_refs import DatasetRefRecord  # External references (09 JAN 2026 - F7.8)
 
 
 class PydanticToSQL:
@@ -394,6 +395,15 @@ class PydanticToSQL:
             constraints.append(
                 sql.SQL("PRIMARY KEY ({})").format(sql.Identifier("promoted_id"))
             )
+        elif table_name == "dataset_refs":
+            # External references table (09 JAN 2026 - F7.8)
+            # Composite primary key on (dataset_id, data_type)
+            constraints.append(
+                sql.SQL("PRIMARY KEY ({}, {})").format(
+                    sql.Identifier("dataset_id"),
+                    sql.Identifier("data_type")
+                )
+            )
 
         # Combine columns and constraints
         all_parts = columns + constraints
@@ -522,6 +532,15 @@ class PydanticToSQL:
             # Config quality monitoring
             indexes.append(IndexBuilder.btree(s, "system_snapshots", "config_defaults_count", name="idx_system_snapshots_defaults_count",
                                               partial_where="config_defaults_count > 0"))
+
+        elif table_name == "dataset_refs":
+            # External references table (09 JAN 2026 - F7.8)
+            # Indexes for DDH lookup queries
+            indexes.append(IndexBuilder.btree(s, "dataset_refs", "ddh_dataset_id", name="idx_dataset_refs_ddh_dataset",
+                                              partial_where="ddh_dataset_id IS NOT NULL"))
+            indexes.append(IndexBuilder.btree(s, "dataset_refs", "ddh_resource_id", name="idx_dataset_refs_ddh_resource",
+                                              partial_where="ddh_resource_id IS NOT NULL"))
+            indexes.append(IndexBuilder.btree(s, "dataset_refs", "data_type", name="idx_dataset_refs_data_type"))
 
         self.logger.debug(f"✅ Generated {len(indexes)} indexes for table {table_name}")
         return indexes
@@ -893,6 +912,7 @@ $$""").format(
         composed.append(self.generate_table_composed(CuratedUpdateLog, "curated_update_log"))
         composed.append(self.generate_table_composed(PromotedDataset, "promoted_datasets"))  # Promoted datasets (23 DEC 2025)
         composed.append(self.generate_table_composed(SystemSnapshotRecord, "system_snapshots"))  # System snapshots (04 JAN 2026)
+        composed.append(self.generate_table_composed(DatasetRefRecord, "dataset_refs"))  # External references (09 JAN 2026 - F7.8)
 
         # Indexes - now using composed SQL
         composed.extend(self.generate_indexes_composed("jobs", JobRecord))
@@ -905,6 +925,7 @@ $$""").format(
         composed.extend(self.generate_indexes_composed("curated_update_log", CuratedUpdateLog))
         composed.extend(self.generate_indexes_composed("promoted_datasets", PromotedDataset))  # Promoted datasets (23 DEC 2025)
         composed.extend(self.generate_indexes_composed("system_snapshots", SystemSnapshotRecord))  # System snapshots (04 JAN 2026)
+        composed.extend(self.generate_indexes_composed("dataset_refs", DatasetRefRecord))  # External references (09 JAN 2026 - F7.8)
 
         # Functions - already sql.Composed objects
         composed.extend(self.generate_static_functions())

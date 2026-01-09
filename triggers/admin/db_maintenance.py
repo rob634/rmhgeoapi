@@ -1283,6 +1283,28 @@ class AdminDbMaintenanceTrigger:
                         """)
                         logger.info("✅ Ensured geo.table_metadata has table_type column")
 
+                        # 0f. Add Unified Metadata columns (09 JAN 2026 - F7.8)
+                        # Per METADATA.md design document - adds STAC-aligned fields
+                        f78_columns = [
+                            # STAC providers (array of provider objects)
+                            "ALTER TABLE geo.table_metadata ADD COLUMN IF NOT EXISTS providers JSONB",
+                            # STAC extensions URIs
+                            "ALTER TABLE geo.table_metadata ADD COLUMN IF NOT EXISTS stac_extensions JSONB",
+                            # Table Extension fields
+                            "ALTER TABLE geo.table_metadata ADD COLUMN IF NOT EXISTS column_definitions JSONB",
+                            "ALTER TABLE geo.table_metadata ADD COLUMN IF NOT EXISTS primary_geometry VARCHAR(100) DEFAULT 'geom'",
+                            # Processing Extension fields
+                            "ALTER TABLE geo.table_metadata ADD COLUMN IF NOT EXISTS processing_software JSONB",
+                            # Scientific metadata
+                            "ALTER TABLE geo.table_metadata ADD COLUMN IF NOT EXISTS sci_doi VARCHAR(200)",
+                            "ALTER TABLE geo.table_metadata ADD COLUMN IF NOT EXISTS sci_citation TEXT",
+                            # Custom properties (extension point)
+                            "ALTER TABLE geo.table_metadata ADD COLUMN IF NOT EXISTS custom_properties JSONB DEFAULT '{}'",
+                        ]
+                        for alter_sql in f78_columns:
+                            cur.execute(alter_sql)
+                        logger.info("✅ Ensured geo.table_metadata has F7.8 unified metadata columns")
+
                         # 0e. Migrate system_admin0 to curated_admin0 (15 DEC 2025)
                         # Curated datasets use curated_ prefix for protection
                         cur.execute("""

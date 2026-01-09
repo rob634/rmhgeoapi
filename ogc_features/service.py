@@ -191,6 +191,10 @@ class OGCFeaturesService:
         Enhanced (06 DEC 2025): Now includes custom metadata from geo.table_metadata
         registry when available (ETL traceability, STAC linkage, pre-computed bbox).
 
+        Note (09 JAN 2026 - F7.8): For new code, consider using get_collection_v2()
+        which uses the VectorMetadata unified model with to_ogc_collection() conversion.
+        This method is preserved for backward compatibility.
+
         Args:
             collection_id: Collection identifier (table name)
             base_url: Base URL for link generation

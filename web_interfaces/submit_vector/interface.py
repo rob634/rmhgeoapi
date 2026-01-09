@@ -26,7 +26,7 @@ from web_interfaces import InterfaceRegistry
 logger = logging.getLogger(__name__)
 
 # Valid storage zones
-VALID_ZONES = ["bronze", "silver", "silverext"]
+VALID_ZONES = ["bronze"]
 
 # Valid vector file extensions
 VECTOR_EXTENSIONS = ['.csv', '.geojson', '.json', '.gpkg', '.kml', '.kmz', '.shp', '.zip']
@@ -499,7 +499,6 @@ class SubmitVectorInterface(BaseInterface):
                                         onchange="updateLoadButton()">
                                     <option value="">Select zone...</option>
                                     <option value="bronze">🟤 Bronze (raw uploads)</option>
-                                    <option value="silver">⚪ Silver (processed)</option>
                                 </select>
                                 <span id="container-spinner" class="htmx-indicator spinner-sm"></span>
                             </div>

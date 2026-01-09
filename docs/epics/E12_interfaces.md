@@ -460,4 +460,4 @@ Phase 1 (Complete)           Phase 2 (Current)
 
 ---
 
-**Last Updated**: 07 JAN 2026 (Reframed as Integration Onboarding with CURL box strategy)
+**Last Updated**: 09 JAN 2026 (SP12.9 NiceGUI spike confirmed complete - staying with HTMX)

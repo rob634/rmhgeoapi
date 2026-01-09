@@ -361,6 +361,97 @@ class VectorInterface(BaseInterface):
             font-family: monospace;
             font-size: 12px;
         }
+
+        /* CURL Confirmation Modal */
+        .modal-content.modal-curl {
+            max-width: 650px;
+            text-align: left;
+        }
+
+        .modal-curl .modal-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .modal-curl .modal-icon {
+            font-size: 32px;
+        }
+
+        .modal-curl .modal-header h3 {
+            margin: 0;
+            color: var(--ds-navy);
+        }
+
+        .modal-curl .modal-warning {
+            background: #FEF3C7;
+            border: 1px solid #F59E0B;
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 16px;
+            color: #92400E;
+            font-size: 13px;
+        }
+
+        .modal-curl .curl-section {
+            background: #1e293b;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+
+        .modal-curl .curl-section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .modal-curl .curl-title {
+            color: #e2e8f0;
+            font-weight: 600;
+            font-size: 13px;
+        }
+
+        .modal-curl .btn-copy {
+            background: #334155;
+            border: 1px solid #475569;
+            color: #e2e8f0;
+            padding: 4px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .modal-curl .btn-copy:hover {
+            background: var(--ds-blue-primary);
+            border-color: var(--ds-blue-primary);
+        }
+
+        .modal-curl .curl-code {
+            background: #0f172a;
+            color: #e2e8f0;
+            padding: 12px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            line-height: 1.5;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+            margin: 0;
+            max-height: 200px;
+        }
+
+        .modal-curl .modal-buttons {
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid var(--ds-gray-light);
+        }
         """
 
     def _generate_custom_js(self) -> str:
@@ -624,27 +715,88 @@ class VectorInterface(BaseInterface):
             document.body.appendChild(modal);
         }
 
-        // Delete collection (trigger unpublish)
+        // Show CURL confirmation modal - displays the API call before executing
+        // Returns Promise that resolves to true (execute) or false (cancel)
+        function showCurlConfirmModal(title, warning, endpoint, method, payload, confirmText = 'Delete') {
+            return new Promise((resolve) => {
+                const modal = document.createElement('div');
+                modal.className = 'modal-overlay';
+
+                const jsonStr = JSON.stringify(payload, null, 2);
+                const curlCommand = `curl -X ${method} "${window.location.origin}${endpoint}" \\
+  -H "Content-Type: application/json" \\
+  -d '${JSON.stringify(payload)}'`;
+
+                modal.innerHTML = `
+                    <div class="modal-content modal-curl">
+                        <button class="modal-close" onclick="this.closest('.modal-overlay').remove(); window._curlConfirmResolve(false);">&times;</button>
+                        <div class="modal-header">
+                            <span class="modal-icon">🗑️</span>
+                            <h3>${title}</h3>
+                        </div>
+                        <div class="modal-warning">
+                            ⚠️ ${warning}
+                        </div>
+                        <div class="curl-section">
+                            <div class="curl-section-header">
+                                <span class="curl-title">📋 API Call (cURL)</span>
+                                <button class="btn-copy" onclick="copyCurlToClipboard(this)">
+                                    <span class="copy-icon">📋</span> Copy
+                                </button>
+                            </div>
+                            <pre class="curl-code">${curlCommand}</pre>
+                        </div>
+                        <div class="modal-buttons">
+                            <button class="btn-cancel" onclick="this.closest('.modal-overlay').remove(); window._curlConfirmResolve(false);">Cancel</button>
+                            <button class="btn-danger" onclick="this.closest('.modal-overlay').remove(); window._curlConfirmResolve(true);">${confirmText}</button>
+                        </div>
+                    </div>
+                `;
+
+                window._curlConfirmResolve = resolve;
+                document.body.appendChild(modal);
+            });
+        }
+
+        // Copy CURL command to clipboard
+        function copyCurlToClipboard(btn) {
+            const curlCode = btn.closest('.curl-section').querySelector('.curl-code').textContent;
+            navigator.clipboard.writeText(curlCode).then(() => {
+                const icon = btn.querySelector('.copy-icon');
+                icon.textContent = '✅';
+                setTimeout(() => { icon.textContent = '📋'; }, 1500);
+            }).catch(err => {
+                console.error('Copy failed:', err);
+                alert('Copy failed. Please select and copy manually.');
+            });
+        }
+
+        // Delete collection (trigger unpublish) - shows CURL before executing
         async function deleteCollection(collectionId, event) {
             event.stopPropagation();
 
-            const confirmed = await showConfirmModal(
-                'Delete Collection?',
+            const endpoint = '/api/platform/unpublish/vector';
+            const payload = {
+                table_name: collectionId,
+                dry_run: false
+            };
+
+            const confirmed = await showCurlConfirmModal(
+                'Delete Collection',
                 `This will unpublish <strong>${collectionId}</strong> and remove it from the database. This action cannot be undone.`,
-                'Delete',
-                '🗑️'
+                endpoint,
+                'POST',
+                payload,
+                'Delete Collection'
             );
 
             if (!confirmed) return;
 
             try {
-                const response = await fetch(`${API_BASE_URL}/api/platform/unpublish/vector`, {
+                const response = await fetch(`${API_BASE_URL}${endpoint}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        table_name: collectionId,
-                        dry_run: false
-                    })
+                    body: JSON.stringify(payload)
                 });
 
                 const result = await response.json();

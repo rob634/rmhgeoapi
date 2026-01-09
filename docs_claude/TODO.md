@@ -1,6 +1,6 @@
 # Working Backlog
 
-**Last Updated**: 08 JAN 2026 (Web Interface DRY Consolidation - in progress)
+**Last Updated**: 09 JAN 2026 (SP12.9 NiceGUI spike complete - staying with HTMX)
 **Source of Truth**: [docs/epics/README.md](/docs/epics/README.md) — Epic/Feature/Story definitions
 **Purpose**: Sprint-level task tracking and delegation
 
@@ -12,11 +12,12 @@
 |:--------:|------|------|--------|-------------|
 | **1** | E9 | **FATHOM Rwanda Pipeline** | ✅ | Complete! STAC registration pending |
 | **2** | E8 | **H3 Analytics (Rwanda)** | 🚧 | H3 bootstrap running (res 3-7) |
-| **3** | E8 | **Building Flood Exposure** | 📋 | F8.7: MS Buildings → FATHOM → H3 |
-| 4 | E9 | Pre-prepared Raster Ingest | 📋 | F9.8: COG copy + STAC |
-| 5 | E2 | Raster Data as API | 🚧 | F2.7: Collection Processing |
-| 6 | E3 | DDH Platform Integration | 🚧 | F3.1: Validate Swagger UI |
-| 7 | E1 | Vector Data as API | 🚧 | F1.8: ETL Style Integration |
+| **3** | E7 | **Unified Metadata Architecture** | 🚧 | F7.8: Phase 1 complete (models + schema) |
+| 4 | E8 | Building Flood Exposure | 📋 | F8.7: MS Buildings → FATHOM → H3 |
+| 5 | E9 | Pre-prepared Raster Ingest | 📋 | F9.8: COG copy + STAC |
+| 6 | E2 | Raster Data as API | 🚧 | F2.7: Collection Processing |
+| 7 | E3 | DDH Platform Integration | 🚧 | F3.1: Validate Swagger UI |
+| 8 | E1 | Vector Data as API | 🚧 | F1.8: ETL Style Integration |
 | — | E7 | Pipeline Builder | 📋 | F7.5: Future (after concrete implementations) |
 
 **Focus**: Rwanda as test region for all analytics pipelines before scaling.
@@ -334,27 +335,54 @@ CREATE TABLE h3.building_flood_stats (
 
 ---
 
-### ⚪ Future: Unified Metadata Architecture (Foundational)
+### 🟡 Priority 3: Unified Metadata Architecture
 
 **Epic**: E7 Pipeline Infrastructure
 **Goal**: Pydantic-based metadata models providing single source of truth across all data types
 **Design Document**: [METADATA.md](/METADATA.md)
-**Timeline**: After Building Flood Exposure pipeline (Priority 3)
+**Status**: Phase 1 complete (09 JAN 2026)
 
 #### F7.8: Unified Metadata Architecture
 
 | Story | Description | Status |
 |-------|-------------|--------|
-| S7.8.1 | Create `core/models/unified_metadata.py` with BaseMetadata + VectorMetadata | 📋 |
-| S7.8.2 | Create `core/models/external_refs.py` with DDHRefs + ExternalRefs models | 📋 |
-| S7.8.3 | Create `app.dataset_refs` table DDL (cross-type external linkage) | 📋 |
-| S7.8.4 | Add `providers JSONB` and `custom_properties JSONB` to geo.table_metadata DDL | 📋 |
-| S7.8.5 | Refactor `ogc_features/repository.py` to return VectorMetadata model | 📋 |
-| S7.8.6 | Refactor `ogc_features/service.py` to use VectorMetadata.to_ogc_response() | 📋 |
-| S7.8.7 | Refactor `services/stac_vector_catalog.py` to use VectorMetadata.to_stac_item() | 📋 |
-| S7.8.8 | Wire Platform layer to populate app.dataset_refs on ingest | 📋 |
-| S7.8.9 | Document pattern for future data types (RasterMetadata, ZarrMetadata) | 📋 |
-| S7.8.10 | Archive METADATA.md design doc to docs/archive after implementation | 📋 |
+| S7.8.1 | Create `core/models/unified_metadata.py` with BaseMetadata + VectorMetadata | ✅ Done (09 JAN) |
+| S7.8.2 | Create `core/models/external_refs.py` with DDHRefs + ExternalRefs models | ✅ Done (09 JAN) |
+| S7.8.3 | Create `app.dataset_refs` table DDL (cross-type external linkage) | ✅ Done (09 JAN) |
+| S7.8.4 | Add `providers JSONB` and `custom_properties JSONB` to geo.table_metadata DDL | ✅ Done (09 JAN) |
+| S7.8.5 | Refactor `ogc_features/repository.py` to return VectorMetadata model | ✅ Done (09 JAN) |
+| S7.8.6 | Refactor `ogc_features/service.py` to use VectorMetadata.to_ogc_response() | 📋 Phase 2 |
+| S7.8.7 | Refactor `services/stac_vector_catalog.py` to use VectorMetadata.to_stac_item() | 📋 Phase 2 |
+| S7.8.8 | Wire Platform layer to populate app.dataset_refs on ingest | 📋 Phase 2 |
+| S7.8.9 | Document pattern for future data types (RasterMetadata, ZarrMetadata) | 📋 Phase 2 |
+| S7.8.10 | Archive METADATA.md design doc to docs/archive after implementation | 📋 Phase 2 |
+
+**Phase 1 Complete (09 JAN 2026)**:
+- Created `core/models/unified_metadata.py` with:
+  - `Provider`, `ProviderRole` - STAC provider models
+  - `SpatialExtent`, `TemporalExtent`, `Extent` - Extent models
+  - `BaseMetadata` - Abstract base for all data types
+  - `VectorMetadata` - Full implementation with `from_db_row()`, `to_ogc_properties()`, `to_ogc_collection()`, `to_stac_collection()`, `to_stac_item()`
+- Created `core/models/external_refs.py` with:
+  - `DataType` enum (vector, raster, zarr)
+  - `DDHRefs`, `ExternalRefs`, `DatasetRef` - API models
+  - `DatasetRefRecord` - Database record model
+- Updated `core/schema/sql_generator.py` to generate `app.dataset_refs` table with indexes
+- Updated `triggers/admin/db_maintenance.py` with F7.8 columns for geo.table_metadata
+- Added `get_vector_metadata()` method to `ogc_features/repository.py` returning VectorMetadata model
+
+**Key Files (Phase 1)**:
+- `core/models/unified_metadata.py` - Main metadata models
+- `core/models/external_refs.py` - External reference models
+- `core/schema/sql_generator.py` - DDL for app.dataset_refs
+- `triggers/admin/db_maintenance.py` - DDL for geo.table_metadata F7.8 columns
+- `ogc_features/repository.py` - `get_vector_metadata()` method
+
+**Phase 2 (Pending)**:
+- Full service layer migration to use VectorMetadata model
+- STAC catalog migration to use model conversions
+- Platform layer integration for DDH linkage
+- Documentation of pattern for future data types
 
 **Architecture**:
 ```
@@ -432,7 +460,19 @@ PlatformRequest.version_id  ───► app.dataset_refs.ddh_version_id
 | Feature | Description | Status |
 |---------|-------------|--------|
 | F12.1-F12.3 | Cleanup, HTMX, Migration | ✅ Complete |
-| F12.4 | NiceGUI Evaluation | 📋 Future |
+| F12.3.1 | DRY Consolidation (CSS/JS dedup) | ✅ Complete (09 JAN 2026) |
+| SP12.9 | NiceGUI Evaluation Spike | ✅ Complete - **Not Pursuing** |
+| F12.EN1 | Helper Enhancements | 📋 Planned |
+| F12.4 | System Dashboard | 📋 Planned |
+| F12.5 | Pipeline Workflow Hub | 📋 Planned |
+| F12.6 | STAC & Raster Browser | 📋 Planned |
+| F12.7 | OGC Features Browser | 📋 Planned |
+| F12.8 | API Documentation Hub | 📋 Planned |
+
+**SP12.9 Decision (09 JAN 2026)**: Evaluated NiceGUI and decided to stay with current HTMX + hardcoded JS/HTML/CSS approach. Rationale:
+- NiceGUI requires persistent WebSocket connections → incompatible with Azure Functions
+- Would require separate Docker deployment (Container Apps)
+- Current approach is working well, simpler architecture, no additional infrastructure needed
 
 ---
 
@@ -830,6 +870,9 @@ Tasks suitable for a colleague with Azure/Python/pipeline expertise but without 
 
 | Date | Item | Epic |
 |------|------|------|
+| 09 JAN 2026 | **SP12.9 NiceGUI Spike Complete** - Decision: Stay with HTMX/JS/HTML/CSS | E12 |
+| 09 JAN 2026 | **F12.3.1 DRY Consolidation** - CSS/JS deduplication across interfaces | E12 |
+| 09 JAN 2026 | **F7.8 Unified Metadata Architecture Phase 1** (models, schema, repository) | E7 |
 | 08 JAN 2026 | **pg_cron + autovacuum implementation** (table_maintenance.py, pg_cron_setup.sql) | E8 |
 | 08 JAN 2026 | H3 finalize handler updated with run_vacuum param (default: False) | E8 |
 | 08 JAN 2026 | TABLE_MAINTENANCE.md documentation created | E8 |

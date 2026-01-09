@@ -36,7 +36,7 @@ from web_interfaces import InterfaceRegistry
 logger = logging.getLogger(__name__)
 
 # Valid storage zones
-VALID_ZONES = ["bronze", "silver", "silverext"]
+VALID_ZONES = ["bronze"]
 
 # Valid raster file extensions
 RASTER_EXTENSIONS = ['.tif', '.tiff', '.geotiff', '.img', '.jp2', '.ecw', '.vrt', '.nc', '.hdf', '.hdf5']
@@ -511,7 +511,6 @@ class SubmitRasterInterface(BaseInterface):
                                         onchange="updateLoadButton()">
                                     <option value="">Select zone...</option>
                                     <option value="bronze">🟤 Bronze (raw uploads)</option>
-                                    <option value="silver">⚪ Silver (processed)</option>
                                 </select>
                                 <span id="container-spinner" class="htmx-indicator spinner-sm"></span>
                             </div>

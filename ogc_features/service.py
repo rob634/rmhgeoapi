@@ -3,8 +3,8 @@
 # ============================================================================
 # STATUS: API module service - Business logic orchestration for OGC endpoints
 # PURPOSE: Generate OGC-compliant responses with pagination and link generation
-# LAST_REVIEWED: 05 JAN 2026
-# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# LAST_REVIEWED: 09 JAN 2026
+# REVIEW_STATUS: F7.8 Unified Metadata integration complete
 # EXPORTS: OGCFeaturesService
 # DEPENDENCIES: ogc_features.config, ogc_features.repository, ogc_features.models
 # ============================================================================
@@ -38,7 +38,6 @@ from .models import (
     OGCLink,
     OGCExtent,
     OGCSpatialExtent,
-    OGCTemporalExtent,  # Added 09 DEC 2025
     OGCQueryParameters
 )
 
@@ -188,12 +187,9 @@ class OGCFeaturesService:
         """
         Get detailed metadata for a specific collection.
 
-        Enhanced (06 DEC 2025): Now includes custom metadata from geo.table_metadata
-        registry when available (ETL traceability, STAC linkage, pre-computed bbox).
-
-        Note (09 JAN 2026 - F7.8): For new code, consider using get_collection_v2()
-        which uses the VectorMetadata unified model with to_ogc_collection() conversion.
-        This method is preserved for backward compatibility.
+        Refactored (09 JAN 2026 - F7.8): Now uses VectorMetadata unified model when
+        available, falling back to legacy dict-based approach for tables without
+        geo.table_metadata entry.
 
         Args:
             collection_id: Collection identifier (table name)
@@ -205,115 +201,54 @@ class OGCFeaturesService:
         Raises:
             ValueError: If collection not found
         """
+        # =====================================================================
+        # F7.8: Try VectorMetadata model first (preferred path)
+        # =====================================================================
+        vector_metadata = self.repository.get_vector_metadata(collection_id)
+
+        if vector_metadata:
+            # Use VectorMetadata model for clean conversion
+            ogc_dict = vector_metadata.to_ogc_collection(base_url)
+
+            # Add parent link (not included in to_ogc_collection)
+            ogc_dict["links"].append({
+                "href": f"{base_url}/api/features/collections",
+                "rel": "parent",
+                "type": "application/json",
+                "title": "All collections"
+            })
+
+            # Convert to OGCCollection model via Pydantic validation
+            collection = OGCCollection.model_validate(ogc_dict)
+            logger.info(f"Retrieved collection metadata for '{collection_id}' via VectorMetadata (F7.8)")
+            return collection
+
+        # =====================================================================
+        # FALLBACK: Legacy path for tables without geo.table_metadata entry
+        # (e.g., manually created tables, legacy tables not via ETL)
+        # =====================================================================
+        logger.debug(f"No VectorMetadata for '{collection_id}', using legacy path")
+
         # Get base metadata from geometry_columns (required - table must exist)
         metadata = self.repository.get_collection_metadata(collection_id)
 
-        # Get custom metadata from geo.table_metadata registry (optional)
-        # This contains ETL traceability, STAC linkage, and pre-computed bbox
-        custom_metadata = self.repository.get_table_metadata(collection_id)
-
-        # =====================================================================
-        # BUILD EXTENT - Prefer cached bbox (performance) over ST_Extent
-        # =====================================================================
-        # If we have a cached bbox from ETL, use it to avoid ST_Extent query.
-        # Otherwise, fall back to the computed bbox from get_collection_metadata.
+        # Build extent from computed bbox
         extent = None
-        bbox = None
-
-        if custom_metadata and custom_metadata.get('cached_bbox'):
-            # Use pre-computed bbox from geo.table_metadata (fast - no query)
-            bbox = custom_metadata['cached_bbox']
-            logger.debug(f"Using cached bbox for {collection_id}")
-        elif metadata.get('bbox'):
-            # Fall back to ST_Extent result (computed during get_collection_metadata)
-            bbox = metadata['bbox']
-
-        # Build temporal extent if available (09 DEC 2025)
-        temporal_extent = None
-        if custom_metadata:
-            temporal_start = custom_metadata.get('temporal_start')
-            temporal_end = custom_metadata.get('temporal_end')
-            if temporal_start or temporal_end:
-                temporal_extent = OGCTemporalExtent(
-                    interval=[[temporal_start, temporal_end]]
-                )
-
-        if bbox or temporal_extent:
+        bbox = metadata.get('bbox')
+        if bbox:
             extent = OGCExtent(
                 spatial=OGCSpatialExtent(
-                    bbox=[bbox] if bbox else None,
+                    bbox=[bbox],
                     crs="http://www.opengis.net/def/crs/OGC/1.3/CRS84"
-                ) if bbox else None,
-                temporal=temporal_extent
+                )
             )
 
-        # =====================================================================
-        # BUILD TITLE - Use user-provided title if available (09 DEC 2025)
-        # =====================================================================
-        if custom_metadata and custom_metadata.get('title'):
-            title = custom_metadata['title']
-        else:
-            # Default: table name with underscores to title case
-            title = collection_id.replace("_", " ").title()
+        # Build title (table name to title case)
+        title = collection_id.replace("_", " ").title()
 
-        # =====================================================================
-        # BUILD DESCRIPTION - User-provided or auto-generated (09 DEC 2025)
-        # =====================================================================
+        # Build description
         feature_count = metadata.get('feature_count', 0)
-        if custom_metadata and custom_metadata.get('feature_count'):
-            feature_count = custom_metadata['feature_count']
-
-        if custom_metadata and custom_metadata.get('description'):
-            # User-provided description (09 DEC 2025)
-            description = custom_metadata['description']
-        elif custom_metadata and custom_metadata.get('source_file'):
-            # Auto-generated description with source file info
-            description = (
-                f"Source: {custom_metadata['source_file']} "
-                f"({feature_count:,} features). "
-                f"Format: {custom_metadata.get('source_format', 'unknown')}. "
-                f"Original CRS: {custom_metadata.get('source_crs', 'unknown')}."
-            )
-        else:
-            # Default description
-            description = f"Vector features from {collection_id} table ({feature_count:,} features)"
-
-        # =====================================================================
-        # BUILD CUSTOM PROPERTIES - ETL traceability, STAC linkage, user metadata
-        # =====================================================================
-        properties = None
-        if custom_metadata:
-            # Parse keywords from comma-separated string to list (09 DEC 2025)
-            keywords_str = custom_metadata.get('keywords')
-            keywords_list = None
-            if keywords_str:
-                keywords_list = [k.strip() for k in keywords_str.split(',') if k.strip()]
-
-            properties = {
-                # ETL traceability
-                "etl:job_id": custom_metadata.get('etl_job_id'),
-                "source:file": custom_metadata.get('source_file'),
-                "source:format": custom_metadata.get('source_format'),
-                "source:crs": custom_metadata.get('source_crs'),
-                # STAC linkage
-                "stac:item_id": custom_metadata.get('stac_item_id'),
-                "stac:collection_id": custom_metadata.get('stac_collection_id'),
-                # Timestamps
-                "created": custom_metadata.get('created_at'),
-                "updated": custom_metadata.get('updated_at'),
-                # User-provided metadata (09 DEC 2025)
-                "attribution": custom_metadata.get('attribution'),
-                "license": custom_metadata.get('license'),
-                "keywords": keywords_list,
-                "feature_count": custom_metadata.get('feature_count'),
-                "temporal_property": custom_metadata.get('temporal_property')
-            }
-            # Remove None values for cleaner JSON output
-            properties = {k: v for k, v in properties.items() if v is not None}
-
-            # If properties dict is empty after filtering, set to None
-            if not properties:
-                properties = None
+        description = f"Vector features from {collection_id} table ({feature_count:,} features)"
 
         # Build links
         links = [
@@ -343,7 +278,7 @@ class OGCFeaturesService:
 
         collection = OGCCollection(
             id=collection_id,
-            title=title,  # Uses user-provided title or auto-generated (09 DEC 2025)
+            title=title,
             description=description,
             links=links,
             extent=extent,
@@ -353,10 +288,10 @@ class OGCFeaturesService:
                 "http://www.opengis.net/def/crs/EPSG/0/4326"
             ],
             storageCrs=storage_crs,
-            properties=properties
+            properties=None  # No custom properties for legacy tables
         )
 
-        logger.info(f"Retrieved collection metadata for '{collection_id}' (custom_metadata={'yes' if custom_metadata else 'no'})")
+        logger.info(f"Retrieved collection metadata for '{collection_id}' (legacy path)")
 
         return collection
 

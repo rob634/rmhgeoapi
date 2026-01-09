@@ -3,10 +3,10 @@
 # ============================================================================
 # STATUS: Service layer - STAC metadata extraction from PostGIS tables
 # PURPOSE: Extract STAC Item metadata from vector tables stored in PostGIS
-# LAST_REVIEWED: 04 JAN 2026
-# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# LAST_REVIEWED: 09 JAN 2026
+# REVIEW_STATUS: F7.8 Unified Metadata integration complete
 # EXPORTS: StacVectorService
-# DEPENDENCIES: psycopg, stac-pydantic, shapely
+# DEPENDENCIES: psycopg, stac-pydantic, shapely, core.models.unified_metadata
 # ============================================================================
 """
 STAC Vector Metadata Service.
@@ -35,6 +35,7 @@ from shapely.geometry import box
 from config import get_config
 from infrastructure.pgstac_bootstrap import PgStacBootstrap
 from util_logger import LoggerFactory, ComponentType
+from core.models.unified_metadata import VectorMetadata
 
 # Component-specific logger for structured logging (Application Insights)
 logger = LoggerFactory.create_logger(
@@ -142,38 +143,55 @@ class StacVectorService:
         if source_file:
             properties['source_file'] = source_file
 
-        # Fetch user-provided metadata from geo.table_metadata (09 DEC 2025)
+        # =====================================================================
+        # F7.8: Fetch VectorMetadata from geo.table_metadata (09 JAN 2026)
         # This is the SOURCE OF TRUTH - same data used by OGC Features API
-        user_metadata = self._get_user_metadata(table_name)
-        if user_metadata:
-            # Map to STAC-compliant property names
-            if user_metadata.get('title'):
-                properties['title'] = user_metadata['title']
-            if user_metadata.get('description'):
-                properties['description'] = user_metadata['description']
-            if user_metadata.get('attribution'):
-                properties['attribution'] = user_metadata['attribution']
-            if user_metadata.get('license'):
-                properties['license'] = user_metadata['license']
-            if user_metadata.get('keywords'):
-                properties['keywords'] = user_metadata['keywords']
-            if user_metadata.get('feature_count'):
-                properties['feature_count'] = user_metadata['feature_count']
+        # =====================================================================
+        vector_metadata = self._get_vector_metadata(table_name)
+        if vector_metadata:
+            # Map VectorMetadata properties to STAC-compliant property names
+            if vector_metadata.title:
+                properties['title'] = vector_metadata.title
+            if vector_metadata.description:
+                properties['description'] = vector_metadata.description
+            if vector_metadata.license:
+                properties['license'] = vector_metadata.license
+            if vector_metadata.keywords:
+                properties['keywords'] = vector_metadata.keywords
+            if vector_metadata.feature_count:
+                properties['feature_count'] = vector_metadata.feature_count
+
+            # Attribution from providers or legacy field
+            attribution = vector_metadata.get_attribution() or vector_metadata.attribution
+            if attribution:
+                properties['attribution'] = attribution
+
+            # Providers (STAC standard)
+            if vector_metadata.providers:
+                properties['providers'] = [p.to_stac_dict() for p in vector_metadata.providers]
+
+            # Scientific metadata
+            if vector_metadata.sci_doi:
+                properties['sci:doi'] = vector_metadata.sci_doi
+            if vector_metadata.sci_citation:
+                properties['sci:citation'] = vector_metadata.sci_citation
 
             # Add temporal extent using STAC datetime convention
-            temporal_start = user_metadata.get('temporal_start')
-            temporal_end = user_metadata.get('temporal_end')
-            if temporal_start or temporal_end:
-                # STAC spec: use start_datetime/end_datetime for ranges, datetime=null
-                properties['datetime'] = None
-                if temporal_start:
-                    properties['start_datetime'] = temporal_start
-                if temporal_end:
-                    properties['end_datetime'] = temporal_end
-                if user_metadata.get('temporal_property'):
-                    properties['temporal_property'] = user_metadata['temporal_property']
+            if vector_metadata.extent and vector_metadata.extent.temporal:
+                interval = vector_metadata.extent.temporal.interval
+                if interval and interval[0]:
+                    temporal_start, temporal_end = interval[0]
+                    if temporal_start or temporal_end:
+                        # STAC spec: use start_datetime/end_datetime for ranges, datetime=null
+                        properties['datetime'] = None
+                        if temporal_start:
+                            properties['start_datetime'] = temporal_start
+                        if temporal_end:
+                            properties['end_datetime'] = temporal_end
+                        if vector_metadata.temporal_property:
+                            properties['temporal_property'] = vector_metadata.temporal_property
 
-            logger.debug(f"Added user metadata to STAC properties: {list(user_metadata.keys())}")
+            logger.debug(f"Added VectorMetadata to STAC properties (F7.8)")
 
         # Merge additional properties (after user metadata so ETL props can override)
         if additional_properties:
@@ -376,31 +394,21 @@ class StacVectorService:
                     'created_at': created_at
                 }
 
-    def _get_user_metadata(self, table_name: str) -> Optional[Dict[str, Any]]:
+    def _get_vector_metadata(self, table_name: str) -> Optional[VectorMetadata]:
         """
-        Fetch user-provided metadata from geo.table_metadata registry.
+        Fetch VectorMetadata from geo.table_metadata registry.
+
+        Refactored (09 JAN 2026 - F7.8): Now returns VectorMetadata model
+        instead of dict, enabling use of unified conversion methods.
 
         This is the SOURCE OF TRUTH for vector metadata. STAC items should
         read from here to stay synchronized with OGC Features API.
-
-        Added: 09 DEC 2025
 
         Args:
             table_name: Table name (primary key in geo.table_metadata)
 
         Returns:
-            Dict with user-provided metadata fields, or None if not found:
-            {
-                "title": str,
-                "description": str,
-                "attribution": str,
-                "license": str,
-                "keywords": [str],  # Parsed from comma-separated
-                "temporal_start": str,  # ISO 8601
-                "temporal_end": str,    # ISO 8601
-                "temporal_property": str,
-                "feature_count": int
-            }
+            VectorMetadata model, or None if not found
         """
         from infrastructure.postgresql import PostgreSQLRepository
         repo = PostgreSQLRepository(target_database=self.target_database)
@@ -418,12 +426,14 @@ class StacVectorService:
                     """)
                     result = cur.fetchone()
                     if not result or not result.get('table_exists'):
-                        logger.debug(f"geo.table_metadata does not exist - skipping user metadata for {table_name}")
+                        logger.debug(f"geo.table_metadata does not exist - skipping metadata for {table_name}")
                         return None
 
-                    # Query user-provided metadata fields
+                    # Query all F7.8 metadata fields
                     cur.execute("""
                         SELECT
+                            table_name,
+                            schema_name,
                             title,
                             description,
                             attribution,
@@ -432,42 +442,41 @@ class StacVectorService:
                             temporal_start,
                             temporal_end,
                             temporal_property,
-                            feature_count
+                            feature_count,
+                            geometry_type,
+                            etl_job_id,
+                            source_file,
+                            source_format,
+                            source_crs,
+                            stac_item_id,
+                            stac_collection_id,
+                            created_at,
+                            updated_at,
+                            bbox_minx,
+                            bbox_miny,
+                            bbox_maxx,
+                            bbox_maxy,
+                            providers,
+                            stac_extensions,
+                            sci_doi,
+                            sci_citation,
+                            custom_properties
                         FROM geo.table_metadata
                         WHERE table_name = %s
                     """, (table_name,))
 
                     row = cur.fetchone()
                     if not row:
-                        logger.debug(f"No user metadata found in geo.table_metadata for {table_name}")
+                        logger.debug(f"No metadata found in geo.table_metadata for {table_name}")
                         return None
 
-                    # Parse keywords from comma-separated string to list
-                    keywords_str = row.get('keywords')
-                    keywords_list = None
-                    if keywords_str:
-                        keywords_list = [k.strip() for k in keywords_str.split(',') if k.strip()]
-
-                    result = {
-                        "title": row.get('title'),
-                        "description": row.get('description'),
-                        "attribution": row.get('attribution'),
-                        "license": row.get('license'),
-                        "keywords": keywords_list,
-                        "temporal_start": row['temporal_start'].isoformat() if row.get('temporal_start') else None,
-                        "temporal_end": row['temporal_end'].isoformat() if row.get('temporal_end') else None,
-                        "temporal_property": row.get('temporal_property'),
-                        "feature_count": row.get('feature_count')
-                    }
-
-                    # Remove None values
-                    result = {k: v for k, v in result.items() if v is not None}
-
-                    logger.debug(f"Retrieved user metadata for {table_name}: {list(result.keys())}")
-                    return result if result else None
+                    # Convert row to VectorMetadata using factory method
+                    vector_metadata = VectorMetadata.from_db_row(dict(row))
+                    logger.debug(f"Retrieved VectorMetadata for {table_name} (F7.8)")
+                    return vector_metadata
 
         except Exception as e:
-            logger.warning(f"Error fetching user metadata for {table_name}: {e}")
+            logger.warning(f"Error fetching VectorMetadata for {table_name}: {e}")
             return None
 
     # _get_countries_for_bbox() REMOVED (25 NOV 2025)

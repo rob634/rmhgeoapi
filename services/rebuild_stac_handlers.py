@@ -129,7 +129,7 @@ def _validate_vector_sources(
     Returns:
         (valid_items, invalid_items)
     """
-    from infrastructure.repository_factory import RepositoryFactory
+    from infrastructure.factory import RepositoryFactory
 
     valid = []
     invalid = []

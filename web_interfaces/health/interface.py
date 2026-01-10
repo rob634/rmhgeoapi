@@ -424,6 +424,9 @@ class HealthInterface(BaseInterface):
                     <!-- ETL Apps box (right edge) -> PostGIS - 90 degree: right then up -->
                     <path d="M 805 225 L 870 225 L 870 155" class="flow-arrow" marker-end="url(#arrowhead)"/>
                     <text x="875" y="190" class="flow-label-tiny">Write</text>
+
+                    <!-- ETL Apps box -> Zarr Store - branches from PostGIS junction, continues right then up -->
+                    <path d="M 870 225 L 1005 225 L 1005 155" class="flow-arrow" marker-end="url(#arrowhead)"/>
                 </svg>
             </div>
 

@@ -129,15 +129,15 @@ def _validate_vector_sources(
     Returns:
         (valid_items, invalid_items)
     """
-    from infrastructure.factory import RepositoryFactory
+    from infrastructure.postgresql import PostgreSQLRepository
 
     valid = []
     invalid = []
 
     try:
-        repo = RepositoryFactory.create_geo_repository()
+        repo = PostgreSQLRepository(target_database="app")
 
-        with repo.get_connection() as conn:
+        with repo._get_connection() as conn:
             with conn.cursor() as cur:
                 for table_name in items:
                     # Check if table exists in schema
@@ -145,10 +145,11 @@ def _validate_vector_sources(
                         SELECT EXISTS (
                             SELECT 1 FROM information_schema.tables
                             WHERE table_schema = %s AND table_name = %s
-                        )
+                        ) as exists
                     """, (schema, table_name))
 
-                    exists = cur.fetchone()[0]
+                    result = cur.fetchone()
+                    exists = result['exists'] if isinstance(result, dict) else result[0]
 
                     if exists:
                         # Also check if it has geometry
@@ -161,13 +162,14 @@ def _validate_vector_sources(
                             LIMIT 1
                         """, (schema, table_name))
 
-                        geom_col = cur.fetchone()
+                        geom_row = cur.fetchone()
 
-                        if geom_col:
+                        if geom_row:
+                            geom_col = geom_row['column_name'] if isinstance(geom_row, dict) else geom_row[0]
                             valid.append({
                                 "name": table_name,
                                 "schema": schema,
-                                "geometry_column": geom_col[0]
+                                "geometry_column": geom_col
                             })
                         else:
                             invalid.append({

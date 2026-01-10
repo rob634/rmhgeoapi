@@ -1,6 +1,6 @@
 # CLAUDE.md - Project Context
 
-**Last Updated**: 09 JAN 2026
+**Last Updated**: 10 JAN 2026
 
 ---
 
@@ -37,6 +37,7 @@ All Claude-optimized documentation is in **`/docs_claude/`**.
 |----------|---------|
 | `docs_claude/CLAUDE_CONTEXT.md` | Primary context - start here |
 | `docs_claude/TODO.md` | **ONLY** active task list |
+| `docs_claude/ERRORS_AND_FIXES.md` | **Error tracking** - search here first when debugging |
 | `docs_claude/FATHOM_ETL.md` | FATHOM flood data pipeline (Phase 1 & 2) |
 | `docs_claude/ARCHITECTURE_REFERENCE.md` | Deep technical specs, error handling patterns |
 | `docs_claude/ARCHITECTURE_DIAGRAMS.md` | **Visual diagrams** - C4/Mermaid architecture |
@@ -384,6 +385,51 @@ if not job_type:
 
 ---
 
+## 🔧 ERROR TROUBLESHOOTING
+
+**Canonical error log**: `docs_claude/ERRORS_AND_FIXES.md`
+
+### When You Encounter an Error
+
+1. **Search ERRORS_AND_FIXES.md first** - many errors have already been solved
+2. **Check error category** - CONFIG, IMPORT, DATABASE, STORAGE, HEALTH, DEPLOYMENT, UI, PIPELINE, CODE
+3. **Apply documented fix** - follow resolution steps exactly
+
+### After Fixing Any Error
+
+**ALWAYS add the error to `docs_claude/ERRORS_AND_FIXES.md`** with:
+- Exact error message (for searchability)
+- Root cause analysis
+- Fix applied (with code snippets)
+- Related change that triggered it
+- Prevention tips
+
+### Common Error Patterns
+
+| Symptom | First Check | Likely Category |
+|---------|-------------|-----------------|
+| `'object has no attribute'` | Config access pattern | CFG-xxx |
+| `ImportError: cannot import` | Circular imports, library changes | IMP-xxx |
+| Job stuck in PROCESSING | CoreMachine transitions | PIP-xxx |
+| `relation does not exist` | Schema rebuild needed | DB-xxx |
+| App won't start | Missing env vars | DEP-xxx |
+| UI not updating | JS data paths changed | UI-xxx |
+
+### Config Access Quick Reference
+
+```python
+# AppConfig attributes (via get_config()):
+config.storage, config.database, config.queues, config.raster,
+config.vector, config.analytics, config.h3, config.platform, config.metrics
+
+# AppModeConfig (SEPARATE singleton - common mistake!):
+from config import get_app_mode_config
+app_mode_config = get_app_mode_config()
+app_mode_config.docker_worker_enabled
+```
+
+---
+
 ## 📚 REFERENCE LINKS
 
 | Topic | Document |
@@ -391,11 +437,13 @@ if not job_type:
 | Job creation | `docs_claude/JOB_CREATION_QUICKSTART.md` |
 | Architecture details | `docs_claude/ARCHITECTURE_REFERENCE.md` |
 | **Architecture diagrams** | `docs_claude/ARCHITECTURE_DIAGRAMS.md` |
-| Error handling | `docs_claude/ARCHITECTURE_REFERENCE.md` → Error Handling Strategy |
+| **Error tracking** | `docs_claude/ERRORS_AND_FIXES.md` |
+| Error handling patterns | `docs_claude/ARCHITECTURE_REFERENCE.md` → Error Handling Strategy |
 | APIM future plans | `docs_claude/APIM_ARCHITECTURE.md` |
 | Service Bus config | `docs_claude/SERVICE_BUS_HARMONIZATION.md` |
 | Schema design | `docs_claude/SCHEMA_ARCHITECTURE.md` |
 | Log queries | `docs_claude/APPLICATION_INSIGHTS.md` |
+| Memory profiling | `docs_claude/MEMORY_PROFILING.md` |
 | Completed work | `docs_claude/HISTORY.md` |
 
 ---

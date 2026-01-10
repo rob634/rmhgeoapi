@@ -78,6 +78,33 @@ logger = logging.getLogger(__name__)
 SLOW_THRESHOLD_MS = int(os.environ.get("SERVICE_LATENCY_SLOW_MS", "2000"))
 
 
+def _log_to_blob(
+    operation: str,
+    duration_ms: float,
+    status: str,
+    layer: str,
+    slow: bool,
+    error: Optional[str] = None
+):
+    """
+    Log metric to blob storage (fire-and-forget).
+
+    Catches all exceptions to avoid impacting request performance.
+    """
+    try:
+        from infrastructure.metrics_blob_logger import log_metric
+        log_metric(
+            operation=operation,
+            duration_ms=duration_ms,
+            status=status,
+            layer=layer,
+            slow=slow,
+            error=error
+        )
+    except Exception:
+        pass  # Never fail the request due to metrics logging
+
+
 def _is_latency_tracking_enabled() -> bool:
     """
     Check if latency tracking is enabled.
@@ -163,6 +190,9 @@ def track_latency(operation_name: str):
                         extra=extra
                     )
 
+                # Also log to blob storage (if enabled)
+                _log_to_blob(operation_name, duration_ms, status, "service", is_slow, error_msg)
+
         return wrapper
     return decorator
 
@@ -226,6 +256,9 @@ def track_db_operation(operation_name: str):
                         f"[DB_LATENCY] {operation_name}: {duration_ms:.0f}ms",
                         extra=extra
                     )
+
+                # Also log to blob storage (if enabled)
+                _log_to_blob(operation_name, duration_ms, status, "database", is_slow, error_msg)
 
         return wrapper
     return decorator

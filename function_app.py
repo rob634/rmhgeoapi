@@ -2506,6 +2506,14 @@ STARTUP_STATE.finalize()
 # Detect env vars using defaults (for readyz warnings - not errors, just informational)
 STARTUP_STATE.detect_default_env_vars()
 
+# Initialize metrics blob container if METRICS_DEBUG_MODE is enabled
+try:
+    from infrastructure.metrics_blob_logger import init_metrics_container
+    if init_metrics_container():
+        _startup_logger.info("✅ STARTUP: Metrics container 'applogs' initialized")
+except Exception as _metrics_init_error:
+    _startup_logger.debug(f"Metrics container init skipped: {_metrics_init_error}")
+
 if STARTUP_STATE.all_passed:
     _startup_logger.info("✅ STARTUP: Phase 2 complete - All validations PASSED")
 

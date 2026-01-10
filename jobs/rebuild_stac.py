@@ -149,9 +149,10 @@ class RebuildStacJob(JobBaseMixin, JobBase):
             # Create rebuild task for each valid item
             rebuild_tasks = []
             data_type = job_params.get('data_type')
-            schema = job_params.get('schema', 'geo')
-            collection_id = job_params.get('collection_id')
-            force_recreate = job_params.get('force_recreate', False)
+            schema = validate_result.get('schema', job_params.get('schema', 'geo'))
+            # Get collection_id from validation result (has default), fallback to job_params
+            collection_id = validate_result.get('collection_id') or job_params.get('collection_id')
+            force_recreate = validate_result.get('force_recreate', job_params.get('force_recreate', False))
 
             for idx, item_info in enumerate(valid_items):
                 item_name = item_info.get('name') if isinstance(item_info, dict) else item_info

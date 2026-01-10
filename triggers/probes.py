@@ -320,3 +320,95 @@ def diagnostics(req: func.HttpRequest) -> func.HttpResponse:
         GET /api/diagnostics?dependencies=true&dns=true&timeout=5
     """
     return _diagnostics_probe.handle(req)
+
+
+# ============================================================================
+# METRICS FLUSH ENDPOINT
+# ============================================================================
+
+@bp.route(
+    route="metrics/flush",
+    methods=["POST"],
+    auth_level=func.AuthLevel.ANONYMOUS
+)
+def metrics_flush(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Flush buffered metrics to blob storage.
+
+    Use this endpoint to force-flush metrics before a deployment or
+    to ensure recent metrics are persisted for debugging.
+
+    Returns:
+        200: Flush stats including records flushed, errors, etc.
+
+    Example:
+        POST /api/metrics/flush
+    """
+    try:
+        from infrastructure.metrics_blob_logger import flush_metrics, get_metrics_stats
+
+        # Flush and get stats
+        flush_result = flush_metrics()
+        stats = get_metrics_stats()
+
+        return func.HttpResponse(
+            json.dumps({
+                "status": "ok",
+                "flush": flush_result,
+                "stats": stats,
+            }, indent=2),
+            status_code=200,
+            mimetype="application/json"
+        )
+
+    except Exception as e:
+        return func.HttpResponse(
+            json.dumps({
+                "status": "error",
+                "error": str(e),
+                "error_type": type(e).__name__,
+            }, indent=2),
+            status_code=500,
+            mimetype="application/json"
+        )
+
+
+@bp.route(
+    route="metrics/stats",
+    methods=["GET"],
+    auth_level=func.AuthLevel.ANONYMOUS
+)
+def metrics_stats(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Get metrics logger statistics.
+
+    Returns:
+        200: Current logger stats (records logged, flushed, errors, buffer size)
+
+    Example:
+        GET /api/metrics/stats
+    """
+    try:
+        from infrastructure.metrics_blob_logger import get_metrics_stats
+
+        stats = get_metrics_stats()
+
+        return func.HttpResponse(
+            json.dumps({
+                "status": "ok",
+                "metrics": stats,
+            }, indent=2),
+            status_code=200,
+            mimetype="application/json"
+        )
+
+    except Exception as e:
+        return func.HttpResponse(
+            json.dumps({
+                "status": "error",
+                "error": str(e),
+                "error_type": type(e).__name__,
+            }, indent=2),
+            status_code=500,
+            mimetype="application/json"
+        )

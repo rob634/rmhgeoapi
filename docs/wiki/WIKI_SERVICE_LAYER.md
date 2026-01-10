@@ -2,7 +2,7 @@
 
 **Purpose:** Comprehensive documentation for the data access APIs that serve finished geospatial products.
 
-**Last Updated:** 09 JAN 2026
+**Last Updated:** 10 JAN 2026
 
 ---
 
@@ -881,6 +881,107 @@ GET  /api/xarray/aggregate/{collection}/{item}  # Temporal aggregation
 
 ---
 
+## 9. Service Latency Tracking (10 JAN 2026)
+
+### Overview
+
+Service layer operations can be instrumented with latency tracking for debugging performance issues in opaque QA environments.
+
+**Controlled by**: `METRICS_DEBUG_MODE=true` (default: false)
+
+### Architecture
+
+```
+HTTP Request → Service Layer (@track_latency) → Repository Layer (@track_db_operation)
+                     │                                    │
+                     ▼                                    ▼
+            Application Insights                 Application Insights
+            [SERVICE_LATENCY] logs              [DB_LATENCY] logs
+                     │                                    │
+                     └──────────── Blob Storage ──────────┘
+                                   (applogs container)
+```
+
+### Decorators
+
+| Decorator | Use For | Log Prefix |
+|-----------|---------|------------|
+| `@track_latency("operation.name")` | Service layer methods | `[SERVICE_LATENCY]` |
+| `@track_db_operation("operation.name")` | Repository/database methods | `[DB_LATENCY]` |
+
+### Usage
+
+```python
+from infrastructure.service_latency import track_latency, track_db_operation
+
+class OGCFeaturesService:
+    @track_latency("ogc.query_features")
+    def query_features(self, collection_id: str, **params):
+        # Service logic...
+        pass
+
+class OGCFeaturesRepository:
+    @track_db_operation("ogc.query_features_db")
+    def query_features(self, collection_id: str, bbox=None):
+        # Database query...
+        pass
+```
+
+### Instrumented Operations
+
+**OGC Features API** (`ogc_features/service.py`):
+- `ogc.list_collections`
+- `ogc.get_collection`
+- `ogc.query_features`
+- `ogc.get_feature`
+
+**OGC Features Repository** (`ogc_features/repository.py`):
+- `ogc.list_collections_db`
+- `ogc.get_collection_metadata_db`
+- `ogc.query_features_db`
+- `ogc.get_feature_by_id_db`
+
+**STAC API** (`stac_api/service.py`):
+- `stac.get_collections`
+- `stac.get_collection`
+- `stac.get_items`
+- `stac.get_item`
+
+### Blob Storage Output
+
+When enabled, metrics are buffered and flushed to blob storage:
+
+**Path**: `applogs/service-metrics/{date}/{instance_id}/{timestamp}.jsonl`
+
+**Format** (JSON Lines):
+```json
+{"ts": "2026-01-10T14:30:52Z", "op": "ogc.query_features", "ms": 145.2, "status": "success", "layer": "service"}
+{"ts": "2026-01-10T14:30:53Z", "op": "ogc.query_features_db", "ms": 89.1, "status": "success", "layer": "database"}
+```
+
+### Performance Impact
+
+- **Disabled** (`METRICS_DEBUG_MODE=false`): Zero overhead - decorators return immediately
+- **Enabled**: ~0.1ms overhead per operation (timing + logging)
+
+### Configuration
+
+| Env Var | Default | Description |
+|---------|---------|-------------|
+| `METRICS_DEBUG_MODE` | `false` | Enable/disable latency tracking |
+| `SERVICE_LATENCY_SLOW_MS` | `2000` | Threshold for SLOW warnings |
+| `METRICS_FLUSH_INTERVAL` | `60` | Seconds between blob flushes |
+| `METRICS_BUFFER_SIZE` | `100` | Records before auto-flush |
+
+### Endpoints
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/metrics/stats` | GET | View current metrics statistics |
+| `/api/metrics/flush` | POST | Force flush metrics to blob |
+
+---
+
 ## Related Documentation
 
 | Document | Purpose |
@@ -895,4 +996,4 @@ GET  /api/xarray/aggregate/{collection}/{item}  # Temporal aggregation
 ---
 
 **Author:** Claude + Robert Harrison
-**Last Updated:** 09 JAN 2026
+**Last Updated:** 10 JAN 2026

@@ -110,6 +110,49 @@ union requests, traces | where timestamp >= ago(30m) | where operation_Name cont
 requests | where timestamp >= ago(30m) | where name contains "process_" | project timestamp, name, success, resultCode, duration | order by timestamp desc
 ```
 
+### Service Latency Metrics (10 JAN 2026)
+
+When `METRICS_DEBUG_MODE=true`, service layer operations log latency with `[SERVICE_LATENCY]` and `[DB_LATENCY]` prefixes.
+
+```kql
+// Find slow service operations (> 1s)
+traces
+| where timestamp >= ago(1h)
+| where message contains "[SERVICE_LATENCY]"
+| extend duration_ms = todouble(customDimensions.duration_ms)
+| where duration_ms > 1000
+| project timestamp, customDimensions.operation, duration_ms, customDimensions.status
+| order by duration_ms desc
+
+// P90 latency by operation
+traces
+| where timestamp >= ago(1h)
+| where message contains "[SERVICE_LATENCY]"
+| extend op = tostring(customDimensions.operation)
+| extend duration_ms = todouble(customDimensions.duration_ms)
+| summarize p50=percentile(duration_ms, 50), p90=percentile(duration_ms, 90), p99=percentile(duration_ms, 99), count=count() by op
+| order by p90 desc
+
+// Database operation latency
+traces
+| where timestamp >= ago(1h)
+| where message contains "[DB_LATENCY]"
+| extend op = tostring(customDimensions.operation)
+| extend duration_ms = todouble(customDimensions.duration_ms)
+| summarize avg_ms=avg(duration_ms), max_ms=max(duration_ms), count=count() by op
+| order by avg_ms desc
+
+// Slow operations with error details
+traces
+| where timestamp >= ago(1h)
+| where message contains "SLOW"
+| extend op = tostring(customDimensions.operation)
+| extend duration_ms = todouble(customDimensions.duration_ms)
+| extend error = tostring(customDimensions.error)
+| project timestamp, op, duration_ms, error
+| order by timestamp desc
+```
+
 ---
 
 ## 🔧 Pretty Output with Python Parsing
@@ -258,5 +301,5 @@ dependencies | where timestamp >= ago(1h) | project timestamp, name, type, succe
 
 ---
 
-**Last Updated**: 12 DEC 2025
+**Last Updated**: 10 JAN 2026
 **Status**: PRODUCTION VERIFIED

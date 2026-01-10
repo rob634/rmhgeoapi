@@ -2,7 +2,7 @@
 
 > **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [All Jobs](WIKI_API_JOB_SUBMISSION.md) | [Errors](WIKI_API_ERRORS.md) | **Health**
 
-**Last Updated**: 08 JAN 2026
+**Last Updated**: 10 JAN 2026
 **Status**: Reference Documentation
 **Purpose**: Health probes, startup validation, and diagnostic endpoints
 
@@ -10,13 +10,16 @@
 
 ## Overview
 
-The platform provides three diagnostic endpoints following Kubernetes-style health probe patterns:
+The platform provides diagnostic endpoints following Kubernetes-style health probe patterns:
 
 | Endpoint | Purpose | Always Available |
 |----------|---------|------------------|
 | `/api/livez` | Liveness probe - is the process alive? | Yes |
 | `/api/readyz` | Readiness probe - is the app ready for traffic? | Yes |
 | `/api/health` | Comprehensive health check with component status | After startup |
+| `/api/diagnostics` | Deep system diagnostics (connectivity, DNS, pools) | Yes |
+| `/api/metrics/stats` | Service latency metrics statistics | Yes |
+| `/api/metrics/flush` | Force flush metrics to blob storage | Yes |
 
 ---
 
@@ -31,6 +34,15 @@ curl https://YOUR_APP.azurewebsites.net/api/readyz
 
 # Full health check with component status
 curl https://YOUR_APP.azurewebsites.net/api/health
+
+# Deep system diagnostics (connectivity, DNS, pools)
+curl https://YOUR_APP.azurewebsites.net/api/diagnostics
+
+# Service metrics statistics
+curl https://YOUR_APP.azurewebsites.net/api/metrics/stats
+
+# Force flush metrics to blob storage
+curl -X POST https://YOUR_APP.azurewebsites.net/api/metrics/flush
 ```
 
 ---
@@ -131,6 +143,121 @@ curl https://YOUR_APP.azurewebsites.net/api/health
 - Environment variable validation
 - Startup validation summary
 - Component capabilities
+
+---
+
+### GET /api/diagnostics - Deep System Diagnostics (10 JAN 2026)
+
+**Purpose**: Deep system diagnostics for debugging opaque corporate Azure environments with VNet/ASE complexity.
+
+**Query Parameters**:
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `dependencies` | `true` | Check dependency connectivity (database, storage, Service Bus) |
+| `dns` | `true` | Check DNS resolution timing |
+| `pools` | `true` | Check connection pool statistics |
+| `instance` | `true` | Check instance/cold start information |
+| `network` | `true` | Check network environment summary |
+| `timeout` | `10` | Timeout for connectivity checks (max 30s) |
+
+**Example Request**:
+```bash
+# Full diagnostics
+curl https://YOUR_APP.azurewebsites.net/api/diagnostics
+
+# Only dependency and DNS checks with custom timeout
+curl "https://YOUR_APP.azurewebsites.net/api/diagnostics?pools=false&instance=false&timeout=5"
+```
+
+**Response (200)**:
+```json
+{
+  "status": "ok",
+  "timestamp": "2026-01-10T14:30:00Z",
+  "duration_ms": 1234,
+  "dependencies": {
+    "database": {"status": "healthy", "latency_ms": 45},
+    "service_bus": {"status": "healthy", "latency_ms": 23},
+    "silver_storage": {"status": "healthy", "latency_ms": 12}
+  },
+  "dns": {
+    "postgis_host": {"resolved": true, "latency_ms": 5, "addresses": ["10.0.0.5"]},
+    "service_bus_fqdn": {"resolved": true, "latency_ms": 3, "addresses": ["40.90.1.123"]}
+  },
+  "pools": {
+    "database": {"active": 2, "idle": 3, "max": 10}
+  },
+  "instance": {
+    "instance_id": "abc123",
+    "cold_start": false,
+    "uptime_seconds": 3600
+  },
+  "network": {
+    "private_ip": "10.0.0.50",
+    "outbound_ip": "52.186.123.45"
+  }
+}
+```
+
+**Use case**: QA debugging when app is slow but `/api/health` shows healthy. Identifies whether the issue is DNS resolution, network latency, connection pool exhaustion, or cold start overhead.
+
+---
+
+### GET /api/metrics/stats - Service Latency Statistics
+
+**Purpose**: View current service latency metrics statistics.
+
+**Response (200)**:
+```json
+{
+  "status": "ok",
+  "metrics": {
+    "enabled": true,
+    "records_logged": 1523,
+    "records_flushed": 1400,
+    "flush_errors": 0,
+    "buffer_size": 123,
+    "instance_id": "abc123def456",
+    "container": "applogs",
+    "flush_interval": 60
+  }
+}
+```
+
+**Note**: Only active when `METRICS_DEBUG_MODE=true`. Returns `{"enabled": false}` when disabled.
+
+---
+
+### POST /api/metrics/flush - Force Flush Metrics
+
+**Purpose**: Force flush buffered metrics to blob storage. Use before deployments or to ensure recent metrics are persisted for debugging.
+
+**Response (200)**:
+```json
+{
+  "status": "ok",
+  "flush": {
+    "flushed": true,
+    "records_logged": 1523,
+    "records_flushed": 1523,
+    "flush_errors": 0,
+    "buffer_remaining": 0
+  },
+  "stats": {
+    "enabled": true,
+    "container": "applogs",
+    "flush_interval": 60
+  }
+}
+```
+
+**Blob Storage Path**: `applogs/service-metrics/{date}/{instance_id}/{timestamp}.jsonl`
+
+**JSON Lines Format** (one record per line):
+```json
+{"ts": "2026-01-10T14:30:52Z", "op": "ogc.query_features", "ms": 145.2, "status": "success", "layer": "service"}
+{"ts": "2026-01-10T14:30:53Z", "op": "ogc.get_collection", "ms": 23.1, "status": "success", "layer": "database", "slow": true}
+```
 
 ---
 

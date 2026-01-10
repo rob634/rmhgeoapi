@@ -1152,6 +1152,401 @@ Tasks suitable for a colleague with Azure/Python/pipeline expertise but without 
 
 ---
 
+---
+
+## F7.12: Logging Architecture Consolidation (10 JAN 2026)
+
+**Epic**: E7 Pipeline Infrastructure
+**Goal**: Eliminate duplicate debug flags, unify diagnostics, add global log context for multi-app filtering
+**Priority**: HIGH - Duplicate flags are accumulating and causing confusion
+**Status**: 📋 PLANNED
+
+### Background
+
+Systematic review (10 JAN 2026) identified significant issues in logging/metrics infrastructure:
+
+1. **Duplicate Debug Flags** - Multiple env vars controlling similar behavior
+2. **No Global App/Instance ID** - Can't filter logs by app in multi-app deployment
+3. **Duplicate Diagnostics Code** - `diagnostics.py` and `health.py` overlap
+4. **Unclear Metrics Systems** - Three different metrics systems with unclear purposes
+
+### Current State (Problems)
+
+**Duplicate Debug Flags**:
+| Env Var | Used By | Purpose |
+|---------|---------|---------|
+| `DEBUG_MODE` | util_logger.py | Memory/CPU checkpoints, runtime environment |
+| `DEBUG_LOGGING` | util_logger.py | Log level DEBUG vs INFO |
+| `METRICS_DEBUG_MODE` | service_latency.py, metrics_blob_logger.py | Service latency tracking + blob dumps |
+| `METRICS_ENABLED` | metrics_config.py, metrics_repository.py | ETL job progress to PostgreSQL |
+
+**Problem**: 4 different boolean flags for debug/metrics behavior. Very confusing!
+
+**Missing App/Instance Context**:
+- `util_logger.py` gathers `WEBSITE_INSTANCE_ID` but only logs it in debug checkpoints
+- `service_latency.py` logs to App Insights WITHOUT instance/app identification
+- In multi-app deployment (ETL + Reader + Docker workers), can't filter logs by source
+
+**Duplicate Code**:
+- `infrastructure/diagnostics.py` - DNS checks, connectivity checks, instance info
+- `triggers/health.py` - Also does connectivity checks, instance info
+- `util_logger.py:get_runtime_environment()` - Also gathers instance info
+
+### F7.12.A: Global Log Context (HIGH PRIORITY)
+
+**Goal**: Every log line includes app_name and instance_id for multi-app filtering
+
+| Story | Description | Status | Files |
+|-------|-------------|--------|-------|
+| S7.12.A.1 | Add `LOG_CONTEXT_APP_NAME` and `LOG_CONTEXT_INSTANCE_ID` to LoggerFactory | 📋 | `util_logger.py` |
+| S7.12.A.2 | Modify `create_logger()` to inject app/instance into every log | 📋 | `util_logger.py` |
+| S7.12.A.3 | Update `service_latency.py` to use LoggerFactory with context | 📋 | `infrastructure/service_latency.py` |
+| S7.12.A.4 | Update `metrics_blob_logger.py` to include app_name in blob path | 📋 | `infrastructure/metrics_blob_logger.py` |
+| S7.12.A.5 | Add `environment` (dev/qa/prod) to log context | 📋 | `util_logger.py` |
+| S7.12.A.6 | Document log filtering patterns for multi-app deployment | 📋 | `docs_claude/APPLICATION_INSIGHTS.md` |
+
+**Implementation for S7.12.A.1-2**:
+```python
+# util_logger.py - Module-level context (loaded once at import)
+import os
+
+# Global log context - every log gets these fields
+_GLOBAL_LOG_CONTEXT = {
+    "app_name": os.environ.get("APP_NAME", "unknown"),
+    "app_instance": os.environ.get("WEBSITE_INSTANCE_ID", "local")[:16],
+    "environment": os.environ.get("ENVIRONMENT", "dev"),
+}
+
+# In create_logger() wrapper:
+def log_with_context(level, msg, args, exc_info=None, extra=None, ...):
+    if extra is None:
+        extra = {}
+
+    custom_dims = {
+        **_GLOBAL_LOG_CONTEXT,  # Always include app/instance
+        'component_type': component_type.value,
+        'component_name': name
+    }
+    # ... rest of existing code
+```
+
+**KQL Query (after implementation)**:
+```kusto
+// Filter logs by app in multi-app deployment
+traces
+| where customDimensions.app_name == "rmhazuregeoapi"
+| where customDimensions.app_instance == "abc123"
+| where timestamp >= ago(1h)
+| order by timestamp desc
+```
+
+### F7.12.B: Unify Diagnostics Module (MEDIUM PRIORITY)
+
+**Goal**: Single source of truth for connectivity/DNS/instance checks
+
+| Story | Description | Status | Files |
+|-------|-------------|--------|-------|
+| S7.12.B.1 | Create `infrastructure/diagnostics/connectivity.py` - shared checks | 📋 | New file |
+| S7.12.B.2 | Create `infrastructure/diagnostics/dns.py` - shared DNS timing | 📋 | New file |
+| S7.12.B.3 | Create `infrastructure/diagnostics/instance.py` - shared instance info | 📋 | New file |
+| S7.12.B.4 | Create `infrastructure/diagnostics/__init__.py` - unified API | 📋 | New file |
+| S7.12.B.5 | Refactor `infrastructure/diagnostics.py` to use shared modules | 📋 | Existing file |
+| S7.12.B.6 | Refactor `triggers/health.py` to delegate to shared modules | 📋 | `triggers/health.py` |
+| S7.12.B.7 | Remove duplicate code from `util_logger.py:get_runtime_environment()` | 📋 | `util_logger.py` |
+
+**Target Structure**:
+```
+infrastructure/
+  diagnostics/
+    __init__.py           # Unified API: get_diagnostics(), check_connectivity(), etc.
+    connectivity.py       # Database, storage, Service Bus connectivity checks
+    dns.py                # DNS resolution timing
+    instance.py           # Instance ID, cold start, Azure env vars
+    pools.py              # Connection pool statistics
+    network.py            # VNet, private IP, outbound IP
+
+infrastructure/diagnostics.py  # DEPRECATED - thin wrapper over diagnostics/
+triggers/health.py             # Delegates to infrastructure/diagnostics/
+util_logger.py                 # Delegates to infrastructure/diagnostics/instance.py
+```
+
+### F7.12.C: Consolidate Debug Flags (HIGH PRIORITY)
+
+**Goal**: Reduce 4 flags to 2 clear flags with distinct purposes
+
+| Story | Description | Status | Files |
+|-------|-------------|--------|-------|
+| S7.12.C.1 | Document current flag behavior and decide consolidation strategy | 📋 | This doc |
+| S7.12.C.2 | Implement flag consolidation (see strategy below) | 📋 | Multiple files |
+| S7.12.C.3 | Update all usages to use new consolidated flags | 📋 | Multiple files |
+| S7.12.C.4 | Add deprecation warnings for old flag names | 📋 | `config/__init__.py` |
+| S7.12.C.5 | Update WIKI_ENVIRONMENT_VARIABLES.md with new flag structure | 📋 | `docs/wiki/` |
+| S7.12.C.6 | Update startup_state.py ENV_VARS_WITH_DEFAULTS | 📋 | `startup_state.py` |
+
+**Consolidation Strategy**:
+
+| Current Flag | Behavior | New Flag | New Behavior |
+|--------------|----------|----------|--------------|
+| `DEBUG_MODE` | Memory/CPU checkpoints | `OBSERVABILITY_MODE` | All debug diagnostics (memory, CPU, DB stats) |
+| `DEBUG_LOGGING` | Log level DEBUG | `LOG_LEVEL=DEBUG` | Already exists! Remove DEBUG_LOGGING |
+| `METRICS_DEBUG_MODE` | Service latency + blob dumps | `OBSERVABILITY_MODE` | Merge into single flag |
+| `METRICS_ENABLED` | ETL job progress to PostgreSQL | `METRICS_ENABLED` | Keep - different purpose (dashboards) |
+
+**Result: 2 flags instead of 4**:
+- `OBSERVABILITY_MODE=true` → Memory checkpoints, service latency, blob dumps, database stats
+- `METRICS_ENABLED=true` → ETL job progress to PostgreSQL (for dashboards)
+
+**Implementation for S7.12.C.2**:
+```python
+# config/__init__.py - Add unified observability flag
+class Config:
+    @property
+    def observability_mode(self) -> bool:
+        """Master switch for debug diagnostics (memory, latency, blob dumps)."""
+        # Check new name first, fall back to old names for backward compat
+        if os.environ.get("OBSERVABILITY_MODE"):
+            return os.environ.get("OBSERVABILITY_MODE", "false").lower() == "true"
+        # Backward compat: any old flag enables observability
+        return (
+            os.environ.get("DEBUG_MODE", "false").lower() == "true" or
+            os.environ.get("METRICS_DEBUG_MODE", "false").lower() == "true"
+        )
+```
+
+### F7.12.D: Python App Insights Log Export (MEDIUM PRIORITY)
+
+**Goal**: On-demand export of App Insights logs to blob storage via Python endpoint
+
+| Story | Description | Status | Files |
+|-------|-------------|--------|-------|
+| S7.12.D.1 | Create `infrastructure/appinsights_export.py` with REST API client | 📋 | New file |
+| S7.12.D.2 | Implement `query_logs(query: str, hours: int)` method | 📋 | `appinsights_export.py` |
+| S7.12.D.3 | Implement `export_to_blob(query, hours, container, blob_name)` method | 📋 | `appinsights_export.py` |
+| S7.12.D.4 | Add `POST /api/logs/export` endpoint | 📋 | `triggers/probes.py` or new file |
+| S7.12.D.5 | Add `GET /api/logs/query` endpoint for quick queries | 📋 | Same file |
+| S7.12.D.6 | Document usage and KQL templates | 📋 | `docs_claude/APPLICATION_INSIGHTS.md` |
+
+**Implementation for S7.12.D.1-3** (`infrastructure/appinsights_export.py`):
+```python
+"""
+App Insights Log Export.
+
+Query Application Insights via REST API and export results to blob storage.
+Uses same auth pattern as documented in APPLICATION_INSIGHTS.md.
+"""
+
+import json
+import os
+from datetime import datetime, timezone
+from typing import Dict, Any, List, Optional
+
+from azure.identity import DefaultAzureCredential
+import requests
+
+
+class AppInsightsExporter:
+    """Export App Insights logs to blob storage."""
+
+    def __init__(self):
+        self.app_id = os.environ.get("APPINSIGHTS_APP_ID")  # From Azure portal
+        self.api_endpoint = f"https://api.applicationinsights.io/v1/apps/{self.app_id}/query"
+        self._credential = None
+
+    def _get_token(self) -> str:
+        """Get bearer token for App Insights API."""
+        if self._credential is None:
+            self._credential = DefaultAzureCredential()
+        token = self._credential.get_token("https://api.applicationinsights.io/.default")
+        return token.token
+
+    def query_logs(
+        self,
+        query: str,
+        timespan: str = "PT24H"  # ISO 8601 duration (24 hours default)
+    ) -> List[Dict[str, Any]]:
+        """
+        Query App Insights and return results.
+
+        Args:
+            query: KQL query string
+            timespan: ISO 8601 duration (PT1H, PT24H, P7D, etc.)
+
+        Returns:
+            List of result rows as dicts
+        """
+        headers = {
+            "Authorization": f"Bearer {self._get_token()}",
+            "Content-Type": "application/json"
+        }
+
+        response = requests.post(
+            self.api_endpoint,
+            headers=headers,
+            json={"query": query, "timespan": timespan}
+        )
+        response.raise_for_status()
+
+        data = response.json()
+
+        # Convert to list of dicts
+        if "tables" not in data or not data["tables"]:
+            return []
+
+        table = data["tables"][0]
+        columns = [col["name"] for col in table["columns"]]
+
+        return [dict(zip(columns, row)) for row in table["rows"]]
+
+    def export_to_blob(
+        self,
+        query: str,
+        container: str = "applogs",
+        blob_prefix: str = "exports",
+        timespan: str = "PT24H"
+    ) -> Dict[str, Any]:
+        """
+        Query App Insights and export results to blob storage.
+
+        Args:
+            query: KQL query string
+            container: Blob container name
+            blob_prefix: Prefix for blob path
+            timespan: ISO 8601 duration
+
+        Returns:
+            Dict with export status, row count, blob path
+        """
+        from infrastructure.blob import BlobRepository
+
+        # Query logs
+        rows = self.query_logs(query, timespan)
+
+        if not rows:
+            return {"status": "empty", "row_count": 0, "blob_path": None}
+
+        # Generate blob name
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        blob_name = f"{blob_prefix}/{timestamp}.jsonl"
+
+        # Write as JSON Lines
+        content = "\n".join(json.dumps(row, default=str) for row in rows)
+
+        # Upload to blob
+        blob_repo = BlobRepository()
+        blob_repo.upload_blob(
+            container_name=container,
+            blob_name=blob_name,
+            data=content.encode("utf-8"),
+            overwrite=True
+        )
+
+        return {
+            "status": "exported",
+            "row_count": len(rows),
+            "blob_path": f"{container}/{blob_name}",
+            "timespan": timespan
+        }
+```
+
+**API Endpoint (S7.12.D.4)**:
+```python
+# triggers/probes.py or new file
+
+@bp.route(
+    route="logs/export",
+    methods=["POST"],
+    auth_level=func.AuthLevel.ANONYMOUS
+)
+def logs_export(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Export App Insights logs to blob storage.
+
+    POST /api/logs/export
+    {
+        "query": "traces | where timestamp >= ago(1h) | take 1000",
+        "timespan": "PT1H",
+        "container": "applogs",
+        "blob_prefix": "exports/service-logs"
+    }
+
+    Returns:
+        200: {"status": "exported", "row_count": 1000, "blob_path": "applogs/exports/..."}
+    """
+    try:
+        body = req.get_json()
+        query = body.get("query", "traces | where timestamp >= ago(1h) | take 1000")
+        timespan = body.get("timespan", "PT1H")
+        container = body.get("container", "applogs")
+        blob_prefix = body.get("blob_prefix", "exports")
+
+        from infrastructure.appinsights_export import AppInsightsExporter
+        exporter = AppInsightsExporter()
+
+        result = exporter.export_to_blob(
+            query=query,
+            container=container,
+            blob_prefix=blob_prefix,
+            timespan=timespan
+        )
+
+        return func.HttpResponse(
+            json.dumps(result, indent=2),
+            status_code=200,
+            mimetype="application/json"
+        )
+    except Exception as e:
+        return func.HttpResponse(
+            json.dumps({"status": "error", "error": str(e)}),
+            status_code=500,
+            mimetype="application/json"
+        )
+```
+
+**Required Env Var**:
+```
+APPINSIGHTS_APP_ID=d3af3d37-cfe3-411f-adef-bc540181cbca  # From Azure portal
+```
+
+### Implementation Order
+
+1. **F7.12.C (Consolidate Flags)** - FIRST - Reduces confusion before other changes
+2. **F7.12.A (Global Log Context)** - SECOND - Enables multi-app log filtering
+3. **F7.12.B (Unify Diagnostics)** - THIRD - Clean up code duplication
+4. **F7.12.D (App Insights Export)** - FOURTH - Nice-to-have for QA debugging
+
+### Acceptance Criteria
+
+**F7.12.C Complete When**:
+- Only 2 debug flags: `OBSERVABILITY_MODE` and `METRICS_ENABLED`
+- Old flags still work (backward compat) but log deprecation warning
+- Documentation updated
+
+**F7.12.A Complete When**:
+- Every log line has `app_name`, `app_instance`, `environment`
+- KQL queries can filter by app
+- Documentation includes multi-app filtering examples
+
+**F7.12.B Complete When**:
+- Single `infrastructure/diagnostics/` module for all checks
+- No duplicate DNS/connectivity/instance code
+- health.py delegates to diagnostics module
+
+**F7.12.D Complete When**:
+- `POST /api/logs/export` endpoint works
+- Exports to `applogs` container in silver storage
+- Documentation includes usage examples
+
+### Testing Checklist
+
+- [ ] Set `OBSERVABILITY_MODE=true`, verify memory checkpoints + service latency work
+- [ ] Set old `DEBUG_MODE=true`, verify backward compat + deprecation warning
+- [ ] Verify logs include `app_name`, `app_instance` in customDimensions
+- [ ] Run KQL query filtering by app_name
+- [ ] Call `/api/logs/export`, verify blob created with log data
+- [ ] Health endpoint still works after diagnostics refactor
+
+---
+
 **Workflow**:
 1. ~~Complete Rwanda FATHOM pipeline (Priority 1)~~ ✅ DONE
 2. Run H3 aggregation on FATHOM outputs (Priority 2) - 🚧 H3 bootstrap running

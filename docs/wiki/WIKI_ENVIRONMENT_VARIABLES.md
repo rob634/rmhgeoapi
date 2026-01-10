@@ -1,6 +1,6 @@
 # Environment Variables Reference
 
-**Last Updated**: 01 JAN 2026
+**Last Updated**: 10 JAN 2026
 **Purpose**: Complete reference for all environment variables used by the platform
 
 ---
@@ -233,7 +233,25 @@ Each trust zone can have its own storage account. Required accounts are in Secti
 | `DEBUG_MODE` | `false` | Enable debug mode |
 | `DEBUG_LOGGING` | `false` | Enable verbose debug logging |
 
-### 6.3 Platform Integration
+### 6.3 Service Metrics & Diagnostics (10 JAN 2026)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `METRICS_DEBUG_MODE` | `false` | Enable service latency tracking and blob logging |
+| `SERVICE_LATENCY_SLOW_MS` | `2000` | Threshold (ms) for slow operation warnings |
+| `METRICS_FLUSH_INTERVAL` | `60` | Seconds between metrics blob flushes |
+| `METRICS_BUFFER_SIZE` | `100` | Max records before auto-flush |
+| `METRICS_BLOB_CONTAINER` | `applogs` | Container for metrics JSON files |
+
+**When `METRICS_DEBUG_MODE=true`:**
+- Service layer operations (OGC Features, STAC API) log latency to Application Insights
+- Database operations log separately with `[DB_LATENCY]` prefix
+- Metrics are buffered and written to blob storage as JSON Lines files
+- Blob path: `applogs/service-metrics/{date}/{instance_id}/{timestamp}.jsonl`
+
+**Use for QA debugging** in opaque corporate Azure environments where VNet/ASE complexity may cause performance issues. Zero overhead when disabled.
+
+### 6.4 Platform Integration
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -245,13 +263,13 @@ Each trust zone can have its own storage account. Required accounts are in Secti
 | `PLATFORM_WEBHOOK_RETRY_COUNT` | `3` | Webhook retry attempts |
 | `PLATFORM_WEBHOOK_RETRY_DELAY` | `5` | Webhook retry delay (seconds) |
 
-### 6.4 STAC Configuration
+### 6.5 STAC Configuration
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `STAC_DEFAULT_COLLECTION` | `system-rasters` | Default STAC collection |
 
-### 6.5 TiTiler Mode
+### 6.6 TiTiler Mode
 
 | Variable | Default | Description |
 |----------|---------|-------------|

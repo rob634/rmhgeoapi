@@ -73,6 +73,9 @@ from .h3_export_dataset import H3ExportDatasetJob
 # STAC Repair (22 DEC 2025)
 from .repair_stac_items import RepairStacItemsJob
 
+# STAC Rebuild (10 JAN 2026) - F7.11 Self-Healing
+from .rebuild_stac import RebuildStacJob
+
 # Ingest Collection (29 DEC 2025)
 from .ingest_collection import IngestCollectionJob
 
@@ -123,6 +126,9 @@ ALL_JOBS = {
 
     # STAC Repair (22 DEC 2025)
     "repair_stac_items": RepairStacItemsJob,
+
+    # STAC Rebuild (10 JAN 2026) - F7.11 Self-Healing
+    "rebuild_stac": RebuildStacJob,
 
     # Ingest Collection (29 DEC 2025)
     "ingest_collection": IngestCollectionJob,

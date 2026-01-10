@@ -165,6 +165,12 @@ from .stac_repair_handlers import (
     stac_repair_item,
 )
 
+# STAC Rebuild handlers (10 JAN 2026) - F7.11 Self-Healing
+from .rebuild_stac_handlers import (
+    stac_rebuild_validate,
+    stac_rebuild_item,
+)
+
 # Ingest Collection handlers (29 DEC 2025)
 from .ingest import ALL_HANDLERS as INGEST_HANDLERS
 
@@ -282,6 +288,9 @@ ALL_HANDLERS = {
     # STAC Repair handlers (22 DEC 2025)
     "stac_repair_inventory": stac_repair_inventory,  # Stage 1: Scan catalog for issues
     "stac_repair_item": stac_repair_item,  # Stage 2: Repair individual items
+    # STAC Rebuild handlers (10 JAN 2026) - F7.11 Self-Healing
+    "stac_rebuild_validate": stac_rebuild_validate,  # Stage 1: Check sources exist
+    "stac_rebuild_item": stac_rebuild_item,  # Stage 2: Regenerate STAC item (fan-out)
 }
 
 # Validate no collisions before merging INGEST_HANDLERS (29 DEC 2025)

@@ -2,8 +2,8 @@
 
 **Type**: Foundational Enabler
 **Value Statement**: The ETL brain that makes everything else possible.
-**Status**: 🚧 PARTIAL (F7.1 ✅, F7.2 🚧, F7.3 ✅, F7.4 ✅, F7.8 📋)
-**Last Updated**: 08 JAN 2026
+**Status**: 🚧 PARTIAL (F7.1 ✅, F7.2 🚧, F7.3 ✅, F7.4 ✅, F7.8 🚧, F7.10 ✅, F7.11 📋)
+**Last Updated**: 10 JAN 2026
 
 **This is the substrate.** E1, E2, E8, and E9 all run on E7. Without it, nothing processes.
 
@@ -30,7 +30,9 @@
 | F7.5 | 📋 | Pipeline Builder UI |
 | F7.6 | 📋 | ACLED Conflict Data (twice weekly) |
 | F7.7 | 📋 | Static Reference Data (Admin0, manual) |
-| F7.8 | 📋 | **Unified Metadata Architecture** (Pydantic models, extensible) |
+| F7.8 | 🚧 | **Unified Metadata Architecture** (Pydantic models, extensible) |
+| F7.10 | ✅ | Metadata Consistency Enforcement (timer + checker) |
+| F7.11 | 📋 | STAC Catalog Self-Healing (rebuild job) |
 
 ---
 
@@ -371,5 +373,116 @@ PlatformRequest                    app.dataset_refs
 - E2 (Raster): Parallel `raster.cog_metadata` table with RasterMetadata
 - E9 (Zarr): Parallel `zarr.dataset_metadata` table with ZarrMetadata
 - E8 (Analytics): Consistent metadata across aggregation outputs
+
+---
+
+### Feature F7.10: Metadata Consistency Enforcement ✅
+
+**Deliverable**: Automated detection of cross-schema metadata inconsistencies
+**Completed**: 10 JAN 2026
+**Design Document**: [METADATA_CONSISTENCY_DESIGN.md](/METADATA_CONSISTENCY_DESIGN.md)
+
+**Problem Statement**:
+- STAC items can become orphaned (no corresponding metadata record)
+- Metadata records can have broken backlinks (stac_item_id → non-existent STAC item)
+- Dataset refs can have dangling foreign keys
+- COG blobs can be deleted but metadata remains
+
+**Solution**: Two-tier validation with timer-based detection
+
+| Tier | Frequency | Checks | Cost |
+|------|-----------|--------|------|
+| **Tier 1** (Timer) | Every 6 hours | DB cross-refs, blob HEAD | 💰 Cheap |
+| **Tier 2** (CoreMachine) | Weekly | Full file validation | 💰💰💰 Expensive |
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S7.10.1 | ✅ | Create `triggers/timer_base.py` - DRY pattern for timer handlers |
+| S7.10.2 | ✅ | Extract geo_orphan_timer and system_snapshot_timer to handlers |
+| S7.10.3 | ✅ | Create `services/metadata_consistency.py` - 7 cross-schema checks |
+| S7.10.4 | ✅ | Create timer trigger (schedule: 03:00, 09:00, 15:00, 21:00 UTC) |
+| S7.10.5 | ✅ | Add HTTP endpoint `GET /api/cleanup/metadata-health` |
+| S7.10.6 | ✅ | Integrate with janitor `POST /api/admin/janitor/run?type=metadata_consistency` |
+
+**Checks Implemented**:
+1. `stac_vector_orphans` - pgstac.items without geo.table_metadata
+2. `stac_raster_orphans` - pgstac.items without app.cog_metadata
+3. `vector_backlinks` - table_metadata.stac_item_id → pgstac
+4. `raster_backlinks` - cog_metadata.stac_item_id → pgstac
+5. `dataset_refs_vector` - dataset_refs → table_metadata FK
+6. `dataset_refs_raster` - dataset_refs → cog_metadata FK
+7. `raster_blob_exists` - HEAD request for recent COGs
+
+**Key Files**:
+- `triggers/timer_base.py` - TimerHandlerBase ABC
+- `triggers/admin/metadata_consistency_timer.py` - Timer handler
+- `services/metadata_consistency.py` - MetadataConsistencyChecker (580 lines)
+
+---
+
+### Feature F7.11: STAC Catalog Self-Healing 📋
+
+**Deliverable**: Job-based remediation for metadata consistency issues
+**Status**: 📋 PLANNED
+**Added**: 10 JAN 2026
+
+**Problem Statement**:
+- F7.10 timer detects issues but cannot fix them (would timeout on large repairs)
+- Current STAC generation is embedded in ETL jobs (process_vector, process_raster)
+- No standalone batch rebuild capability
+
+**Solution**: Dedicated `rebuild_stac` job with fan-out pattern
+
+```
+Timer Detection (F7.10)
+    ↓ finds 9 broken backlinks
+Job Submission
+    POST /api/jobs/submit/rebuild_stac
+    {"data_type": "vector", "items": [...], "dry_run": false}
+    ↓
+Stage 1: VALIDATE (single task)
+    - Check each source exists (geo.table for vectors, COG blob for rasters)
+    - Filter out items with missing source data
+    - Return list of rebuildable items
+    ↓
+Stage 2: REBUILD (fan_out - 1 task per item)
+    - Reuse existing create_vector_stac / extract_stac_metadata handlers
+    - STAC item regenerated + backlink updated
+    - Independent, parallel execution
+    ↓
+Completion
+    - Summary logged to Application Insights
+    - Broken backlinks resolved
+```
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S7.11.1 | 📋 | Create `jobs/rebuild_stac.py` - 2-stage job definition |
+| S7.11.2 | 📋 | Create `services/rebuild_stac_handlers.py` - validate + rebuild handlers |
+| S7.11.3 | 📋 | Register job and handlers in `__init__.py` files |
+| S7.11.4 | 📋 | Add `force_recreate` mode (delete existing STAC before rebuild) |
+| S7.11.5 | 📋 | Add raster support (rebuild from COG metadata) |
+| S7.11.6 | 📋 | Optional: Timer auto-submit (detect issues → submit rebuild job) |
+
+**Parameters**:
+```python
+parameters_schema = {
+    'data_type': {'type': 'str', 'required': True, 'enum': ['vector', 'raster']},
+    'items': {'type': 'list', 'required': True},  # table names or cog_ids
+    'dry_run': {'type': 'bool', 'default': True},
+    'force_recreate': {'type': 'bool', 'default': False},
+    'collection_id': {'type': 'str', 'default': None}  # Override collection
+}
+```
+
+**Key Files** (planned):
+- `jobs/rebuild_stac.py` - RebuildStacJob class
+- `services/rebuild_stac_handlers.py` - stac_rebuild_validate, stac_rebuild_item
+
+**Design Principles**:
+1. **Reuse existing handlers** - Stage 2 calls battle-tested `create_vector_stac`
+2. **Safe by default** - `dry_run: true` validates without modifying
+3. **Batch support** - Single job can rebuild multiple items
+4. **Idempotent** - Safe to re-run (existing STAC items skipped unless force_recreate)
 
 ---

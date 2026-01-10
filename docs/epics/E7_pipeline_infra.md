@@ -2,7 +2,7 @@
 
 **Type**: Foundational Enabler
 **Value Statement**: The ETL brain that makes everything else possible.
-**Status**: 🚧 PARTIAL (F7.1 ✅, F7.2 🚧, F7.3 ✅, F7.4 ✅, F7.8 🚧, F7.10 ✅, F7.11 📋)
+**Status**: 🚧 PARTIAL (F7.1 ✅, F7.2 🚧, F7.3 ✅, F7.4 ✅, F7.8 🚧, F7.10 ✅, F7.11 🚧)
 **Last Updated**: 10 JAN 2026
 
 **This is the substrate.** E1, E2, E8, and E9 all run on E7. Without it, nothing processes.
@@ -32,7 +32,7 @@
 | F7.7 | 📋 | Static Reference Data (Admin0, manual) |
 | F7.8 | 🚧 | **Unified Metadata Architecture** (Pydantic models, extensible) |
 | F7.10 | ✅ | Metadata Consistency Enforcement (timer + checker) |
-| F7.11 | 📋 | STAC Catalog Self-Healing (rebuild job) |
+| F7.11 | 🚧 | STAC Catalog Self-Healing (rebuild job) - vectors working |
 
 ---
 
@@ -420,11 +420,12 @@ PlatformRequest                    app.dataset_refs
 
 ---
 
-### Feature F7.11: STAC Catalog Self-Healing 📋
+### Feature F7.11: STAC Catalog Self-Healing 🚧
 
 **Deliverable**: Job-based remediation for metadata consistency issues
-**Status**: 📋 PLANNED
+**Status**: 🚧 IN PROGRESS (vectors working, raster pending)
 **Added**: 10 JAN 2026
+**Implemented**: 10 JAN 2026
 
 **Problem Statement**:
 - F7.10 timer detects issues but cannot fix them (would timeout on large repairs)
@@ -457,10 +458,10 @@ Completion
 
 | Story | Status | Description |
 |-------|--------|-------------|
-| S7.11.1 | 📋 | Create `jobs/rebuild_stac.py` - 2-stage job definition |
-| S7.11.2 | 📋 | Create `services/rebuild_stac_handlers.py` - validate + rebuild handlers |
-| S7.11.3 | 📋 | Register job and handlers in `__init__.py` files |
-| S7.11.4 | 📋 | Add `force_recreate` mode (delete existing STAC before rebuild) |
+| S7.11.1 | ✅ | Create `jobs/rebuild_stac.py` - 2-stage job definition |
+| S7.11.2 | ✅ | Create `services/rebuild_stac_handlers.py` - validate + rebuild handlers |
+| S7.11.3 | ✅ | Register job and handlers in `__init__.py` files |
+| S7.11.4 | ✅ | Add `force_recreate` mode (delete existing STAC before rebuild) |
 | S7.11.5 | 📋 | Add raster support (rebuild from COG metadata) |
 | S7.11.6 | 📋 | Optional: Timer auto-submit (detect issues → submit rebuild job) |
 
@@ -475,9 +476,21 @@ parameters_schema = {
 }
 ```
 
-**Key Files** (planned):
-- `jobs/rebuild_stac.py` - RebuildStacJob class
-- `services/rebuild_stac_handlers.py` - stac_rebuild_validate, stac_rebuild_item
+**Key Files**:
+- `jobs/rebuild_stac.py` - RebuildStacJob class (227 lines)
+- `services/rebuild_stac_handlers.py` - stac_rebuild_validate, stac_rebuild_item (367 lines)
+
+**Usage**:
+```bash
+# Rebuild STAC for specific vector tables
+POST /api/jobs/submit/rebuild_stac
+{
+    "data_type": "vector",
+    "items": ["curated_admin0", "system_ibat_kba"],
+    "schema": "geo",
+    "dry_run": false
+}
+```
 
 **Design Principles**:
 1. **Reuse existing handlers** - Stage 2 calls battle-tested `create_vector_stac`

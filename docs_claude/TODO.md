@@ -1,6 +1,6 @@
 # Working Backlog
 
-**Last Updated**: 09 JAN 2026 (SP12.9 NiceGUI spike complete - staying with HTMX)
+**Last Updated**: 10 JAN 2026 (F7.11 STAC Self-Healing vectors implemented)
 **Source of Truth**: [docs/epics/README.md](/docs/epics/README.md) — Epic/Feature/Story definitions
 **Purpose**: Sprint-level task tracking and delegation
 
@@ -575,6 +575,77 @@ CREATE INDEX idx_cog_metadata_datetime ON app.cog_metadata(datetime);
 - Raster has NO equivalent — STAC items built directly from COG headers
 - No way to query "all rasters for DDH dataset X"
 - No consistent visualization defaults stored
+
+---
+
+### 🚧 F7.11: STAC Catalog Self-Healing
+
+**Epic**: E7 Pipeline Infrastructure
+**Goal**: Job-based remediation for metadata consistency issues detected by F7.10
+**Status**: 🚧 IN PROGRESS (vectors working, raster pending)
+**Implemented**: 10 JAN 2026
+
+#### Background
+
+F7.10 Metadata Consistency timer runs every 6 hours and detects:
+- Broken backlinks (table_metadata.stac_item_id → non-existent STAC item)
+- Orphaned STAC items (no corresponding metadata record)
+- Missing blob references
+
+The timer *detects* issues but cannot *fix* them (would timeout on large repairs).
+F7.11 provides a dedicated `rebuild_stac` job to remediate these issues.
+
+#### Stories
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S7.11.1 | ✅ Done | Create `jobs/rebuild_stac.py` - 2-stage job definition |
+| S7.11.2 | ✅ Done | Create `services/rebuild_stac_handlers.py` - validate + rebuild handlers |
+| S7.11.3 | ✅ Done | Register job and handlers in `__init__.py` files |
+| S7.11.4 | ✅ Done | Add `force_recreate` mode (delete existing STAC before rebuild) |
+| S7.11.5 | 📋 | Add raster support (rebuild from app.cog_metadata) |
+| S7.11.6 | 📋 | Timer auto-submit (F7.10 detects → auto-submit rebuild job) |
+
+#### Usage
+
+```bash
+# Rebuild STAC for specific vector tables
+POST /api/jobs/submit/rebuild_stac
+{
+    "data_type": "vector",
+    "items": ["curated_admin0", "system_ibat_kba"],
+    "schema": "geo",
+    "dry_run": false
+}
+
+# With force_recreate (deletes existing STAC item first)
+POST /api/jobs/submit/rebuild_stac
+{
+    "data_type": "vector",
+    "items": ["curated_admin0"],
+    "schema": "geo",
+    "dry_run": false,
+    "force_recreate": true
+}
+```
+
+#### Key Files
+
+- `jobs/rebuild_stac.py` - RebuildStacJob class (227 lines)
+- `services/rebuild_stac_handlers.py` - stac_rebuild_validate, stac_rebuild_item (367 lines)
+
+#### Remaining Work
+
+**S7.11.5 - Raster Support**:
+- Currently returns "Raster rebuild not yet implemented"
+- Needs to query `app.cog_metadata` for COG info
+- Call existing `extract_stac_metadata` handler
+- Depends on F7.9 (RasterMetadata) being complete
+
+**S7.11.6 - Timer Auto-Submit**:
+- Modify F7.10 timer to submit rebuild_stac job when issues detected
+- Add threshold (only submit if >0 issues found)
+- Add cooldown (don't re-submit if job already running)
 
 ---
 

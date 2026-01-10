@@ -1817,8 +1817,22 @@ class HealthInterface(BaseInterface):
                 return;
             }}
 
-            // Get hardware info from components
-            const hardware = data.components?.hardware?.details || {{}};
+            // Get runtime details from runtime component (07 JAN 2026 restructure)
+            // Path: components.runtime.details contains hardware, memory, instance, process
+            const runtime = data.components?.runtime?.details || {{}};
+            const hardware = runtime.hardware || {{}};
+            const memory = runtime.memory || {{}};
+            const instance = runtime.instance || {{}};
+
+            // Merge into combined object for renderHardwareInfo
+            const hwInfo = {{
+                ...hardware,
+                ram_utilization_percent: memory.system_percent || 0,
+                cpu_utilization_percent: memory.cpu_percent || 0,
+                available_ram_mb: memory.system_available_mb || 0,
+                process_rss_mb: memory.process_rss_mb || 0,
+                azure_instance_id: instance.instance_id_short || instance.instance_id || '',
+            }};
 
             envInfo.classList.remove('hidden');
             envInfo.innerHTML = `
@@ -1831,7 +1845,7 @@ class HealthInterface(BaseInterface):
                         </div>
                     `).join('')}}
                 </div>
-                ${{Object.keys(hardware).length > 0 ? renderHardwareInfo(hardware) : ''}}
+                ${{Object.keys(hwInfo).length > 0 ? renderHardwareInfo(hwInfo) : ''}}
             `;
         }}
 

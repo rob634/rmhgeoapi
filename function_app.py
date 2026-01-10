@@ -3330,26 +3330,44 @@ def geo_orphan_check_timer(timer: func.TimerRequest) -> None:
     Detection only - does NOT auto-delete. Logs findings to Application Insights.
 
     Schedule: Every 6 hours - low overhead monitoring for data integrity
+
+    Handler: triggers/admin/geo_orphan_timer.py (extracted 09 JAN 2026)
     """
-    from services.janitor_service import geo_orphan_detector
-    from util_logger import LoggerFactory, ComponentType
+    from triggers.admin.geo_orphan_timer import geo_orphan_timer_handler
+    geo_orphan_timer_handler.handle(timer)
 
-    timer_logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, "geo_orphan_timer")
-    timer_logger.info("⏰ Timer: Starting geo orphan detection")
 
-    result = geo_orphan_detector.run()
+# ============================================================================
+# METADATA CONSISTENCY TIMER (09 JAN 2026 - F7.10)
+# ============================================================================
+# Timer trigger for unified metadata consistency validation.
+# Runs every 6 hours, offset from geo_orphan_check_timer by 3 hours.
+# Tier 1 checks: DB cross-refs + blob HEAD (lightweight, frequent).
+# ============================================================================
 
-    if result.get("success"):
-        summary = result.get("summary", {})
-        timer_logger.info(
-            f"⏰ Timer: Geo orphan check complete - "
-            f"{summary.get('tracked', 0)} tracked, "
-            f"{summary.get('orphaned_tables', 0)} orphaned tables, "
-            f"{summary.get('orphaned_metadata', 0)} orphaned metadata, "
-            f"status={summary.get('health_status', 'UNKNOWN')}"
-        )
-    else:
-        timer_logger.error(f"⏰ Timer: Geo orphan check failed - {result.get('error')}")
+@app.timer_trigger(
+    schedule="0 0 3,9,15,21 * * *",  # Every 6 hours at 03:00, 09:00, 15:00, 21:00 UTC
+    arg_name="timer",
+    run_on_startup=False
+)
+def metadata_consistency_timer(timer: func.TimerRequest) -> None:
+    """
+    Timer trigger: Unified metadata consistency check every 6 hours.
+
+    Tier 1 Checks (DB + blob HEAD):
+    - STAC ↔ Metadata cross-reference (vector and raster)
+    - Broken backlinks (metadata → STAC items)
+    - Dataset refs FK integrity
+    - Raster blob existence (HEAD only)
+
+    Detection only - does NOT auto-delete. Logs findings to Application Insights.
+
+    Schedule: Every 6 hours, offset from geo_orphan by 3 hours to spread load.
+
+    Handler: triggers/admin/metadata_consistency_timer.py
+    """
+    from triggers.admin.metadata_consistency_timer import metadata_consistency_timer_handler
+    metadata_consistency_timer_handler.handle(timer)
 
 
 # ============================================================================
@@ -3399,28 +3417,11 @@ def system_snapshot_timer(timer: func.TimerRequest) -> None:
     logs if configuration drift is detected.
 
     Schedule: Every hour on the hour (aligns with instance scaling)
+
+    Handler: triggers/admin/system_snapshot_timer.py (extracted 09 JAN 2026)
     """
-    from services.snapshot_service import snapshot_service
-    from util_logger import LoggerFactory, ComponentType
-
-    timer_logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, "snapshot_timer")
-    timer_logger.info("⏰ Timer: Starting system snapshot capture")
-
-    if timer.past_due:
-        timer_logger.warning("⏰ Timer: System snapshot timer is past due!")
-
-    result = snapshot_service.capture_scheduled_snapshot()
-
-    if result.get("success"):
-        timer_logger.info(
-            f"⏰ Timer: Snapshot captured - id={result.get('snapshot_id')}, "
-            f"drift={result.get('has_drift')}, "
-            f"duration={result.get('duration_seconds')}s"
-        )
-        if result.get("has_drift"):
-            timer_logger.warning("⚠️ DRIFT DETECTED: Configuration changed since last snapshot!")
-    else:
-        timer_logger.error(f"⏰ Timer: Snapshot failed - {result.get('error')}")
+    from triggers.admin.system_snapshot_timer import system_snapshot_timer_handler
+    system_snapshot_timer_handler.handle(timer)
 
 
 # ============================================================================
@@ -3440,13 +3441,52 @@ def cleanup_run(req: func.HttpRequest) -> func.HttpResponse:
     """
     Manually trigger a cleanup (janitor) run.
 
-    POST /api/cleanup/run?type={task_watchdog|job_health|orphan_detector|all}
+    POST /api/cleanup/run?type={task_watchdog|job_health|orphan_detector|metadata_consistency|all}
 
     Examples:
         curl -X POST "https://.../api/cleanup/run?type=task_watchdog"
+        curl -X POST "https://.../api/cleanup/run?type=metadata_consistency"
         curl -X POST "https://.../api/cleanup/run?type=all"
     """
     return janitor_run_handler(req)
+
+
+@app.route(route="cleanup/metadata-health", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def cleanup_metadata_health(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Get metadata consistency health status.
+
+    GET /api/cleanup/metadata-health
+
+    Returns comprehensive metadata integrity check results:
+    - STAC ↔ Metadata cross-reference
+    - Broken backlinks
+    - Dataset refs integrity
+    - Raster blob existence
+
+    Example:
+        curl "https://.../api/cleanup/metadata-health"
+    """
+    import json
+    from services.metadata_consistency import get_metadata_consistency_checker
+
+    try:
+        checker = get_metadata_consistency_checker()
+        result = checker.run()
+
+        status_code = 200 if result.get("health_status") == "HEALTHY" else 200  # Always 200, health in body
+
+        return func.HttpResponse(
+            json.dumps(result, indent=2, default=str),
+            status_code=status_code,
+            mimetype="application/json"
+        )
+    except Exception as e:
+        return func.HttpResponse(
+            json.dumps({"error": str(e), "success": False}),
+            status_code=500,
+            mimetype="application/json"
+        )
 
 
 @app.route(route="cleanup/status", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)

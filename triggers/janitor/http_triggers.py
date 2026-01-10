@@ -34,14 +34,15 @@ def janitor_run_handler(req: func.HttpRequest) -> func.HttpResponse:
     """
     Manually trigger a janitor run.
 
-    POST /api/admin/janitor/run?type={task_watchdog|job_health|orphan_detector|all}
+    POST /api/admin/janitor/run?type={task_watchdog|job_health|orphan_detector|metadata_consistency|all}
 
     Query Parameters:
         type: Which janitor to run (required)
             - task_watchdog: Detect stale PROCESSING tasks
             - job_health: Detect jobs with failed tasks
             - orphan_detector: Detect orphaned/zombie records
-            - all: Run all three in sequence
+            - metadata_consistency: Unified metadata validation (09 JAN 2026)
+            - all: Run all four in sequence
 
     Returns:
         JSON with run results
@@ -53,14 +54,14 @@ def janitor_run_handler(req: func.HttpRequest) -> func.HttpResponse:
             json.dumps({
                 "status": "error",
                 "error": "Missing required parameter: type",
-                "valid_types": ["task_watchdog", "job_health", "orphan_detector", "all"],
+                "valid_types": ["task_watchdog", "job_health", "orphan_detector", "metadata_consistency", "all"],
                 "usage": "POST /api/admin/janitor/run?type=task_watchdog"
             }),
             status_code=400,
             mimetype="application/json"
         )
 
-    valid_types = ["task_watchdog", "job_health", "orphan_detector", "all"]
+    valid_types = ["task_watchdog", "job_health", "orphan_detector", "metadata_consistency", "all"]
     if run_type not in valid_types:
         return func.HttpResponse(
             json.dumps({
@@ -89,6 +90,13 @@ def janitor_run_handler(req: func.HttpRequest) -> func.HttpResponse:
         if run_type == "orphan_detector" or run_type == "all":
             result = service.run_orphan_detection()
             results.append(result.to_dict())
+
+        if run_type == "metadata_consistency" or run_type == "all":
+            # Metadata consistency check (09 JAN 2026 - F7.10)
+            from services.metadata_consistency import get_metadata_consistency_checker
+            checker = get_metadata_consistency_checker()
+            result = checker.run()
+            results.append(result)
 
         # Summary
         total_scanned = sum(r.get('items_scanned', 0) for r in results)

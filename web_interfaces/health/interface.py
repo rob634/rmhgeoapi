@@ -119,7 +119,9 @@ class HealthInterface(BaseInterface):
         long_queue = config.queues.long_running_tasks_queue
 
         # Docker worker enabled status
-        docker_worker_enabled = config.app_mode.docker_worker_enabled
+        from config import get_app_mode_config
+        app_mode_config = get_app_mode_config()
+        docker_worker_enabled = app_mode_config.docker_worker_enabled
 
         # OGC Features URL - clean up for display
         ogc_url = config.ogc_features_base_url

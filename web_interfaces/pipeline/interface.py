@@ -557,7 +557,7 @@ class PipelineInterface(BaseInterface):
                             </div>
                         </div>
                         <div class="pipeline-action">
-                            <span class="btn-placeholder">🗂️ Coming Soon</span>
+                            <a href="/api/interface/submit-raster-collection" class="btn btn-submit">🗂️ Submit Collection</a>
                         </div>
                     </div>
 

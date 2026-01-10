@@ -183,6 +183,8 @@ class RebuildStacJob(JobBaseMixin, JobBase):
             }
 
         # Count results
+        # Note: context.task_results is List[TaskResult] (Pydantic models)
+        # Access attributes directly, not with .get()
         total_requested = 0
         valid_count = 0
         invalid_count = 0
@@ -191,18 +193,20 @@ class RebuildStacJob(JobBaseMixin, JobBase):
         dry_run = True
 
         for task_result in context.task_results:
-            result = task_result.get('result', {})
+            # TaskResult has: task_id, task_type, status, result_data, error_details, etc.
+            result_data = task_result.result_data or {}
+            result = result_data.get('result', {})
 
-            if task_result.get('task_type') == 'stac_rebuild_validate':
+            if task_result.task_type == 'stac_rebuild_validate':
                 total_requested = result.get('total_requested', 0)
                 valid_count = len(result.get('valid_items', []))
                 invalid_count = len(result.get('invalid_items', []))
                 dry_run = result.get('dry_run', True)
 
-            elif task_result.get('task_type') == 'stac_rebuild_item':
+            elif task_result.task_type == 'stac_rebuild_item':
                 if result.get('rebuilt', False):
                     rebuilt_count += 1
-                elif not task_result.get('success', False):
+                elif not task_result.success:
                     failed_count += 1
 
         return {

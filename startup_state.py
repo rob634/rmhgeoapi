@@ -268,25 +268,33 @@ class StartupState:
 # ============================================================================
 
 ENV_VARS_WITH_DEFAULTS: Dict[str, Dict[str, str]] = {
-    # Debug/Metrics flags
+    # Observability flags (10 JAN 2026 - F7.12.C Flag Consolidation)
+    "OBSERVABILITY_MODE": {
+        "default": "false",
+        "description": "Master switch for debug instrumentation (memory tracking, latency logging, blob metrics)",
+        "category": "observability",
+    },
+    # Legacy aliases - kept for backward compatibility, prefer OBSERVABILITY_MODE
     "DEBUG_MODE": {
         "default": "false",
-        "description": "Verbose diagnostics (set true for debugging)",
-        "category": "debug",
-    },
-    "DEBUG_LOGGING": {
-        "default": "false",
-        "description": "Additional logging output",
-        "category": "debug",
+        "description": "[LEGACY] Use OBSERVABILITY_MODE instead. Falls back to this if OBSERVABILITY_MODE not set.",
+        "category": "observability",
     },
     "METRICS_DEBUG_MODE": {
         "default": "false",
-        "description": "Service latency tracking (set true for performance debugging)",
-        "category": "metrics",
+        "description": "[LEGACY] Use OBSERVABILITY_MODE instead. Falls back to this if OBSERVABILITY_MODE not set.",
+        "category": "observability",
     },
+    # Logging verbosity - use LOG_LEVEL=DEBUG instead of DEBUG_LOGGING=true
+    "LOG_LEVEL": {
+        "default": "INFO",
+        "description": "Logging verbosity (DEBUG, INFO, WARNING, ERROR). Use DEBUG for verbose logging.",
+        "category": "observability",
+    },
+    # ETL metrics (separate purpose - not consolidated)
     "METRICS_ENABLED": {
         "default": "true",
-        "description": "Master switch for job metrics collection",
+        "description": "Master switch for job/ETL metrics collection (separate from OBSERVABILITY_MODE)",
         "category": "metrics",
     },
     "SERVICE_LATENCY_SLOW_MS": {

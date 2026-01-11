@@ -1,0 +1,87 @@
+# ============================================================================
+# Azure Functions Ignore File
+# ============================================================================
+# Files and directories to exclude from Azure Functions deployment.
+# This keeps the deployment package small and avoids uploading Docker-specific files.
+#
+# IMPORTANT: Do NOT add */ which would exclude all subdirectories!
+#
+# Created: 10 JAN 2026
+# ============================================================================
+
+# =============================================================================
+# Docker Files (not needed for Azure Functions)
+# =============================================================================
+Dockerfile
+docker-compose.yml
+docker-compose*.yml
+docker.env
+docker.env.example
+requirements-docker.txt
+docker_main.py
+workers_entrance.py
+
+# =============================================================================
+# Development and Documentation
+# =============================================================================
+.git/
+.gitignore
+.github/
+docs/
+docs_claude/
+*.md
+!requirements.txt
+
+# =============================================================================
+# Python Cache and Build Artifacts
+# =============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+*.egg
+
+# =============================================================================
+# Testing (not needed for deployment)
+# =============================================================================
+test/
+tests/
+testing/
+*test*.py
+pytest.ini
+.pytest_cache/
+.coverage
+htmlcov/
+
+# =============================================================================
+# IDE and Editor Files
+# =============================================================================
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# =============================================================================
+# Local Development Files
+# =============================================================================
+local.settings.json
+.env
+.venv/
+venv/
+*.sh
+local_scripts/
+
+# =============================================================================
+# Azure Functions Local Artifacts
+# =============================================================================
+bin/
+obj/
+.python_packages/
+__azurite_db*__.json
+__blobstorage__/
+__queuestorage__/

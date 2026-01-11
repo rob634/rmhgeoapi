@@ -28,7 +28,7 @@ Common Startup Failures (check Application Insights for STARTUP_FAILED):
     - Service Bus connectivity (namespace permissions)
 
 Debug Mode (for troubleshooting):
-    Add DEBUG_MODE=true to app settings to see config_sources in response
+    Add OBSERVABILITY_MODE=true to app settings to see config_sources in response
 
 For full deployment verification steps, see CLAUDE.md → Post-Deployment Validation
 
@@ -52,7 +52,7 @@ Components Monitored:
     - TiTiler (13 DEC 2025) - Raster tile server health
     - OGC Features (13 DEC 2025) - Vector feature API health
 
-Debug Mode Features (DEBUG_MODE=true):
+Observability Mode Features (OBSERVABILITY_MODE=true):
     - config_sources: Shows env var vs default sources for all config values
 
 Exports:
@@ -371,15 +371,15 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         if ogc_features_health.get("status") == "unhealthy":
             health_data["errors"].append("OGC Features API unavailable (vector feature queries disabled)")
 
-        # Debug status - always include (07 DEC 2025)
-        health_data["debug_status"] = config.get_debug_status()
+        # Observability status - always include (10 JAN 2026 - F7.12.C)
+        health_data["observability_status"] = config.get_debug_status()
 
-        # Config sources - only include when DEBUG_MODE=true (07 DEC 2025)
-        if config.debug_mode:
+        # Config sources - only include when OBSERVABILITY_MODE=true
+        if config.is_observability_enabled():
             config_sources = self._get_config_sources()
             health_data["config_sources"] = config_sources
-            health_data["_debug_mode"] = True
-            health_data["_debug_notice"] = "Verbose config sources included - DEBUG_MODE=true"
+            health_data["_observability_mode"] = True
+            health_data["_debug_notice"] = "Verbose config sources included - OBSERVABILITY_MODE=true"
 
         return health_data
     
@@ -2831,7 +2831,7 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         - ENV: Environment variable
         - DEFAULT: AzureDefaults or other default class
 
-        Only included when DEBUG_MODE=true to avoid leaking configuration details.
+        Only included when OBSERVABILITY_MODE=true to avoid leaking configuration details.
         Sensitive values (passwords, keys) are masked.
 
         Returns:
@@ -2907,17 +2907,30 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             "is_default": not bool(sb_env)
         }
 
-        # Debug mode
+        # Observability mode (10 JAN 2026 - F7.12.C)
+        obs_env = os.getenv('OBSERVABILITY_MODE')
         debug_env = os.getenv('DEBUG_MODE')
-        sources['debug_mode'] = {
-            "value": config.debug_mode,
-            "source": "ENV" if debug_env else "DEFAULT",
-            "env_var": "DEBUG_MODE",
-            "is_default": not bool(debug_env)
+        metrics_debug_env = os.getenv('METRICS_DEBUG_MODE')
+        # Show which env var is active
+        if obs_env:
+            source = "ENV (OBSERVABILITY_MODE)"
+        elif metrics_debug_env:
+            source = "ENV (METRICS_DEBUG_MODE - legacy)"
+        elif debug_env:
+            source = "ENV (DEBUG_MODE - legacy)"
+        else:
+            source = "DEFAULT"
+
+        sources['observability_mode'] = {
+            "value": config.is_observability_enabled(),
+            "source": source,
+            "env_var": "OBSERVABILITY_MODE",
+            "is_default": not bool(obs_env or debug_env or metrics_debug_env),
+            "note": "Unified flag replacing DEBUG_MODE/METRICS_DEBUG_MODE"
         }
 
         # Summary statistics
-        env_count = sum(1 for v in sources.values() if v['source'] == 'ENV')
+        env_count = sum(1 for v in sources.values() if v['source'].startswith('ENV'))
         default_count = sum(1 for v in sources.values() if v['source'] == 'DEFAULT')
 
         return {
@@ -2927,7 +2940,7 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                 "from_environment": env_count,
                 "using_defaults": default_count
             },
-            "note": "Only shown when DEBUG_MODE=true"
+            "note": "Only shown when OBSERVABILITY_MODE=true"
         }
 
 

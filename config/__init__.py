@@ -44,7 +44,7 @@ Created: 20 NOV 2025 as part of config.py god object refactoring
 # ============================================================================
 # VERSION
 # ============================================================================
-__version__ = "0.7.6.9"
+__version__ = "0.7.7.1"
 
 from typing import Optional
 
@@ -63,6 +63,7 @@ from .defaults import (
     PlatformDefaults,
     FathomDefaults,
     STACDefaults,
+    ObservabilityDefaults,
     AppDefaults,
     KeyVaultDefaults,
 )
@@ -86,6 +87,7 @@ from .analytics_config import AnalyticsConfig, DuckDBConnectionType
 from .h3_config import H3Config
 from .platform_config import PlatformConfig, generate_platform_request_id
 from .metrics_config import MetricsConfig
+from .observability_config import ObservabilityConfig
 from .app_config import AppConfig
 from .app_mode_config import AppMode, AppModeConfig, get_app_mode_config
 
@@ -187,7 +189,8 @@ def debug_config() -> dict:
             'metrics': config.metrics.debug_dict(),
 
             # Application
-            'debug_mode': config.debug_mode,
+            'observability': config.observability.debug_dict(),
+            'debug_mode': config.debug_mode,  # Legacy alias
             'environment': config.environment,
             'function_timeout_minutes': config.function_timeout_minutes,
             'log_level': config.log_level,
@@ -218,6 +221,7 @@ __all__ = [
     'PlatformDefaults',
     'FathomDefaults',
     'STACDefaults',
+    'ObservabilityDefaults',
     'AppDefaults',
     'KeyVaultDefaults',
 
@@ -269,6 +273,9 @@ __all__ = [
 
     # Metrics (E13: Pipeline Observability)
     'MetricsConfig',
+
+    # Observability (F7.12.C: Flag Consolidation - 10 JAN 2026)
+    'ObservabilityConfig',
 
     # Environment Variable Validation (08 JAN 2026)
     'ENV_VAR_RULES',

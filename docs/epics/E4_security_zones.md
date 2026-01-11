@@ -1,10 +1,10 @@
-## Epic E4: Data Externalization & Security Zones 📋
+## Epic E4: Data Externalization & Security Zones 🔥
 
 **Type**: Enabler
 **Value Statement**: E1 and E2 capabilities become available externally.
 **Runs On**: E2 (Raster Data), ADF Infrastructure
-**Status**: 📋 PLANNED
-**Last Updated**: 31 DEC 2025
+**Status**: 🔥 PRIORITY - Near-term implementation target
+**Last Updated**: 10 JAN 2026
 
 **Strategic Context**:
 > E4 handles movement of data between security zones. ADF copies data from the **Silver Zone**

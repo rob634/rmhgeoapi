@@ -75,30 +75,31 @@ Technical foundation that enables all Epics above.
 
 # BACKLOG ENABLERS
 
-## Enabler EN6: Long-Running Task Infrastructure ⏳ FY26 DECISION PENDING
+## Enabler EN6: Long-Running Task Infrastructure ✅ DEPLOYED
 
 **Purpose**: Docker-based worker for tasks exceeding Azure Functions 30-min timeout
 **What It Enables**: E2 (oversized rasters), E9 (large climate datasets)
-**Reference**: See architecture diagram at `/api/interface/health`
+**Deployed**: 11 JAN 2026 to `rmhheavyapi` Web App
+**Image**: `rmhazureacr.azurecr.io/geospatial-worker:v0.7.1-auth`
 **Owner**: DevOps (infrastructure) + Geospatial Team (handler integration)
 
-**Decision Context**: Deploy as part of FY26 work is pending. Current chunked processing
-in Azure Functions handles most use cases. EN6 activates if:
-- FATHOM data volumes exceed Function App timeout limits
-- Climate data (E9) requires multi-hour processing jobs
-- Production workloads demonstrate need for dedicated worker
+**Implementation (F7.12)**:
+- OSGeo GDAL ubuntu-full-3.10.1 base image with full driver support
+- Managed Identity OAuth for PostgreSQL and Azure Storage
+- FastAPI health endpoints (`/livez`, `/readyz`, `/health`)
+- Background token refresh (45-minute interval)
 
 ### EN6 Stories
 
 | Story | Status | Description | Owner | Acceptance Criteria |
 |-------|--------|-------------|-------|---------------------|
-| EN6.1 | 📋 | Create **Long-Running Worker** Docker image | DevOps | Image builds, contains GDAL 3.6+, rasterio, xarray, fsspec, adlfs |
-| EN6.2 | 📋 | Deploy **Long-Running Worker** to Azure | DevOps | Container runs, has managed identity, can access **Bronze/Silver Storage** |
+| EN6.1 | ✅ | Create **Long-Running Worker** Docker image | DevOps | Image builds with GDAL 3.10+, rasterio, azure-identity |
+| EN6.2 | ✅ | Deploy **Long-Running Worker** to Azure | DevOps | Container runs on `rmhheavyapi`, has managed identity |
 | EN6.3 | 📋 | Create **Long-Running Task Queue** | DevOps | Queue exists in Service Bus namespace, dead-letter enabled |
-| EN6.4 | 📋 | Implement queue listener | DevOps | Worker receives messages, logs receipt, acks on completion |
-| EN6.5 | 📋 | Integrate existing handlers | Geospatial | Worker calls `raster_cog.py` functions, writes to **Silver Storage** |
-| EN6.6 | 📋 | Add health endpoint | DevOps | `/health` returns 200, shows queue connection status |
-| EN6.7 | 📋 | Add routing logic in **ETL Function App** | Geospatial | Jobs exceeding size threshold route to **Long-Running Task Queue** |
+| EN6.4 | ✅ | Implement queue listener | DevOps | `docker_main.py` polls queue, processes via CoreMachine |
+| EN6.5 | 📋 | Integrate existing handlers | Geospatial | Worker calls handler functions, writes to Storage |
+| EN6.6 | ✅ | Add health endpoint | DevOps | `/health` returns DB + Storage connectivity status |
+| EN6.7 | 📋 | Add routing logic in **ETL Function App** | Geospatial | Jobs route to long-running queue based on criteria |
 
 ### EN6.1 Docker Image Specification
 

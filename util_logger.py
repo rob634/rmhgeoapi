@@ -3,8 +3,8 @@
 # ============================================================================
 # STATUS: Core - Structured logging and resource monitoring
 # PURPOSE: JSON logging for Azure Application Insights + memory/CPU/DB monitoring
-# LAST_REVIEWED: 02 JAN 2026
-# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure)
+# LAST_REVIEWED: 10 JAN 2026
+# REVIEW_STATUS: Updated for F7.12 observability consolidation
 # ============================================================================
 """
 Unified Logger System.
@@ -16,6 +16,24 @@ Design Principles:
     - Enum safety for categories
     - Component-specific loggers
     - Clean factory pattern
+    - Global log context for multi-app filtering (10 JAN 2026)
+
+Observability Mode (10 JAN 2026 - F7.12.C):
+    Uses unified OBSERVABILITY_MODE flag instead of separate DEBUG_MODE/DEBUG_LOGGING.
+    Features controlled by OBSERVABILITY_MODE:
+    - Memory/CPU tracking (get_memory_stats, log_memory_checkpoint)
+    - Database stats collection (get_database_stats)
+    - Verbose diagnostics
+
+    For log verbosity, use LOG_LEVEL=DEBUG instead of DEBUG_LOGGING=true.
+
+Global Log Context (10 JAN 2026 - F7.12.A):
+    Every log entry automatically includes:
+    - app_name: Application identifier (APP_NAME env var)
+    - app_instance: Azure instance ID (WEBSITE_INSTANCE_ID)
+    - environment: Deployment environment (ENVIRONMENT env var)
+
+    This enables filtering logs by component in multi-app deployments.
 
 Exports:
     ComponentType: Enum for component types
@@ -32,11 +50,12 @@ Exports:
     get_database_environment: Database server config (PostgreSQL version, settings) - cached
     get_database_stats: Database utilization snapshot (connections, cache, locks)
     log_database_checkpoint: Database checkpoint logger (utilization, cache ratios)
+    get_global_log_context: Get global log context fields
 
 Dependencies:
     Standard library only (logging, enum, dataclasses, json)
-    Optional: psutil (lazy import for memory tracking in debug mode)
-    Optional: config (lazy import for debug mode check)
+    Optional: psutil (lazy import for memory tracking in observability mode)
+    Optional: config (lazy import for observability mode check)
 """
 
 from enum import Enum
@@ -55,7 +74,68 @@ import threading
 
 
 # ============================================================================
-# DEBUG MODE - Lazy imports for memory tracking (8 NOV 2025)
+# GLOBAL LOG CONTEXT (10 JAN 2026 - F7.12.A)
+# ============================================================================
+# Cached global context fields injected into every log entry.
+# Enables filtering logs by app/instance in multi-app deployments.
+
+_GLOBAL_LOG_CONTEXT: Optional[Dict[str, str]] = None
+
+
+def get_global_log_context() -> Dict[str, str]:
+    """
+    Get global log context fields for multi-app filtering.
+
+    Returns cached context containing:
+    - app_name: Application identifier (APP_NAME env var)
+    - app_instance: Azure instance ID (truncated to 16 chars)
+    - environment: Deployment environment (dev/qa/prod)
+
+    These fields are automatically injected into every log entry
+    by LoggerFactory, enabling queries like:
+        traces | where customDimensions.app_name == "rmhogcstac"
+
+    Returns:
+        Dict with app_name, app_instance, environment
+    """
+    global _GLOBAL_LOG_CONTEXT
+
+    if _GLOBAL_LOG_CONTEXT is None:
+        _GLOBAL_LOG_CONTEXT = {
+            "app_name": os.environ.get("APP_NAME", "unknown"),
+            "app_instance": os.environ.get("WEBSITE_INSTANCE_ID", "local")[:16],
+            "environment": os.environ.get("ENVIRONMENT", "dev"),
+        }
+
+    return _GLOBAL_LOG_CONTEXT
+
+
+def _is_observability_enabled() -> bool:
+    """
+    Check if observability mode is enabled (10 JAN 2026).
+
+    Uses config.observability.enabled which checks env vars in priority order:
+    1. OBSERVABILITY_MODE (new preferred)
+    2. METRICS_DEBUG_MODE (legacy)
+    3. DEBUG_MODE (legacy)
+
+    Returns:
+        bool: True if observability features should be active
+    """
+    try:
+        from config import get_config
+        return get_config().is_observability_enabled()
+    except Exception:
+        # Fallback: check env vars directly if config import fails
+        for var in ("OBSERVABILITY_MODE", "METRICS_DEBUG_MODE", "DEBUG_MODE"):
+            val = os.environ.get(var, "").lower()
+            if val in ("true", "1", "yes"):
+                return True
+        return False
+
+
+# ============================================================================
+# OBSERVABILITY MODE - Lazy imports for memory tracking (Updated 10 JAN 2026)
 # ============================================================================
 
 def _lazy_import_psutil():
@@ -101,10 +181,10 @@ def get_memory_stats() -> Optional[Dict[str, float]]:
     """
     Get current process memory, CPU, and system statistics.
 
-    Only executes if DEBUG_MODE=true in config.
+    Only executes if OBSERVABILITY_MODE is enabled.
 
     Returns:
-        dict with resource stats or None if debug disabled or psutil unavailable
+        dict with resource stats or None if observability disabled or psutil unavailable
         {
             'process_rss_mb': float,      # Resident Set Size (actual RAM used)
             'process_vms_mb': float,      # Virtual Memory Size
@@ -117,16 +197,8 @@ def get_memory_stats() -> Optional[Dict[str, float]]:
     # Get a logger for visibility (20 DEC 2025: stderr not visible in App Insights)
     _logger = logging.getLogger("util_logger.memory_stats")
 
-    # Check if debug mode enabled
-    try:
-        from config import get_config
-        config = get_config()
-
-        if not config.debug_mode:
-            return None
-    except Exception as e:
-        # Log warning so failure is visible in App Insights
-        _logger.warning(f"⚠️ DEBUG_MODE check failed (memory stats disabled): {e}")
+    # Check if observability mode enabled (10 JAN 2026: unified flag)
+    if not _is_observability_enabled():
         return None
 
     # Lazy import psutil
@@ -169,10 +241,10 @@ def get_runtime_environment() -> Optional[Dict[str, Any]]:
     Get runtime environment info (CPU, RAM, platform, Azure instance).
 
     Cached after first call since these don't change during process lifetime.
-    Only executes if DEBUG_MODE=true in config.
+    Only executes if OBSERVABILITY_MODE is enabled.
 
     Returns:
-        dict with environment info or None if debug disabled:
+        dict with environment info or None if observability disabled:
         {
             'cpu_count': int,           # Logical CPU count
             'total_ram_gb': float,      # Total system RAM in GB
@@ -189,13 +261,8 @@ def get_runtime_environment() -> Optional[Dict[str, Any]]:
     if _runtime_environment is not None:
         return _runtime_environment
 
-    # Check if debug mode enabled
-    try:
-        from config import get_config
-        config = get_config()
-        if not config.debug_mode:
-            return None
-    except Exception:
+    # Check if observability mode enabled (10 JAN 2026: unified flag)
+    if not _is_observability_enabled():
         return None
 
     # Lazy import psutil
@@ -244,7 +311,7 @@ def log_memory_checkpoint(
     """
     Log a resource usage checkpoint with memory, CPU, and duration tracking.
 
-    Only logs if DEBUG_MODE=true. Otherwise, this is a no-op.
+    Only logs if OBSERVABILITY_MODE is enabled. Otherwise, this is a no-op.
     Adds memory/CPU stats, duration since last checkpoint, and custom fields.
 
     Args:
@@ -713,10 +780,10 @@ def get_database_stats() -> Optional[Dict[str, Any]]:
     Get current database utilization snapshot.
 
     Queries PostgreSQL for real-time performance metrics.
-    Only executes if DEBUG_MODE=true in config.
+    Only executes if OBSERVABILITY_MODE is enabled.
 
     Returns:
-        dict with database stats or None if debug disabled or query fails:
+        dict with database stats or None if observability disabled or query fails:
         {
             'connection_utilization_percent': float,  # (total / max_connections) * 100
             'active_connections': int,                # Currently executing queries
@@ -734,15 +801,8 @@ def get_database_stats() -> Optional[Dict[str, Any]]:
     """
     _logger = logging.getLogger("util_logger.database_stats")
 
-    # Check if debug mode enabled
-    try:
-        from config import get_config
-        config = get_config()
-
-        if not config.debug_mode:
-            return None
-    except Exception as e:
-        _logger.warning(f"⚠️ DEBUG_MODE check failed (database stats disabled): {e}")
+    # Check if observability mode enabled (10 JAN 2026: unified flag)
+    if not _is_observability_enabled():
         return None
 
     conn = None
@@ -864,7 +924,7 @@ def log_database_checkpoint(
     """
     Log a database utilization checkpoint with stats.
 
-    Only logs if DEBUG_MODE=true. Otherwise, this is a no-op.
+    Only logs if OBSERVABILITY_MODE is enabled. Otherwise, this is a no-op.
     Mirrors log_memory_checkpoint() but for database metrics.
 
     Args:
@@ -1340,17 +1400,22 @@ class LoggerFactory:
     This factory creates Python loggers configured for each
     component type with appropriate settings and context.
 
+    Global Context (10 JAN 2026):
+        Every log entry automatically includes app_name, app_instance,
+        and environment from get_global_log_context().
+
     Example:
         logger = LoggerFactory.create_logger(
             ComponentType.CONTROLLER,
             "HelloWorldController"
         )
         logger.info("Processing job")
+        # Log will include: app_name, app_instance, environment
     """
 
     # Default configurations per component type
-    # Check environment variable for debug mode (os imported at module level)
-    _default_level = LogLevel.DEBUG if os.getenv('DEBUG_LOGGING', '').lower() == 'true' else LogLevel.INFO
+    # Use LOG_LEVEL env var instead of DEBUG_LOGGING (10 JAN 2026)
+    _default_level = LogLevel.DEBUG if os.getenv('LOG_LEVEL', 'INFO').upper() == 'DEBUG' else LogLevel.INFO
 
     DEFAULT_CONFIGS = {
         ComponentType.CONTROLLER: ComponentConfig(
@@ -1463,22 +1528,23 @@ class LoggerFactory:
             original_log = logger._log
 
             def log_with_context(level, msg, args, exc_info=None, extra=None, stack_info=False, stacklevel=1):
-                """Wrapper to inject context as custom dimensions."""
+                """Wrapper to inject context and global context as custom dimensions."""
                 if extra is None:
                     extra = {}
 
-                # Build base custom dimensions from context
-                if context:
-                    custom_dims = context.to_dict()
-                    custom_dims['component_type'] = component_type.value
-                    custom_dims['component_name'] = name
-                else:
-                    custom_dims = {
-                        'component_type': component_type.value,
-                        'component_name': name
-                    }
+                # Start with global log context (10 JAN 2026 - F7.12.A)
+                # This enables multi-app filtering in Application Insights
+                custom_dims = get_global_log_context().copy()
 
-                # Merge with any custom_dimensions passed in extra (for DEBUG_MODE, etc.)
+                # Add component info
+                custom_dims['component_type'] = component_type.value
+                custom_dims['component_name'] = name
+
+                # Add request context if provided
+                if context:
+                    custom_dims.update(context.to_dict())
+
+                # Merge with any custom_dimensions passed in extra
                 if 'custom_dimensions' in extra:
                     custom_dims.update(extra['custom_dimensions'])
 

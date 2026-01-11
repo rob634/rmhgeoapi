@@ -301,6 +301,25 @@ ENV_VAR_RULES: Dict[str, EnvVarRule] = {
         fix_suggestion="Set to 'true' for Azure deployment, 'false' for local development",
         example="true",
     ),
+
+    # =========================================================================
+    # OBSERVABILITY (10 JAN 2026 - F7.12.C Flag Consolidation)
+    # =========================================================================
+    "OBSERVABILITY_MODE": EnvVarRule(
+        pattern=_BOOLEAN,
+        pattern_description="Boolean value (true/false)",
+        required=False,
+        fix_suggestion="Set to 'true' to enable debug instrumentation (memory tracking, latency logging)",
+        example="true",
+    ),
+
+    "LOG_LEVEL": EnvVarRule(
+        pattern=re.compile(r"^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$", re.IGNORECASE),
+        pattern_description="Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)",
+        required=False,
+        fix_suggestion="Set to DEBUG for verbose logging, INFO for normal operation",
+        example="INFO",
+    ),
 }
 
 

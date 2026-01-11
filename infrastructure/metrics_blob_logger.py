@@ -5,7 +5,7 @@
 # PURPOSE: Dump service metrics to blob storage as JSON for QA debugging
 # LAST_REVIEWED: 10 JAN 2026
 # EXPORTS: MetricsBlobLogger, get_metrics_logger, flush_metrics
-# DEPENDENCIES: azure.storage.blob, config
+# DEPENDENCIES: azure.storage.blob, config.observability
 # ============================================================================
 """
 Service Metrics Blob Logger.
@@ -20,9 +20,10 @@ Architecture:
     - JSON Lines format (.jsonl) for easy parsing
     - Files named: metrics/{date}/{instance_id}/{timestamp}.jsonl
 
-Environment Variables:
-    METRICS_DEBUG_MODE: Must be true to enable (default: false)
-    METRICS_BLOB_CONTAINER: Container name (default: "metrics")
+Environment Variables (10 JAN 2026 - F7.12.C):
+    OBSERVABILITY_MODE: Must be true to enable (default: false)
+                        Also reads legacy METRICS_DEBUG_MODE and DEBUG_MODE
+    METRICS_BLOB_CONTAINER: Container name (default: "applogs")
     METRICS_FLUSH_INTERVAL: Seconds between flushes (default: 60)
     METRICS_BUFFER_SIZE: Max records before flush (default: 100)
 
@@ -152,10 +153,18 @@ class MetricsBlobLogger:
             atexit.register(self.shutdown)
 
     def _check_enabled(self) -> bool:
-        """Check if metrics blob logging is enabled."""
-        # Requires METRICS_DEBUG_MODE=true
-        debug_mode = os.environ.get("METRICS_DEBUG_MODE", "false").lower() == "true"
-        return debug_mode
+        """
+        Check if metrics blob logging is enabled.
+
+        Uses unified OBSERVABILITY_MODE flag (10 JAN 2026 - F7.12.C).
+        Also reads legacy METRICS_DEBUG_MODE and DEBUG_MODE for backward compatibility.
+        """
+        # Check env vars in priority order for backward compatibility
+        for var in ("OBSERVABILITY_MODE", "METRICS_DEBUG_MODE", "DEBUG_MODE"):
+            val = os.environ.get(var, "").lower()
+            if val in ("true", "1", "yes"):
+                return True
+        return False
 
     def _get_blob_client(self):
         """Get or create blob service client (lazy initialization)."""

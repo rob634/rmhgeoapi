@@ -230,24 +230,33 @@ Each trust zone can have its own storage account. Required accounts are in Secti
 |----------|---------|-------------|
 | `FUNCTION_TIMEOUT_MINUTES` | `30` | Azure Function timeout |
 | `LOG_LEVEL` | `INFO` | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
-| `DEBUG_MODE` | `false` | Enable debug mode |
-| `DEBUG_LOGGING` | `false` | Enable verbose debug logging |
 
-### 6.3 Service Metrics & Diagnostics (10 JAN 2026)
+### 6.3 Observability (10 JAN 2026 - F7.12)
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `METRICS_DEBUG_MODE` | `false` | Enable service latency tracking and blob logging |
+| `OBSERVABILITY_MODE` | `false` | **Master switch** for all debug instrumentation |
+| `LOG_LEVEL` | `INFO` | Logging verbosity (`DEBUG` for verbose logging) |
 | `SERVICE_LATENCY_SLOW_MS` | `2000` | Threshold (ms) for slow operation warnings |
 | `METRICS_FLUSH_INTERVAL` | `60` | Seconds between metrics blob flushes |
 | `METRICS_BUFFER_SIZE` | `100` | Max records before auto-flush |
 | `METRICS_BLOB_CONTAINER` | `applogs` | Container for metrics JSON files |
+| `APPINSIGHTS_APP_ID` | — | Application Insights App ID (for log export) |
 
-**When `METRICS_DEBUG_MODE=true`:**
-- Service layer operations (OGC Features, STAC API) log latency to Application Insights
-- Database operations log separately with `[DB_LATENCY]` prefix
-- Metrics are buffered and written to blob storage as JSON Lines files
+**When `OBSERVABILITY_MODE=true`:**
+- Memory/CPU tracking enabled (`log_memory_checkpoint`)
+- Service latency tracking (`[SERVICE_LATENCY]` logs)
+- Database latency tracking (`[DB_LATENCY]` logs)
+- Metrics buffered and written to blob storage as JSON Lines
 - Blob path: `applogs/service-metrics/{date}/{instance_id}/{timestamp}.jsonl`
+
+**Legacy Flags (backward compatible):**
+
+| Variable | Status | Replacement |
+|----------|--------|-------------|
+| `DEBUG_MODE` | Legacy | Use `OBSERVABILITY_MODE` |
+| `METRICS_DEBUG_MODE` | Legacy | Use `OBSERVABILITY_MODE` |
+| `DEBUG_LOGGING` | Removed | Use `LOG_LEVEL=DEBUG` |
 
 **Use for QA debugging** in opaque corporate Azure environments where VNet/ASE complexity may cause performance issues. Zero overhead when disabled.
 

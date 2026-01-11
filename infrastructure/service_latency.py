@@ -3,9 +3,9 @@
 # ============================================================================
 # STATUS: Infrastructure - Service layer response time instrumentation
 # PURPOSE: Track latency for OGC Features, STAC API, and other service calls
-# LAST_REVIEWED: 09 JAN 2026
+# LAST_REVIEWED: 10 JAN 2026
 # EXPORTS: track_latency, track_db_operation, ServiceLatencyTracker
-# DEPENDENCIES: config.metrics
+# DEPENDENCIES: config.observability
 # ============================================================================
 """
 Service Layer Latency Tracking.
@@ -16,14 +16,15 @@ with VNet/ASE network complexity.
 
 Key Design:
 -----------
-- Zero overhead when METRICS_DEBUG_MODE=false (early return, no timing)
+- Zero overhead when OBSERVABILITY_MODE=false (early return, no timing)
 - Full timing + structured logging when enabled
 - Slow operation alerting (configurable threshold)
 - Designed for Application Insights Kusto queries
 
-Environment Variables:
-----------------------
-METRICS_DEBUG_MODE: Enable service latency tracking (default: false)
+Environment Variables (10 JAN 2026 - F7.12.C):
+----------------------------------------------
+OBSERVABILITY_MODE: Enable service latency tracking (default: false)
+                    Also reads legacy METRICS_DEBUG_MODE and DEBUG_MODE
 SERVICE_LATENCY_SLOW_MS: Threshold for slow operation warnings (default: 2000)
 
 Usage:
@@ -109,21 +110,26 @@ def _is_latency_tracking_enabled() -> bool:
     """
     Check if latency tracking is enabled.
 
-    Uses METRICS_DEBUG_MODE to control service latency tracking.
+    Uses OBSERVABILITY_MODE (unified flag) to control service latency tracking.
     Lazy evaluation to avoid import-time config loading.
 
+    Priority order for backward compatibility:
+    1. OBSERVABILITY_MODE (new preferred)
+    2. METRICS_DEBUG_MODE (legacy)
+    3. DEBUG_MODE (legacy)
+
     Returns:
-        bool: True if METRICS_DEBUG_MODE=true
+        bool: True if observability is enabled
     """
     from config import get_config
-    return get_config().metrics.debug_mode
+    return get_config().is_observability_enabled()
 
 
 def track_latency(operation_name: str):
     """
     Decorator to track latency for service layer operations.
 
-    Zero overhead when METRICS_DEBUG_MODE=false - the original function
+    Zero overhead when OBSERVABILITY_MODE=false - the original function
     is called directly without any timing or logging.
 
     When enabled, logs structured JSON with:

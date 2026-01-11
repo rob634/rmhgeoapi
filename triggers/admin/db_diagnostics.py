@@ -701,14 +701,15 @@ class AdminDbDiagnosticsTrigger:
                     "default_class": "DatabaseDefaults" if is_default and default_value else None
                 }
 
-            # Debug mode
-            debug_mode = os.environ.get("DEBUG_MODE", "false").lower() == "true"
-            debug_logging = os.environ.get("DEBUG_LOGGING", "false").lower() == "true"
+            # Observability mode (10 JAN 2026 - F7.12.C Flag Consolidation)
+            from config import get_config
+            config = get_config()
+            observability_enabled = config.is_observability_enabled()
 
             result = {
                 "config": config_audit,
-                "debug_mode": debug_mode,
-                "debug_logging": debug_logging,
+                "observability_mode": observability_enabled,
+                "log_level": os.environ.get("LOG_LEVEL", "INFO"),
                 "environment": os.environ.get("ENVIRONMENT", "dev"),
                 "using_defaults_count": sum(1 for c in config_audit.values() if c.get("is_default")),
                 "from_environment_count": sum(1 for c in config_audit.values() if not c.get("is_default")),

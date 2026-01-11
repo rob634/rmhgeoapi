@@ -1,9 +1,11 @@
 # SAFe Epic & Feature Registry
 
-**Last Updated**: 08 JAN 2026 (F7.8 Unified Metadata Architecture added)
+**Last Updated**: 11 JAN 2026
 **Framework**: SAFe (Scaled Agile Framework)
 **Purpose**: Master reference for Azure DevOps Boards import
 **Source of Truth**: This directory defines Epic/Feature numbers; TODO.md should align
+
+**See Also**: [COMPLETED_FEATURES.md](COMPLETED_FEATURES.md) - Archive of all delivered capabilities
 
 ---
 
@@ -55,13 +57,13 @@
 
 | Epic | Name | Type | Value Statement | Status | Features | Link |
 |------|------|------|-----------------|--------|:--------:|:----:|
-| E7 | Pipeline Infrastructure | Foundational | The ETL brain that makes everything possible | 🚧 Partial | 7 | [E7](E7_pipeline_infra.md) |
-| E1 | Vector Data as API | Business | Vector garbage → clean, API-accessible data | 🚧 Partial | 8 | [E1](E1_vector_data.md) |
-| E2 | Raster Data as API | Business | Any imagery → analysis-ready and tileable | 🚧 Partial | 9 | [E2](E2_raster_data.md) |
+| E7 | Pipeline Infrastructure | Foundational | The ETL brain that makes everything possible | 🚧 Partial | 10 | [E7](E7_pipeline_infra.md) |
+| E1 | Vector Data as API | Business | Vector garbage → clean, API-accessible data | ✅ Operational | 8 | [E1](E1_vector_data.md) |
+| E2 | Raster Data as API | Business | Any imagery → analysis-ready and tileable | ✅ Operational | 9 | [E2](E2_raster_data.md) |
 | E9 | Large & Multidimensional | Business | Host FATHOM/CMIP6 at scale | 🚧 Partial | 10 | [E9](E9_large_data.md) |
 | E8 | GeoAnalytics Pipeline | Business | Raw data → H3-aggregated, analysis-ready | 🚧 Partial | 14 | [E8](E8_geoanalytics.md) |
-| E3 | DDH Integration | Enabler | DDH consumes geospatial services | 🚧 Partial | 8 | [E3](E3_ddh_integration.md) |
-| E4 | Externalization & Security | Enabler | Data movement to external zones | 📋 Planned | 5 | [E4](E4_security_zones.md) |
+| **E4** | **Externalization & Security** | **Enabler** | **Data movement to external zones** | **🔥 PRIORITY** | 5 | [E4](E4_security_zones.md) |
+| E3 | DDH Integration | Coordination | DDH team coordination artifact | 📋 Political | 8 | [E3](E3_ddh_integration.md) |
 | E12 | Integration Onboarding | Enabler | Self-service onboarding for integrators | 🚧 Partial | 10 | [E12](E12_interfaces.md) |
 
 **Epic Types**:
@@ -121,7 +123,7 @@ E9: Large Data (FATHOM, CMIP6)  →  E8: GeoAnalytics  →  GeoParquet / OGC Fea
 | EN3 | Azure Platform Integration | ✅ Complete | All | [Details](ENABLERS.md#enabler-en3-azure-platform-integration-) |
 | EN4 | Configuration System | ✅ Complete | All | [Details](ENABLERS.md#enabler-en4-configuration-system-) |
 | EN5 | Pre-flight Validation | ✅ Complete | E1, E2 | [Details](ENABLERS.md#enabler-en5-pre-flight-validation-) |
-| EN6 | Long-Running Task Infrastructure | ⏳ FY26 Decision | E2, E9 | [Details](ENABLERS.md#enabler-en6-long-running-task-infrastructure--fy26-decision-pending) |
+| EN6 | Long-Running Task Infrastructure | ✅ Deployed | E2, E9 | [Details](ENABLERS.md#enabler-en6-long-running-task-infrastructure--fy26-decision-pending) |
 
 ---
 
@@ -143,7 +145,7 @@ Abstract component names for ADO work items. Actual Azure resource names assigne
 |--------------|---------|---------|--------|
 | **ETL Function App** | Job orchestration, HTTP APIs | Azure Functions (Python) | ✅ Deployed |
 | **Reader Function App** | Read-only data access APIs | Azure Functions (Python) | 📋 Planned |
-| **Long-Running Worker** | Tasks exceeding 30-min timeout | Docker Container App | ⏳ FY26 Decision |
+| **Long-Running Worker** | Tasks exceeding 30-min timeout | Docker Container App (`rmhheavyapi`) | ✅ Deployed (11 JAN 2026) |
 | **TiTiler Raster Service** | COG tile serving | Docker Container App | ✅ Deployed |
 | **TiTiler Zarr Service** | Zarr/NetCDF tile serving | Docker Container App | 📋 Planned |
 
@@ -153,7 +155,7 @@ Abstract component names for ADO work items. Actual Azure resource names assigne
 |---------|--------------|-------------------|-------|
 | **TiTiler Raster** | `ghcr.io/stac-utils/titiler-pgstac` | Azure Container Apps | Production, serving COGs |
 | **TiTiler Zarr** | Custom (xarray/zarr stack) | Azure Container Apps | Pending E9 progress |
-| **Long-Running Worker** | Custom (GDAL/rasterio stack) | Azure Container Apps | See EN6; FY26 decision pending |
+| **Long-Running Worker** | `rmhazureacr.azurecr.io/geospatial-worker:v0.7.1-auth` | Azure Web App (`rmhheavyapi`) | ✅ Deployed 11 JAN 2026 |
 
 ## Queues (Service Bus)
 
@@ -191,10 +193,11 @@ Abstract component names for ADO work items. Actual Azure resource names assigne
 ```
 docs/epics/
 ├── README.md              # This file - Quick Reference + Navigation
-├── E1_vector_data.md      # Epic E1: Vector Data as API (includes OGC Styles)
-├── E2_raster_data.md      # Epic E2: Raster Data as API
-├── E3_ddh_integration.md  # Epic E3: DDH Platform Integration
-├── E4_security_zones.md   # Epic E4: Data Externalization & Security Zones
+├── COMPLETED_FEATURES.md  # Archive of delivered capabilities (feature-level summaries)
+├── E1_vector_data.md      # Epic E1: Vector Data as API (✅ Operational)
+├── E2_raster_data.md      # Epic E2: Raster Data as API (✅ Operational)
+├── E3_ddh_integration.md  # Epic E3: DDH Coordination (political artifact)
+├── E4_security_zones.md   # Epic E4: Data Externalization (🔥 PRIORITY)
 ├── E7_pipeline_infra.md   # Epic E7: Pipeline Infrastructure
 ├── E8_geoanalytics.md     # Epic E8: GeoAnalytics Pipeline
 ├── E9_large_data.md       # Epic E9: Large and Multidimensional Data

@@ -2506,7 +2506,24 @@ STARTUP_STATE.finalize()
 # Detect env vars using defaults (for readyz warnings - not errors, just informational)
 STARTUP_STATE.detect_default_env_vars()
 
-# Initialize metrics blob container if METRICS_DEBUG_MODE is enabled
+# Log observability mode status (10 JAN 2026 - F7.12)
+try:
+    from config import get_config
+    _obs_config = get_config().observability
+    if _obs_config.enabled:
+        _startup_logger.info(
+            f"✅ STARTUP: OBSERVABILITY_MODE=true "
+            f"(app={_obs_config.app_name}, env={_obs_config.environment})"
+        )
+    else:
+        _startup_logger.warning(
+            "⚠️ STARTUP: OBSERVABILITY_MODE not set or false - "
+            "debug instrumentation disabled (memory tracking, latency logging, blob metrics)"
+        )
+except Exception as _obs_error:
+    _startup_logger.debug(f"Observability config check skipped: {_obs_error}")
+
+# Initialize metrics blob container if OBSERVABILITY_MODE is enabled
 try:
     from infrastructure.metrics_blob_logger import init_metrics_container
     if init_metrics_container():

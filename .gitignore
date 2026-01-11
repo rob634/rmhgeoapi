@@ -189,3 +189,5 @@ reference/
 postgres_data/
 pgadmin_data/
 local_test_results/
+# Docker credentials (never commit)
+docker.env

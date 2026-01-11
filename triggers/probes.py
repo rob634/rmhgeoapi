@@ -412,3 +412,243 @@ def metrics_stats(req: func.HttpRequest) -> func.HttpResponse:
             status_code=500,
             mimetype="application/json"
         )
+
+
+# ============================================================================
+# APP INSIGHTS LOG EXPORT ENDPOINT (10 JAN 2026 - F7.12.D)
+# ============================================================================
+
+@bp.route(
+    route="appinsights/query",
+    methods=["POST"],
+    auth_level=func.AuthLevel.ANONYMOUS
+)
+def appinsights_query(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Query Application Insights logs.
+
+    Request body:
+        {
+            "query": "traces | where timestamp >= ago(1h) | take 100",
+            "timespan": "PT1H"  // Optional, default PT1H
+        }
+
+    Returns:
+        200: Query results with rows and metadata
+
+    Example:
+        POST /api/appinsights/query
+        {"query": "traces | take 10"}
+    """
+    try:
+        from infrastructure.appinsights_exporter import query_logs
+
+        # Parse request body
+        try:
+            body = req.get_json()
+        except ValueError:
+            return func.HttpResponse(
+                json.dumps({"status": "error", "error": "Invalid JSON body"}),
+                status_code=400,
+                mimetype="application/json"
+            )
+
+        query = body.get("query")
+        if not query:
+            return func.HttpResponse(
+                json.dumps({"status": "error", "error": "Missing 'query' field"}),
+                status_code=400,
+                mimetype="application/json"
+            )
+
+        timespan = body.get("timespan", "PT1H")
+
+        # Run query
+        result = query_logs(query, timespan)
+
+        if result.success:
+            return func.HttpResponse(
+                json.dumps({
+                    "status": "ok",
+                    "row_count": result.row_count,
+                    "columns": result.columns,
+                    "rows": result.rows[:100],  # Limit response size
+                    "query_duration_ms": round(result.query_duration_ms, 2),
+                    "truncated": result.row_count > 100,
+                }, indent=2),
+                status_code=200,
+                mimetype="application/json"
+            )
+        else:
+            return func.HttpResponse(
+                json.dumps({
+                    "status": "error",
+                    "error": result.error,
+                    "query_duration_ms": round(result.query_duration_ms, 2),
+                }, indent=2),
+                status_code=500,
+                mimetype="application/json"
+            )
+
+    except Exception as e:
+        return func.HttpResponse(
+            json.dumps({
+                "status": "error",
+                "error": str(e),
+                "error_type": type(e).__name__,
+            }, indent=2),
+            status_code=500,
+            mimetype="application/json"
+        )
+
+
+@bp.route(
+    route="appinsights/export",
+    methods=["POST"],
+    auth_level=func.AuthLevel.ANONYMOUS
+)
+def appinsights_export(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Export Application Insights logs to blob storage.
+
+    Request body:
+        {
+            "query": "traces | where message contains 'SERVICE_LATENCY'",
+            "timespan": "PT24H",  // Optional, default PT24H
+            "container": "applogs",  // Optional, default "applogs"
+            "prefix": "exports"  // Optional, default "exports"
+        }
+
+    Or use a template:
+        {
+            "template": "service_latency",  // One of: recent_traces, recent_errors,
+                                            // service_latency, db_latency, exceptions
+            "timespan": "24h",  // Without PT prefix
+            "limit": 1000
+        }
+
+    Returns:
+        200: Export result with blob path
+
+    Example:
+        POST /api/appinsights/export
+        {"template": "service_latency", "timespan": "24h"}
+    """
+    try:
+        from infrastructure.appinsights_exporter import export_logs_to_blob, export_template
+
+        # Parse request body
+        try:
+            body = req.get_json()
+        except ValueError:
+            return func.HttpResponse(
+                json.dumps({"status": "error", "error": "Invalid JSON body"}),
+                status_code=400,
+                mimetype="application/json"
+            )
+
+        # Check for template-based export
+        template = body.get("template")
+        if template:
+            timespan = body.get("timespan", "1h")
+            limit = body.get("limit", 1000)
+            container = body.get("container", "applogs")
+
+            result = export_template(template, timespan, limit, container)
+        else:
+            # Custom query export
+            query = body.get("query")
+            if not query:
+                return func.HttpResponse(
+                    json.dumps({"status": "error", "error": "Missing 'query' or 'template' field"}),
+                    status_code=400,
+                    mimetype="application/json"
+                )
+
+            timespan = body.get("timespan", "PT24H")
+            container = body.get("container", "applogs")
+            prefix = body.get("prefix", "exports")
+
+            result = export_logs_to_blob(query, timespan, container, prefix)
+
+        if result.success:
+            return func.HttpResponse(
+                json.dumps({
+                    "status": "ok",
+                    "blob_path": result.blob_path,
+                    "row_count": result.row_count,
+                    "query_duration_ms": round(result.query_duration_ms, 2),
+                    "export_duration_ms": round(result.export_duration_ms, 2),
+                }, indent=2),
+                status_code=200,
+                mimetype="application/json"
+            )
+        else:
+            return func.HttpResponse(
+                json.dumps({
+                    "status": "error",
+                    "error": result.error,
+                    "row_count": result.row_count,
+                    "query_duration_ms": round(result.query_duration_ms, 2),
+                }, indent=2),
+                status_code=500,
+                mimetype="application/json"
+            )
+
+    except Exception as e:
+        return func.HttpResponse(
+            json.dumps({
+                "status": "error",
+                "error": str(e),
+                "error_type": type(e).__name__,
+            }, indent=2),
+            status_code=500,
+            mimetype="application/json"
+        )
+
+
+@bp.route(
+    route="appinsights/templates",
+    methods=["GET"],
+    auth_level=func.AuthLevel.ANONYMOUS
+)
+def appinsights_templates(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    List available query templates.
+
+    Returns:
+        200: List of templates with descriptions
+
+    Example:
+        GET /api/appinsights/templates
+    """
+    try:
+        from infrastructure.appinsights_exporter import AppInsightsExporter
+
+        templates = {}
+        for name, query in AppInsightsExporter.QUERY_TEMPLATES.items():
+            templates[name] = {
+                "query_pattern": query,
+                "description": name.replace("_", " ").title(),
+            }
+
+        return func.HttpResponse(
+            json.dumps({
+                "status": "ok",
+                "templates": templates,
+                "usage": "POST /api/appinsights/export with {\"template\": \"<name>\", \"timespan\": \"24h\"}",
+            }, indent=2),
+            status_code=200,
+            mimetype="application/json"
+        )
+
+    except Exception as e:
+        return func.HttpResponse(
+            json.dumps({
+                "status": "error",
+                "error": str(e),
+                "error_type": type(e).__name__,
+            }, indent=2),
+            status_code=500,
+            mimetype="application/json"
+        )

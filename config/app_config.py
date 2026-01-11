@@ -86,6 +86,7 @@ from .analytics_config import AnalyticsConfig
 from .h3_config import H3Config
 from .platform_config import PlatformConfig
 from .metrics_config import MetricsConfig
+from .observability_config import ObservabilityConfig
 from .defaults import AzureDefaults, AppDefaults, KeyVaultDefaults, StorageDefaults
 
 
@@ -105,13 +106,11 @@ class AppConfig(BaseModel):
     # Core Application Settings
     # ========================================================================
 
-    debug_mode: bool = Field(
-        default=AppDefaults.DEBUG_MODE,
-        description="Enable debug mode for verbose diagnostics. "
-                    "WARNING: Increases logging overhead and log volume. "
-                    "Features enabled: memory tracking, detailed timing, payload logging. "
-                    "Set DEBUG_MODE=true in environment to enable.",
-        examples=[True, False]
+    # Observability configuration (F7.12.C - Flag Consolidation, 10 JAN 2026)
+    # Unified control for all debug instrumentation features
+    observability: ObservabilityConfig = Field(
+        default_factory=ObservabilityConfig.from_environment,
+        description="Unified observability configuration (replaces DEBUG_MODE, METRICS_DEBUG_MODE)"
     )
 
     environment: str = Field(
@@ -119,6 +118,14 @@ class AppConfig(BaseModel):
         description="Environment name (dev, qa, prod)",
         examples=["dev", "qa", "prod"]
     )
+
+    # ========================================================================
+    # Legacy Debug Mode (Backward Compatibility)
+    # ========================================================================
+    # NOTE (10 JAN 2026): debug_mode is now a property that delegates to
+    # observability.enabled. Kept for backward compatibility with existing code.
+    # Prefer using config.observability.enabled or config.is_observability_enabled()
+    # ========================================================================
 
     # ========================================================================
     # Timeouts and Retries
@@ -735,72 +742,112 @@ class AppConfig(BaseModel):
             raise ValueError(f"Invalid mode: {mode}. Must be one of: 'cog', 'mosaicjson', 'pgstac'")
 
     # ========================================================================
-    # Debug Mode Helper Methods (07 DEC 2025)
+    # Observability Helper Methods (Updated 10 JAN 2026 - F7.12.C)
     # ========================================================================
+
+    @property
+    def debug_mode(self) -> bool:
+        """
+        Legacy property for backward compatibility.
+
+        NOTE (10 JAN 2026): Now delegates to observability.enabled.
+        Prefer using config.observability.enabled or config.is_observability_enabled().
+
+        Returns:
+            bool: True if observability mode is enabled
+        """
+        return self.observability.enabled
+
+    def is_observability_enabled(self) -> bool:
+        """
+        Check if observability features are enabled (10 JAN 2026).
+
+        Preferred method over debug_mode property.
+        Returns True if OBSERVABILITY_MODE (or legacy DEBUG_MODE/METRICS_DEBUG_MODE) is true.
+
+        Features enabled when True:
+            - Memory/CPU tracking
+            - Service latency tracking
+            - Blob metrics logging
+            - Database stats collection
+            - Verbose diagnostics
+
+        Usage:
+            config = get_config()
+            if config.is_observability_enabled():
+                log_memory_checkpoint(logger, "start")
+
+        Returns:
+            bool: True if observability is enabled
+        """
+        return self.observability.enabled
 
     def get_debug_status(self) -> dict:
         """
-        Get comprehensive debug mode status for diagnostics (07 DEC 2025).
+        Get comprehensive observability status for diagnostics.
 
-        Returns a summary of all debug-related settings and what features
-        they enable. Used by health endpoint and diagnostic endpoints.
+        Updated 10 JAN 2026: Uses unified OBSERVABILITY_MODE.
+        Returns a summary of all observability settings and features.
+        Used by health endpoint and diagnostic endpoints.
 
         Returns:
             {
-                "debug_mode": true/false,
-                "debug_logging": true/false,
+                "observability_mode": true/false,
+                "debug_mode": true/false,  # Legacy alias
                 "environment": "dev/qa/prod",
                 "features_enabled": [...],
-                "log_level": "DEBUG/INFO/..."
+                "log_level": "DEBUG/INFO/...",
+                "app_name": "...",
+                "app_instance": "..."
             }
         """
-        import os
-
-        debug_mode = self.debug_mode
-        debug_logging = os.environ.get("DEBUG_LOGGING", "false").lower() == "true"
+        observability_enabled = self.observability.enabled
 
         features_enabled = []
-        if debug_mode:
+        if observability_enabled:
             features_enabled.extend([
                 "memory_tracking",
+                "service_latency_tracking",
+                "blob_metrics_logging",
+                "database_stats_collection",
                 "detailed_timing",
-                "config_sources_in_health",
-                "verbose_validation_messages",
-                "parameter_origin_logging",
-                "full_parameter_dumps_on_failure"
+                "verbose_diagnostics",
             ])
-        if debug_logging:
+
+        # Check if LOG_LEVEL=DEBUG for additional verbose features
+        if self.log_level.upper() == "DEBUG":
             features_enabled.extend([
                 "debug_log_level",
                 "verbose_sql_logging",
-                "request_payload_logging"
             ])
 
         return {
-            "debug_mode": debug_mode,
-            "debug_logging": debug_logging,
+            "observability_mode": observability_enabled,
+            "debug_mode": observability_enabled,  # Legacy alias
             "environment": self.environment,
             "log_level": self.log_level,
             "features_enabled": features_enabled,
             "is_production": self.environment == "prod",
-            "verbose_enabled": debug_mode or debug_logging
+            "app_name": self.observability.app_name,
+            "app_instance": self.observability.app_instance,
         }
 
     def should_log_verbose(self) -> bool:
         """
-        Check if verbose logging should be enabled (07 DEC 2025).
+        Check if verbose logging should be enabled.
 
-        Returns True if either DEBUG_MODE or DEBUG_LOGGING is enabled.
-        Use this to guard verbose logging statements.
+        Updated 10 JAN 2026: Uses unified observability check.
+        Returns True if observability is enabled OR log_level is DEBUG.
 
         Usage:
             config = get_config()
             if config.should_log_verbose():
                 logger.debug(f"Detailed info: {extensive_data}")
+
+        Returns:
+            bool: True if verbose logging is appropriate
         """
-        import os
-        debug_logging = os.environ.get("DEBUG_LOGGING", "false").lower() == "true"
-        return self.debug_mode or debug_logging
+        return self.observability.enabled or self.log_level.upper() == "DEBUG"
 
     # ========================================================================
     # Factory Methods
@@ -811,7 +858,8 @@ class AppConfig(BaseModel):
         """Load all configs from environment."""
         return cls(
             # Core settings (using defaults from config/defaults.py)
-            debug_mode=os.environ.get("DEBUG_MODE", str(AppDefaults.DEBUG_MODE).lower()).lower() == "true",
+            # NOTE (10 JAN 2026): debug_mode is now a property that reads from observability
+            observability=ObservabilityConfig.from_environment(),
             environment=os.environ.get("ENVIRONMENT", AppDefaults.ENVIRONMENT),
             function_timeout_minutes=int(os.environ.get("FUNCTION_TIMEOUT_MINUTES", str(AppDefaults.FUNCTION_TIMEOUT_MINUTES))),
             log_level=os.environ.get("LOG_LEVEL", AppDefaults.LOG_LEVEL),

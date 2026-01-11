@@ -1,0 +1,74 @@
+# ============================================================================
+# Docker Worker Dependencies
+# ============================================================================
+# This is the same as rmhgeoapi/requirements.txt MINUS azure-functions
+# which is only needed for Azure Functions runtime.
+#
+# NOTE: GDAL is NOT listed here - it comes pre-installed in the base image
+# (ghcr.io/osgeo/gdal:ubuntu-full-3.10.1). Do NOT add GDAL to this file.
+# ubuntu-full includes NetCDF, HDF5, Zarr, and all multidimensional drivers.
+#
+# Generated: 22 DEC 2025
+# Updated: 10 JAN 2026 - Copied to unified rmhgeoapi repo
+# ============================================================================
+
+# Azure SDK - Storage, Service Bus, Identity
+azure-storage-blob
+azure-storage-queue
+azure-data-tables
+azure-identity
+azure-keyvault-secrets
+azure-servicebus>=7.11.0
+azure-mgmt-datafactory>=4.0.0
+
+# Geospatial - Core libraries
+geopandas
+psycopg[binary]
+rasterio>=1.3.1
+rio-cogeo
+rio-stac>=0.10.0
+cogeo-mosaic>=7.0.0
+
+# STRONG TYPING DISCIPLINE - Schema validation and enforcement
+pydantic>=2.0.0
+
+# DEBUG MODE - Memory and performance profiling
+psutil>=5.9.0
+
+# STAC Implementation - PgSTAC database and Python libraries
+pypgstac==0.9.8
+psycopg-pool>=3.1.0
+pystac>=1.13.0
+pystac-client>=0.7.0
+stac-pydantic>=3.4.0
+
+# DuckDB - Analytical query engine with spatial and Azure extensions
+duckdb>=1.1.0
+pyarrow>=10.0.0
+
+# H3 - Uber's hexagonal hierarchical geospatial indexing system
+h3>=4.0.0
+
+# H3 Aggregation - Zonal statistics and Planetary Computer access
+rasterstats>=0.19.0
+planetary-computer>=0.5.0
+
+# AsyncPG - Async PostgreSQL driver for non-blocking database operations
+asyncpg>=0.29.0
+
+# xarray ecosystem - Service Layer API for Zarr direct access
+xarray>=2024.1.0
+zarr>=2.16.0
+fsspec>=2024.2.0
+adlfs>=2024.2.0
+aiohttp>=3.9.0
+
+# HTTP client for TiTiler proxy
+httpx>=0.27.0
+
+# Image output for xarray API
+pillow>=10.0.0
+
+# Workers Entrance - Direct HTTP endpoint (optional)
+fastapi>=0.104.0
+uvicorn>=0.24.0

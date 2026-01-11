@@ -2,8 +2,8 @@
 
 **Type**: Foundational Enabler
 **Value Statement**: The ETL brain that makes everything else possible.
-**Status**: 🚧 PARTIAL (F7.1 ✅, F7.2 🚧, F7.3 ✅, F7.4 ✅, F7.8 🚧, F7.10 ✅, F7.11 🚧)
-**Last Updated**: 10 JAN 2026
+**Status**: 🚧 PARTIAL (F7.1 ✅, F7.2 🟡, F7.3 ✅, F7.4 ✅, F7.8 🚧, F7.10 ✅, F7.11 🚧, F7.12 ✅, F7.13 📋 PRIORITY)
+**Last Updated**: 11 JAN 2026
 
 **This is the substrate.** E1, E2, E8, and E9 all run on E7. Without it, nothing processes.
 
@@ -33,6 +33,9 @@
 | F7.8 | 🚧 | **Unified Metadata Architecture** (Pydantic models, extensible) |
 | F7.10 | ✅ | Metadata Consistency Enforcement (timer + checker) |
 | F7.11 | 🚧 | STAC Catalog Self-Healing (rebuild job) - vectors working |
+| F7.12 | ✅ | **Docker Worker Infrastructure** - Deployed to rmhheavyapi (11 JAN 2026) |
+| F7.13 | 📋 | **Docker Job Definitions** (consolidated single-task jobs) - PRIORITY |
+| F7.14 | 🔵 | Dynamic Task Routing (optional, if hybrid needed later) |
 
 ---
 
@@ -55,13 +58,14 @@
 
 ---
 
-### Feature F7.2: IBAT Reference Data 🚧 PARTIAL
+### Feature F7.2: IBAT Reference Data 🟡 CODE COMPLETE
 
 **Deliverable**: IBAT-sourced reference datasets (WDPA, KBAs) for spatial analysis
 **Documentation**: [IBAT.md](/IBAT.md)
 **Data Source**: IBAT Alliance API (https://api.ibat-alliance.org)
 **Update Frequency**: Quarterly
-**Auth**: Shared `IBAT_AUTH_KEY` + `IBAT_AUTH_TOKEN` env vars
+**Auth**: `WDPA_AUTH_KEY` + `WDPA_AUTH_TOKEN` env vars
+**Status**: Code complete but NOT OPERATIONAL - credentials not configured, never executed
 
 | Story | Status | Description |
 |-------|--------|-------------|
@@ -71,13 +75,19 @@
 | S7.2.4 | 📋 | Style integration (IUCN categories for WDPA, KBA status) |
 | S7.2.5 | 📋 | Manual trigger endpoint (currently placeholder) |
 
+**To Make Operational**:
+1. Get IBAT API credentials from https://api.ibat-alliance.org
+2. Set env vars in Azure: `WDPA_AUTH_KEY`, `WDPA_AUTH_TOKEN`
+3. Submit job: `POST /api/jobs/submit/curated_wdpa_update`
+
 **Key Files**:
-- `services/curated/wdpa_handler.py` (reference implementation)
+- `services/curated/wdpa_handler.py` (544 lines - complete handler)
+- `jobs/curated_update.py` (4-stage job)
 - `core/models/curated.py`
 - `infrastructure/curated_repository.py`
 
 **Target Tables**:
-- `geo.curated_wdpa_protected_areas`
+- `geo.curated_wdpa_protected_areas` (not yet populated)
 - `geo.curated_kbas` (planned)
 
 ---
@@ -497,5 +507,185 @@ POST /api/jobs/submit/rebuild_stac
 2. **Safe by default** - `dry_run: true` validates without modifying
 3. **Batch support** - Single job can rebuild multiple items
 4. **Idempotent** - Safe to re-run (existing STAC items skipped unless force_recreate)
+
+---
+
+### Feature F7.12: Docker Worker Infrastructure ✅ COMPLETE
+
+**Deliverable**: Docker worker with Managed Identity OAuth for PostgreSQL and Storage
+**Status**: ✅ DEPLOYED (11 JAN 2026)
+**Deployed To**: `rmhheavyapi` Web App
+**Image**: `rmhazureacr.azurecr.io/geospatial-worker:v0.7.1-auth`
+**Version**: 0.7.7.1
+
+**Problem Solved**:
+- Function App has 10-minute timeout, limited GDAL support
+- Large rasters (>1GB) need Docker worker with full GDAL
+- Docker worker needs OAuth tokens for Azure services
+
+**Implementation**:
+- FastAPI health endpoints (`/livez`, `/readyz`, `/health`)
+- Managed Identity OAuth for PostgreSQL (user-assigned) and Storage (system-assigned)
+- Background token refresh thread (45-minute interval)
+- OSGeo GDAL ubuntu-full-3.10.1 base image
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S7.12.1 | ✅ | Create `docker_main.py` (queue polling entry point) |
+| S7.12.2 | ✅ | Create `workers_entrance.py` (FastAPI + health endpoints) |
+| S7.12.3 | ✅ | Create `Dockerfile`, `requirements-docker.txt`, `docker.env.example` |
+| S7.12.4 | ⏭️ | Skip testing/ directory (building new tests later) |
+| S7.12.5 | ✅ | Create `.funcignore` to exclude Docker files from Functions |
+| S7.12.6 | ✅ | Create `infrastructure/auth/` module for Managed Identity OAuth |
+| S7.12.7 | ✅ | Verify ACR build succeeds |
+| S7.12.8 | ✅ | Deploy to rmhheavyapi Web App |
+| S7.12.9 | ✅ | Configure identities (PostgreSQL: user-assigned, Storage: system-assigned) |
+| S7.12.10 | ✅ | Verify all health endpoints working |
+
+**Key Files Created**:
+| File | Purpose | Lines |
+|------|---------|-------|
+| `docker_main.py` | Queue polling entry point (not HTTP) | 157 |
+| `workers_entrance.py` | FastAPI app with health endpoints | 489 |
+| `Dockerfile` | OSGeo GDAL ubuntu-full-3.10.1 base | 24 |
+| `requirements-docker.txt` | Dependencies (minus azure-functions) | 30 |
+| `docker.env.example` | Environment variable template | 110 |
+| `.funcignore` | Excludes Docker files from Functions | 15 |
+| `infrastructure/auth/__init__.py` | Auth module initialization | 71 |
+| `infrastructure/auth/token_cache.py` | Thread-safe token caching | 105 |
+| `infrastructure/auth/postgres_auth.py` | PostgreSQL OAuth | 233 |
+| `infrastructure/auth/storage_auth.py` | Storage OAuth + GDAL config | 263 |
+
+**Identity Configuration**:
+| Resource | Identity | Type | Principal ID |
+|----------|----------|------|--------------|
+| PostgreSQL (`rmhpgflexadmin`) | User-assigned MI | `a533cb80-a590-4fad-8e52-1eb1f72659d7` | `ab45e154...` |
+| Storage (`rmhazuregeo`) | System-assigned MI | Web App identity | `cea30c4b...` |
+
+**Health Endpoints**:
+| Endpoint | Purpose | Response |
+|----------|---------|----------|
+| `/livez` | Liveness probe | `{"status":"ok"}` |
+| `/readyz` | Readiness probe | Token status |
+| `/health` | Detailed health | DB + Storage connectivity |
+| `/test/database` | DB connectivity test | Connection details |
+| `/test/storage` | Storage connectivity test | Account access |
+
+**Background Workers**:
+- Token refresh thread: 45-minute interval, 5-minute buffer before expiry
+- Tokens valid for ~24 hours (Azure AD default)
+
+---
+
+### Feature F7.13: Docker Job Definitions 📋 PRIORITY
+
+**Deliverable**: Consolidated single-task job definitions for Docker worker
+**Status**: 📋 PLANNED - PRIORITY
+**Added**: 10 JAN 2026
+**Blocks**: F7.12 (need Docker infrastructure first)
+
+**Approach**: Each Docker job consolidates multi-stage Function App logic into one handler.
+
+```python
+# Function App: 3 stages, 3 handlers
+class ProcessRasterV2Job:
+    stages = [
+        {"number": 1, "task_type": "validate_raster"},
+        {"number": 2, "task_type": "create_cog"},
+        {"number": 3, "task_type": "stac_raster"},
+    ]
+
+# Docker: 1 stage, 1 handler (does everything)
+class ProcessRasterDockerJob:
+    stages = [
+        {"number": 1, "task_type": "process_raster_complete"},
+    ]
+```
+
+**Handler Pattern**:
+```python
+def process_raster_complete(params: dict, context: dict) -> dict:
+    """Complete raster processing in one execution."""
+    # Reuse existing logic functions (not handlers)
+    validation = _validate_raster_impl(params)
+    cog_result = _create_cog_impl(params, validation)
+    stac_result = _register_stac_impl(params, cog_result)
+    return {**cog_result, **stac_result}
+```
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S7.13.1 | 📋 | Create `jobs/process_raster_docker.py` - single-stage job definition |
+| S7.13.2 | 📋 | Create `services/raster/handler_complete.py` - consolidated handler |
+| S7.13.3 | 📋 | Extract reusable `_impl` functions from existing handlers |
+| S7.13.4 | 📋 | Register job and handler in `__init__.py` files |
+| S7.13.5 | 📋 | Add submission endpoint or use generic `/api/jobs/submit/{job_type}` |
+| S7.13.6 | 📋 | Test locally with `workers_entrance.py` |
+| S7.13.7 | 📋 | Test end-to-end: submit job → Docker executes → job complete |
+| S7.13.8 | 📋 | Add `process_vector_docker` job (same pattern) |
+
+**Jobs to Create**:
+| Docker Job | Consolidates | Handler |
+|------------|--------------|---------|
+| `process_raster_docker` | validate + COG + STAC | `process_raster_complete` |
+| `process_vector_docker` | validate + load + STAC | `process_vector_complete` |
+| `process_large_raster_docker` | chunked + COG + STAC | `process_large_raster_complete` |
+
+**Key Files** (planned):
+- `jobs/process_raster_docker.py` - Job definition
+- `services/raster/handler_complete.py` - Consolidated handler
+- `jobs/process_vector_docker.py` - Vector job
+- `services/vector/handler_complete.py` - Vector handler
+
+**Testing**:
+```bash
+# Local Docker test
+curl -X POST http://localhost:8080/execute/process_raster_complete \
+    -H "Content-Type: application/json" \
+    -d '{"source_url": "...", "output_container": "silvercogs"}'
+
+# Full job test
+curl -X POST http://localhost:8080/test/execute/process_raster_complete \
+    -d '{"params": {"source_url": "..."}}'
+```
+
+---
+
+### Feature F7.14: Dynamic Task Routing 🔵 OPTIONAL
+
+**Deliverable**: Configurable task-to-queue routing with environment-based overrides
+**Status**: 🔵 BACKLOG - Optional, implement if needed
+**Design Document**: [UNIFICATION.md Section 4](/Users/robertharrison/python_builds/rmhgeoapi-docker/UNIFICATION.md#4-taskroutingconfig-design)
+**Added**: 10 JAN 2026
+**Revised**: 10 JAN 2026 - Demoted to optional (separate Docker jobs is simpler)
+
+**When This Would Be Needed**:
+- If you want Function App and Docker to share the SAME job definitions
+- If you want to route SOME tasks to Docker, others to Functions dynamically
+- If you want hybrid execution (e.g., validate in Functions, COG in Docker)
+
+**Current Decision**: Use separate job definitions (F7.13) instead.
+- Simpler to implement, test, and troubleshoot
+- No CoreMachine changes required
+- Clear separation of concerns
+
+**If Needed Later**:
+`TaskRoutingConfig` class would allow:
+```bash
+# Route all raster tasks to Docker
+ROUTE_ALL_RASTER_TO_DOCKER=true
+
+# Or specific tasks only
+ROUTE_TO_DOCKER=create_cog,create_cog_streaming
+```
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S7.14.1 | 🔵 | Create `config/task_routing_config.py` |
+| S7.14.2 | 🔵 | Update `config/defaults.py` with task lists |
+| S7.14.3 | 🔵 | Integrate with CoreMachine `_get_queue_for_task()` |
+| S7.14.4 | 🔵 | Add `/routing` health endpoint |
+
+**Revisit When**: Separate Docker jobs prove insufficient for a use case.
 
 ---

@@ -862,6 +862,32 @@ class STACDefaults:
 
 
 # =============================================================================
+# OBSERVABILITY DEFAULTS (10 JAN 2026 - F7.12.C Flag Consolidation)
+# =============================================================================
+
+class ObservabilityDefaults:
+    """
+    Observability configuration defaults.
+
+    Controls unified debug instrumentation across the application.
+
+    FLAG CONSOLIDATION (10 JAN 2026):
+        BEFORE: DEBUG_MODE, DEBUG_LOGGING, METRICS_DEBUG_MODE (confusing)
+        AFTER:  OBSERVABILITY_MODE (single unified flag)
+
+    Features controlled by OBSERVABILITY_MODE:
+        - Memory/CPU tracking (log_memory_checkpoint)
+        - Service latency tracking (@track_latency)
+        - Blob metrics logging (MetricsBlobLogger)
+        - Database stats collection (get_database_stats)
+        - Verbose diagnostics output
+    """
+
+    # Master switch for all observability features
+    OBSERVABILITY_MODE = False
+
+
+# =============================================================================
 # APPLICATION DEFAULTS
 # =============================================================================
 
@@ -870,10 +896,14 @@ class AppDefaults:
     Application-wide defaults.
 
     Controls debug mode, logging, health checks, and timeouts.
+
+    NOTE (10 JAN 2026): DEBUG_MODE is now an alias for OBSERVABILITY_MODE.
+    Prefer using OBSERVABILITY_MODE env var for new deployments.
+    DEBUG_MODE is kept for backward compatibility.
     """
 
     # Environment
-    DEBUG_MODE = False
+    DEBUG_MODE = False  # Legacy - use OBSERVABILITY_MODE instead
     ENVIRONMENT = "dev"
     LOG_LEVEL = "INFO"
 
@@ -928,6 +958,7 @@ __all__ = [
     "PlatformDefaults",
     "FathomDefaults",
     "STACDefaults",
+    "ObservabilityDefaults",
     "AppDefaults",
     "KeyVaultDefaults",
 ]

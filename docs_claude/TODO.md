@@ -1,8 +1,128 @@
 # Working Backlog
 
-**Last Updated**: 10 JAN 2026 (F7.11 STAC Self-Healing vectors implemented)
+**Last Updated**: 11 JAN 2026 (F7.12 Docker Worker deployed to rmhheavyapi)
 **Source of Truth**: [docs/epics/README.md](/docs/epics/README.md) — Epic/Feature/Story definitions
 **Purpose**: Sprint-level task tracking and delegation
+
+---
+
+## 🔥 NEXT UP: Docker Worker Infrastructure (F7.12-13)
+
+**Epic**: E7 Pipeline Infrastructure
+**Goal**: Docker worker with consolidated single-task jobs (no multi-stage complexity)
+**Reference**: [rmhgeoapi-docker](/Users/robertharrison/python_builds/rmhgeoapi-docker/) for code patterns
+**Added**: 10 JAN 2026
+
+### Architecture Decision
+
+```
+FUNCTION APP                         DOCKER WORKER
+─────────────                        ─────────────
+process_raster_v2                    process_raster_docker
+├── Stage 1: validate_raster         └── Stage 1: process_raster_complete
+├── Stage 2: create_cog                  (does everything in one handler)
+└── Stage 3: stac_raster
+
+Both use same CoreMachine.process_task_message() contract.
+No CoreMachine changes needed.
+Docker jobs = 1 stage, 1 task.
+```
+
+**Why This Approach**:
+1. Stages exist for Function App timeout limits - Docker doesn't need them
+2. CoreMachine is agnostic to WHO processes tasks - just honor the contract
+3. Separate jobs are easier to test and troubleshoot
+4. Dynamic routing (TaskRoutingConfig) NOT needed for MVP
+
+### F7.12: Docker Worker Infrastructure ✅ COMPLETE
+
+**Deployed**: 11 JAN 2026 to `rmhheavyapi` Web App
+**Image**: `rmhazureacr.azurecr.io/geospatial-worker:v0.7.1-auth`
+**Version**: 0.7.7.1
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| S7.12.1 | Create `docker_main.py` (queue polling entry point) | ✅ |
+| S7.12.2 | Create `workers_entrance.py` (FastAPI + health endpoints) | ✅ |
+| S7.12.3 | Create `Dockerfile`, `requirements-docker.txt`, `docker.env.example` | ✅ |
+| S7.12.4 | Skip testing/ directory (building new) | ⏭️ |
+| S7.12.5 | Create `.funcignore` to exclude Docker files from Functions deploy | ✅ |
+| S7.12.6 | Create `infrastructure/auth/` module for Managed Identity OAuth | ✅ |
+| S7.12.7 | Verify ACR build succeeds | ✅ |
+| S7.12.8 | Deploy to rmhheavyapi Web App | ✅ |
+| S7.12.9 | Configure identities (PostgreSQL: user-assigned, Storage: system-assigned) | ✅ |
+| S7.12.10 | Verify all health endpoints (`/livez`, `/readyz`, `/health`) | ✅ |
+
+**Key Files Created**:
+- `docker_main.py` - Queue polling entry point (not HTTP)
+- `workers_entrance.py` - FastAPI app with health endpoints
+- `Dockerfile` - OSGeo GDAL ubuntu-full-3.10.1 base
+- `requirements-docker.txt` - Dependencies (minus azure-functions)
+- `docker.env.example` - Environment variable template
+- `.funcignore` - Excludes Docker files from Functions deploy
+- `infrastructure/auth/__init__.py` - Auth module initialization
+- `infrastructure/auth/token_cache.py` - Thread-safe token caching
+- `infrastructure/auth/postgres_auth.py` - PostgreSQL OAuth
+- `infrastructure/auth/storage_auth.py` - Storage OAuth + GDAL config
+
+**Identity Configuration**:
+| Resource | Identity | Type |
+|----------|----------|------|
+| PostgreSQL (`rmhpgflexadmin`) | `a533cb80-a590-4fad-8e52-1eb1f72659d7` | User-assigned MI |
+| Storage (`rmhazuregeo`) | `cea30c4b-8d75-4a39-8b53-adab9a904345` | System-assigned MI |
+
+**Health Endpoints**:
+- `/livez` - Liveness probe (process running)
+- `/readyz` - Readiness probe (tokens valid)
+- `/health` - Detailed health (database + storage connectivity)
+
+### F7.13: Docker Job Definitions
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| S7.13.1 | Create `jobs/process_raster_docker.py` - single-stage job | 📋 |
+| S7.13.2 | Create `services/raster/handler_complete.py` - consolidated handler | 📋 |
+| S7.13.3 | Extract reusable `_impl` functions from existing handlers | 📋 |
+| S7.13.4 | Register job and handler in `__init__.py` files | 📋 |
+| S7.13.5 | Test locally with `workers_entrance.py` | 📋 |
+| S7.13.6 | Test end-to-end: submit job → Docker executes → job complete | 📋 |
+| S7.13.7 | Add `process_vector_docker` job (same pattern) | 📋 |
+
+### Handler Pattern
+
+```python
+# services/raster/handler_complete.py
+def process_raster_complete(params: dict, context: dict) -> dict:
+    """Complete raster processing in one execution."""
+    # Reuse existing logic functions (not handlers)
+    validation = _validate_raster_impl(params)
+    cog_result = _create_cog_impl(params, validation)
+    stac_result = _register_stac_impl(params, cog_result)
+    return {**cog_result, **stac_result}
+```
+
+### Testing
+
+```bash
+# Local Docker test (no external deps with mock mode)
+curl -X POST http://localhost:8080/test/execute/process_raster_complete \
+    -d '{"params": {"source_url": "..."}}'
+
+# Full job test
+POST /api/jobs/submit/process_raster_docker
+{"source_url": "...", "output_container": "silvercogs"}
+```
+
+### F7.14: Dynamic Task Routing (OPTIONAL - Backlog)
+
+**Status**: 🔵 BACKLOG - Only implement if separate Docker jobs prove insufficient
+
+TaskRoutingConfig would allow routing individual tasks to different queues:
+```bash
+ROUTE_TO_DOCKER=create_cog,process_fathom_stack
+```
+
+**Current Decision**: Separate job definitions is simpler and sufficient.
 
 ---
 
@@ -1103,6 +1223,8 @@ Tasks suitable for a colleague with Azure/Python/pipeline expertise but without 
 
 | Date | Item | Epic |
 |------|------|------|
+| 11 JAN 2026 | **F7.12 Docker Worker Infrastructure** - Deployed to rmhheavyapi with Managed Identity OAuth (v0.7.7.1) | E7 |
+| 10 JAN 2026 | **F7.12 Logging Architecture** - Flag consolidation, global log context, App Insights export (RBAC pending) | E7 |
 | 09 JAN 2026 | **SP12.9 NiceGUI Spike Complete** - Decision: Stay with HTMX/JS/HTML/CSS | E12 |
 | 09 JAN 2026 | **F12.3.1 DRY Consolidation** - CSS/JS deduplication across interfaces | E12 |
 | 09 JAN 2026 | **F7.8 Unified Metadata Architecture Phase 1** (models, schema, repository) | E7 |
@@ -1159,7 +1281,7 @@ Tasks suitable for a colleague with Azure/Python/pipeline expertise but without 
 **Epic**: E7 Pipeline Infrastructure
 **Goal**: Eliminate duplicate debug flags, unify diagnostics, add global log context for multi-app filtering
 **Priority**: HIGH - Duplicate flags are accumulating and causing confusion
-**Status**: 📋 PLANNED
+**Status**: ✅ COMPLETE (code deployed, RBAC pending)
 
 ### Background
 
@@ -1192,18 +1314,18 @@ Systematic review (10 JAN 2026) identified significant issues in logging/metrics
 - `triggers/health.py` - Also does connectivity checks, instance info
 - `util_logger.py:get_runtime_environment()` - Also gathers instance info
 
-### F7.12.A: Global Log Context (HIGH PRIORITY)
+### F7.12.A: Global Log Context ✅ COMPLETE
 
 **Goal**: Every log line includes app_name and instance_id for multi-app filtering
 
 | Story | Description | Status | Files |
 |-------|-------------|--------|-------|
-| S7.12.A.1 | Add `LOG_CONTEXT_APP_NAME` and `LOG_CONTEXT_INSTANCE_ID` to LoggerFactory | 📋 | `util_logger.py` |
-| S7.12.A.2 | Modify `create_logger()` to inject app/instance into every log | 📋 | `util_logger.py` |
-| S7.12.A.3 | Update `service_latency.py` to use LoggerFactory with context | 📋 | `infrastructure/service_latency.py` |
-| S7.12.A.4 | Update `metrics_blob_logger.py` to include app_name in blob path | 📋 | `infrastructure/metrics_blob_logger.py` |
-| S7.12.A.5 | Add `environment` (dev/qa/prod) to log context | 📋 | `util_logger.py` |
-| S7.12.A.6 | Document log filtering patterns for multi-app deployment | 📋 | `docs_claude/APPLICATION_INSIGHTS.md` |
+| S7.12.A.1 | Add `LOG_CONTEXT_APP_NAME` and `LOG_CONTEXT_INSTANCE_ID` to LoggerFactory | ✅ | `util_logger.py` |
+| S7.12.A.2 | Modify `create_logger()` to inject app/instance into every log | ✅ | `util_logger.py` |
+| S7.12.A.3 | Update `service_latency.py` to use LoggerFactory with context | ✅ | `infrastructure/service_latency.py` |
+| S7.12.A.4 | Update `metrics_blob_logger.py` to include app_name in blob path | ✅ | `infrastructure/metrics_blob_logger.py` |
+| S7.12.A.5 | Add `environment` (dev/qa/prod) to log context | ✅ | `util_logger.py` |
+| S7.12.A.6 | Document log filtering patterns for multi-app deployment | ✅ | `docs/wiki/WIKI_ENVIRONMENT_VARIABLES.md` |
 
 **Implementation for S7.12.A.1-2**:
 ```python
@@ -1240,19 +1362,15 @@ traces
 | order by timestamp desc
 ```
 
-### F7.12.B: Unify Diagnostics Module (MEDIUM PRIORITY)
+### F7.12.B: Unify Diagnostics Module ⏭️ SKIPPED
 
 **Goal**: Single source of truth for connectivity/DNS/instance checks
 
+**Decision (10 JAN 2026)**: Reviewed existing structure - determined current organization is clean enough. `infrastructure/diagnostics.py` already handles diagnostics, `triggers/health.py` delegates appropriately. No refactor needed at this time.
+
 | Story | Description | Status | Files |
 |-------|-------------|--------|-------|
-| S7.12.B.1 | Create `infrastructure/diagnostics/connectivity.py` - shared checks | 📋 | New file |
-| S7.12.B.2 | Create `infrastructure/diagnostics/dns.py` - shared DNS timing | 📋 | New file |
-| S7.12.B.3 | Create `infrastructure/diagnostics/instance.py` - shared instance info | 📋 | New file |
-| S7.12.B.4 | Create `infrastructure/diagnostics/__init__.py` - unified API | 📋 | New file |
-| S7.12.B.5 | Refactor `infrastructure/diagnostics.py` to use shared modules | 📋 | Existing file |
-| S7.12.B.6 | Refactor `triggers/health.py` to delegate to shared modules | 📋 | `triggers/health.py` |
-| S7.12.B.7 | Remove duplicate code from `util_logger.py:get_runtime_environment()` | 📋 | `util_logger.py` |
+| S7.12.B.1-7 | Diagnostics module refactor | ⏭️ SKIPPED | Existing structure adequate |
 
 **Target Structure**:
 ```
@@ -1270,18 +1388,18 @@ triggers/health.py             # Delegates to infrastructure/diagnostics/
 util_logger.py                 # Delegates to infrastructure/diagnostics/instance.py
 ```
 
-### F7.12.C: Consolidate Debug Flags (HIGH PRIORITY)
+### F7.12.C: Consolidate Debug Flags ✅ COMPLETE
 
 **Goal**: Reduce 4 flags to 2 clear flags with distinct purposes
 
 | Story | Description | Status | Files |
 |-------|-------------|--------|-------|
-| S7.12.C.1 | Document current flag behavior and decide consolidation strategy | 📋 | This doc |
-| S7.12.C.2 | Implement flag consolidation (see strategy below) | 📋 | Multiple files |
-| S7.12.C.3 | Update all usages to use new consolidated flags | 📋 | Multiple files |
-| S7.12.C.4 | Add deprecation warnings for old flag names | 📋 | `config/__init__.py` |
-| S7.12.C.5 | Update WIKI_ENVIRONMENT_VARIABLES.md with new flag structure | 📋 | `docs/wiki/` |
-| S7.12.C.6 | Update startup_state.py ENV_VARS_WITH_DEFAULTS | 📋 | `startup_state.py` |
+| S7.12.C.1 | Document current flag behavior and decide consolidation strategy | ✅ | This doc |
+| S7.12.C.2 | Implement flag consolidation (see strategy below) | ✅ | `config/observability_config.py` |
+| S7.12.C.3 | Update all usages to use new consolidated flags | ✅ | Multiple files |
+| S7.12.C.4 | Add deprecation warnings for old flag names | ✅ | Backward compat in observability_config.py |
+| S7.12.C.5 | Update WIKI_ENVIRONMENT_VARIABLES.md with new flag structure | ✅ | `docs/wiki/` |
+| S7.12.C.6 | Update startup_state.py ENV_VARS_WITH_DEFAULTS | ✅ | `startup_state.py` |
 
 **Consolidation Strategy**:
 
@@ -1313,18 +1431,35 @@ class Config:
         )
 ```
 
-### F7.12.D: Python App Insights Log Export (MEDIUM PRIORITY)
+### F7.12.D: Python App Insights Log Export ✅ CODE COMPLETE (RBAC PENDING)
 
 **Goal**: On-demand export of App Insights logs to blob storage via Python endpoint
 
 | Story | Description | Status | Files |
 |-------|-------------|--------|-------|
-| S7.12.D.1 | Create `infrastructure/appinsights_export.py` with REST API client | 📋 | New file |
-| S7.12.D.2 | Implement `query_logs(query: str, hours: int)` method | 📋 | `appinsights_export.py` |
-| S7.12.D.3 | Implement `export_to_blob(query, hours, container, blob_name)` method | 📋 | `appinsights_export.py` |
-| S7.12.D.4 | Add `POST /api/logs/export` endpoint | 📋 | `triggers/probes.py` or new file |
-| S7.12.D.5 | Add `GET /api/logs/query` endpoint for quick queries | 📋 | Same file |
-| S7.12.D.6 | Document usage and KQL templates | 📋 | `docs_claude/APPLICATION_INSIGHTS.md` |
+| S7.12.D.1 | Create `infrastructure/appinsights_exporter.py` with REST API client | ✅ | `infrastructure/appinsights_exporter.py` |
+| S7.12.D.2 | Implement `query_logs(query: str, hours: int)` method | ✅ | `appinsights_exporter.py` |
+| S7.12.D.3 | Implement `export_to_blob(query, hours, container, blob_name)` method | ✅ | `appinsights_exporter.py` |
+| S7.12.D.4 | Add `POST /api/appinsights/export` endpoint | ✅ | `triggers/probes.py` |
+| S7.12.D.5 | Add `POST /api/appinsights/query` endpoint for quick queries | ✅ | `triggers/probes.py` |
+| S7.12.D.6 | Document usage and KQL templates | ✅ | `docs/wiki/WIKI_API_HEALTH.md` |
+
+**⚠️ RBAC Configuration Required**:
+The App Insights query endpoints return **403 InsufficientAccessError** because the Function App's managed identity does not have permission to query its own Application Insights resource.
+
+To enable these endpoints, grant **Monitoring Reader** role:
+```bash
+# Get the managed identity principal ID
+PRINCIPAL_ID=$(az functionapp identity show --name rmhazuregeoapi --resource-group rmhazure_rg --query principalId -o tsv)
+
+# Grant Monitoring Reader on Application Insights
+az role assignment create \
+  --assignee "$PRINCIPAL_ID" \
+  --role "Monitoring Reader" \
+  --scope "/subscriptions/$(az account show --query id -o tsv)/resourceGroups/rmhazure_rg/providers/microsoft.insights/components/rmhazuregeoapi"
+```
+
+Until this RBAC change is made, the `/api/appinsights/query` and `/api/appinsights/export` endpoints will return 403 errors.
 
 **Implementation for S7.12.D.1-3** (`infrastructure/appinsights_export.py`):
 ```python

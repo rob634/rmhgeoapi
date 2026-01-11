@@ -231,6 +231,12 @@ class AppModeConfig(BaseModel):
                     "When False, standalone mode skips long-running-tasks queue validation."
     )
 
+    docker_worker_url: Optional[str] = Field(
+        default=None,
+        description="URL of the Docker worker for health checks (e.g., https://rmhheavyapi.azurewebsites.net). "
+                    "Used by health interface to fetch Docker worker status."
+    )
+
     # =========================================================================
     # QUEUE LISTENING PROPERTIES
     # =========================================================================
@@ -418,6 +424,7 @@ class AppModeConfig(BaseModel):
         # Parse as boolean: "true", "1", "yes" → True, anything else → False
         docker_worker_str = os.environ.get("DOCKER_WORKER_ENABLED", "").lower()
         docker_worker_enabled = docker_worker_str in ("true", "1", "yes")
+        docker_worker_url = os.environ.get("DOCKER_WORKER_URL")
 
         return cls(
             mode=mode,
@@ -425,6 +432,7 @@ class AppModeConfig(BaseModel):
             raster_app_url=os.environ.get("RASTER_APP_URL"),
             vector_app_url=os.environ.get("VECTOR_APP_URL"),
             docker_worker_enabled=docker_worker_enabled,
+            docker_worker_url=docker_worker_url,
         )
 
     # =========================================================================
@@ -461,6 +469,7 @@ class AppModeConfig(BaseModel):
             "external_apps": {
                 "raster_app_url": self.raster_app_url,
                 "vector_app_url": self.vector_app_url,
+                "docker_worker_url": self.docker_worker_url,
             },
         }
 

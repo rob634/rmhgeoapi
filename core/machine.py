@@ -273,7 +273,11 @@ class CoreMachine:
         from exceptions import ContractViolationError
 
         # Determine task category - NO FALLBACK
-        if task_type in TaskRoutingDefaults.RASTER_TASKS:
+        if task_type in TaskRoutingDefaults.LONG_RUNNING_TASKS:
+            # Long-running tasks → Docker worker queue (11 JAN 2026)
+            queue_name = self.config.queues.long_running_tasks_queue
+            self.logger.debug(f"📤 Task type '{task_type}' → long-running queue: {queue_name}")
+        elif task_type in TaskRoutingDefaults.RASTER_TASKS:
             queue_name = self.config.queues.raster_tasks_queue
             self.logger.debug(f"📤 Task type '{task_type}' → raster queue: {queue_name}")
         elif task_type in TaskRoutingDefaults.VECTOR_TASKS:
@@ -283,8 +287,9 @@ class CoreMachine:
             # NO FALLBACK - Explicit routing required (11 DEC 2025)
             raise ContractViolationError(
                 f"Task type '{task_type}' is not mapped to a queue. "
-                f"Add '{task_type}' to TaskRoutingDefaults.RASTER_TASKS or "
-                f"TaskRoutingDefaults.VECTOR_TASKS in config/defaults.py"
+                f"Add '{task_type}' to TaskRoutingDefaults.RASTER_TASKS, "
+                f"TaskRoutingDefaults.VECTOR_TASKS, or TaskRoutingDefaults.LONG_RUNNING_TASKS "
+                f"in config/defaults.py"
             )
 
         return queue_name
@@ -867,10 +872,10 @@ class CoreMachine:
             # Inject job context into parameters (underscore prefix = system-injected)
             # This allows handlers to access job_id, job_type, stage without modifying every job definition
             #
-            # NOTE: _heartbeat_fn DISABLED (2 DEC 2025) - Token expiration issues
+            # NOTE: _pulse_fn DISABLED (2 DEC 2025) - Token expiration issues
             # When re-enabling, add this to enriched_params:
-            #   '_heartbeat_fn': lambda tid=task_id: self.repos['task_repo'].update_task_heartbeat(tid),
-            # See services/raster_cog.py HeartbeatWrapper class for usage
+            #   '_pulse_fn': lambda tid=task_id: self.repos['task_repo'].update_task_pulse(tid),
+            # See services/raster_cog.py PulseWrapper class for usage
             task_id = task_message.task_id
             enriched_params = {
                 **task_message.parameters,
@@ -878,7 +883,7 @@ class CoreMachine:
                 '_job_type': task_message.job_type,
                 '_stage': task_message.stage,
                 '_task_id': task_id,
-                # '_heartbeat_fn': DISABLED - see note above
+                # '_pulse_fn': DISABLED - see note above
             }
 
             # Execute handler (returns dict or TaskResult)

@@ -520,8 +520,8 @@ class TaskRepository(PostgreSQLTaskRepository):
                     update.error_details = additional_updates['error_details']
                 if 'result_data' in additional_updates:
                     update.result_data = additional_updates['result_data']
-                if 'heartbeat' in additional_updates:
-                    update.heartbeat = additional_updates['heartbeat']
+                if 'last_pulse' in additional_updates:
+                    update.last_pulse = additional_updates['last_pulse']
                 if 'retry_count' in additional_updates:
                     update.retry_count = additional_updates['retry_count']
                 if 'metadata' in additional_updates:
@@ -611,9 +611,9 @@ class TaskRepository(PostgreSQLTaskRepository):
         """
         return self.update_task(task_id, update_model)
 
-    def update_task_heartbeat(self, task_id: str) -> bool:
+    def update_task_pulse(self, task_id: str) -> bool:
         """
-        Update task heartbeat timestamp.
+        Update task pulse timestamp (for long-running Docker tasks).
 
         Args:
             task_id: Task ID to update
@@ -621,7 +621,7 @@ class TaskRepository(PostgreSQLTaskRepository):
         Returns:
             True if updated successfully
         """
-        update = TaskUpdateModel(heartbeat=datetime.now(timezone.utc))
+        update = TaskUpdateModel(last_pulse=datetime.now(timezone.utc))
         return self.update_task(task_id, update)
     
     def increment_retry_count(self, task_id: str) -> bool:

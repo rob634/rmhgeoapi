@@ -42,7 +42,7 @@ class TaskRecord(TaskData):
     - metadata: Additional task metadata
     - error_details: Error message if failed
     - retry_count: Number of retry attempts
-    - heartbeat: Last heartbeat timestamp
+    - last_pulse: Last pulse timestamp (for long-running Docker tasks)
     - next_stage_params: Parameters for next stage tasks
     - created_at, updated_at: Audit timestamps
 
@@ -68,8 +68,14 @@ class TaskRecord(TaskData):
 
     # Execution tracking (Database-specific)
     retry_count: int = Field(default=0, ge=0, description="Number of retry attempts")
-    heartbeat: Optional[datetime] = Field(default=None, description="Last heartbeat timestamp")
+    last_pulse: Optional[datetime] = Field(default=None, description="Last pulse timestamp (Docker long-running tasks)")
     next_stage_params: Optional[Dict[str, Any]] = Field(default=None, description="Parameters for next stage")
+
+    # Checkpoint tracking (11 JAN 2026 - Docker worker resume support)
+    # Enables resume from checkpoint if Docker task is interrupted
+    checkpoint_phase: Optional[int] = Field(default=None, description="Current checkpoint phase number")
+    checkpoint_data: Optional[Dict[str, Any]] = Field(default=None, description="Checkpoint state data (JSONB)")
+    checkpoint_updated_at: Optional[datetime] = Field(default=None, description="When checkpoint was last saved")
 
     # Multi-app tracking (07 DEC 2025 - Multi-Function App Architecture)
     target_queue: Optional[str] = Field(

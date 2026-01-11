@@ -108,6 +108,11 @@ class QueuesInterface(BaseInterface):
                                 <td>Vector processing tasks (PostGIS load)</td>
                                 <td>Vector task processor</td>
                             </tr>
+                            <tr>
+                                <td><code>long-running-tasks</code></td>
+                                <td>Long-running tasks (large raster, Docker jobs)</td>
+                                <td>Docker Worker Container</td>
+                            </tr>
                         </tbody>
                     </table>
                 </div>

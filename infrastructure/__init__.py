@@ -233,6 +233,14 @@ def __getattr__(name: str):
         from .factory import get_default_repositories
         return get_default_repositories
 
+    # Checkpoint Manager (11 JAN 2026 - Docker resume support)
+    elif name == "CheckpointManager":
+        from .checkpoint_manager import CheckpointManager
+        return CheckpointManager
+    elif name == "CheckpointValidationError":
+        from .checkpoint_manager import CheckpointValidationError
+        return CheckpointValidationError
+
     else:
         raise AttributeError(f"module 'infrastructure' has no attribute '{name}'")
 
@@ -271,4 +279,7 @@ __all__ = [
     "FathomETLTracker",
     "RasterCollectionTracker",
     "get_default_repositories",
+    # Checkpoint Manager (11 JAN 2026 - Docker resume support)
+    "CheckpointManager",
+    "CheckpointValidationError",
 ]

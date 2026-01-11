@@ -416,12 +416,12 @@ class TaskRoutingDefaults:
     """
 
     # Long-running tasks → long-running-tasks queue (13 DEC 2025, renamed 22 DEC 2025)
-    # Placeholder for Docker worker. When Docker support is added, large
-    # tasks will route here instead of raising NotImplementedError.
-    # Currently empty - no tasks route here yet.
+    # Docker worker tasks - no Azure Functions timeout constraints.
+    # These handlers are designed for Docker worker (rmhheavyapi) execution.
     LONG_RUNNING_TASKS = [
-        # Future: "create_cog_large", "extract_tiles_large", etc.
-        # When a job contains files > size threshold, tasks route here
+        # Docker consolidated raster handler (11 JAN 2026) - F7.13
+        # Validate → COG → STAC in single execution (no stage overhead)
+        "raster_process_complete",
     ]
 
     # Raster tasks → raster-tasks queue (memory-intensive, low concurrency)

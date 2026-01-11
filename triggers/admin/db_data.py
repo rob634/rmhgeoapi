@@ -521,7 +521,7 @@ class AdminDbDataTrigger:
             # Build query
             query_parts = [
                 f"SELECT task_id, parent_job_id, task_type, status::text, stage, task_index,",
-                f"       parameters, result_data, error_details, heartbeat, retry_count,",
+                f"       parameters, result_data, error_details, last_pulse, retry_count,",
                 f"       created_at, updated_at",
                 f"FROM {self.config.app_schema}.tasks",
                 f"WHERE created_at >= NOW() - INTERVAL '{hours} hours'"
@@ -570,7 +570,7 @@ class AdminDbDataTrigger:
                             'parameters': row['parameters'],
                             'result_data': row['result_data'],
                             'error_details': row['error_details'],
-                            'heartbeat': row['heartbeat'].isoformat() if row['heartbeat'] else None,
+                            'last_pulse': row['last_pulse'].isoformat() if row['last_pulse'] else None,
                             'retry_count': row['retry_count'],
                             'created_at': row['created_at'].isoformat() if row['created_at'] else None,
                             'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None
@@ -639,7 +639,7 @@ class AdminDbDataTrigger:
 
             query = f"""
                 SELECT task_id, parent_job_id, task_type, status::text, stage, task_index,
-                       parameters, result_data, metadata, error_details, heartbeat, retry_count,
+                       parameters, result_data, metadata, error_details, last_pulse, retry_count,
                        execution_started_at, created_at, updated_at
                 FROM {self.config.app_schema}.tasks
                 WHERE parent_job_id = %s
@@ -673,7 +673,7 @@ class AdminDbDataTrigger:
                             'result_data': row['result_data'],
                             'metadata': row['metadata'],
                             'error_details': row['error_details'],
-                            'heartbeat': row['heartbeat'].isoformat() if row['heartbeat'] else None,
+                            'last_pulse': row['last_pulse'].isoformat() if row['last_pulse'] else None,
                             'retry_count': row['retry_count'],
                             'execution_started_at': row['execution_started_at'].isoformat() if row['execution_started_at'] else None,
                             'execution_time_ms': execution_time_ms,

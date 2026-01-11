@@ -183,7 +183,8 @@ class JanitorRepository(PostgreSQLRepository):
         Returns:
             List of stale task dicts with task_id, parent_job_id, job_type, etc.
         """
-        # 15 DEC 2025: Added heartbeat, parameters, task_index for PROCESSING retry logic
+        # 15 DEC 2025: Added last_pulse, parameters, task_index for PROCESSING retry logic
+        # 11 JAN 2026: Renamed heartbeat → last_pulse
         query = sql.SQL("""
             SELECT
                 t.task_id,
@@ -193,7 +194,7 @@ class JanitorRepository(PostgreSQLRepository):
                 t.stage,
                 t.task_index,
                 t.status,
-                t.heartbeat,
+                t.last_pulse,
                 t.parameters,
                 t.updated_at,
                 t.created_at,

@@ -107,10 +107,12 @@ class ServiceBusAdminTrigger:
         self._config = None
 
         # Known queue names from QueueDefaults (11 DEC 2025 - No Legacy Fallbacks)
+        # Updated 11 JAN 2026: Added long-running-tasks queue for Docker worker
         self._known_queues = [
             QueueDefaults.JOBS_QUEUE,
             QueueDefaults.RASTER_TASKS_QUEUE,
             QueueDefaults.VECTOR_TASKS_QUEUE,
+            QueueDefaults.LONG_RUNNING_TASKS_QUEUE,
         ]
 
         self.logger.info("🔧 Initializing ServiceBusAdminTrigger")

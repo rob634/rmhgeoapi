@@ -237,7 +237,7 @@ class JanitorService:
         Task goes to PENDING, message is re-sent, trigger confirms PENDING→QUEUED.
 
         Used for PROCESSING tasks that timed out without ever starting
-        (heartbeat is None), allowing them to be retried.
+        (last_pulse is None), allowing them to be retried.
 
         Args:
             task_id: Task ID to reset
@@ -325,7 +325,7 @@ class JanitorService:
                 for i, task in enumerate(stale_tasks, 1):
                     task_id = task['task_id']
                     retry_count = task.get('retry_count', 0)
-                    heartbeat = task.get('heartbeat')
+                    last_pulse = task.get('last_pulse')
                     minutes_stuck = round(task.get('minutes_stuck', 0), 1)
                     task_type = task.get('task_type', '')
 
@@ -335,16 +335,16 @@ class JanitorService:
                         f"job_id={task['parent_job_id'][:16]}..., "
                         f"task_type={task_type}, "
                         f"stuck={minutes_stuck}min, "
-                        f"heartbeat={'SET' if heartbeat else 'None'}, "
+                        f"last_pulse={'SET' if last_pulse else 'None'}, "
                         f"retry_count={retry_count}"
                     )
 
                     # RETRY LOGIC (15 DEC 2025):
-                    # - If heartbeat is None: task was never started (platform issue)
+                    # - If last_pulse is None: task was never started (platform issue)
                     # - If retry_count < max: we can retry
-                    # - If heartbeat is SET: task actually ran and failed (code error)
+                    # - If last_pulse is SET: task actually ran and failed (code error)
                     can_retry = (
-                        heartbeat is None and
+                        last_pulse is None and
                         retry_count < self.config.orphaned_queued_max_retries
                     )
 
@@ -387,7 +387,7 @@ class JanitorService:
                                 "max_retries": self.config.orphaned_queued_max_retries,
                                 "minutes_stuck": minutes_stuck,
                                 "message_id": message_id,
-                                "reason": "processing_timeout_no_heartbeat"
+                                "reason": "processing_timeout_no_pulse"
                             })
 
                             logger.info(
@@ -407,11 +407,11 @@ class JanitorService:
                             })
                     else:
                         # Cannot retry - mark as FAILED
-                        if heartbeat:
+                        if last_pulse:
                             reason = "task_executed_but_timed_out"
                             error_message = (
                                 f"[JANITOR] Task exceeded {self.config.task_timeout_minutes} minute timeout. "
-                                f"Task started executing (heartbeat set) but did not complete."
+                                f"Task started executing (last_pulse set) but did not complete."
                             )
                         else:
                             reason = "max_retries_exceeded"
@@ -431,7 +431,7 @@ class JanitorService:
                             "task_type": task_type,
                             "minutes_stuck": minutes_stuck,
                             "retry_count": retry_count,
-                            "heartbeat_set": heartbeat is not None,
+                            "last_pulse_set": last_pulse is not None,
                             "reason": reason
                         })
 

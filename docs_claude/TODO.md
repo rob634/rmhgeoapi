@@ -76,30 +76,302 @@ Docker jobs = 1 stage, 1 task.
 - `/readyz` - Readiness probe (tokens valid)
 - `/health` - Detailed health (database + storage connectivity)
 
-### F7.13: Docker Job Definitions
+### F7.13: Docker Job Definitions with Checkpoint/Resume
+
+**Status**: IN PROGRESS (11 JAN 2026)
+**Key Innovation**: Docker tasks are "atomic" from orchestrator's perspective but internally resumable
 
 | Story | Description | Status |
 |-------|-------------|--------|
-| S7.13.1 | Create `jobs/process_raster_docker.py` - single-stage job | 📋 |
-| S7.13.2 | Create `services/raster/handler_complete.py` - consolidated handler | 📋 |
-| S7.13.3 | Extract reusable `_impl` functions from existing handlers | 📋 |
-| S7.13.4 | Register job and handler in `__init__.py` files | 📋 |
-| S7.13.5 | Test locally with `workers_entrance.py` | 📋 |
-| S7.13.6 | Test end-to-end: submit job → Docker executes → job complete | 📋 |
-| S7.13.7 | Add `process_vector_docker` job (same pattern) | 📋 |
+| S7.13.1 | Create `jobs/process_raster_docker.py` - single-stage job | ✅ Done |
+| S7.13.2 | Create `services/handler_process_raster_complete.py` - consolidated handler | ✅ Done |
+| S7.13.3 | Register job and handler in `__init__.py` files | ✅ Done |
+| S7.13.4 | Rename `heartbeat` → `last_pulse` throughout codebase | ✅ Done |
+| S7.13.5 | Add checkpoint fields to `TaskRecord` model and schema | ✅ Done |
+| S7.13.6 | Create `CheckpointManager` class for resume support | ✅ Done |
+| S7.13.7 | Update handler to use `CheckpointManager` | ✅ Done |
+| S7.13.8 | Test locally with `workers_entrance.py` | 📋 |
+| S7.13.9 | Test end-to-end: submit job → Docker crash → resume from checkpoint | 📋 |
+| S7.13.10 | Add `process_vector_docker` job (same pattern) | 📋 |
 
-### Handler Pattern
+### Checkpoint/Resume Architecture (11 JAN 2026)
+
+**Core Principle**: Function App = Job orchestration (coarse-grained), Docker Worker = Task execution with internal resilience (fine-grained)
+
+This mirrors Kubernetes pattern: Kubernetes orchestrates pods, pods handle their own restart logic.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  FUNCTION APP ORCHESTRATOR (CoreMachine)                        │
+│  - Sees tasks as ATOMIC black boxes                             │
+│  - Handles: job submission, stage advancement, job completion   │
+│  - Doesn't know/care about Docker internal phases               │
+│  - If Docker task completes → orchestrator advances job         │
+│  - If Docker task fails → orchestrator marks job failed         │
+└─────────────────────────┬───────────────────────────────────────┘
+                          │
+                          │ Queue message: "task_id=xyz, type=raster_process_complete"
+                          ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  DOCKER WORKER                                                  │
+│  - Picks up task message                                        │
+│  - Checks checkpoint_phase: "Did I crash mid-way?"              │
+│  - Resumes from last checkpoint OR starts fresh                 │
+│  - Updates checkpoint_phase/data as it progresses               │
+│  - On completion: marks task COMPLETED, orchestrator takes over │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Why This Works**:
+1. **Orchestrator doesn't care** - task goes to queue → task eventually completes or fails → orchestrator advances job
+2. **Docker worker is self-healing** - checks checkpoint on startup, resumes from last good state
+3. **No orchestrator changes needed** - existing CoreMachine works as-is
+4. **Task state table is single source of truth** - checkpoint_phase/data live on task record
+
+### Checkpoint Fields Added to TaskRecord (11 JAN 2026)
 
 ```python
-# services/raster/handler_complete.py
-def process_raster_complete(params: dict, context: dict) -> dict:
-    """Complete raster processing in one execution."""
-    # Reuse existing logic functions (not handlers)
-    validation = _validate_raster_impl(params)
-    cog_result = _create_cog_impl(params, validation)
-    stac_result = _register_stac_impl(params, cog_result)
-    return {**cog_result, **stac_result}
+# core/models/task.py
+class TaskRecord(BaseModel):
+    # ... existing fields ...
+
+    # Pulse tracking (renamed from heartbeat)
+    last_pulse: Optional[datetime] = None
+
+    # Checkpoint tracking for Docker resume support
+    checkpoint_phase: Optional[int] = None      # Current phase number (1, 2, 3...)
+    checkpoint_data: Optional[Dict] = None      # Phase-specific state (JSONB)
+    checkpoint_updated_at: Optional[datetime] = None
 ```
+
+### CheckpointManager Class (TO IMPLEMENT)
+
+```python
+# infrastructure/checkpoint_manager.py
+class CheckpointManager:
+    """Manages checkpoint state for resumable Docker tasks."""
+
+    def __init__(self, task_id: str, task_repo):
+        self.task_id = task_id
+        self.task_repo = task_repo
+        self.current_phase = None
+        self.data = {}
+        self._load_checkpoint()
+
+    def _load_checkpoint(self):
+        """Load existing checkpoint from task record."""
+        task = self.task_repo.get_task(self.task_id)
+        self.current_phase = task.checkpoint_phase or 0
+        self.data = task.checkpoint_data or {}
+
+    def should_skip(self, phase: int) -> bool:
+        """Check if phase was already completed."""
+        return self.current_phase >= phase
+
+    def save(self, phase: int, data: dict = None, validate_artifact: Callable = None):
+        """
+        Save checkpoint after completing a phase.
+
+        Args:
+            phase: Phase number just completed
+            data: Phase-specific data to merge into checkpoint
+            validate_artifact: Optional callable to validate output exists
+                             (e.g., check COG blob exists before saving checkpoint)
+        """
+        # Optional: validate artifact exists before saving
+        if validate_artifact and not validate_artifact():
+            raise CheckpointValidationError(f"Phase {phase} artifact validation failed")
+
+        self.task_repo.update_task(self.task_id, TaskUpdateModel(
+            checkpoint_phase=phase,
+            checkpoint_data={**self.data, **(data or {})},
+            checkpoint_updated_at=datetime.now(timezone.utc)
+        ))
+        self.current_phase = phase
+        self.data = {**self.data, **(data or {})}
+
+    def get_data(self, key: str, default=None):
+        """Get data from previous checkpoint."""
+        return self.data.get(key, default)
+```
+
+### Handler Pattern with Checkpoints
+
+```python
+# services/handler_process_raster_complete.py
+def process_raster_complete(params: dict, context: dict = None) -> dict:
+    """
+    Complete raster processing in one execution with checkpoint support.
+
+    Phases:
+        1. Validation - validate source raster
+        2. COG Creation - create Cloud Optimized GeoTIFF
+        3. STAC Metadata - register in STAC catalog
+
+    If Docker crashes mid-execution:
+        - Orchestrator doesn't know/care
+        - Same message stays in queue (not completed)
+        - Docker restarts, picks up message
+        - CheckpointManager loads last state
+        - Resumes from last completed phase
+    """
+    task_id = params['_task_id']
+    task_repo = RepositoryFactory.create_task_repository()
+    checkpoint = CheckpointManager(task_id, task_repo)
+
+    # Phase 1: Validation
+    if not checkpoint.should_skip(1):
+        logger.info(f"🔄 Phase 1: Validating raster...")
+        validation_result = validate_raster({...})
+        if not validation_result['success']:
+            return validation_result  # Fail fast
+        checkpoint.save(1, data={"validation": validation_result['result']})
+    else:
+        logger.info(f"⏭️ Phase 1: Skipping (already completed)")
+
+    # Phase 2: COG Creation (uses validation result from checkpoint)
+    if not checkpoint.should_skip(2):
+        logger.info(f"🔄 Phase 2: Creating COG...")
+        cog_params = {**params, **checkpoint.get_data('validation', {})}
+        cog_result = create_cog(cog_params)
+        if not cog_result['success']:
+            return cog_result  # Fail fast
+
+        # Validate COG exists before saving checkpoint
+        checkpoint.save(
+            phase=2,
+            data={"cog_blob": cog_result['result']['cog_blob']},
+            validate_artifact=lambda: blob_exists(cog_result['result']['cog_blob'])
+        )
+    else:
+        logger.info(f"⏭️ Phase 2: Skipping (already completed)")
+
+    # Phase 3: STAC Metadata
+    if not checkpoint.should_skip(3):
+        logger.info(f"🔄 Phase 3: Creating STAC metadata...")
+        stac_params = {**params, "cog_blob": checkpoint.get_data('cog_blob')}
+        stac_result = extract_stac_metadata(stac_params)
+        if not stac_result['success']:
+            return stac_result  # Fail fast
+        checkpoint.save(3, data={"stac_item_id": stac_result['result'].get('item_id')})
+    else:
+        logger.info(f"⏭️ Phase 3: Skipping (already completed)")
+
+    # All phases complete
+    return {
+        "success": True,
+        "result": checkpoint.data,
+        "message": "Raster processing complete"
+    }
+```
+
+### Checkpoint Validation Strategy
+
+Per discussion (11 JAN 2026), checkpoints use **full artifact validation**, not just existence checks:
+
+| Phase | Artifact | Validation |
+|-------|----------|------------|
+| 1 (Validation) | Validation result dict | Schema validation of result fields |
+| 2 (COG Creation) | COG blob in storage | Blob exists + can open with rasterio |
+| 3 (STAC Metadata) | STAC item in catalog | Item exists in pgstac.items |
+
+### Checkpoint Retention
+
+Checkpoints are retained (not cleared on completion) for:
+- Audit trail - understand what happened during processing
+- Debugging - see phase timings and intermediate data
+- Future: Timer function to clean up old checkpoints while retaining audit info
+
+### Testing Scenarios
+
+```bash
+# Test checkpoint resume
+1. Submit process_raster_docker job
+2. Let Phase 1 complete, Phase 2 start
+3. Kill Docker container mid-COG-creation
+4. Restart Docker
+5. Verify: Phase 1 skipped, Phase 2 restarts, job completes
+
+# Test artifact validation
+1. Submit job with invalid source
+2. Verify: Phase 1 fails, no checkpoint saved
+3. Fix source, resubmit
+4. Verify: Phase 1 runs fresh (no stale checkpoint)
+```
+
+### Key Files (Updated/Created 11 JAN 2026)
+
+| File | Purpose | Status |
+|------|---------|--------|
+| `core/models/task.py` | TaskRecord with checkpoint fields | ✅ Updated |
+| `core/schema/updates.py` | TaskUpdateModel with checkpoint fields | ✅ Updated |
+| `core/schema/sql_generator.py` | DDL with checkpoint columns + indexes | ✅ Updated |
+| `core/schema/deployer.py` | required_columns validation | ✅ Updated |
+| `infrastructure/postgresql.py` | INSERT/SELECT with checkpoint fields | ✅ Updated |
+| `infrastructure/jobs_tasks.py` | update_task_pulse() method | ✅ Updated |
+| `infrastructure/janitor_repository.py` | SQL query with last_pulse | ✅ Updated |
+| `services/raster_cog.py` | PulseWrapper class (renamed) | ✅ Updated |
+| `services/janitor_service.py` | last_pulse references | ✅ Updated |
+| `triggers/admin/db_data.py` | API responses with last_pulse | ✅ Updated |
+| `core/machine.py` | Commented code references | ✅ Updated |
+| `jobs/process_raster_docker.py` | Single-stage Docker job | ✅ Created |
+| `services/handler_process_raster_complete.py` | Consolidated handler | ✅ Created |
+| `infrastructure/checkpoint_manager.py` | CheckpointManager class | ✅ Created |
+
+### Memory Strategy for Docker Raster Processing (11 JAN 2026)
+
+**Principle**: Docker uses identical approach to Function App - just with more headroom.
+
+| Scenario | Strategy | Why |
+|----------|----------|-----|
+| Fits in memory (~7GB) | In-memory processing (MemoryFile) | Same as Function App, fast |
+| Larger than memory | Tiling pipeline (`process_large_raster_v2`) | Chunk into tiles, process individually |
+
+**Docker Environment**: 2 CPU, 7.7GB RAM
+
+**Memory Budget** (same pattern as Function App):
+```
+Input blob download:    ~2 GB max  ← downloaded to RAM
+MemoryFile overhead:    ~2 GB      ← rasterio buffers
+cog_translate work:     ~2 GB      ← compression/processing
+Output MemoryFile:      ~1.5 GB    ← output COG
+────────────────────────────────────
+Practical limit:        ~2-3 GB input files (vs ~800MB on Function App)
+```
+
+**Size-Based Routing**:
+```
+< 800 MB      → Function App (process_raster_v2)
+800 MB - 2 GB → Docker (process_raster_docker) - in-memory
+> 2 GB        → Docker (process_large_raster_v2) - tiling pipeline
+```
+
+**FUTURE ENHANCEMENT: Disk-Based Processing**
+
+For files that exceed memory but don't need tiling (2-5GB single COGs):
+```python
+# NOT IMPLEMENTED - Add when metrics show need
+def create_cog_disk_based(params):
+    """Download to disk, process, upload. Memory: ~2GB regardless of file size."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        input_path = Path(tmpdir) / "input.tif"
+        output_path = Path(tmpdir) / "output.tif"
+
+        # Stream download to disk (not RAM)
+        blob_repo.download_blob_to_file(container, blob, input_path)
+
+        # COG translate from disk to disk
+        with rasterio.open(input_path) as src:
+            cog_translate(src, output_path, cog_profile, in_memory=False)
+
+        # Stream upload from disk
+        blob_repo.upload_file_to_blob(output_path, out_container, out_blob)
+```
+
+**Why deferred**: Need real metrics first. Test with actual files to understand:
+- Memory utilization by input size
+- Where OOM actually occurs
+- Whether tiling is sufficient for all cases
 
 ### Testing
 

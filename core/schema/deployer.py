@@ -408,7 +408,9 @@ class SchemaManager:
                         required_columns = [
                             'task_id', 'parent_job_id', 'task_type', 'status', 'stage',
                             'task_index', 'parameters', 'result_data', 'error_details',
-                            'retry_count', 'heartbeat', 'created_at', 'updated_at'
+                            'retry_count', 'last_pulse', 'created_at', 'updated_at',
+                            # Checkpoint fields (11 JAN 2026)
+                            'checkpoint_phase', 'checkpoint_data', 'checkpoint_updated_at'
                         ]
                         missing = [col for col in required_columns if col not in columns]
                         if missing:

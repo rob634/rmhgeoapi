@@ -141,8 +141,8 @@ class IndexBuilder:
         idx = IndexBuilder.btree('app', 'tasks', ['parent_job_id', 'stage'])
 
         # Partial index
-        idx = IndexBuilder.btree('app', 'tasks', 'heartbeat',
-                                 partial_where='heartbeat IS NOT NULL')
+        idx = IndexBuilder.btree('app', 'tasks', 'last_pulse',
+                                 partial_where='last_pulse IS NOT NULL')
 
         # Spatial index
         idx = IndexBuilder.gist('geo', 'countries', 'geom')

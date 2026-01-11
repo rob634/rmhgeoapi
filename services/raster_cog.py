@@ -38,18 +38,18 @@ from exceptions import ContractViolationError
 
 
 # ============================================================================
-# HEARTBEAT WRAPPER - Threading Pattern for Blocking Operations
+# PULSE WRAPPER - Threading Pattern for Blocking Operations (11 JAN 2026)
 # ============================================================================
-# Background thread updates task heartbeat while cog_translate() blocks.
+# Background thread updates task last_pulse while cog_translate() blocks.
 # Prevents tasks from being stuck in "processing" forever on timeout.
-# Added: 30 NOV 2025
+# Added: 30 NOV 2025, Renamed heartbeat→pulse: 11 JAN 2026
 # ============================================================================
 
-class HeartbeatWrapper:
+class PulseWrapper:
     """
-    Wraps blocking operations with periodic heartbeat updates.
+    Wraps blocking operations with periodic pulse updates.
 
-    Uses a background daemon thread to update heartbeat while the main operation runs.
+    Uses a background daemon thread to update last_pulse while the main operation runs.
     Thread-safe and handles cleanup on completion or error.
 
     Why Threading (not async):
@@ -58,82 +58,82 @@ class HeartbeatWrapper:
     - Daemon thread auto-cleanup if main thread crashes
 
     Usage:
-        heartbeat_fn = params.get('_heartbeat_fn')  # Injected by CoreMachine
-        with HeartbeatWrapper(task_id, heartbeat_fn, interval_seconds=30, logger=logger):
+        pulse_fn = params.get('_pulse_fn')  # Injected by CoreMachine
+        with PulseWrapper(task_id, pulse_fn, interval_seconds=30, logger=logger):
             cog_translate(...)  # Blocking operation
     """
 
     def __init__(
         self,
         task_id: str,
-        heartbeat_fn: Callable[[], bool],
+        pulse_fn: Callable[[], bool],
         interval_seconds: int = 30,
         logger=None
     ):
         """
-        Initialize heartbeat wrapper.
+        Initialize pulse wrapper.
 
         Args:
-            task_id: Task ID (for logging only - heartbeat_fn has task_id bound)
-            heartbeat_fn: No-arg callable that updates heartbeat (injected by CoreMachine)
-            interval_seconds: Seconds between heartbeat updates (default: 30)
+            task_id: Task ID (for logging only - pulse_fn has task_id bound)
+            pulse_fn: No-arg callable that updates last_pulse (injected by CoreMachine)
+            interval_seconds: Seconds between pulse updates (default: 30)
             logger: Optional logger instance
         """
         self.task_id = task_id  # For logging only
-        self.heartbeat_fn = heartbeat_fn
+        self.pulse_fn = pulse_fn
         self.interval = interval_seconds
         self.logger = logger
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
-        self._heartbeat_count = 0
-        self._last_heartbeat: Optional[datetime] = None
+        self._pulse_count = 0
+        self._last_pulse: Optional[datetime] = None
 
-    def _heartbeat_loop(self):
-        """Background thread loop - updates heartbeat every interval."""
+    def _pulse_loop(self):
+        """Background thread loop - updates last_pulse every interval."""
         while not self._stop_event.wait(timeout=self.interval):
             try:
-                success = self.heartbeat_fn()  # No args - task_id bound in closure
-                self._heartbeat_count += 1
-                self._last_heartbeat = datetime.now(timezone.utc)
+                success = self.pulse_fn()  # No args - task_id bound in closure
+                self._pulse_count += 1
+                self._last_pulse = datetime.now(timezone.utc)
                 if self.logger:
                     self.logger.debug(
-                        f"💓 Heartbeat #{self._heartbeat_count} for task {self.task_id[:8]}",
+                        f"💓 Pulse #{self._pulse_count} for task {self.task_id[:8]}",
                         extra={"task_id": self.task_id}
                     )
                 if not success and self.logger:
                     self.logger.warning(
-                        f"💔 Heartbeat update returned False for task {self.task_id[:8]}"
+                        f"💔 Pulse update returned False for task {self.task_id[:8]}"
                     )
             except Exception as e:
                 if self.logger:
-                    self.logger.warning(f"💔 Heartbeat update failed: {e}")
+                    self.logger.warning(f"💔 Pulse update failed: {e}")
 
     def __enter__(self):
-        """Start heartbeat thread."""
+        """Start pulse thread."""
         self._stop_event.clear()
-        self._thread = threading.Thread(target=self._heartbeat_loop, daemon=True)
+        self._thread = threading.Thread(target=self._pulse_loop, daemon=True)
         self._thread.start()
         if self.logger:
             self.logger.info(
-                f"💓 Started heartbeat thread (interval={self.interval}s) for task {self.task_id[:8]}"
+                f"💓 Started pulse thread (interval={self.interval}s) for task {self.task_id[:8]}"
             )
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """Stop heartbeat thread and cleanup."""
+        """Stop pulse thread and cleanup."""
         self._stop_event.set()
         if self._thread:
             self._thread.join(timeout=5)
         if self.logger:
             self.logger.info(
-                f"💓 Stopped heartbeat thread after {self._heartbeat_count} heartbeats"
+                f"💓 Stopped pulse thread after {self._pulse_count} pulses"
             )
         return False  # Don't suppress exceptions
 
     @property
-    def heartbeat_count(self) -> int:
-        """Number of successful heartbeat updates."""
-        return self._heartbeat_count
+    def pulse_count(self) -> int:
+        """Number of successful pulse updates."""
+        return self._pulse_count
 
 
 # Lazy imports for Azure environment compatibility
@@ -528,28 +528,28 @@ def create_cog(params: dict) -> dict:
                         logger.warning(f"⚠️ Pre-cog_translate snapshot failed (non-fatal): {snap_error}")
 
                 # ================================================================
-                # HEARTBEAT DISABLED (2 DEC 2025) - Token expiration issues
+                # PULSE DISABLED (2 DEC 2025) - Token expiration issues
                 # ================================================================
-                # When re-enabling heartbeat:
-                # 1. Uncomment _heartbeat_fn injection in core/machine.py
-                # 2. Uncomment validation and HeartbeatWrapper below
-                # See HeartbeatWrapper class above for implementation details
+                # When re-enabling pulse:
+                # 1. Uncomment _pulse_fn injection in core/machine.py
+                # 2. Uncomment validation and PulseWrapper below
+                # See PulseWrapper class above for implementation details
                 # ================================================================
                 # task_id = params.get('_task_id')
-                # heartbeat_fn = params.get('_heartbeat_fn')
+                # pulse_fn = params.get('_pulse_fn')
                 # if not task_id:
                 #     raise ContractViolationError(...)
-                # if not heartbeat_fn:
+                # if not pulse_fn:
                 #     raise ContractViolationError(...)
-                # logger.info(f"💓 Heartbeat enabled for task {task_id[:8]}... (30s interval)")
+                # logger.info(f"💓 Pulse enabled for task {task_id[:8]}... (30s interval)")
 
                 # Create output MemoryFile for COG
                 with MemoryFile() as output_memfile:
                     try:
                         # cog_translate can accept a rasterio dataset directly (not just path string)
                         # and writes to MemoryFile's internal /vsimem/ path
-                        # NOTE: HeartbeatWrapper disabled - see comment above
-                        # with HeartbeatWrapper(task_id=task_id, heartbeat_fn=heartbeat_fn, ...):
+                        # NOTE: PulseWrapper disabled - see comment above
+                        # with PulseWrapper(task_id=task_id, pulse_fn=pulse_fn, ...):
                         cog_translate(
                             src,                        # Input rasterio dataset
                             output_memfile.name,        # Output to MemoryFile's internal /vsimem/ path

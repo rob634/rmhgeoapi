@@ -457,12 +457,15 @@ class PydanticToSQL:
             indexes.append(IndexBuilder.btree(s, "tasks", "status", name="idx_tasks_status"))
             indexes.append(IndexBuilder.btree(s, "tasks", ["parent_job_id", "stage"], name="idx_tasks_job_stage"))
             indexes.append(IndexBuilder.btree(s, "tasks", ["parent_job_id", "stage", "status"], name="idx_tasks_job_stage_status"))
-            indexes.append(IndexBuilder.btree(s, "tasks", "heartbeat", name="idx_tasks_heartbeat",
-                                              partial_where="heartbeat IS NOT NULL"))
+            indexes.append(IndexBuilder.btree(s, "tasks", "last_pulse", name="idx_tasks_last_pulse",
+                                              partial_where="last_pulse IS NOT NULL"))
             indexes.append(IndexBuilder.btree(s, "tasks", "retry_count", name="idx_tasks_retry_count",
                                               partial_where="retry_count > 0"))
             indexes.append(IndexBuilder.btree(s, "tasks", "target_queue", name="idx_tasks_target_queue"))
             indexes.append(IndexBuilder.btree(s, "tasks", "executed_by_app", name="idx_tasks_executed_by_app"))
+            # Checkpoint index (11 JAN 2026 - Docker worker resume support)
+            indexes.append(IndexBuilder.btree(s, "tasks", "checkpoint_phase", name="idx_tasks_checkpoint_phase",
+                                              partial_where="checkpoint_phase IS NOT NULL"))
 
         elif table_name == "api_requests":
             # NOTE: api_requests does NOT have a status column (removed 22 NOV 2025)

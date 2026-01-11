@@ -1692,9 +1692,10 @@ class PostgreSQLTaskRepository(PostgreSQLRepository, ITaskRepository):
                 INSERT INTO {}.{} (
                     task_id, parent_job_id, job_type, task_type, status, stage, task_index,
                     parameters, result_data, metadata, error_details, retry_count,
-                    heartbeat, created_at, updated_at
+                    last_pulse, checkpoint_phase, checkpoint_data, checkpoint_updated_at,
+                    created_at, updated_at
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 ) ON CONFLICT (task_id) DO NOTHING
             """).format(
                 sql.Identifier(self.schema_name),
@@ -1714,7 +1715,10 @@ class PostgreSQLTaskRepository(PostgreSQLRepository, ITaskRepository):
                 json.dumps(task.metadata) if task.metadata else json.dumps({}),  # ✅ FIXED: Include metadata
                 task.error_details,
                 task.retry_count,
-                task.heartbeat,
+                task.last_pulse,
+                task.checkpoint_phase,
+                json.dumps(task.checkpoint_data) if task.checkpoint_data else None,
+                task.checkpoint_updated_at,
                 task.created_at or datetime.now(timezone.utc),
                 task.updated_at or datetime.now(timezone.utc)
             )
@@ -1747,20 +1751,21 @@ class PostgreSQLTaskRepository(PostgreSQLRepository, ITaskRepository):
             query = sql.SQL("""
                 SELECT task_id, parent_job_id, job_type, task_type, status, stage, task_index,
                        parameters, result_data, error_details, retry_count,
-                       heartbeat, created_at, updated_at
+                       last_pulse, checkpoint_phase, checkpoint_data, checkpoint_updated_at,
+                       created_at, updated_at
                 FROM {}.{}
                 WHERE task_id = %s
             """).format(
                 sql.Identifier(self.schema_name),
                 sql.Identifier("tasks")
             )
-            
+
             row = self._execute_query(query, (task_id,), fetch='one')
-            
+
             if not row:
                 logger.debug(f"📋 Task not found: {task_id}")
                 return None
-            
+
             # Convert row to TaskRecord with explicit JSONB parsing (28 NOV 2025)
             task_data = {
                 'task_id': row['task_id'],
@@ -1774,7 +1779,10 @@ class PostgreSQLTaskRepository(PostgreSQLRepository, ITaskRepository):
                 'result_data': _parse_jsonb_column(row['result_data'], 'result_data', task_id, default=None),
                 'error_details': row['error_details'],
                 'retry_count': row['retry_count'],
-                'heartbeat': row['heartbeat'],
+                'last_pulse': row['last_pulse'],
+                'checkpoint_phase': row['checkpoint_phase'],
+                'checkpoint_data': _parse_jsonb_column(row['checkpoint_data'], 'checkpoint_data', task_id, default=None),
+                'checkpoint_updated_at': row['checkpoint_updated_at'],
                 'created_at': row['created_at'],
                 'updated_at': row['updated_at']
             }
@@ -1885,7 +1893,8 @@ class PostgreSQLTaskRepository(PostgreSQLRepository, ITaskRepository):
             query = sql.SQL("""
                 SELECT task_id, parent_job_id, job_type, task_type, status, stage, task_index,
                        parameters, result_data, error_details, retry_count,
-                       heartbeat, created_at, updated_at
+                       last_pulse, checkpoint_phase, checkpoint_data, checkpoint_updated_at,
+                       created_at, updated_at
                 FROM {}.{}
                 WHERE parent_job_id = %s
                 ORDER BY stage, task_index
@@ -1926,7 +1935,10 @@ class PostgreSQLTaskRepository(PostgreSQLRepository, ITaskRepository):
                         result_data=_parse_jsonb_column(row['result_data'], 'result_data', task_id, default=None),
                         error_details=row['error_details'],
                         retry_count=row['retry_count'],
-                        heartbeat=row['heartbeat'],
+                        last_pulse=row['last_pulse'],
+                        checkpoint_phase=row['checkpoint_phase'],
+                        checkpoint_data=_parse_jsonb_column(row['checkpoint_data'], 'checkpoint_data', task_id, default=None),
+                        checkpoint_updated_at=row['checkpoint_updated_at'],
                         created_at=row['created_at'],
                         updated_at=row['updated_at']
                     )

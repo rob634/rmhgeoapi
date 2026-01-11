@@ -171,6 +171,9 @@ from .rebuild_stac_handlers import (
     stac_rebuild_item,
 )
 
+# Docker consolidated handler (11 JAN 2026) - F7.13
+from .handler_process_raster_complete import process_raster_complete
+
 # Ingest Collection handlers (29 DEC 2025)
 from .ingest import ALL_HANDLERS as INGEST_HANDLERS
 
@@ -291,6 +294,8 @@ ALL_HANDLERS = {
     # STAC Rebuild handlers (10 JAN 2026) - F7.11 Self-Healing
     "stac_rebuild_validate": stac_rebuild_validate,  # Stage 1: Check sources exist
     "stac_rebuild_item": stac_rebuild_item,  # Stage 2: Regenerate STAC item (fan-out)
+    # Docker consolidated handler (11 JAN 2026) - F7.13
+    "raster_process_complete": process_raster_complete,  # Single-stage Docker handler
 }
 
 # Validate no collisions before merging INGEST_HANDLERS (29 DEC 2025)
@@ -355,20 +360,22 @@ def validate_task_routing_coverage():
 
     Runs at import time - fail fast if misconfigured.
     Added 12 DEC 2025.
+    Updated 11 JAN 2026: Include LONG_RUNNING_TASKS for Docker handlers.
     """
     from config.defaults import TaskRoutingDefaults
 
     all_tasks = set(ALL_HANDLERS.keys())
     raster_set = set(TaskRoutingDefaults.RASTER_TASKS)
     vector_set = set(TaskRoutingDefaults.VECTOR_TASKS)
+    long_running_set = set(TaskRoutingDefaults.LONG_RUNNING_TASKS)
 
-    unmapped = all_tasks - raster_set - vector_set
+    unmapped = all_tasks - raster_set - vector_set - long_running_set
 
     if unmapped:
         raise ValueError(
             f"FATAL: {len(unmapped)} handler(s) have NO queue routing configured! "
             f"Tasks will fail at runtime. Add to config/defaults.py "
-            f"TaskRoutingDefaults.RASTER_TASKS or VECTOR_TASKS: {sorted(unmapped)}"
+            f"TaskRoutingDefaults.RASTER_TASKS, VECTOR_TASKS, or LONG_RUNNING_TASKS: {sorted(unmapped)}"
         )
 
 

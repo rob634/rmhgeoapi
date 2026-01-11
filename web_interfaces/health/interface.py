@@ -50,7 +50,13 @@ class HealthInterface(BaseInterface):
         content = self._generate_html_content()
         custom_css = self._generate_custom_css()
         tooltips = self._get_component_tooltips()
-        custom_js = self._generate_custom_js(tooltips)
+
+        # Get Docker worker URL for JavaScript
+        from config import get_app_mode_config
+        app_mode_config = get_app_mode_config()
+        docker_worker_url = app_mode_config.docker_worker_url or ''
+
+        custom_js = self._generate_custom_js(tooltips, docker_worker_url)
 
         return self.wrap_html(
             title="System Health Dashboard",
@@ -118,10 +124,11 @@ class HealthInterface(BaseInterface):
         vector_queue = config.queues.vector_tasks_queue
         long_queue = config.queues.long_running_tasks_queue
 
-        # Docker worker enabled status
+        # Docker worker config
         from config import get_app_mode_config
         app_mode_config = get_app_mode_config()
         docker_worker_enabled = app_mode_config.docker_worker_enabled
+        docker_worker_url = app_mode_config.docker_worker_url or ''
 
         # OGC Features URL - clean up for display
         ogc_url = config.ogc_features_base_url
@@ -157,9 +164,9 @@ class HealthInterface(BaseInterface):
             'comp-titiler': f"{titiler_url}\nMode: {config.titiler_mode}",
             'comp-ogc-features': f"{ogc_url}\nOGC API - Features",
 
-            # Docker Worker (controlled by DOCKER_WORKER_ENABLED env var)
+            # Docker Worker (status fetched from actual Docker app health)
             'comp-long-queue': f"{service_bus_ns}\nQueue: {long_queue}\nDocker Worker: {'Enabled' if docker_worker_enabled else 'Disabled'}",
-            'comp-container': f"Docker Container Worker\nQueue: {long_queue}\nStatus: {'Enabled' if docker_worker_enabled else 'Disabled (set DOCKER_WORKER_ENABLED=true)'}",
+            'comp-container': f"{docker_worker_url or 'Not configured'}\nQueue: {long_queue}\nStatus: {'Enabled' if docker_worker_enabled else 'Disabled (set DOCKER_WORKER_ENABLED=true)'}",
 
             # Zarr/xarray components - TiTiler-xarray uses same TiTiler, Zarr uses same silver account
             'comp-titiler-xarray': f"{titiler_url}\nxarray/Zarr endpoint\nStatus: check available_features.xarray_zarr",
@@ -1564,7 +1571,7 @@ class HealthInterface(BaseInterface):
         }
         """
 
-    def _generate_custom_js(self, tooltips: dict) -> str:
+    def _generate_custom_js(self, tooltips: dict, docker_worker_url: str = '') -> str:
         """Generate custom JavaScript for Health Dashboard."""
         tooltips_json = json.dumps(tooltips)
 
@@ -1572,6 +1579,9 @@ class HealthInterface(BaseInterface):
         return f"""
         // Dynamic component tooltips from server config
         const COMPONENT_TOOLTIPS = {tooltips_json};
+
+        // Docker Worker URL for health checks (empty string if not configured)
+        const DOCKER_WORKER_URL = '{docker_worker_url}';
 
         // Apply dynamic tooltips on page load
         function applyDynamicTooltips() {{
@@ -1623,7 +1633,7 @@ class HealthInterface(BaseInterface):
         const DOCKER_WORKER_COMPONENTS = ['comp-long-queue', 'comp-container'];
 
         // Update architecture diagram status indicators
-        function updateDiagramStatus(components) {{
+        function updateDiagramStatus(components, dockerHealth = null) {{
             if (!components) return;
 
             // Get TiTiler component for feature flag checks
@@ -1644,14 +1654,24 @@ class HealthInterface(BaseInterface):
 
                 // Check if this is a Docker Worker component
                 if (DOCKER_WORKER_COMPONENTS.includes(svgId)) {{
-                    // Status based on DOCKER_WORKER_ENABLED setting
-                    // If disabled: grey (unknown) - feature not enabled
-                    // If enabled: would need health check (not implemented yet, so show warning)
-                    if (!dockerWorkerEnabled) {{
-                        status = 'unknown';  // Grey - not enabled
-                    }} else {{
-                        // Docker worker is enabled but we don't have health check yet
-                        status = 'warning';  // Yellow - enabled but no health check
+                    // Status based on actual Docker worker health (if configured)
+                    if (!dockerWorkerEnabled && !DOCKER_WORKER_URL) {{
+                        status = 'unknown';  // Grey - not enabled/configured
+                    }} else if (dockerHealth) {{
+                        // Use actual Docker worker health status
+                        const dockerStatus = dockerHealth.status || 'unknown';
+                        if (dockerStatus === 'healthy') {{
+                            status = 'healthy';
+                        }} else if (dockerStatus === 'unhealthy' || dockerStatus === 'unreachable') {{
+                            status = 'unhealthy';
+                        }} else if (dockerStatus === 'warning') {{
+                            status = 'warning';
+                        }} else {{
+                            status = 'unknown';
+                        }}
+                    }} else if (dockerWorkerEnabled) {{
+                        // Docker enabled but no health data (URL not configured)
+                        status = 'warning';
                     }}
                 }}
                 // Check if this is a TiTiler feature-based component
@@ -1710,6 +1730,175 @@ class HealthInterface(BaseInterface):
             }});
         }}
 
+        // Fetch Docker Worker health from its endpoint
+        async function fetchDockerWorkerHealth() {{
+            if (!DOCKER_WORKER_URL) {{
+                return null;
+            }}
+
+            try {{
+                const response = await fetch(`${{DOCKER_WORKER_URL}}/health`, {{
+                    method: 'GET',
+                    headers: {{ 'Accept': 'application/json' }},
+                    mode: 'cors',
+                    // Short timeout - don't block main health display
+                    signal: AbortSignal.timeout(10000)
+                }});
+
+                if (!response.ok) {{
+                    return {{
+                        status: 'unhealthy',
+                        error: `HTTP ${{response.status}}`,
+                        url: DOCKER_WORKER_URL
+                    }};
+                }}
+
+                const data = await response.json();
+                return {{
+                    ...data,
+                    status: data.status || 'healthy',
+                    url: DOCKER_WORKER_URL
+                }};
+            }} catch (err) {{
+                return {{
+                    status: 'unreachable',
+                    error: err.message,
+                    url: DOCKER_WORKER_URL
+                }};
+            }}
+        }}
+
+        // Render Docker Worker info section
+        function renderDockerWorkerInfo(dockerHealth) {{
+            if (!dockerHealth) return;
+
+            const envInfo = document.getElementById('environment-info');
+            if (!envInfo) return;
+
+            // Extract health data
+            const status = dockerHealth.status || 'unknown';
+            const hardware = dockerHealth.hardware || {{}};
+            const memory = dockerHealth.memory || {{}};
+            const tokens = dockerHealth.tokens || {{}};
+            const url = dockerHealth.url || DOCKER_WORKER_URL;
+
+            // Calculate status color
+            let statusColor = '#6B7280'; // grey for unknown
+            let statusIcon = '⚪';
+            if (status === 'healthy') {{
+                statusColor = '#10B981';
+                statusIcon = '🟢';
+            }} else if (status === 'unhealthy' || status === 'unreachable') {{
+                statusColor = '#DC2626';
+                statusIcon = '🔴';
+            }} else if (status === 'warning') {{
+                statusColor = '#F59E0B';
+                statusIcon = '🟡';
+            }}
+
+            // Calculate memory bar
+            const ramPercent = memory.system_percent || 0;
+            let ramBarColor = '#10B981';
+            if (ramPercent >= 90) ramBarColor = '#DC2626';
+            else if (ramPercent >= 80) ramBarColor = '#F59E0B';
+
+            const cpuPercent = memory.cpu_percent || 0;
+            let cpuBarColor = '#10B981';
+            if (cpuPercent >= 90) cpuBarColor = '#DC2626';
+            else if (cpuPercent >= 70) cpuBarColor = '#F59E0B';
+
+            // Clean URL for display
+            let displayUrl = url;
+            if (displayUrl.startsWith('https://')) displayUrl = displayUrl.substring(8);
+            if (displayUrl.startsWith('http://')) displayUrl = displayUrl.substring(7);
+
+            const dockerHtml = `
+                <div class="hardware-section docker-worker-section">
+                    <h4>🐳 Docker Worker Resources</h4>
+                    <div class="hardware-grid">
+                        <!-- Status -->
+                        <div class="hardware-card">
+                            <div class="hardware-icon">${{statusIcon}}</div>
+                            <div class="hardware-details">
+                                <div class="hardware-label">Status</div>
+                                <div class="hardware-value" style="color: ${{statusColor}}; text-transform: capitalize;">${{status}}</div>
+                                <div class="hardware-sub">${{displayUrl}}</div>
+                            </div>
+                        </div>
+
+                        ${{status === 'healthy' || status === 'warning' ? `
+                        <!-- CPU Info -->
+                        <div class="hardware-card">
+                            <div class="hardware-icon">⚡</div>
+                            <div class="hardware-details">
+                                <div class="hardware-label">CPU</div>
+                                <div class="hardware-value">${{hardware.cpu_count || 'N/A'}} cores</div>
+                                <div class="hardware-bar-container">
+                                    <div class="hardware-bar" style="width: ${{Math.min(cpuPercent, 100)}}%; background: ${{cpuBarColor}};"></div>
+                                </div>
+                                <div class="hardware-sub">${{cpuPercent.toFixed(1)}}% utilized</div>
+                            </div>
+                        </div>
+
+                        <!-- RAM Info -->
+                        <div class="hardware-card">
+                            <div class="hardware-icon">💾</div>
+                            <div class="hardware-details">
+                                <div class="hardware-label">Memory</div>
+                                <div class="hardware-value">${{hardware.total_ram_gb || 'N/A'}} GB total</div>
+                                <div class="hardware-bar-container">
+                                    <div class="hardware-bar" style="width: ${{Math.min(ramPercent, 100)}}%; background: ${{ramBarColor}};"></div>
+                                </div>
+                                <div class="hardware-sub">${{memory.system_available_mb ? (memory.system_available_mb / 1024).toFixed(1) + ' GB' : 'N/A'}} available</div>
+                            </div>
+                        </div>
+
+                        <!-- Token Status -->
+                        <div class="hardware-card">
+                            <div class="hardware-icon">🔑</div>
+                            <div class="hardware-details">
+                                <div class="hardware-label">Auth Tokens</div>
+                                <div class="hardware-value">${{tokens.postgres_valid && tokens.storage_valid ? 'Valid' : 'Issues'}}</div>
+                                <div class="hardware-sub">
+                                    PG: ${{tokens.postgres_valid ? '✓' : '✗'}} &nbsp;
+                                    Storage: ${{tokens.storage_valid ? '✓' : '✗'}}
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Platform Info -->
+                        <div class="hardware-card">
+                            <div class="hardware-icon">🖥️</div>
+                            <div class="hardware-details">
+                                <div class="hardware-label">Platform</div>
+                                <div class="hardware-value">${{hardware.platform || 'N/A'}}</div>
+                                <div class="hardware-sub">Python ${{hardware.python_version || 'N/A'}}</div>
+                            </div>
+                        </div>
+                        ` : `
+                        <!-- Error Info -->
+                        <div class="hardware-card" style="grid-column: span 2;">
+                            <div class="hardware-icon">⚠️</div>
+                            <div class="hardware-details">
+                                <div class="hardware-label">Error</div>
+                                <div class="hardware-value" style="color: #DC2626;">${{dockerHealth.error || 'Unable to connect'}}</div>
+                                <div class="hardware-sub">Check Docker worker deployment and network connectivity</div>
+                            </div>
+                        </div>
+                        `}}
+                    </div>
+                </div>
+            `;
+
+            // Insert after Function App Resources section
+            const existingDockerSection = envInfo.parentElement.querySelector('.docker-worker-section');
+            if (existingDockerSection) {{
+                existingDockerSection.outerHTML = dockerHtml;
+            }} else {{
+                envInfo.insertAdjacentHTML('afterend', dockerHtml);
+            }}
+        }}
+
         // Load health data from API
         async function loadHealth() {{
             const refreshBtn = document.getElementById('refresh-btn');
@@ -1735,7 +1924,22 @@ class HealthInterface(BaseInterface):
             }});
 
             try {{
-                const data = await fetchJSON(`${{API_BASE_URL}}/api/health`);
+                // Fetch main health and Docker worker health in parallel
+                const healthPromise = fetchJSON(`${{API_BASE_URL}}/api/health`);
+
+                // Only fetch Docker health if URL is configured
+                let dockerHealthPromise = Promise.resolve(null);
+                if (DOCKER_WORKER_URL) {{
+                    dockerHealthPromise = fetchDockerWorkerHealth().catch(err => {{
+                        console.warn('Docker worker health fetch failed:', err.message);
+                        return {{ status: 'unreachable', error: err.message }};
+                    }});
+                }}
+
+                const [data, dockerHealth] = await Promise.all([healthPromise, dockerHealthPromise]);
+
+                // Store Docker health globally for diagram status updates
+                window.dockerWorkerHealth = dockerHealth;
 
                 // Render overall status
                 renderOverallStatus(data);
@@ -1743,14 +1947,19 @@ class HealthInterface(BaseInterface):
                 // Render environment info
                 renderEnvironmentInfo(data);
 
+                // Render Docker worker info (if configured)
+                if (DOCKER_WORKER_URL) {{
+                    renderDockerWorkerInfo(dockerHealth);
+                }}
+
                 // Render identity info
                 renderIdentityInfo(data);
 
                 // Render component cards
                 renderComponents(data.components);
 
-                // Update architecture diagram
-                updateDiagramStatus(data.components);
+                // Update architecture diagram (pass Docker health for Long Worker/Queue status)
+                updateDiagramStatus(data.components, dockerHealth);
 
                 // Render schema summary
                 renderSchemaSummary(data.components);

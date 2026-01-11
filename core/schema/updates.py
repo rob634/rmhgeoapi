@@ -52,9 +52,13 @@ class TaskUpdateModel(BaseModel):
     status: Optional[TaskStatus] = None
     result_data: Optional[Dict[str, Any]] = None
     error_details: Optional[str] = None
-    heartbeat: Optional[datetime] = None
+    last_pulse: Optional[datetime] = None
     retry_count: Optional[int] = Field(None, ge=0, le=10)
     metadata: Optional[Dict[str, Any]] = None
+    # Checkpoint fields (11 JAN 2026 - Docker worker resume support)
+    checkpoint_phase: Optional[int] = None
+    checkpoint_data: Optional[Dict[str, Any]] = None
+    checkpoint_updated_at: Optional[datetime] = None
 
     def to_dict(self, exclude_unset: bool = True) -> Dict[str, Any]:
         """Convert to dictionary for SQL operations."""

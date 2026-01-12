@@ -42,18 +42,6 @@ from azure.functions import Blueprint
 # Import startup state - this module has zero dependencies
 from startup_state import STARTUP_STATE
 
-# Get version safely without importing the full config module
-# The config module has complex dependencies that can cause import issues
-def _get_version() -> str:
-    """Get version from config/__init__.py without importing the full module."""
-    try:
-        from config import __version__
-        return __version__
-    except Exception:
-        return "unknown"
-
-__version__ = _get_version()
-
 # Create Blueprint for probe endpoints
 bp = Blueprint()
 
@@ -103,7 +91,6 @@ class ReadyzProbe:
                 json.dumps({
                     "status": "initializing",
                     "probe": "readyz",
-                    "version": __version__,
                     "message": "Startup validation in progress",
                     "startup_time": STARTUP_STATE.startup_time
                 }),
@@ -116,7 +103,6 @@ class ReadyzProbe:
             response = {
                 "status": "ready",
                 "probe": "readyz",
-                "version": __version__,
                 "message": "All startup validations passed",
                 "summary": STARTUP_STATE.get_summary()
             }
@@ -167,7 +153,6 @@ class ReadyzProbe:
             json.dumps({
                 "status": "not_ready",
                 "probe": "readyz",
-                "version": __version__,
                 "message": STARTUP_STATE.critical_error or "Startup validation failed",
                 "summary": STARTUP_STATE.get_summary(),
                 "errors": errors
@@ -220,57 +205,10 @@ def readyz(req: func.HttpRequest) -> func.HttpResponse:
     Returns 503 if any validation failed (with error details).
 
     Returns:
-        200: {"status": "ready", "probe": "readyz", "version": "x.y.z", ...}
-        503: {"status": "not_ready", "probe": "readyz", "version": "x.y.z", "errors": [...]}
+        200: {"status": "ready", "probe": "readyz", ...}
+        503: {"status": "not_ready", "probe": "readyz", "errors": [...]}
     """
     return _readyz_probe.handle(req)
-
-
-@bp.route(
-    route="health",
-    methods=["GET"],
-    auth_level=func.AuthLevel.ANONYMOUS
-)
-def health(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Health endpoint - Quick health check with version info.
-
-    Provides a simple health status including version number.
-    For deep diagnostics, use /api/diagnostics instead.
-
-    Returns:
-        200: {"status": "healthy", "version": "x.y.z", ...}
-        503: {"status": "unhealthy", "version": "x.y.z", ...}
-
-    Example:
-        GET /api/health
-    """
-    is_healthy = STARTUP_STATE.all_passed
-
-    response = {
-        "status": "healthy" if is_healthy else "unhealthy",
-        "version": __version__,
-        "probes": {
-            "livez": "alive",
-            "readyz": "ready" if is_healthy else "not_ready",
-        },
-        "startup_time": STARTUP_STATE.startup_time,
-        "validation_complete": STARTUP_STATE.validation_complete,
-    }
-
-    # Add summary if available
-    if STARTUP_STATE.validation_complete:
-        response["summary"] = STARTUP_STATE.get_summary()
-
-    # Add critical error if unhealthy
-    if not is_healthy and STARTUP_STATE.critical_error:
-        response["error"] = STARTUP_STATE.critical_error
-
-    return func.HttpResponse(
-        json.dumps(response, indent=2),
-        status_code=200 if is_healthy else 503,
-        mimetype="application/json"
-    )
 
 
 def get_probe_status() -> dict:

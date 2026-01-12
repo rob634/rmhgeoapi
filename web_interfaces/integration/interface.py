@@ -170,6 +170,7 @@ class ProcessRasterIntegrationInterface(BaseInterface):
     def _render_files_fragment(self, request: func.HttpRequest) -> str:
         """Render file list items (filtered for raster extensions)."""
         container = request.params.get('container', '')
+        prefix = request.params.get('prefix', '')
         limit = int(request.params.get('limit', '100'))
 
         if not container:
@@ -181,7 +182,7 @@ class ProcessRasterIntegrationInterface(BaseInterface):
             repo = BlobRepository.for_zone("bronze")
             blobs = repo.list_blobs(
                 container=container,
-                prefix="",
+                prefix=prefix,
                 limit=limit * 2  # Fetch more since we'll filter
             )
 
@@ -250,15 +251,22 @@ class ProcessRasterIntegrationInterface(BaseInterface):
                         </div>
 
                         <!-- Container Selection (HTMX) -->
-                        <div class="form-group">
-                            <label>Container <span class="required">*</span></label>
-                            <select id="container-select"
-                                    hx-get="/api/interface/integration-process-raster?fragment=containers"
-                                    hx-trigger="load"
-                                    hx-swap="innerHTML"
-                                    onchange="loadFiles(); updateCurl();">
-                                <option value="">Loading containers...</option>
-                            </select>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Container <span class="required">*</span></label>
+                                <select id="container-select"
+                                        hx-get="/api/interface/integration-process-raster?fragment=containers"
+                                        hx-trigger="load"
+                                        hx-swap="innerHTML"
+                                        onchange="loadFiles(); updateCurl();">
+                                    <option value="">Loading containers...</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Path Filter</label>
+                                <input type="text" id="prefix-filter" placeholder="e.g., rasters/"
+                                       oninput="debouncedLoadFiles()">
+                            </div>
                         </div>
 
                         <!-- File List (HTMX) -->
@@ -655,6 +663,8 @@ class ProcessRasterIntegrationInterface(BaseInterface):
                 overflow: hidden;
                 display: flex;
                 flex-direction: column;
+                height: 100%;
+                min-height: 200px;
             }
 
             .curl-header {
@@ -697,10 +707,10 @@ class ProcessRasterIntegrationInterface(BaseInterface):
                 color: #d4d4d4;
                 white-space: pre-wrap;
                 word-break: break-all;
-                max-height: 280px;
                 overflow-y: auto;
                 line-height: 1.5;
                 flex: 1;
+                margin: 0;
             }
 
             .curl-code .cmd { color: #569cd6; }
@@ -904,6 +914,7 @@ class ProcessRasterIntegrationInterface(BaseInterface):
             // State
             let selectedFile = '';
             let currentJobId = '';
+            let filterTimeout = null;
 
             // Initialize API URLs on page load
             document.addEventListener('DOMContentLoaded', function() {
@@ -932,6 +943,7 @@ class ProcessRasterIntegrationInterface(BaseInterface):
             // Load files when container changes
             function loadFiles() {
                 const container = document.getElementById('container-select').value;
+                const prefix = document.getElementById('prefix-filter').value;
                 const fileList = document.getElementById('file-list');
 
                 if (!container) {
@@ -941,15 +953,26 @@ class ProcessRasterIntegrationInterface(BaseInterface):
 
                 fileList.innerHTML = '<div class="file-item placeholder">Loading files...</div>';
 
+                // Build URL with optional prefix filter
+                let url = '/api/interface/integration-process-raster?fragment=files&container=' + encodeURIComponent(container);
+                if (prefix) {
+                    url += '&prefix=' + encodeURIComponent(prefix);
+                }
+
                 // Use HTMX to fetch files
-                htmx.ajax('GET',
-                    '/api/interface/integration-process-raster?fragment=files&container=' + encodeURIComponent(container),
-                    {target: '#file-list', swap: 'innerHTML'}
-                );
+                htmx.ajax('GET', url, {target: '#file-list', swap: 'innerHTML'});
 
                 // Clear selection
                 selectedFile = '';
                 updateCurl();
+            }
+
+            // Debounced version for filter input (300ms delay)
+            function debouncedLoadFiles() {
+                if (filterTimeout) {
+                    clearTimeout(filterTimeout);
+                }
+                filterTimeout = setTimeout(loadFiles, 300);
             }
 
             function selectFile(element, filename) {

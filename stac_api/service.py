@@ -321,7 +321,7 @@ class STACAPIService:
 
         if 'error' not in response:
             # infrastructure.stac.get_item_by_id returns item directly, not wrapped
-            response['links'] = [
+            links = [
                 {
                     "rel": "self",
                     "type": "application/geo+json",
@@ -347,5 +347,19 @@ class STACAPIService:
                     "title": "Root catalog"
                 }
             ]
+
+            # Add OGC Features API link for vector items (12 JAN 2026 - F7.9)
+            # Vector items have postgis:table property indicating the OGC collection name
+            properties = response.get('properties', {})
+            postgis_table = properties.get('postgis:table')
+            if postgis_table:
+                links.append({
+                    "rel": "http://www.opengis.net/def/rel/ogc/1.0/items",
+                    "type": "application/geo+json",
+                    "href": f"{base_url}/api/features/collections/{postgis_table}/items",
+                    "title": "OGC Features API"
+                })
+
+            response['links'] = links
 
         return response

@@ -44,7 +44,7 @@ Created: 20 NOV 2025 as part of config.py god object refactoring
 # ============================================================================
 # VERSION
 # ============================================================================
-__version__ = "0.7.7.7"
+__version__ = "0.7.7.8"
 
 from typing import Optional
 
@@ -91,7 +91,7 @@ from .observability_config import ObservabilityConfig
 from .app_config import AppConfig
 from .app_mode_config import AppMode, AppModeConfig, get_app_mode_config
 
-# Environment variable validation (08 JAN 2026)
+# Environment variable validation (08 JAN 2026, updated 12 JAN 2026)
 from .env_validation import (
     ENV_VAR_RULES,
     EnvVarRule,
@@ -99,6 +99,7 @@ from .env_validation import (
     validate_environment,
     validate_single_var,
     get_validation_summary,
+    log_validation_results,
 )
 
 
@@ -277,11 +278,12 @@ __all__ = [
     # Observability (F7.12.C: Flag Consolidation - 10 JAN 2026)
     'ObservabilityConfig',
 
-    # Environment Variable Validation (08 JAN 2026)
+    # Environment Variable Validation (08 JAN 2026, updated 12 JAN 2026)
     'ENV_VAR_RULES',
     'EnvVarRule',
     'EnvValidationError',
     'validate_environment',
     'validate_single_var',
     'get_validation_summary',
+    'log_validation_results',
 ]

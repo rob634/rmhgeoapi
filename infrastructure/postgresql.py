@@ -1656,10 +1656,50 @@ class PostgreSQLJobRepository(PostgreSQLRepository, IJobRepository):
                 }
                 jobs.append(JobRecord(**job_data))
             
-            logger.info(f"📋 Listed {len(jobs)} jobs" + 
+            logger.info(f"📋 Listed {len(jobs)} jobs" +
                        (f" with status {status_filter}" if status_filter else ""))
-            
+
             return jobs
+
+    @enforce_contract(
+        params={'job_id': str},
+        returns=bool
+    )
+    def delete_job(self, job_id: str) -> bool:
+        """
+        Delete a job from PostgreSQL (12 JAN 2026).
+
+        Used by job resubmit to clean up old job records before creating
+        new ones with the same parameters.
+
+        Note: Tasks should be deleted first via TaskRepository.delete_tasks_for_job()
+        to avoid orphaned task records.
+
+        Args:
+            job_id: Job ID to delete
+
+        Returns:
+            True if deleted, False if not found
+        """
+        with self._error_context("job deletion", job_id):
+            query = sql.SQL("""
+                DELETE FROM {}.{}
+                WHERE job_id = %s
+                RETURNING job_id
+            """).format(
+                sql.Identifier(self.schema_name),
+                sql.Identifier("jobs")
+            )
+
+            result = self._execute_query(query, (job_id,), fetch='one')
+            deleted = result is not None
+
+            if deleted:
+                logger.info(f"🗑️ Deleted job: {job_id[:16]}...")
+            else:
+                logger.warning(f"⚠️ Job not found for deletion: {job_id[:16]}...")
+
+            return deleted
 
 
 # ============================================================================

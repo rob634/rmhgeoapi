@@ -311,6 +311,7 @@ from triggers.health import health_check_trigger
 from triggers.submit_job import submit_job_trigger
 from triggers.get_job_status import get_job_status_trigger
 from triggers.get_job_logs import get_job_logs_trigger
+from triggers.jobs.resubmit import job_resubmit
 from triggers.schema_pydantic_deploy import pydantic_deploy_trigger
 # ⚠️ LEGACY IMPORTS - DEPRECATED (10 NOV 2025) - COMMENTED OUT 16 NOV 2025
 # These imports are kept temporarily for backward compatibility
@@ -679,6 +680,22 @@ def get_job_logs(req: func.HttpRequest) -> func.HttpResponse:
         - component: Filter by component name
     """
     return get_job_logs_trigger.handle_request(req)
+
+
+@app.route(route="jobs/{job_id}/resubmit", methods=["POST"])
+def job_resubmit_route(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Job resubmit endpoint (12 JAN 2026).
+
+    Performs "nuclear reset" - deletes all job artifacts and resubmits
+    with the same parameters. Useful for failed/stuck jobs.
+
+    Body params (all optional):
+        - dry_run: Preview cleanup without executing (default: false)
+        - delete_blobs: Also delete COG files (default: false)
+        - force: Resubmit even if job is processing (default: false)
+    """
+    return job_resubmit(req)
 
 
 # ============================================================================

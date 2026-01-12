@@ -137,6 +137,53 @@ class TasksInterface(BaseInterface):
                 <!-- Tasks will be inserted here -->
             </div>
 
+            <!-- Logs Section (12 JAN 2026) -->
+            <div id="logs-section" class="logs-section">
+                <div class="logs-header" onclick="toggleLogsSection()">
+                    <div class="logs-header-left">
+                        <span class="logs-toggle-icon" id="logs-toggle-icon">▶</span>
+                        <h3>📋 Job Logs</h3>
+                        <span class="logs-count" id="logs-count"></span>
+                    </div>
+                    <div class="logs-header-right">
+                        <select id="logsLevelFilter" class="logs-filter-select" onclick="event.stopPropagation()">
+                            <option value="DEBUG">All (DEBUG+)</option>
+                            <option value="INFO" selected>INFO+</option>
+                            <option value="WARNING">WARNING+</option>
+                            <option value="ERROR">ERROR only</option>
+                        </select>
+                        <button id="refreshLogsBtn" class="logs-refresh-btn" onclick="event.stopPropagation(); loadLogs()">
+                            Refresh Logs
+                        </button>
+                    </div>
+                </div>
+                <div id="logs-content" class="logs-content hidden">
+                    <div id="logs-loading" class="logs-loading hidden">
+                        <div class="spinner-small"></div>
+                        <span>Loading logs from Application Insights...</span>
+                    </div>
+                    <div id="logs-empty" class="logs-empty hidden">
+                        <span>No logs found for this job</span>
+                    </div>
+                    <div id="logs-error" class="logs-error hidden">
+                        <span id="logs-error-message"></span>
+                    </div>
+                    <table id="logs-table" class="logs-table hidden">
+                        <thead>
+                            <tr>
+                                <th class="log-col-time">Timestamp</th>
+                                <th class="log-col-level">Level</th>
+                                <th class="log-col-component">Component</th>
+                                <th class="log-col-stage">Stage</th>
+                                <th class="log-col-message">Message</th>
+                            </tr>
+                        </thead>
+                        <tbody id="logs-table-body">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
             <!-- Empty State -->
             <div id="empty-state" class="empty-state hidden">
                 <div class="icon">📭</div>
@@ -1389,6 +1436,207 @@ class TasksInterface(BaseInterface):
             color: #991B1B;
             font-size: 13px;
             margin: 5px 0 0 0;
+        }
+
+        /* Logs Section (12 JAN 2026) */
+        .logs-section {
+            background: white;
+            border-radius: 3px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-top: 20px;
+            overflow: hidden;
+        }
+
+        .logs-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 20px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .logs-header:hover {
+            background: #f1f3f5;
+        }
+
+        .logs-header-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .logs-header-left h3 {
+            margin: 0;
+            font-size: 14px;
+            color: #053657;
+            font-weight: 600;
+        }
+
+        .logs-toggle-icon {
+            font-size: 10px;
+            color: #626F86;
+            transition: transform 0.2s;
+        }
+
+        .logs-toggle-icon.expanded {
+            transform: rotate(90deg);
+        }
+
+        .logs-count {
+            background: #e9ecef;
+            color: #626F86;
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 10px;
+        }
+
+        .logs-header-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .logs-filter-select {
+            padding: 6px 10px;
+            border: 1px solid #e9ecef;
+            border-radius: 3px;
+            font-size: 12px;
+            background: white;
+            cursor: pointer;
+        }
+
+        .logs-refresh-btn {
+            padding: 6px 12px;
+            background: #0071BC;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .logs-refresh-btn:hover {
+            background: #005a96;
+        }
+
+        .logs-content {
+            padding: 0;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .logs-content.hidden {
+            display: none;
+        }
+
+        .logs-loading, .logs-empty, .logs-error {
+            padding: 30px;
+            text-align: center;
+            color: #626F86;
+            font-size: 13px;
+        }
+
+        .logs-loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .spinner-small {
+            width: 16px;
+            height: 16px;
+            border: 2px solid #e9ecef;
+            border-top-color: #0071BC;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        .logs-error {
+            color: #DC2626;
+            background: #FEE2E2;
+        }
+
+        .logs-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        .logs-table thead {
+            background: #f8f9fa;
+            position: sticky;
+            top: 0;
+        }
+
+        .logs-table th {
+            padding: 10px 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #053657;
+            border-bottom: 1px solid #e9ecef;
+            white-space: nowrap;
+        }
+
+        .logs-table td {
+            padding: 8px 12px;
+            border-bottom: 1px solid #f1f3f5;
+            vertical-align: top;
+        }
+
+        .logs-table tr:hover {
+            background: #f8f9fa;
+        }
+
+        .log-col-time { width: 160px; }
+        .log-col-level { width: 70px; }
+        .log-col-component { width: 150px; }
+        .log-col-stage { width: 60px; text-align: center; }
+        .log-col-message { min-width: 300px; }
+
+        .log-level {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .log-level-debug { background: #e9ecef; color: #626F86; }
+        .log-level-info { background: #DBEAFE; color: #1D4ED8; }
+        .log-level-warning { background: #FEF3C7; color: #B45309; }
+        .log-level-error { background: #FEE2E2; color: #DC2626; }
+        .log-level-critical { background: #7F1D1D; color: white; }
+
+        .log-timestamp {
+            font-family: 'Courier New', monospace;
+            color: #626F86;
+            font-size: 11px;
+        }
+
+        .log-component {
+            color: #0071BC;
+            font-size: 11px;
+        }
+
+        .log-stage {
+            display: inline-block;
+            background: #e9ecef;
+            color: #053657;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+        }
+
+        .log-message {
+            color: #053657;
+            word-break: break-word;
+            max-width: 500px;
         }
 
         /* Responsive */
@@ -2793,6 +3041,134 @@ class TasksInterface(BaseInterface):
                 memoryEl.classList.toggle('hidden');
             }}
         }}
+
+        // ============================================================
+        // LOGS SECTION (12 JAN 2026)
+        // ============================================================
+
+        let logsExpanded = false;
+
+        // Toggle logs section visibility
+        function toggleLogsSection() {{
+            logsExpanded = !logsExpanded;
+            const content = document.getElementById('logs-content');
+            const icon = document.getElementById('logs-toggle-icon');
+
+            if (logsExpanded) {{
+                content.classList.remove('hidden');
+                icon.classList.add('expanded');
+                // Load logs on first expand
+                if (!content.dataset.loaded) {{
+                    loadLogs();
+                    content.dataset.loaded = 'true';
+                }}
+            }} else {{
+                content.classList.add('hidden');
+                icon.classList.remove('expanded');
+            }}
+        }}
+
+        // Load logs from API
+        async function loadLogs() {{
+            const level = document.getElementById('logsLevelFilter').value;
+            const loading = document.getElementById('logs-loading');
+            const empty = document.getElementById('logs-empty');
+            const error = document.getElementById('logs-error');
+            const table = document.getElementById('logs-table');
+            const countBadge = document.getElementById('logs-count');
+
+            // Show loading
+            loading.classList.remove('hidden');
+            empty.classList.add('hidden');
+            error.classList.add('hidden');
+            table.classList.add('hidden');
+
+            try {{
+                const response = await fetchJSON(
+                    `${{API_BASE_URL}}/api/jobs/${{JOB_ID}}/logs?level=${{level}}&limit=200&timespan=PT48H`
+                );
+
+                loading.classList.add('hidden');
+
+                if (!response.success) {{
+                    throw new Error(response.error || 'Failed to load logs');
+                }}
+
+                const logs = response.logs || [];
+                countBadge.textContent = `${{logs.length}} logs`;
+
+                if (logs.length === 0) {{
+                    empty.classList.remove('hidden');
+                    return;
+                }}
+
+                // Render logs table
+                renderLogsTable(logs);
+                table.classList.remove('hidden');
+
+            }} catch (err) {{
+                loading.classList.add('hidden');
+                error.classList.remove('hidden');
+                document.getElementById('logs-error-message').textContent = err.message;
+                countBadge.textContent = 'error';
+            }}
+        }}
+
+        // Render logs into table
+        function renderLogsTable(logs) {{
+            const tbody = document.getElementById('logs-table-body');
+            tbody.innerHTML = '';
+
+            for (const log of logs) {{
+                const row = document.createElement('tr');
+
+                // Format timestamp
+                const ts = new Date(log.timestamp);
+                const timeStr = ts.toLocaleString('en-US', {{
+                    month: 'short',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: false
+                }});
+
+                // Level class
+                const levelClass = `log-level-${{log.level.toLowerCase()}}`;
+
+                // Stage display
+                const stageHtml = log.stage ? `<span class="log-stage">S${{log.stage}}</span>` : '-';
+
+                // Component display
+                const componentDisplay = log.component || log.component_type || '-';
+
+                row.innerHTML = `
+                    <td><span class="log-timestamp">${{timeStr}}</span></td>
+                    <td><span class="log-level ${{levelClass}}">${{log.level}}</span></td>
+                    <td><span class="log-component">${{componentDisplay}}</span></td>
+                    <td>${{stageHtml}}</td>
+                    <td><span class="log-message">${{escapeHtml(log.message)}}</span></td>
+                `;
+
+                tbody.appendChild(row);
+            }}
+        }}
+
+        // Escape HTML to prevent XSS
+        function escapeHtml(text) {{
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }}
+
+        // Update logs when level filter changes
+        document.addEventListener('DOMContentLoaded', () => {{
+            document.getElementById('logsLevelFilter').addEventListener('change', () => {{
+                if (logsExpanded) {{
+                    loadLogs();
+                }}
+            }});
+        }});
 
         // ============================================================
         // ERROR/UTILITY FUNCTIONS

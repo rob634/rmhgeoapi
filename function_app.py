@@ -310,6 +310,7 @@ from triggers.health import health_check_trigger
 # NOTE: livez is now provided by triggers/probes.py (registered in Phase 1)
 from triggers.submit_job import submit_job_trigger
 from triggers.get_job_status import get_job_status_trigger
+from triggers.get_job_logs import get_job_logs_trigger
 from triggers.schema_pydantic_deploy import pydantic_deploy_trigger
 # ⚠️ LEGACY IMPORTS - DEPRECATED (10 NOV 2025) - COMMENTED OUT 16 NOV 2025
 # These imports are kept temporarily for backward compatibility
@@ -663,6 +664,21 @@ def get_job_status(req: func.HttpRequest) -> func.HttpResponse:
     return get_job_status_trigger.handle_request(req)
 
 
+@app.route(route="jobs/{job_id}/logs", methods=["GET"])
+def get_job_logs(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Job logs retrieval endpoint (12 JAN 2026).
+
+    Fetches Application Insights logs filtered by job_id for display
+    in workflow monitor.
+
+    Query params:
+        - level: Minimum level (DEBUG/INFO/WARNING/ERROR) - default INFO
+        - limit: Max rows (default 100, max 500)
+        - timespan: How far back (default PT24H)
+        - component: Filter by component name
+    """
+    return get_job_logs_trigger.handle_request(req)
 
 
 # ============================================================================
@@ -3447,6 +3463,28 @@ def system_snapshot_timer(timer: func.TimerRequest) -> None:
     """
     from triggers.admin.system_snapshot_timer import system_snapshot_timer_handler
     system_snapshot_timer_handler.handle(timer)
+
+
+@app.timer_trigger(
+    schedule="0 0 3 * * *",  # Daily at 3 AM UTC
+    arg_name="timer",
+    run_on_startup=False
+)
+def log_cleanup_timer(timer: func.TimerRequest) -> None:
+    """
+    Timer trigger: Clean up expired JSONL log files daily.
+
+    Deletes old log files from Azure Blob Storage based on retention settings:
+    - Verbose logs (DEBUG+): 7 days (JSONL_DEBUG_RETENTION_DAYS)
+    - Default logs (WARNING+): 30 days (JSONL_WARNING_RETENTION_DAYS)
+    - Metrics logs: 14 days (JSONL_METRICS_RETENTION_DAYS)
+
+    Schedule: Daily at 3 AM UTC (low traffic period)
+
+    Handler: triggers/admin/log_cleanup_timer.py (created 11 JAN 2026 - F7.12.F)
+    """
+    from triggers.admin.log_cleanup_timer import log_cleanup_timer_handler
+    log_cleanup_timer_handler.handle(timer)
 
 
 # ============================================================================

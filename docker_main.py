@@ -47,6 +47,52 @@ from typing import Optional
 # Ensure APP_MODE is set before importing config
 os.environ.setdefault("APP_MODE", "worker_docker")
 
+
+# ============================================================================
+# AZURE MONITOR OPENTELEMETRY SETUP (MUST BE EARLY)
+# ============================================================================
+# This sends logs, traces, and metrics to Application Insights - giving Docker
+# workers the same observability as Azure Functions.
+# ============================================================================
+
+def _configure_azure_monitor():
+    """Configure Azure Monitor OpenTelemetry for Docker queue worker."""
+    connection_string = os.environ.get("APPLICATIONINSIGHTS_CONNECTION_STRING")
+
+    if not connection_string:
+        print("⚠️ APPLICATIONINSIGHTS_CONNECTION_STRING not set - telemetry disabled")
+        return False
+
+    try:
+        from azure.monitor.opentelemetry import configure_azure_monitor
+
+        app_name = os.environ.get("APP_NAME", "docker-worker")
+        environment = os.environ.get("ENVIRONMENT", "dev")
+
+        configure_azure_monitor(
+            connection_string=connection_string,
+            resource_attributes={
+                "service.name": app_name,
+                "service.namespace": "rmhgeoapi",
+                "deployment.environment": environment,
+            },
+            enable_live_metrics=True,
+        )
+
+        print(f"✅ Azure Monitor OpenTelemetry configured (app={app_name}, env={environment})")
+        return True
+
+    except ImportError:
+        print("⚠️ azure-monitor-opentelemetry not installed - telemetry disabled")
+        return False
+    except Exception as e:
+        print(f"⚠️ Azure Monitor setup failed: {e} - telemetry disabled")
+        return False
+
+
+_azure_monitor_enabled = _configure_azure_monitor()
+
+
 # Azure SDK imports
 from azure.servicebus import ServiceBusClient, ServiceBusReceiver, ServiceBusReceivedMessage
 from azure.servicebus.exceptions import (

@@ -33,7 +33,7 @@
 | F7.8 | 🚧 | **Unified Metadata Architecture** (Pydantic models, extensible) |
 | F7.10 | ✅ | Metadata Consistency Enforcement (timer + checker) |
 | F7.11 | 🚧 | STAC Catalog Self-Healing (rebuild job) - vectors working |
-| F7.12 | ✅ | **Docker Worker Infrastructure** - Deployed to rmhheavyapi (11 JAN 2026) |
+| F7.12 | ✅ | **Docker Worker Infrastructure** - Deployed with OpenTelemetry (v0.7.8-otel, 11 JAN 2026) |
 | F7.13 | 📋 | **Docker Job Definitions** (consolidated single-task jobs) - PRIORITY |
 | F7.14 | 🔵 | Dynamic Task Routing (optional, if hybrid needed later) |
 
@@ -515,19 +515,21 @@ POST /api/jobs/submit/rebuild_stac
 **Deliverable**: Docker worker with Managed Identity OAuth for PostgreSQL and Storage
 **Status**: ✅ DEPLOYED (11 JAN 2026)
 **Deployed To**: `rmhheavyapi` Web App
-**Image**: `rmhazureacr.azurecr.io/geospatial-worker:v0.7.1-auth`
-**Version**: 0.7.7.1
+**Image**: `rmhazureacr.azurecr.io/geospatial-worker:v0.7.8-otel`
+**Version**: 0.7.8
 
 **Problem Solved**:
 - Function App has 10-minute timeout, limited GDAL support
 - Large rasters (>1GB) need Docker worker with full GDAL
 - Docker worker needs OAuth tokens for Azure services
+- **Multi-app observability** - Docker worker logs to same App Insights as Function App
 
 **Implementation**:
 - FastAPI health endpoints (`/livez`, `/readyz`, `/health`)
 - Managed Identity OAuth for PostgreSQL (user-assigned) and Storage (system-assigned)
 - Background token refresh thread (45-minute interval)
 - OSGeo GDAL ubuntu-full-3.10.1 base image
+- **OpenTelemetry integration** - `azure-monitor-opentelemetry` sends logs to App Insights
 
 | Story | Status | Description |
 |-------|--------|-------------|
@@ -541,14 +543,19 @@ POST /api/jobs/submit/rebuild_stac
 | S7.12.8 | ✅ | Deploy to rmhheavyapi Web App |
 | S7.12.9 | ✅ | Configure identities (PostgreSQL: user-assigned, Storage: system-assigned) |
 | S7.12.10 | ✅ | Verify all health endpoints working |
+| S7.12.11 | ✅ | Add `azure-monitor-opentelemetry` to requirements-docker.txt |
+| S7.12.12 | ✅ | Configure OpenTelemetry in `workers_entrance.py` BEFORE FastAPI import |
+| S7.12.13 | ✅ | Configure OpenTelemetry in `docker_main.py` for queue polling |
+| S7.12.14 | ✅ | Build v0.7.8-otel image with OpenTelemetry and push to ACR |
+| S7.12.15 | ✅ | Deploy to rmhheavyapi and verify telemetry transmission to App Insights |
 
-**Key Files Created**:
+**Key Files Created/Modified**:
 | File | Purpose | Lines |
 |------|---------|-------|
-| `docker_main.py` | Queue polling entry point (not HTTP) | 157 |
-| `workers_entrance.py` | FastAPI app with health endpoints | 489 |
+| `docker_main.py` | Queue polling entry point + OpenTelemetry setup | 180+ |
+| `workers_entrance.py` | FastAPI app + health + OpenTelemetry (before FastAPI) | 550+ |
 | `Dockerfile` | OSGeo GDAL ubuntu-full-3.10.1 base | 24 |
-| `requirements-docker.txt` | Dependencies (minus azure-functions) | 30 |
+| `requirements-docker.txt` | Dependencies + azure-monitor-opentelemetry | 35 |
 | `docker.env.example` | Environment variable template | 110 |
 | `.funcignore` | Excludes Docker files from Functions | 15 |
 | `infrastructure/auth/__init__.py` | Auth module initialization | 71 |
@@ -574,6 +581,20 @@ POST /api/jobs/submit/rebuild_stac
 **Background Workers**:
 - Token refresh thread: 45-minute interval, 5-minute buffer before expiry
 - Tokens valid for ~24 hours (Azure AD default)
+
+**OpenTelemetry Integration (v0.7.8-otel)**:
+- Package: `azure-monitor-opentelemetry>=1.6.0`
+- Configuration must be called BEFORE FastAPI import
+- Sends logs, traces, metrics to same App Insights as Function App
+- Cross-app correlation via `cloud_RoleName`
+
+**Multi-App Log Query**:
+```kql
+traces
+| where cloud_RoleName in ("rmhazuregeoapi", "docker-worker-azure")
+| project timestamp, cloud_RoleName, message
+| order by timestamp desc
+```
 
 ---
 

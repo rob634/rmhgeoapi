@@ -21,6 +21,11 @@ azure-keyvault-secrets
 azure-servicebus>=7.11.0
 azure-mgmt-datafactory>=4.0.0
 
+# Azure Monitor OpenTelemetry - Application Insights for Docker workers
+# This sends logs/traces/metrics to App Insights (same as Function App)
+# Must call configure_azure_monitor() BEFORE importing FastAPI
+azure-monitor-opentelemetry>=1.6.0
+
 # Geospatial - Core libraries
 geopandas
 psycopg[binary]

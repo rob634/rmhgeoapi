@@ -1,37 +1,40 @@
 #!/usr/bin/env python3
 # ============================================================================
-# CLAUDE CONTEXT - WORKERS ENTRANCE (Docker HTTP + Health Endpoints)
+# CLAUDE CONTEXT - DOCKER SERVICE (HTTP + Queue Worker)
 # ============================================================================
-# STATUS: Core Component - HTTP API for Docker container health and operations
-# PURPOSE: Health checks, auth validation, and handler execution for Docker
-# LAST_REVIEWED: 10 JAN 2026
+# STATUS: Core Component - Docker container with HTTP API and queue processing
+# PURPOSE: Health checks + Service Bus queue polling for long-running tasks
+# LAST_REVIEWED: 11 JAN 2026
 # ============================================================================
 """
-Workers Entrance - Docker Container HTTP API.
+Docker Service - HTTP API + Background Queue Worker.
 
-Provides HTTP endpoints for:
-    - Kubernetes-style health checks (livez, readyz, health)
-    - Database connectivity validation
-    - Storage connectivity validation
-    - Direct handler execution (for testing)
+This module runs:
+    1. FastAPI HTTP server (for health checks and diagnostics)
+    2. Background thread polling Service Bus queue for long-running tasks
+
+The queue worker uses CoreMachine.process_task_message() - identical to how
+Azure Functions process tasks. The only difference is the trigger mechanism.
+
+HTTP Endpoints:
+    /livez       - Liveness probe (is the process running?)
+    /readyz      - Readiness probe (can we serve traffic?)
+    /health      - Detailed health (token status, connectivity, queue status)
+    /queue/status - Queue worker status
 
 Background Services:
-    - Token refresh thread (PostgreSQL + Storage OAuth)
-    - Queue polling thread (optional, for task processing)
-
-Health Check Endpoints:
-    /livez  - Liveness probe (is the process running?)
-    /readyz - Readiness probe (can we serve traffic?)
-    /health - Detailed health (token status, connectivity)
+    - Token refresh thread (PostgreSQL + Storage OAuth every 45 min)
+    - Queue polling thread (polls long-running-tasks queue)
 
 Usage:
-    # Start the server
+    # Start the server (includes background queue worker)
     uvicorn workers_entrance:app --host 0.0.0.0 --port 80
 
     # Test endpoints
     curl http://localhost/livez
     curl http://localhost/readyz
     curl http://localhost/health
+    curl http://localhost/queue/status
 """
 
 import os
@@ -44,6 +47,70 @@ from typing import Any, Dict, Optional
 
 # Ensure APP_MODE is set
 os.environ.setdefault("APP_MODE", "worker_docker")
+
+
+# ============================================================================
+# AZURE MONITOR OPENTELEMETRY SETUP (MUST BE BEFORE FASTAPI IMPORT)
+# ============================================================================
+# This sends logs, traces, and metrics to Application Insights - giving Docker
+# workers the same observability as Azure Functions.
+#
+# CRITICAL: configure_azure_monitor() must be called BEFORE importing FastAPI
+# otherwise the instrumentation won't capture FastAPI requests properly.
+#
+# Requires: APPLICATIONINSIGHTS_CONNECTION_STRING environment variable
+# ============================================================================
+
+def configure_azure_monitor_telemetry():
+    """
+    Configure Azure Monitor OpenTelemetry for Docker environment.
+
+    This enables:
+    - Logs → Application Insights traces table
+    - HTTP requests → Application Insights requests table
+    - Exceptions → Application Insights exceptions table
+    - Custom metrics → Application Insights customMetrics table
+
+    Falls back gracefully if package not installed or connection string missing.
+    """
+    connection_string = os.environ.get("APPLICATIONINSIGHTS_CONNECTION_STRING")
+
+    if not connection_string:
+        print("⚠️ APPLICATIONINSIGHTS_CONNECTION_STRING not set - telemetry disabled")
+        return False
+
+    try:
+        from azure.monitor.opentelemetry import configure_azure_monitor
+
+        # Get app identification for log correlation
+        app_name = os.environ.get("APP_NAME", "docker-worker")
+        environment = os.environ.get("ENVIRONMENT", "dev")
+
+        configure_azure_monitor(
+            connection_string=connection_string,
+            # Cloud role helps identify this app in App Insights
+            resource_attributes={
+                "service.name": app_name,
+                "service.namespace": "rmhgeoapi",
+                "deployment.environment": environment,
+            },
+            # Enable all telemetry types
+            enable_live_metrics=True,
+        )
+
+        print(f"✅ Azure Monitor OpenTelemetry configured (app={app_name}, env={environment})")
+        return True
+
+    except ImportError:
+        print("⚠️ azure-monitor-opentelemetry not installed - telemetry disabled")
+        return False
+    except Exception as e:
+        print(f"⚠️ Azure Monitor setup failed: {e} - telemetry disabled")
+        return False
+
+
+# Configure Azure Monitor BEFORE any other imports
+_azure_monitor_enabled = configure_azure_monitor_telemetry()
 
 
 # ============================================================================
@@ -60,8 +127,11 @@ def configure_docker_logging():
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)
 
-    for handler in root_logger.handlers[:]:
-        root_logger.removeHandler(handler)
+    # If Azure Monitor is configured, it adds its own handler
+    # We still add a stream handler for local visibility
+    if not _azure_monitor_enabled:
+        for handler in root_logger.handlers[:]:
+            root_logger.removeHandler(handler)
 
     handler = logging.StreamHandler(sys.stdout)
     handler.setLevel(logging.INFO)
@@ -81,10 +151,20 @@ def configure_docker_logging():
 
 configure_docker_logging()
 
+import json
 import logging
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+
+# Azure Service Bus imports for queue polling
+from azure.servicebus import ServiceBusClient, ServiceBusReceiver, ServiceBusReceivedMessage
+from azure.servicebus.exceptions import (
+    ServiceBusError,
+    ServiceBusConnectionError,
+    OperationTimeoutError,
+)
+from azure.identity import DefaultAzureCredential
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +235,260 @@ class TokenRefreshWorker:
 
 # Global instances
 token_refresh_worker = TokenRefreshWorker()
+
+
+# ============================================================================
+# BACKGROUND QUEUE WORKER (Service Bus Polling)
+# ============================================================================
+
+class BackgroundQueueWorker:
+    """
+    Background worker that polls Service Bus queue in a separate thread.
+
+    This runs alongside the FastAPI HTTP server, allowing Azure Web App
+    to receive health checks while processing queue messages.
+
+    The worker uses CoreMachine.process_task_message() - identical to how
+    Azure Functions process tasks. The only difference is the trigger
+    mechanism (polling vs Function trigger).
+    """
+
+    def __init__(self):
+        self._thread: Optional[threading.Thread] = None
+        self._stop_event = threading.Event()
+        self._sb_client: Optional[ServiceBusClient] = None
+        self._is_running = False
+        self._messages_processed = 0
+        self._last_poll_time: Optional[datetime] = None
+        self._last_error: Optional[str] = None
+        self._started_at: Optional[datetime] = None
+
+        # Lazy-load config to avoid import issues at module load time
+        self._config = None
+        self._queue_name = None
+        self._core_machine = None
+
+        # Processing settings
+        self.max_wait_time_seconds = 30  # Long poll
+        self.poll_interval_on_error = 5  # Seconds to wait after error
+
+    def _ensure_initialized(self):
+        """Lazy initialization of config and CoreMachine."""
+        if self._config is None:
+            from config import get_config
+            self._config = get_config()
+            self._queue_name = self._config.queues.long_running_tasks_queue
+
+        if self._core_machine is None:
+            from core.machine import CoreMachine
+            from jobs import ALL_JOBS
+            from services import ALL_HANDLERS
+            self._core_machine = CoreMachine(
+                all_jobs=ALL_JOBS,
+                all_handlers=ALL_HANDLERS
+            )
+
+    def _get_sb_client(self) -> ServiceBusClient:
+        """
+        Get or create Service Bus client.
+
+        Authentication Priority (Identity-First):
+            1. Managed Identity via SERVICE_BUS_FQDN (preferred, production)
+            2. Connection string via ServiceBusConnection (local dev only)
+
+        Required RBAC Roles (on Service Bus namespace):
+            - Azure Service Bus Data Sender
+            - Azure Service Bus Data Receiver
+        """
+        if self._sb_client is None:
+            self._ensure_initialized()
+
+            # PREFER Managed Identity (namespace) over connection string
+            namespace = self._config.queues.namespace
+
+            if namespace:
+                # Production: Use Managed Identity (system-assigned)
+                logger.info(f"[Queue Worker] Using Managed Identity for: {namespace}")
+                credential = DefaultAzureCredential()
+                self._sb_client = ServiceBusClient(
+                    fully_qualified_namespace=namespace,
+                    credential=credential
+                )
+            else:
+                # Fallback: Connection string (local dev only)
+                connection_string = self._config.queues.connection_string
+                if not connection_string:
+                    raise ValueError(
+                        "No Service Bus connection configured. "
+                        "Set SERVICE_BUS_FQDN (recommended) or ServiceBusConnection"
+                    )
+                logger.warning("[Queue Worker] Using connection string auth (use SERVICE_BUS_FQDN for production)")
+                self._sb_client = ServiceBusClient.from_connection_string(connection_string)
+
+        return self._sb_client
+
+    def _process_message(
+        self,
+        message: ServiceBusReceivedMessage,
+        receiver: ServiceBusReceiver
+    ) -> bool:
+        """Process a single message via CoreMachine."""
+        from core.schema.queue import TaskQueueMessage
+
+        start_time = time.time()
+        task_id = "unknown"
+
+        try:
+            message_body = str(message)
+            task_data = json.loads(message_body)
+            task_message = TaskQueueMessage(**task_data)
+            task_id = task_message.task_id
+
+            logger.info(
+                f"[Queue] Processing: {task_id[:16]}... "
+                f"(type: {task_message.task_type}, stage: {task_message.stage})"
+            )
+
+            # Process via CoreMachine - identical to Function App
+            result = self._core_machine.process_task_message(task_message)
+            elapsed = time.time() - start_time
+
+            if result.get('success'):
+                logger.info(f"[Queue] Completed in {elapsed:.2f}s: {task_id[:16]}...")
+                receiver.complete_message(message)
+                self._messages_processed += 1
+
+                if result.get('stage_complete'):
+                    logger.info(
+                        f"[Queue] Stage {task_message.stage} complete for job "
+                        f"{task_message.parent_job_id[:16]}..."
+                    )
+                return True
+            else:
+                error = result.get('error', 'Unknown error')
+                logger.error(f"[Queue] Failed after {elapsed:.2f}s: {error}")
+                receiver.dead_letter_message(
+                    message,
+                    reason="TaskFailed",
+                    error_description=str(error)[:1024]
+                )
+                return False
+
+        except json.JSONDecodeError as e:
+            logger.error(f"[Queue] Invalid JSON: {e}")
+            receiver.dead_letter_message(message, reason="JSONDecodeError", error_description=str(e))
+            return False
+
+        except Exception as e:
+            elapsed = time.time() - start_time
+            logger.exception(f"[Queue] Exception processing {task_id[:16]}... after {elapsed:.2f}s")
+            try:
+                receiver.abandon_message(message)
+            except Exception:
+                pass
+            return False
+
+    def _run_loop(self):
+        """Main polling loop (runs in background thread)."""
+        self._ensure_initialized()
+        logger.info(f"[Queue Worker] Starting on queue: {self._queue_name}")
+        self._is_running = True
+        self._started_at = datetime.now(timezone.utc)
+
+        try:
+            client = self._get_sb_client()
+        except Exception as e:
+            self._last_error = str(e)
+            logger.error(f"[Queue Worker] Failed to connect: {e}")
+            self._is_running = False
+            return
+
+        while not self._stop_event.is_set():
+            try:
+                with client.get_queue_receiver(
+                    queue_name=self._queue_name,
+                    max_wait_time=self.max_wait_time_seconds,
+                ) as receiver:
+
+                    self._last_poll_time = datetime.now(timezone.utc)
+                    self._last_error = None
+
+                    messages = receiver.receive_messages(
+                        max_message_count=1,
+                        max_wait_time=self.max_wait_time_seconds
+                    )
+
+                    if not messages:
+                        continue
+
+                    for message in messages:
+                        if self._stop_event.is_set():
+                            receiver.abandon_message(message)
+                            break
+                        self._process_message(message, receiver)
+
+            except (ServiceBusConnectionError, OperationTimeoutError) as e:
+                self._last_error = f"{type(e).__name__}: {e}"
+                logger.warning(f"[Queue Worker] Transient error: {self._last_error}")
+                if not self._stop_event.is_set():
+                    self._stop_event.wait(self.poll_interval_on_error)
+
+            except ServiceBusError as e:
+                self._last_error = f"{type(e).__name__}: {e}"
+                logger.error(f"[Queue Worker] Service Bus error: {self._last_error}")
+                if not self._stop_event.is_set():
+                    self._stop_event.wait(self.poll_interval_on_error)
+
+            except Exception as e:
+                self._last_error = f"{type(e).__name__}: {e}"
+                logger.exception("[Queue Worker] Unexpected error")
+                if not self._stop_event.is_set():
+                    self._stop_event.wait(self.poll_interval_on_error)
+
+        # Cleanup
+        self._is_running = False
+        if self._sb_client:
+            try:
+                self._sb_client.close()
+            except Exception:
+                pass
+            self._sb_client = None
+
+        logger.info("[Queue Worker] Stopped")
+
+    def start(self):
+        """Start the background worker thread."""
+        if self._thread is not None and self._thread.is_alive():
+            logger.warning("[Queue Worker] Already running")
+            return
+
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._run_loop, daemon=True)
+        self._thread.start()
+        logger.info("[Queue Worker] Background thread started")
+
+    def stop(self):
+        """Stop the background worker thread."""
+        logger.info("[Queue Worker] Stopping...")
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=10)
+            self._thread = None
+
+    def get_status(self) -> dict:
+        """Get current worker status."""
+        return {
+            "running": self._is_running,
+            "queue_name": self._queue_name,
+            "messages_processed": self._messages_processed,
+            "started_at": self._started_at.isoformat() if self._started_at else None,
+            "last_poll_time": self._last_poll_time.isoformat() if self._last_poll_time else None,
+            "last_error": self._last_error,
+        }
+
+
+# Global queue worker instance
+queue_worker = BackgroundQueueWorker()
 
 
 # ============================================================================
@@ -252,7 +586,7 @@ async def lifespan(app: FastAPI):
     from infrastructure.auth import initialize_docker_auth
 
     print("=" * 60, flush=True)
-    print("WORKERS ENTRANCE - STARTING", flush=True)
+    print("DOCKER SERVICE - STARTING", flush=True)
     print("=" * 60, flush=True)
 
     # Initialize authentication (acquire tokens, configure GDAL)
@@ -263,10 +597,14 @@ async def lifespan(app: FastAPI):
     # Start background token refresh
     token_refresh_worker.start()
 
+    # Start background queue worker (polls long-running-tasks queue)
+    queue_worker.start()
+
     yield
 
     # Shutdown
-    print("WORKERS ENTRANCE - SHUTTING DOWN", flush=True)
+    print("DOCKER SERVICE - SHUTTING DOWN", flush=True)
+    queue_worker.stop()
     token_refresh_worker.stop()
 
 
@@ -342,6 +680,7 @@ def health_check():
     Detailed health check endpoint.
 
     Returns comprehensive health information including:
+    - Hardware metrics (CPU, memory, platform)
     - Token status (TTL, expiry)
     - Database connectivity
     - Storage connectivity
@@ -350,6 +689,9 @@ def health_check():
     Returns:
         Detailed health status
     """
+    import platform
+    import psutil
+
     from infrastructure.auth import get_token_status
     from config import get_config
 
@@ -362,6 +704,26 @@ def health_check():
     db_status = test_database_connectivity()
     storage_status = test_storage_connectivity()
 
+    # Hardware metrics (same format as Function App)
+    memory = psutil.virtual_memory()
+    process = psutil.Process()
+
+    hardware = {
+        "cpu_count": psutil.cpu_count(),
+        "total_ram_gb": round(memory.total / (1024**3), 1),
+        "platform": platform.system(),
+        "python_version": platform.python_version(),
+        "azure_site_name": os.environ.get("WEBSITE_SITE_NAME", "docker-worker"),
+        "azure_sku": os.environ.get("WEBSITE_SKU", "Container"),
+    }
+
+    memory_info = {
+        "system_percent": memory.percent,
+        "system_available_mb": round(memory.available / (1024**2), 1),
+        "cpu_percent": psutil.cpu_percent(interval=0.1),
+        "process_rss_mb": round(process.memory_info().rss / (1024**2), 1),
+    }
+
     # Overall health
     healthy = db_status.get("connected", False)
 
@@ -369,6 +731,8 @@ def health_check():
         "status": "healthy" if healthy else "unhealthy",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "version": "1.0.0",
+        "hardware": hardware,
+        "memory": memory_info,
         "config": {
             "database_host": config.database.host,
             "storage_account": config.storage.silver.account_name,
@@ -381,6 +745,7 @@ def health_check():
         },
         "background_workers": {
             "token_refresh": token_refresh_worker.get_status(),
+            "queue_worker": queue_worker.get_status(),
         },
     }
 
@@ -433,6 +798,20 @@ def test_storage():
     return test_storage_connectivity()
 
 
+@app.get("/queue/status")
+def get_queue_status():
+    """
+    Get detailed queue worker status.
+
+    Returns:
+        Queue worker status including messages processed, last poll time, errors
+    """
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "worker": queue_worker.get_status(),
+    }
+
+
 # ============================================================================
 # HANDLER ENDPOINTS (for future use)
 # ============================================================================
@@ -473,19 +852,24 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", "80"))
 
     logger.info("=" * 60)
-    logger.info("Workers Entrance - Docker Container API")
+    logger.info("Docker Service - HTTP API + Queue Worker")
     logger.info(f"Port: {port}")
     logger.info("=" * 60)
     logger.info("Health Endpoints:")
-    logger.info("  GET  /livez       - Liveness probe")
-    logger.info("  GET  /readyz      - Readiness probe")
-    logger.info("  GET  /health      - Detailed health check")
+    logger.info("  GET  /livez        - Liveness probe")
+    logger.info("  GET  /readyz       - Readiness probe")
+    logger.info("  GET  /health       - Detailed health check")
+    logger.info("  GET  /queue/status - Queue worker status")
     logger.info("Auth Endpoints:")
-    logger.info("  GET  /auth/status - Token status")
+    logger.info("  GET  /auth/status  - Token status")
     logger.info("  POST /auth/refresh - Force token refresh")
     logger.info("Test Endpoints:")
     logger.info("  GET  /test/database - Test DB connectivity")
     logger.info("  GET  /test/storage  - Test storage connectivity")
+    logger.info("=" * 60)
+    logger.info("Background Workers:")
+    logger.info("  - Token refresh (every 45 min)")
+    logger.info("  - Queue polling (long-running-tasks)")
     logger.info("=" * 60)
 
     uvicorn.run(app, host="0.0.0.0", port=port)

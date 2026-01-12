@@ -1,6 +1,6 @@
 # Project History
 
-**Last Updated**: 02 JAN 2026
+**Last Updated**: 11 JAN 2026
 **Active Log**: This is the main project history log (Sep 2025 onwards)
 
 **Archives**:
@@ -8,6 +8,242 @@
 - For history prior to September 2025, see **OLDER_HISTORY.md**
 
 This document tracks completed architectural changes and improvements to the Azure Geospatial ETL Pipeline.
+
+---
+
+## 09 JAN 2026: F7.8 Unified Metadata Architecture 📋
+
+**Status**: ✅ **COMPLETE** - Phase 1 & 2
+**Epic**: E7 Pipeline Infrastructure
+**Impact**: Pydantic-based metadata models as single source of truth across all data types
+**Author**: Robert and Claude
+
+### Achievement
+
+Created unified metadata architecture with Pydantic models providing consistent metadata patterns:
+
+```
+BaseMetadata (abstract)
+    ├── VectorMetadata      → geo.table_metadata
+    ├── RasterMetadata      → app.cog_metadata (F7.9)
+    └── Future formats      → extensible via inheritance
+```
+
+### Stories Completed
+
+| Story | Description |
+|-------|-------------|
+| S7.8.1 | Created `core/models/unified_metadata.py` with BaseMetadata + VectorMetadata |
+| S7.8.2 | Created `core/models/external_refs.py` with DDHRefs + ExternalRefs models |
+| S7.8.3 | Created `app.dataset_refs` table DDL (cross-type external linkage) |
+| S7.8.4 | Added `providers JSONB` and `custom_properties JSONB` to geo.table_metadata |
+| S7.8.5 | Refactored `ogc_features/repository.py` to return VectorMetadata model |
+| S7.8.6 | Refactored `ogc_features/service.py` to use VectorMetadata.to_ogc_collection() |
+| S7.8.7 | Refactored `services/service_stac_vector.py` to use VectorMetadata |
+| S7.8.8 | Wired Platform layer to populate app.dataset_refs on ingest |
+| S7.8.9 | Documented pattern for future RasterMetadata, ZarrMetadata |
+| S7.8.10 | Archived METADATA.md design doc to docs/archive |
+
+### Key Files
+
+- `core/models/unified_metadata.py` - Main metadata models (Provider, Extent, BaseMetadata, VectorMetadata)
+- `core/models/external_refs.py` - DDH linkage models (DatasetRef, DatasetRefRecord)
+- `core/schema/sql_generator.py` - DDL for app.dataset_refs table
+- `ogc_features/repository.py` - `get_vector_metadata()` method
+
+### Principles Established
+
+1. Pydantic models as single source of truth
+2. Typed columns over JSONB (minimize JSONB usage)
+3. pgstac as catalog index (populated FROM metadata tables)
+4. Open/Closed Principle — extend via inheritance
+5. External refs in app schema — cross-cutting DDH linkage spans all data types
+
+---
+
+## 09 JAN 2026: F12.5 Web Interface DRY Consolidation 🎨
+
+**Status**: ✅ **COMPLETE**
+**Epic**: E12 Interface Modernization
+**Impact**: Eliminated copy-pasted CSS/JS across web interfaces, clean template for frontend teams
+**Author**: Robert and Claude
+
+### Achievement
+
+Consolidated duplicate CSS and JavaScript across web interfaces:
+
+| Before | After |
+|--------|-------|
+| `.header-with-count` copied 4x | Moved to COMMON_CSS |
+| `.action-bar` + `.filter-group` copied 3x | Moved to COMMON_CSS |
+| `filterCollections()` JS copied 3x | Moved to COMMON_JS |
+
+### Stories Completed
+
+| Story | Description | Files |
+|-------|-------------|-------|
+| S12.5.1 | Move `.header-with-count` CSS to COMMON_CSS | `base.py` |
+| S12.5.2 | Move `.action-bar` + `.filter-group` CSS to COMMON_CSS | `base.py` |
+| S12.5.3 | Remove duplicated CSS from interfaces | `stac/`, `vector/` |
+| S12.5.4 | Add `filterCollections()` JS to COMMON_JS | `base.py` |
+| S12.5.5 | Remove duplicated JS from interfaces | `stac/`, `vector/` |
+| S12.5.6 | Fix naming: `_generate_css` → `_generate_custom_css` | `pipeline/interface.py` |
+| S12.5.7 | Verify all affected interfaces render correctly | Browser testing |
+
+### Verification
+
+All interfaces verified post-deployment:
+- `/api/interface/stac` - Header badge, search, type filter working
+- `/api/interface/vector` - Header badge, search input present
+- `/api/interface/stac-map` - Uses own DOM-based filter (as designed)
+- `/api/interface/pipeline` - Renders correctly, pipeline cards visible
+
+---
+
+## 07 JAN 2026: F9.1 FATHOM Rwanda Pipeline 🌊
+
+**Status**: ✅ **COMPLETE**
+**Epic**: E9 Large Data Hosting
+**Impact**: End-to-end FATHOM flood data processing on Rwanda (1,872 TIF files, 1.85 GB)
+**Author**: Robert and Claude
+**Docs**: [FATHOM_ETL.md](./FATHOM_ETL.md), [WIKI_JOB_FATHOM_ETL.md](/docs/wiki/WIKI_JOB_FATHOM_ETL.md)
+
+### Achievement
+
+Built and executed two-phase ETL pipeline for FATHOM global flood data on Rwanda test region:
+
+```
+Phase 1: Band Stacking (8 return periods → 1 multi-band COG per scenario)
+Phase 2: Spatial Merge (6 tiles → merged COGs per scenario)
+```
+
+### Rwanda Data Dimensions
+
+| Dimension | Values |
+|-----------|--------|
+| Flood Types | FLUVIAL_DEFENDED, FLUVIAL_UNDEFENDED, PLUVIAL_DEFENDED |
+| Years | 2020, 2030, 2050, 2080 |
+| SSP Scenarios | SSP1_2.6, SSP2_4.5, SSP3_7.0, SSP5_8.5 (future only) |
+| Return Periods | 1in5, 1in10, 1in20, 1in50, 1in100, 1in200, 1in500, 1in1000 |
+| Tiles | 6 tiles covering Rwanda |
+
+### Performance Results
+
+| Metric | Value |
+|--------|-------|
+| Inventory | 6 tiles, 234 Phase 1 groups, 39 Phase 2 groups |
+| Phase 1 | 234/234 tasks completed, 0 failures (~7 min) |
+| Phase 2 | 39/39 tasks completed, 0 failures (~8 min) |
+| Total pipeline | ~17 minutes |
+| Throughput | 33 tasks/min (Phase 1), 5 tasks/min (Phase 2) |
+
+### Stories Completed
+
+| Story | Description |
+|-------|-------------|
+| S9.1.R1 | Add `base_prefix` parameter to `inventory_fathom_container` job |
+| S9.1.R2 | Deploy and run inventory for Rwanda (`base_prefix: "rwa"`) |
+| S9.1.R3 | Run Phase 1 band stacking |
+| S9.1.R4 | Run Phase 2 spatial merge |
+| S9.1.R5 | Verify outputs in silver-fathom storage |
+| S9.1.R7 | Change FATHOM grid from 5×5 to 4×4 degrees |
+| S9.1.R8 | Fix region filtering bug (`source_metadata->>'region'` WHERE clauses) |
+
+### Key Files
+
+- `jobs/inventory_fathom_container.py` - Inventory job with region filtering
+- `services/fathom_container_inventory.py` - Bronze scanner with region extraction
+- `services/fathom_etl.py` - Core handlers with region filtering
+- `jobs/process_fathom_stack.py` - Phase 1 job
+- `jobs/process_fathom_merge.py` - Phase 2 job
+
+---
+
+## 06 JAN 2026: System Diagnostics & Configuration Drift Detection 🔍
+
+**Status**: ✅ **COMPLETE**
+**Impact**: Azure platform configuration snapshots for drift detection and audit trails
+**Author**: Robert and Claude
+
+### Achievement
+
+Built system snapshot infrastructure to capture and compare Azure platform configurations:
+
+| Component | Description |
+|-----------|-------------|
+| `app.system_snapshots` table | Stores configuration snapshots with Pydantic model |
+| Health: network_environment | Captures 90+ WEBSITE_*/AZURE_* environment vars |
+| Health: instance_info | Instance ID, worker config, cold start detection |
+| Snapshot service | Capture + drift detection via config hash comparison |
+
+### Snapshot Trigger Types
+
+| Trigger | When | Purpose |
+|---------|------|---------|
+| `startup` | App cold start | Baseline for each instance |
+| `scheduled` | Timer (hourly) | Detect drift over time |
+| `manual` | Admin endpoint | On-demand debugging |
+| `drift_detected` | Hash changed | Record moment of change |
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `core/models/system_snapshot.py` | Pydantic model + SnapshotTriggerType enum |
+| `core/schema/sql_generator.py` | DDL generation for system_snapshots table |
+| `services/snapshot_service.py` | SnapshotService + SnapshotRepository |
+| `triggers/admin/snapshot.py` | Blueprint with HTTP endpoints |
+| `function_app.py` | Timer trigger + startup capture |
+
+### Azure Configuration
+
+- Scale controller logging enabled: `SCALE_CONTROLLER_LOGGING_ENABLED=AppInsights:Verbose`
+- Drift detection via SHA256 hash of stable config fields
+
+---
+
+## 05 JAN 2026: Thread Safety Fix for BlobRepository 🔒
+
+**Status**: ✅ **COMPLETE**
+**Trigger**: KeyError race condition with 8 instances × 4 concurrent calls = 32 parallel executions
+**Impact**: Fixed container client caching race condition
+**Author**: Robert and Claude
+
+### Problem
+
+With `maxConcurrentCalls: 4` and 8 instances, hit race conditions in BlobRepository's container client caching due to check-then-act pattern without locking:
+
+```python
+# UNSAFE: Three separate bytecode ops, GIL releases between them
+if key not in dict:      # ① CHECK
+    dict[key] = value    # ② STORE (may trigger dict resize!)
+return dict[key]         # ③ RETURN (KeyError during resize!)
+```
+
+### Solution
+
+Implemented double-checked locking pattern:
+
+```python
+# SAFE: Lock protects entire sequence
+if key in dict:                    # Fast path (no lock)
+    return dict[key]
+with lock:                         # Slow path (locked)
+    if key not in dict:            # Double-check
+        dict[key] = create_value()
+    return dict[key]
+```
+
+### Key Concepts Documented
+
+| Coordination Type | Scope | Lock Mechanism | Example |
+|-------------------|-------|----------------|---------|
+| **Distributed** | Across instances/processes | PostgreSQL `pg_advisory_xact_lock` | "Last task turns out lights" |
+| **Local** | Within single process | Python `threading.Lock` | Dict caching in singletons |
+
+### Files Changed
+
+- `infrastructure/blob.py` - Added `_instances_lock`, `_container_clients_lock`, double-checked locking
 
 ---
 

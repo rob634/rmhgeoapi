@@ -348,9 +348,13 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         external_checks = [
             ("titiler", self._check_titiler_health),
             ("ogc_features", self._check_ogc_features_health),
-            # Add future external service checks here:
-            # ("new_service", self._check_new_service_health),
         ]
+
+        # Add Docker worker check if enabled (11 JAN 2026 - F7.13)
+        from config import get_app_mode_config
+        app_mode_config = get_app_mode_config()
+        if app_mode_config.docker_worker_enabled and app_mode_config.docker_worker_url:
+            external_checks.append(("docker_worker", self._check_docker_worker_health))
 
         parallel_results = self._run_checks_parallel(external_checks, timeout_seconds=25.0)
 
@@ -370,6 +374,15 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         health_data["components"]["ogc_features"] = ogc_features_health
         if ogc_features_health.get("status") == "unhealthy":
             health_data["errors"].append("OGC Features API unavailable (vector feature queries disabled)")
+
+        # Process Docker worker result (11 JAN 2026 - F7.13)
+        if "docker_worker" in parallel_results:
+            docker_worker_health = parallel_results.get("docker_worker", {"status": "error", "error": "Check not completed"})
+            health_data["components"]["docker_worker"] = docker_worker_health
+            if docker_worker_health.get("status") == "unhealthy":
+                health_data["warnings"].append("Docker worker unavailable (large raster processing disabled)")
+                if health_data["status"] == "healthy":
+                    health_data["status"] = "degraded"
 
         # Observability status - always include (10 JAN 2026 - F7.12.C)
         health_data["observability_status"] = config.get_debug_status()
@@ -2501,6 +2514,85 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             "ogc_features",
             check_ogc_features,
             description="OGC API - Features for PostGIS vector queries"
+        )
+
+    def _check_docker_worker_health(self) -> Dict[str, Any]:
+        """
+        Check Docker worker health (11 JAN 2026 - F7.13).
+
+        The Docker worker handles long-running tasks that exceed Function App
+        timeout limits (e.g., large raster processing). This check is only
+        performed when DOCKER_WORKER_ENABLED=true and DOCKER_WORKER_URL is set.
+
+        Returns:
+            Dict with Docker worker health status including:
+            - url: Docker worker URL
+            - health_endpoint: Full health endpoint URL
+            - health: Response from health endpoint
+            - overall_status: healthy/unhealthy
+            - purpose: Description of worker function
+        """
+        def check_docker_worker():
+            import requests
+            from config import get_app_mode_config
+
+            app_mode_config = get_app_mode_config()
+            worker_url = app_mode_config.docker_worker_url.rstrip('/')
+
+            health_ok = False
+            health_response = None
+            health_error = None
+
+            # Check /health endpoint
+            health_endpoint = f"{worker_url}/health"
+            try:
+                resp = requests.get(health_endpoint, timeout=15)
+                health_ok = resp.status_code == 200
+                health_response = {
+                    "status_code": resp.status_code,
+                    "ok": health_ok
+                }
+                # Try to get health response body if JSON
+                try:
+                    body = resp.json()
+                    health_response["body"] = body
+                    health_response["status"] = body.get("status", "unknown")
+                except Exception:
+                    pass
+            except requests.exceptions.Timeout:
+                health_error = "Connection timed out (15s)"
+            except requests.exceptions.ConnectionError as e:
+                health_error = f"Connection failed: {str(e)[:100]}"
+            except Exception as e:
+                health_error = f"Error: {str(e)[:100]}"
+
+            # Determine status
+            if health_ok:
+                overall_status = "healthy"
+                status_reason = "/health endpoint responding"
+            else:
+                overall_status = "unhealthy"
+                status_reason = health_error or "Docker worker not responding"
+
+            result = {
+                "url": worker_url,
+                "health_endpoint": health_endpoint,
+                "health": health_response if health_response else {"error": health_error},
+                "overall_status": overall_status,
+                "status_reason": status_reason,
+                "purpose": "Long-running task processing (large rasters, Docker-based COG creation)"
+            }
+
+            # Add error field for unhealthy status
+            if overall_status == "unhealthy":
+                result["error"] = status_reason
+
+            return result
+
+        return self.check_component_health(
+            "docker_worker",
+            check_docker_worker,
+            description="Docker worker for long-running geospatial tasks"
         )
 
     def _check_runtime_environment(self) -> Dict[str, Any]:

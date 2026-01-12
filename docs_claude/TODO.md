@@ -1,6 +1,6 @@
 # Working Backlog
 
-**Last Updated**: 11 JAN 2026 (F7.12 Docker Worker deployed to rmhheavyapi)
+**Last Updated**: 12 JAN 2026 (S7.13.8 BackgroundQueueWorker complete, MI auth for Service Bus)
 **Source of Truth**: [docs/epics/README.md](/docs/epics/README.md) — Epic/Feature/Story definitions
 **Purpose**: Sprint-level task tracking and delegation
 
@@ -37,8 +37,8 @@ Docker jobs = 1 stage, 1 task.
 ### F7.12: Docker Worker Infrastructure ✅ COMPLETE
 
 **Deployed**: 11 JAN 2026 to `rmhheavyapi` Web App
-**Image**: `rmhazureacr.azurecr.io/geospatial-worker:v0.7.1-auth`
-**Version**: 0.7.7.1
+**Image**: `rmhazureacr.azurecr.io/rmh-gdal-worker:latest` (tag: 20260111-1631)
+**Version**: 0.7.8
 
 | Story | Description | Status |
 |-------|-------------|--------|
@@ -65,11 +65,17 @@ Docker jobs = 1 stage, 1 task.
 - `infrastructure/auth/postgres_auth.py` - PostgreSQL OAuth
 - `infrastructure/auth/storage_auth.py` - Storage OAuth + GDAL config
 
-**Identity Configuration**:
-| Resource | Identity | Type |
-|----------|----------|------|
-| PostgreSQL (`rmhpgflexadmin`) | `a533cb80-a590-4fad-8e52-1eb1f72659d7` | User-assigned MI |
-| Storage (`rmhazuregeo`) | `cea30c4b-8d75-4a39-8b53-adab9a904345` | System-assigned MI |
+**Identity Configuration** (All Identity-Based - No Secrets):
+| Resource | Identity | Type | RBAC Role |
+|----------|----------|------|-----------|
+| PostgreSQL (`rmhpgflexadmin`) | `a533cb80-a590-4fad-8e52-1eb1f72659d7` | User-assigned MI | PostgreSQL AAD Auth |
+| Storage (`rmhazuregeo`) | `cea30c4b-8d75-4a39-8b53-adab9a904345` | System-assigned MI | Storage Blob Data Contributor |
+| Service Bus (`rmhazure`) | `cea30c4b-8d75-4a39-8b53-adab9a904345` | System-assigned MI | Data Sender + Data Receiver |
+
+**Environment Variables** (12 JAN 2026 - Updated for MI auth):
+- `SERVICE_BUS_FQDN=rmhazure.servicebus.windows.net` (MI auth, no connection string)
+- `USE_MANAGED_IDENTITY=true`
+- `DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID=a533cb80-a590-4fad-8e52-1eb1f72659d7`
 
 **Health Endpoints**:
 - `/livez` - Liveness probe (process running)
@@ -90,9 +96,39 @@ Docker jobs = 1 stage, 1 task.
 | S7.13.5 | Add checkpoint fields to `TaskRecord` model and schema | ✅ Done |
 | S7.13.6 | Create `CheckpointManager` class for resume support | ✅ Done |
 | S7.13.7 | Update handler to use `CheckpointManager` | ✅ Done |
-| S7.13.8 | Test locally with `workers_entrance.py` | 📋 |
-| S7.13.9 | Test end-to-end: submit job → Docker crash → resume from checkpoint | 📋 |
-| S7.13.10 | Add `process_vector_docker` job (same pattern) | 📋 |
+| S7.13.8 | **Add BackgroundQueueWorker to workers_entrance.py** | ✅ Done |
+| S7.13.9 | Rename `workers_entrance.py` → `docker_service.py` | 📋 |
+| S7.13.10 | Test locally: verify queue polling starts with FastAPI | 📋 |
+| S7.13.11 | Push to ACR and deploy to rmhheavyapi | 📋 |
+| S7.13.12 | Test end-to-end: submit job → verify Docker processes | 📋 |
+| S7.13.13 | Test checkpoint/resume: Docker crash → resume from checkpoint | 📋 |
+| S7.13.14 | Add `process_vector_docker` job (same pattern) | 📋 |
+
+### S7.13.8 Implementation Details: BackgroundQueueWorker ✅ COMPLETE
+
+**Completed**: 12 JAN 2026
+
+**What Was Added to `workers_entrance.py`**:
+1. `BackgroundQueueWorker` class (~200 lines) - daemon thread polling Service Bus
+2. Updated lifespan to start/stop queue worker
+3. Added `/queue/status` endpoint
+4. Updated header to reflect "Docker Service" naming
+
+**Key Features**:
+- Uses `CoreMachine.process_task_message()` - identical to Function App
+- Identity-first auth: prefers `SERVICE_BUS_FQDN` (MI) over connection string
+- Lazy initialization of CoreMachine to avoid import issues
+- Proper error handling with retry backoff
+- Message completion/dead-lettering based on result
+
+**Auth Priority** (Identity-First):
+```python
+# 1. Managed Identity via SERVICE_BUS_FQDN (preferred)
+# 2. Connection string via ServiceBusConnection (local dev only)
+```
+
+**Environment Variables** (No Secrets):
+- `SERVICE_BUS_FQDN=rmhazure.servicebus.windows.net` ✅
 
 ### Checkpoint/Resume Architecture (11 JAN 2026)
 
@@ -389,12 +425,131 @@ POST /api/jobs/submit/process_raster_docker
 
 **Status**: 🔵 BACKLOG - Only implement if separate Docker jobs prove insufficient
 
-TaskRoutingConfig would allow routing individual tasks to different queues:
+**Current State (11 JAN 2026)**:
+- Job type determines routing: `process_raster_v2` → Function App, `process_raster_docker` → Docker
+- User/client chooses which job to submit
+- `RASTER_ROUTE_DOCKER_MB=2000` env var exists but is NOT wired up
+
+**Future Enhancement - Automatic File-Size Routing**:
+```python
+# In job submission endpoint:
+if file_size_mb > config.raster.raster_route_docker_mb:
+    job_type = "process_raster_docker"  # Auto-route to Docker
+else:
+    job_type = "process_raster_v2"      # Standard Function App
+```
+
+**Alternative - TaskRoutingConfig**:
 ```bash
 ROUTE_TO_DOCKER=create_cog,process_fathom_stack
 ```
 
-**Current Decision**: Separate job definitions is simpler and sufficient.
+**Current Decision**: Separate job definitions is simpler and sufficient for MVP.
+Automatic routing can be added when:
+1. Docker worker is proven stable
+2. Real metrics show where the size threshold should be
+3. Client convenience outweighs explicit job selection
+
+### F7.15: HTTP-Triggered Docker Worker (Alternative Architecture)
+
+**Status**: 📋 PLANNED - Alternative to Service Bus polling
+**Added**: 11 JAN 2026
+**Prerequisite**: Complete F7.13 Option A first, then implement as configuration option
+
+**Concept**: Eliminate Docker→Service Bus connection entirely.
+Function App task worker HTTP-triggers Docker, then exits. Docker tracks its own state.
+
+```
+┌─────────────────┐    ┌──────────────────────┐
+│  Function App   │───▶│  Service Bus Queue   │
+│  (SB Trigger)   │◀───│  long-running-tasks  │
+└────────┬────────┘    └──────────────────────┘
+         │
+         │ 1. HTTP POST /task/start
+         │    {task_id, params, callback_url}
+         │
+         │ 2. Docker returns 202 Accepted immediately
+         ▼
+┌─────────────────┐
+│  Docker Worker  │──── 3. Process task in background
+│  (HTTP only)    │     4. Update task status in PostgreSQL
+└────────┬────────┘     5. Optionally call callback_url when done
+         │
+         │ (Function App is already gone - no timeout issues)
+         ▼
+   Task completion detected by:
+   - Polling task status table
+   - Or callback to Function App HTTP endpoint
+```
+
+**Why This Might Be Better**:
+1. **Simpler Docker auth** - Only needs HTTP endpoint, no Service Bus SDK
+2. **No queue credentials in Docker** - Function App owns all queue logic
+3. **Function App exits immediately** - No timeout concerns
+4. **State in PostgreSQL** - Already have task status table
+
+**Key Insight**: Docker uses THE SAME CoreMachine as Function App.
+It's Python + SQL - the only difference is the trigger mechanism.
+
+**Implementation Stories**:
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| S7.15.1 | Create 2-stage job: `process_raster_docker_http` | 📋 |
+| S7.15.2 | Stage 1 handler: `validate_and_trigger_docker` | 📋 |
+| S7.15.3 | Docker endpoint: `POST /task/start` | 📋 |
+| S7.15.4 | Docker background processing with CoreMachine | 📋 |
+| S7.15.5 | Configuration switch: `DOCKER_ORCHESTRATION_MODE` | 📋 |
+| S7.15.6 | Test both modes work | 📋 |
+
+**Detailed Flow**:
+```
+STAGE 1 (Function App - raster-tasks queue):
+┌─────────────────────────────────────────────────────────┐
+│ handler_validate_and_trigger_docker(params):            │
+│   1. validation = validate_raster(params)               │
+│   2. response = http_post(docker_url + "/task/start",   │
+│        {job_id, stage: 2, params: validated_params})    │
+│   3. if response.status == 202:                         │
+│        return {success: True}  # Stage 1 done           │
+└─────────────────────────────────────────────────────────┘
+                        │
+                        ▼ HTTP POST
+STAGE 2 (Docker - CoreMachine):
+┌─────────────────────────────────────────────────────────┐
+│ POST /task/start:                                       │
+│   1. Create Stage 2 task record in DB                   │
+│   2. Build TaskQueueMessage from HTTP payload           │
+│   3. Spawn: CoreMachine.process_task_message(msg)       │
+│   4. Return 202 Accepted immediately                    │
+│                                                         │
+│ Background thread:                                      │
+│   - CoreMachine handles EVERYTHING:                     │
+│     - Execute handler                                   │
+│     - Update task status                                │
+│     - Check stage completion (fan-in)                   │
+│     - Advance job / complete job                        │
+│   - Same code path as Service Bus trigger               │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Configuration**:
+```bash
+# Option A: Docker polls Service Bus (default)
+DOCKER_ORCHESTRATION_MODE=service_bus
+
+# Option B: Function App HTTP-triggers Docker
+DOCKER_ORCHESTRATION_MODE=http_trigger
+DOCKER_WORKER_URL=https://rmhheavyapi-xxx.azurewebsites.net
+```
+
+**Failure Handling**: Same as Function App - retries exhausted = job failed.
+No special watchdog needed beyond existing job timeout logic.
+
+**When to Implement**:
+- After F7.13 Option A is working
+- If Service Bus auth in Docker proves problematic
+- As configuration option, not replacement
 
 ---
 
@@ -514,128 +669,6 @@ themes:
 
 ---
 
-### ✅ Complete: Web Interface DRY Consolidation (v0.7.6.2)
-
-**Epic**: E12 Interface Modernization
-**Goal**: Eliminate copy-pasted CSS/JS across web interfaces to improve maintainability and provide clean template for future frontend teams
-**Started**: 08 JAN 2026 | **Completed**: 09 JAN 2026
-**Risk**: Low (additive CSS/JS changes, no logic changes)
-
-#### Background
-
-Code review identified significant DRY violations in `web_interfaces/`:
-- ~30K lines across 36 interfaces
-- Same CSS copied 4x (`.header-with-count`, `.action-bar`)
-- Same JS function copied 3x (`filterCollections()`)
-- Inconsistent method naming
-
-**Why It Matters**: This code serves as a template for future frontend teams. Copy-paste patterns will propagate as anti-patterns.
-
-#### F12.5: Web Interface DRY Consolidation
-
-| Story | Description | Status | Files |
-|-------|-------------|--------|-------|
-| S12.5.1 | Move `.header-with-count` CSS to COMMON_CSS | ✅ Done | `base.py` |
-| S12.5.2 | Move `.action-bar` + `.filter-group` CSS to COMMON_CSS | ✅ Done | `base.py` |
-| S12.5.3 | Remove duplicated CSS from interfaces | ✅ Done | `stac/`, `vector/` |
-| S12.5.4 | Add `filterCollections()` JS to COMMON_JS | ✅ Done | `base.py` |
-| S12.5.5 | Remove duplicated JS from interfaces | ✅ Done | `stac/`, `vector/` |
-| S12.5.6 | Fix naming: `_generate_css` → `_generate_custom_css` | ✅ Done | `pipeline/interface.py` |
-| S12.5.7 | Verify all affected interfaces render correctly | 📋 | Browser testing (post-deploy) |
-
-#### Implementation Details
-
-**S12.5.1 - CSS to add to COMMON_CSS**:
-```css
-/* Header with count badge - collection browsers */
-.header-with-count {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding-bottom: 12px;
-}
-.header-with-count h1 { margin: 0; }
-.collection-count {
-    background: var(--ds-blue-primary);
-    color: white;
-    padding: 6px 14px;
-    border-radius: 20px;
-    font-size: 14px;
-    font-weight: 600;
-}
-```
-
-**S12.5.2 - CSS to add to COMMON_CSS**:
-```css
-/* Action bar - button + filters layout */
-.action-bar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 16px;
-    gap: 16px;
-}
-.filter-group {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-}
-.filter-select {
-    padding: 8px 12px;
-    border: 1px solid var(--ds-gray-light);
-    border-radius: 4px;
-    font-size: 13px;
-}
-```
-
-**S12.5.4 - JS to add to COMMON_JS**:
-```javascript
-/**
- * Filter collection cards by search term and optional type.
- * Requires: #search-filter input, optional #type-filter select
- * Requires: global allCollections array and renderCollections(filtered) function
- */
-function filterCollections() {
-    const searchTerm = (document.getElementById('search-filter')?.value || '').toLowerCase();
-    const typeFilter = document.getElementById('type-filter')?.value || '';
-
-    const filtered = allCollections.filter(c => {
-        const matchesSearch = !searchTerm ||
-            c.id.toLowerCase().includes(searchTerm) ||
-            (c.title || '').toLowerCase().includes(searchTerm) ||
-            (c.description || '').toLowerCase().includes(searchTerm);
-        const matchesType = !typeFilter || c.type === typeFilter;
-        return matchesSearch && matchesType;
-    });
-
-    renderCollections(filtered);
-}
-```
-
-**S12.5.3/S12.5.5 - Files to clean up**:
-| File | Remove CSS | Remove JS |
-|------|------------|-----------|
-| `stac/interface.py` | `.header-with-count`, `.action-bar`, `.filter-group`, `.filter-select` | `filterCollections()` |
-| `vector/interface.py` | `.header-with-count`, `.action-bar` | `filterCollections()` |
-| `stac_map/interface.py` | `.header-with-count` (if present) | Keep custom (DOM-based) |
-| `h3/interface.py` | `.header-with-count` (if present) | N/A |
-
-#### Verification Checklist
-
-**Implementation Complete (08 JAN 2026)** - All syntax/import checks pass locally.
-**Verification Complete (09 JAN 2026)** - All interfaces render correctly post-deployment.
-
-| Interface | Status | Notes |
-|-----------|--------|-------|
-| `/api/interface/stac` | ✅ Pass | Header badge, search, type filter working |
-| `/api/interface/vector` | ✅ Pass | Header badge, search input present |
-| `/api/interface/stac-map` | ✅ Pass | Uses own DOM-based filter (as designed) |
-| `/api/interface/pipeline` | ✅ Pass | Renders correctly, pipeline cards visible |
-
-**F12.5 COMPLETE** - DRY consolidation deployed and verified.
-
----
-
 ### 🟢 Priority 3: Building Flood Exposure Pipeline
 
 **Epic**: E8 GeoAnalytics Pipeline
@@ -725,88 +758,6 @@ CREATE TABLE h3.building_flood_stats (
 | S7.5.4 | Pipeline Builder UI (visual orchestration) | 📋 |
 
 **Design Principle**: Build concrete implementations first (FATHOM, H3, Buildings), then extract patterns.
-
----
-
-### ✅ Priority 3: Unified Metadata Architecture (Phase 2 Complete)
-
-**Epic**: E7 Pipeline Infrastructure
-**Goal**: Pydantic-based metadata models providing single source of truth across all data types
-**Design Document**: [docs/archive/METADATA.md](/docs/archive/METADATA.md) (archived)
-**Status**: Phase 2 complete (09 JAN 2026)
-
-#### F7.8: Unified Metadata Architecture
-
-| Story | Description | Status |
-|-------|-------------|--------|
-| S7.8.1 | Create `core/models/unified_metadata.py` with BaseMetadata + VectorMetadata | ✅ Done (09 JAN) |
-| S7.8.2 | Create `core/models/external_refs.py` with DDHRefs + ExternalRefs models | ✅ Done (09 JAN) |
-| S7.8.3 | Create `app.dataset_refs` table DDL (cross-type external linkage) | ✅ Done (09 JAN) |
-| S7.8.4 | Add `providers JSONB` and `custom_properties JSONB` to geo.table_metadata DDL | ✅ Done (09 JAN) |
-| S7.8.5 | Refactor `ogc_features/repository.py` to return VectorMetadata model | ✅ Done (09 JAN) |
-| S7.8.6 | Refactor `ogc_features/service.py` to use VectorMetadata.to_ogc_collection() | ✅ Done (09 JAN) |
-| S7.8.7 | Refactor `services/service_stac_vector.py` to use VectorMetadata | ✅ Done (09 JAN) |
-| S7.8.8 | Wire Platform layer to populate app.dataset_refs on ingest | ✅ Done (09 JAN) |
-| S7.8.9 | Document pattern for future data types (RasterMetadata, ZarrMetadata) | ✅ Done (09 JAN) |
-| S7.8.10 | Archive METADATA.md design doc to docs/archive after implementation | ✅ Done (09 JAN) |
-
-**Phase 1 Complete (09 JAN 2026)**:
-- Created `core/models/unified_metadata.py` with:
-  - `Provider`, `ProviderRole` - STAC provider models
-  - `SpatialExtent`, `TemporalExtent`, `Extent` - Extent models
-  - `BaseMetadata` - Abstract base for all data types
-  - `VectorMetadata` - Full implementation with `from_db_row()`, `to_ogc_properties()`, `to_ogc_collection()`, `to_stac_collection()`, `to_stac_item()`
-- Created `core/models/external_refs.py` with:
-  - `DataType` enum (vector, raster, zarr)
-  - `DDHRefs`, `ExternalRefs`, `DatasetRef` - API models
-  - `DatasetRefRecord` - Database record model
-- Updated `core/schema/sql_generator.py` to generate `app.dataset_refs` table with indexes
-- Updated `triggers/admin/db_maintenance.py` with F7.8 columns for geo.table_metadata
-- Added `get_vector_metadata()` method to `ogc_features/repository.py` returning VectorMetadata model
-
-**Key Files (Phase 1)**:
-- `core/models/unified_metadata.py` - Main metadata models
-- `core/models/external_refs.py` - External reference models
-- `core/schema/sql_generator.py` - DDL for app.dataset_refs
-- `triggers/admin/db_maintenance.py` - DDL for geo.table_metadata F7.8 columns
-- `ogc_features/repository.py` - `get_vector_metadata()` method
-
-**Phase 2 Complete (09 JAN 2026)**:
-- OGC Features service uses VectorMetadata.to_ogc_collection() (S7.8.6)
-- STAC vector service uses VectorMetadata for item enrichment (S7.8.7)
-- Platform layer wired to populate app.dataset_refs on ingest (S7.8.8)
-- Pattern documented for future RasterMetadata, ZarrMetadata (S7.8.9)
-- METADATA.md archived to docs/archive/ (S7.8.10)
-
-**Architecture**:
-```
-BaseMetadata (abstract)
-    ├── VectorMetadata      → geo.table_metadata
-    ├── RasterMetadata      → raster.cog_metadata (future E2)
-    ├── ZarrMetadata        → zarr.dataset_metadata (future E9)
-    └── NewFormatMetadata   → extensible for future formats
-
-app.dataset_refs (cross-type DDH linkage)
-    ├── dataset_id (our ID) + data_type
-    ├── ddh_dataset_id, ddh_resource_id, ddh_version_id (typed, indexed)
-    └── other_refs JSONB (future external systems)
-```
-
-**Principles**:
-1. Pydantic models as single source of truth
-2. Typed columns over JSONB (minimize JSONB to `providers`, `custom_properties`, `other_refs`)
-3. pgstac as catalog index (populated FROM metadata tables)
-4. Open/Closed Principle — extend via inheritance
-5. External refs in app schema — cross-cutting DDH linkage spans all data types
-
-**DDH Integration Flow**:
-```
-PlatformRequest.dataset_id  ───► app.dataset_refs.ddh_dataset_id
-PlatformRequest.resource_id ───► app.dataset_refs.ddh_resource_id
-PlatformRequest.version_id  ───► app.dataset_refs.ddh_version_id
-```
-
-**Enables**: E1 (Vector), E2 (Raster), E9 (Zarr), E8 (Analytics) — consistent metadata + DDH linkage across all data types.
 
 ---
 
@@ -1495,8 +1446,9 @@ Tasks suitable for a colleague with Azure/Python/pipeline expertise but without 
 
 | Date | Item | Epic |
 |------|------|------|
+| 11 JAN 2026 | **F7.12 Docker OpenTelemetry** - Docker worker logs to App Insights via azure-monitor-opentelemetry (v0.7.8-otel) | E7 |
 | 11 JAN 2026 | **F7.12 Docker Worker Infrastructure** - Deployed to rmhheavyapi with Managed Identity OAuth (v0.7.7.1) | E7 |
-| 10 JAN 2026 | **F7.12 Logging Architecture** - Flag consolidation, global log context, App Insights export (RBAC pending) | E7 |
+| 10 JAN 2026 | **F7.12 Logging Architecture** - Flag consolidation, global log context, env var cleanup | E7 |
 | 09 JAN 2026 | **SP12.9 NiceGUI Spike Complete** - Decision: Stay with HTMX/JS/HTML/CSS | E12 |
 | 09 JAN 2026 | **F12.3.1 DRY Consolidation** - CSS/JS deduplication across interfaces | E12 |
 | 09 JAN 2026 | **F7.8 Unified Metadata Architecture Phase 1** (models, schema, repository) | E7 |
@@ -1553,7 +1505,7 @@ Tasks suitable for a colleague with Azure/Python/pipeline expertise but without 
 **Epic**: E7 Pipeline Infrastructure
 **Goal**: Eliminate duplicate debug flags, unify diagnostics, add global log context for multi-app filtering
 **Priority**: HIGH - Duplicate flags are accumulating and causing confusion
-**Status**: ✅ COMPLETE (code deployed, RBAC pending)
+**Status**: ✅ COMPLETE (Function App + Docker Worker both logging to App Insights)
 
 ### Background
 
@@ -1703,7 +1655,7 @@ class Config:
         )
 ```
 
-### F7.12.D: Python App Insights Log Export ✅ CODE COMPLETE (RBAC PENDING)
+### F7.12.D: Python App Insights Log Export ✅ COMPLETE
 
 **Goal**: On-demand export of App Insights logs to blob storage via Python endpoint
 
@@ -1716,22 +1668,39 @@ class Config:
 | S7.12.D.5 | Add `POST /api/appinsights/query` endpoint for quick queries | ✅ | `triggers/probes.py` |
 | S7.12.D.6 | Document usage and KQL templates | ✅ | `docs/wiki/WIKI_API_HEALTH.md` |
 
-**⚠️ RBAC Configuration Required**:
-The App Insights query endpoints return **403 InsufficientAccessError** because the Function App's managed identity does not have permission to query its own Application Insights resource.
+**Note**: App Insights REST API query endpoints require Monitoring Reader RBAC role (optional - see WIKI for setup).
 
-To enable these endpoints, grant **Monitoring Reader** role:
-```bash
-# Get the managed identity principal ID
-PRINCIPAL_ID=$(az functionapp identity show --name rmhazuregeoapi --resource-group rmhazure_rg --query principalId -o tsv)
+### F7.12.E: Docker Worker OpenTelemetry ✅ COMPLETE (11 JAN 2026)
 
-# Grant Monitoring Reader on Application Insights
-az role assignment create \
-  --assignee "$PRINCIPAL_ID" \
-  --role "Monitoring Reader" \
-  --scope "/subscriptions/$(az account show --query id -o tsv)/resourceGroups/rmhazure_rg/providers/microsoft.insights/components/rmhazuregeoapi"
+**Goal**: Docker worker logs to same Application Insights as Function App
+
+| Story | Description | Status | Files |
+|-------|-------------|--------|-------|
+| S7.12.E.1 | Add `azure-monitor-opentelemetry>=1.6.0` to requirements-docker.txt | ✅ | `requirements-docker.txt` |
+| S7.12.E.2 | Configure OpenTelemetry in `workers_entrance.py` BEFORE FastAPI import | ✅ | `workers_entrance.py` |
+| S7.12.E.3 | Configure OpenTelemetry in `docker_main.py` for queue polling | ✅ | `docker_main.py` |
+| S7.12.E.4 | Build and push to ACR (v0.7.8-otel) | ✅ | ACR |
+| S7.12.E.5 | Deploy to rmhheavyapi and verify telemetry transmission | ✅ | Azure Web App |
+
+**Result**: Docker worker and Function App both log to Application Insights with cross-app correlation via `cloud_RoleName`:
+```kql
+traces
+| where cloud_RoleName in ("rmhazuregeoapi", "docker-worker-azure")
+| project timestamp, cloud_RoleName, message
+| order by timestamp desc
 ```
 
-Until this RBAC change is made, the `/api/appinsights/query` and `/api/appinsights/export` endpoints will return 403 errors.
+**Key Files**:
+- `requirements-docker.txt` - Added `azure-monitor-opentelemetry>=1.6.0`
+- `workers_entrance.py` - `configure_azure_monitor_telemetry()` called before FastAPI
+- `docker_main.py` - `_configure_azure_monitor()` called early in startup
+
+**Environment Variables for Docker**:
+```bash
+APPLICATIONINSIGHTS_CONNECTION_STRING=InstrumentationKey=xxx;...
+APP_NAME=docker-worker-azure
+ENVIRONMENT=dev
+```
 
 **Implementation for S7.12.D.1-3** (`infrastructure/appinsights_export.py`):
 ```python

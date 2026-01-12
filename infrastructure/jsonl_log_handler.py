@@ -30,17 +30,13 @@ Environment Variables (11 JAN 2026 - F7.12.F):
     JSONL_FLUSH_INTERVAL: Seconds between flushes (default: 60)
     JSONL_BUFFER_SIZE: Max records before flush (default: 100)
 
-Blob Structure:
+Blob Structure (flat - no nested date/instance folders):
     applogs/
       logs/
         default/           # WARNING+ from all, DEBUG+ from janitor/timer
-          2026-01-12/
-            instance123/
-              20260112T143052Z.jsonl
+          20260112T143052Z_instance123.jsonl
         verbose/           # ALL logs (when VERBOSE_LOG_DUMP=true)
-          2026-01-12/
-            instance123/
-              20260112T143052Z.jsonl
+          20260112T143052Z_instance123.jsonl
 
 JSON Lines Format:
     {"ts": "2026-01-12T14:30:52Z", "level": "WARNING", "logger": "service.StacCatalog", ...}
@@ -457,11 +453,11 @@ class JSONLBlobHandler(logging.Handler):
         lines = [r.to_json_line() for r in records]
         content = "\n".join(lines) + "\n"
 
-        # Generate blob name
+        # Generate blob name (flat structure - no nested folders)
+        # Format: logs/{mode}/{timestamp}_{instance}.jsonl (sortable by date)
         now = datetime.now(timezone.utc)
-        date_str = now.strftime("%Y-%m-%d")
         timestamp_str = now.strftime("%Y%m%dT%H%M%SZ")
-        blob_name = f"logs/{mode}/{date_str}/{self.instance_id[:16]}/{timestamp_str}.jsonl"
+        blob_name = f"logs/{mode}/{timestamp_str}_{self.instance_id[:16]}.jsonl"
 
         try:
             client = self._get_blob_client()

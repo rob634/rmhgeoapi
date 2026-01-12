@@ -38,12 +38,11 @@ Usage:
     # Force flush (e.g., on shutdown)
     flush_metrics()
 
-Blob Structure:
-    metrics/
-      2026-01-10/
-        abc123def456/
-          20260110T143052Z.jsonl
-          20260110T144152Z.jsonl
+Blob Structure (flat - no nested date/instance folders):
+    applogs/
+      service-metrics/
+        20260110T143052Z_abc123def456.jsonl
+        20260110T144152Z_abc123def456.jsonl
 
 JSON Lines Format (one JSON object per line):
     {"ts": "2026-01-10T14:30:52Z", "op": "ogc.query_features", "ms": 145.2, "status": "success", ...}
@@ -281,11 +280,11 @@ class MetricsBlobLogger:
         lines = [r.to_json_line() for r in records]
         content = "\n".join(lines) + "\n"
 
-        # Generate blob name
+        # Generate blob name (flat structure - no nested folders)
+        # Format: service-metrics/{timestamp}_{instance}.jsonl (sortable by date)
         now = datetime.now(timezone.utc)
-        date_str = now.strftime("%Y-%m-%d")
         timestamp_str = now.strftime("%Y%m%dT%H%M%SZ")
-        blob_name = f"service-metrics/{date_str}/{self.instance_id[:16]}/{timestamp_str}.jsonl"
+        blob_name = f"service-metrics/{timestamp_str}_{self.instance_id[:16]}.jsonl"
 
         # Upload to blob
         try:

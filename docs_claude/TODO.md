@@ -97,9 +97,9 @@ Docker jobs = 1 stage, 1 task.
 | S7.13.6 | Create `CheckpointManager` class for resume support | ✅ Done |
 | S7.13.7 | Update handler to use `CheckpointManager` | ✅ Done |
 | S7.13.8 | **Add BackgroundQueueWorker to workers_entrance.py** | ✅ Done |
-| S7.13.9 | Rename `workers_entrance.py` → `docker_service.py` | 📋 |
-| S7.13.10 | Test locally: verify queue polling starts with FastAPI | 📋 |
-| S7.13.11 | Push to ACR and deploy to rmhheavyapi | 📋 |
+| S7.13.9 | Rename `workers_entrance.py` → `docker_service.py` | ✅ Done |
+| S7.13.10 | Test locally: verify queue polling starts with FastAPI | ⏭️ Skip |
+| S7.13.11 | Push to ACR and deploy to rmhheavyapi | 🔄 In Progress |
 | S7.13.12 | Test end-to-end: submit job → verify Docker processes | 📋 |
 | S7.13.13 | Test checkpoint/resume: Docker crash → resume from checkpoint | 📋 |
 | S7.13.14 | Add `process_vector_docker` job (same pattern) | 📋 |
@@ -551,6 +551,40 @@ No special watchdog needed beyond existing job timeout logic.
 - If Service Bus auth in Docker proves problematic
 - As configuration option, not replacement
 
+### Docker Execution Model Terminology (12 JAN 2026)
+
+**Two Models - Clear Naming**:
+
+| Model | Name | Trigger | Job Suffix | Use Case |
+|-------|------|---------|------------|----------|
+| **A** | **Queue-Polled** | Docker polls Service Bus | `*_docker` | Heavy ETL, hours-long |
+| **B** | **Function-Triggered** | FA HTTP → Docker | `*_triggered` | FA as gatekeeper |
+
+**Job Type Naming Convention**:
+```
+# QUEUE-POLLED (Docker polls queue, single stage)
+process_raster_docker      # F7.13 - current implementation
+process_vector_docker      # Future
+
+# FUNCTION-TRIGGERED (FA triggers Docker, two stages)
+process_raster_triggered   # F7.15 - FA validates → Docker ETL
+process_vector_triggered   # F7.15 - FA validates → Docker ETL
+```
+
+**Common Abstraction for Function-Triggered Jobs**:
+- `DockerTriggeredJobMixin` - standard 2-stage structure
+- Stage 1 handler: `trigger_docker_task` (FA validates + POSTs to Docker)
+- Stage 2: Docker creates task, runs CoreMachine in background
+- Docker endpoint: `POST /task/start` returns 202 Accepted
+
+**When to Use Which**:
+| Scenario | Model |
+|----------|-------|
+| Tasks running hours (large rasters) | Queue-Polled |
+| FA validation before Docker starts | Function-Triggered |
+| Simpler Docker (no Service Bus) | Function-Triggered |
+| High-volume parallel tasks | Queue-Polled |
+
 ---
 
 ## FY26 Priorities (ends 30 JUN 2026)
@@ -573,53 +607,6 @@ No special watchdog needed beyond existing job timeout logic.
 ---
 
 ## Current Sprint Focus
-
-### ✅ Priority 1: FATHOM Rwanda Pipeline (COMPLETE)
-
-**Epic**: E9 Large Data Hosting
-**Goal**: End-to-end FATHOM processing on Rwanda data (1,872 TIF files, 1.85 GB)
-**Test Region**: Rwanda (6 tiles: s01e030, s02e029, s02e030, s03e028, s03e029, s03e030)
-**Completed**: 07 JAN 2026
-
-#### Rwanda Data Dimensions
-
-| Dimension | Values |
-|-----------|--------|
-| Flood Types | FLUVIAL_DEFENDED, FLUVIAL_UNDEFENDED, PLUVIAL_DEFENDED |
-| Years | 2020, 2030, 2050, 2080 |
-| SSP Scenarios | SSP1_2.6, SSP2_4.5, SSP3_7.0, SSP5_8.5 (future only) |
-| Return Periods | 1in5, 1in10, 1in20, 1in50, 1in100, 1in200, 1in500, 1in1000 |
-| Tiles | 6 tiles covering Rwanda |
-
-#### F9.1: FATHOM Rwanda Processing
-
-| Story | Description | Status |
-|-------|-------------|--------|
-| S9.1.R1 | Add `base_prefix` parameter to `inventory_fathom_container` job | ✅ Done (07 JAN) |
-| S9.1.R2 | Deploy and run inventory for Rwanda (`base_prefix: "rwa"`) | ✅ Done (07 JAN) |
-| S9.1.R3 | Run Phase 1 band stacking (8 return periods → 1 COG per scenario) | ✅ Done (07 JAN) |
-| S9.1.R4 | Run Phase 2 spatial merge (6 tiles → merged COGs) | ✅ Done (07 JAN) |
-| S9.1.R5 | Verify outputs in silver-fathom storage | ✅ Done (07 JAN) |
-| S9.1.R6 | Register merged COGs in STAC catalog | 📋 Pending |
-| S9.1.R7 | Change FATHOM grid from 5×5 to 4×4 degrees | ✅ Done (06 JAN) |
-| S9.1.R8 | Fix region filtering bug (source_metadata->>'region') | ✅ Done (07 JAN) |
-
-**Completed Results (07 JAN 2026)**:
-- Inventory: 6 tiles, 234 Phase 1 groups, 39 Phase 2 groups
-- Phase 1: 234/234 tasks completed, 0 failures (~7 min)
-- Phase 2: 39/39 tasks completed, 0 failures (~8 min)
-- Total pipeline: ~17 minutes
-- Performance: 33 tasks/min (Phase 1), 5 tasks/min (Phase 2)
-- See: [WIKI_JOB_FATHOM_ETL.md](/docs/wiki/WIKI_JOB_FATHOM_ETL.md)
-
-**Key Files**:
-- `jobs/inventory_fathom_container.py` - Inventory job with region filtering
-- `services/fathom_container_inventory.py` - Bronze scanner with region extraction
-- `services/fathom_etl.py` - Core handlers with region filtering
-- `jobs/process_fathom_stack.py` - Phase 1 job
-- `jobs/process_fathom_merge.py` - Phase 2 job
-
----
 
 ### 🟡 Priority 2: H3 Analytics on Rwanda
 
@@ -1052,152 +1039,6 @@ POST /api/jobs/submit/rebuild_stac
 
 ---
 
-## System Diagnostics & Configuration Drift Detection
-
-**Added**: 04 JAN 2026
-**Purpose**: Capture Azure platform configuration snapshots to detect changes in corporate environments
-
-### Background
-
-Corporate Azure environments (ASE, VNet) have configurations that can change without warning.
-The enhanced health endpoint now captures 90+ environment variables. System snapshots will
-persist this data for drift detection and audit trails.
-
-### Completed (04 JAN 2026)
-
-| Task | Description | Status |
-|------|-------------|--------|
-| Database schema | `app.system_snapshots` table with Pydantic model | ✅ |
-| SQL generator | Enum, table, indexes added to `sql_generator.py` | ✅ |
-| Health: network_environment | Captures all WEBSITE_*/AZURE_* vars | ✅ Deployed |
-| Health: instance_info | Instance ID, worker config, cold start detection | ✅ Committed |
-| Scale controller logging | `SCALE_CONTROLLER_LOGGING_ENABLED=AppInsights:Verbose` | ✅ Enabled |
-| Blueprint pattern investigation | Reviewed probes.py; snapshot follows same Blueprint pattern | ✅ |
-| Snapshot capture service | `services/snapshot_service.py` - capture + drift detection | ✅ |
-| Config hash computation | SHA256 of stable config fields for drift detection | ✅ |
-| Drift diff computation | Compare current vs previous snapshot, identify changes | ✅ |
-| Startup trigger | Capture snapshot in `function_app.py` after Phase 2 validation | ✅ |
-| Scheduled trigger | Timer trigger (hourly) in `function_app.py` | ✅ |
-| Manual trigger | `POST /api/system/snapshot` + `GET /api/system/snapshot/drift` | ✅ |
-| Version bump | 0.7.2.1 → 0.7.3 | ✅ |
-
-### Deployment Complete (06 JAN 2026)
-
-| Task | Description | Status |
-|------|-------------|--------|
-| Deploy changes | Deploy v0.7.4.3 to Azure | ✅ |
-| Deploy schema | Run full-rebuild to create `system_snapshots` table | ✅ |
-| Verify endpoints | Scheduled trigger capturing snapshots hourly | ✅ |
-
-### Snapshot Trigger Types
-
-| Trigger | When | Purpose |
-|---------|------|---------|
-| `startup` | App cold start | Baseline for each instance |
-| `scheduled` | Timer (hourly) | Detect drift over time |
-| `manual` | Admin endpoint | On-demand debugging |
-| `drift_detected` | Hash changed | Record moment of change |
-
-### Key Files
-
-| File | Purpose |
-|------|---------|
-| `core/models/system_snapshot.py` | Pydantic model + SnapshotTriggerType enum |
-| `core/schema/sql_generator.py` | DDL generation for system_snapshots table |
-| `services/snapshot_service.py` | SnapshotService + SnapshotRepository |
-| `triggers/admin/snapshot.py` | Blueprint with HTTP endpoints |
-| `function_app.py` | Timer trigger + startup capture (lines 2484-2504, 3352-3395) |
-
-### Application Insights Queries
-
-```kusto
--- Scale controller decisions
-traces
-| where customDimensions.Category == "ScaleControllerLogs"
-| where message == "Instance count changed"
-| project timestamp,
-    PreviousCount = customDimensions.PreviousInstanceCount,
-    NewCount = customDimensions.CurrentInstanceCount,
-    Reason = customDimensions.Reason
-
--- Active instances in last 30 min
-performanceCounters
-| where timestamp > ago(30m)
-| summarize LastSeen=max(timestamp) by cloud_RoleInstance
-| order by LastSeen desc
-```
-
----
-
-## Thread Safety Investigation
-
-**Added**: 05 JAN 2026
-**Trigger**: KeyError race condition in BlobRepository when scaled to 8 instances
-**Status**: Initial fix applied, broader investigation needed
-
-### Background
-
-With `maxConcurrentCalls: 4` and 8 instances = 32 parallel task executions, we hit race conditions in BlobRepository's container client caching. Root cause: **check-then-act pattern without locking**.
-
-### Key Concepts (05 JAN 2026 Discussion)
-
-| Coordination Type | Scope | Lock Mechanism | Example |
-|-------------------|-------|----------------|---------|
-| **Distributed** | Across instances/processes | PostgreSQL `pg_advisory_xact_lock` | "Last task turns out lights" |
-| **Local** | Within single process | Python `threading.Lock` | Dict caching in singletons |
-
-**Why PostgreSQL can't help with local coordination**: The `_container_clients` dict exists only in Python process memory. PostgreSQL can only lock things it knows about (database rows/tables).
-
-**The race condition pattern**:
-```python
-# UNSAFE: Three separate bytecode ops, GIL releases between them
-if key not in dict:      # ① CHECK
-    dict[key] = value    # ② STORE (may trigger dict resize!)
-return dict[key]         # ③ RETURN (KeyError during resize!)
-```
-
-**The fix (double-checked locking)**:
-```python
-# SAFE: Lock protects entire sequence
-if key in dict:                    # Fast path (no lock)
-    return dict[key]
-with lock:                         # Slow path (locked)
-    if key not in dict:            # Double-check
-        dict[key] = create_value()
-    return dict[key]
-```
-
-### Completed (05 JAN 2026)
-
-| Task | Description | Status |
-|------|-------------|--------|
-| BlobRepository fix | Added `_instances_lock` and `_container_clients_lock` | ✅ |
-| Double-checked locking | `_get_container_client()` uses fast path + locked slow path | ✅ |
-| Documentation | Explained pattern in docstrings | ✅ |
-
-### Future Investigation
-
-| Area | Concern | Priority |
-|------|---------|----------|
-| Other singletons | PostgreSQLRepository, other repos - same pattern? | 🟡 Medium |
-| GDAL/rasterio threading | GDAL releases GIL - potential issues with concurrent raster ops | 🟡 Medium |
-| Connection pools | psycopg3 pool thread safety under high concurrency | 🟡 Medium |
-| Azure SDK clients | BlobServiceClient thread safety documentation | 🟢 Low |
-
-### Key Files
-
-| File | What Was Fixed |
-|------|----------------|
-| `infrastructure/blob.py` | `_instances_lock`, `_container_clients_lock`, double-checked locking |
-
-### Related Context
-
-- **CoreMachine uses PostgreSQL advisory locks** for distributed coordination (see `core/state_manager.py`, `core/schema/sql_generator.py`)
-- **OOM concerns** have historically limited multi-threading exploration
-- **GDAL threading issues** are separate from Python GIL (GDAL has own thread pool)
-
----
-
 ## E4: Classification Enforcement & ADF Integration
 
 **Added**: 07 JAN 2026
@@ -1446,43 +1287,17 @@ Tasks suitable for a colleague with Azure/Python/pipeline expertise but without 
 
 | Date | Item | Epic |
 |------|------|------|
-| 11 JAN 2026 | **F7.12 Docker OpenTelemetry** - Docker worker logs to App Insights via azure-monitor-opentelemetry (v0.7.8-otel) | E7 |
-| 11 JAN 2026 | **F7.12 Docker Worker Infrastructure** - Deployed to rmhheavyapi with Managed Identity OAuth (v0.7.7.1) | E7 |
-| 10 JAN 2026 | **F7.12 Logging Architecture** - Flag consolidation, global log context, env var cleanup | E7 |
-| 09 JAN 2026 | **SP12.9 NiceGUI Spike Complete** - Decision: Stay with HTMX/JS/HTML/CSS | E12 |
-| 09 JAN 2026 | **F12.3.1 DRY Consolidation** - CSS/JS deduplication across interfaces | E12 |
-| 09 JAN 2026 | **F7.8 Unified Metadata Architecture Phase 1** (models, schema, repository) | E7 |
-| 08 JAN 2026 | **pg_cron + autovacuum implementation** (table_maintenance.py, pg_cron_setup.sql) | E8 |
-| 08 JAN 2026 | H3 finalize handler updated with run_vacuum param (default: False) | E8 |
-| 08 JAN 2026 | TABLE_MAINTENANCE.md documentation created | E8 |
-| 08 JAN 2026 | H3 finalize timeout root cause identified: VACUUM ANALYZE on 114M rows | E8 |
-| 08 JAN 2026 | h3-pg PostgreSQL extension spike: NOT available on Azure Flexible Server | E8 |
-| 07 JAN 2026 | **FATHOM Rwanda Pipeline COMPLETE** (234 Phase 1 + 39 Phase 2 tasks, 0 failures) | E9 |
-| 07 JAN 2026 | Region filtering bug fix (`source_metadata->>'region'` WHERE clauses) | E9 |
-| 07 JAN 2026 | WIKI_JOB_FATHOM_ETL.md created (performance metrics, instance monitoring) | — |
-| 05 JAN 2026 | **Docstring Review COMPLETE** (236/236 stable files, archived to docs_claude/) | — |
-| 05 JAN 2026 | Thread-safety fixes for BlobRepository (concurrent pipeline support) | — |
-| 05 JAN 2026 | FATHOM tile deduplication bug fix (8x duplicates) | E9 |
-| 05 JAN 2026 | Database admin interface added to web_interfaces | E12 |
-| 04 JAN 2026 | S2.2.5: Multi-band TiTiler URLs with bidx params | E2 |
-| 04 JAN 2026 | S2.2.6: Auto-rescale for DEMs and non-uint8 rasters | E2 |
-| 04 JAN 2026 | TiTiler-xarray deployed to DEV (Zarr tile serving) | E9 |
-| 04 JAN 2026 | System snapshots schema (Pydantic model + DDL) | — |
-| 04 JAN 2026 | Health: network_environment (90+ Azure vars) | — |
-| 04 JAN 2026 | Health: instance_info (cold start detection) | — |
-| 04 JAN 2026 | Scale controller logging enabled | — |
-| 04 JAN 2026 | SERVICE_BUS_NAMESPACE explicit env var | — |
-| 04 JAN 2026 | Version bump to 0.7.1 | — |
-| 03 JAN 2026 | STARTUP_REFORM.md Phases 1-4 (livez/readyz probes) | — |
-| 03 JAN 2026 | Blueprint refactor for probes.py | — |
-| 30 DEC 2025 | Platform API Submit UI COMPLETE | E3 |
-| 29 DEC 2025 | Epic Consolidation (E10,E11,E13,E14,E15 absorbed) | — |
-| 29 DEC 2025 | F7.5 Collection Ingestion COMPLETE | E7 |
-| 28 DEC 2025 | F8.12 H3 Export Pipeline COMPLETE | E8 |
-| 28 DEC 2025 | F7.6 Pipeline Observability COMPLETE | E7 |
-| 28 DEC 2025 | F8.8 Source Catalog COMPLETE | E8 |
-| 24 DEC 2025 | F12.3 Migration COMPLETE (14 interfaces HTMX) | E12 |
-| 21 DEC 2025 | FATHOM Phase 1 complete (CI), Phase 2 46/47 | E7 |
+| 11 JAN 2026 | **F7.12 Docker OpenTelemetry** - Docker worker logs to App Insights (v0.7.8-otel) | E7 |
+| 11 JAN 2026 | **F7.12 Docker Worker Infrastructure** - Deployed to rmhheavyapi | E7 |
+| 10 JAN 2026 | **F7.12 Logging Architecture** - Flag consolidation, global log context | E7 |
+| 09 JAN 2026 | **F7.8 Unified Metadata Architecture** - VectorMetadata pattern (→ HISTORY.md) | E7 |
+| 09 JAN 2026 | **F12.5 DRY Consolidation** - CSS/JS deduplication (→ HISTORY.md) | E12 |
+| 08 JAN 2026 | pg_cron + autovacuum for H3 VACUUM | E8 |
+| 07 JAN 2026 | **F9.1 FATHOM Rwanda Pipeline COMPLETE** (→ HISTORY.md) | E9 |
+| 06 JAN 2026 | **System Diagnostics & Drift Detection** (→ HISTORY.md) | — |
+| 05 JAN 2026 | **Thread-safety fix for BlobRepository** (→ HISTORY.md) | — |
+
+*For full details on items marked (→ HISTORY.md), see [HISTORY.md](./HISTORY.md)*
 
 ---
 

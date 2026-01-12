@@ -28,7 +28,7 @@ Background Services:
 
 Usage:
     # Start the server (includes background queue worker)
-    uvicorn workers_entrance:app --host 0.0.0.0 --port 80
+    uvicorn docker_service:app --host 0.0.0.0 --port 80
 
     # Test endpoints
     curl http://localhost/livez
@@ -704,24 +704,58 @@ def health_check():
     db_status = test_database_connectivity()
     storage_status = test_storage_connectivity()
 
-    # Hardware metrics (same format as Function App)
+    # Hardware metrics (same format as Function App - 12 JAN 2026)
     memory = psutil.virtual_memory()
     process = psutil.Process()
+    mem_info = process.memory_info()
+    total_ram_gb = round(memory.total / (1024**3), 1)
 
     hardware = {
         "cpu_count": psutil.cpu_count(),
-        "total_ram_gb": round(memory.total / (1024**3), 1),
+        "total_ram_gb": total_ram_gb,
         "platform": platform.system(),
         "python_version": platform.python_version(),
         "azure_site_name": os.environ.get("WEBSITE_SITE_NAME", "docker-worker"),
         "azure_sku": os.environ.get("WEBSITE_SKU", "Container"),
     }
 
-    memory_info = {
-        "system_percent": memory.percent,
+    # Instance info for log correlation (matches Function App pattern)
+    instance = {
+        "container_id": os.environ.get("HOSTNAME", "unknown")[:12],
+        "website_instance_id": os.environ.get("WEBSITE_INSTANCE_ID", "local")[:8],
+        "app_name": os.environ.get("APP_NAME", "docker-worker"),
+    }
+
+    # Process info
+    try:
+        create_time = datetime.fromtimestamp(process.create_time(), tz=timezone.utc)
+        uptime_seconds = (datetime.now(timezone.utc) - create_time).total_seconds()
+    except Exception:
+        uptime_seconds = 0
+
+    process_info = {
+        "pid": process.pid,
+        "uptime_seconds": round(uptime_seconds),
+        "uptime_human": f"{int(uptime_seconds // 3600)}h {int((uptime_seconds % 3600) // 60)}m",
+        "threads": process.num_threads(),
+    }
+
+    # Memory stats (system and process)
+    memory_stats = {
+        "system_total_gb": total_ram_gb,
         "system_available_mb": round(memory.available / (1024**2), 1),
-        "cpu_percent": psutil.cpu_percent(interval=0.1),
-        "process_rss_mb": round(process.memory_info().rss / (1024**2), 1),
+        "system_percent": round(memory.percent, 1),
+        "process_rss_mb": round(mem_info.rss / (1024**2), 1),
+        "process_vms_mb": round(mem_info.vms / (1024**2), 1),
+        "process_percent": round(process.memory_percent(), 2),
+        "cpu_percent": round(psutil.cpu_percent(interval=0.1), 1),
+    }
+
+    # Capacity thresholds (same as Function App)
+    capacity = {
+        "safe_file_limit_mb": round((total_ram_gb * 1024) / 4, 0),
+        "warning_threshold_percent": 80,
+        "critical_threshold_percent": 90,
     }
 
     # Overall health
@@ -731,12 +765,19 @@ def health_check():
         "status": "healthy" if healthy else "unhealthy",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "version": "1.0.0",
-        "hardware": hardware,
-        "memory": memory_info,
+        # Runtime environment (matches Function App pattern)
+        "runtime": {
+            "hardware": hardware,
+            "instance": instance,
+            "process": process_info,
+            "memory": memory_stats,
+            "capacity": capacity,
+        },
         "config": {
             "database_host": config.database.host,
             "storage_account": config.storage.silver.account_name,
             "managed_identity": config.database.use_managed_identity,
+            "service_bus_fqdn": config.queues.namespace,
         },
         "tokens": token_status,
         "connectivity": {

@@ -66,7 +66,6 @@ EXPOSE 80
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:80/health || exit 1
 
-# Entry point - FastAPI Workers Entrance for HTTP access
-# Use workers_entrance.py for Azure Web App (HTTP required)
-# For queue-based processing, use docker_main.py separately
-CMD ["python3", "-m", "uvicorn", "workers_entrance:app", "--host", "0.0.0.0", "--port", "80", "--log-level", "info", "--access-log"]
+# Entry point - Docker Service (HTTP + Queue Worker)
+# Runs FastAPI for health checks + background thread polling Service Bus
+CMD ["python3", "-m", "uvicorn", "docker_service:app", "--host", "0.0.0.0", "--port", "80", "--log-level", "info", "--access-log"]

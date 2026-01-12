@@ -86,6 +86,10 @@ class ObservabilityConfig(BaseModel):
         2. METRICS_DEBUG_MODE (legacy)
         3. DEBUG_MODE (legacy)
 
+    verbose_log_dump: Enable verbose JSONL log dumps (11 JAN 2026 - F7.12.F)
+        - When true (with enabled=true), dumps ALL logs to blob
+        - When false, only dumps janitor/timer + WARNING+
+
     app_name: Application identifier for multi-app log filtering
         - Set via APP_NAME env var
         - Used in global log context
@@ -97,6 +101,11 @@ class ObservabilityConfig(BaseModel):
     environment: Deployment environment (dev, qa, prod)
         - Set via ENVIRONMENT env var
         - Used in global log context
+
+    JSONL Log Retention (11 JAN 2026 - F7.12.F):
+        debug_retention_days: Days to keep verbose/debug logs (default: 7)
+        warning_retention_days: Days to keep warning+ logs (default: 30)
+        metrics_retention_days: Days to keep metrics logs (default: 14)
     """
 
     enabled: bool = Field(
@@ -106,6 +115,16 @@ class ObservabilityConfig(BaseModel):
             "True = Enable memory tracking, service latency, blob metrics. "
             "False = Minimal overhead for production. "
             "Reads from OBSERVABILITY_MODE, METRICS_DEBUG_MODE, or DEBUG_MODE."
+        )
+    )
+
+    verbose_log_dump: bool = Field(
+        default=False,
+        description=(
+            "Enable verbose JSONL log dumps (11 JAN 2026 - F7.12.F). "
+            "When true (with enabled=true), dumps ALL logs including DEBUG to blob storage. "
+            "When false, only dumps janitor/timer logs + WARNING+ from everything else. "
+            "Set via VERBOSE_LOG_DUMP environment variable."
         )
     )
 
@@ -136,6 +155,34 @@ class ObservabilityConfig(BaseModel):
         )
     )
 
+    # JSONL Log Retention Settings (11 JAN 2026 - F7.12.F)
+    debug_retention_days: int = Field(
+        default=7,
+        description=(
+            "Days to keep verbose/debug logs in blob storage. "
+            "Set via JSONL_DEBUG_RETENTION_DAYS. "
+            "Applies to applogs/logs/verbose/ directory."
+        )
+    )
+
+    warning_retention_days: int = Field(
+        default=30,
+        description=(
+            "Days to keep warning+ logs in blob storage. "
+            "Set via JSONL_WARNING_RETENTION_DAYS. "
+            "Applies to applogs/logs/default/ directory."
+        )
+    )
+
+    metrics_retention_days: int = Field(
+        default=14,
+        description=(
+            "Days to keep metrics logs in blob storage. "
+            "Set via JSONL_METRICS_RETENTION_DAYS. "
+            "Applies to applogs/service-metrics/ directory."
+        )
+    )
+
     @classmethod
     def from_environment(cls) -> "ObservabilityConfig":
         """
@@ -153,6 +200,13 @@ class ObservabilityConfig(BaseModel):
             """Parse boolean from environment variable."""
             return value.lower() in ("true", "1", "yes")
 
+        def parse_int(value: str, default: int) -> int:
+            """Parse integer from environment variable."""
+            try:
+                return int(value) if value else default
+            except ValueError:
+                return default
+
         # Check env vars in priority order for backward compatibility
         observability_mode = os.environ.get("OBSERVABILITY_MODE", "").lower()
         metrics_debug_mode = os.environ.get("METRICS_DEBUG_MODE", "").lower()
@@ -168,11 +222,23 @@ class ObservabilityConfig(BaseModel):
         else:
             enabled = False
 
+        # Verbose log dump (11 JAN 2026 - F7.12.F)
+        verbose_log_dump = parse_bool(os.environ.get("VERBOSE_LOG_DUMP", ""))
+
+        # Retention settings (11 JAN 2026 - F7.12.F)
+        debug_retention = parse_int(os.environ.get("JSONL_DEBUG_RETENTION_DAYS", ""), 7)
+        warning_retention = parse_int(os.environ.get("JSONL_WARNING_RETENTION_DAYS", ""), 30)
+        metrics_retention = parse_int(os.environ.get("JSONL_METRICS_RETENTION_DAYS", ""), 14)
+
         return cls(
             enabled=enabled,
+            verbose_log_dump=verbose_log_dump,
             app_name=os.environ.get("APP_NAME", "unknown"),
             app_instance=os.environ.get("WEBSITE_INSTANCE_ID", "local")[:16],
             environment=os.environ.get("ENVIRONMENT", "dev"),
+            debug_retention_days=debug_retention,
+            warning_retention_days=warning_retention,
+            metrics_retention_days=metrics_retention,
         )
 
     def debug_dict(self) -> dict:
@@ -184,9 +250,13 @@ class ObservabilityConfig(BaseModel):
         """
         return {
             "enabled": self.enabled,
+            "verbose_log_dump": self.verbose_log_dump,
             "app_name": self.app_name,
             "app_instance": self.app_instance,
             "environment": self.environment,
+            "debug_retention_days": self.debug_retention_days,
+            "warning_retention_days": self.warning_retention_days,
+            "metrics_retention_days": self.metrics_retention_days,
         }
 
     def get_global_context(self) -> dict:

@@ -914,13 +914,11 @@ class TaskRepository(PostgreSQLTaskRepository):
             FROM {}.tasks
             WHERE status = 'pending_retry'
               AND batch_id IS NOT NULL
-              AND created_at > NOW() - INTERVAL %s
+              AND created_at > NOW() - make_interval(mins => %s)
             LIMIT %s
         """).format(sql.Identifier(self.schema_name))
 
-        # Create proper interval string
-        interval_str = f'{max_age_minutes} minutes'
-        results = self._execute_query(query, (interval_str, limit))
+        results = self._execute_query(query, (max_age_minutes, limit))
         return [r['batch_id'] for r in results]
 
     # ========================================================================

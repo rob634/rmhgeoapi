@@ -317,7 +317,7 @@ from core.machine import CoreMachine
 
 # Application modules (our code) - HTTP Trigger Classes
 # Import directly from modules to control when instances are created
-from triggers.health import health_check_trigger
+# NOTE: health_check_trigger moved to admin_system blueprint (12 JAN 2026)
 # NOTE: livez is now provided by triggers/probes.py (registered in Phase 1)
 from triggers.submit_job import submit_job_trigger
 from triggers.get_job_status import get_job_status_trigger
@@ -333,12 +333,10 @@ from triggers.schema_pydantic_deploy import pydantic_deploy_trigger
 # )
 
 from triggers.analyze_container import analyze_container_trigger
-from triggers.stac_setup import stac_setup_trigger
-from triggers.stac_collections import stac_collections_trigger
-from triggers.stac_init import stac_init_trigger
+# NOTE: STAC admin triggers (stac_setup, stac_collections, stac_init, stac_nuke)
+# moved to admin_stac blueprint (12 JAN 2026)
 from triggers.stac_extract import stac_extract_trigger
 from triggers.stac_vector import stac_vector_trigger
-from triggers.stac_nuke import stac_nuke_trigger
 
 # STAC API v1.0.0 Portable Module (10 NOV 2025)
 from stac_api import get_stac_triggers
@@ -356,8 +354,7 @@ from triggers.admin.db_maintenance import admin_db_maintenance_trigger
 from triggers.admin.db_data import admin_db_data_trigger
 from triggers.admin.db_diagnostics import admin_db_diagnostics_trigger
 from triggers.admin.servicebus import servicebus_admin_trigger
-from triggers.admin.h3_debug import admin_h3_debug_trigger
-from triggers.admin.h3_datasets import admin_h3_datasets_trigger
+# NOTE: H3 admin triggers (h3_debug, h3_datasets) moved to admin_h3 blueprint (12 JAN 2026)
 
 # Curated Dataset Admin (15 DEC 2025) - System-managed geospatial data
 from triggers.curated.admin import curated_admin_trigger
@@ -401,16 +398,12 @@ from triggers.list_container_blobs import list_container_blobs_handler
 from triggers.get_blob_metadata import get_blob_metadata_handler
 from triggers.list_storage_containers import list_storage_containers_handler
 
-# Janitor Triggers (21 NOV 2025) - System maintenance (timer + HTTP)
+# Janitor Triggers (21 NOV 2025) - System maintenance (timer handlers only)
+# HTTP handlers moved to triggers/admin/admin_janitor.py blueprint (12 JAN 2026)
 from triggers.janitor import (
-    # Timer handlers
     task_watchdog_handler,
     job_health_handler,
-    orphan_detector_handler,
-    # HTTP handlers
-    janitor_run_handler,
-    janitor_status_handler,
-    janitor_history_handler
+    orphan_detector_handler
 )
 
 # ========================================================================
@@ -487,118 +480,34 @@ logger.info(f"   ✅ Platform callback registered (will be connected on Platform
 # See STARTUP_REFORM.md for rationale.
 
 # ============================================================================
-# BLUEPRINT REGISTRATIONS (15 DEC 2025, updated 02 JAN 2026)
+# BLUEPRINT REGISTRATIONS (15 DEC 2025, updated 12 JAN 2026)
 # ============================================================================
 # DEV/Admin endpoints in triggers/admin/ Blueprint modules
 from triggers.admin import admin_db_bp, admin_servicebus_bp, snapshot_bp
+from triggers.admin.admin_janitor import bp as admin_janitor_bp
+from triggers.admin.admin_stac import bp as admin_stac_bp
+from triggers.admin.admin_h3 import bp as admin_h3_bp
+from triggers.admin.admin_system import bp as admin_system_bp
 from web_interfaces.h3_sources import bp as h3_sources_bp
 
 app.register_functions(admin_db_bp)
 app.register_functions(admin_servicebus_bp)
+app.register_functions(admin_janitor_bp)
+app.register_functions(admin_stac_bp)
+app.register_functions(admin_h3_bp)
+app.register_functions(admin_system_bp)
 app.register_functions(h3_sources_bp)
 app.register_functions(snapshot_bp)
 
-logger.info("✅ Blueprints registered: admin_db, admin_servicebus, h3_sources, snapshot")
+logger.info("✅ Blueprints registered: admin_db, admin_servicebus, admin_janitor, admin_stac, admin_h3, admin_system, h3_sources, snapshot")
 
 
 
 
 
-@app.route(route="health", methods=["GET"])
-def health(req: func.HttpRequest) -> func.HttpResponse:
-    """Health check endpoint using HTTP trigger base class."""
-    return health_check_trigger.handle_request(req)
-
-
-# NOTE: /api/livez is now registered in Phase 1 via triggers/probes.py
-# See STARTUP_REFORM.md - probes must be available even when startup fails
-
-
-@app.route(route="system/stats", methods=["GET"])
-def system_stats(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Lightweight system stats for UI widgets.
-
-    Returns memory, CPU, and basic job stats for dashboard widgets.
-    Designed to be polled frequently (every 10-30 seconds).
-
-    Response:
-        {
-            "memory": {"used_percent": 52.1, "available_mb": 3800, "total_mb": 7900},
-            "cpu": {"percent": 15.2},
-            "jobs": {"active": 2, "pending": 5, "completed_24h": 47},
-            "timestamp": "2025-12-28T18:30:00Z"
-        }
-    """
-    import psutil
-    from datetime import datetime, timedelta
-
-    try:
-        # Memory stats
-        mem = psutil.virtual_memory()
-        memory_stats = {
-            "used_percent": round(mem.percent, 1),
-            "available_mb": round(mem.available / (1024 * 1024), 1),
-            "total_mb": round(mem.total / (1024 * 1024), 1)
-        }
-
-        # CPU stats
-        cpu_percent = psutil.cpu_percent(interval=0.1)
-        cpu_stats = {
-            "percent": round(cpu_percent, 1)
-        }
-
-        # Job stats (lightweight query)
-        job_stats = {"active": 0, "pending": 0, "completed_24h": 0, "failed_24h": 0}
-        try:
-            from infrastructure.factory import RepositoryFactory
-            repos = RepositoryFactory.create_repositories()
-            job_repo = repos['job_repo']
-
-            with job_repo._get_connection() as conn:
-                with conn.cursor() as cur:
-                    # Count by status
-                    cur.execute("""
-                        SELECT status, COUNT(*) as count
-                        FROM app.jobs
-                        WHERE status IN ('pending', 'processing', 'queued')
-                           OR (status IN ('completed', 'failed') AND updated_at > NOW() - INTERVAL '24 hours')
-                        GROUP BY status
-                    """)
-                    for row in cur.fetchall():
-                        status = row['status']
-                        count = row['count']
-                        if status in ('pending', 'queued'):
-                            job_stats['pending'] += count
-                        elif status == 'processing':
-                            job_stats['active'] = count
-                        elif status == 'completed':
-                            job_stats['completed_24h'] = count
-                        elif status == 'failed':
-                            job_stats['failed_24h'] = count
-        except Exception as e:
-            logger.warning(f"Could not fetch job stats: {e}")
-
-        response = {
-            "memory": memory_stats,
-            "cpu": cpu_stats,
-            "jobs": job_stats,
-            "timestamp": datetime.utcnow().isoformat() + "Z"
-        }
-
-        return func.HttpResponse(
-            json.dumps(response),
-            status_code=200,
-            mimetype="application/json"
-        )
-
-    except Exception as e:
-        logger.error(f"Error getting system stats: {e}")
-        return func.HttpResponse(
-            json.dumps({"error": str(e)}),
-            status_code=500,
-            mimetype="application/json"
-        )
+# NOTE: /api/health moved to triggers/admin/admin_system.py blueprint (12 JAN 2026)
+# NOTE: /api/system/stats moved to triggers/admin/admin_system.py blueprint (12 JAN 2026)
+# NOTE: /api/livez is registered in Phase 1 via triggers/probes.py
 
 
 # ============================================================================
@@ -721,104 +630,10 @@ def job_resubmit_route(req: func.HttpRequest) -> func.HttpResponse:
 # ============================================================================
 
 
-# H3 Debug and Bootstrap Monitoring (12 NOV 2025)
-# NOTE: Changed from /api/admin/h3 to /api/h3/debug because Azure Functions reserves /api/admin/* for built-in admin UI
-@app.route(route="h3/debug", methods=["GET", "POST"])
-def admin_h3_debug(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    H3 debug operations: GET/POST /api/h3/debug?operation={op}&{params}
-
-    Available operations:
-    - schema_status: Check h3 schema exists
-    - grid_summary: Grid metadata for all resolutions
-    - grid_details: Detailed stats for specific grid (requires grid_id)
-    - reference_filters: List all reference filters
-    - reference_filter_details: Details for specific filter (requires filter_name)
-    - sample_cells: Sample cells from grid (requires grid_id)
-    - parent_child_check: Validate hierarchy (requires parent_id)
-    - delete_grids: Delete grids by prefix (POST, requires confirm=yes)
-    - nuke_h3: Truncate all H3 tables (POST, requires confirm=yes)
-    """
-    return admin_h3_debug_trigger.handle_request(req)
-
-
-# H3 Dataset Registry API (22 DEC 2025)
-# Development endpoint for managing h3.dataset_registry. For production use,
-# prefer the h3_register_dataset job which provides async processing.
-@app.route(route="h3/datasets", methods=["GET", "POST", "DELETE"])
-def h3_datasets(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    H3 Dataset Registry CRUD: /api/h3/datasets
-
-    GET  /api/h3/datasets              - List all datasets
-    GET  /api/h3/datasets?id={id}      - Get single dataset
-    POST /api/h3/datasets              - Register new dataset (UPSERT)
-    DELETE /api/h3/datasets?id={id}    - Delete dataset (requires confirm=yes)
-    """
-    return admin_h3_datasets_trigger.handle_request(req)
-
-
-# H3 Stats API for web interface (16 DEC 2025)
-@app.route(route="h3/stats", methods=["GET"])
-def h3_stats(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Get H3 grid cell counts by resolution: GET /api/h3/stats
-
-    Returns cell counts for each resolution level (2-7) in the h3.cells table.
-
-    Response:
-        {
-            "stats": {
-                "2": 12345,
-                "3": 86412,
-                ...
-            },
-            "timestamp": "2025-12-16T00:00:00Z"
-        }
-    """
-    import json
-    from datetime import datetime, timezone
-
-    try:
-        from infrastructure.postgresql import PostgreSQLRepository
-
-        repo = PostgreSQLRepository(schema_name='h3')
-
-        # Query cell counts by resolution from normalized h3.cells table
-        query = """
-            SELECT resolution, COUNT(*) as count
-            FROM h3.cells
-            GROUP BY resolution
-            ORDER BY resolution
-        """
-
-        with repo._get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(query)
-                rows = cur.fetchall()
-
-        # Build stats dict (rows are dict_row objects from psycopg)
-        stats = {str(row['resolution']): row['count'] for row in rows}
-
-        return func.HttpResponse(
-            json.dumps({
-                "stats": stats,
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }),
-            mimetype="application/json",
-            status_code=200
-        )
-
-    except Exception as e:
-        return func.HttpResponse(
-            json.dumps({
-                "error": str(e),
-                "stats": {},
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }),
-            mimetype="application/json",
-            status_code=200  # Return 200 with empty stats so UI doesn't break
-        )
+# NOTE: H3 routes moved to triggers/admin/admin_h3.py blueprint (12 JAN 2026)
+# - /api/h3/debug
+# - /api/h3/datasets
+# - /api/h3/stats
 
 
 # ============================================================================
@@ -1040,90 +855,11 @@ _stac_item = _stac_triggers[5]['handler']
 #     return _stac_collections(req)
 
 
-# ============================================================================
-# STAC SETUP ENDPOINT - PgSTAC installation and management
-# ============================================================================
-
-@app.route(route="stac/setup", methods=["GET", "POST"])
-def stac_setup(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    STAC infrastructure setup and status: /api/stac/setup
-
-    GET  /api/stac/setup              - Check installation status
-    GET  /api/stac/setup?verify=true  - Full verification with tests
-    POST /api/stac/setup?confirm=yes  - Install PgSTAC schema
-
-    POST with drop (DESTRUCTIVE):
-    POST /api/stac/setup?confirm=yes&drop=true - Reinstall (requires PGSTAC_CONFIRM_DROP=true)
-
-    Returns:
-        Installation status, verification results, or setup confirmation
-    """
-    return stac_setup_trigger.handle_request(req)
-
-
-# 🚨 STAC NUCLEAR BUTTON - DEVELOPMENT ONLY (29 OCT 2025)
-@app.route(route="stac/nuke", methods=["POST"])
-def nuke_stac_data(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    🚨 NUCLEAR: Clear STAC items/collections (DEV/TEST ONLY)
-
-    POST /api/stac/nuke?confirm=yes&mode=all
-
-    Query Parameters:
-        confirm: Must be "yes" (required)
-        mode: Clearing mode (default: "all")
-              - "items": Delete only items (preserve collections)
-              - "collections": Delete collections (CASCADE deletes items)
-              - "all": Delete both collections and items
-
-    Returns:
-        Deletion results with counts and execution time
-
-    ⚠️ This clears STAC data but preserves pgstac schema (functions, indexes, partitions)
-    Much faster than full schema drop/recreate cycle
-    """
-    return stac_nuke_trigger.handle_request(req)
-
-
-@app.route(route="stac/collections/{tier}", methods=["POST"])
-def stac_collections(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    STAC collection management for Bronze/Silver/Gold tiers.
-
-    POST /api/stac/collections/{tier} where tier is: bronze, silver, or gold
-
-    Body:
-        {
-            "container": "<bronze-container>",  // Required (use config.storage.bronze)
-            "collection_id": "custom-id",       // Optional
-            "title": "Custom Title",            // Optional
-            "description": "Custom description" // Optional
-        }
-
-    Returns:
-        Collection creation result with collection_id
-    """
-    return stac_collections_trigger.handle_request(req)
-
-
-@app.route(route="stac/init", methods=["POST"])
-def stac_init(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Initialize STAC production collections.
-
-    POST /api/stac/init
-
-    Body (optional):
-        {
-            "collections": ["dev", "cogs", "vectors", "geoparquet"]  // Default: all
-        }
-
-    Returns:
-        Results for each collection creation
-    """
-    return stac_init_trigger.handle_request(req)
-
+# NOTE: STAC admin routes moved to triggers/admin/admin_stac.py blueprint (12 JAN 2026)
+# - /api/stac/setup
+# - /api/stac/nuke
+# - /api/stac/collections/{tier}
+# - /api/stac/init
 
 @app.route(route="stac/extract", methods=["POST"])
 def stac_extract(req: func.HttpRequest) -> func.HttpResponse:
@@ -3515,96 +3251,11 @@ def log_cleanup_timer(timer: func.TimerRequest) -> None:
     log_cleanup_timer_handler.handle(timer)
 
 
-# ============================================================================
-# JANITOR HTTP ENDPOINTS - Manual Triggering and Status (21 NOV 2025)
-# ============================================================================
-# These endpoints allow manual janitor operations for testing and debugging.
-# Useful for:
-# - Testing janitor logic before deploying timer triggers
-# - On-demand cleanup after known issues
-# - Monitoring janitor health and activity
-# ============================================================================
-
-# NOTE: Using /api/cleanup/* instead of /api/admin/janitor/* because Azure Functions
-# reserves /api/admin/* for built-in admin UI (returns 404)
-@app.route(route="cleanup/run", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
-def cleanup_run(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Manually trigger a cleanup (janitor) run.
-
-    POST /api/cleanup/run?type={task_watchdog|job_health|orphan_detector|metadata_consistency|all}
-
-    Examples:
-        curl -X POST "https://.../api/cleanup/run?type=task_watchdog"
-        curl -X POST "https://.../api/cleanup/run?type=metadata_consistency"
-        curl -X POST "https://.../api/cleanup/run?type=all"
-    """
-    return janitor_run_handler(req)
-
-
-@app.route(route="cleanup/metadata-health", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
-def cleanup_metadata_health(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Get metadata consistency health status.
-
-    GET /api/cleanup/metadata-health
-
-    Returns comprehensive metadata integrity check results:
-    - STAC ↔ Metadata cross-reference
-    - Broken backlinks
-    - Dataset refs integrity
-    - Raster blob existence
-
-    Example:
-        curl "https://.../api/cleanup/metadata-health"
-    """
-    import json
-    from services.metadata_consistency import get_metadata_consistency_checker
-
-    try:
-        checker = get_metadata_consistency_checker()
-        result = checker.run()
-
-        status_code = 200 if result.get("health_status") == "HEALTHY" else 200  # Always 200, health in body
-
-        return func.HttpResponse(
-            json.dumps(result, indent=2, default=str),
-            status_code=status_code,
-            mimetype="application/json"
-        )
-    except Exception as e:
-        return func.HttpResponse(
-            json.dumps({"error": str(e), "success": False}),
-            status_code=500,
-            mimetype="application/json"
-        )
-
-
-@app.route(route="cleanup/status", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
-def cleanup_status(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Get current cleanup (janitor) status and configuration.
-
-    GET /api/cleanup/status
-
-    Returns config, enabled status, and last 24h statistics.
-    """
-    return janitor_status_handler(req)
-
-
-@app.route(route="cleanup/history", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
-def cleanup_history(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Get recent cleanup (janitor) run history.
-
-    GET /api/cleanup/history?hours=24&type=task_watchdog&limit=50
-
-    Query Parameters:
-        hours: How many hours of history (default: 24, max: 168)
-        type: Filter by run type (optional)
-        limit: Max records to return (default: 50, max: 200)
-    """
-    return janitor_history_handler(req)
+# NOTE: Cleanup/janitor routes moved to triggers/admin/admin_janitor.py blueprint (12 JAN 2026)
+# - /api/cleanup/run
+# - /api/cleanup/metadata-health
+# - /api/cleanup/status
+# - /api/cleanup/history
 
 
 # ============================================================================
@@ -3744,64 +3395,7 @@ def xarray_api_aggregate(req: func.HttpRequest) -> func.HttpResponse:
     return _xarray_aggregate(req)
 
 
-# ============================================================================
-# STAC REPAIR ENDPOINTS - Direct Testing (23 DEC 2025)
-# ============================================================================
-# Direct endpoints to test STAC repair functionality without job orchestration.
-# Useful for debugging and manual repairs.
-#
-# Endpoints:
-#   GET  /api/stac/repair/test       - Test handler configuration
-#   POST /api/stac/repair/inventory  - Run inventory scan directly
-#   POST /api/stac/repair/item       - Repair single item directly
-# ============================================================================
-
-from triggers.admin.stac_repair import (
-    stac_repair_test_handler,
-    stac_repair_inventory_handler,
-    stac_repair_item_handler
-)
-
-
-@app.route(route="stac/repair/test", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
-def stac_repair_test(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Test STAC repair handler configuration.
-
-    GET /api/stac/repair/test
-
-    Returns handler availability and configuration status.
-    """
-    return stac_repair_test_handler(req)
-
-
-@app.route(route="stac/repair/inventory", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
-def stac_repair_inventory_endpoint(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Run STAC repair inventory directly (bypass job orchestration).
-
-    POST /api/stac/repair/inventory?collection_id=xxx&limit=100
-
-    Query Parameters:
-        collection_id: Optional - limit to specific collection
-        limit: Maximum items to scan (default: 100)
-        prioritize_promoted: If true, return promoted items first (default: true)
-    """
-    return stac_repair_inventory_handler(req)
-
-
-@app.route(route="stac/repair/item", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
-def stac_repair_item_endpoint(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Repair a single STAC item directly (bypass job orchestration).
-
-    POST /api/stac/repair/item?item_id=xxx&collection_id=yyy
-
-    Query Parameters:
-        item_id: STAC item ID to repair (required)
-        collection_id: Collection the item belongs to (required)
-        fix_version: Repair STAC version (default: true)
-        fix_datetime: Add datetime if missing (default: true)
-        fix_geometry: Derive geometry from bbox (default: true)
-    """
-    return stac_repair_item_handler(req)
+# NOTE: STAC repair routes moved to triggers/admin/admin_stac.py blueprint (12 JAN 2026)
+# - /api/stac/repair/test
+# - /api/stac/repair/inventory
+# - /api/stac/repair/item

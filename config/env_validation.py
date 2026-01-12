@@ -107,6 +107,8 @@ class EnvVarRule:
         fix_suggestion: How to fix if validation fails
         example: Example valid value
         allow_empty: Allow empty string (default False)
+        default_value: Default value used if not set (for warning messages)
+        warn_on_default: Emit warning when using default value (default True for optional vars)
     """
     pattern: Pattern
     pattern_description: str
@@ -114,6 +116,8 @@ class EnvVarRule:
     fix_suggestion: str
     example: str
     allow_empty: bool = False
+    default_value: Optional[str] = None
+    warn_on_default: bool = True
 
 
 # ============================================================================
@@ -319,6 +323,168 @@ ENV_VAR_RULES: Dict[str, EnvVarRule] = {
         required=False,
         fix_suggestion="Set to DEBUG for verbose logging, INFO for normal operation",
         example="INFO",
+        default_value="INFO",
+    ),
+
+    # =========================================================================
+    # APP MODE & DOCKER WORKER (12 JAN 2026)
+    # =========================================================================
+    "APP_MODE": EnvVarRule(
+        pattern=re.compile(r"^(standalone|platform_only|platform_raster|platform_vector|worker_raster|worker_vector|worker_docker)$"),
+        pattern_description="Deployment mode (standalone, platform_only, worker_raster, worker_vector, worker_docker)",
+        required=False,
+        fix_suggestion="Set to 'standalone' for single-app deployment or specific mode for multi-app",
+        example="standalone",
+        default_value="standalone",
+    ),
+
+    "DOCKER_WORKER_ENABLED": EnvVarRule(
+        pattern=_BOOLEAN,
+        pattern_description="Boolean value (true/false)",
+        required=False,
+        fix_suggestion="Set to 'true' to enable Docker worker queue validation",
+        example="true",
+        default_value="false",
+    ),
+
+    "DOCKER_WORKER_URL": EnvVarRule(
+        pattern=_HTTPS_URL,
+        pattern_description="HTTPS URL for Docker worker health checks",
+        required=False,
+        fix_suggestion="Set to Docker worker URL if using external Docker processing",
+        example="https://mydockerworker.azurewebsites.net",
+        default_value=None,
+        warn_on_default=False,  # Optional - no warning needed
+    ),
+
+    # =========================================================================
+    # QUEUE CONFIGURATION (12 JAN 2026)
+    # =========================================================================
+    "SERVICE_BUS_JOBS_QUEUE": EnvVarRule(
+        pattern=re.compile(r"^[a-z0-9][a-z0-9-]{0,49}$"),
+        pattern_description="Queue name (lowercase, alphanumeric with hyphens)",
+        required=False,
+        fix_suggestion="Set queue name or use default 'geospatial-jobs'",
+        example="geospatial-jobs",
+        default_value="geospatial-jobs",
+    ),
+
+    "SERVICE_BUS_RASTER_TASKS_QUEUE": EnvVarRule(
+        pattern=re.compile(r"^[a-z0-9][a-z0-9-]{0,49}$"),
+        pattern_description="Queue name (lowercase, alphanumeric with hyphens)",
+        required=False,
+        fix_suggestion="Set queue name or use default 'raster-tasks'",
+        example="raster-tasks",
+        default_value="raster-tasks",
+    ),
+
+    "SERVICE_BUS_VECTOR_TASKS_QUEUE": EnvVarRule(
+        pattern=re.compile(r"^[a-z0-9][a-z0-9-]{0,49}$"),
+        pattern_description="Queue name (lowercase, alphanumeric with hyphens)",
+        required=False,
+        fix_suggestion="Set queue name or use default 'vector-tasks'",
+        example="vector-tasks",
+        default_value="vector-tasks",
+    ),
+
+    "SERVICE_BUS_LONG_RUNNING_TASKS_QUEUE": EnvVarRule(
+        pattern=re.compile(r"^[a-z0-9][a-z0-9-]{0,49}$"),
+        pattern_description="Queue name (lowercase, alphanumeric with hyphens)",
+        required=False,
+        fix_suggestion="Set queue name or use default 'long-running-tasks'",
+        example="long-running-tasks",
+        default_value="long-running-tasks",
+    ),
+
+    # =========================================================================
+    # RASTER PROCESSING CONFIG (12 JAN 2026)
+    # =========================================================================
+    "RASTER_ROUTE_LARGE_MB": EnvVarRule(
+        pattern=_POSITIVE_INT,
+        pattern_description="Size threshold in MB for large raster routing",
+        required=False,
+        fix_suggestion="Set size threshold (MB) for routing to large raster pipeline",
+        example="100",
+        default_value="100",
+    ),
+
+    "RASTER_ROUTE_DOCKER_MB": EnvVarRule(
+        pattern=_POSITIVE_INT,
+        pattern_description="Size threshold in MB for Docker raster routing",
+        required=False,
+        fix_suggestion="Set size threshold (MB) for routing to Docker pipeline",
+        example="500",
+        default_value="500",
+    ),
+
+    "RASTER_ROUTE_REJECT_MB": EnvVarRule(
+        pattern=_POSITIVE_INT,
+        pattern_description="Size threshold in MB for rejecting oversized rasters",
+        required=False,
+        fix_suggestion="Set max size (MB) before rejection",
+        example="10000",
+        default_value="10000",
+    ),
+
+    "STAC_DEFAULT_COLLECTION": EnvVarRule(
+        pattern=re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$"),
+        pattern_description="STAC collection ID (lowercase, alphanumeric with hyphens/underscores)",
+        required=False,
+        fix_suggestion="Set default STAC collection for raster items",
+        example="system-rasters",
+        default_value="system-rasters",
+    ),
+
+    "RASTER_COG_COMPRESSION": EnvVarRule(
+        pattern=re.compile(r"^(LZW|DEFLATE|ZSTD|JPEG|WEBP|NONE)$", re.IGNORECASE),
+        pattern_description="COG compression algorithm",
+        required=False,
+        fix_suggestion="Set compression: LZW, DEFLATE, ZSTD, JPEG, WEBP, or NONE",
+        example="LZW",
+        default_value="LZW",
+    ),
+
+    "RASTER_TARGET_CRS": EnvVarRule(
+        pattern=re.compile(r"^EPSG:\d{4,5}$"),
+        pattern_description="Target CRS in EPSG format",
+        required=False,
+        fix_suggestion="Set target CRS like 'EPSG:4326' for WGS84",
+        example="EPSG:4326",
+        default_value="EPSG:4326",
+    ),
+
+    # =========================================================================
+    # ENVIRONMENT & IDENTITY (12 JAN 2026)
+    # =========================================================================
+    "ENVIRONMENT": EnvVarRule(
+        pattern=re.compile(r"^(dev|test|staging|prod|production)$", re.IGNORECASE),
+        pattern_description="Environment name (dev, test, staging, prod)",
+        required=False,
+        fix_suggestion="Set to 'dev', 'test', 'staging', or 'prod'",
+        example="dev",
+        default_value="dev",
+    ),
+
+    "DB_ADMIN_MANAGED_IDENTITY_NAME": EnvVarRule(
+        pattern=_APP_NAME,
+        pattern_description="Managed identity name for database admin",
+        required=False,
+        fix_suggestion="Set to your managed identity name",
+        example="myapp-identity",
+        default_value=None,
+        warn_on_default=False,  # Uses system-assigned MI if not set
+    ),
+
+    # =========================================================================
+    # VECTOR PROCESSING CONFIG (12 JAN 2026)
+    # =========================================================================
+    "VECTOR_TARGET_SCHEMA": EnvVarRule(
+        pattern=_SCHEMA_NAME,
+        pattern_description="Target PostgreSQL schema for vector tables",
+        required=False,
+        fix_suggestion="Set schema name for vector data output",
+        example="geo",
+        default_value="geo",
     ),
 }
 
@@ -327,16 +493,21 @@ ENV_VAR_RULES: Dict[str, EnvVarRule] = {
 # VALIDATION FUNCTIONS
 # ============================================================================
 
-def validate_single_var(var_name: str, rule: EnvVarRule) -> Optional[ValidationError]:
+def validate_single_var(
+    var_name: str,
+    rule: EnvVarRule,
+    include_warnings: bool = True
+) -> Optional[ValidationError]:
     """
     Validate a single environment variable against its rule.
 
     Args:
         var_name: Environment variable name
         rule: Validation rule to apply
+        include_warnings: Whether to return warnings for vars using defaults
 
     Returns:
-        ValidationError if validation fails, None if passes
+        ValidationError if validation fails or warning if using default, None if passes
     """
     value = os.environ.get(var_name)
 
@@ -351,8 +522,17 @@ def validate_single_var(var_name: str, rule: EnvVarRule) -> Optional[ValidationE
             severity="error",
         )
 
-    # If not required and not set, skip pattern validation
+    # If not required and not set, emit warning if warn_on_default is True
     if value is None or value == "":
+        if include_warnings and not rule.required and rule.warn_on_default and rule.default_value is not None:
+            return ValidationError(
+                var_name=var_name,
+                message=f"Not set, using default value",
+                current_value=None,
+                expected_pattern=f"Default: {rule.default_value}",
+                fix_suggestion=f"Set explicitly or accept default. {rule.fix_suggestion}",
+                severity="warning",
+            )
         return None
 
     # Validate pattern
@@ -369,54 +549,123 @@ def validate_single_var(var_name: str, rule: EnvVarRule) -> Optional[ValidationE
     return None
 
 
-def validate_environment(rules: Optional[Dict[str, EnvVarRule]] = None) -> List[ValidationError]:
+def validate_environment(
+    rules: Optional[Dict[str, EnvVarRule]] = None,
+    include_warnings: bool = True
+) -> List[ValidationError]:
     """
     Validate all environment variables against their rules.
 
     Args:
         rules: Optional custom rules dict (defaults to ENV_VAR_RULES)
+        include_warnings: Whether to include warnings for vars using defaults
 
     Returns:
-        List of ValidationError objects (empty if all valid)
+        List of ValidationError objects (errors and optionally warnings)
     """
     if rules is None:
         rules = ENV_VAR_RULES
 
-    errors = []
+    results = []
     for var_name, rule in rules.items():
-        error = validate_single_var(var_name, rule)
-        if error:
-            errors.append(error)
+        result = validate_single_var(var_name, rule, include_warnings=include_warnings)
+        if result:
+            results.append(result)
 
-    return errors
+    return results
 
 
-def get_validation_summary() -> Dict[str, Any]:
+def get_validation_summary(include_warnings: bool = True) -> Dict[str, Any]:
     """
     Get a summary of environment variable validation status.
+
+    Args:
+        include_warnings: Whether to include warnings in the summary
 
     Returns:
         Dict with validation summary suitable for health endpoint
     """
-    errors = validate_environment()
+    all_results = validate_environment(include_warnings=include_warnings)
+
+    # Separate errors and warnings
+    errors = [r for r in all_results if r.severity == "error"]
+    warnings = [r for r in all_results if r.severity == "warning"]
 
     required_vars = [name for name, rule in ENV_VAR_RULES.items() if rule.required]
     optional_vars = [name for name, rule in ENV_VAR_RULES.items() if not rule.required]
 
     # Check which vars are set vs missing
-    set_vars = [name for name in required_vars if os.environ.get(name)]
-    missing_vars = [name for name in required_vars if not os.environ.get(name)]
+    set_required = [name for name in required_vars if os.environ.get(name)]
+    missing_required = [name for name in required_vars if not os.environ.get(name)]
+    set_optional = [name for name in optional_vars if os.environ.get(name)]
+    using_defaults = [name for name in optional_vars if not os.environ.get(name)]
 
     return {
         "valid": len(errors) == 0,
         "error_count": len(errors),
+        "warning_count": len(warnings),
         "required_vars": {
             "total": len(required_vars),
-            "set": len(set_vars),
-            "missing": missing_vars,
+            "set": len(set_required),
+            "missing": missing_required,
+        },
+        "optional_vars": {
+            "total": len(optional_vars),
+            "set": len(set_optional),
+            "using_defaults": len(using_defaults),
         },
         "errors": [e.to_dict() for e in errors],
+        "warnings": [w.to_dict() for w in warnings],
     }
+
+
+def log_validation_results(logger=None) -> bool:
+    """
+    Log validation results at appropriate levels.
+
+    Logs errors at ERROR level, warnings at WARNING level.
+    Returns True if no errors (warnings are OK).
+
+    Args:
+        logger: Optional logger instance (uses print if None)
+
+    Returns:
+        True if no errors, False if there are errors
+    """
+    all_results = validate_environment(include_warnings=True)
+
+    errors = [r for r in all_results if r.severity == "error"]
+    warnings = [r for r in all_results if r.severity == "warning"]
+
+    def _log(level: str, msg: str):
+        if logger:
+            getattr(logger, level.lower())(msg)
+        else:
+            print(f"[{level.upper()}] {msg}")
+
+    # Log errors
+    for error in errors:
+        _log("error", f"ENV VAR ERROR: {error.var_name} - {error.message}")
+        _log("error", f"  Expected: {error.expected_pattern}")
+        _log("error", f"  Fix: {error.fix_suggestion}")
+
+    # Log warnings (optional vars using defaults)
+    if warnings:
+        _log("warning", f"ENV VARS: {len(warnings)} optional variables using defaults:")
+        for warning in warnings:
+            default_val = warning.expected_pattern.replace("Default: ", "")
+            _log("warning", f"  {warning.var_name} → {default_val}")
+
+    # Summary
+    if errors:
+        _log("error", f"❌ STARTUP_FAILED: {len(errors)} environment variable errors")
+        return False
+    elif warnings:
+        _log("info", f"✅ Environment validation passed ({len(warnings)} vars using defaults)")
+        return True
+    else:
+        _log("info", f"✅ Environment validation passed (all vars explicitly set)")
+        return True
 
 
 # ============================================================================
@@ -430,4 +679,5 @@ __all__ = [
     "validate_environment",
     "validate_single_var",
     "get_validation_summary",
+    "log_validation_results",
 ]

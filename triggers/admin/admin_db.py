@@ -3,7 +3,7 @@
 # ============================================================================
 # STATUS: Trigger layer - Blueprint for /api/dbadmin/* routes
 # PURPOSE: DEV/QA database administration endpoints (remove before PROD)
-# LAST_REVIEWED: 05 JAN 2026
+# LAST_REVIEWED: 12 JAN 2026
 # REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
 # EXPORTS: bp (Blueprint)
 # ============================================================================
@@ -13,7 +13,7 @@ Database Admin Blueprint - All dbadmin/* routes.
 Consolidated DEV/QA endpoints for database administration.
 These endpoints should be removed before UAT/Production deployment.
 
-Routes (19 total):
+Routes (18 total):
     Schema Operations (3):
         GET /api/dbadmin/schemas
         GET /api/dbadmin/schemas/{schema_name}
@@ -48,10 +48,8 @@ Routes (19 total):
     Diagnostics (1 consolidated):
         GET /api/dbadmin/diagnostics?type={stats|enums|functions|all|config|errors|lineage}
 
-    Debug (1):
-        GET /api/dbadmin/debug/all
-
 Created: 15 DEC 2025 (Blueprint refactor)
+Updated: 12 JAN 2026 (Removed redundant debug/all endpoint)
 """
 
 import azure.functions as func
@@ -228,108 +226,4 @@ def admin_diagnostics(req: func.HttpRequest) -> func.HttpResponse:
     return admin_db_diagnostics_trigger.handle_diagnostics(req)
 
 
-# ============================================================================
-# DEBUG (1 route with inline code)
-# ============================================================================
-
-@bp.route(route="dbadmin/debug/all", methods=["GET"])
-def debug_dump_all(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    DEBUG: Dump all jobs and tasks.
-    GET /api/dbadmin/debug/all?limit=100
-    """
-    from infrastructure import RepositoryFactory, PostgreSQLRepository
-
-    limit = int(req.params.get('limit', '100'))
-    jobs = []
-    tasks = []
-
-    try:
-        repos = RepositoryFactory.create_repositories()
-        job_repo = repos['job_repo']
-
-        if isinstance(job_repo, PostgreSQLRepository):
-            with job_repo._get_connection() as conn:
-                from psycopg.rows import dict_row
-                with conn.cursor(row_factory=dict_row) as cursor:
-                    # Get jobs
-                    cursor.execute(f"""
-                        SELECT job_id, job_type, status, stage, total_stages,
-                               parameters, stage_results, result_data, error_details,
-                               created_at, updated_at
-                        FROM {job_repo.schema_name}.jobs
-                        ORDER BY created_at DESC LIMIT %s
-                    """, (limit,))
-
-                    for row in cursor.fetchall():
-                        jobs.append({
-                            "job_id": row["job_id"],
-                            "job_type": row["job_type"],
-                            "status": row["status"],
-                            "stage": row["stage"],
-                            "total_stages": row["total_stages"],
-                            "parameters": row["parameters"],
-                            "stage_results": row["stage_results"],
-                            "result_data": row["result_data"],
-                            "error_details": row["error_details"],
-                            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
-                            "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None
-                        })
-
-                    # Get tasks
-                    cursor.execute(f"""
-                        SELECT task_id, parent_job_id, task_type, status, stage,
-                               parameters, result_data, error_details, retry_count,
-                               created_at, updated_at
-                        FROM {job_repo.schema_name}.tasks
-                        ORDER BY created_at DESC LIMIT %s
-                    """, (limit,))
-
-                    for row in cursor.fetchall():
-                        tasks.append({
-                            "task_id": row["task_id"],
-                            "parent_job_id": row["parent_job_id"],
-                            "task_type": row["task_type"],
-                            "status": row["status"],
-                            "stage": row["stage"],
-                            "parameters": row["parameters"],
-                            "result_data": row["result_data"],
-                            "error_details": row["error_details"],
-                            "retry_count": row["retry_count"],
-                            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
-                            "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None
-                        })
-        else:
-            return func.HttpResponse(
-                body=json.dumps({
-                    "error": f"Repository type {type(job_repo).__name__} not supported",
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                }),
-                status_code=501,
-                headers={'Content-Type': 'application/json'}
-            )
-
-        return func.HttpResponse(
-            body=json.dumps({
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "jobs_count": len(jobs),
-                "tasks_count": len(tasks),
-                "jobs": jobs,
-                "tasks": tasks
-            }, default=str),
-            status_code=200,
-            headers={'Content-Type': 'application/json'}
-        )
-
-    except Exception as e:
-        import traceback
-        return func.HttpResponse(
-            body=json.dumps({
-                "error": f"Debug dump failed: {str(e)}",
-                "error_type": type(e).__name__,
-                "traceback": traceback.format_exc(),
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }),
-            status_code=500,
-            headers={'Content-Type': 'application/json'}
-        )
+# DEBUG endpoint removed 12 JAN 2026 - redundant with /api/dbadmin/jobs and /api/dbadmin/tasks

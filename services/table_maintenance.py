@@ -200,7 +200,9 @@ def check_vacuum_status(
                         SELECT 1 FROM pg_extension WHERE extname = 'pg_cron'
                     )
                 """)
-                if not cur.fetchone()[0]:
+                result = cur.fetchone()
+                # psycopg3 returns dict_row - use column name 'exists'
+                if not result['exists']:
                     return {"status": "pg_cron_not_available"}
 
                 # Get recent job runs
@@ -217,15 +219,16 @@ def check_vacuum_status(
 
                 recent_jobs = []
                 for row in cur.fetchall():
+                    # psycopg3 returns dict_row - use column names
                     recent_jobs.append({
-                        "job_id": row[0],
-                        "run_id": row[1],
-                        "command": row[3],
-                        "status": row[4],
-                        "message": row[5],
-                        "start_time": row[6].isoformat() if row[6] else None,
-                        "end_time": row[7].isoformat() if row[7] else None,
-                        "duration": str(row[8]) if row[8] else None
+                        "job_id": row['jobid'],
+                        "run_id": row['runid'],
+                        "command": row['command'],
+                        "status": row['status'],
+                        "message": row['return_message'],
+                        "start_time": row['start_time'].isoformat() if row['start_time'] else None,
+                        "end_time": row['end_time'].isoformat() if row['end_time'] else None,
+                        "duration": str(row['duration']) if row['duration'] else None
                     })
 
                 # Get scheduled vacuum jobs
@@ -238,12 +241,13 @@ def check_vacuum_status(
 
                 scheduled_jobs = []
                 for row in cur.fetchall():
+                    # psycopg3 returns dict_row - use column names
                     scheduled_jobs.append({
-                        "job_id": row[0],
-                        "job_name": row[1],
-                        "schedule": row[2],
-                        "command": row[3],
-                        "active": row[4]
+                        "job_id": row['jobid'],
+                        "job_name": row['jobname'],
+                        "schedule": row['schedule'],
+                        "command": row['command'],
+                        "active": row['active']
                     })
 
         return {
@@ -296,17 +300,20 @@ def get_table_bloat_stats(
 
                 tables = []
                 for row in cur.fetchall():
+                    # psycopg3 returns dict_row - use column names
+                    dead_tuples = row['n_dead_tup']
+                    dead_pct = row['dead_pct']
                     tables.append({
-                        "schema": row[0],
-                        "table": row[1],
-                        "last_vacuum": row[2].isoformat() if row[2] else None,
-                        "last_autovacuum": row[3].isoformat() if row[3] else None,
-                        "last_analyze": row[4].isoformat() if row[4] else None,
-                        "last_autoanalyze": row[5].isoformat() if row[5] else None,
-                        "dead_tuples": row[6],
-                        "live_tuples": row[7],
-                        "dead_pct": float(row[8]) if row[8] else 0.0,
-                        "needs_vacuum": row[6] > 10000 or (row[8] and float(row[8]) > 5)
+                        "schema": row['schemaname'],
+                        "table": row['relname'],
+                        "last_vacuum": row['last_vacuum'].isoformat() if row['last_vacuum'] else None,
+                        "last_autovacuum": row['last_autovacuum'].isoformat() if row['last_autovacuum'] else None,
+                        "last_analyze": row['last_analyze'].isoformat() if row['last_analyze'] else None,
+                        "last_autoanalyze": row['last_autoanalyze'].isoformat() if row['last_autoanalyze'] else None,
+                        "dead_tuples": dead_tuples,
+                        "live_tuples": row['n_live_tup'],
+                        "dead_pct": float(dead_pct) if dead_pct else 0.0,
+                        "needs_vacuum": dead_tuples > 10000 or (dead_pct and float(dead_pct) > 5)
                     })
 
         return {

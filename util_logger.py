@@ -1390,6 +1390,49 @@ class JSONFormatter(logging.Formatter):
 
 
 # ============================================================================
+# JSONL BLOB HANDLER - Singleton for blob log exports (11 JAN 2026 - F7.12.F)
+# ============================================================================
+
+_jsonl_handler: Optional[logging.Handler] = None
+_jsonl_handler_lock = threading.Lock()
+
+
+def _get_jsonl_handler() -> Optional[logging.Handler]:
+    """
+    Get singleton JSONL blob handler for log exports.
+
+    Lazy initialization to avoid import issues at module load.
+    Only creates handler if observability mode is enabled.
+
+    Returns:
+        JSONLBlobHandler instance or None if disabled
+    """
+    global _jsonl_handler
+
+    if _jsonl_handler is not None:
+        return _jsonl_handler
+
+    with _jsonl_handler_lock:
+        if _jsonl_handler is not None:
+            return _jsonl_handler
+
+        # Check if observability is enabled before creating handler
+        if not _is_observability_enabled():
+            return None
+
+        try:
+            from infrastructure.jsonl_log_handler import JSONLBlobHandler
+            _jsonl_handler = JSONLBlobHandler()
+            return _jsonl_handler
+        except ImportError:
+            # Module not available - skip JSONL logging
+            return None
+        except Exception:
+            # Don't let handler initialization break app startup
+            return None
+
+
+# ============================================================================
 # LOGGER FACTORY - Creates component-specific loggers
 # ============================================================================
 
@@ -1404,6 +1447,11 @@ class LoggerFactory:
         Every log entry automatically includes app_name, app_instance,
         and environment from get_global_log_context().
 
+    JSONL Blob Export (11 JAN 2026 - F7.12.F):
+        When OBSERVABILITY_MODE=true, logs are also exported to Azure
+        Blob Storage as JSONL files. The JSONLBlobHandler is automatically
+        attached to all loggers created by this factory.
+
     Example:
         logger = LoggerFactory.create_logger(
             ComponentType.CONTROLLER,
@@ -1411,6 +1459,7 @@ class LoggerFactory:
         )
         logger.info("Processing job")
         # Log will include: app_name, app_instance, environment
+        # Log will also be exported to blob storage if observability enabled
     """
 
     # Default configurations per component type
@@ -1518,6 +1567,13 @@ class LoggerFactory:
 
             # Add handler to logger
             logger.addHandler(handler)
+
+            # Add JSONL blob handler if observability enabled (11 JAN 2026 - F7.12.F)
+            jsonl_handler = _get_jsonl_handler()
+            if jsonl_handler is not None:
+                # Check if handler not already attached (avoid duplicates)
+                if jsonl_handler not in logger.handlers:
+                    logger.addHandler(jsonl_handler)
 
         # Allow propagation to Azure's root logger for Application Insights
         logger.propagate = True

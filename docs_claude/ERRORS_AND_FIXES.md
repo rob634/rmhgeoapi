@@ -280,6 +280,56 @@ return {"items": items, "next": next_token}
 
 ---
 
+### DB-005: psycopg3 INTERVAL parameter syntax error
+
+**Date**: 12 JAN 2026
+**Version**: 0.7.7.x
+**Severity**: Breaking (Janitor completely non-functional)
+
+**Error Message**:
+```
+syntax error at or near "$1"
+LINE 12:               AND j.created_at < NOW() - INTERVAL $1
+```
+
+**Root Cause**:
+PostgreSQL does not support parameterized INTERVAL values. When psycopg3 sends `INTERVAL %s` with a value like `'24 hours'`, PostgreSQL receives `INTERVAL $1` which is invalid syntax.
+
+**Affected Code**:
+```python
+# WRONG - doesn't work with psycopg3/PostgreSQL
+query = sql.SQL("... WHERE created_at < NOW() - INTERVAL %s")
+result = self._execute_query(query, (f'{hours} hours',))
+```
+
+**Fix Applied**:
+Use `make_interval()` PostgreSQL function instead:
+```python
+# CORRECT - hours
+query = sql.SQL("... WHERE created_at < NOW() - make_interval(hours => %s)")
+result = self._execute_query(query, (hours,))  # Pass integer directly
+
+# CORRECT - minutes
+query = sql.SQL("... WHERE created_at < NOW() - make_interval(mins => %s)")
+result = self._execute_query(query, (minutes,))  # Pass integer directly
+```
+
+**Files Fixed**:
+- `infrastructure/janitor_repository.py` (4 occurrences)
+- `infrastructure/jobs_tasks.py` (1 occurrence)
+
+**Impact**:
+- Janitor timers were running but failing silently
+- Stuck QUEUED jobs never got cleaned up
+- No janitor history was recorded (0 runs shown)
+
+**Prevention**:
+- Never use `INTERVAL %s` in psycopg3 queries
+- Always use `make_interval(hours => %s)` or `make_interval(mins => %s)`
+- Search for `INTERVAL %s` pattern when reviewing SQL queries
+
+---
+
 ## STORAGE Errors
 
 ### STG-001: SAS token expired or invalid

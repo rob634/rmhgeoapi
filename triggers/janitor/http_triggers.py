@@ -34,7 +34,7 @@ def janitor_run_handler(req: func.HttpRequest) -> func.HttpResponse:
     """
     Manually trigger a janitor run.
 
-    POST /api/admin/janitor/run?type={task_watchdog|job_health|orphan_detector|metadata_consistency|all}
+    POST /api/admin/janitor/run?type={task_watchdog|job_health|orphan_detector|metadata_consistency|log_cleanup|all}
 
     Query Parameters:
         type: Which janitor to run (required)
@@ -42,7 +42,8 @@ def janitor_run_handler(req: func.HttpRequest) -> func.HttpResponse:
             - job_health: Detect jobs with failed tasks
             - orphan_detector: Detect orphaned/zombie records
             - metadata_consistency: Unified metadata validation (09 JAN 2026)
-            - all: Run all four in sequence
+            - log_cleanup: Clean up expired JSONL log files (11 JAN 2026 - F7.12.F)
+            - all: Run all in sequence
 
     Returns:
         JSON with run results
@@ -54,14 +55,14 @@ def janitor_run_handler(req: func.HttpRequest) -> func.HttpResponse:
             json.dumps({
                 "status": "error",
                 "error": "Missing required parameter: type",
-                "valid_types": ["task_watchdog", "job_health", "orphan_detector", "metadata_consistency", "all"],
+                "valid_types": ["task_watchdog", "job_health", "orphan_detector", "metadata_consistency", "log_cleanup", "all"],
                 "usage": "POST /api/admin/janitor/run?type=task_watchdog"
             }),
             status_code=400,
             mimetype="application/json"
         )
 
-    valid_types = ["task_watchdog", "job_health", "orphan_detector", "metadata_consistency", "all"]
+    valid_types = ["task_watchdog", "job_health", "orphan_detector", "metadata_consistency", "log_cleanup", "all"]
     if run_type not in valid_types:
         return func.HttpResponse(
             json.dumps({
@@ -96,6 +97,12 @@ def janitor_run_handler(req: func.HttpRequest) -> func.HttpResponse:
             from services.metadata_consistency import get_metadata_consistency_checker
             checker = get_metadata_consistency_checker()
             result = checker.run()
+            results.append(result)
+
+        if run_type == "log_cleanup" or run_type == "all":
+            # Log cleanup (11 JAN 2026 - F7.12.F)
+            from triggers.admin.log_cleanup_timer import log_cleanup_timer_handler
+            result = log_cleanup_timer_handler.execute()
             results.append(result)
 
         # Summary

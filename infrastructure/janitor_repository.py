@@ -481,7 +481,7 @@ class JanitorRepository(PostgreSQLRepository):
                 EXTRACT(EPOCH FROM (NOW() - j.created_at)) / 3600 AS hours_stuck
             FROM {schema}.jobs j
             WHERE j.status = 'queued'
-              AND j.created_at < NOW() - INTERVAL %s
+              AND j.created_at < NOW() - make_interval(hours => %s)
               AND NOT EXISTS (
                   SELECT 1 FROM {schema}.tasks t
                   WHERE t.parent_job_id = j.job_id
@@ -489,10 +489,8 @@ class JanitorRepository(PostgreSQLRepository):
             ORDER BY j.created_at ASC
         """).format(schema=sql.Identifier(self.schema_name))
 
-        interval_str = f'{timeout_hours} hours'
-
         with self._error_context("get stuck queued jobs"):
-            result = self._execute_query(query, (interval_str,), fetch='all')
+            result = self._execute_query(query, (timeout_hours,), fetch='all')
             logger.info(f"Found {len(result) if result else 0} stuck QUEUED jobs (>{timeout_hours}h)")
             return result or []
 
@@ -525,14 +523,12 @@ class JanitorRepository(PostgreSQLRepository):
                 (SELECT COUNT(*) FROM {schema}.tasks t WHERE t.parent_job_id = j.job_id) AS task_count
             FROM {schema}.jobs j
             WHERE j.status = 'processing'
-              AND j.updated_at < NOW() - INTERVAL %s
+              AND j.updated_at < NOW() - make_interval(hours => %s)
             ORDER BY j.updated_at ASC
         """).format(schema=sql.Identifier(self.schema_name))
 
-        interval_str = f'{timeout_hours} hours'
-
         with self._error_context("get ancient stale jobs"):
-            result = self._execute_query(query, (interval_str,), fetch='all')
+            result = self._execute_query(query, (timeout_hours,), fetch='all')
             logger.info(f"Found {len(result) if result else 0} ancient stale jobs (>{timeout_hours}h)")
             return result or []
 
@@ -723,21 +719,21 @@ class JanitorRepository(PostgreSQLRepository):
             query = sql.SQL("""
                 SELECT *
                 FROM {schema}.janitor_runs
-                WHERE started_at > NOW() - INTERVAL %s
+                WHERE started_at > NOW() - make_interval(hours => %s)
                   AND run_type = %s
                 ORDER BY started_at DESC
                 LIMIT %s
             """).format(schema=sql.Identifier(self.schema_name))
-            params = (f'{hours} hours', run_type, limit)
+            params = (hours, run_type, limit)
         else:
             query = sql.SQL("""
                 SELECT *
                 FROM {schema}.janitor_runs
-                WHERE started_at > NOW() - INTERVAL %s
+                WHERE started_at > NOW() - make_interval(hours => %s)
                 ORDER BY started_at DESC
                 LIMIT %s
             """).format(schema=sql.Identifier(self.schema_name))
-            params = (f'{hours} hours', limit)
+            params = (hours, limit)
 
         try:
             with self._error_context("get recent janitor runs"):

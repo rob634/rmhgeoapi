@@ -132,7 +132,8 @@ class SnapshotRepository(PostgreSQLRepository):
                 row = cur.fetchone()
                 conn.commit()
 
-                snapshot.snapshot_id = row[0]
+                # psycopg3 returns dict_row by default
+                snapshot.snapshot_id = row['snapshot_id']
                 logger.info(f"Saved snapshot: id={snapshot.snapshot_id}")
                 return snapshot
 
@@ -249,31 +250,33 @@ class SnapshotRepository(PostgreSQLRepository):
         if not row:
             return None
 
-        # Row is a tuple from psycopg cursor
-        # Column order matches table definition
+        # psycopg3 returns dict_row by default - use column names
+        full_snapshot = row['full_snapshot']
+        drift_details = row['drift_details']
+
         return SystemSnapshotRecord(
-            snapshot_id=row[0],
-            captured_at=row[1],
-            trigger_type=SnapshotTriggerType(row[2]),
-            instance_id=row[3],
-            role_instance_id=row[4],
-            config_hash=row[5],
-            environment_type=row[6],
-            sku=row[7],
-            region=row[8],
-            vnet_private_ip=row[9],
-            dns_server=row[10],
-            vnet_route_all=row[11],
-            worker_process_count=row[12],
-            config_from_env_count=row[13],
-            config_defaults_count=row[14],
-            discovered_var_count=row[15],
-            full_snapshot=row[16] if isinstance(row[16], dict) else json.loads(row[16]) if row[16] else {},
-            has_drift=row[17],
-            drift_details=row[18] if isinstance(row[18], dict) else json.loads(row[18]) if row[18] else None,
-            previous_snapshot_id=row[19],
-            app_version=row[20],
-            notes=row[21]
+            snapshot_id=row['snapshot_id'],
+            captured_at=row['captured_at'],
+            trigger_type=SnapshotTriggerType(row['trigger_type']),
+            instance_id=row['instance_id'],
+            role_instance_id=row['role_instance_id'],
+            config_hash=row['config_hash'],
+            environment_type=row['environment_type'],
+            sku=row['sku'],
+            region=row['region'],
+            vnet_private_ip=row['vnet_private_ip'],
+            dns_server=row['dns_server'],
+            vnet_route_all=row['vnet_route_all'],
+            worker_process_count=row['worker_process_count'],
+            config_from_env_count=row['config_from_env_count'],
+            config_defaults_count=row['config_defaults_count'],
+            discovered_var_count=row['discovered_var_count'],
+            full_snapshot=full_snapshot if isinstance(full_snapshot, dict) else json.loads(full_snapshot) if full_snapshot else {},
+            has_drift=row['has_drift'],
+            drift_details=drift_details if isinstance(drift_details, dict) else json.loads(drift_details) if drift_details else None,
+            previous_snapshot_id=row['previous_snapshot_id'],
+            app_version=row['app_version'],
+            notes=row['notes']
         )
 
 

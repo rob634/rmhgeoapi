@@ -489,51 +489,52 @@ class AdminDbHealthTrigger:
                             WHERE backend_type = 'client backend'
                         """)
                         row = cur.fetchone()
-                        total_conn = row[0] or 0
-                        active_conn = row[1] or 0
-                        idle_conn = row[2] or 0
-                        idle_in_tx = row[3] or 0
-                        locks_waiting = row[4] or 0
+                        # psycopg3 returns dict_row - use column aliases
+                        total_conn = row['total'] or 0
+                        active_conn = row['active'] or 0
+                        idle_conn = row['idle'] or 0
+                        idle_in_tx = row['idle_in_transaction'] or 0
+                        locks_waiting = row['locks_waiting'] or 0
 
                         # Max connections
                         cur.execute("SHOW max_connections")
-                        max_conn = int(cur.fetchone()[0])
+                        max_conn = int(cur.fetchone()['max_connections'])
                         utilization = round((total_conn / max_conn * 100), 1) if max_conn > 0 else 0
 
                         # Cache hit ratio
                         cur.execute("""
-                            SELECT sum(heap_blks_hit) / NULLIF(sum(heap_blks_hit + heap_blks_read), 0)
+                            SELECT sum(heap_blks_hit) / NULLIF(sum(heap_blks_hit + heap_blks_read), 0) as ratio
                             FROM pg_statio_user_tables
                         """)
-                        cache_hit = cur.fetchone()[0]
+                        cache_hit = cur.fetchone()['ratio']
                         cache_hit_ratio = round(float(cache_hit), 4) if cache_hit else 0.0
 
                         # Index hit ratio
                         cur.execute("""
-                            SELECT sum(idx_blks_hit) / NULLIF(sum(idx_blks_hit + idx_blks_read), 0)
+                            SELECT sum(idx_blks_hit) / NULLIF(sum(idx_blks_hit + idx_blks_read), 0) as ratio
                             FROM pg_statio_user_indexes
                         """)
-                        index_hit = cur.fetchone()[0]
+                        index_hit = cur.fetchone()['ratio']
                         index_hit_ratio = round(float(index_hit), 4) if index_hit else 0.0
 
                         # Long-running queries
                         cur.execute("""
-                            SELECT count(*)
+                            SELECT count(*) as cnt
                             FROM pg_stat_activity
                             WHERE state = 'active'
                             AND now() - query_start > interval '5 minutes'
                             AND pid != pg_backend_pid()
                         """)
-                        long_queries = cur.fetchone()[0] or 0
+                        long_queries = cur.fetchone()['cnt'] or 0
 
                         # Oldest transaction
                         cur.execute("""
-                            SELECT EXTRACT(EPOCH FROM (now() - min(xact_start)))
+                            SELECT EXTRACT(EPOCH FROM (now() - min(xact_start))) as age_sec
                             FROM pg_stat_activity
                             WHERE xact_start IS NOT NULL
                             AND pid != pg_backend_pid()
                         """)
-                        oldest_tx = cur.fetchone()[0]
+                        oldest_tx = cur.fetchone()['age_sec']
                         oldest_tx_sec = round(float(oldest_tx), 1) if oldest_tx else 0.0
 
                         # Transaction stats
@@ -543,8 +544,8 @@ class AdminDbHealthTrigger:
                             WHERE datname = current_database()
                         """)
                         tx_row = cur.fetchone()
-                        xact_commit = tx_row[0] or 0
-                        xact_rollback = tx_row[1] or 0
+                        xact_commit = tx_row['xact_commit'] or 0
+                        xact_rollback = tx_row['xact_rollback'] or 0
                         total_tx = xact_commit + xact_rollback
                         rollback_ratio = round(xact_rollback / total_tx, 4) if total_tx > 0 else 0.0
 

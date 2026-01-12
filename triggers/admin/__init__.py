@@ -36,6 +36,12 @@ from triggers.admin.admin_servicebus import bp as admin_servicebus_bp
 # Phase 4: System Snapshot Blueprint (04 JAN 2026)
 from triggers.admin.snapshot import bp as snapshot_bp, SnapshotAdminTrigger, snapshot_admin_trigger
 
+# Phase 5: Consolidated Admin Blueprints (12 JAN 2026)
+from triggers.admin.admin_janitor import bp as admin_janitor_bp
+from triggers.admin.admin_stac import bp as admin_stac_bp
+from triggers.admin.admin_h3 import bp as admin_h3_bp
+from triggers.admin.admin_system import bp as admin_system_bp
+
 # Export all admin triggers
 __all__ = [
     # Phase 1: Database Admin - Classes
@@ -64,4 +70,9 @@ __all__ = [
     'snapshot_bp',
     'SnapshotAdminTrigger',
     'snapshot_admin_trigger',
+    # Phase 5: Consolidated Admin Blueprints (12 JAN 2026)
+    'admin_janitor_bp',
+    'admin_stac_bp',
+    'admin_h3_bp',
+    'admin_system_bp',
 ]

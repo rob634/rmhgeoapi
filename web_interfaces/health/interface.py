@@ -975,6 +975,25 @@ class HealthInterface(BaseInterface):
             font-weight: 600;
         }
 
+        /* Docker Worker Resources - Standalone white box (like environment-info) */
+        .docker-worker-section {
+            background: white;
+            border: 1px solid #e9ecef;
+            border-radius: 3px;
+            padding: 20px;
+            margin-bottom: 20px;
+            margin-top: 0;
+            border-top: none;
+        }
+
+        .docker-worker-section h3 {
+            color: #053657;
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            margin-top: 0;
+        }
+
         .env-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -1827,8 +1846,8 @@ class HealthInterface(BaseInterface):
 
             if (status === 'healthy' || status === 'warning') {{
                 dockerHtml = `
-                    <div class="hardware-section docker-worker-section">
-                        <h4>🐳 Docker Worker Resources</h4>
+                    <div class="docker-worker-section">
+                        <h3>🐳 Docker Worker Resources</h3>
                         <div class="hardware-grid">
                             <!-- Azure Info -->
                             <div class="hardware-card">
@@ -1901,8 +1920,8 @@ class HealthInterface(BaseInterface):
             }} else {{
                 // Error state - show minimal cards with error info
                 dockerHtml = `
-                    <div class="hardware-section docker-worker-section">
-                        <h4>🐳 Docker Worker Resources</h4>
+                    <div class="docker-worker-section">
+                        <h3>🐳 Docker Worker Resources</h3>
                         <div class="hardware-grid">
                             <!-- Status -->
                             <div class="hardware-card">

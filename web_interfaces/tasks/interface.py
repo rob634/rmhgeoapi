@@ -93,6 +93,9 @@ class TasksInterface(BaseInterface):
                             <span id="refreshCountdown" class="countdown-text"></span>
                         </div>
                         <button id="refreshBtn" class="refresh-button">Refresh</button>
+                        <button id="resubmitBtn" class="resubmit-button" onclick="showResubmitModal()">
+                            🔄 Resubmit Job
+                        </button>
                         <a href="/api/interface/pipeline" class="back-button-link">
                             Back to Pipeline
                         </a>
@@ -200,6 +203,61 @@ class TasksInterface(BaseInterface):
                     Retry
                 </button>
             </div>
+
+            <!-- Resubmit Modal (12 JAN 2026) -->
+            <div id="resubmit-modal" class="modal-overlay hidden">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h3>🔄 Resubmit Job</h3>
+                        <button class="modal-close" onclick="hideResubmitModal()">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div id="resubmit-loading" class="modal-loading hidden">
+                            <div class="spinner-small"></div>
+                            <span>Analyzing job artifacts...</span>
+                        </div>
+                        <div id="resubmit-preview" class="hidden">
+                            <p class="resubmit-warning">
+                                ⚠️ This will <strong>delete all progress</strong> and restart the job from scratch.
+                            </p>
+                            <div class="cleanup-preview">
+                                <h4>Cleanup Preview</h4>
+                                <div class="cleanup-item">
+                                    <span class="cleanup-label">Tasks to delete:</span>
+                                    <span class="cleanup-value" id="preview-tasks">0</span>
+                                </div>
+                                <div class="cleanup-item">
+                                    <span class="cleanup-label">STAC items to delete:</span>
+                                    <span class="cleanup-value" id="preview-stac">0</span>
+                                </div>
+                                <div class="cleanup-item">
+                                    <span class="cleanup-label">Tables to drop:</span>
+                                    <span class="cleanup-value" id="preview-tables">0</span>
+                                </div>
+                            </div>
+                            <div class="resubmit-options">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="delete-blobs-checkbox">
+                                    <span>Also delete blob files (COGs)</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div id="resubmit-error" class="modal-error hidden">
+                            <span id="resubmit-error-message"></span>
+                        </div>
+                        <div id="resubmit-success" class="modal-success hidden">
+                            <span>✅ Job resubmitted successfully!</span>
+                            <p>Redirecting to new job...</p>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="modal-btn modal-btn-cancel" onclick="hideResubmitModal()">Cancel</button>
+                        <button class="modal-btn modal-btn-confirm" id="confirm-resubmit-btn" onclick="executeResubmit()">
+                            Resubmit Job
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
         """
 
@@ -261,6 +319,29 @@ class TasksInterface(BaseInterface):
 
         .refresh-button:hover {
             background: #005a96;
+        }
+
+        /* Resubmit button (12 JAN 2026) */
+        .resubmit-button {
+            background: #F59E0B;
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 3px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 13px;
+        }
+
+        .resubmit-button:hover {
+            background: #D97706;
+        }
+
+        .resubmit-button:disabled {
+            background: #e9ecef;
+            color: #626F86;
+            cursor: not-allowed;
         }
 
         /* Auto-refresh toggle */
@@ -1637,6 +1718,202 @@ class TasksInterface(BaseInterface):
             color: #053657;
             word-break: break-word;
             max-width: 500px;
+        }
+
+        /* Resubmit Modal (12 JAN 2026) */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .modal-overlay.hidden {
+            display: none;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            width: 90%;
+            max-width: 480px;
+            max-height: 90vh;
+            overflow: hidden;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 20px;
+            border-bottom: 1px solid #e9ecef;
+            background: #f8f9fa;
+        }
+
+        .modal-header h3 {
+            margin: 0;
+            color: #053657;
+            font-size: 16px;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            color: #626F86;
+            cursor: pointer;
+            padding: 0;
+            line-height: 1;
+        }
+
+        .modal-close:hover {
+            color: #DC2626;
+        }
+
+        .modal-body {
+            padding: 20px;
+        }
+
+        .modal-loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            padding: 20px;
+            color: #626F86;
+        }
+
+        .resubmit-warning {
+            background: #FEF3C7;
+            border: 1px solid #F59E0B;
+            border-radius: 4px;
+            padding: 12px;
+            margin-bottom: 16px;
+            color: #92400E;
+            font-size: 13px;
+        }
+
+        .cleanup-preview {
+            background: #f8f9fa;
+            border-radius: 4px;
+            padding: 12px;
+            margin-bottom: 16px;
+        }
+
+        .cleanup-preview h4 {
+            margin: 0 0 10px 0;
+            font-size: 13px;
+            color: #053657;
+        }
+
+        .cleanup-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 0;
+            font-size: 13px;
+        }
+
+        .cleanup-label {
+            color: #626F86;
+        }
+
+        .cleanup-value {
+            color: #053657;
+            font-weight: 600;
+        }
+
+        .resubmit-options {
+            margin-top: 12px;
+        }
+
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: #626F86;
+            cursor: pointer;
+        }
+
+        .checkbox-label input {
+            width: 16px;
+            height: 16px;
+        }
+
+        .modal-error {
+            background: #FEE2E2;
+            border: 1px solid #DC2626;
+            border-radius: 4px;
+            padding: 12px;
+            color: #DC2626;
+            font-size: 13px;
+        }
+
+        .modal-success {
+            background: #D1FAE5;
+            border: 1px solid #10B981;
+            border-radius: 4px;
+            padding: 12px;
+            color: #065F46;
+            font-size: 13px;
+            text-align: center;
+        }
+
+        .modal-success p {
+            margin: 8px 0 0 0;
+            font-size: 12px;
+        }
+
+        .modal-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            padding: 16px 20px;
+            border-top: 1px solid #e9ecef;
+            background: #f8f9fa;
+        }
+
+        .modal-btn {
+            padding: 10px 20px;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .modal-btn-cancel {
+            background: white;
+            border: 1px solid #e9ecef;
+            color: #626F86;
+        }
+
+        .modal-btn-cancel:hover {
+            background: #f8f9fa;
+            border-color: #626F86;
+        }
+
+        .modal-btn-confirm {
+            background: #DC2626;
+            border: none;
+            color: white;
+        }
+
+        .modal-btn-confirm:hover {
+            background: #B91C1C;
+        }
+
+        .modal-btn-confirm:disabled {
+            background: #e9ecef;
+            color: #626F86;
+            cursor: not-allowed;
         }
 
         /* Responsive */
@@ -3168,6 +3445,126 @@ class TasksInterface(BaseInterface):
                     loadLogs();
                 }}
             }});
+        }});
+
+        // ============================================================
+        // RESUBMIT MODAL (12 JAN 2026)
+        // ============================================================
+
+        let resubmitCleanupPlan = null;
+
+        // Show resubmit modal with dry-run preview
+        async function showResubmitModal() {{
+            const modal = document.getElementById('resubmit-modal');
+            const loading = document.getElementById('resubmit-loading');
+            const preview = document.getElementById('resubmit-preview');
+            const error = document.getElementById('resubmit-error');
+            const success = document.getElementById('resubmit-success');
+            const confirmBtn = document.getElementById('confirm-resubmit-btn');
+
+            // Reset state
+            loading.classList.remove('hidden');
+            preview.classList.add('hidden');
+            error.classList.add('hidden');
+            success.classList.add('hidden');
+            confirmBtn.disabled = true;
+
+            // Show modal
+            modal.classList.remove('hidden');
+
+            try {{
+                // Fetch dry-run preview
+                const response = await fetch(`${{API_BASE_URL}}/api/jobs/${{JOB_ID}}/resubmit`, {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{ dry_run: true }})
+                }});
+
+                const data = await response.json();
+
+                loading.classList.add('hidden');
+
+                if (!data.success && !data.dry_run) {{
+                    throw new Error(data.error || 'Failed to analyze job');
+                }}
+
+                // Store cleanup plan for later
+                resubmitCleanupPlan = data.cleanup_plan || {{}};
+
+                // Update preview
+                document.getElementById('preview-tasks').textContent = resubmitCleanupPlan.tasks_to_delete || 0;
+                document.getElementById('preview-stac').textContent = (resubmitCleanupPlan.stac_items_to_delete || []).length;
+                document.getElementById('preview-tables').textContent = (resubmitCleanupPlan.tables_to_drop || []).length;
+
+                // Show preview
+                preview.classList.remove('hidden');
+                confirmBtn.disabled = false;
+
+            }} catch (err) {{
+                loading.classList.add('hidden');
+                error.classList.remove('hidden');
+                document.getElementById('resubmit-error-message').textContent = err.message;
+            }}
+        }}
+
+        // Hide resubmit modal
+        function hideResubmitModal() {{
+            document.getElementById('resubmit-modal').classList.add('hidden');
+            resubmitCleanupPlan = null;
+        }}
+
+        // Execute resubmit
+        async function executeResubmit() {{
+            const preview = document.getElementById('resubmit-preview');
+            const error = document.getElementById('resubmit-error');
+            const success = document.getElementById('resubmit-success');
+            const confirmBtn = document.getElementById('confirm-resubmit-btn');
+            const deleteBlobs = document.getElementById('delete-blobs-checkbox').checked;
+
+            // Disable button and hide preview
+            confirmBtn.disabled = true;
+            confirmBtn.textContent = 'Resubmitting...';
+            error.classList.add('hidden');
+
+            try {{
+                const response = await fetch(`${{API_BASE_URL}}/api/jobs/${{JOB_ID}}/resubmit`, {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{
+                        dry_run: false,
+                        delete_blobs: deleteBlobs
+                    }})
+                }});
+
+                const data = await response.json();
+
+                if (!data.success) {{
+                    throw new Error(data.error || 'Resubmit failed');
+                }}
+
+                // Show success
+                preview.classList.add('hidden');
+                success.classList.remove('hidden');
+
+                // Redirect to new job after delay
+                const newJobId = data.new_job_id || data.original_job_id;
+                setTimeout(() => {{
+                    window.location.href = `/api/interface/tasks?job_id=${{newJobId}}`;
+                }}, 1500);
+
+            }} catch (err) {{
+                error.classList.remove('hidden');
+                document.getElementById('resubmit-error-message').textContent = err.message;
+                confirmBtn.disabled = false;
+                confirmBtn.textContent = 'Resubmit Job';
+            }}
+        }}
+
+        // Close modal on escape key
+        document.addEventListener('keydown', (e) => {{
+            if (e.key === 'Escape') {{
+                hideResubmitModal();
+            }}
         }});
 
         // ============================================================

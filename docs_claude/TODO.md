@@ -1,436 +1,313 @@
 # Working Backlog
 
-**Last Updated**: 12 JAN 2026 (S7.13.8 BackgroundQueueWorker complete, MI auth for Service Bus)
+**Last Updated**: 12 JAN 2026
 **Source of Truth**: [docs/epics/README.md](/docs/epics/README.md) — Epic/Feature/Story definitions
 **Purpose**: Sprint-level task tracking and delegation
 
 ---
 
-## 🔥 NEXT UP: Docker Worker Infrastructure (F7.12-13)
+## 🔥 NEXT UP: RasterMetadata + STAC Self-Healing (F7.9 + F7.11)
 
-**Epic**: E7 Pipeline Infrastructure
-**Goal**: Docker worker with consolidated single-task jobs (no multi-stage complexity)
-**Reference**: [rmhgeoapi-docker](/Users/robertharrison/python_builds/rmhgeoapi-docker/) for code patterns
-**Added**: 10 JAN 2026
+**Epic**: E7 Pipeline Infrastructure → E2 Raster Data as API
+**Goal**: Complete unified metadata architecture for rasters and wire up STAC self-healing
+**Priority**: CRITICAL - Raster is primary STAC use case, self-healing depends on metadata
+**Updated**: 12 JAN 2026
 
-### Architecture Decision
+### Why Combined Priority
 
-```
-FUNCTION APP                         DOCKER WORKER
-─────────────                        ─────────────
-process_raster_v2                    process_raster_docker
-├── Stage 1: validate_raster         └── Stage 1: process_raster_complete
-├── Stage 2: create_cog                  (does everything in one handler)
-└── Stage 3: stac_raster
+F7.9 (RasterMetadata) and F7.11 (STAC Self-Healing) are tightly coupled:
+- F7.11 raster support **depends on** F7.9 being complete
+- Both share the same service layer (`service_stac_metadata.py`, `stac_catalog.py`)
+- Completing together ensures consistent metadata → STAC pipeline
 
-Both use same CoreMachine.process_task_message() contract.
-No CoreMachine changes needed.
-Docker jobs = 1 stage, 1 task.
-```
+### F7.9: RasterMetadata Implementation
 
-**Why This Approach**:
-1. Stages exist for Function App timeout limits - Docker doesn't need them
-2. CoreMachine is agnostic to WHO processes tasks - just honor the contract
-3. Separate jobs are easier to test and troubleshoot
-4. Dynamic routing (TaskRoutingConfig) NOT needed for MVP
+**Status**: Phase 1 ✅ COMPLETE, Phase 2 📋 IN PROGRESS
+**Dependency**: F7.8 ✅ (BaseMetadata, VectorMetadata pattern established)
 
-### F7.12: Docker Worker Infrastructure ✅ COMPLETE
-
-**Deployed**: 11 JAN 2026 to `rmhheavyapi` Web App
-**Image**: `rmhazureacr.azurecr.io/rmh-gdal-worker:latest` (tag: 20260111-1631)
-**Version**: 0.7.8
+#### Phase 1 (COMPLETE - 09 JAN 2026)
 
 | Story | Description | Status |
 |-------|-------------|--------|
-| S7.12.1 | Create `docker_main.py` (queue polling entry point) | ✅ |
-| S7.12.2 | Create `workers_entrance.py` (FastAPI + health endpoints) | ✅ |
-| S7.12.3 | Create `Dockerfile`, `requirements-docker.txt`, `docker.env.example` | ✅ |
-| S7.12.4 | Skip testing/ directory (building new) | ⏭️ |
-| S7.12.5 | Create `.funcignore` to exclude Docker files from Functions deploy | ✅ |
-| S7.12.6 | Create `infrastructure/auth/` module for Managed Identity OAuth | ✅ |
-| S7.12.7 | Verify ACR build succeeds | ✅ |
-| S7.12.8 | Deploy to rmhheavyapi Web App | ✅ |
-| S7.12.9 | Configure identities (PostgreSQL: user-assigned, Storage: system-assigned) | ✅ |
-| S7.12.10 | Verify all health endpoints (`/livez`, `/readyz`, `/health`) | ✅ |
+| S7.9.1 | Create `RasterMetadata` class in `core/models/unified_metadata.py` | ✅ |
+| S7.9.2 | Create `app.cog_metadata` table DDL with typed columns | ✅ |
+| S7.9.3 | Create `RasterMetadataRepository` with CRUD operations | ✅ |
+| S7.9.4 | Implement `RasterMetadata.from_db_row()` factory method | ✅ |
+| S7.9.5 | Implement `RasterMetadata.to_stac_item()` conversion | ✅ |
+| S7.9.6 | Implement `RasterMetadata.to_stac_collection()` conversion | ✅ |
 
-**Key Files Created**:
-- `docker_main.py` - Queue polling entry point (not HTTP)
-- `workers_entrance.py` - FastAPI app with health endpoints
-- `Dockerfile` - OSGeo GDAL ubuntu-full-3.10.1 base
-- `requirements-docker.txt` - Dependencies (minus azure-functions)
-- `docker.env.example` - Environment variable template
-- `.funcignore` - Excludes Docker files from Functions deploy
-- `infrastructure/auth/__init__.py` - Auth module initialization
-- `infrastructure/auth/token_cache.py` - Thread-safe token caching
-- `infrastructure/auth/postgres_auth.py` - PostgreSQL OAuth
-- `infrastructure/auth/storage_auth.py` - Storage OAuth + GDAL config
+#### Phase 2 (IN PROGRESS - 12 JAN 2026)
 
-**Identity Configuration** (All Identity-Based - No Secrets):
-| Resource | Identity | Type | RBAC Role |
-|----------|----------|------|-----------|
-| PostgreSQL (`rmhpgflexadmin`) | `a533cb80-a590-4fad-8e52-1eb1f72659d7` | User-assigned MI | PostgreSQL AAD Auth |
-| Storage (`rmhazuregeo`) | `cea30c4b-8d75-4a39-8b53-adab9a904345` | System-assigned MI | Storage Blob Data Contributor |
-| Service Bus (`rmhazure`) | `cea30c4b-8d75-4a39-8b53-adab9a904345` | System-assigned MI | Data Sender + Data Receiver |
-
-**Environment Variables** (12 JAN 2026 - Updated for MI auth):
-- `SERVICE_BUS_FQDN=rmhazure.servicebus.windows.net` (MI auth, no connection string)
-- `USE_MANAGED_IDENTITY=true`
-- `DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID=a533cb80-a590-4fad-8e52-1eb1f72659d7`
-
-**Health Endpoints**:
-- `/livez` - Liveness probe (process running)
-- `/readyz` - Readiness probe (tokens valid)
-- `/health` - Detailed health (database + storage connectivity)
-
-### F7.13: Docker Job Definitions with Checkpoint/Resume
-
-**Status**: IN PROGRESS (11 JAN 2026)
-**Key Innovation**: Docker tasks are "atomic" from orchestrator's perspective but internally resumable
+**Key Discovery**: Both `process_raster_v2` and `process_raster_docker` use the SAME handler for STAC creation: `services/stac_catalog.py:extract_stac_metadata()`. This is the single wiring point.
 
 | Story | Description | Status |
 |-------|-------------|--------|
-| S7.13.1 | Create `jobs/process_raster_docker.py` - single-stage job | ✅ Done |
-| S7.13.2 | Create `services/handler_process_raster_complete.py` - consolidated handler | ✅ Done |
-| S7.13.3 | Register job and handler in `__init__.py` files | ✅ Done |
-| S7.13.4 | Rename `heartbeat` → `last_pulse` throughout codebase | ✅ Done |
-| S7.13.5 | Add checkpoint fields to `TaskRecord` model and schema | ✅ Done |
-| S7.13.6 | Create `CheckpointManager` class for resume support | ✅ Done |
-| S7.13.7 | Update handler to use `CheckpointManager` | ✅ Done |
-| S7.13.8 | **Add BackgroundQueueWorker to workers_entrance.py** | ✅ Done |
-| S7.13.9 | Rename `workers_entrance.py` → `docker_service.py` | ✅ Done |
-| S7.13.10 | Test locally: verify queue polling starts with FastAPI | ⏭️ Skip |
-| S7.13.11 | Push to ACR and deploy to rmhheavyapi | 🔄 In Progress |
-| S7.13.12 | Test end-to-end: submit job → verify Docker processes | 📋 |
+| S7.9.8 | Wire `extract_stac_metadata` to populate `app.cog_metadata` | ✅ 12 JAN 2026 |
+| S7.9.8a | Extract raster properties from STAC item for cog_metadata | ✅ |
+| S7.9.8b | Call `RasterMetadataRepository.upsert()` after pgSTAC insert | ✅ |
+| S7.9.8c | Handle graceful degradation if cog_metadata insert fails | ✅ |
+| S7.11.5 | Enable raster rebuild in `rebuild_stac_handlers.py` | ✅ 12 JAN 2026 |
+| S7.11.5a | Query `app.cog_metadata` for raster validation | ✅ |
+| S7.11.5b | Use `RasterMetadata.to_stac_item()` for rebuild | ✅ |
+| S7.9.TEST | Test: `process_raster_v2` populates cog_metadata + STAC | 📋 NEXT |
+
+**Raster Job Architecture** (discovered 12 JAN 2026):
+```
+process_raster_v2 (Function App, <1GB)     process_raster_docker (Docker, large files)
+        │                                           │
+        │ Stage 3                                   │ Phase 3
+        ▼                                           ▼
+    ┌─────────────────────────────────────────────────┐
+    │  services/stac_catalog.py:extract_stac_metadata │  ← SINGLE WIRING POINT
+    │      Step 5: Insert STAC item to pgSTAC         │
+    │      Step 5.5: Populate app.cog_metadata (NEW)  │
+    └─────────────────────────────────────────────────┘
+```
+
+**Key Files**:
+- `core/models/unified_metadata.py` - RasterMetadata domain model
+- `core/models/raster_metadata.py` - CogMetadataRecord for DDL
+- `core/schema/sql_generator.py` - Table/index generation
+- `infrastructure/raster_metadata_repository.py` - CRUD operations
+
+### F7.11: STAC Catalog Self-Healing
+
+**Status**: 🚧 IN PROGRESS (vectors working, raster pending)
+**Implemented**: 10 JAN 2026
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S7.11.1 | ✅ | Create `jobs/rebuild_stac.py` - 2-stage job definition |
+| S7.11.2 | ✅ | Create `services/rebuild_stac_handlers.py` - validate + rebuild handlers |
+| S7.11.3 | ✅ | Register job and handlers in `__init__.py` files |
+| S7.11.4 | ✅ | Add `force_recreate` mode (delete existing STAC before rebuild) |
+| S7.11.5 | 📋 | **Add raster support** (rebuild from app.cog_metadata) ← Depends on F7.9 |
+| S7.11.6 | 📋 | Timer auto-submit (F7.10 detects → auto-submit rebuild job) |
+
+**Key Files**:
+- `jobs/rebuild_stac.py` - RebuildStacJob class
+- `services/rebuild_stac_handlers.py` - stac_rebuild_validate, stac_rebuild_item
+
+---
+
+## ✅ COMPLETED: Docker Worker Infrastructure (F7.12-13)
+
+**Status**: ✅ COMPLETE - Moved to HISTORY.md (12 JAN 2026)
+**Reference**: See HISTORY.md for full implementation details
+
+### Summary
+
+- F7.12: Docker Worker Infrastructure ✅ Deployed to `rmhheavyapi`
+- F7.13: Docker Job Definitions ✅ Phase 1 complete (checkpoint/resume architecture)
+- Tested: dctest.tif processed successfully via Docker worker
+
+### Remaining Backlog (Low Priority)
+
+| Story | Description | Status |
+|-------|-------------|--------|
 | S7.13.13 | Test checkpoint/resume: Docker crash → resume from checkpoint | 📋 |
 | S7.13.14 | Add `process_vector_docker` job (same pattern) | 📋 |
 
-### S7.13.8 Implementation Details: BackgroundQueueWorker ✅ COMPLETE
+---
 
-**Completed**: 12 JAN 2026
+## FY26 Priorities (ends 30 JUN 2026)
 
-**What Was Added to `workers_entrance.py`**:
-1. `BackgroundQueueWorker` class (~200 lines) - daemon thread polling Service Bus
-2. Updated lifespan to start/stop queue worker
-3. Added `/queue/status` endpoint
-4. Updated header to reflect "Docker Service" naming
+| Priority | Epic | Name | Status | Next Action |
+|:--------:|------|------|--------|-------------|
+| **1** | E7→E2 | **RasterMetadata + STAC Self-Healing** | 🔴 | F7.9 + F7.11: CRITICAL |
+| **2** | E8 | **H3 Analytics (Rwanda)** | 🚧 | H3 bootstrap running (res 3-7) |
+| 3 | E8 | Building Flood Exposure | 📋 | F8.7: MS Buildings → FATHOM → H3 |
+| 4 | E9 | Pre-prepared Raster Ingest | 📋 | F9.8: COG copy + STAC |
+| 5 | E2 | Raster Data as API | 🚧 | F2.7: Collection Processing |
+| 6 | E3 | DDH Platform Integration | 🚧 | F3.1: Validate Swagger UI |
+| — | E7 | Pipeline Builder | 📋 | F7.5: Future (after concrete implementations) |
 
-**Key Features**:
-- Uses `CoreMachine.process_task_message()` - identical to Function App
-- Identity-first auth: prefers `SERVICE_BUS_FQDN` (MI) over connection string
-- Lazy initialization of CoreMachine to avoid import issues
-- Proper error handling with retry backoff
-- Message completion/dead-lettering based on result
+**Focus**: Rwanda as test region for all analytics pipelines before scaling.
 
-**Auth Priority** (Identity-First):
+**Completed**:
+- E9 FATHOM Rwanda Pipeline ✅
+- E7 Unified Metadata Architecture ✅ (F7.8 VectorMetadata)
+- E7 Docker Worker Infrastructure ✅ (F7.12-13)
+
+---
+
+## Current Sprint Focus
+
+### 🟡 H3 Analytics on Rwanda
+
+**Epic**: E8 GeoAnalytics Pipeline
+**Goal**: H3 aggregation of FATHOM flood data for Rwanda
+**Dependency**: F9.1 ✅ (FATHOM merged COGs exist in silver-fathom)
+**Status**: H3 bootstrap running (08 JAN 2026)
+
+#### F8.13: Rwanda H3 Aggregation
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| S8.13.1 | Seed Rwanda H3 cells (res 2-7, country-filtered) | 🔴 Stage 3 timeout |
+| S8.13.1a | **Fix H3 finalize timeout** - pg_cron + autovacuum | ✅ Done (08 JAN) |
+| S8.13.1b | Enable pg_cron extension in Azure Portal | 📋 |
+| S8.13.1c | Run pg_cron_setup.sql on database | 📋 |
+| S8.13.1d | Re-run H3 bootstrap (run_vacuum=False) | 📋 |
+| S8.13.2 | Add FATHOM merged COGs to source_catalog | 📋 |
+| S8.13.3 | Run H3 raster aggregation on Rwanda FATHOM | 📋 |
+| S8.13.4 | Verify zonal_stats populated for flood themes | 📋 |
+| S8.13.5 | Test H3 export endpoint with Rwanda data | 📋 |
+
+See [TABLE_MAINTENANCE.md](./TABLE_MAINTENANCE.md) for pg_cron setup steps.
+
+---
+
+### 🟢 Building Flood Exposure Pipeline
+
+**Epic**: E8 GeoAnalytics Pipeline
+**Goal**: Calculate % of buildings in flood risk areas, aggregated to H3 level 7
+**Dependency**: F8.13 (H3 cells for Rwanda), F9.1 ✅ (FATHOM COGs)
+**Data Source**: Microsoft Building Footprints (direct download)
+**Initial Scenario**: `fluvial-defended-2020` (baseline)
+
+#### F8.7: Building Flood Exposure Job
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| S8.7.1 | Download MS Building Footprints for Rwanda | 📋 |
+| S8.7.2 | Create `buildings` schema (footprints, flood_exposure tables) | 📋 |
+| S8.7.3 | Create `BuildingFloodExposureJob` definition (4-stage) | 📋 |
+| S8.7.4 | Stage 1 handler: `building_load_footprints` (GeoJSON → PostGIS) | 📋 |
+| S8.7.5 | Stage 2 handler: `building_assign_h3` (centroid → H3 index) | 📋 |
+| S8.7.6 | Stage 3 handler: `building_sample_fathom` (point → raster value) | 📋 |
+| S8.7.7 | Stage 4 handler: `building_aggregate_h3` (SQL aggregation) | 📋 |
+| S8.7.8 | End-to-end test: Rwanda + fluvial-defended-2020 | 📋 |
+| S8.7.9 | Expand to all FATHOM scenarios (39 for Rwanda) | 📋 |
+
+---
+
+## Other Active Work
+
+### ⚪ Future: Pipeline Builder (Low Priority)
+
+**Epic**: E7 Pipeline Infrastructure
+**Goal**: Generalize FATHOM pipeline to configuration-driven raster processing
+**Timeline**: After FATHOM + H3 + Open Buildings working on Rwanda
+
+#### F7.5: Pipeline Builder
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| S7.5.1 | Abstract FATHOM dimension parser to configuration | 📋 |
+| S7.5.2 | Create `ComplexRasterPipeline` base class | 📋 |
+| S7.5.3 | YAML/JSON pipeline definition schema | 📋 |
+| S7.5.4 | Pipeline Builder UI (visual orchestration) | 📋 |
+
+**Design Principle**: Build concrete implementations first (FATHOM, H3, Buildings), then extract patterns.
+
+---
+
+## E4: Classification Enforcement & ADF Integration
+
+**Added**: 07 JAN 2026
+**Epic**: E4 Security Zones / Externalization
+**Goal**: Make `access_level` (OUO/Public/Restricted) mandatory and prepare for ADF integration
+**Context**: Colleague configuring ADF; we need Python side ready with correct parameters
+
+### Background
+
+Data classification (`access_level`) controls where data can be exported:
+- **PUBLIC**: Can be copied to external-facing storage (ADF will handle this)
+- **OUO** (Official Use Only): Internal only, ADF should reject export requests
+- **RESTRICTED**: Highest restriction, no external access
+
+Currently `access_level` is inconsistently enforced across the codebase. This work makes it:
+1. **Mandatory** at Platform API entry point
+2. **Type-safe** using `AccessLevel` enum throughout
+3. **Fail-fast** in pipeline tasks if somehow missing
+
+### Current State Analysis (07 JAN 2026)
+
+| Location | Type | Default | Required | Issue |
+|----------|------|---------|----------|-------|
+| `PlatformRequest` | `str` | `"OUO"` | ✅ | Not using enum |
+| `AccessLevel` enum | `Enum` | N/A | N/A | Exists but unused |
+| Job parameter schemas | `str` | `None` | ❌ | Loses value |
+| `PlatformMetadata` dataclass | `Optional[str]` | `None` | ❌ | Loses value |
+| `PlatformProperties` model | `Optional[AccessLevel]` | `None` | ❌ | Uses enum but optional |
+
+**Key Files**:
+- `core/models/stac.py:57-62` - `AccessLevel` enum definition
+- `core/models/platform.py:147-151` - `PlatformRequest.access_level` field
+- `triggers/trigger_platform.py` - Translation functions
+- `jobs/process_raster_v2.py:92` - Job parameter schema
+- `jobs/raster_mixin.py:93-98` - `PLATFORM_PASSTHROUGH_SCHEMA`
+- `services/stac_metadata_helper.py:69` - `PlatformMetadata` dataclass
+- `infrastructure/data_factory.py` - ADF repository (ready for testing)
+
+### Phase 1: Enforce at Platform Level
+
+**Goal**: Reject requests with invalid/missing classification at API entry point
+
+| Story | Description | Status | Files |
+|-------|-------------|--------|-------|
+| S4.CL.1 | Update `PlatformRequest.access_level` to use `AccessLevel` enum | 📋 | `core/models/platform.py` |
+| S4.CL.2 | Add Pydantic validator to normalize case (accept "OUO" → store as "ouo") | 📋 | `core/models/platform.py` |
+| S4.CL.3 | Make `access_level` required (remove default) OR keep secure default "ouo" | 📋 | `core/models/platform.py` |
+| S4.CL.4 | Update `_translate_to_coremachine()` to pass enum value (lowercase string) | 📋 | `triggers/trigger_platform.py` |
+| S4.CL.5 | Add validation tests for Platform API rejection of invalid values | 📋 | `tests/` |
+
+**Implementation Notes for S4.CL.1-3**:
 ```python
-# 1. Managed Identity via SERVICE_BUS_FQDN (preferred)
-# 2. Connection string via ServiceBusConnection (local dev only)
+# core/models/platform.py - Change from:
+access_level: str = Field(default="OUO", max_length=50, ...)
+
+# To:
+from core.models.stac import AccessLevel
+
+access_level: AccessLevel = Field(
+    default=AccessLevel.OUO,
+    description="Data classification: public, ouo, restricted"
+)
+
+@field_validator('access_level', mode='before')
+@classmethod
+def normalize_access_level(cls, v):
+    """Accept case-insensitive input, normalize to enum."""
+    if isinstance(v, str):
+        try:
+            return AccessLevel(v.lower())
+        except ValueError:
+            raise ValueError(f"Invalid access_level '{v}'. Must be: public, ouo, restricted")
+    return v
 ```
 
-**Environment Variables** (No Secrets):
-- `SERVICE_BUS_FQDN=rmhazure.servicebus.windows.net` ✅
+**Decision Point**: Keep `default=AccessLevel.OUO` (secure by default) or make truly required (no default). Recommend keeping default since OUO is the safe choice.
 
-### Checkpoint/Resume Architecture (11 JAN 2026)
+### Phase 2: Fail-Fast in Pipeline Tasks
 
-**Core Principle**: Function App = Job orchestration (coarse-grained), Docker Worker = Task execution with internal resilience (fine-grained)
+**Goal**: Defense-in-depth - tasks fail immediately if access_level missing (shouldn't happen if Phase 1 works)
 
-This mirrors Kubernetes pattern: Kubernetes orchestrates pods, pods handle their own restart logic.
+| Story | Description | Status | Files |
+|-------|-------------|--------|-------|
+| S4.CL.6 | Add `access_level` to job schemas with `required: True` | 📋 | `jobs/raster_mixin.py`, `jobs/process_raster_v2.py`, `jobs/process_vector.py` |
+| S4.CL.7 | Add validation in STAC metadata creation (fail if missing) | 📋 | `services/stac_metadata_helper.py` |
+| S4.CL.8 | Add validation in promote handlers (data export tasks) | 📋 | `services/promote_service.py` |
+| S4.CL.9 | Update `PlatformMetadata` dataclass to require access_level | 📋 | `services/stac_metadata_helper.py` |
+| S4.CL.10 | Add checkpoints logging for access_level at key stages | 📋 | Various handlers |
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  FUNCTION APP ORCHESTRATOR (CoreMachine)                        │
-│  - Sees tasks as ATOMIC black boxes                             │
-│  - Handles: job submission, stage advancement, job completion   │
-│  - Doesn't know/care about Docker internal phases               │
-│  - If Docker task completes → orchestrator advances job         │
-│  - If Docker task fails → orchestrator marks job failed         │
-└─────────────────────────┬───────────────────────────────────────┘
-                          │
-                          │ Queue message: "task_id=xyz, type=raster_process_complete"
-                          ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  DOCKER WORKER                                                  │
-│  - Picks up task message                                        │
-│  - Checks checkpoint_phase: "Did I crash mid-way?"              │
-│  - Resumes from last checkpoint OR starts fresh                 │
-│  - Updates checkpoint_phase/data as it progresses               │
-│  - On completion: marks task COMPLETED, orchestrator takes over │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-**Why This Works**:
-1. **Orchestrator doesn't care** - task goes to queue → task eventually completes or fails → orchestrator advances job
-2. **Docker worker is self-healing** - checks checkpoint on startup, resumes from last good state
-3. **No orchestrator changes needed** - existing CoreMachine works as-is
-4. **Task state table is single source of truth** - checkpoint_phase/data live on task record
-
-### Checkpoint Fields Added to TaskRecord (11 JAN 2026)
-
+**Implementation Notes for S4.CL.6**:
 ```python
-# core/models/task.py
-class TaskRecord(BaseModel):
-    # ... existing fields ...
-
-    # Pulse tracking (renamed from heartbeat)
-    last_pulse: Optional[datetime] = None
-
-    # Checkpoint tracking for Docker resume support
-    checkpoint_phase: Optional[int] = None      # Current phase number (1, 2, 3...)
-    checkpoint_data: Optional[Dict] = None      # Phase-specific state (JSONB)
-    checkpoint_updated_at: Optional[datetime] = None
+# jobs/raster_mixin.py - Update PLATFORM_PASSTHROUGH_SCHEMA:
+PLATFORM_PASSTHROUGH_SCHEMA = {
+    'dataset_id': {'type': 'str', 'default': None},
+    'resource_id': {'type': 'str', 'default': None},
+    'version_id': {'type': 'str', 'default': None},
+    'access_level': {
+        'type': 'str',
+        'required': True,  # Now required!
+        'allowed': ['public', 'ouo', 'restricted']
+    },
+}
 ```
 
-### CheckpointManager Class (TO IMPLEMENT)
-
-```python
-# infrastructure/checkpoint_manager.py
-class CheckpointManager:
-    """Manages checkpoint state for resumable Docker tasks."""
-
-    def __init__(self, task_id: str, task_repo):
-        self.task_id = task_id
-        self.task_repo = task_repo
-        self.current_phase = None
-        self.data = {}
-        self._load_checkpoint()
-
-    def _load_checkpoint(self):
-        """Load existing checkpoint from task record."""
-        task = self.task_repo.get_task(self.task_id)
-        self.current_phase = task.checkpoint_phase or 0
-        self.data = task.checkpoint_data or {}
-
-    def should_skip(self, phase: int) -> bool:
-        """Check if phase was already completed."""
-        return self.current_phase >= phase
-
-    def save(self, phase: int, data: dict = None, validate_artifact: Callable = None):
-        """
-        Save checkpoint after completing a phase.
-
-        Args:
-            phase: Phase number just completed
-            data: Phase-specific data to merge into checkpoint
-            validate_artifact: Optional callable to validate output exists
-                             (e.g., check COG blob exists before saving checkpoint)
-        """
-        # Optional: validate artifact exists before saving
-        if validate_artifact and not validate_artifact():
-            raise CheckpointValidationError(f"Phase {phase} artifact validation failed")
-
-        self.task_repo.update_task(self.task_id, TaskUpdateModel(
-            checkpoint_phase=phase,
-            checkpoint_data={**self.data, **(data or {})},
-            checkpoint_updated_at=datetime.now(timezone.utc)
-        ))
-        self.current_phase = phase
-        self.data = {**self.data, **(data or {})}
-
-    def get_data(self, key: str, default=None):
-        """Get data from previous checkpoint."""
-        return self.data.get(key, default)
-```
-
-### Handler Pattern with Checkpoints
-
-```python
-# services/handler_process_raster_complete.py
-def process_raster_complete(params: dict, context: dict = None) -> dict:
-    """
-    Complete raster processing in one execution with checkpoint support.
-
-    Phases:
-        1. Validation - validate source raster
-        2. COG Creation - create Cloud Optimized GeoTIFF
-        3. STAC Metadata - register in STAC catalog
-
-    If Docker crashes mid-execution:
-        - Orchestrator doesn't know/care
-        - Same message stays in queue (not completed)
-        - Docker restarts, picks up message
-        - CheckpointManager loads last state
-        - Resumes from last completed phase
-    """
-    task_id = params['_task_id']
-    task_repo = RepositoryFactory.create_task_repository()
-    checkpoint = CheckpointManager(task_id, task_repo)
-
-    # Phase 1: Validation
-    if not checkpoint.should_skip(1):
-        logger.info(f"🔄 Phase 1: Validating raster...")
-        validation_result = validate_raster({...})
-        if not validation_result['success']:
-            return validation_result  # Fail fast
-        checkpoint.save(1, data={"validation": validation_result['result']})
-    else:
-        logger.info(f"⏭️ Phase 1: Skipping (already completed)")
-
-    # Phase 2: COG Creation (uses validation result from checkpoint)
-    if not checkpoint.should_skip(2):
-        logger.info(f"🔄 Phase 2: Creating COG...")
-        cog_params = {**params, **checkpoint.get_data('validation', {})}
-        cog_result = create_cog(cog_params)
-        if not cog_result['success']:
-            return cog_result  # Fail fast
-
-        # Validate COG exists before saving checkpoint
-        checkpoint.save(
-            phase=2,
-            data={"cog_blob": cog_result['result']['cog_blob']},
-            validate_artifact=lambda: blob_exists(cog_result['result']['cog_blob'])
-        )
-    else:
-        logger.info(f"⏭️ Phase 2: Skipping (already completed)")
-
-    # Phase 3: STAC Metadata
-    if not checkpoint.should_skip(3):
-        logger.info(f"🔄 Phase 3: Creating STAC metadata...")
-        stac_params = {**params, "cog_blob": checkpoint.get_data('cog_blob')}
-        stac_result = extract_stac_metadata(stac_params)
-        if not stac_result['success']:
-            return stac_result  # Fail fast
-        checkpoint.save(3, data={"stac_item_id": stac_result['result'].get('item_id')})
-    else:
-        logger.info(f"⏭️ Phase 3: Skipping (already completed)")
-
-    # All phases complete
-    return {
-        "success": True,
-        "result": checkpoint.data,
-        "message": "Raster processing complete"
-    }
-```
-
-### Checkpoint Validation Strategy
-
-Per discussion (11 JAN 2026), checkpoints use **full artifact validation**, not just existence checks:
-
-| Phase | Artifact | Validation |
-|-------|----------|------------|
-| 1 (Validation) | Validation result dict | Schema validation of result fields |
-| 2 (COG Creation) | COG blob in storage | Blob exists + can open with rasterio |
-| 3 (STAC Metadata) | STAC item in catalog | Item exists in pgstac.items |
-
-### Checkpoint Retention
-
-Checkpoints are retained (not cleared on completion) for:
-- Audit trail - understand what happened during processing
-- Debugging - see phase timings and intermediate data
-- Future: Timer function to clean up old checkpoints while retaining audit info
-
-### Testing Scenarios
-
-```bash
-# Test checkpoint resume
-1. Submit process_raster_docker job
-2. Let Phase 1 complete, Phase 2 start
-3. Kill Docker container mid-COG-creation
-4. Restart Docker
-5. Verify: Phase 1 skipped, Phase 2 restarts, job completes
-
-# Test artifact validation
-1. Submit job with invalid source
-2. Verify: Phase 1 fails, no checkpoint saved
-3. Fix source, resubmit
-4. Verify: Phase 1 runs fresh (no stale checkpoint)
-```
-
-### Key Files (Updated/Created 11 JAN 2026)
-
-| File | Purpose | Status |
-|------|---------|--------|
-| `core/models/task.py` | TaskRecord with checkpoint fields | ✅ Updated |
-| `core/schema/updates.py` | TaskUpdateModel with checkpoint fields | ✅ Updated |
-| `core/schema/sql_generator.py` | DDL with checkpoint columns + indexes | ✅ Updated |
-| `core/schema/deployer.py` | required_columns validation | ✅ Updated |
-| `infrastructure/postgresql.py` | INSERT/SELECT with checkpoint fields | ✅ Updated |
-| `infrastructure/jobs_tasks.py` | update_task_pulse() method | ✅ Updated |
-| `infrastructure/janitor_repository.py` | SQL query with last_pulse | ✅ Updated |
-| `services/raster_cog.py` | PulseWrapper class (renamed) | ✅ Updated |
-| `services/janitor_service.py` | last_pulse references | ✅ Updated |
-| `triggers/admin/db_data.py` | API responses with last_pulse | ✅ Updated |
-| `core/machine.py` | Commented code references | ✅ Updated |
-| `jobs/process_raster_docker.py` | Single-stage Docker job | ✅ Created |
-| `services/handler_process_raster_complete.py` | Consolidated handler | ✅ Created |
-| `infrastructure/checkpoint_manager.py` | CheckpointManager class | ✅ Created |
-
-### Memory Strategy for Docker Raster Processing (11 JAN 2026)
-
-**Principle**: Docker uses identical approach to Function App - just with more headroom.
-
-| Scenario | Strategy | Why |
-|----------|----------|-----|
-| Fits in memory (~7GB) | In-memory processing (MemoryFile) | Same as Function App, fast |
-| Larger than memory | Tiling pipeline (`process_large_raster_v2`) | Chunk into tiles, process individually |
-
-**Docker Environment**: 2 CPU, 7.7GB RAM
-
-**Memory Budget** (same pattern as Function App):
-```
-Input blob download:    ~2 GB max  ← downloaded to RAM
-MemoryFile overhead:    ~2 GB      ← rasterio buffers
-cog_translate work:     ~2 GB      ← compression/processing
-Output MemoryFile:      ~1.5 GB    ← output COG
-────────────────────────────────────
-Practical limit:        ~2-3 GB input files (vs ~800MB on Function App)
-```
-
-**Size-Based Routing**:
-```
-< 800 MB      → Function App (process_raster_v2)
-800 MB - 2 GB → Docker (process_raster_docker) - in-memory
-> 2 GB        → Docker (process_large_raster_v2) - tiling pipeline
-```
-
-**FUTURE ENHANCEMENT: Disk-Based Processing**
-
-For files that exceed memory but don't need tiling (2-5GB single COGs):
-```python
-# NOT IMPLEMENTED - Add when metrics show need
-def create_cog_disk_based(params):
-    """Download to disk, process, upload. Memory: ~2GB regardless of file size."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        input_path = Path(tmpdir) / "input.tif"
-        output_path = Path(tmpdir) / "output.tif"
-
-        # Stream download to disk (not RAM)
-        blob_repo.download_blob_to_file(container, blob, input_path)
-
-        # COG translate from disk to disk
-        with rasterio.open(input_path) as src:
-            cog_translate(src, output_path, cog_profile, in_memory=False)
-
-        # Stream upload from disk
-        blob_repo.upload_file_to_blob(output_path, out_container, out_blob)
-```
-
-**Why deferred**: Need real metrics first. Test with actual files to understand:
-- Memory utilization by input size
-- Where OOM actually occurs
-- Whether tiling is sufficient for all cases
-
-### Testing
-
-```bash
-# Local Docker test (no external deps with mock mode)
-curl -X POST http://localhost:8080/test/execute/process_raster_complete \
-    -d '{"params": {"source_url": "..."}}'
-
-# Full job test
-POST /api/jobs/submit/process_raster_docker
-{"source_url": "...", "output_container": "silvercogs"}
-```
-
-### F7.14: Dynamic Task Routing (OPTIONAL - Backlog)
-
-**Status**: 🔵 BACKLOG - Only implement if separate Docker jobs prove insufficient
-
-**Current State (11 JAN 2026)**:
-- Job type determines routing: `process_raster_v2` → Function App, `process_raster_docker` → Docker
-- User/client chooses which job to submit
-- `RASTER_ROUTE_DOCKER_MB=2000` env var exists but is NOT wired up
-
-**Future Enhancement - Automatic File-Size Routing**:
+**Implementation Notes for S4.CL.7**:
 ```python
 # In job submission endpoint:
 if file_size_mb > config.raster.raster_route_docker_mb:
@@ -1012,6 +889,27 @@ triggers/admin/
 
 ---
 
+### F7.17: Additional Features (12 JAN 2026)
+
+**Status**: ✅ COMPLETE
+**Version**: 0.7.7.11
+
+| Feature | Description | Status |
+|---------|-------------|--------|
+| Job Resubmit Endpoint | `POST /api/jobs/{job_id}/resubmit` - nuclear reset + resubmit | ✅ |
+| Platform processing_mode | Route Platform raster to Docker via `processing_mode=docker` | ✅ |
+| Env Validation Warnings | Separate errors from warnings (don't block Service Bus) | ✅ |
+| PgStacRepository.delete_item | Delete STAC items for job resubmit cleanup | ✅ |
+| JobRepository.delete_job | Delete job records for resubmit | ✅ |
+
+**Job Resubmit Details** (`triggers/jobs/resubmit.py`):
+- Dry run mode: preview cleanup without executing
+- Cleanup: tasks, job record, PostGIS tables, STAC items
+- Optionally delete blob artifacts (COGs)
+- Force mode: resubmit even if job is processing
+
+---
+
 ### E9: Large Data Hosting
 
 | Feature | Description | Status |
@@ -1318,6 +1216,8 @@ Tasks suitable for a colleague with Azure/Python/pipeline expertise but without 
 
 | Date | Item | Epic |
 |------|------|------|
+| 12 JAN 2026 | **F7.17 Job Resubmit + Features** - `/api/jobs/{job_id}/resubmit` endpoint, env validation fix | E7 |
+| 12 JAN 2026 | **F7.16 db_maintenance.py Split** - Phase 1 complete (28% reduction, 2 modules extracted) | E7 |
 | 11 JAN 2026 | **F7.12 Docker OpenTelemetry** - Docker worker logs to App Insights (v0.7.8-otel) | E7 |
 | 11 JAN 2026 | **F7.12 Docker Worker Infrastructure** - Deployed to rmhheavyapi | E7 |
 | 10 JAN 2026 | **F7.12 Logging Architecture** - Flag consolidation, global log context | E7 |

@@ -197,19 +197,52 @@ def _validate_vector_sources(
 
 def _validate_raster_sources(items: List[str]) -> tuple[List[Dict], List[Dict]]:
     """
-    Check which COG blobs exist.
+    Check which COG IDs exist in app.cog_metadata.
 
-    Note: Raster support is Phase 2 (S7.11.5). For now, returns all as invalid.
+    Implemented: 12 JAN 2026 - S7.11.5
+
+    Args:
+        items: List of COG IDs to validate
 
     Returns:
         (valid_items, invalid_items)
     """
-    # TODO: Implement raster validation when app.cog_metadata exists
-    invalid = [
-        {"name": item, "reason": "Raster rebuild not yet implemented (S7.11.5)"}
-        for item in items
-    ]
-    return [], invalid
+    from infrastructure.raster_metadata_repository import get_raster_metadata_repository
+
+    valid = []
+    invalid = []
+
+    try:
+        cog_repo = get_raster_metadata_repository()
+
+        for cog_id in items:
+            # Check if COG exists in cog_metadata
+            cog_record = cog_repo.get_by_id(cog_id)
+
+            if cog_record:
+                valid.append({
+                    "name": cog_id,
+                    "container": cog_record.get("container"),
+                    "blob_path": cog_record.get("blob_path"),
+                    "collection_id": cog_record.get("stac_collection_id"),
+                    "band_count": cog_record.get("band_count", 1)
+                })
+            else:
+                invalid.append({
+                    "name": cog_id,
+                    "reason": "COG not found in app.cog_metadata"
+                })
+
+    except Exception as e:
+        logger.error(f"Error validating raster sources: {e}")
+        # If we can't query cog_metadata, mark all as invalid
+        invalid = [
+            {"name": item, "reason": f"Failed to query cog_metadata: {e}"}
+            for item in items
+        ]
+        return [], invalid
+
+    return valid, invalid
 
 
 def stac_rebuild_item(params: Dict[str, Any]) -> Dict[str, Any]:
@@ -355,14 +388,117 @@ def _rebuild_raster_stac(
     """
     Rebuild STAC item for a raster COG.
 
-    TODO: Implement when app.cog_metadata exists (S7.11.5).
+    Implemented: 12 JAN 2026 - S7.11.5
+
+    Uses RasterMetadata from app.cog_metadata to regenerate STAC item.
+    This is the reverse of extract_stac_metadata which populates cog_metadata.
+
+    Args:
+        cog_id: COG identifier (usually same as STAC item ID)
+        collection_id: Target STAC collection
+        force_recreate: Delete existing STAC item before creating
+        job_id: Job ID for tracking
+
+    Returns:
+        Success dict with rebuilt item info or error dict
     """
-    return {
-        "success": False,
-        "error": "Raster STAC rebuild not yet implemented (S7.11.5)",
-        "error_type": "NotImplementedError",
-        "cog_id": cog_id
-    }
+    from infrastructure.raster_metadata_repository import get_raster_metadata_repository
+    from infrastructure.pgstac_bootstrap import PgStacBootstrap
+    from infrastructure.pgstac_repository import PgStacRepository
+    from core.models.unified_metadata import RasterMetadata
+    from config import get_config
+
+    config = get_config()
+
+    try:
+        # Load COG metadata from database
+        cog_repo = get_raster_metadata_repository()
+        cog_record = cog_repo.get_by_id(cog_id)
+
+        if not cog_record:
+            return {
+                "success": False,
+                "error": f"COG not found in cog_metadata: {cog_id}",
+                "error_type": "NotFoundError",
+                "cog_id": cog_id
+            }
+
+        # Create RasterMetadata domain object from database row
+        raster_meta = RasterMetadata.from_db_row(cog_record)
+
+        # Use collection_id from parameter or fall back to stored value
+        target_collection = collection_id or raster_meta.stac_collection_id or STACDefaults.RASTER_COLLECTION
+
+        # Initialize pgSTAC infrastructure
+        stac_infra = PgStacBootstrap()
+        pgstac_repo = PgStacRepository()
+
+        # If force_recreate, delete existing item first
+        if force_recreate:
+            expected_item_id = cog_id
+            if stac_infra.item_exists(expected_item_id, target_collection):
+                logger.info(f"🗑️ Deleting existing STAC item: {expected_item_id}")
+                try:
+                    stac_infra.delete_item(expected_item_id, target_collection)
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not delete existing item: {e}")
+
+        # Generate STAC item from RasterMetadata
+        base_url = config.stac_base_url or "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net"
+        titiler_url = config.titiler_base_url
+
+        stac_item_dict = raster_meta.to_stac_item(
+            base_url=base_url,
+            titiler_base_url=titiler_url
+        )
+
+        # Insert into pgSTAC
+        # Need to convert dict to pystac.Item for insertion
+        import pystac
+        stac_item = pystac.Item.from_dict(stac_item_dict)
+
+        # Insert item
+        insert_result = pgstac_repo.insert_item(stac_item, target_collection)
+
+        if not insert_result:
+            return {
+                "success": False,
+                "error": "Failed to insert STAC item into pgSTAC",
+                "error_type": "InsertionError",
+                "cog_id": cog_id
+            }
+
+        # Update cog_metadata with new STAC linkage
+        cog_repo.update_stac_linkage(
+            cog_id=cog_id,
+            stac_item_id=cog_id,
+            stac_collection_id=target_collection
+        )
+
+        logger.info(f"✅ Rebuilt raster STAC item: {cog_id} in collection {target_collection}")
+
+        return {
+            "success": True,
+            "result": {
+                "rebuilt": True,
+                "item_id": cog_id,
+                "item_name": cog_id,
+                "collection_id": target_collection,
+                "source": "cog_metadata",
+                "job_id": job_id
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"❌ Failed to rebuild raster STAC for {cog_id}: {e}")
+        import traceback
+        logger.debug(traceback.format_exc())
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": type(e).__name__,
+            "cog_id": cog_id
+        }
 
 
 # Module exports

@@ -210,10 +210,14 @@ _startup_logger.info("🔍 STARTUP: Validating environment variables (format + p
 try:
     from config.env_validation import validate_environment, get_validation_summary
 
-    _validation_errors = validate_environment()
+    _validation_results = validate_environment()
+
+    # Separate actual errors from warnings (12 JAN 2026)
+    _validation_errors = [e for e in _validation_results if e.severity == "error"]
+    _validation_warnings = [w for w in _validation_results if w.severity == "warning"]
 
     if _validation_errors:
-        # Build detailed error message
+        # Build detailed error message for actual errors only
         _error_details = []
         for err in _validation_errors:
             _error_details.append(f"  - {err.var_name}: {err.message}")
@@ -231,11 +235,13 @@ try:
             error_message=f"{len(_validation_errors)} environment variable(s) invalid",
             details={
                 "errors": [e.to_dict() for e in _validation_errors],
+                "warnings": [w.to_dict() for w in _validation_warnings],
                 "fix": "Review the errors above and update environment variables via Azure Portal → Function App → Configuration"
             }
         )
         _startup_logger.critical(f"❌ STARTUP: {_error_msg}")
     else:
+        # No errors - validation passed (warnings are OK)
         _summary = get_validation_summary()
         STARTUP_STATE.env_vars = ValidationResult(
             name="env_vars",
@@ -243,10 +249,15 @@ try:
             details={
                 "message": "All environment variables validated successfully",
                 "required_vars_checked": _summary["required_vars"]["total"],
+                "warning_count": len(_validation_warnings),
+                "warnings": [w.to_dict() for w in _validation_warnings] if _validation_warnings else None,
                 "all_vars_validated": True
             }
         )
-        _startup_logger.info(f"✅ STARTUP: All environment variables validated ({_summary['required_vars']['total']} required vars checked)")
+        if _validation_warnings:
+            _startup_logger.info(f"✅ STARTUP: Env vars validated ({_summary['required_vars']['total']} required, {len(_validation_warnings)} warnings for optional vars using defaults)")
+        else:
+            _startup_logger.info(f"✅ STARTUP: All environment variables validated ({_summary['required_vars']['total']} required vars checked)")
 
 except ImportError as _import_err:
     # Fallback to basic check if validation module not found

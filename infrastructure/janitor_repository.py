@@ -26,6 +26,7 @@ Exports:
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime, timezone, timedelta
 import logging
+import uuid
 
 from psycopg import sql
 
@@ -568,6 +569,9 @@ class JanitorRepository(PostgreSQLRepository):
         """
         import json
 
+        # Generate run_id (required field - no database DEFAULT)
+        run_id = str(uuid.uuid4())
+
         # Calculate duration only if both timestamps are available
         # At start of run, completed_at will be None
         if completed_at and started_at:
@@ -577,6 +581,7 @@ class JanitorRepository(PostgreSQLRepository):
 
         query = sql.SQL("""
             INSERT INTO {schema}.janitor_runs (
+                run_id,
                 run_type,
                 started_at,
                 completed_at,
@@ -586,7 +591,7 @@ class JanitorRepository(PostgreSQLRepository):
                 actions_taken,
                 error_details,
                 duration_ms
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s)
             RETURNING run_id
         """).format(schema=sql.Identifier(self.schema_name))
 
@@ -595,6 +600,7 @@ class JanitorRepository(PostgreSQLRepository):
                 result = self._execute_query(
                     query,
                     (
+                        run_id,
                         run_type,
                         started_at,
                         completed_at,

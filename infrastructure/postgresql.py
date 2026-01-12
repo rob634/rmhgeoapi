@@ -1834,8 +1834,9 @@ class PostgreSQLTaskRepository(PostgreSQLRepository, ITaskRepository):
             for field, value in update_dict.items():
                 set_clauses.append(sql.SQL("{} = %s").format(sql.Identifier(field)))
 
-                # Handle special types
-                if field in ['parameters', 'result_data', 'metadata'] and value is not None:
+                # Handle special types - JSONB fields need json.dumps()
+                # checkpoint_data added 12 JAN 2026 - was missing, caused Docker handler failure
+                if field in ['parameters', 'result_data', 'metadata', 'checkpoint_data'] and value is not None:
                     params.append(json.dumps(value) if not isinstance(value, str) else value)
                 else:
                     # Pydantic has already converted enums to strings

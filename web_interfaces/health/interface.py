@@ -1775,11 +1775,13 @@ class HealthInterface(BaseInterface):
             const envInfo = document.getElementById('environment-info');
             if (!envInfo) return;
 
-            // Extract health data
+            // Extract health data from actual Docker worker response structure
             const status = dockerHealth.status || 'unknown';
-            const hardware = dockerHealth.hardware || {{}};
-            const memory = dockerHealth.memory || {{}};
+            const version = dockerHealth.version || 'N/A';
+            const config = dockerHealth.config || {{}};
             const tokens = dockerHealth.tokens || {{}};
+            const connectivity = dockerHealth.connectivity || {{}};
+            const workers = dockerHealth.background_workers || {{}};
             const url = dockerHealth.url || DOCKER_WORKER_URL;
 
             // Calculate status color
@@ -1796,21 +1798,27 @@ class HealthInterface(BaseInterface):
                 statusIcon = '🟡';
             }}
 
-            // Calculate memory bar
-            const ramPercent = memory.system_percent || 0;
-            let ramBarColor = '#10B981';
-            if (ramPercent >= 90) ramBarColor = '#DC2626';
-            else if (ramPercent >= 80) ramBarColor = '#F59E0B';
+            // Token status
+            const pgToken = tokens.postgres || {{}};
+            const storageToken = tokens.storage || {{}};
+            const pgValid = pgToken.has_token === true;
+            const storageValid = storageToken.has_token === true;
+            const tokensValid = pgValid && storageValid;
 
-            const cpuPercent = memory.cpu_percent || 0;
-            let cpuBarColor = '#10B981';
-            if (cpuPercent >= 90) cpuBarColor = '#DC2626';
-            else if (cpuPercent >= 70) cpuBarColor = '#F59E0B';
+            // Connectivity status
+            const dbConnected = connectivity.database?.connected === true;
+            const storageConnected = connectivity.storage?.connected === true;
+
+            // Token TTL (convert seconds to hours)
+            const pgTtlHours = pgToken.ttl_seconds ? Math.round(pgToken.ttl_seconds / 3600) : 0;
+            const storageTtlHours = storageToken.ttl_seconds ? Math.round(storageToken.ttl_seconds / 3600) : 0;
 
             // Clean URL for display
             let displayUrl = url;
             if (displayUrl.startsWith('https://')) displayUrl = displayUrl.substring(8);
             if (displayUrl.startsWith('http://')) displayUrl = displayUrl.substring(7);
+            // Truncate long URLs
+            if (displayUrl.length > 45) displayUrl = displayUrl.substring(0, 42) + '...';
 
             const dockerHtml = `
                 <div class="hardware-section docker-worker-section">
@@ -1822,34 +1830,28 @@ class HealthInterface(BaseInterface):
                             <div class="hardware-details">
                                 <div class="hardware-label">Status</div>
                                 <div class="hardware-value" style="color: ${{statusColor}}; text-transform: capitalize;">${{status}}</div>
-                                <div class="hardware-sub">${{displayUrl}}</div>
+                                <div class="hardware-sub">v${{version}} • ${{displayUrl}}</div>
                             </div>
                         </div>
 
                         ${{status === 'healthy' || status === 'warning' ? `
-                        <!-- CPU Info -->
+                        <!-- Database Connectivity -->
                         <div class="hardware-card">
-                            <div class="hardware-icon">⚡</div>
+                            <div class="hardware-icon">${{dbConnected ? '🐘' : '❌'}}</div>
                             <div class="hardware-details">
-                                <div class="hardware-label">CPU</div>
-                                <div class="hardware-value">${{hardware.cpu_count || 'N/A'}} cores</div>
-                                <div class="hardware-bar-container">
-                                    <div class="hardware-bar" style="width: ${{Math.min(cpuPercent, 100)}}%; background: ${{cpuBarColor}};"></div>
-                                </div>
-                                <div class="hardware-sub">${{cpuPercent.toFixed(1)}}% utilized</div>
+                                <div class="hardware-label">Database</div>
+                                <div class="hardware-value" style="color: ${{dbConnected ? '#10B981' : '#DC2626'}}">${{dbConnected ? 'Connected' : 'Disconnected'}}</div>
+                                <div class="hardware-sub">${{connectivity.database?.database || config.database_host || 'N/A'}}</div>
                             </div>
                         </div>
 
-                        <!-- RAM Info -->
+                        <!-- Storage Connectivity -->
                         <div class="hardware-card">
-                            <div class="hardware-icon">💾</div>
+                            <div class="hardware-icon">${{storageConnected ? '📦' : '❌'}}</div>
                             <div class="hardware-details">
-                                <div class="hardware-label">Memory</div>
-                                <div class="hardware-value">${{hardware.total_ram_gb || 'N/A'}} GB total</div>
-                                <div class="hardware-bar-container">
-                                    <div class="hardware-bar" style="width: ${{Math.min(ramPercent, 100)}}%; background: ${{ramBarColor}};"></div>
-                                </div>
-                                <div class="hardware-sub">${{memory.system_available_mb ? (memory.system_available_mb / 1024).toFixed(1) + ' GB' : 'N/A'}} available</div>
+                                <div class="hardware-label">Storage</div>
+                                <div class="hardware-value" style="color: ${{storageConnected ? '#10B981' : '#DC2626'}}">${{storageConnected ? 'Connected' : 'Disconnected'}}</div>
+                                <div class="hardware-sub">${{connectivity.storage?.account || config.storage_account || 'N/A'}}</div>
                             </div>
                         </div>
 
@@ -1858,21 +1860,21 @@ class HealthInterface(BaseInterface):
                             <div class="hardware-icon">🔑</div>
                             <div class="hardware-details">
                                 <div class="hardware-label">Auth Tokens</div>
-                                <div class="hardware-value">${{tokens.postgres_valid && tokens.storage_valid ? 'Valid' : 'Issues'}}</div>
+                                <div class="hardware-value" style="color: ${{tokensValid ? '#10B981' : '#DC2626'}}">${{tokensValid ? 'Valid' : 'Issues'}}</div>
                                 <div class="hardware-sub">
-                                    PG: ${{tokens.postgres_valid ? '✓' : '✗'}} &nbsp;
-                                    Storage: ${{tokens.storage_valid ? '✓' : '✗'}}
+                                    PG: ${{pgValid ? '✓ ' + pgTtlHours + 'h' : '✗'}} &nbsp;
+                                    Storage: ${{storageValid ? '✓ ' + storageTtlHours + 'h' : '✗'}}
                                 </div>
                             </div>
                         </div>
 
-                        <!-- Platform Info -->
+                        <!-- Background Workers -->
                         <div class="hardware-card">
-                            <div class="hardware-icon">🖥️</div>
+                            <div class="hardware-icon">${{workers.token_refresh?.running ? '⚙️' : '⏸️'}}</div>
                             <div class="hardware-details">
-                                <div class="hardware-label">Platform</div>
-                                <div class="hardware-value">${{hardware.platform || 'N/A'}}</div>
-                                <div class="hardware-sub">Python ${{hardware.python_version || 'N/A'}}</div>
+                                <div class="hardware-label">Token Refresh</div>
+                                <div class="hardware-value" style="color: ${{workers.token_refresh?.running ? '#10B981' : '#F59E0B'}}">${{workers.token_refresh?.running ? 'Running' : 'Stopped'}}</div>
+                                <div class="hardware-sub">${{workers.token_refresh?.refresh_count || 0}} refreshes • ${{Math.round((workers.token_refresh?.interval_seconds || 0) / 60)}}min interval</div>
                             </div>
                         </div>
                         ` : `

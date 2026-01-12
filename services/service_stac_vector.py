@@ -242,6 +242,30 @@ class StacVectorService:
             )
         }
 
+        # Build STAC Item links (12 JAN 2026 - F7.9 Phase 2)
+        # Include OGC Features API link for discoverability
+        base_url = self.config.ogc_features_base_url.rstrip('/')
+        links = [
+            {
+                'rel': 'self',
+                'href': f"{base_url}/api/stac/collections/{collection_id}/items/{item_id}",
+                'type': 'application/geo+json',
+                'title': f'STAC Item {item_id}'
+            },
+            {
+                'rel': 'collection',
+                'href': f"{base_url}/api/stac/collections/{collection_id}",
+                'type': 'application/json',
+                'title': f'Collection {collection_id}'
+            },
+            {
+                'rel': 'http://www.opengis.net/def/rel/ogc/1.0/items',
+                'href': f"{base_url}/api/features/collections/{table_name}/items",
+                'type': 'application/geo+json',
+                'title': 'OGC Features API'
+            }
+        ]
+
         # Build STAC Item dict
         item_dict = {
             'id': item_id,
@@ -252,7 +276,7 @@ class StacVectorService:
             'bbox': bbox,
             'properties': properties,
             'assets': assets,
-            'links': []
+            'links': links
         }
 
         # Validate with stac-pydantic

@@ -221,6 +221,7 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
             # Use config default if collection_id not specified
             collection_id = params.get("collection_id") or config.stac_default_collection
             item_id = params.get("item_id")  # Optional custom item ID
+            collection_must_exist = params.get("collection_must_exist", False)  # 12 JAN 2026: Fail if collection doesn't exist
 
             using_default = params.get("collection_id") is None
             logger.info(
@@ -353,6 +354,12 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
                 logger.info(f"🔍 STEP 4.5: Checking if collection '{collection_id}' exists...")
 
                 if not stac_infra.collection_exists(collection_id):
+                    # 12 JAN 2026: Fail fast if collection_must_exist=True
+                    if collection_must_exist:
+                        raise ValueError(
+                            f"Collection '{collection_id}' does not exist and collection_must_exist=True. "
+                            f"Create the collection first or set collection_must_exist=False to auto-create."
+                        )
                     logger.warning(f"⚠️ STEP 4.5: Collection '{collection_id}' does not exist! Auto-creating...")
                     logger.warning(f"⚠️ This is expected on first use of '{collection_id}' collection")
 

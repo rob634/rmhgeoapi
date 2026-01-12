@@ -90,6 +90,65 @@ process_raster_v2 (Function App, <1GB)     process_raster_docker (Docker, large 
 
 ---
 
+## 🟡 MEDIUM: Add Rasters to Existing Collections (F2.8)
+
+**Added**: 12 JAN 2026
+**Epic**: E2 Raster Data as API
+**Goal**: Support adding rasters to existing STAC collections (vs always creating new)
+**Status**: Core implementation ✅, Platform wiring 📋
+
+### Completed (12 JAN 2026)
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| S2.8.1 | Add `collection_must_exist` param to `extract_stac_metadata` handler | ✅ |
+| S2.8.2 | Add `collection_must_exist` to `process_raster_v2` parameters_schema | ✅ |
+| S2.8.3 | Add `collection_must_exist` to `process_raster_docker` parameters_schema | ✅ |
+
+### Remaining Work
+
+| Story | Description | Status | Priority |
+|-------|-------------|--------|----------|
+| S2.8.4 | Create Platform endpoint `POST /api/platform/raster/add-to-collection` | 📋 | Medium |
+| S2.8.5 | Endpoint wrapper enforces `collection_must_exist=true` | 📋 | Medium |
+| S2.8.6 | Update `process_raster_collection_v2` to support adding tiles to existing collection | 📋 | Low |
+| S2.8.7 | Test: `collection_must_exist=true` + existing collection → success | 📋 | Medium |
+| S2.8.8 | Test: `collection_must_exist=true` + missing collection → clear error | 📋 | Medium |
+| S2.8.9 | Document new parameter in API reference | 📋 | Low |
+
+### Usage Examples
+
+```bash
+# Add raster to existing collection (fails if collection doesn't exist)
+curl -X POST .../api/jobs/submit/process_raster_v2 \
+  -d '{"container_name": "uploads", "blob_name": "new_tile.tif",
+       "collection_id": "existing-collection", "collection_must_exist": true}'
+
+# Default behavior unchanged (auto-creates collection if missing)
+curl -X POST .../api/jobs/submit/process_raster_v2 \
+  -d '{"container_name": "uploads", "blob_name": "my_raster.tif"}'
+```
+
+### Implementation Notes
+
+**Platform endpoint design** (S2.8.4-5):
+```python
+# triggers/trigger_platform.py - New endpoint
+@app.route(route="platform/raster/add-to-collection", methods=["POST"])
+async def platform_add_raster_to_collection(req: func.HttpRequest) -> func.HttpResponse:
+    """Add raster to EXISTING collection (fails if collection doesn't exist)."""
+    # Enforce collection_must_exist=true, require collection_id
+    request = PlatformAddToCollectionRequest.model_validate_json(req.get_body())
+    # ... translate to process_raster_v2 with collection_must_exist=True
+```
+
+**Key Files**:
+- `services/stac_catalog.py:224,357-362` - collection_must_exist check
+- `jobs/process_raster_v2.py:87` - parameter schema
+- `jobs/process_raster_docker.py:90` - parameter schema
+
+---
+
 ## ✅ COMPLETED: Docker Worker Infrastructure (F7.12-13)
 
 **Status**: ✅ COMPLETE - Moved to HISTORY.md (12 JAN 2026)

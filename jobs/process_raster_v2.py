@@ -84,6 +84,7 @@ class ProcessRasterV2Job(JobBaseMixin, JobBase):
         # STAC
         'collection_id': {'type': 'str', 'default': None},  # Resolved from config.raster.stac_default_collection
         'item_id': {'type': 'str', 'default': None},
+        'collection_must_exist': {'type': 'bool', 'default': False},  # Fail if collection doesn't exist (12 JAN 2026)
 
         # Platform passthrough (DDH integration)
         'dataset_id': {'type': 'str', 'default': None},

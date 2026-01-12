@@ -325,6 +325,11 @@ class SubmitRasterInterface(BaseInterface):
             if input_crs:
                 processing_options['crs'] = input_crs
 
+            # STAC collection ID
+            collection_id = get_param('collection_id')
+            if collection_id:
+                processing_options['collection_id'] = collection_id
+
             if processing_options:
                 platform_payload['processing_options'] = processing_options
 
@@ -501,26 +506,23 @@ class SubmitRasterInterface(BaseInterface):
                     <div class="controls-grid">
                         <div class="controls-row">
                             <div class="control-group">
-                                <label for="zone-select">Zone:</label>
-                                <select id="zone-select" name="zone" class="filter-select"
-                                        hx-get="/api/interface/submit-raster?fragment=containers"
-                                        hx-target="#container-select"
-                                        hx-trigger="change"
-                                        hx-indicator="#container-spinner"
-                                        hx-include="[name='zone']"
-                                        onchange="updateLoadButton()">
-                                    <option value="">Select zone...</option>
-                                    <option value="bronze">🟤 Bronze (raw uploads)</option>
-                                </select>
-                                <span id="container-spinner" class="htmx-indicator spinner-sm"></span>
+                                <label>Zone:</label>
+                                <div class="zone-badge-bronze">BRONZE (Source Data)</div>
+                                <input type="hidden" id="zone-select" name="zone" value="bronze">
                             </div>
 
                             <div class="control-group">
                                 <label for="container-select">Container:</label>
                                 <select id="container-select" name="container" class="filter-select"
+                                        hx-get="/api/interface/submit-raster?fragment=containers&zone=bronze"
+                                        hx-trigger="load"
+                                        hx-target="this"
+                                        hx-swap="innerHTML"
+                                        hx-indicator="#container-spinner"
                                         onchange="updateLoadButton()">
-                                    <option value="">Select zone first</option>
+                                    <option value="">Loading containers...</option>
                                 </select>
+                                <span id="container-spinner" class="htmx-indicator spinner-sm"></span>
                             </div>
                         </div>
 
@@ -574,8 +576,8 @@ class SubmitRasterInterface(BaseInterface):
                         <!-- Initial State -->
                         <div id="initial-state" class="empty-state">
                             <div class="icon">🗺️</div>
-                            <h3>Select a Zone and Container</h3>
-                            <p>Choose a storage zone and container to browse raster files</p>
+                            <h3>Select a Container</h3>
+                            <p>Choose a container from the Bronze zone to browse raster files</p>
                             <p class="supported-formats">Supported: .tif, .tiff, .img, .jp2, .ecw, .vrt, .nc</p>
                         </div>
                     </div>
@@ -712,6 +714,21 @@ class SubmitRasterInterface(BaseInterface):
                             </div>
                         </div>
 
+                        <!-- STAC Configuration Section -->
+                        <div class="stac-section">
+                            <div class="form-group-header">STAC Configuration (Optional)</div>
+                            <div class="stac-fields">
+                                <div class="form-group">
+                                    <label for="collection_id">Collection ID</label>
+                                    <input type="text" id="collection_id" name="collection_id"
+                                           placeholder="e.g., aerial-imagery"
+                                           pattern="[a-z0-9][a-z0-9-]*[a-z0-9]"
+                                           title="Lowercase letters, numbers, hyphens. No leading/trailing hyphens.">
+                                    <span class="field-hint">STAC collection to add item to (defaults to 'system-rasters' if blank)</span>
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- Platform API cURL Section (Prominent) -->
                         <div class="curl-section-prominent" id="curl-section">
                             <div class="curl-section-header">
@@ -827,6 +844,17 @@ class SubmitRasterInterface(BaseInterface):
             color: var(--ds-gray);
             text-transform: uppercase;
             letter-spacing: 0.5px;
+        }
+
+        /* Zone badge - fixed to Bronze */
+        .zone-badge-bronze {
+            background: #cd7f32;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 3px;
+            font-weight: 600;
+            text-align: center;
+            font-size: 13px;
         }
 
         .filter-input {
@@ -1257,6 +1285,26 @@ class SubmitRasterInterface(BaseInterface):
             padding: 16px;
         }
 
+        /* STAC Configuration Section */
+        .stac-section {
+            border: 1px solid var(--ds-gray-light);
+            border-radius: 6px;
+            margin-bottom: 16px;
+            background: white;
+        }
+
+        .stac-section .form-group-header {
+            padding: 12px 16px;
+            background: var(--ds-bg);
+            border-bottom: 1px solid var(--ds-gray-light);
+            border-radius: 6px 6px 0 0;
+            margin-bottom: 0;
+        }
+
+        .stac-fields {
+            padding: 16px;
+        }
+
         .processing-fields .form-group:last-child {
             margin-bottom: 0;
         }
@@ -1364,11 +1412,10 @@ class SubmitRasterInterface(BaseInterface):
         return """
         // Update load button state based on selections
         function updateLoadButton() {
-            const zone = document.getElementById('zone-select').value;
             const container = document.getElementById('container-select').value;
             const loadBtn = document.getElementById('load-btn');
 
-            loadBtn.disabled = !zone || !container;
+            loadBtn.disabled = !container;
         }
 
         // Show files table and hide initial state
@@ -1488,6 +1535,9 @@ class SubmitRasterInterface(BaseInterface):
             const accessLevel = document.getElementById('access_level').value;
             const tags = document.getElementById('tags').value;
 
+            // STAC configuration
+            const collectionId = document.getElementById('collection_id').value;
+
             if (!datasetId || !resourceId || !versionId) {
                 return 'Fill in DDH identifiers (dataset_id, resource_id, version_id) to see the Platform API cURL command';
             }
@@ -1520,6 +1570,7 @@ class SubmitRasterInterface(BaseInterface):
             if (outputTier && outputTier !== 'analysis') processingOptions.output_tier = outputTier;
             if (inputCrs) processingOptions.crs = inputCrs;
             if (rasterType && rasterType !== 'auto') processingOptions.raster_type = rasterType;
+            if (collectionId) processingOptions.collection_id = collectionId;
 
             if (Object.keys(processingOptions).length > 0) {
                 payload.processing_options = processingOptions;
@@ -1557,7 +1608,7 @@ class SubmitRasterInterface(BaseInterface):
         document.addEventListener('DOMContentLoaded', () => {
             const formInputs = ['dataset_id', 'resource_id', 'version_id', 'raster_type',
                                 'output_tier', 'input_crs', 'service_name', 'description',
-                                'access_level', 'tags'];
+                                'access_level', 'tags', 'collection_id'];
             formInputs.forEach(id => {
                 const el = document.getElementById(id);
                 if (el) {

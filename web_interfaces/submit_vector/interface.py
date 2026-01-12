@@ -489,26 +489,23 @@ class SubmitVectorInterface(BaseInterface):
                     <div class="controls-grid">
                         <div class="controls-row">
                             <div class="control-group">
-                                <label for="zone-select">Zone:</label>
-                                <select id="zone-select" name="zone" class="filter-select"
-                                        hx-get="/api/interface/submit-vector?fragment=containers"
-                                        hx-target="#container-select"
-                                        hx-trigger="change"
-                                        hx-indicator="#container-spinner"
-                                        hx-include="[name='zone']"
-                                        onchange="updateLoadButton()">
-                                    <option value="">Select zone...</option>
-                                    <option value="bronze">🟤 Bronze (raw uploads)</option>
-                                </select>
-                                <span id="container-spinner" class="htmx-indicator spinner-sm"></span>
+                                <label>Zone:</label>
+                                <div class="zone-badge-bronze">BRONZE (Source Data)</div>
+                                <input type="hidden" id="zone-select" name="zone" value="bronze">
                             </div>
 
                             <div class="control-group">
                                 <label for="container-select">Container:</label>
                                 <select id="container-select" name="container" class="filter-select"
+                                        hx-get="/api/interface/submit-vector?fragment=containers&zone=bronze"
+                                        hx-trigger="load"
+                                        hx-target="this"
+                                        hx-swap="innerHTML"
+                                        hx-indicator="#container-spinner"
                                         onchange="updateLoadButton()">
-                                    <option value="">Select zone first</option>
+                                    <option value="">Loading containers...</option>
                                 </select>
+                                <span id="container-spinner" class="htmx-indicator spinner-sm"></span>
                             </div>
                         </div>
 
@@ -562,8 +559,8 @@ class SubmitVectorInterface(BaseInterface):
                         <!-- Initial State -->
                         <div id="initial-state" class="empty-state">
                             <div class="icon">📁</div>
-                            <h3>Select a Zone and Container</h3>
-                            <p>Choose a storage zone and container to browse vector files</p>
+                            <h3>Select a Container</h3>
+                            <p>Choose a container from the Bronze zone to browse vector files</p>
                             <p class="supported-formats">Supported: .csv, .geojson, .json, .gpkg, .kml, .kmz, .shp, .zip</p>
                         </div>
                     </div>
@@ -815,6 +812,17 @@ class SubmitVectorInterface(BaseInterface):
             color: var(--ds-gray);
             text-transform: uppercase;
             letter-spacing: 0.5px;
+        }
+
+        /* Zone badge - fixed to Bronze */
+        .zone-badge-bronze {
+            background: #cd7f32;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 3px;
+            font-weight: 600;
+            text-align: center;
+            font-size: 13px;
         }
 
         .filter-input {
@@ -1366,11 +1374,10 @@ class SubmitVectorInterface(BaseInterface):
         return """
         // Update load button state based on selections
         function updateLoadButton() {
-            const zone = document.getElementById('zone-select').value;
             const container = document.getElementById('container-select').value;
             const loadBtn = document.getElementById('load-btn');
 
-            loadBtn.disabled = !zone || !container;
+            loadBtn.disabled = !container;
         }
 
         // Show files table and hide initial state

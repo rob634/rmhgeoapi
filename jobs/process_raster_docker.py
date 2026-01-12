@@ -87,6 +87,7 @@ class ProcessRasterDockerJob(JobBaseMixin, JobBase):
         # STAC
         'collection_id': {'type': 'str', 'default': None},
         'item_id': {'type': 'str', 'default': None},
+        'collection_must_exist': {'type': 'bool', 'default': False},  # Fail if collection doesn't exist (12 JAN 2026)
 
         # Platform passthrough (DDH integration)
         'dataset_id': {'type': 'str', 'default': None},

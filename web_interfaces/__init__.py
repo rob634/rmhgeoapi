@@ -431,6 +431,12 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Could not import H3 Map interface: {e}")
 
+try:
+    from .integration import interface as _integration
+    logger.info("✅ Imported Integration interface module")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import Integration interface: {e}")
+
 
 # Public API
 __all__ = [

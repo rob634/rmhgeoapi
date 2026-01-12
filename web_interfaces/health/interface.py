@@ -975,15 +975,13 @@ class HealthInterface(BaseInterface):
             font-weight: 600;
         }
 
-        /* Docker Worker Resources - Standalone white box (like environment-info) */
+        /* Docker Worker Resources - Follows identity-section pattern */
         .docker-worker-section {
             background: white;
             border: 1px solid #e9ecef;
             border-radius: 3px;
             padding: 20px;
             margin-bottom: 20px;
-            margin-top: 0;
-            border-top: none;
         }
 
         .docker-worker-section h3 {
@@ -991,7 +989,53 @@ class HealthInterface(BaseInterface):
             font-size: 16px;
             font-weight: 600;
             margin-bottom: 15px;
-            margin-top: 0;
+        }
+
+        .docker-worker-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+        }
+
+        .docker-worker-card {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 3px;
+            padding: 12px 15px;
+        }
+
+        .docker-worker-card .card-label {
+            color: #626F86;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+
+        .docker-worker-card .card-value {
+            color: #053657;
+            font-size: 15px;
+            font-weight: 600;
+        }
+
+        .docker-worker-card .card-sub {
+            color: #626F86;
+            font-size: 11px;
+            margin-top: 4px;
+        }
+
+        .docker-worker-card .card-bar-container {
+            height: 4px;
+            background: #e9ecef;
+            border-radius: 2px;
+            margin: 6px 0 4px 0;
+            overflow: hidden;
+        }
+
+        .docker-worker-card .card-bar {
+            height: 100%;
+            border-radius: 2px;
+            transition: width 0.3s ease;
         }
 
         .env-grid {
@@ -1848,71 +1892,47 @@ class HealthInterface(BaseInterface):
                 dockerHtml = `
                     <div class="docker-worker-section">
                         <h3>🐳 Docker Worker Resources</h3>
-                        <div class="hardware-grid">
-                            <!-- Azure Info -->
-                            <div class="hardware-card">
-                                <div class="hardware-icon">${{statusIcon}}</div>
-                                <div class="hardware-details">
-                                    <div class="hardware-label">Azure Site</div>
-                                    <div class="hardware-value">${{hardware.azure_site_name || 'docker-worker'}}</div>
-                                    <div class="hardware-sub">${{hardware.azure_sku || 'Container'}} • v${{version}}</div>
-                                </div>
+                        <div class="docker-worker-grid">
+                            <div class="docker-worker-card">
+                                <div class="card-label">${{statusIcon}} Azure Site</div>
+                                <div class="card-value">${{hardware.azure_site_name || 'docker-worker'}}</div>
+                                <div class="card-sub">${{hardware.azure_sku || 'Container'}} • v${{version}}</div>
                             </div>
 
-                            <!-- CPU Info -->
-                            <div class="hardware-card">
-                                <div class="hardware-icon">⚡</div>
-                                <div class="hardware-details">
-                                    <div class="hardware-label">CPU</div>
-                                    <div class="hardware-value">${{hardware.cpu_count || 'N/A'}} cores</div>
-                                    <div class="hardware-bar-container">
-                                        <div class="hardware-bar" style="width: ${{Math.min(cpuPercent, 100)}}%; background: ${{cpuBarColor}};"></div>
-                                    </div>
-                                    <div class="hardware-sub">${{cpuPercent.toFixed(1)}}% utilized</div>
+                            <div class="docker-worker-card">
+                                <div class="card-label">⚡ CPU</div>
+                                <div class="card-value">${{hardware.cpu_count || 'N/A'}} cores</div>
+                                <div class="card-bar-container">
+                                    <div class="card-bar" style="width: ${{Math.min(cpuPercent, 100)}}%; background: ${{cpuBarColor}};"></div>
                                 </div>
+                                <div class="card-sub">${{cpuPercent.toFixed(1)}}% utilized</div>
                             </div>
 
-                            <!-- RAM Info -->
-                            <div class="hardware-card">
-                                <div class="hardware-icon">💾</div>
-                                <div class="hardware-details">
-                                    <div class="hardware-label">Memory</div>
-                                    <div class="hardware-value">${{hardware.total_ram_gb || 'N/A'}} GB total</div>
-                                    <div class="hardware-bar-container">
-                                        <div class="hardware-bar" style="width: ${{Math.min(ramPercent, 100)}}%; background: ${{ramBarColor}};"></div>
-                                    </div>
-                                    <div class="hardware-sub">${{memory.system_available_mb ? (memory.system_available_mb / 1024).toFixed(1) + ' GB' : 'N/A'}} available (${{(100 - ramPercent).toFixed(1)}}% free)</div>
+                            <div class="docker-worker-card">
+                                <div class="card-label">💾 Memory</div>
+                                <div class="card-value">${{hardware.total_ram_gb || 'N/A'}} GB total</div>
+                                <div class="card-bar-container">
+                                    <div class="card-bar" style="width: ${{Math.min(ramPercent, 100)}}%; background: ${{ramBarColor}};"></div>
                                 </div>
+                                <div class="card-sub">${{memory.system_available_mb ? (memory.system_available_mb / 1024).toFixed(1) + ' GB' : 'N/A'}} available (${{(100 - ramPercent).toFixed(1)}}% free)</div>
                             </div>
 
-                            <!-- Process Info -->
-                            <div class="hardware-card">
-                                <div class="hardware-icon">📊</div>
-                                <div class="hardware-details">
-                                    <div class="hardware-label">Process RSS</div>
-                                    <div class="hardware-value">${{memory.process_rss_mb ? (memory.process_rss_mb >= 1024 ? (memory.process_rss_mb / 1024).toFixed(2) + ' GB' : memory.process_rss_mb.toFixed(0) + ' MB') : 'N/A'}}</div>
-                                    <div class="hardware-sub">Current process memory usage</div>
-                                </div>
+                            <div class="docker-worker-card">
+                                <div class="card-label">📊 Process RSS</div>
+                                <div class="card-value">${{memory.process_rss_mb ? (memory.process_rss_mb >= 1024 ? (memory.process_rss_mb / 1024).toFixed(2) + ' GB' : memory.process_rss_mb.toFixed(0) + ' MB') : 'N/A'}}</div>
+                                <div class="card-sub">Current process memory</div>
                             </div>
 
-                            <!-- Platform Info -->
-                            <div class="hardware-card">
-                                <div class="hardware-icon">🖥️</div>
-                                <div class="hardware-details">
-                                    <div class="hardware-label">Platform</div>
-                                    <div class="hardware-value">${{hardware.platform || 'N/A'}}</div>
-                                    <div class="hardware-sub">Python ${{hardware.python_version || 'N/A'}}</div>
-                                </div>
+                            <div class="docker-worker-card">
+                                <div class="card-label">🖥️ Platform</div>
+                                <div class="card-value">${{hardware.platform || 'N/A'}}</div>
+                                <div class="card-sub">Python ${{hardware.python_version || 'N/A'}}</div>
                             </div>
 
-                            <!-- Queue Worker Status -->
-                            <div class="hardware-card">
-                                <div class="hardware-icon">${{workers.token_refresh?.running ? '🔑' : '⏸️'}}</div>
-                                <div class="hardware-details">
-                                    <div class="hardware-label">Auth Tokens</div>
-                                    <div class="hardware-value" style="color: ${{tokensValid ? '#10B981' : '#DC2626'}}">${{tokensValid ? 'Valid' : 'Issues'}}</div>
-                                    <div class="hardware-sub">PG: ${{pgValid ? '✓' : '✗'}} Storage: ${{storageValid ? '✓' : '✗'}} • ${{workers.token_refresh?.refresh_count || 0}} refreshes</div>
-                                </div>
+                            <div class="docker-worker-card">
+                                <div class="card-label">🔑 Auth Tokens</div>
+                                <div class="card-value" style="color: ${{tokensValid ? '#10B981' : '#DC2626'}}">${{tokensValid ? 'Valid' : 'Issues'}}</div>
+                                <div class="card-sub">PG: ${{pgValid ? '✓' : '✗'}} Storage: ${{storageValid ? '✓' : '✗'}}</div>
                             </div>
                         </div>
                     </div>
@@ -1922,25 +1942,17 @@ class HealthInterface(BaseInterface):
                 dockerHtml = `
                     <div class="docker-worker-section">
                         <h3>🐳 Docker Worker Resources</h3>
-                        <div class="hardware-grid">
-                            <!-- Status -->
-                            <div class="hardware-card">
-                                <div class="hardware-icon">${{statusIcon}}</div>
-                                <div class="hardware-details">
-                                    <div class="hardware-label">Status</div>
-                                    <div class="hardware-value" style="color: ${{statusColor}}; text-transform: capitalize;">${{status}}</div>
-                                    <div class="hardware-sub">${{displayUrl}}</div>
-                                </div>
+                        <div class="docker-worker-grid">
+                            <div class="docker-worker-card">
+                                <div class="card-label">${{statusIcon}} Status</div>
+                                <div class="card-value" style="color: ${{statusColor}}; text-transform: capitalize;">${{status}}</div>
+                                <div class="card-sub">${{displayUrl}}</div>
                             </div>
 
-                            <!-- Error Info -->
-                            <div class="hardware-card" style="grid-column: span 5;">
-                                <div class="hardware-icon">⚠️</div>
-                                <div class="hardware-details">
-                                    <div class="hardware-label">Error</div>
-                                    <div class="hardware-value" style="color: #DC2626;">${{dockerHealth.error || 'Unable to connect to Docker worker'}}</div>
-                                    <div class="hardware-sub">Check Docker worker deployment and network connectivity</div>
-                                </div>
+                            <div class="docker-worker-card" style="grid-column: span 5;">
+                                <div class="card-label">⚠️ Error</div>
+                                <div class="card-value" style="color: #DC2626;">${{dockerHealth.error || 'Unable to connect to Docker worker'}}</div>
+                                <div class="card-sub">Check Docker worker deployment and network connectivity</div>
                             </div>
                         </div>
                     </div>

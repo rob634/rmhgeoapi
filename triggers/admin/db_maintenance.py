@@ -38,6 +38,10 @@ from config import get_config
 from config.defaults import STACDefaults, AzureDefaults
 from util_logger import LoggerFactory, ComponentType
 
+# Import extracted operation modules (12 JAN 2026 - F7.16 code maintenance)
+from .data_cleanup import DataCleanupOperations
+from .geo_table_operations import GeoTableOperations
+
 logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "AdminDbMaintenance")
 
 
@@ -117,6 +121,12 @@ class AdminDbMaintenanceTrigger:
             return
 
         logger.info("🔧 Initializing AdminDbMaintenanceTrigger")
+
+        # Initialize operation modules (12 JAN 2026 - F7.16 code maintenance)
+        # These are lazily initialized when first accessed via db_repo property
+        self._data_cleanup_ops = None
+        self._geo_table_ops = None
+
         self._initialized = True
         logger.info("✅ AdminDbMaintenanceTrigger initialized")
 
@@ -133,6 +143,20 @@ class AdminDbMaintenanceTrigger:
             repos = RepositoryFactory.create_repositories()
             self._db_repo = repos['job_repo']
         return self._db_repo
+
+    @property
+    def data_cleanup_ops(self) -> DataCleanupOperations:
+        """Lazy initialization of data cleanup operations (12 JAN 2026)."""
+        if self._data_cleanup_ops is None:
+            self._data_cleanup_ops = DataCleanupOperations(self.db_repo)
+        return self._data_cleanup_ops
+
+    @property
+    def geo_table_ops(self) -> GeoTableOperations:
+        """Lazy initialization of geo table operations (12 JAN 2026)."""
+        if self._geo_table_ops is None:
+            self._geo_table_ops = GeoTableOperations(self.db_repo)
+        return self._geo_table_ops
 
     def handle_maintenance(self, req: func.HttpRequest) -> func.HttpResponse:
         """
@@ -1844,830 +1868,55 @@ class AdminDbMaintenanceTrigger:
     def _cleanup_old_records(self, req: func.HttpRequest) -> func.HttpResponse:
         """
         Clean up old completed jobs and tasks.
-
-        POST /api/dbadmin/maintenance/cleanup?confirm=yes&days=30
-
-        Query Parameters:
-            confirm: Must be "yes" (required)
-            days: Delete records older than N days (default: 30)
-
-        Returns:
-            {
-                "status": "success",
-                "deleted": {
-                    "jobs": 150,
-                    "tasks": 3500
-                },
-                "cutoff_date": "2025-10-04T...",
-                "timestamp": "2025-11-03T..."
-            }
+        Delegates to DataCleanupOperations (12 JAN 2026 - F7.16).
         """
-        confirm = req.params.get('confirm')
-        days = int(req.params.get('days', 30))
-
-        if confirm != 'yes':
-            return func.HttpResponse(
-                body=json.dumps({
-                    'error': 'Cleanup requires explicit confirmation',
-                    'usage': f'POST /api/dbadmin/maintenance/cleanup?confirm=yes&days={days}',
-                    'warning': f'This will DELETE all completed jobs older than {days} days'
-                }),
-                status_code=400,
-                mimetype='application/json'
-            )
-
-        logger.info(f"🧹 Cleaning up records older than {days} days")
-
-        try:
-            if not isinstance(self.db_repo, PostgreSQLRepository):
-                raise ValueError("Database repository is not PostgreSQL")
-
-            cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
-
-            with self.db_repo._get_connection() as conn:
-                with conn.cursor() as cursor:
-                    # Delete old completed jobs (SQL injection safe - 16 NOV 2025)
-                    delete_jobs_query = sql.SQL("""
-                        DELETE FROM {schema}.jobs
-                        WHERE status = 'completed'
-                        AND updated_at < %s
-                        RETURNING job_id;
-                    """).format(schema=sql.Identifier(self.db_repo.schema_name))
-
-                    cursor.execute(delete_jobs_query, (cutoff_date,))
-                    deleted_jobs = cursor.rowcount
-
-                    # Delete orphaned tasks (tasks whose jobs were deleted)
-                    delete_orphaned_query = sql.SQL("""
-                        DELETE FROM {schema}.tasks
-                        WHERE parent_job_id NOT IN (
-                            SELECT job_id FROM {schema}.jobs
-                        )
-                        RETURNING task_id;
-                    """).format(schema=sql.Identifier(self.db_repo.schema_name))
-
-                    cursor.execute(delete_orphaned_query)
-                    deleted_tasks = cursor.rowcount
-
-                    # Also delete old completed tasks for existing jobs
-                    delete_old_tasks_query = sql.SQL("""
-                        DELETE FROM {schema}.tasks t
-                        WHERE t.status = 'completed'
-                        AND t.updated_at < %s
-                        RETURNING task_id;
-                    """).format(schema=sql.Identifier(self.db_repo.schema_name))
-
-                    cursor.execute(delete_old_tasks_query, (cutoff_date,))
-                    deleted_tasks += cursor.rowcount
-
-                    conn.commit()
-
-            logger.info(f"✅ Cleanup: {deleted_jobs} jobs, {deleted_tasks} tasks deleted")
-
-            return func.HttpResponse(
-                body=json.dumps({
-                    'status': 'success',
-                    'deleted': {
-                        'jobs': deleted_jobs,
-                        'tasks': deleted_tasks
-                    },
-                    'cutoff_date': cutoff_date.isoformat(),
-                    'days': days,
-                    'timestamp': datetime.now(timezone.utc).isoformat()
-                }, indent=2),
-                status_code=200,
-                mimetype='application/json'
-            )
-
-        except Exception as e:
-            logger.error(f"❌ Error during cleanup: {e}")
-            logger.error(traceback.format_exc())
-            return func.HttpResponse(
-                body=json.dumps({
-                    'error': str(e),
-                    'timestamp': datetime.now(timezone.utc).isoformat()
-                }),
-                status_code=500,
-                mimetype='application/json'
-            )
+        return self.data_cleanup_ops.cleanup_old_records(req)
 
     def _check_pgstac_prerequisites(self, req: func.HttpRequest) -> func.HttpResponse:
         """
-        Check if DBA prerequisites for pypgstac are in place (5 DEC 2025).
-
-        GET /api/dbadmin/maintenance/pgstac/check-prerequisites
-        GET /api/dbadmin/maintenance/pgstac/check-prerequisites?identity=migeoetldbadminqa
-
-        In corporate/QA environments, a DBA must:
-        1. Create pgstac roles (pgstac_admin, pgstac_ingest, pgstac_read)
-        2. Grant those roles to the managed identity
-
-        This endpoint verifies these prerequisites BEFORE running pypgstac migrate.
-
-        Query Parameters:
-            identity: Optional managed identity name to check (defaults to config value)
-
-        Returns:
-            {
-                "ready": true/false,
-                "roles_exist": {"pgstac_admin": true, ...},
-                "roles_granted": {"pgstac_admin": true, ...},
-                "identity_name": "rmhpgflexadmin",
-                "missing_roles": [],
-                "missing_grants": [],
-                "dba_sql": "-- SQL for DBA to run if not ready"
-            }
+        Check if DBA prerequisites for pypgstac are in place.
+        Delegates to DataCleanupOperations (12 JAN 2026 - F7.16).
         """
-        logger.info("🔍 Checking pgSTAC DBA prerequisites...")
-
-        try:
-            # Get optional identity parameter
-            identity_name = req.params.get('identity')
-
-            from infrastructure.pgstac_bootstrap import PgStacBootstrap
-            bootstrap = PgStacBootstrap()
-
-            # Run prerequisite check
-            result = bootstrap.check_dba_prerequisites(identity_name=identity_name)
-
-            result["timestamp"] = datetime.now(timezone.utc).isoformat()
-
-            status_code = 200 if result.get('ready') else 200  # Always 200, ready status in body
-
-            logger.info(f"✅ DBA prerequisites check: ready={result.get('ready')}")
-
-            return func.HttpResponse(
-                body=json.dumps(result, indent=2),
-                status_code=status_code,
-                mimetype='application/json'
-            )
-
-        except Exception as e:
-            logger.error(f"❌ Error checking DBA prerequisites: {e}")
-            logger.error(traceback.format_exc())
-            return func.HttpResponse(
-                body=json.dumps({
-                    'error': str(e),
-                    'error_type': type(e).__name__,
-                    'timestamp': datetime.now(timezone.utc).isoformat()
-                }),
-                status_code=500,
-                mimetype='application/json'
-            )
+        return self.data_cleanup_ops.check_pgstac_prerequisites(req)
 
     # =========================================================================
-    # GEO SCHEMA TABLE MANAGEMENT (10 DEC 2025)
-    # =========================================================================
-    # Methods for managing vector tables in the geo schema.
-    # Supports both tracked tables (with metadata) and orphaned tables.
+    # GEO SCHEMA TABLE MANAGEMENT
+    # Delegates to GeoTableOperations (12 JAN 2026 - F7.16 code maintenance)
     # =========================================================================
 
     def _unpublish_geo_table(self, req: func.HttpRequest) -> func.HttpResponse:
-        """
-        Cascade delete a vector table from geo schema.
-
-        POST /api/dbadmin/geo/unpublish?table_name={name}&confirm=yes
-
-        Handles both tracked tables (with metadata) and orphaned tables:
-        - Tracked: Delete STAC item → Delete metadata → Drop table
-        - Orphaned: Just drop the table (warnings logged)
-
-        Query Parameters:
-            table_name: Required. Table name (without schema prefix)
-            confirm: Required. Must be "yes" to execute
-
-        Returns:
-            {
-                "success": true,
-                "table_name": "world_countries",
-                "deleted": {
-                    "stac_item": "postgis-geo-world_countries",
-                    "metadata_row": true,
-                    "geo_table": true
-                },
-                "warnings": [...],
-                "was_orphaned": false
-            }
-        """
-        table_name = req.params.get('table_name')
-        confirm = req.params.get('confirm')
-
-        # Validate parameters
-        if not table_name:
-            return func.HttpResponse(
-                body=json.dumps({
-                    "error": "table_name parameter required",
-                    "usage": "POST /api/dbadmin/geo/unpublish?table_name={name}&confirm=yes"
-                }),
-                status_code=400,
-                mimetype='application/json'
-            )
-
-        if confirm != 'yes':
-            return func.HttpResponse(
-                body=json.dumps({
-                    "error": "Confirmation required",
-                    "message": "Add ?confirm=yes to execute this destructive operation",
-                    "table_name": table_name,
-                    "warning": "⚠️ This will permanently delete the table and associated metadata"
-                }),
-                status_code=400,
-                mimetype='application/json'
-            )
-
-        # Curated table protection (15 DEC 2025)
-        # Tables with curated_ prefix are system-managed and cannot be unpublished
-        # via this admin endpoint. Use curated dataset management API instead.
-        force_curated = req.params.get('force') == 'curated'
-        if table_name.startswith('curated_') and not force_curated:
-            logger.warning(
-                f"Attempted to unpublish protected curated table: {table_name}. "
-                f"Use force=curated or curated dataset management API."
-            )
-            return func.HttpResponse(
-                body=json.dumps({
-                    "error": f"Cannot unpublish curated table '{table_name}'",
-                    "message": "Curated tables are system-managed and protected. "
-                               "Use the curated dataset management API instead.",
-                    "table_name": table_name,
-                    "is_curated": True,
-                    "bypass_hint": "Add &force=curated if you have authorization to drop curated tables"
-                }),
-                status_code=403,
-                mimetype='application/json'
-            )
-
-        logger.info(f"🗑️ Unpublishing geo table: {table_name}")
-
-        result = {
-            "success": False,
-            "table_name": table_name,
-            "deleted": {
-                "stac_item": None,
-                "metadata_row": False,
-                "geo_table": False
-            },
-            "warnings": [],
-            "was_orphaned": False
-        }
-
-        try:
-            repo = PostgreSQLRepository()
-
-            with repo._get_connection() as conn:
-                with conn.cursor() as cur:
-                    # Step 0: Verify table exists in geo schema
-                    cur.execute("""
-                        SELECT EXISTS (
-                            SELECT 1 FROM information_schema.tables
-                            WHERE table_schema = 'geo' AND table_name = %s
-                        ) as table_exists
-                    """, (table_name,))
-                    row = cur.fetchone()
-                    exists = row['table_exists'] if row else False
-
-                    if not exists:
-                        result["error"] = f"Table '{table_name}' does not exist in geo schema"
-                        return func.HttpResponse(
-                            body=json.dumps(result),
-                            status_code=404,
-                            mimetype='application/json'
-                        )
-
-                    # Step 1: Look up STAC item ID from metadata (if exists)
-                    stac_item_id = None
-                    stac_collection_id = None
-
-                    # Check if geo.table_metadata exists first
-                    cur.execute("""
-                        SELECT EXISTS (
-                            SELECT 1 FROM information_schema.tables
-                            WHERE table_schema = 'geo' AND table_name = 'table_metadata'
-                        ) as metadata_table_exists
-                    """)
-                    metadata_table_exists = cur.fetchone()['metadata_table_exists']
-
-                    if metadata_table_exists:
-                        cur.execute("""
-                            SELECT stac_item_id, stac_collection_id
-                            FROM geo.table_metadata
-                            WHERE table_name = %s
-                        """, (table_name,))
-                        metadata_row = cur.fetchone()
-
-                        if metadata_row:
-                            stac_item_id = metadata_row.get('stac_item_id')
-                            stac_collection_id = metadata_row.get('stac_collection_id')
-                            logger.info(f"Found metadata for {table_name}: STAC item={stac_item_id}")
-                        else:
-                            result["was_orphaned"] = True
-                            result["warnings"].append(
-                                "No metadata found - table was orphaned (created outside ETL or metadata wiped)"
-                            )
-                    else:
-                        result["was_orphaned"] = True
-                        result["warnings"].append(
-                            "geo.table_metadata table does not exist - cannot lookup STAC linkage"
-                        )
-
-                    # Step 2: Delete STAC item (if we have an ID)
-                    # Use SAVEPOINT to isolate STAC deletion failures (pgstac triggers can fail
-                    # if partition tables are missing after schema rebuild)
-                    if stac_item_id:
-                        try:
-                            # Check if pgstac.items exists
-                            cur.execute("""
-                                SELECT EXISTS (
-                                    SELECT 1 FROM information_schema.tables
-                                    WHERE table_schema = 'pgstac' AND table_name = 'items'
-                                ) as pgstac_exists
-                            """)
-                            pgstac_exists = cur.fetchone()['pgstac_exists']
-
-                            if pgstac_exists:
-                                # Use savepoint to isolate potential trigger failures
-                                cur.execute("SAVEPOINT stac_delete")
-                                try:
-                                    cur.execute("""
-                                        DELETE FROM pgstac.items
-                                        WHERE id = %s
-                                        RETURNING id
-                                    """, (stac_item_id,))
-                                    deleted_stac = cur.fetchone()
-                                    if deleted_stac:
-                                        result["deleted"]["stac_item"] = stac_item_id
-                                        logger.info(f"✅ Deleted STAC item: {stac_item_id}")
-                                        cur.execute("RELEASE SAVEPOINT stac_delete")
-                                    else:
-                                        result["warnings"].append(
-                                            f"STAC item '{stac_item_id}' not found in pgstac.items (already deleted)"
-                                        )
-                                        cur.execute("RELEASE SAVEPOINT stac_delete")
-                                except Exception as stac_error:
-                                    # Rollback just the STAC deletion, continue with metadata/table
-                                    cur.execute("ROLLBACK TO SAVEPOINT stac_delete")
-                                    result["warnings"].append(
-                                        f"STAC item deletion failed (pgstac trigger error): {stac_error}"
-                                    )
-                                    logger.warning(f"STAC item deletion failed, continuing: {stac_error}")
-                            else:
-                                result["warnings"].append(
-                                    "pgstac.items table does not exist - STAC deletion skipped"
-                                )
-                        except Exception as e:
-                            result["warnings"].append(f"Failed to delete STAC item: {e}")
-                            logger.warning(f"STAC item deletion failed: {e}")
-                    elif not result["was_orphaned"]:
-                        result["warnings"].append(
-                            "No STAC item ID in metadata (STAC cataloging may have been skipped or degraded mode)"
-                        )
-
-                    # Step 3: Delete metadata row (if table exists)
-                    if metadata_table_exists:
-                        cur.execute("""
-                            DELETE FROM geo.table_metadata
-                            WHERE table_name = %s
-                            RETURNING table_name
-                        """, (table_name,))
-                        deleted_metadata = cur.fetchone()
-                        result["deleted"]["metadata_row"] = deleted_metadata is not None
-                        if deleted_metadata:
-                            logger.info(f"✅ Deleted metadata row for {table_name}")
-
-                    # Step 4: DROP TABLE CASCADE
-                    cur.execute(
-                        sql.SQL("DROP TABLE IF EXISTS {schema}.{table} CASCADE").format(
-                            schema=sql.Identifier("geo"),
-                            table=sql.Identifier(table_name)
-                        )
-                    )
-                    result["deleted"]["geo_table"] = True
-                    logger.info(f"✅ Dropped table geo.{table_name}")
-
-                    conn.commit()
-
-            result["success"] = True
-            logger.info(f"🎉 Successfully unpublished geo.{table_name}")
-
-            return func.HttpResponse(
-                body=json.dumps(result, default=str),
-                status_code=200,
-                mimetype='application/json'
-            )
-
-        except Exception as e:
-            logger.error(f"❌ Error unpublishing geo.{table_name}: {e}")
-            logger.error(traceback.format_exc())
-            result["error"] = str(e)
-            result["error_type"] = type(e).__name__
-            return func.HttpResponse(
-                body=json.dumps(result, default=str),
-                status_code=500,
-                mimetype='application/json'
-            )
+        """Delegates to GeoTableOperations.unpublish_geo_table."""
+        return self.geo_table_ops.unpublish_geo_table(req)
 
     def _list_geo_tables(self, req: func.HttpRequest) -> func.HttpResponse:
-        """
-        List all tables in the geo schema with metadata status.
-
-        GET /api/dbadmin/geo/tables
-
-        Returns tables with their tracking status (has metadata, has STAC item).
-        Useful for discovering orphaned tables after a full-rebuild.
-
-        Returns:
-            {
-                "tables": [
-                    {
-                        "table_name": "world_countries",
-                        "has_metadata": true,
-                        "has_stac_item": true,
-                        "feature_count": 250,
-                        "title": "World Countries",
-                        "etl_job_id": "abc123...",
-                        "created_at": "2025-12-09T10:00:00Z"
-                    },
-                    {
-                        "table_name": "orphaned_test",
-                        "has_metadata": false,
-                        "has_stac_item": false,
-                        "feature_count": null,
-                        "title": null,
-                        "etl_job_id": null,
-                        "created_at": null
-                    }
-                ],
-                "summary": {
-                    "total": 2,
-                    "tracked": 1,
-                    "orphaned": 1
-                }
-            }
-        """
-        logger.info("📋 Listing geo schema tables...")
-
-        try:
-            repo = PostgreSQLRepository()
-            tables = []
-
-            with repo._get_connection() as conn:
-                with conn.cursor() as cur:
-                    # Get all tables in geo schema (excluding system tables)
-                    cur.execute("""
-                        SELECT table_name
-                        FROM information_schema.tables
-                        WHERE table_schema = 'geo'
-                        AND table_type = 'BASE TABLE'
-                        AND table_name != 'table_metadata'
-                        ORDER BY table_name
-                    """)
-                    geo_tables = [row['table_name'] for row in cur.fetchall()]
-
-                    # Check if geo.table_metadata exists
-                    cur.execute("""
-                        SELECT EXISTS (
-                            SELECT 1 FROM information_schema.tables
-                            WHERE table_schema = 'geo' AND table_name = 'table_metadata'
-                        ) as metadata_table_exists
-                    """)
-                    metadata_table_exists = cur.fetchone()['metadata_table_exists']
-
-                    # Check if pgstac.items exists
-                    cur.execute("""
-                        SELECT EXISTS (
-                            SELECT 1 FROM information_schema.tables
-                            WHERE table_schema = 'pgstac' AND table_name = 'items'
-                        ) as pgstac_exists
-                    """)
-                    pgstac_exists = cur.fetchone()['pgstac_exists']
-
-                    # Build metadata lookup dict if table exists
-                    metadata_lookup = {}
-                    if metadata_table_exists:
-                        cur.execute("""
-                            SELECT
-                                table_name,
-                                title,
-                                feature_count,
-                                etl_job_id,
-                                stac_item_id,
-                                created_at
-                            FROM geo.table_metadata
-                        """)
-                        for row in cur.fetchall():
-                            metadata_lookup[row['table_name']] = {
-                                'title': row.get('title'),
-                                'feature_count': row.get('feature_count'),
-                                'etl_job_id': row.get('etl_job_id'),
-                                'stac_item_id': row.get('stac_item_id'),
-                                'created_at': row['created_at'].isoformat() if row.get('created_at') else None
-                            }
-
-                    # Build STAC item lookup if table exists
-                    stac_item_ids = set()
-                    if pgstac_exists:
-                        cur.execute("SELECT id FROM pgstac.items")
-                        stac_item_ids = {row['id'] for row in cur.fetchall()}
-
-                    # Build table list with status
-                    tracked_count = 0
-                    orphaned_count = 0
-
-                    for table_name in geo_tables:
-                        metadata = metadata_lookup.get(table_name)
-                        has_metadata = metadata is not None
-                        stac_item_id = metadata.get('stac_item_id') if metadata else None
-                        has_stac_item = stac_item_id in stac_item_ids if stac_item_id else False
-
-                        table_info = {
-                            "table_name": table_name,
-                            "has_metadata": has_metadata,
-                            "has_stac_item": has_stac_item,
-                            "feature_count": metadata.get('feature_count') if metadata else None,
-                            "title": metadata.get('title') if metadata else None,
-                            "etl_job_id": metadata.get('etl_job_id')[:8] + "..." if metadata and metadata.get('etl_job_id') else None,
-                            "created_at": metadata.get('created_at') if metadata else None
-                        }
-                        tables.append(table_info)
-
-                        if has_metadata:
-                            tracked_count += 1
-                        else:
-                            orphaned_count += 1
-
-            result = {
-                "tables": tables,
-                "summary": {
-                    "total": len(tables),
-                    "tracked": tracked_count,
-                    "orphaned": orphaned_count
-                },
-                "schema_status": {
-                    "geo_table_metadata_exists": metadata_table_exists,
-                    "pgstac_items_exists": pgstac_exists
-                }
-            }
-
-            logger.info(f"📋 Found {len(tables)} geo tables ({tracked_count} tracked, {orphaned_count} orphaned)")
-
-            return func.HttpResponse(
-                body=json.dumps(result, default=str, indent=2),
-                status_code=200,
-                mimetype='application/json'
-            )
-
-        except Exception as e:
-            logger.error(f"❌ Error listing geo tables: {e}")
-            logger.error(traceback.format_exc())
-            return func.HttpResponse(
-                body=json.dumps({
-                    'error': str(e),
-                    'error_type': type(e).__name__,
-                    'timestamp': datetime.now(timezone.utc).isoformat()
-                }),
-                status_code=500,
-                mimetype='application/json'
-            )
-
-    # =========================================================================
-    # GEO METADATA QUERY ENDPOINT (10 DEC 2025)
-    # =========================================================================
+        """Delegates to GeoTableOperations.list_geo_tables."""
+        return self.geo_table_ops.list_geo_tables(req)
 
     def _list_metadata(self, req: func.HttpRequest) -> func.HttpResponse:
-        """
-        List all records in geo.table_metadata with filtering options.
-
-        GET /api/dbadmin/geo/metadata
-        GET /api/dbadmin/geo/metadata?job_id=abc123
-        GET /api/dbadmin/geo/metadata?has_stac=true
-        GET /api/dbadmin/geo/metadata?limit=50&offset=0
-
-        Query Parameters:
-            job_id: Filter by ETL job ID
-            has_stac: Filter by STAC linkage (true/false)
-            limit: Max records (default: 100, max: 500)
-            offset: Pagination offset (default: 0)
-
-        Returns:
-            JSON with metadata records, total count, and filters applied
-        """
-        # Parse query parameters
-        job_id = req.params.get('job_id')
-        has_stac = req.params.get('has_stac')
-
-        try:
-            limit = int(req.params.get('limit', 100))
-        except ValueError:
-            limit = 100
-        try:
-            offset = int(req.params.get('offset', 0))
-        except ValueError:
-            offset = 0
-
-        # Clamp limits
-        limit = min(max(1, limit), 500)  # 1-500
-        offset = max(0, offset)
-
-        filters_applied = {}
-
-        try:
-            with self.db_repo._get_connection() as conn:
-                with conn.cursor() as cur:
-                    # Check if table_metadata exists
-                    cur.execute("""
-                        SELECT EXISTS (
-                            SELECT 1 FROM information_schema.tables
-                            WHERE table_schema = 'geo' AND table_name = 'table_metadata'
-                        )
-                    """)
-                    if not cur.fetchone()['exists']:
-                        return func.HttpResponse(
-                            body=json.dumps({
-                                'error': 'geo.table_metadata table does not exist',
-                                'hint': 'Run full-rebuild to create schema'
-                            }),
-                            status_code=404,
-                            mimetype='application/json'
-                        )
-
-                    # Build dynamic WHERE clause
-                    conditions = []
-                    params = []
-
-                    if job_id:
-                        conditions.append("etl_job_id = %s")
-                        params.append(job_id)
-                        filters_applied['job_id'] = job_id
-
-                    if has_stac is not None:
-                        if has_stac.lower() == 'true':
-                            conditions.append("stac_item_id IS NOT NULL")
-                            filters_applied['has_stac'] = True
-                        elif has_stac.lower() == 'false':
-                            conditions.append("stac_item_id IS NULL")
-                            filters_applied['has_stac'] = False
-
-                    where_clause = ""
-                    if conditions:
-                        where_clause = "WHERE " + " AND ".join(conditions)
-
-                    # Get total count
-                    count_sql = f"SELECT COUNT(*) FROM geo.table_metadata {where_clause}"
-                    cur.execute(count_sql, params)
-                    total = cur.fetchone()['count']
-
-                    # Discover which columns actually exist in the table
-                    # This handles schema evolution gracefully
-                    cur.execute("""
-                        SELECT column_name
-                        FROM information_schema.columns
-                        WHERE table_schema = 'geo' AND table_name = 'table_metadata'
-                    """)
-                    existing_columns = set(row['column_name'] for row in cur.fetchall())
-
-                    # Define columns we want, in order (only include if they exist)
-                    desired_columns = [
-                        'table_name', 'schema_name',
-                        'title', 'description', 'attribution', 'license', 'keywords',
-                        'feature_count', 'geometry_type',
-                        'source_file', 'source_format', 'source_crs',
-                        'etl_job_id', 'stac_item_id', 'stac_collection_id',
-                        'bbox_minx', 'bbox_miny', 'bbox_maxx', 'bbox_maxy',
-                        'temporal_start', 'temporal_end', 'temporal_property',
-                        'created_at', 'updated_at'
-                    ]
-
-                    # Only select columns that exist
-                    select_columns = [c for c in desired_columns if c in existing_columns]
-
-                    # Get records
-                    query = f"""
-                        SELECT {', '.join(select_columns)}
-                        FROM geo.table_metadata
-                        {where_clause}
-                        ORDER BY created_at DESC
-                        LIMIT %s OFFSET %s
-                    """
-                    cur.execute(query, params + [limit, offset])
-
-                    # Helper to safely get value from row (handles missing columns)
-                    def safe_get(row_dict, key, default=None):
-                        if key in existing_columns:
-                            return row_dict.get(key, default)
-                        return default
-
-                    metadata = []
-                    for row in cur.fetchall():
-                        item = {
-                            'table_name': row['table_name'],  # Required column
-                            'schema_name': safe_get(row, 'schema_name', 'geo'),
-                            'feature_count': safe_get(row, 'feature_count'),
-                            'geometry_type': safe_get(row, 'geometry_type'),
-                            'source_file': safe_get(row, 'source_file'),
-                            'source_format': safe_get(row, 'source_format'),
-                            'source_crs': safe_get(row, 'source_crs'),
-                            'etl_job_id': safe_get(row, 'etl_job_id'),
-                            'stac_item_id': safe_get(row, 'stac_item_id'),
-                            'stac_collection_id': safe_get(row, 'stac_collection_id'),
-                        }
-
-                        # Timestamps
-                        created_at = safe_get(row, 'created_at')
-                        updated_at = safe_get(row, 'updated_at')
-                        item['created_at'] = created_at.isoformat() if created_at else None
-                        item['updated_at'] = updated_at.isoformat() if updated_at else None
-
-                        # New metadata columns (may not exist in older schemas)
-                        if 'title' in existing_columns:
-                            item['title'] = safe_get(row, 'title')
-                        if 'description' in existing_columns:
-                            item['description'] = safe_get(row, 'description')
-                        if 'attribution' in existing_columns:
-                            item['attribution'] = safe_get(row, 'attribution')
-                        if 'license' in existing_columns:
-                            item['license'] = safe_get(row, 'license')
-                        if 'keywords' in existing_columns:
-                            item['keywords'] = safe_get(row, 'keywords')
-
-                        # Add bbox if present
-                        bbox_cols = ['bbox_minx', 'bbox_miny', 'bbox_maxx', 'bbox_maxy']
-                        if all(c in existing_columns for c in bbox_cols):
-                            bbox_vals = [safe_get(row, c) for c in bbox_cols]
-                            if all(v is not None for v in bbox_vals):
-                                item['bbox'] = bbox_vals
-
-                        # Add temporal extent if columns exist
-                        if 'temporal_start' in existing_columns or 'temporal_end' in existing_columns:
-                            ts = safe_get(row, 'temporal_start')
-                            te = safe_get(row, 'temporal_end')
-                            if ts or te:
-                                item['temporal_extent'] = {
-                                    'start': ts.isoformat() if ts else None,
-                                    'end': te.isoformat() if te else None,
-                                    'property': safe_get(row, 'temporal_property')
-                                }
-
-                        metadata.append(item)
-
-            logger.info(f"📋 Listed {len(metadata)} metadata records (total: {total}, filters: {filters_applied})")
-
-            return func.HttpResponse(
-                body=json.dumps({
-                    'metadata': metadata,
-                    'total': total,
-                    'limit': limit,
-                    'offset': offset,
-                    'filters_applied': filters_applied
-                }, default=str, indent=2),
-                status_code=200,
-                mimetype='application/json'
-            )
-
-        except Exception as e:
-            logger.error(f"❌ Error listing metadata: {e}")
-            logger.error(traceback.format_exc())
-            return func.HttpResponse(
-                body=json.dumps({
-                    'error': str(e),
-                    'error_type': type(e).__name__,
-                    'timestamp': datetime.now(timezone.utc).isoformat()
-                }),
-                status_code=500,
-                mimetype='application/json'
-            )
-
-    # =========================================================================
-    # GEO ORPHAN CHECK ENDPOINT (10 DEC 2025)
-    # =========================================================================
+        """Delegates to GeoTableOperations.list_metadata."""
+        return self.geo_table_ops.list_metadata(req)
 
     def _check_geo_orphans(self, req: func.HttpRequest) -> func.HttpResponse:
-        """
-        Check for orphaned tables and metadata in geo schema.
-
-        GET /api/dbadmin/geo/orphans
-
-        Detects:
-        - Orphaned Tables: Tables in geo schema without metadata records
-        - Orphaned Metadata: Metadata records for non-existent tables
-
-        Detection only - does NOT delete anything.
-
-        Returns:
-            JSON with orphaned tables, orphaned metadata, tracked tables, and summary
-        """
-        from services.janitor_service import geo_orphan_detector
-
-        logger.info("🔍 Running geo orphan detection...")
-
-        result = geo_orphan_detector.run()
-        status_code = 200 if result.get("success") else 500
-
-        return func.HttpResponse(
-            body=json.dumps(result, default=str, indent=2),
-            status_code=status_code,
-            mimetype='application/json'
-        )
+        """Delegates to GeoTableOperations.check_geo_orphans."""
+        return self.geo_table_ops.check_geo_orphans(req)
 
 
 # Create singleton instance
 admin_db_maintenance_trigger = AdminDbMaintenanceTrigger.instance()
+
+
+# ===========================================================================
+# LEGACY CODE REMOVED (12 JAN 2026 - F7.16)
+# ===========================================================================
+# The following methods were extracted to separate modules:
+# - _cleanup_old_records -> data_cleanup.py:DataCleanupOperations
+# - _check_pgstac_prerequisites -> data_cleanup.py:DataCleanupOperations
+# - _unpublish_geo_table -> geo_table_operations.py:GeoTableOperations
+# - _list_geo_tables -> geo_table_operations.py:GeoTableOperations
+# - _list_metadata -> geo_table_operations.py:GeoTableOperations
+# - _check_geo_orphans -> geo_table_operations.py:GeoTableOperations
+#
+# Schema operations (_nuke_schema, _rebuild, _redeploy_schema,
+# _redeploy_pgstac_schema, _full_rebuild) remain in this file for now.
+# Future: Extract to schema_operations.py (~1,400 lines)
+# ===========================================================================

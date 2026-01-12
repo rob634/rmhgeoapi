@@ -981,6 +981,37 @@ POST /api/jobs/submit/rebuild_stac
 
 ## Other Active Work
 
+### F7.16: Code Maintenance - db_maintenance.py Split
+
+**Added**: 12 JAN 2026
+**Completed**: 12 JAN 2026
+**Status**: ✅ PHASE 1 COMPLETE
+**Goal**: Split 2,673-line monolithic file into focused modules
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| S7.16.1 | Create `schema_operations.py` (~1,400 lines) | ⏳ Future |
+| S7.16.2 | Create `data_cleanup.py` (~195 lines) | ✅ |
+| S7.16.3 | Create `geo_table_operations.py` (~578 lines) | ✅ |
+| S7.16.4 | Refactor `db_maintenance.py` to use delegates | ✅ |
+| S7.16.5 | Update imports and verify no regressions | ✅ |
+
+**Results**:
+- `db_maintenance.py`: 2,673 → 1,922 lines (28% reduction)
+- Extracted `data_cleanup.py`: 195 lines (cleanup + prerequisites)
+- Extracted `geo_table_operations.py`: 578 lines (geo table management)
+- Schema operations remain in db_maintenance.py (future extraction)
+
+**Current Structure**:
+```
+triggers/admin/
+├── db_maintenance.py          # Router + schema ops (1,922 lines)
+├── data_cleanup.py            # Record cleanup (195 lines) NEW
+└── geo_table_operations.py    # Geo table mgmt (578 lines) NEW
+```
+
+---
+
 ### E9: Large Data Hosting
 
 | Feature | Description | Status |
@@ -1735,6 +1766,87 @@ APPINSIGHTS_APP_ID=d3af3d37-cfe3-411f-adef-bc540181cbca  # From Azure portal
 - [ ] Run KQL query filtering by app_name
 - [ ] Call `/api/logs/export`, verify blob created with log data
 - [ ] Health endpoint still works after diagnostics refactor
+
+---
+
+### F7.12.F: JSONL Log Dump System (IMPLEMENTED)
+
+**Added**: 11 JAN 2026
+**Implemented**: 11 JAN 2026
+**Goal**: Granular control over JSONL log exports with level-based filtering
+**Status**: ✅ IMPLEMENTED
+
+**Concept**: Separate JSONL exports based on observability mode and log level:
+
+| Mode | What Gets Exported | Blob Path |
+|------|-------------------|-----------|
+| `OBSERVABILITY_MODE=true` | Janitor/timer logs + WARNING+ from everywhere | `applogs/logs/default/` |
+| `OBSERVABILITY_MODE=true` + `VERBOSE_LOG_DUMP=true` | ALL logs including DEBUG | `applogs/logs/verbose/` |
+| Log cleanup timer | Delete old logs based on retention | Daily at 3 AM UTC |
+
+**Environment Variables**:
+```bash
+OBSERVABILITY_MODE=true           # Master switch for observability features
+VERBOSE_LOG_DUMP=true             # When combined with OBSERVABILITY_MODE, dump ALL logs
+JSONL_DEBUG_RETENTION_DAYS=7      # Days to keep verbose/debug logs
+JSONL_WARNING_RETENTION_DAYS=30   # Days to keep warning+ logs
+JSONL_METRICS_RETENTION_DAYS=14   # Days to keep metrics logs
+JSONL_LOG_CONTAINER=applogs       # Blob container name (default: applogs)
+JSONL_FLUSH_INTERVAL=60           # Seconds between flushes (default: 60)
+JSONL_BUFFER_SIZE=100             # Max records before flush (default: 100)
+```
+
+**Stories**:
+
+| Story | Description | Status | Files |
+|-------|-------------|--------|-------|
+| S7.12.F.1 | Define unified observability schema (logger/metrics/diagnostics) | ✅ | Research complete |
+| S7.12.F.2 | Create `JSONLBlobHandler` class extending logging.Handler | ✅ | `infrastructure/jsonl_log_handler.py` |
+| S7.12.F.3 | Add level-based routing (WARNING+ vs ALL based on env vars) | ✅ | `infrastructure/jsonl_log_handler.py` |
+| S7.12.F.4 | Integrate with LoggerFactory for automatic blob export | ✅ | `util_logger.py` |
+| S7.12.F.5 | Implement log cleanup timer logic | ✅ | `triggers/admin/log_cleanup_timer.py` |
+| S7.12.F.6 | Register log cleanup timer in function_app.py | ✅ | `function_app.py` |
+
+**Blob Structure**:
+```
+applogs/
+├── logs/
+│   ├── default/          # WARNING+ always (OBSERVABILITY_MODE=true)
+│   │   └── 2026-01-12/
+│   │       └── instance123/
+│   │           └── 1705012345.jsonl
+│   └── verbose/          # ALL logs (VERBOSE_LOG_DUMP=true)
+│       └── 2026-01-12/
+│           └── instance123/
+│               └── 1705012345.jsonl
+└── service-metrics/      # Existing service latency metrics
+    └── 2026-01-12/
+        └── ...
+```
+
+**Manual Trigger**:
+```bash
+# Trigger log cleanup manually
+curl -X POST "https://.../api/cleanup/run?type=log_cleanup"
+```
+
+**Schema Standardization Research** (11 JAN 2026):
+
+Comparison of current observability tools identified these standardization needs:
+
+| Issue | Current State | Recommendation |
+|-------|--------------|----------------|
+| Environment tag | Only in util_logger | Add to blob_logger, db_health |
+| Correlation ID | LogContext only | Add to MetricRecord, diagnostics |
+| Instance tracking | Inconsistent (16 vs 32 char) | Standardize on 16 char |
+| Status vocabulary | 3 different enums | Unify: success/warning/error/critical |
+| Metrics structure | Flat vs nested | Create standard `metrics` object |
+
+**Key Files**:
+- `infrastructure/jsonl_log_handler.py` - JSONL blob handler (created 11 JAN 2026)
+- `triggers/admin/log_cleanup_timer.py` - Cleanup timer (implemented 11 JAN 2026)
+- `config/observability_config.py` - Updated with retention settings
+- `util_logger.py` - Integrated JSONLBlobHandler into LoggerFactory
 
 ---
 

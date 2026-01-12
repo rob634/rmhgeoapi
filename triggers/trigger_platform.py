@@ -230,8 +230,11 @@ def platform_raster_submit(req: func.HttpRequest) -> func.HttpResponse:
     POST /api/platform/raster
 
     DDH uses this endpoint when submitting a single raster file.
-    Platform routes to process_raster_v2, with automatic fallback to
+    Platform routes to process_raster_v2 by default, with automatic fallback to
     process_large_raster_v2 if file exceeds size threshold.
+
+    Use processing_mode="docker" for large/heavy rasters that require
+    Docker-based processing (longer timeouts, more memory).
 
     Request Body:
     {
@@ -241,8 +244,16 @@ def platform_raster_submit(req: func.HttpRequest) -> func.HttpResponse:
         "container_name": "bronze-rasters",
         "file_name": "aerial-alpha.tif",
         "service_name": "Aerial Imagery Site Alpha",
-        "access_level": "OUO"
+        "access_level": "OUO",
+        "processing_options": {
+            "processing_mode": "docker"  // Optional: "function" (default) or "docker"
+        }
     }
+
+    Processing Modes:
+        - "function" (default): Azure Function processing (process_raster_v2)
+        - "docker": Docker container processing (process_raster_docker)
+          Use for large files, complex projections, or when Function times out
 
     Note: file_name must be a string (single file), not a list.
     """
@@ -1312,12 +1323,19 @@ def _translate_to_coremachine(
                 'target_crs': opts.get('crs')
             }
         else:
-            # Single raster → process_raster_v2 (mixin pattern, 28 NOV 2025)
+            # Single raster → process_raster_v2 or process_raster_docker (12 JAN 2026)
             file_name = request.file_name
             if isinstance(file_name, list):
                 file_name = file_name[0]
 
-            return 'process_raster_v2', {
+            # Check for docker processing mode
+            processing_mode = opts.get('processing_mode', 'function').lower()
+            if processing_mode == 'docker':
+                job_type = 'process_raster_docker'
+            else:
+                job_type = 'process_raster_v2'
+
+            return job_type, {
                 # File location (required)
                 'blob_name': file_name,
                 'container_name': request.container_name,
@@ -1359,14 +1377,16 @@ def _translate_single_raster(
     Translate DDH request to single raster job parameters.
 
     Used by /api/platform/raster endpoint.
-    Always returns process_raster_v2 (fallback to large handled by _create_and_submit_job).
+    Returns process_raster_v2 by default, or process_raster_docker if
+    processing_mode="docker" is specified.
 
     Args:
         request: PlatformRequest from DDH
         cfg: AppConfig instance
 
     Returns:
-        Tuple of ('process_raster_v2', job_parameters)
+        Tuple of (job_type, job_parameters)
+        - job_type: 'process_raster_v2' or 'process_raster_docker'
     """
     platform_cfg = cfg.platform
 
@@ -1395,7 +1415,17 @@ def _translate_single_raster(
     if isinstance(file_name, list):
         file_name = file_name[0]
 
-    return 'process_raster_v2', {
+    # Determine job type based on processing_mode (12 JAN 2026)
+    processing_mode = opts.get('processing_mode', 'function').lower()
+    if processing_mode == 'docker':
+        job_type = 'process_raster_docker'
+        logger.info(f"  Processing mode: docker → {job_type}")
+    else:
+        job_type = 'process_raster_v2'
+        if processing_mode != 'function':
+            logger.warning(f"  Unknown processing_mode '{processing_mode}', defaulting to function")
+
+    return job_type, {
         # File location (required)
         'blob_name': file_name,
         'container_name': request.container_name,
@@ -1488,11 +1518,14 @@ def _translate_raster_collection(
 # JOB CREATION & SUBMISSION
 # ============================================================================
 
-# Size-based job fallback routing (04 DEC 2025)
+# Size-based job fallback routing (04 DEC 2025, updated 12 JAN 2026)
 # When validator fails with size error, automatically try alternate job type
+# process_raster_docker has no fallback - it handles all sizes
 RASTER_JOB_FALLBACKS = {
     'process_raster_v2': 'process_large_raster_v2',
     'process_large_raster_v2': 'process_raster_v2',
+    # Docker job handles all sizes - no automatic fallback needed
+    # 'process_raster_docker': None,
 }
 
 

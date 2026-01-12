@@ -1,6 +1,6 @@
 # Project History
 
-**Last Updated**: 11 JAN 2026
+**Last Updated**: 12 JAN 2026
 **Active Log**: This is the main project history log (Sep 2025 onwards)
 
 **Archives**:
@@ -8,6 +8,129 @@
 - For history prior to September 2025, see **OLDER_HISTORY.md**
 
 This document tracks completed architectural changes and improvements to the Azure Geospatial ETL Pipeline.
+
+---
+
+## 12 JAN 2026: F7.12 Docker Worker Infrastructure ✅
+
+**Status**: ✅ **COMPLETE**
+**Epic**: E7 Pipeline Infrastructure
+**Deployed**: 11 JAN 2026 to `rmhheavyapi` Web App
+**Image**: `rmhazureacr.azurecr.io/rmh-gdal-worker:latest`
+**Version**: 0.7.8
+
+### Achievement
+
+Deployed Docker worker for long-running tasks that exceed Azure Functions 30-minute timeout. Uses same CoreMachine as Function App - only the trigger mechanism differs.
+
+### Stories Completed
+
+| Story | Description |
+|-------|-------------|
+| S7.12.1 | Create `docker_main.py` (queue polling entry point) |
+| S7.12.2 | Create `workers_entrance.py` (FastAPI + health endpoints) |
+| S7.12.3 | Create `Dockerfile`, `requirements-docker.txt`, `docker.env.example` |
+| S7.12.5 | Create `.funcignore` to exclude Docker files from Functions deploy |
+| S7.12.6 | Create `infrastructure/auth/` module for Managed Identity OAuth |
+| S7.12.7 | Verify ACR build succeeds |
+| S7.12.8 | Deploy to rmhheavyapi Web App |
+| S7.12.9 | Configure identities (PostgreSQL: user-assigned, Storage: system-assigned) |
+| S7.12.10 | Verify all health endpoints (`/livez`, `/readyz`, `/health`) |
+
+### Key Files Created
+
+- `docker_main.py` - Queue polling entry point
+- `workers_entrance.py` → `docker_service.py` - FastAPI app with health endpoints
+- `Dockerfile` - OSGeo GDAL ubuntu-full-3.10.1 base
+- `requirements-docker.txt` - Dependencies (minus azure-functions)
+- `infrastructure/auth/` - Token cache, PostgreSQL OAuth, Storage OAuth
+
+### Identity Configuration (All Identity-Based - No Secrets)
+
+| Resource | Identity | Type | RBAC Role |
+|----------|----------|------|-----------|
+| PostgreSQL | `a533cb80-a590-4fad-8e52-1eb1f72659d7` | User-assigned MI | PostgreSQL AAD Auth |
+| Storage | `cea30c4b-8d75-4a39-8b53-adab9a904345` | System-assigned MI | Storage Blob Data Contributor |
+| Service Bus | `cea30c4b-8d75-4a39-8b53-adab9a904345` | System-assigned MI | Data Sender + Data Receiver |
+
+---
+
+## 12 JAN 2026: F7.13 Docker Job Definitions (Phase 1) ✅
+
+**Status**: ✅ **PHASE 1 COMPLETE** (checkpoint infrastructure + BackgroundQueueWorker)
+**Epic**: E7 Pipeline Infrastructure
+
+### Achievement
+
+Created checkpoint/resume infrastructure for Docker tasks and integrated BackgroundQueueWorker into FastAPI service.
+
+### Stories Completed
+
+| Story | Description |
+|-------|-------------|
+| S7.13.1 | Create `jobs/process_raster_docker.py` - single-stage job |
+| S7.13.2 | Create `services/handler_process_raster_complete.py` - consolidated handler |
+| S7.13.3 | Register job and handler in `__init__.py` files |
+| S7.13.4 | Rename `heartbeat` → `last_pulse` throughout codebase |
+| S7.13.5 | Add checkpoint fields to `TaskRecord` model and schema |
+| S7.13.6 | Create `CheckpointManager` class for resume support |
+| S7.13.7 | Update handler to use `CheckpointManager` |
+| S7.13.8 | Add BackgroundQueueWorker to workers_entrance.py |
+| S7.13.9 | Rename `workers_entrance.py` → `docker_service.py` |
+
+### Checkpoint Architecture
+
+Docker tasks are "atomic" from orchestrator's perspective but internally resumable:
+- `checkpoint_phase` - Current phase number (1, 2, 3...)
+- `checkpoint_data` - Phase-specific state (JSONB)
+- `checkpoint_updated_at` - Last checkpoint timestamp
+
+### Remaining (F7.13 Phase 2)
+
+- S7.13.11-14: Deploy, end-to-end test, checkpoint resume test, vector job
+
+---
+
+## 12 JAN 2026: F7.12 Logging Architecture Consolidation ✅
+
+**Status**: ✅ **COMPLETE**
+**Epic**: E7 Pipeline Infrastructure
+
+### Achievement
+
+Unified observability infrastructure with global log context and consolidated debug flags.
+
+### Sub-Features Completed
+
+| Feature | Description | Status |
+|---------|-------------|--------|
+| F7.12.A | Global Log Context (app_name, instance_id, environment in every log) | ✅ |
+| F7.12.B | Unify Diagnostics Module | ⏭️ Skipped (existing structure adequate) |
+| F7.12.C | Consolidate Debug Flags (4 → 2: OBSERVABILITY_MODE, METRICS_ENABLED) | ✅ |
+| F7.12.D | Python App Insights Log Export (`/api/logs/export`) | ✅ |
+| F7.12.E | Docker Worker OpenTelemetry (logs to same App Insights) | ✅ |
+| F7.12.F | JSONL Log Dump System (level-based blob export) | ✅ |
+
+### Key Files
+
+- `config/observability_config.py` - Unified observability configuration
+- `infrastructure/jsonl_log_handler.py` - JSONL blob handler
+- `infrastructure/appinsights_exporter.py` - App Insights REST API client
+- `util_logger.py` - Global log context integration
+
+---
+
+## 12 JAN 2026: F7.16 Code Maintenance (Phase 1) ✅
+
+**Status**: ✅ **PHASE 1 COMPLETE**
+**Goal**: Split 2,673-line monolithic db_maintenance.py into focused modules
+
+### Results
+
+- `db_maintenance.py`: 2,673 → 1,922 lines (28% reduction)
+- Extracted `data_cleanup.py`: 195 lines (cleanup + prerequisites)
+- Extracted `geo_table_operations.py`: 578 lines (geo table management)
+- Schema operations remain in db_maintenance.py (future extraction)
 
 ---
 

@@ -18,9 +18,17 @@ Provides step-by-step integration guides showing:
 Each integration guide is tailored to a specific job type (raster, vector, etc.)
 """
 
+import logging
+from datetime import datetime
+
 import azure.functions as func
 from web_interfaces.base import BaseInterface
 from web_interfaces import InterfaceRegistry
+
+logger = logging.getLogger(__name__)
+
+# Valid raster file extensions
+RASTER_EXTENSIONS = ['.tif', '.tiff', '.geotiff', '.img', '.jp2', '.ecw', '.vrt', '.nc', '.hdf', '.hdf5']
 
 
 @InterfaceRegistry.register('integration')
@@ -107,6 +115,8 @@ class ProcessRasterIntegrationInterface(BaseInterface):
     1. Job submission with live CURL
     2. Job monitoring with status polling
     3. Output data retrieval
+
+    Supports HTMX fragments for dynamic container/file loading.
     """
 
     def render(self, request: func.HttpRequest) -> str:
@@ -120,8 +130,91 @@ class ProcessRasterIntegrationInterface(BaseInterface):
             content=content,
             custom_css=custom_css,
             custom_js=custom_js,
-            include_htmx=False
+            include_htmx=True  # Enable HTMX for dynamic loading
         )
+
+    def htmx_partial(self, request: func.HttpRequest, fragment: str) -> str:
+        """
+        Handle HTMX partial requests.
+
+        Fragments:
+            containers: Returns <option> elements for container dropdown
+            files: Returns file list items for raster files
+        """
+        if fragment == 'containers':
+            return self._render_containers_fragment(request)
+        elif fragment == 'files':
+            return self._render_files_fragment(request)
+        else:
+            raise ValueError(f"Unknown fragment: {fragment}")
+
+    def _render_containers_fragment(self, request: func.HttpRequest) -> str:
+        """Render container options for Bronze zone."""
+        try:
+            from infrastructure.blob import BlobRepository
+
+            repo = BlobRepository.for_zone("bronze")
+            containers = repo.list_containers()
+
+            if not containers:
+                return '<option value="">No containers in Bronze zone</option>'
+
+            options = ['<option value="">-- Select Container --</option>']
+            options += [f'<option value="{c["name"]}">{c["name"]}</option>' for c in containers]
+            return '\n'.join(options)
+
+        except Exception as e:
+            logger.error(f"Error loading containers: {e}")
+            return '<option value="">Error loading containers</option>'
+
+    def _render_files_fragment(self, request: func.HttpRequest) -> str:
+        """Render file list items (filtered for raster extensions)."""
+        container = request.params.get('container', '')
+        limit = int(request.params.get('limit', '100'))
+
+        if not container:
+            return '<div class="file-item placeholder">Select a container first</div>'
+
+        try:
+            from infrastructure.blob import BlobRepository
+
+            repo = BlobRepository.for_zone("bronze")
+            blobs = repo.list_blobs(
+                container=container,
+                prefix="",
+                limit=limit * 2  # Fetch more since we'll filter
+            )
+
+            # Filter for raster extensions
+            raster_blobs = []
+            for blob in blobs:
+                name = blob.get('name', '').lower()
+                if any(name.endswith(ext) for ext in RASTER_EXTENSIONS):
+                    raster_blobs.append(blob)
+                if len(raster_blobs) >= limit:
+                    break
+
+            if not raster_blobs:
+                return '<div class="file-item placeholder">No raster files found (.tif, .tiff, etc.)</div>'
+
+            # Build file items
+            items = []
+            for blob in raster_blobs:
+                name = blob.get('name', '')
+                short_name = name.split('/')[-1] if '/' in name else name
+                size_mb = blob.get('size', 0) / (1024 * 1024)
+
+                items.append(
+                    f'<div class="file-item" onclick="selectFile(this, \'{name}\')" '
+                    f'data-blob="{name}" data-size="{size_mb:.1f}">'
+                    f'{short_name} <span class="file-size-hint">({size_mb:.1f} MB)</span></div>'
+                )
+
+            return '\n'.join(items)
+
+        except Exception as e:
+            logger.error(f"Error loading files: {e}")
+            return f'<div class="file-item error">Error: {str(e)[:50]}</div>'
 
     def _generate_html_content(self) -> str:
         """Generate the three-block layout."""
@@ -156,70 +249,92 @@ class ProcessRasterIntegrationInterface(BaseInterface):
                             <div class="zone-badge">BRONZE (Source Data)</div>
                         </div>
 
-                        <!-- Container Selection -->
+                        <!-- Container Selection (HTMX) -->
                         <div class="form-group">
-                            <label>Container</label>
-                            <select id="container-select" onchange="updateCurl()">
-                                <option value="">-- Select Container --</option>
-                                <option value="bronze-rasters">bronze-rasters</option>
-                                <option value="bronze-fathom">bronze-fathom</option>
-                                <option value="bronze-uploads">bronze-uploads</option>
+                            <label>Container <span class="required">*</span></label>
+                            <select id="container-select"
+                                    hx-get="/api/interface/integration-process-raster?fragment=containers"
+                                    hx-trigger="load"
+                                    hx-swap="innerHTML"
+                                    onchange="loadFiles(); updateCurl();">
+                                <option value="">Loading containers...</option>
                             </select>
                         </div>
 
-                        <!-- File List (compact) -->
+                        <!-- File List (HTMX) -->
                         <div class="form-group">
-                            <label>Select Source File</label>
+                            <label>Select Source File <span class="required">*</span></label>
                             <div class="file-list-compact" id="file-list">
-                                <div class="file-item" onclick="selectFile(this, 'flood_depth_100yr.tif')">flood_depth_100yr.tif</div>
-                                <div class="file-item" onclick="selectFile(this, 'elevation_dem.tif')">elevation_dem.tif</div>
-                                <div class="file-item" onclick="selectFile(this, 'landcover_2024.tif')">landcover_2024.tif</div>
-                                <div class="file-item" onclick="selectFile(this, 'temperature_avg.tif')">temperature_avg.tif</div>
-                            </div>
-                        </div>
-
-                        <!-- DDH Identifiers Section -->
-                        <div class="ddh-section">
-                            <div class="ddh-section-title">DDH Identifiers</div>
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label>Collection ID</label>
-                                    <input type="text" id="collection-id" placeholder="e.g., flood-risk-2024" oninput="updateCurl()">
-                                </div>
-                                <div class="form-group">
-                                    <label>Item ID</label>
-                                    <input type="text" id="item-id" placeholder="e.g., depth-100yr-northeast" oninput="updateCurl()">
-                                </div>
+                                <div class="file-item placeholder">Select a container first</div>
                             </div>
                         </div>
 
                         <!-- Processing Options -->
-                        <div class="form-row-3">
+                        <div class="form-row">
                             <div class="form-group">
-                                <label>Output Format</label>
-                                <select id="output-format" onchange="updateCurl()">
-                                    <option value="COG">COG (Cloud Optimized)</option>
-                                    <option value="GeoTIFF">GeoTIFF</option>
+                                <label>Raster Type</label>
+                                <select id="raster-type" onchange="updateCurl()">
+                                    <option value="auto">Auto-detect</option>
+                                    <option value="dem">DEM (Elevation)</option>
+                                    <option value="rgb">RGB Imagery</option>
+                                    <option value="rgba">RGBA (with alpha)</option>
+                                    <option value="categorical">Categorical</option>
+                                    <option value="multispectral">Multispectral</option>
                                 </select>
                             </div>
                             <div class="form-group">
-                                <label>Compression</label>
-                                <select id="compression" onchange="updateCurl()">
-                                    <option value="LZW">LZW</option>
-                                    <option value="DEFLATE">DEFLATE</option>
-                                    <option value="ZSTD">ZSTD</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label>Target CRS</label>
-                                <select id="target-crs" onchange="updateCurl()">
-                                    <option value="EPSG:4326">EPSG:4326 (WGS84)</option>
-                                    <option value="EPSG:3857">EPSG:3857 (Web Mercator)</option>
+                                <label>Output Tier</label>
+                                <select id="output-tier" onchange="updateCurl()">
+                                    <option value="analysis">Analysis (LZW)</option>
+                                    <option value="visualization">Visualization (JPEG)</option>
+                                    <option value="archive">Archive (DEFLATE)</option>
                                 </select>
                             </div>
                         </div>
 
-                        <button class="btn btn-primary" style="width: 100%;" onclick="simulateSubmit()">Submit Job</button>
+                        <!-- DDH Platform Identifiers -->
+                        <div class="ddh-section">
+                            <div class="ddh-section-title">DDH Platform Identifiers</div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>Dataset ID</label>
+                                    <input type="text" id="dataset-id" placeholder="DDH dataset UUID" oninput="updateCurl()">
+                                </div>
+                                <div class="form-group">
+                                    <label>Resource ID</label>
+                                    <input type="text" id="resource-id" placeholder="DDH resource UUID" oninput="updateCurl()">
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>Version ID</label>
+                                    <input type="text" id="version-id" placeholder="DDH version UUID" oninput="updateCurl()">
+                                </div>
+                                <div class="form-group">
+                                    <label>Access Level</label>
+                                    <select id="access-level" onchange="updateCurl()">
+                                        <option value="">Not specified</option>
+                                        <option value="public">Public</option>
+                                        <option value="private">Private</option>
+                                        <option value="restricted">Restricted</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- STAC Identifiers (Optional) -->
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Collection ID <span class="optional">(optional)</span></label>
+                                <input type="text" id="collection-id" placeholder="STAC collection (auto-generated if blank)" oninput="updateCurl()">
+                            </div>
+                            <div class="form-group">
+                                <label>Item ID <span class="optional">(optional)</span></label>
+                                <input type="text" id="item-id" placeholder="STAC item (auto-generated if blank)" oninput="updateCurl()">
+                            </div>
+                        </div>
+
+                        <button class="btn btn-primary" style="width: 100%;" onclick="simulateSubmit()">Submit Job (Demo)</button>
                     </div>
 
                     <!-- Right: CURL -->
@@ -228,18 +343,7 @@ class ProcessRasterIntegrationInterface(BaseInterface):
                             <span class="curl-label">CURL Command</span>
                             <button class="copy-btn" onclick="copyCurl('curl-submit')">Copy</button>
                         </div>
-                        <pre class="curl-code" id="curl-submit"><span class="cmd">curl</span> <span class="flag">-X POST</span> \\
-  <span class="url">"https://rmhazuregeoapi.../api/jobs/submit/process_raster_v2"</span> \\
-  <span class="flag">-H</span> <span class="string">"Content-Type: application/json"</span> \\
-  <span class="flag">-d</span> '{
-    <span class="key">"source_container"</span>: <span class="string">""</span>,
-    <span class="key">"source_blob"</span>: <span class="string">""</span>,
-    <span class="key">"collection_id"</span>: <span class="string">""</span>,
-    <span class="key">"item_id"</span>: <span class="string">""</span>,
-    <span class="key">"output_format"</span>: <span class="string">"COG"</span>,
-    <span class="key">"compression"</span>: <span class="string">"LZW"</span>,
-    <span class="key">"target_crs"</span>: <span class="string">"EPSG:4326"</span>
-  }'</pre>
+                        <pre class="curl-code" id="curl-submit">Loading...</pre>
                     </div>
                 </div>
             </div>
@@ -268,17 +372,17 @@ class ProcessRasterIntegrationInterface(BaseInterface):
                             <div class="stage-mini completed" id="stage-1">
                                 <div class="stage-mini-number">Stage 1</div>
                                 <div class="stage-mini-name">Validate</div>
-                                <div class="stage-mini-status">1/1 tasks</div>
+                                <div class="stage-mini-status">CRS, type detection</div>
                             </div>
                             <div class="stage-mini active" id="stage-2">
                                 <div class="stage-mini-number">Stage 2</div>
-                                <div class="stage-mini-name">Process</div>
-                                <div class="stage-mini-status">0/1 tasks</div>
+                                <div class="stage-mini-name">Create COG</div>
+                                <div class="stage-mini-status">Reproject + optimize</div>
                             </div>
                             <div class="stage-mini" id="stage-3">
                                 <div class="stage-mini-number">Stage 3</div>
-                                <div class="stage-mini-name">Register</div>
-                                <div class="stage-mini-status">pending</div>
+                                <div class="stage-mini-name">Create STAC</div>
+                                <div class="stage-mini-status">Metadata + catalog</div>
                             </div>
                         </div>
                     </div>
@@ -289,7 +393,7 @@ class ProcessRasterIntegrationInterface(BaseInterface):
                             <span class="curl-label">CURL - Check Job Status</span>
                             <button class="copy-btn" onclick="copyCurl('curl-status')">Copy</button>
                         </div>
-                        <pre class="curl-code" id="curl-status"><span class="cmd">curl</span> <span class="url">"https://rmhazuregeoapi.../api/jobs/status/<span id="curl-job-id-1">{job_id}</span>"</span>
+                        <pre class="curl-code" id="curl-status"><span class="cmd">curl</span> <span class="url" id="status-url-display">"{API_BASE_URL}/api/jobs/status/<span id="curl-job-id-1">{job_id}</span>"</span>
 
 <span class="comment"># Response:</span>
 {
@@ -325,19 +429,24 @@ class ProcessRasterIntegrationInterface(BaseInterface):
   <span class="key">"job_type"</span>: <span class="string">"process_raster_v2"</span>,
   <span class="key">"result_data"</span>: {
     <span class="key">"cog"</span>: {
-      <span class="key highlight highlight-url">"output_url"</span>: <span class="string highlight highlight-url">"https://rmhazuregeosilver.blob.../silver-cogs/flood_depth_100yr.tif"</span>,
+      <span class="key highlight highlight-url">"output_url"</span>: <span class="string highlight highlight-url">"https://rmhazuregeosilver.blob.../silver-cogs/..."</span>,
       <span class="key">"size_bytes"</span>: <span class="number">15234567</span>,
-      <span class="key">"compression"</span>: <span class="string">"LZW"</span>
+      <span class="key">"tier"</span>: <span class="string">"analysis"</span>
     },
     <span class="key">"stac"</span>: {
-      <span class="key highlight highlight-ddh">"collection_id"</span>: <span class="string highlight highlight-ddh">"flood-risk-2024"</span>,
-      <span class="key highlight highlight-ddh">"item_id"</span>: <span class="string highlight highlight-ddh">"depth-100yr-northeast"</span>,
-      <span class="key highlight highlight-url">"item_url"</span>: <span class="string highlight highlight-url">"https://rmhazuregeoapi.../api/stac/collections/flood-risk-2024/items/depth-100yr-northeast"</span>
+      <span class="key highlight highlight-url">"item_url"</span>: <span class="string highlight highlight-url">"https://rmhazuregeoapi-.../api/stac/collections/.../items/..."</span>,
+      <span class="key">"collection_id"</span>: <span class="string">"system-rasters"</span>,
+      <span class="key">"item_id"</span>: <span class="string">"auto-generated-id"</span>
+    },
+    <span class="key highlight highlight-ddh">"platform"</span>: {
+      <span class="key highlight highlight-ddh">"dataset_id"</span>: <span class="string highlight highlight-ddh">"uuid-from-request"</span>,
+      <span class="key highlight highlight-ddh">"resource_id"</span>: <span class="string highlight highlight-ddh">"uuid-from-request"</span>,
+      <span class="key highlight highlight-ddh">"version_id"</span>: <span class="string highlight highlight-ddh">"uuid-from-request"</span>
     },
     <span class="key">"metadata"</span>: {
       <span class="key">"bbox"</span>: [<span class="number">-74.5</span>, <span class="number">40.2</span>, <span class="number">-73.7</span>, <span class="number">41.1</span>],
       <span class="key">"crs"</span>: <span class="string">"EPSG:4326"</span>,
-      <span class="key">"resolution"</span>: <span class="number">10.0</span>
+      <span class="key">"raster_type"</span>: <span class="string">"dem"</span>
     }
   }
 }</div>
@@ -348,7 +457,7 @@ class ProcessRasterIntegrationInterface(BaseInterface):
                             </div>
                             <div class="legend-item">
                                 <div class="legend-color ddh"></div>
-                                <span>DDH Identifiers (for cataloging)</span>
+                                <span>DDH Platform Identifiers (passthrough)</span>
                             </div>
                         </div>
                     </div>
@@ -359,14 +468,14 @@ class ProcessRasterIntegrationInterface(BaseInterface):
                             <span class="curl-label">CURL - Get Completed Job</span>
                             <button class="copy-btn" onclick="copyCurl('curl-result')">Copy</button>
                         </div>
-                        <pre class="curl-code" id="curl-result"><span class="cmd">curl</span> <span class="url">"https://rmhazuregeoapi.../api/jobs/status/<span id="curl-job-id-2">{job_id}</span>"</span>
+                        <pre class="curl-code" id="curl-result"><span class="cmd">curl</span> <span class="url" id="result-url-display">"{API_BASE_URL}/api/jobs/status/<span id="curl-job-id-2">{job_id}</span>"</span>
 
-<span class="comment"># Extract COG URL:</span>
-<span class="cmd">curl</span> <span class="url">"...api/jobs/status/{job_id}"</span> | \\
+<span class="comment"># Extract COG URL with jq:</span>
+<span class="cmd">curl</span> <span class="url" id="jq-url-display">"{API_BASE_URL}/api/jobs/status/{job_id}"</span> | \\
   <span class="cmd">jq</span> <span class="string">'.result_data.cog.output_url'</span>
 
-<span class="comment"># Fetch STAC Item directly:</span>
-<span class="cmd">curl</span> <span class="url">"https://rmhazuregeoapi.../api/stac/collections/<span id="curl-collection-id">{collection_id}</span>/items/<span id="curl-item-id">{item_id}</span>"</span></pre>
+<span class="comment"># Get STAC Item metadata:</span>
+<span class="cmd">curl</span> <span class="url" id="stac-url-display">"{API_BASE_URL}/api/stac/collections/{collection}/items/{item}"</span></pre>
                     </div>
                 </div>
             </div>
@@ -446,11 +555,8 @@ class ProcessRasterIntegrationInterface(BaseInterface):
                 gap: 16px;
             }
 
-            .form-row-3 {
-                display: grid;
-                grid-template-columns: 1fr 1fr 1fr;
-                gap: 16px;
-            }
+            .required { color: #dc2626; }
+            .optional { color: var(--ds-gray); font-weight: normal; }
 
             /* Zone Badge (non-selectable) */
             .zone-badge {
@@ -468,7 +574,7 @@ class ProcessRasterIntegrationInterface(BaseInterface):
                 background: var(--ds-bg);
                 border: 1px solid var(--ds-gray-light);
                 border-radius: 3px;
-                height: 100px;
+                height: 120px;
                 overflow-y: auto;
                 padding: 8px;
             }
@@ -480,6 +586,9 @@ class ProcessRasterIntegrationInterface(BaseInterface):
                 cursor: pointer;
                 border-radius: 3px;
                 font-family: 'Monaco', 'Courier New', monospace;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
             }
 
             .file-item:hover {
@@ -490,6 +599,24 @@ class ProcessRasterIntegrationInterface(BaseInterface):
             .file-item.selected {
                 background: var(--ds-blue-primary);
                 color: white;
+            }
+
+            .file-item.placeholder {
+                color: var(--ds-gray);
+                font-style: italic;
+                cursor: default;
+                font-family: "Open Sans", Arial, sans-serif;
+            }
+
+            .file-item.error {
+                color: #dc2626;
+                font-style: italic;
+                cursor: default;
+            }
+
+            .file-size-hint {
+                font-size: 11px;
+                opacity: 0.7;
             }
 
             /* DDH Section */
@@ -570,7 +697,7 @@ class ProcessRasterIntegrationInterface(BaseInterface):
                 color: #d4d4d4;
                 white-space: pre-wrap;
                 word-break: break-all;
-                max-height: 240px;
+                max-height: 280px;
                 overflow-y: auto;
                 line-height: 1.5;
                 flex: 1;
@@ -672,11 +799,11 @@ class ProcessRasterIntegrationInterface(BaseInterface):
                 border-radius: 3px;
                 padding: 16px;
                 font-family: 'Monaco', 'Courier New', monospace;
-                font-size: 12px;
-                max-height: 320px;
+                font-size: 11px;
+                max-height: 340px;
                 overflow-y: auto;
                 color: #d4d4d4;
-                line-height: 1.5;
+                line-height: 1.4;
             }
 
             .json-display .key { color: #9cdcfe; }
@@ -753,15 +880,10 @@ class ProcessRasterIntegrationInterface(BaseInterface):
                 .block-content {
                     grid-template-columns: 1fr;
                 }
-
-                .form-row-3 {
-                    grid-template-columns: 1fr 1fr;
-                }
             }
 
             @media (max-width: 768px) {
-                .form-row,
-                .form-row-3 {
+                .form-row {
                     grid-template-columns: 1fr;
                 }
 
@@ -783,6 +905,53 @@ class ProcessRasterIntegrationInterface(BaseInterface):
             let selectedFile = '';
             let currentJobId = '';
 
+            // Initialize API URLs on page load
+            document.addEventListener('DOMContentLoaded', function() {
+                // Update static URL displays with actual API_BASE_URL
+                const statusUrl = document.getElementById('status-url-display');
+                if (statusUrl) {
+                    statusUrl.innerHTML = `"${API_BASE_URL}/api/jobs/status/<span id="curl-job-id-1">{job_id}</span>"`;
+                }
+                const resultUrl = document.getElementById('result-url-display');
+                if (resultUrl) {
+                    resultUrl.innerHTML = `"${API_BASE_URL}/api/jobs/status/<span id="curl-job-id-2">{job_id}</span>"`;
+                }
+                const jqUrl = document.getElementById('jq-url-display');
+                if (jqUrl) {
+                    jqUrl.textContent = `"${API_BASE_URL}/api/jobs/status/{job_id}"`;
+                }
+                const stacUrl = document.getElementById('stac-url-display');
+                if (stacUrl) {
+                    stacUrl.textContent = `"${API_BASE_URL}/api/stac/collections/{collection}/items/{item}"`;
+                }
+
+                // Initialize the submit CURL
+                updateCurl();
+            });
+
+            // Load files when container changes
+            function loadFiles() {
+                const container = document.getElementById('container-select').value;
+                const fileList = document.getElementById('file-list');
+
+                if (!container) {
+                    fileList.innerHTML = '<div class="file-item placeholder">Select a container first</div>';
+                    return;
+                }
+
+                fileList.innerHTML = '<div class="file-item placeholder">Loading files...</div>';
+
+                // Use HTMX to fetch files
+                htmx.ajax('GET',
+                    '/api/interface/integration-process-raster?fragment=files&container=' + encodeURIComponent(container),
+                    {target: '#file-list', swap: 'innerHTML'}
+                );
+
+                // Clear selection
+                selectedFile = '';
+                updateCurl();
+            }
+
             function selectFile(element, filename) {
                 document.querySelectorAll('.file-item').forEach(el => el.classList.remove('selected'));
                 element.classList.add('selected');
@@ -792,37 +961,56 @@ class ProcessRasterIntegrationInterface(BaseInterface):
 
             function updateCurl() {
                 const container = document.getElementById('container-select').value;
+                const rasterType = document.getElementById('raster-type').value;
+                const outputTier = document.getElementById('output-tier').value;
+
+                // DDH Platform identifiers
+                const datasetId = document.getElementById('dataset-id').value;
+                const resourceId = document.getElementById('resource-id').value;
+                const versionId = document.getElementById('version-id').value;
+                const accessLevel = document.getElementById('access-level').value;
+
+                // Optional STAC identifiers
                 const collectionId = document.getElementById('collection-id').value;
                 const itemId = document.getElementById('item-id').value;
-                const outputFormat = document.getElementById('output-format').value;
-                const compression = document.getElementById('compression').value;
-                const targetCrs = document.getElementById('target-crs').value;
+
+                // Build JSON body dynamically (only include non-empty optional fields)
+                let jsonLines = [];
+                jsonLines.push(`    <span class="key">"container_name"</span>: <span class="string">"${container}"</span>`);
+                jsonLines.push(`    <span class="key">"blob_name"</span>: <span class="string">"${selectedFile}"</span>`);
+                jsonLines.push(`    <span class="key">"raster_type"</span>: <span class="string">"${rasterType}"</span>`);
+                jsonLines.push(`    <span class="key">"output_tier"</span>: <span class="string">"${outputTier}"</span>`);
+
+                // Add DDH identifiers if provided
+                if (datasetId) jsonLines.push(`    <span class="key">"dataset_id"</span>: <span class="string">"${datasetId}"</span>`);
+                if (resourceId) jsonLines.push(`    <span class="key">"resource_id"</span>: <span class="string">"${resourceId}"</span>`);
+                if (versionId) jsonLines.push(`    <span class="key">"version_id"</span>: <span class="string">"${versionId}"</span>`);
+                if (accessLevel) jsonLines.push(`    <span class="key">"access_level"</span>: <span class="string">"${accessLevel}"</span>`);
+
+                // Add STAC identifiers if provided
+                if (collectionId) jsonLines.push(`    <span class="key">"collection_id"</span>: <span class="string">"${collectionId}"</span>`);
+                if (itemId) jsonLines.push(`    <span class="key">"item_id"</span>: <span class="string">"${itemId}"</span>`);
+
+                const jsonBody = jsonLines.join(',\\n');
 
                 const curlHtml = `<span class="cmd">curl</span> <span class="flag">-X POST</span> \\\\
-  <span class="url">"https://rmhazuregeoapi.../api/jobs/submit/process_raster_v2"</span> \\\\
+  <span class="url">"${API_BASE_URL}/api/jobs/submit/process_raster_v2"</span> \\\\
   <span class="flag">-H</span> <span class="string">"Content-Type: application/json"</span> \\\\
   <span class="flag">-d</span> '{
-    <span class="key">"source_container"</span>: <span class="string">"${container}"</span>,
-    <span class="key">"source_blob"</span>: <span class="string">"${selectedFile}"</span>,
-    <span class="key">"collection_id"</span>: <span class="string">"${collectionId}"</span>,
-    <span class="key">"item_id"</span>: <span class="string">"${itemId}"</span>,
-    <span class="key">"output_format"</span>: <span class="string">"${outputFormat}"</span>,
-    <span class="key">"compression"</span>: <span class="string">"${compression}"</span>,
-    <span class="key">"target_crs"</span>: <span class="string">"${targetCrs}"</span>
+${jsonBody}
   }'`;
 
                 document.getElementById('curl-submit').innerHTML = curlHtml;
-
-                // Update Block 3 CURL with collection/item IDs
-                if (collectionId) {
-                    document.getElementById('curl-collection-id').textContent = collectionId;
-                }
-                if (itemId) {
-                    document.getElementById('curl-item-id').textContent = itemId;
-                }
             }
 
             function simulateSubmit() {
+                // Validate required fields
+                const container = document.getElementById('container-select').value;
+                if (!container || !selectedFile) {
+                    alert('Please select a container and file first');
+                    return;
+                }
+
                 // Generate a fake job ID for demo
                 currentJobId = 'a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6';
 

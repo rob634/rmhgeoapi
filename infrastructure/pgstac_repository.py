@@ -472,6 +472,49 @@ class PgStacRepository:
             logger.error(f"❌ Error getting item IDs for collection '{collection_id}': {e}")
             return []
 
+    def delete_item(self, collection_id: str, item_id: str) -> bool:
+        """
+        Delete a STAC item from PgSTAC (12 JAN 2026).
+
+        Used by job resubmit to clean up old STAC items before reprocessing.
+
+        Args:
+            collection_id: STAC collection ID
+            item_id: STAC item ID to delete
+
+        Returns:
+            True if deleted, False if not found or error
+
+        Note:
+            pgstac schema uses (collection, id) as composite primary key.
+        """
+        logger.info(f"🗑️ Deleting STAC item '{item_id}' from collection '{collection_id}'")
+
+        try:
+            with self._pg_repo._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        DELETE FROM pgstac.items
+                        WHERE collection = %s AND id = %s
+                        RETURNING id
+                        """,
+                        (collection_id, item_id)
+                    )
+                    result = cur.fetchone()
+                    conn.commit()
+
+                    if result:
+                        logger.info(f"   ✅ Deleted STAC item '{item_id}'")
+                        return True
+                    else:
+                        logger.warning(f"   ⚠️ STAC item '{item_id}' not found in collection '{collection_id}'")
+                        return False
+
+        except Exception as e:
+            logger.error(f"❌ Error deleting STAC item '{item_id}': {e}")
+            return False
+
     def list_collections(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
         """
         List all collections.

@@ -42,8 +42,17 @@ from azure.functions import Blueprint
 # Import startup state - this module has zero dependencies
 from startup_state import STARTUP_STATE
 
-# Import version - just a string constant, safe to import
-from config import __version__
+# Get version safely without importing the full config module
+# The config module has complex dependencies that can cause import issues
+def _get_version() -> str:
+    """Get version from config/__init__.py without importing the full module."""
+    try:
+        from config import __version__
+        return __version__
+    except Exception:
+        return "unknown"
+
+__version__ = _get_version()
 
 # Create Blueprint for probe endpoints
 bp = Blueprint()

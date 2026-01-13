@@ -79,8 +79,9 @@ from .rebuild_stac import RebuildStacJob
 # Ingest Collection (29 DEC 2025)
 from .ingest_collection import IngestCollectionJob
 
-# Docker Jobs (11 JAN 2026) - F7.13
+# Docker Jobs (11 JAN 2026) - F7.13, F7.18
 from .process_raster_docker import ProcessRasterDockerJob
+from .process_large_raster_docker import ProcessLargeRasterDockerJob
 
 # ARCHIVED (07 DEC 2025) - replaced by inventory_container_contents
 # from .container_list import ListContainerContentsWorkflow
@@ -136,9 +137,10 @@ ALL_JOBS = {
     # Ingest Collection (29 DEC 2025)
     "ingest_collection": IngestCollectionJob,
 
-    # Docker Jobs (11 JAN 2026) - F7.13
+    # Docker Jobs (11 JAN 2026) - F7.13, F7.18
     # Single-stage jobs designed for Docker worker (no timeout constraints)
     "process_raster_docker": ProcessRasterDockerJob,
+    "process_large_raster_docker": ProcessLargeRasterDockerJob,
 
     # ARCHIVED (07 DEC 2025) - use inventory_container_contents instead
     # "list_container_contents": ListContainerContentsWorkflow,

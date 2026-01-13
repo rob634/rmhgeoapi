@@ -1,6 +1,6 @@
 # Epic & Feature Summary
 
-**Updated**: 10 JAN 2026 | ✅ Complete | 🚧 In Progress | 📋 Planned | 🔵 Backlog
+**Updated**: 12 JAN 2026 | ✅ Complete | 🚧 In Progress | 📋 Planned | 🔵 Backlog
 
 ---
 
@@ -51,12 +51,16 @@
 - F7.5 📋 Pipeline Builder UI
 - F7.6 📋 ACLED Conflict Data
 - F7.7 📋 Static Reference Data
-- F7.8 🚧 Unified Metadata Architecture
+- F7.8 ✅ Unified Metadata Architecture (VectorMetadata)
+- F7.9 🚧 RasterMetadata Architecture
 - F7.10 ✅ Metadata Consistency Enforcement
 - F7.11 🚧 STAC Catalog Self-Healing
-- F7.12 📋 Docker Worker Infrastructure ⭐
-- F7.13 📋 Docker Job Definitions ⭐
+- F7.12 ✅ Docker Worker Infrastructure
+- F7.13 🚧 Docker Job Definitions (Phase 1 complete)
 - F7.14 🔵 Dynamic Task Routing (optional)
+- F7.15 📋 HTTP-Triggered Docker Worker
+- F7.16 ✅ Code Maintenance (db_maintenance split)
+- F7.17 ✅ Job Resubmit & Platform Features
 
 ## E4: Externalization 🔥 PRIORITY
 - F4.1 📋 Publishing Workflow
@@ -85,6 +89,7 @@
 - F2.7 📋 Raster Collection Pipeline
 - F2.8 📋 Classification & Detection
 - F2.9 ✅ STAC-Integrated Raster Viewer
+- F2.10 🚧 Add Rasters to Existing Collections
 
 ## E1: Vector Data ✅ Operational
 - F1.1 ✅ Vector ETL Pipeline
@@ -105,12 +110,12 @@
 | E12 | 3 | 0 | 6 | 0 |
 | E9 | 1 | 1 | 8 | 0 |
 | E8 | 5 | 0 | 9 | 0 |
-| E7 | 5 | 2 | 5 | 1 |
+| E7 | 8 | 3 | 4 | 1 |
 | E4 | 0 | 2 | 2 | 1 |
 | E3 | 3 | 0 | 3 | 2 |
-| E2 | 7 | 0 | 2 | 0 |
+| E2 | 7 | 1 | 2 | 0 |
 | E1 | 6 | 0 | 2 | 0 |
-| **Total** | **30** | **5** | **37** | **4** |
+| **Total** | **33** | **7** | **36** | **4** |
 
 ---
 

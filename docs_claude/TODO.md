@@ -90,7 +90,7 @@ process_raster_v2 (Function App, <1GB)     process_raster_docker (Docker, large 
 
 ---
 
-## 🟡 MEDIUM: Add Rasters to Existing Collections (F2.8)
+## 🟡 MEDIUM: Add Rasters to Existing Collections (F2.10)
 
 **Added**: 12 JAN 2026
 **Epic**: E2 Raster Data as API
@@ -101,20 +101,20 @@ process_raster_v2 (Function App, <1GB)     process_raster_docker (Docker, large 
 
 | Story | Description | Status |
 |-------|-------------|--------|
-| S2.8.1 | Add `collection_must_exist` param to `extract_stac_metadata` handler | ✅ |
-| S2.8.2 | Add `collection_must_exist` to `process_raster_v2` parameters_schema | ✅ |
-| S2.8.3 | Add `collection_must_exist` to `process_raster_docker` parameters_schema | ✅ |
+| S2.10.1 | Add `collection_must_exist` param to `extract_stac_metadata` handler | ✅ |
+| S2.10.2 | Add `collection_must_exist` to `process_raster_v2` parameters_schema | ✅ |
+| S2.10.3 | Add `collection_must_exist` to `process_raster_docker` parameters_schema | ✅ |
 
 ### Remaining Work
 
 | Story | Description | Status | Priority |
 |-------|-------------|--------|----------|
-| S2.8.4 | Create Platform endpoint `POST /api/platform/raster/add-to-collection` | 📋 | Medium |
-| S2.8.5 | Endpoint wrapper enforces `collection_must_exist=true` | 📋 | Medium |
-| S2.8.6 | Update `process_raster_collection_v2` to support adding tiles to existing collection | 📋 | Low |
-| S2.8.7 | Test: `collection_must_exist=true` + existing collection → success | 📋 | Medium |
-| S2.8.8 | Test: `collection_must_exist=true` + missing collection → clear error | 📋 | Medium |
-| S2.8.9 | Document new parameter in API reference | 📋 | Low |
+| S2.10.4 | Create Platform endpoint `POST /api/platform/raster/add-to-collection` | 📋 | Medium |
+| S2.10.5 | Endpoint wrapper enforces `collection_must_exist=true` | 📋 | Medium |
+| S2.10.6 | Update `process_raster_collection_v2` to support adding tiles to existing collection | 📋 | Low |
+| S2.10.7 | Test: `collection_must_exist=true` + existing collection → success | 📋 | Medium |
+| S2.10.8 | Test: `collection_must_exist=true` + missing collection → clear error | 📋 | Medium |
+| S2.10.9 | Document new parameter in API reference | 📋 | Low |
 
 ### Usage Examples
 

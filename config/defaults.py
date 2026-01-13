@@ -422,6 +422,10 @@ class TaskRoutingDefaults:
         # Docker consolidated raster handler (11 JAN 2026) - F7.13
         # Validate → COG → STAC in single execution (no stage overhead)
         "raster_process_complete",
+
+        # Docker large raster handler (13 JAN 2026) - F7.18
+        # Tiling → Extract → COG → MosaicJSON → STAC (100MB-30GB rasters)
+        "raster_process_large_complete",
     ]
 
     # Raster tasks → raster-tasks queue (memory-intensive, low concurrency)

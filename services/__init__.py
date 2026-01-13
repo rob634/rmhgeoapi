@@ -171,8 +171,9 @@ from .rebuild_stac_handlers import (
     stac_rebuild_item,
 )
 
-# Docker consolidated handler (11 JAN 2026) - F7.13
+# Docker consolidated handlers (11 JAN 2026) - F7.13, F7.18
 from .handler_process_raster_complete import process_raster_complete
+from .handler_process_large_raster_complete import process_large_raster_complete
 
 # Ingest Collection handlers (29 DEC 2025)
 from .ingest import ALL_HANDLERS as INGEST_HANDLERS
@@ -294,8 +295,9 @@ ALL_HANDLERS = {
     # STAC Rebuild handlers (10 JAN 2026) - F7.11 Self-Healing
     "stac_rebuild_validate": stac_rebuild_validate,  # Stage 1: Check sources exist
     "stac_rebuild_item": stac_rebuild_item,  # Stage 2: Regenerate STAC item (fan-out)
-    # Docker consolidated handler (11 JAN 2026) - F7.13
+    # Docker consolidated handlers (11 JAN 2026) - F7.13, F7.18
     "raster_process_complete": process_raster_complete,  # Single-stage Docker handler
+    "raster_process_large_complete": process_large_raster_complete,  # Large raster Docker handler
 }
 
 # Validate no collisions before merging INGEST_HANDLERS (29 DEC 2025)

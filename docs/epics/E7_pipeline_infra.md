@@ -2,8 +2,8 @@
 
 **Type**: Foundational Enabler
 **Value Statement**: The ETL brain that makes everything else possible.
-**Status**: 🚧 PARTIAL (F7.1 ✅, F7.2 🟡, F7.3 ✅, F7.4 ✅, F7.8 🚧, F7.10 ✅, F7.11 🚧, F7.12 ✅, F7.13 📋 PRIORITY)
-**Last Updated**: 11 JAN 2026
+**Status**: 🚧 PARTIAL (F7.1 ✅, F7.2 🟡, F7.3 ✅, F7.4 ✅, F7.8 ✅, F7.9 🚧, F7.10 ✅, F7.11 🚧, F7.12 ✅, F7.13 🚧, F7.16 ✅, F7.17 ✅)
+**Last Updated**: 12 JAN 2026
 
 **This is the substrate.** E1, E2, E8, and E9 all run on E7. Without it, nothing processes.
 
@@ -30,12 +30,16 @@
 | F7.5 | 📋 | Pipeline Builder UI |
 | F7.6 | 📋 | ACLED Conflict Data (twice weekly) |
 | F7.7 | 📋 | Static Reference Data (Admin0, manual) |
-| F7.8 | 🚧 | **Unified Metadata Architecture** (Pydantic models, extensible) |
+| F7.8 | ✅ | **Unified Metadata Architecture** (VectorMetadata complete 09 JAN 2026) |
+| F7.9 | 🚧 | **RasterMetadata Architecture** (extends F7.8 for rasters) |
 | F7.10 | ✅ | Metadata Consistency Enforcement (timer + checker) |
 | F7.11 | 🚧 | STAC Catalog Self-Healing (rebuild job) - vectors working |
 | F7.12 | ✅ | **Docker Worker Infrastructure** - Deployed with OpenTelemetry (v0.7.8-otel, 11 JAN 2026) |
-| F7.13 | 📋 | **Docker Job Definitions** (consolidated single-task jobs) - PRIORITY |
+| F7.13 | 🚧 | **Docker Job Definitions** - Phase 1 complete (checkpoint/resume) |
 | F7.14 | 🔵 | Dynamic Task Routing (optional, if hybrid needed later) |
+| F7.15 | 📋 | HTTP-Triggered Docker Worker (alternative architecture) |
+| F7.16 | ✅ | Code Maintenance - db_maintenance.py split (12 JAN 2026) |
+| F7.17 | ✅ | Job Resubmit & Platform Features (12 JAN 2026) |
 
 ---
 
@@ -231,12 +235,13 @@ CREATE TABLE geo.curated_acled_events (
 
 ---
 
-### Feature F7.8: Unified Metadata Architecture 📋 PRIORITY
+### Feature F7.8: Unified Metadata Architecture ✅ COMPLETE
 
 **Deliverable**: Pydantic-based metadata models providing single source of truth across all data types
-**Status**: 📋 PLANNED
+**Status**: ✅ COMPLETE (VectorMetadata - 09 JAN 2026)
 **Design Document**: [METADATA.md](/METADATA.md)
 **Added**: 08 JAN 2026
+**Completed**: 09 JAN 2026
 
 **Problem Statement**:
 - Vector metadata in `geo.table_metadata`, raster metadata only in `pgstac.items`
@@ -265,15 +270,15 @@ BaseMetadata (abstract)
 
 | Story | Status | Description |
 |-------|--------|-------------|
-| S7.8.1 | 📋 | Create `core/models/unified_metadata.py` with BaseMetadata + VectorMetadata |
-| S7.8.2 | 📋 | Create `core/models/external_refs.py` with DDHRefs + ExternalRefs models |
-| S7.8.3 | 📋 | Create `app.dataset_refs` table DDL (cross-type external linkage) |
-| S7.8.4 | 📋 | Add `providers JSONB` and `custom_properties JSONB` to geo.table_metadata DDL |
-| S7.8.5 | 📋 | Refactor `ogc_features/repository.py` to return VectorMetadata model |
-| S7.8.6 | 📋 | Refactor `ogc_features/service.py` to use VectorMetadata.to_ogc_response() |
-| S7.8.7 | 📋 | Refactor `services/stac_vector_catalog.py` to use VectorMetadata.to_stac_item() |
+| S7.8.1 | ✅ | Create `core/models/unified_metadata.py` with BaseMetadata + VectorMetadata |
+| S7.8.2 | ✅ | Create `core/models/external_refs.py` with DDHRefs + ExternalRefs models |
+| S7.8.3 | ✅ | Create `app.dataset_refs` table DDL (cross-type external linkage) |
+| S7.8.4 | ✅ | Add `providers JSONB` and `custom_properties JSONB` to geo.table_metadata DDL |
+| S7.8.5 | ✅ | Refactor `ogc_features/repository.py` to return VectorMetadata model |
+| S7.8.6 | ✅ | Refactor `ogc_features/service.py` to use VectorMetadata.to_ogc_response() |
+| S7.8.7 | ✅ | Refactor `services/stac_vector_catalog.py` to use VectorMetadata.to_stac_item() |
 | S7.8.8 | 📋 | Wire Platform layer to populate app.dataset_refs on ingest |
-| S7.8.9 | 📋 | Document pattern for future data types (RasterMetadata, ZarrMetadata) |
+| S7.8.9 | ➡️ | Document pattern for future data types → moved to F7.9 |
 | S7.8.10 | 📋 | Archive METADATA.md design doc to docs/archive after implementation |
 
 **Key Files** (planned):

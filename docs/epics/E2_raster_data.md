@@ -18,6 +18,7 @@
 | F2.7 | 📋 | Raster Collection Pipeline |
 | F2.8 | 📋 | Classification & Detection |
 | F2.9 | ✅ | STAC-Integrated Raster Map Viewer |
+| F2.10 | 🚧 | Add Rasters to Existing Collections |
 
 ### Feature F2.1: Raster ETL Pipeline ✅
 
@@ -274,6 +275,48 @@ Raster Input → F2.8 (Classify) → Route to F2.1/F2.6/F2.7 → Tier Selection 
 **Deployed**: Commit `ddebba1` (30 DEC 2025)
 
 ---
+
+### Feature F2.10: Add Rasters to Existing Collections 🚧 IN PROGRESS
+
+**Deliverable**: Support adding rasters to existing STAC collections instead of always creating new ones
+**Added**: 12 JAN 2026
+**Status**: Core implementation ✅, Platform wiring 📋
+
+**Purpose**: Enable incremental raster additions to existing collections. Previously, each raster either auto-created a minimal collection or used the default collection. Now callers can explicitly require that a collection exists before adding.
+
+**Use Cases**:
+- Add new tiles to an existing basemap collection
+- Append time-series imagery to a temporal collection
+- Platform API integration where collection is pre-created
+
+| Story | Status | Description | Acceptance Criteria |
+|-------|--------|-------------|---------------------|
+| S2.10.1 | ✅ | Add `collection_must_exist` param to `extract_stac_metadata` handler | Handler fails with clear error if collection missing and flag=true |
+| S2.10.2 | ✅ | Add `collection_must_exist` to `process_raster_v2` parameters_schema | Parameter accepted in job submission |
+| S2.10.3 | ✅ | Add `collection_must_exist` to `process_raster_docker` parameters_schema | Parameter accepted in Docker job |
+| S2.10.4 | 📋 | Create Platform endpoint `POST /api/platform/raster/add-to-collection` | New endpoint with `collection_id` required |
+| S2.10.5 | 📋 | Endpoint wrapper enforces `collection_must_exist=true` | Cannot accidentally create collection via this endpoint |
+| S2.10.6 | 📋 | Update `process_raster_collection_v2` to support adding tiles to existing collection | Batch job can append to existing collection |
+| S2.10.7 | 📋 | Test: `collection_must_exist=true` + existing collection → success | Raster added to existing collection |
+| S2.10.8 | 📋 | Test: `collection_must_exist=true` + missing collection → clear error | Job fails with helpful message |
+| S2.10.9 | 📋 | Document new parameter in API reference | Usage examples in docs |
+
+**Usage Examples**:
+```bash
+# Add raster to existing collection (fails if collection doesn't exist)
+curl -X POST .../api/jobs/submit/process_raster_v2 \
+  -d '{"container_name": "uploads", "blob_name": "new_tile.tif",
+       "collection_id": "existing-collection", "collection_must_exist": true}'
+
+# Default behavior unchanged (auto-creates collection if missing)
+curl -X POST .../api/jobs/submit/process_raster_v2 \
+  -d '{"container_name": "uploads", "blob_name": "my_raster.tif"}'
+```
+
+**Key Files**:
+- `services/stac_catalog.py:224,357-362` - collection_must_exist check
+- `jobs/process_raster_v2.py:87` - parameter schema
+- `jobs/process_raster_docker.py:90` - parameter schema
 
 ---
 

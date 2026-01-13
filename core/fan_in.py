@@ -100,10 +100,10 @@ def load_fan_in_results(params: dict) -> list[dict]:
         if (task.stage == source_stage
             and task.status.value == "completed"
             and task.result_data):
-            # Extract the inner "result" if present, otherwise use full result_data
-            result = task.result_data.get("result", task.result_data)
-            if result:
-                results.append(result)
+            # Return full result_data (includes "success" field and nested "result")
+            # Handlers expect: {"success": True, "result": {...}}
+            # FIX (13 JAN 2026): Was extracting inner "result", breaking downstream handlers
+            results.append(task.result_data)
 
     logger.info(f"   Retrieved {len(results)} results from database")
 

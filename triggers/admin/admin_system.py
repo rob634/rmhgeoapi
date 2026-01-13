@@ -94,24 +94,26 @@ def system_stats(req: func.HttpRequest) -> func.HttpResponse:
             with job_repo._get_connection() as conn:
                 with conn.cursor() as cur:
                     # Count by status
+                    # Note: app.job_status enum values are: queued, processing, completed, failed, completed_with_errors
+                    # 'pending' is only valid for app.task_status, not job_status
                     cur.execute("""
                         SELECT status, COUNT(*) as count
                         FROM app.jobs
-                        WHERE status IN ('pending', 'processing', 'queued')
-                           OR (status IN ('completed', 'failed') AND updated_at > NOW() - INTERVAL '24 hours')
+                        WHERE status IN ('processing', 'queued')
+                           OR (status IN ('completed', 'failed', 'completed_with_errors') AND updated_at > NOW() - INTERVAL '24 hours')
                         GROUP BY status
                     """)
                     for row in cur.fetchall():
                         status = row['status']
                         count = row['count']
-                        if status in ('pending', 'queued'):
+                        if status == 'queued':
                             job_stats['pending'] += count
                         elif status == 'processing':
                             job_stats['active'] = count
                         elif status == 'completed':
                             job_stats['completed_24h'] = count
-                        elif status == 'failed':
-                            job_stats['failed_24h'] = count
+                        elif status in ('failed', 'completed_with_errors'):
+                            job_stats['failed_24h'] += count
         except Exception as e:
             logger.warning(f"Could not fetch job stats: {e}")
 

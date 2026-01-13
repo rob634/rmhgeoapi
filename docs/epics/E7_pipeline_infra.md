@@ -715,3 +715,89 @@ ROUTE_TO_DOCKER=create_cog,create_cog_streaming
 **Revisit When**: Separate Docker jobs prove insufficient for a use case.
 
 ---
+
+### Feature F7.9: RasterMetadata Architecture 🚧 IN PROGRESS
+
+**Deliverable**: Extend F7.8 metadata pattern for raster data
+**Status**: 🚧 IN PROGRESS (combined with F7.11 as next priority)
+**Added**: 12 JAN 2026
+**Depends On**: F7.8 ✅
+
+**Goal**: Apply the same Pydantic-based metadata architecture to rasters that F7.8 established for vectors.
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S7.9.1 | 📋 | Create `RasterMetadata` model extending BaseMetadata |
+| S7.9.2 | 📋 | Add raster-specific fields (bands, resolution, nodata, etc.) |
+| S7.9.3 | 📋 | Create `app.cog_metadata` table DDL |
+| S7.9.4 | 📋 | Refactor `stac_catalog.py` to use RasterMetadata model |
+| S7.9.5 | 📋 | Wire Platform layer to populate raster metadata |
+| S7.9.6 | 📋 | Test STAC item generation from RasterMetadata |
+
+**Key Files** (planned):
+- `core/models/unified_metadata.py` — add RasterMetadata class
+- `app.cog_metadata` table DDL in db_maintenance
+- `services/stac_catalog.py` — refactor to use model
+
+---
+
+### Feature F7.15: HTTP-Triggered Docker Worker 📋 PLANNED
+
+**Deliverable**: Alternative Docker architecture using HTTP triggers instead of queue polling
+**Status**: 📋 PLANNED (alternative to current queue-based approach)
+**Added**: 12 JAN 2026
+
+**Context**: Current Docker worker polls Service Bus queues. This alternative uses Azure Container Apps with HTTP triggers for simpler scaling.
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S7.15.1 | 📋 | Design HTTP-triggered architecture |
+| S7.15.2 | 📋 | Create FastAPI endpoint for task execution |
+| S7.15.3 | 📋 | Configure Azure Container Apps HTTP scaling |
+| S7.15.4 | 📋 | Compare performance with queue-based approach |
+
+**Note**: May not be needed if current queue-based Docker worker (F7.12) meets requirements.
+
+---
+
+### Feature F7.16: Code Maintenance ✅ COMPLETE
+
+**Deliverable**: Split oversized db_maintenance.py into focused modules
+**Status**: ✅ COMPLETE (12 JAN 2026)
+**Added**: 12 JAN 2026
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S7.16.1 | ✅ | Split db_maintenance.py into schema-specific modules |
+| S7.16.2 | ✅ | Create db_maintenance_app.py (app schema) |
+| S7.16.3 | ✅ | Create db_maintenance_geo.py (geo schema) |
+| S7.16.4 | ✅ | Create db_maintenance_h3.py (h3 schema) |
+| S7.16.5 | ✅ | Update imports and verify functionality |
+
+**Key Files**:
+- `triggers/admin/db_maintenance.py` — router only
+- `triggers/admin/db_maintenance_app.py` — app schema DDL
+- `triggers/admin/db_maintenance_geo.py` — geo schema DDL
+- `triggers/admin/db_maintenance_h3.py` — h3 schema DDL
+
+---
+
+### Feature F7.17: Job Resubmit & Platform Features ✅ COMPLETE
+
+**Deliverable**: Job resubmission capability and Platform processing_mode parameter
+**Status**: ✅ COMPLETE (12 JAN 2026)
+**Added**: 12 JAN 2026
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S7.17.1 | ✅ | Add job resubmit endpoint `POST /api/jobs/{job_id}/resubmit` |
+| S7.17.2 | ✅ | Implement failed task retry logic |
+| S7.17.3 | ✅ | Add `processing_mode` parameter to Platform requests |
+| S7.17.4 | ✅ | Route `processing_mode=docker` to Docker worker queue |
+
+**Key Files**:
+- `triggers/trigger_jobs.py` — resubmit endpoint
+- `services/job_orchestrator.py` — resubmit logic
+- `triggers/trigger_platform.py` — processing_mode routing
+
+---

@@ -1232,12 +1232,13 @@ def _translate_to_coremachine(
         file_ext = file_name.split('.')[-1].lower()
 
         # Build converter params if CSV/lon-lat columns specified
+        # Note: Use 'lat_name'/'lon_name' keys to match job validator expectations
         converter_params = {}
         opts = request.processing_options
         if opts.get('lon_column') or opts.get('lat_column') or opts.get('wkt_column'):
             converter_params = {
-                'lon_column': opts.get('lon_column'),
-                'lat_column': opts.get('lat_column'),
+                'lon_name': opts.get('lon_column'),
+                'lat_name': opts.get('lat_column'),
                 'wkt_column': opts.get('wkt_column')
             }
 

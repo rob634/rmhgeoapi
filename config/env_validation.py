@@ -457,10 +457,10 @@ ENV_VAR_RULES: Dict[str, EnvVarRule] = {
     # ENVIRONMENT & IDENTITY (12 JAN 2026)
     # =========================================================================
     "ENVIRONMENT": EnvVarRule(
-        pattern=re.compile(r"^(dev|test|staging|prod|production)$", re.IGNORECASE),
-        pattern_description="Environment name (dev, test, staging, prod)",
+        pattern=re.compile(r"^(dev|qa|uat|test|staging|prod|production)$", re.IGNORECASE),
+        pattern_description="Environment name (dev, qa, uat, test, staging, prod)",
         required=False,
-        fix_suggestion="Set to 'dev', 'test', 'staging', or 'prod'",
+        fix_suggestion="Set to 'dev', 'qa', 'uat', 'test', 'staging', or 'prod'",
         example="dev",
         default_value="dev",
     ),

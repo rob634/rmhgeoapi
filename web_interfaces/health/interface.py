@@ -46,17 +46,37 @@ class HealthInterface(BaseInterface):
 
         Returns:
             Complete HTML document string
+
+        Note:
+            This method is designed to be resilient - it will render a useful
+            diagnostic page even if config loading or other dependencies fail.
         """
-        content = self._generate_html_content()
+        startup_errors = []
+        tooltips = {}
+        docker_worker_url = ''
+
+        # Try to load config and generate tooltips - capture errors but don't fail
+        try:
+            tooltips = self._get_component_tooltips()
+        except Exception as e:
+            startup_errors.append(f"Config loading failed: {type(e).__name__}: {str(e)}")
+
+        # Try to get Docker worker URL
+        try:
+            from config import get_app_mode_config
+            app_mode_config = get_app_mode_config()
+            docker_worker_url = app_mode_config.docker_worker_url or ''
+        except Exception as e:
+            startup_errors.append(f"App mode config failed: {type(e).__name__}: {str(e)}")
+
+        # Generate content - use error-aware version if there are startup errors
+        if startup_errors:
+            content = self._generate_error_html_content(startup_errors)
+        else:
+            content = self._generate_html_content()
+
         custom_css = self._generate_custom_css()
-        tooltips = self._get_component_tooltips()
-
-        # Get Docker worker URL for JavaScript
-        from config import get_app_mode_config
-        app_mode_config = get_app_mode_config()
-        docker_worker_url = app_mode_config.docker_worker_url or ''
-
-        custom_js = self._generate_custom_js(tooltips, docker_worker_url)
+        custom_js = self._generate_custom_js(tooltips, docker_worker_url, startup_errors)
 
         return self.wrap_html(
             title="System Health Dashboard",
@@ -65,6 +85,70 @@ class HealthInterface(BaseInterface):
             custom_js=custom_js,
             include_htmx=True
         )
+
+    def _generate_error_html_content(self, startup_errors: list) -> str:
+        """
+        Generate HTML content when there are startup/config errors.
+
+        Shows a prominent error banner with details about what failed,
+        while still providing access to manual health checks.
+        """
+        error_items = ''.join(f'<li>{err}</li>' for err in startup_errors)
+
+        return f"""
+        <div class="container">
+            <!-- Startup Error Banner -->
+            <div class="startup-error-banner">
+                <h2>⚠️ System Startup Errors Detected</h2>
+                <p>The health dashboard encountered errors loading configuration. This usually indicates:</p>
+                <ul>
+                    <li>Missing or invalid environment variables</li>
+                    <li>Database connection issues</li>
+                    <li>Storage account configuration problems</li>
+                </ul>
+                <div class="error-details">
+                    <h3>Error Details:</h3>
+                    <ul class="error-list">
+                        {error_items}
+                    </ul>
+                </div>
+                <div class="error-actions">
+                    <p><strong>Recommended Actions:</strong></p>
+                    <ol>
+                        <li>Check Application Insights for <code>STARTUP_FAILED</code> logs</li>
+                        <li>Verify all required environment variables are set in Azure Function App settings</li>
+                        <li>Check database and storage account connectivity</li>
+                    </ol>
+                </div>
+            </div>
+
+            <!-- Manual Health Check Section -->
+            <div class="manual-health-section">
+                <h3>Manual Health Check</h3>
+                <p>Try fetching the health endpoint directly to see more details:</p>
+                <div class="curl-example">
+                    <code>curl {os.environ.get('WEBSITE_HOSTNAME', 'localhost')}/api/health</code>
+                </div>
+                <button class="btn btn-primary" onclick="tryHealthEndpoint()">
+                    🔍 Try Health Endpoint
+                </button>
+                <div id="manual-health-result" class="manual-result hidden"></div>
+            </div>
+
+            <!-- Environment Info -->
+            <div class="env-info-section">
+                <h3>Environment Information</h3>
+                <table class="env-table">
+                    <tr><td>WEBSITE_HOSTNAME</td><td>{os.environ.get('WEBSITE_HOSTNAME', 'NOT SET')}</td></tr>
+                    <tr><td>FUNCTIONS_WORKER_RUNTIME</td><td>{os.environ.get('FUNCTIONS_WORKER_RUNTIME', 'NOT SET')}</td></tr>
+                    <tr><td>POSTGIS_HOST</td><td>{os.environ.get('POSTGIS_HOST', 'NOT SET')[:30] + '...' if os.environ.get('POSTGIS_HOST') else 'NOT SET'}</td></tr>
+                    <tr><td>POSTGIS_DATABASE</td><td>{os.environ.get('POSTGIS_DATABASE', 'NOT SET')}</td></tr>
+                    <tr><td>APP_SCHEMA</td><td>{os.environ.get('APP_SCHEMA', 'NOT SET')}</td></tr>
+                    <tr><td>PGSTAC_SCHEMA</td><td>{os.environ.get('PGSTAC_SCHEMA', 'NOT SET')}</td></tr>
+                </table>
+            </div>
+        </div>
+        """
 
     def _get_component_tooltips(self) -> dict:
         """
@@ -959,6 +1043,182 @@ class HealthInterface(BaseInterface):
             margin-bottom: 20px;
         }
 
+        /* Startup Error Banner (for config/initialization failures) */
+        .startup-error-banner {
+            background: #FEF2F2;
+            border: 2px solid #DC2626;
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 24px;
+        }
+
+        .startup-error-banner h2 {
+            color: #DC2626;
+            margin: 0 0 16px 0;
+            font-size: 20px;
+        }
+
+        .startup-error-banner p {
+            color: #7F1D1D;
+            margin: 8px 0;
+        }
+
+        .startup-error-banner ul, .startup-error-banner ol {
+            color: #7F1D1D;
+            margin: 8px 0 8px 20px;
+        }
+
+        .startup-error-banner .error-details {
+            background: #FEE2E2;
+            border-radius: 4px;
+            padding: 16px;
+            margin: 16px 0;
+        }
+
+        .startup-error-banner .error-details h3 {
+            color: #991B1B;
+            margin: 0 0 8px 0;
+            font-size: 14px;
+        }
+
+        .startup-error-banner .error-list {
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 12px;
+            background: #1F2937;
+            color: #F87171;
+            padding: 12px 16px;
+            border-radius: 4px;
+            list-style: none;
+            margin: 0;
+        }
+
+        .startup-error-banner .error-list li {
+            padding: 4px 0;
+            border-bottom: 1px solid #374151;
+        }
+
+        .startup-error-banner .error-list li:last-child {
+            border-bottom: none;
+        }
+
+        .startup-error-banner .error-actions {
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid #FECACA;
+        }
+
+        .startup-error-banner code {
+            background: #FEE2E2;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 12px;
+        }
+
+        /* Manual Health Check Section */
+        .manual-health-section {
+            background: white;
+            border: 1px solid var(--ds-gray-light);
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 24px;
+        }
+
+        .manual-health-section h3 {
+            margin: 0 0 12px 0;
+            color: var(--ds-navy);
+        }
+
+        .curl-example {
+            background: #1F2937;
+            color: #10B981;
+            padding: 12px 16px;
+            border-radius: 4px;
+            margin: 12px 0;
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 13px;
+        }
+
+        .manual-result {
+            margin-top: 16px;
+            padding: 16px;
+            border-radius: 4px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .manual-result .loading {
+            color: var(--ds-blue-primary);
+        }
+
+        .manual-result .success {
+            background: #D1FAE5;
+            border: 1px solid #10B981;
+            border-radius: 4px;
+            padding: 12px;
+        }
+
+        .manual-result .success h4 {
+            color: #065F46;
+            margin: 0 0 8px 0;
+        }
+
+        .manual-result .error {
+            background: #FEE2E2;
+            border: 1px solid #DC2626;
+            border-radius: 4px;
+            padding: 12px;
+        }
+
+        .manual-result .error h4 {
+            color: #991B1B;
+            margin: 0 0 8px 0;
+        }
+
+        .manual-result pre {
+            background: #1F2937;
+            color: #E5E7EB;
+            padding: 12px;
+            border-radius: 4px;
+            font-size: 11px;
+            overflow-x: auto;
+            max-height: 250px;
+        }
+
+        /* Environment Info Section (for error page) */
+        .env-info-section {
+            background: white;
+            border: 1px solid var(--ds-gray-light);
+            border-radius: 8px;
+            padding: 24px;
+        }
+
+        .env-info-section h3 {
+            margin: 0 0 16px 0;
+            color: var(--ds-navy);
+        }
+
+        .env-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .env-table td {
+            padding: 8px 12px;
+            border-bottom: 1px solid var(--ds-gray-light);
+            font-size: 13px;
+        }
+
+        .env-table td:first-child {
+            font-weight: 600;
+            color: var(--ds-gray);
+            width: 200px;
+        }
+
+        .env-table td:last-child {
+            font-family: 'Monaco', 'Courier New', monospace;
+            color: var(--ds-navy);
+        }
+
         /* Environment Info */
         .environment-info {
             background: white;
@@ -1634,9 +1894,10 @@ class HealthInterface(BaseInterface):
         }
         """
 
-    def _generate_custom_js(self, tooltips: dict, docker_worker_url: str = '') -> str:
+    def _generate_custom_js(self, tooltips: dict, docker_worker_url: str = '', startup_errors: list = None) -> str:
         """Generate custom JavaScript for Health Dashboard."""
         tooltips_json = json.dumps(tooltips)
+        has_startup_errors = 'true' if startup_errors else 'false'
 
         # Inject dynamic tooltips at the start, then use regular string for the rest
         return f"""
@@ -1645,6 +1906,48 @@ class HealthInterface(BaseInterface):
 
         // Docker Worker URL for health checks (empty string if not configured)
         const DOCKER_WORKER_URL = '{docker_worker_url}';
+
+        // Whether there were startup errors (config loading failures)
+        const HAS_STARTUP_ERRORS = {has_startup_errors};
+
+        // Manual health endpoint check (for error recovery UI)
+        async function tryHealthEndpoint() {{
+            const resultDiv = document.getElementById('manual-health-result');
+            if (!resultDiv) return;
+
+            resultDiv.classList.remove('hidden');
+            resultDiv.innerHTML = '<div class="loading">Checking health endpoint...</div>';
+
+            try {{
+                const response = await fetch('/api/health');
+                const data = await response.json();
+
+                if (response.ok) {{
+                    resultDiv.innerHTML = `
+                        <div class="success">
+                            <h4>✅ Health endpoint responded (HTTP ${{response.status}})</h4>
+                            <pre>${{JSON.stringify(data, null, 2)}}</pre>
+                        </div>
+                    `;
+                }} else {{
+                    resultDiv.innerHTML = `
+                        <div class="error">
+                            <h4>⚠️ Health endpoint returned error (HTTP ${{response.status}})</h4>
+                            <pre>${{JSON.stringify(data, null, 2)}}</pre>
+                        </div>
+                    `;
+                }}
+            }} catch (err) {{
+                resultDiv.innerHTML = `
+                    <div class="error">
+                        <h4>❌ Failed to reach health endpoint</h4>
+                        <p><strong>Error:</strong> ${{err.message}}</p>
+                        <p>This usually means the Azure Function is not starting properly.
+                           Check Application Insights for startup errors.</p>
+                    </div>
+                `;
+            }}
+        }}
 
         // Apply dynamic tooltips on page load
         function applyDynamicTooltips() {{

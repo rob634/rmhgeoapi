@@ -323,6 +323,7 @@ from triggers.submit_job import submit_job_trigger
 from triggers.get_job_status import get_job_status_trigger
 from triggers.get_job_logs import get_job_logs_trigger
 from triggers.jobs.resubmit import job_resubmit
+from triggers.jobs.delete import job_delete
 from triggers.schema_pydantic_deploy import pydantic_deploy_trigger
 # ⚠️ LEGACY IMPORTS - DEPRECATED (10 NOV 2025) - COMMENTED OUT 16 NOV 2025
 # These imports are kept temporarily for backward compatibility
@@ -616,6 +617,23 @@ def job_resubmit_route(req: func.HttpRequest) -> func.HttpResponse:
         - force: Resubmit even if job is processing (default: false)
     """
     return job_resubmit(req)
+
+
+@app.route(route="jobs/{job_id}", methods=["DELETE"])
+def job_delete_route(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Job delete endpoint (14 JAN 2026).
+
+    Deletes job and all artifacts without resubmitting.
+    Same cleanup as resubmit but stops after cleanup.
+
+    Query params:
+        - confirm=yes (required): Explicit confirmation
+        - dry_run=true: Preview cleanup without executing
+        - delete_blobs=true: Also delete COG files
+        - force=true: Delete even if job is processing
+    """
+    return job_delete(req)
 
 
 # ============================================================================

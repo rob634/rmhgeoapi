@@ -96,6 +96,9 @@ class TasksInterface(BaseInterface):
                         <button id="resubmitBtn" class="resubmit-button" onclick="showResubmitModal()">
                             🔄 Resubmit Job
                         </button>
+                        <button id="deleteBtn" class="delete-button" onclick="showDeleteModal()">
+                            🗑️ Delete Job
+                        </button>
                         <a href="/api/interface/pipeline" class="back-button-link">
                             Back to Pipeline
                         </a>
@@ -258,6 +261,61 @@ class TasksInterface(BaseInterface):
                     </div>
                 </div>
             </div>
+
+            <!-- Delete Modal (14 JAN 2026) -->
+            <div id="delete-modal" class="modal-overlay hidden">
+                <div class="modal-content">
+                    <div class="modal-header delete-modal-header">
+                        <h3>🗑️ Delete Job</h3>
+                        <button class="modal-close" onclick="hideDeleteModal()">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div id="delete-loading" class="modal-loading hidden">
+                            <div class="spinner-small"></div>
+                            <span>Analyzing job artifacts...</span>
+                        </div>
+                        <div id="delete-preview" class="hidden">
+                            <p class="delete-warning">
+                                ⚠️ This will <strong>permanently delete</strong> the job and all its data. This cannot be undone.
+                            </p>
+                            <div class="cleanup-preview">
+                                <h4>Items to Delete</h4>
+                                <div class="cleanup-item">
+                                    <span class="cleanup-label">Tasks to delete:</span>
+                                    <span class="cleanup-value" id="delete-preview-tasks">0</span>
+                                </div>
+                                <div class="cleanup-item">
+                                    <span class="cleanup-label">STAC items to delete:</span>
+                                    <span class="cleanup-value" id="delete-preview-stac">0</span>
+                                </div>
+                                <div class="cleanup-item">
+                                    <span class="cleanup-label">Tables to drop:</span>
+                                    <span class="cleanup-value" id="delete-preview-tables">0</span>
+                                </div>
+                            </div>
+                            <div class="resubmit-options">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="delete-blobs-checkbox-del">
+                                    <span>Also delete blob files (COGs)</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div id="delete-error" class="modal-error hidden">
+                            <span id="delete-error-message"></span>
+                        </div>
+                        <div id="delete-success" class="modal-success hidden">
+                            <span>✅ Job deleted successfully!</span>
+                            <p>Redirecting to pipeline...</p>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="modal-btn modal-btn-cancel" onclick="hideDeleteModal()">Cancel</button>
+                        <button class="modal-btn modal-btn-danger" id="confirm-delete-btn" onclick="executeDelete()">
+                            Delete Job
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
         """
 
@@ -339,6 +397,29 @@ class TasksInterface(BaseInterface):
         }
 
         .resubmit-button:disabled {
+            background: #e9ecef;
+            color: #626F86;
+            cursor: not-allowed;
+        }
+
+        /* Delete button (14 JAN 2026) */
+        .delete-button {
+            background: #DC2626;
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 3px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 13px;
+        }
+
+        .delete-button:hover {
+            background: #B91C1C;
+        }
+
+        .delete-button:disabled {
             background: #e9ecef;
             color: #626F86;
             cursor: not-allowed;
@@ -1798,6 +1879,42 @@ class TasksInterface(BaseInterface):
             margin-bottom: 16px;
             color: #92400E;
             font-size: 13px;
+        }
+
+        /* Delete modal styles (14 JAN 2026) */
+        .delete-warning {
+            background: #FEE2E2;
+            border: 1px solid #DC2626;
+            border-radius: 4px;
+            padding: 12px;
+            margin-bottom: 16px;
+            color: #991B1B;
+            font-size: 13px;
+        }
+
+        .delete-modal-header {
+            background: #FEE2E2 !important;
+            border-bottom-color: #DC2626 !important;
+        }
+
+        .delete-modal-header h3 {
+            color: #991B1B !important;
+        }
+
+        .modal-btn-danger {
+            background: #DC2626;
+            border: none;
+            color: white;
+        }
+
+        .modal-btn-danger:hover {
+            background: #B91C1C;
+        }
+
+        .modal-btn-danger:disabled {
+            background: #e9ecef;
+            color: #626F86;
+            cursor: not-allowed;
         }
 
         .cleanup-preview {
@@ -3560,10 +3677,118 @@ class TasksInterface(BaseInterface):
             }}
         }}
 
-        // Close modal on escape key
+        // ============================================================
+        // DELETE MODAL (14 JAN 2026)
+        // ============================================================
+
+        let deleteCleanupPlan = null;
+
+        // Show delete modal with dry-run preview
+        async function showDeleteModal() {{
+            const modal = document.getElementById('delete-modal');
+            const loading = document.getElementById('delete-loading');
+            const preview = document.getElementById('delete-preview');
+            const error = document.getElementById('delete-error');
+            const success = document.getElementById('delete-success');
+            const confirmBtn = document.getElementById('confirm-delete-btn');
+
+            // Reset state
+            loading.classList.remove('hidden');
+            preview.classList.add('hidden');
+            error.classList.add('hidden');
+            success.classList.add('hidden');
+            confirmBtn.disabled = true;
+
+            // Show modal
+            modal.classList.remove('hidden');
+
+            try {{
+                // Fetch dry-run preview using resubmit endpoint (same cleanup plan)
+                const response = await fetch(`${{API_BASE_URL}}/api/jobs/${{JOB_ID}}/resubmit`, {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{ dry_run: true }})
+                }});
+
+                const data = await response.json();
+
+                loading.classList.add('hidden');
+
+                if (!data.success && !data.dry_run) {{
+                    throw new Error(data.error || 'Failed to analyze job');
+                }}
+
+                // Store cleanup plan for later
+                deleteCleanupPlan = data.cleanup_plan || {{}};
+
+                // Update preview
+                document.getElementById('delete-preview-tasks').textContent = deleteCleanupPlan.tasks_to_delete || 0;
+                document.getElementById('delete-preview-stac').textContent = (deleteCleanupPlan.stac_items_to_delete || []).length;
+                document.getElementById('delete-preview-tables').textContent = (deleteCleanupPlan.tables_to_drop || []).length;
+
+                // Show preview
+                preview.classList.remove('hidden');
+                confirmBtn.disabled = false;
+
+            }} catch (err) {{
+                loading.classList.add('hidden');
+                error.classList.remove('hidden');
+                document.getElementById('delete-error-message').textContent = err.message;
+            }}
+        }}
+
+        // Hide delete modal
+        function hideDeleteModal() {{
+            document.getElementById('delete-modal').classList.add('hidden');
+            deleteCleanupPlan = null;
+        }}
+
+        // Execute delete
+        async function executeDelete() {{
+            const preview = document.getElementById('delete-preview');
+            const error = document.getElementById('delete-error');
+            const success = document.getElementById('delete-success');
+            const confirmBtn = document.getElementById('confirm-delete-btn');
+            const deleteBlobs = document.getElementById('delete-blobs-checkbox-del').checked;
+
+            // Disable button
+            confirmBtn.disabled = true;
+            confirmBtn.textContent = 'Deleting...';
+            error.classList.add('hidden');
+
+            try {{
+                const response = await fetch(`${{API_BASE_URL}}/api/jobs/${{JOB_ID}}?confirm=yes&delete_blobs=${{deleteBlobs}}`, {{
+                    method: 'DELETE'
+                }});
+
+                const data = await response.json();
+
+                if (!data.success) {{
+                    throw new Error(data.error || 'Delete failed');
+                }}
+
+                // Show success
+                preview.classList.add('hidden');
+                success.classList.remove('hidden');
+
+                // Redirect to pipeline after delay
+                setTimeout(() => {{
+                    window.location.href = '/api/interface/pipeline';
+                }}, 1500);
+
+            }} catch (err) {{
+                error.classList.remove('hidden');
+                document.getElementById('delete-error-message').textContent = err.message;
+                confirmBtn.disabled = false;
+                confirmBtn.textContent = 'Delete Job';
+            }}
+        }}
+
+        // Close modals on escape key
         document.addEventListener('keydown', (e) => {{
             if (e.key === 'Escape') {{
                 hideResubmitModal();
+                hideDeleteModal();
             }}
         }});
 

@@ -12,8 +12,8 @@ Database Diagnostics Admin Trigger.
 
 Database diagnostics and system testing endpoints.
 
-Consolidated endpoint pattern (15 DEC 2025):
-    GET /api/dbadmin/diagnostics?type={stats|enums|functions|all|config|errors}
+Consolidated endpoint pattern (15 DEC 2025, updated 14 JAN 2026):
+    GET /api/dbadmin/diagnostics?type={stats|enums|functions|all|config|errors|geo_integrity}
     GET /api/dbadmin/diagnostics?type=lineage&job_id={job_id}
 
 Exports:
@@ -73,7 +73,7 @@ class AdminDbDiagnosticsTrigger:
             route="dbadmin/diagnostics",
             methods=["GET"],
             handler="handle_diagnostics",
-            description="Consolidated diagnostics: ?type={stats|enums|functions|all|config|errors|lineage}"
+            description="Consolidated diagnostics: ?type={stats|enums|functions|all|config|errors|lineage|geo_integrity}"
         ),
     ]
 
@@ -88,6 +88,7 @@ class AdminDbDiagnosticsTrigger:
         "config": "_get_config_audit",
         "lineage": "_get_etl_lineage",
         "errors": "_get_error_aggregation",
+        "geo_integrity": "_get_geo_integrity",  # 14 JAN 2026 - TiPG compatibility check
     }
 
     def __new__(cls):
@@ -1076,6 +1077,108 @@ class AdminDbDiagnosticsTrigger:
 
         except Exception as e:
             logger.error(f"❌ Error getting error aggregation: {e}")
+            logger.error(traceback.format_exc())
+            return func.HttpResponse(
+                body=json.dumps({
+                    'error': str(e),
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                }),
+                status_code=500,
+                mimetype='application/json'
+            )
+
+
+    def _get_geo_integrity(self, req: func.HttpRequest) -> func.HttpResponse:
+        """
+        Get geo schema integrity validation (14 JAN 2026).
+
+        GET /api/dbadmin/diagnostics?type=geo_integrity
+
+        Validates geo schema tables for TiPG/OGC Features compatibility:
+        - Untyped geometry columns (GEOMETRY without POLYGON, POINT, etc.)
+        - Missing SRID (srid = 0 or NULL)
+        - Missing spatial indexes
+        - Tables not registered in geometry_columns view
+
+        Returns:
+            {
+                "health_status": "HEALTHY|WARNING|DEGRADED",
+                "total_tables": 15,
+                "valid_tables": 12,
+                "invalid_tables": 3,
+                "tipg_compatible": 12,
+                "tipg_incompatible": 3,
+                "delete_candidates": ["geo.old_table1", "geo.bad_table2"],
+                "summary": {...},
+                "timestamp": "..."
+            }
+        """
+        logger.info("🔍 Running geo schema integrity check")
+
+        try:
+            from infrastructure.database import get_connection
+            from core.diagnostics import GeoSchemaValidator
+
+            with get_connection() as conn:
+                validator = GeoSchemaValidator(conn, schema='geo')
+                report = validator.validate_all(include_row_counts=False)
+
+            # Determine health status
+            tipg_incompatible = report.get('tipg_incompatible', 0)
+            invalid_count = report.get('invalid_tables', 0)
+
+            # TiPG sync check
+            tipg_sync = report.get('tipg_sync', {})
+            missing_from_tipg = tipg_sync.get('missing_from_tipg', [])
+
+            if tipg_incompatible > 0:
+                health_status = "DEGRADED"
+            elif invalid_count > 0 or missing_from_tipg:
+                health_status = "WARNING"
+            else:
+                health_status = "HEALTHY"
+
+            # Build response
+            result = {
+                "health_status": health_status,
+                "total_tables": report.get('total_tables', 0),
+                "valid_tables": report.get('valid_tables', 0),
+                "invalid_tables": invalid_count,
+                "tipg_compatible": report.get('tipg_compatible', 0),
+                "tipg_incompatible": tipg_incompatible,
+                "tipg_sync": {
+                    "in_sync": tipg_sync.get('in_sync'),
+                    "missing_from_tipg": missing_from_tipg,
+                    "geo_tables_count": tipg_sync.get('geo_tables_count', 0),
+                    "tipg_collections_count": tipg_sync.get('tipg_collections_count', 0),
+                    "error": tipg_sync.get('error')
+                },
+                "delete_candidates": [
+                    t['full_name'] for t in report.get('tables', [])
+                    if not t.get('is_tipg_compatible')
+                ],
+                "issues_by_type": report.get('summary', {}).get('issue_counts', {}),
+                "geometry_types": report.get('summary', {}).get('geometry_types', {}),
+                "srids": report.get('summary', {}).get('srids', {}),
+                "tables_without_index": report.get('summary', {}).get('tables_without_index', 0),
+                "issues_found": report.get('issues_found', []),
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+
+            logger.info(
+                f"✅ Geo integrity check completed: "
+                f"{result['tipg_compatible']}/{result['total_tables']} TiPG-compatible, "
+                f"{len(result['delete_candidates'])} delete candidates"
+            )
+
+            return func.HttpResponse(
+                body=json.dumps(result, indent=2),
+                status_code=200,
+                mimetype='application/json'
+            )
+
+        except Exception as e:
+            logger.error(f"❌ Error running geo integrity check: {e}")
             logger.error(traceback.format_exc())
             return func.HttpResponse(
                 body=json.dumps({

@@ -3176,6 +3176,39 @@ def metadata_consistency_timer(timer: func.TimerRequest) -> None:
 
 
 # ============================================================================
+# GEO INTEGRITY TIMER (14 JAN 2026)
+# ============================================================================
+# Timer trigger for geo schema integrity validation.
+# Detects tables with untyped geometry, missing SRID - incompatible with TiPG.
+# Runs every 6 hours, offset from geo_orphan by 2 hours.
+# ============================================================================
+
+@app.timer_trigger(
+    schedule="0 0 2,8,14,20 * * *",  # Every 6 hours at 02:00, 08:00, 14:00, 20:00 UTC
+    arg_name="timer",
+    run_on_startup=False
+)
+def geo_integrity_check_timer(timer: func.TimerRequest) -> None:
+    """
+    Timer trigger: Check geo schema table integrity every 6 hours.
+
+    Detects tables incompatible with TiPG/OGC Features:
+    1. Untyped geometry columns (GEOMETRY without POLYGON, POINT, etc.)
+    2. Missing SRID (srid = 0 or NULL)
+    3. Missing spatial indexes
+    4. Tables not registered in geometry_columns view
+
+    Detection only - does NOT auto-delete. Logs DELETE CANDIDATES for manual action.
+
+    Schedule: Every 6 hours, offset from geo_orphan by 2 hours to spread load.
+
+    Handler: triggers/admin/geo_integrity_timer.py
+    """
+    from triggers.admin.geo_integrity_timer import geo_integrity_timer_handler
+    geo_integrity_timer_handler.handle(timer)
+
+
+# ============================================================================
 # CURATED DATASET SCHEDULER (15 DEC 2025)
 # ============================================================================
 # Daily timer trigger to check for curated datasets that need updating.

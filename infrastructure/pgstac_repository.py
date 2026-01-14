@@ -293,15 +293,16 @@ class PgStacRepository:
 
             with self._pg_repo._get_connection() as conn:
                 with conn.cursor() as cur:
-                    # Use PgSTAC's create_item function (singular - single item)
-                    # 18 NOV 2025: Fixed - was create_items (plural) which expects array
+                    # Use PgSTAC's upsert_item for idempotent inserts (13 JAN 2026)
+                    # upsert_item updates if exists, create_item fails on duplicate
+                    # This allows job resubmission without manual cleanup
                     cur.execute(
-                        "SELECT * FROM pgstac.create_item(%s)",
+                        "SELECT * FROM pgstac.upsert_item(%s)",
                         (item_json,)
                     )
                     conn.commit()
 
-                    logger.info(f"✅ Item inserted: {item_id}")
+                    logger.info(f"✅ Item upserted: {item_id}")
                     return item_id
 
         except Exception as e:

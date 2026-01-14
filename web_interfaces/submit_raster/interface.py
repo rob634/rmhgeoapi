@@ -716,15 +716,16 @@ class SubmitRasterInterface(BaseInterface):
 
                         <!-- STAC Configuration Section -->
                         <div class="stac-section">
-                            <div class="form-group-header">STAC Configuration (Optional)</div>
+                            <div class="form-group-header">STAC Configuration</div>
                             <div class="stac-fields">
                                 <div class="form-group">
-                                    <label for="collection_id">Collection ID</label>
+                                    <label for="collection_id">Collection ID <span class="required">*</span></label>
                                     <input type="text" id="collection_id" name="collection_id"
                                            placeholder="e.g., aerial-imagery"
                                            pattern="[a-z0-9][a-z0-9-]*[a-z0-9]"
-                                           title="Lowercase letters, numbers, hyphens. No leading/trailing hyphens.">
-                                    <span class="field-hint">STAC collection to add item to (defaults to 'system-rasters' if blank)</span>
+                                           title="Lowercase letters, numbers, hyphens. No leading/trailing hyphens."
+                                           required>
+                                    <span class="field-hint">STAC collection to add item to (required)</span>
                                 </div>
                             </div>
                         </div>

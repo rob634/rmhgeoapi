@@ -91,7 +91,7 @@ class ProcessLargeRasterDockerJob(JobBaseMixin, JobBase):
         'band_names': {'type': 'dict', 'default': None},  # e.g., {"5": "Red", "3": "Green", "2": "Blue"}
 
         # STAC
-        'collection_id': {'type': 'str', 'default': STACDefaults.RASTER_COLLECTION},
+        'collection_id': {'type': 'str', 'required': True},  # Required (14 JAN 2026)
         'item_id': {'type': 'str', 'default': None},
 
         # Platform passthrough (DDH integration)
@@ -139,7 +139,7 @@ class ProcessLargeRasterDockerJob(JobBaseMixin, JobBase):
         # Resolve defaults from config
         target_crs = job_params.get('target_crs') or config.raster.target_crs
         jpeg_quality = job_params.get('jpeg_quality') or config.raster.cog_jpeg_quality
-        collection_id = job_params.get('collection_id') or STACDefaults.RASTER_COLLECTION
+        collection_id = job_params['collection_id']  # Required (14 JAN 2026)
 
         return [{
             'task_id': generate_deterministic_task_id(job_id, 1, "process_large_complete"),

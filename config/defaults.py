@@ -526,6 +526,13 @@ class TaskRoutingDefaults:
         "ingest_register_collection",
         "ingest_register_items",
         "ingest_finalize",
+        # Orphan Blob handlers (14 JAN 2026) - F7.11 STAC Self-Healing
+        # Inventory is lightweight (blob listing, DB queries)
+        # Validate is lightweight (blob existence check)
+        # Register is raster-bound but quick (rio-stac extraction)
+        "orphan_blob_inventory",
+        "silver_blob_validate",
+        "silver_blob_register",
     ]
 
 
@@ -778,7 +785,7 @@ class STACDefaults:
     # DEFAULT COLLECTION IDs BY DATA TYPE
     # ==========================================================================
     VECTOR_COLLECTION = "system-vectors"      # PostGIS vector tables
-    RASTER_COLLECTION = "system-rasters"      # COG files
+    # RASTER_COLLECTION removed (14 JAN 2026) - collection_id now required for all raster jobs
     H3_COLLECTION = "system-h3-grids"         # H3 hexagonal grids
     DEV_COLLECTION = "dev"                    # Development/testing
     COGS_COLLECTION = "cogs"                  # User-submitted COGs
@@ -789,7 +796,7 @@ class STACDefaults:
     # VALID COLLECTIONS (for job parameter validation)
     # ==========================================================================
     VALID_USER_COLLECTIONS = ["dev", "cogs", "vectors", "geoparquet"]
-    SYSTEM_COLLECTIONS = ["system-vectors", "system-rasters", "system-h3-grids"]
+    SYSTEM_COLLECTIONS = ["system-vectors", "system-h3-grids"]  # system-rasters removed
 
     # ==========================================================================
     # MEDIA TYPES
@@ -826,12 +833,7 @@ class STACDefaults:
             "asset_type": "vector",
             "media_type": "application/geo+json",
         },
-        "system-rasters": {
-            "title": "System STAC - Raster Files",
-            "description": "Operational tracking of COG files created by ETL",
-            "asset_type": "raster",
-            "media_type": "image/tiff; application=geotiff; profile=cloud-optimized",
-        },
+        # system-rasters removed (14 JAN 2026) - collection_id now required for all raster jobs
         "cogs": {
             "title": "Cloud-Optimized GeoTIFFs",
             "description": "Raster data converted to COG format in EPSG:4326 for cloud-native access",

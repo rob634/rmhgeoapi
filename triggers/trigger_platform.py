@@ -70,6 +70,27 @@ except Exception as e:
 
 
 # ============================================================================
+# URL GENERATION HELPERS (14 JAN 2026)
+# ============================================================================
+
+def _generate_job_status_url(job_id: str) -> str:
+    """
+    Generate absolute URL for platform job status endpoint.
+
+    Used in submission responses so users can click directly to see job status.
+    Uses ETL_APP_URL from config for the base URL.
+
+    Args:
+        job_id: CoreMachine job ID
+
+    Returns:
+        Absolute URL like: https://app.azurewebsites.net/api/platform/jobs/{job_id}/status
+    """
+    base_url = config.etl_app_base_url.rstrip('/')
+    return f"{base_url}/api/platform/jobs/{job_id}/status"
+
+
+# ============================================================================
 # HTTP HANDLER
 # ============================================================================
 
@@ -135,7 +156,8 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                     "request_id": request_id,
                     "job_id": existing.job_id,
                     "message": "Request already submitted (idempotent)",
-                    "monitor_url": f"/api/platform/status/{request_id}"
+                    "monitor_url": f"/api/platform/status/{request_id}",
+                    "job_status_url": _generate_job_status_url(existing.job_id)
                 }),
                 status_code=200,
                 headers={"Content-Type": "application/json"}
@@ -172,7 +194,8 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                 "job_id": job_id,
                 "job_type": job_type,
                 "message": f"Platform request submitted. CoreMachine job created.",
-                "monitor_url": f"/api/platform/status/{request_id}"
+                "monitor_url": f"/api/platform/status/{request_id}",
+                "job_status_url": _generate_job_status_url(job_id)
             }),
             status_code=202,
             headers={"Content-Type": "application/json"}
@@ -300,7 +323,8 @@ def platform_raster_submit(req: func.HttpRequest) -> func.HttpResponse:
                     "request_id": request_id,
                     "job_id": existing.job_id,
                     "message": "Request already submitted (idempotent)",
-                    "monitor_url": f"/api/platform/status/{request_id}"
+                    "monitor_url": f"/api/platform/status/{request_id}",
+                    "job_status_url": _generate_job_status_url(existing.job_id)
                 }),
                 status_code=200,
                 headers={"Content-Type": "application/json"}
@@ -337,7 +361,8 @@ def platform_raster_submit(req: func.HttpRequest) -> func.HttpResponse:
                 "job_id": job_id,
                 "job_type": job_type,
                 "message": "Single raster request submitted.",
-                "monitor_url": f"/api/platform/status/{request_id}"
+                "monitor_url": f"/api/platform/status/{request_id}",
+                "job_status_url": _generate_job_status_url(job_id)
             }),
             status_code=202,
             headers={"Content-Type": "application/json"}
@@ -445,7 +470,8 @@ def platform_raster_collection_submit(req: func.HttpRequest) -> func.HttpRespons
                     "request_id": request_id,
                     "job_id": existing.job_id,
                     "message": "Request already submitted (idempotent)",
-                    "monitor_url": f"/api/platform/status/{request_id}"
+                    "monitor_url": f"/api/platform/status/{request_id}",
+                    "job_status_url": _generate_job_status_url(existing.job_id)
                 }),
                 status_code=200,
                 headers={"Content-Type": "application/json"}
@@ -483,7 +509,8 @@ def platform_raster_collection_submit(req: func.HttpRequest) -> func.HttpRespons
                 "job_type": job_type,
                 "file_count": len(file_name),
                 "message": f"Raster collection request submitted ({len(file_name)} files).",
-                "monitor_url": f"/api/platform/status/{request_id}"
+                "monitor_url": f"/api/platform/status/{request_id}",
+                "job_status_url": _generate_job_status_url(job_id)
             }),
             status_code=202,
             headers={"Content-Type": "application/json"}
@@ -603,7 +630,8 @@ def platform_unpublish_vector(req: func.HttpRequest) -> func.HttpResponse:
                     "job_id": existing.job_id,
                     "mode": mode,
                     "message": "Unpublish request already submitted (idempotent)",
-                    "monitor_url": f"/api/platform/status/{unpublish_request_id}"
+                    "monitor_url": f"/api/platform/status/{unpublish_request_id}",
+                    "job_status_url": _generate_job_status_url(existing.job_id)
                 }),
                 status_code=200,
                 headers={"Content-Type": "application/json"}
@@ -644,7 +672,8 @@ def platform_unpublish_vector(req: func.HttpRequest) -> func.HttpResponse:
                 "dry_run": dry_run,
                 "table_name": table_name,
                 "message": f"Vector unpublish job submitted (dry_run={dry_run})",
-                "monitor_url": f"/api/platform/status/{unpublish_request_id}"
+                "monitor_url": f"/api/platform/status/{unpublish_request_id}",
+                "job_status_url": _generate_job_status_url(job_id)
             }),
             status_code=202,
             headers={"Content-Type": "application/json"}
@@ -801,7 +830,8 @@ def platform_unpublish_raster(req: func.HttpRequest) -> func.HttpResponse:
                         "mode": mode,
                         "retry_count": existing.retry_count,
                         "message": "Unpublish request already submitted (idempotent)",
-                        "monitor_url": f"/api/platform/status/{unpublish_request_id}"
+                        "monitor_url": f"/api/platform/status/{unpublish_request_id}",
+                        "job_status_url": _generate_job_status_url(existing.job_id)
                     }),
                     status_code=200,
                     headers={"Content-Type": "application/json"}
@@ -846,7 +876,8 @@ def platform_unpublish_raster(req: func.HttpRequest) -> func.HttpResponse:
                 "stac_item_id": stac_item_id,
                 "collection_id": collection_id,
                 "message": f"Raster unpublish job submitted{retry_msg} (dry_run={dry_run})",
-                "monitor_url": f"/api/platform/status/{unpublish_request_id}"
+                "monitor_url": f"/api/platform/status/{unpublish_request_id}",
+                "job_status_url": _generate_job_status_url(job_id)
             }),
             status_code=202,
             headers={"Content-Type": "application/json"}

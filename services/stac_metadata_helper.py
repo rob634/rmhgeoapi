@@ -661,6 +661,12 @@ class STACMetadataHelper:
                 'href': f"{base}/cog/WebMercatorQuad/tilejson.json?url={encoded}{param_suffix}",
                 'type': 'application/json',
                 'title': 'TileJSON specification'
+            },
+            {
+                'rel': 'tiles',
+                'href': f"{base}/cog/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}?url={encoded}{param_suffix}",
+                'type': 'image/png',
+                'title': 'XYZ tile endpoint (for web apps)'
             }
         ]
 

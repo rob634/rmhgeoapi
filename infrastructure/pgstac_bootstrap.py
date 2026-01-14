@@ -2621,27 +2621,28 @@ def get_all_collections(repo: Optional['PostgreSQLRepository'] = None) -> Dict[s
 
 def get_system_stac_collections() -> List[Dict[str, Any]]:
     """
-    Get STAC collection definitions for system collections (system-vectors, system-rasters).
+    Get STAC collection definitions for system collections (system-vectors only).
 
     This function returns the collection definitions needed to create the system
     STAC collections after a full schema rebuild. These collections track operational
     data created by ETL processes.
+
+    Note (14 JAN 2026): system-rasters removed - collection_id is now required for all raster jobs.
+    Rasters must be added to explicitly named collections.
 
     Returns:
         List of STAC collection dictionaries ready for insertion via pgstac.create_collection
 
     Used by:
         - triggers/admin/db_maintenance.py full_rebuild endpoint (Step 6)
-
-    Date: 25 NOV 2025
     """
     system_collections = []
 
-    # Only create system collections (system-vectors, system-rasters)
-    # Other collections (cogs, vectors, geoparquet, dev) are created on-demand
-    # Use only the first 2 system collections (vectors and rasters)
-    # system-h3-grids is created on-demand by H3 jobs
-    system_collection_types = STACDefaults.SYSTEM_COLLECTIONS[:2]
+    # Only create system-vectors on bootstrap (14 JAN 2026)
+    # - system-rasters removed: rasters require explicit collection_id
+    # - system-h3-grids: created on-demand by H3 jobs
+    # - Other collections (cogs, vectors, geoparquet, dev): created on-demand
+    system_collection_types = ["system-vectors"]  # Only vectors get auto-created
 
     for collection_type in system_collection_types:
         if collection_type in PgStacBootstrap.PRODUCTION_COLLECTIONS:

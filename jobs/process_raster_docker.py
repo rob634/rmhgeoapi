@@ -85,7 +85,7 @@ class ProcessRasterDockerJob(JobBaseMixin, JobBase):
         'strict_mode': {'type': 'bool', 'default': False},
 
         # STAC
-        'collection_id': {'type': 'str', 'default': None},
+        'collection_id': {'type': 'str', 'required': True},  # Required (14 JAN 2026)
         'item_id': {'type': 'str', 'default': None},
         'collection_must_exist': {'type': 'bool', 'default': False},  # Fail if collection doesn't exist (12 JAN 2026)
 
@@ -146,7 +146,7 @@ class ProcessRasterDockerJob(JobBaseMixin, JobBase):
         # Resolve defaults from config
         target_crs = job_params.get('target_crs') or config.raster.target_crs
         jpeg_quality = job_params.get('jpeg_quality') or config.raster.cog_jpeg_quality
-        collection_id = job_params.get('collection_id') or config.raster.stac_default_collection
+        collection_id = job_params['collection_id']  # Required (14 JAN 2026)
 
         return [{
             'task_id': generate_deterministic_task_id(job_id, 1, "process_complete"),

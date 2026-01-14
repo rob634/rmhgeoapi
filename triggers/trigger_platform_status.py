@@ -1,21 +1,23 @@
 # ============================================================================
-# PLATFORM REQUEST STATUS HTTP TRIGGER
+# PLATFORM STATUS HTTP TRIGGERS
 # ============================================================================
-# STATUS: Trigger layer - GET /api/platform/status/{request_id}
-# PURPOSE: Query Platform request status via thin tracking pattern
-# LAST_REVIEWED: 05 JAN 2026
+# STATUS: Trigger layer - Platform status endpoints
+# PURPOSE: Query Platform request and job status for gateway integration
+# LAST_REVIEWED: 14 JAN 2026
 # REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
-# EXPORTS: platform_request_status
+# EXPORTS: platform_request_status, platform_job_status
 # DEPENDENCIES: infrastructure.PlatformRepository, infrastructure.JobRepository
 # ============================================================================
 """
-Platform Request Status HTTP Trigger.
+Platform Status HTTP Triggers.
 
-Query Platform request status by looking up CoreMachine job status using thin tracking pattern.
+Query Platform request and job status. These endpoints are designed for
+gateway integration where only /api/platform/* endpoints are exposed externally.
 
 Endpoints:
-    GET /api/platform/status/{request_id} - Single request with verbose option
-    GET /api/platform/status - List all requests
+    GET /api/platform/status/{request_id} - Platform request status (by request_id)
+    GET /api/platform/status - List all platform requests
+    GET /api/platform/jobs/{job_id}/status - Direct job status (by job_id) [14 JAN 2026]
 
 REMOVED (19 DEC 2025):
     GET /api/platform/health - Use /api/health instead
@@ -23,7 +25,8 @@ REMOVED (19 DEC 2025):
     GET /api/platform/failures - Use /api/dbadmin/jobs?status=failed instead
 
 Exports:
-    platform_request_status: HTTP trigger function for GET /api/platform/status/{request_id}
+    platform_request_status: HTTP trigger for GET /api/platform/status/{request_id}
+    platform_job_status: HTTP trigger for GET /api/platform/jobs/{job_id}/status
 """
 
 import json
@@ -201,6 +204,145 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
             status_code=500,
             headers={"Content-Type": "application/json"}
         )
+
+
+# ============================================================================
+# DIRECT JOB STATUS (14 JAN 2026)
+# ============================================================================
+# Gateway-accessible endpoint for direct job status lookup by job_id.
+# Same output as /api/jobs/status/{job_id} but via platform/ for gateway access.
+# ============================================================================
+
+async def platform_job_status(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Get status of a CoreMachine job directly by job_id.
+
+    GET /api/platform/jobs/{job_id}/status
+        Returns job status with task summary - same format as /api/jobs/status/{job_id}.
+        Query params:
+            - verbose=true: Include full task details (default: false)
+
+    This endpoint is designed for gateway integration where only /api/platform/*
+    endpoints are exposed externally. Lazy users can click the job_status_url
+    returned from submission endpoints to see job progress.
+
+    Response:
+    {
+        "jobId": "abc123...",
+        "jobType": "process_raster_v2",
+        "status": "completed",
+        "stage": 3,
+        "totalStages": 3,
+        "parameters": {...},
+        "stageResults": {...},
+        "createdAt": "2025-01-14T10:00:00Z",
+        "updatedAt": "2025-01-14T10:05:00Z",
+        "resultData": {...},
+        "taskSummary": {
+            "total": 5,
+            "completed": 5,
+            "failed": 0,
+            "byStage": {...}
+        }
+    }
+    """
+    logger.info("Platform job status endpoint called")
+
+    try:
+        job_repo = JobRepository()
+        task_repo = TaskRepository()
+
+        # Extract job_id from route
+        job_id = req.route_params.get('job_id')
+        verbose = req.params.get('verbose', 'false').lower() == 'true'
+
+        if not job_id:
+            return func.HttpResponse(
+                json.dumps({
+                    "success": False,
+                    "error": "job_id is required"
+                }),
+                status_code=400,
+                headers={"Content-Type": "application/json"}
+            )
+
+        logger.debug(f"🔍 Retrieving job status for: {job_id}")
+
+        # Retrieve job record
+        job_record = job_repo.get_job(job_id)
+
+        if not job_record:
+            return func.HttpResponse(
+                json.dumps({
+                    "success": False,
+                    "error": f"Job not found: {job_id}"
+                }),
+                status_code=404,
+                headers={"Content-Type": "application/json"}
+            )
+
+        logger.debug(f"📋 Job found: {job_id[:16]}... status={job_record.status}")
+
+        # Format job response (camelCase for API compatibility)
+        response_data = _format_job_response(job_record)
+
+        # Add task summary
+        task_summary = _get_task_summary(task_repo, job_id, verbose=verbose)
+        response_data["taskSummary"] = task_summary
+
+        return func.HttpResponse(
+            json.dumps(response_data, indent=2, default=str),
+            status_code=200,
+            headers={"Content-Type": "application/json"}
+        )
+
+    except Exception as e:
+        logger.error(f"Platform job status query failed: {e}", exc_info=True)
+        return func.HttpResponse(
+            json.dumps({
+                "success": False,
+                "error": str(e),
+                "error_type": type(e).__name__
+            }),
+            status_code=500,
+            headers={"Content-Type": "application/json"}
+        )
+
+
+def _format_job_response(job_record) -> Dict[str, Any]:
+    """
+    Format job record for API response.
+
+    Converts internal snake_case fields to camelCase for JavaScript compatibility.
+    Matches the format of /api/jobs/status/{job_id} for consistency.
+
+    Args:
+        job_record: JobRecord from repository
+
+    Returns:
+        API response dictionary with camelCase fields
+    """
+    # Basic job information (camelCase for API compatibility)
+    response = {
+        "jobId": job_record.job_id,
+        "jobType": job_record.job_type,
+        "status": job_record.status.value if hasattr(job_record.status, 'value') else str(job_record.status),
+        "stage": job_record.stage,
+        "totalStages": job_record.total_stages,
+        "parameters": job_record.parameters,
+        "stageResults": job_record.stage_results,
+        "createdAt": job_record.created_at.isoformat() if job_record.created_at else None,
+        "updatedAt": job_record.updated_at.isoformat() if job_record.updated_at else None
+    }
+
+    # Optional fields
+    if job_record.result_data:
+        response["resultData"] = job_record.result_data
+
+    if job_record.error_details:
+        response["errorDetails"] = job_record.error_details
+
+    return response
 
 
 # ============================================================================

@@ -209,9 +209,9 @@ class JobResubmitHandler:
         elif 'raster' in job_type.lower():
             # Raster job - check for STAC item and COG
             stac_item_id = parameters.get('stac_item_id')
-            collection_id = parameters.get('collection_id', 'system-rasters')
+            collection_id = parameters.get('collection_id')  # No default (14 JAN 2026)
 
-            if stac_item_id:
+            if stac_item_id and collection_id:
                 plan["stac_items_to_delete"].append({
                     "item_id": stac_item_id,
                     "collection_id": collection_id

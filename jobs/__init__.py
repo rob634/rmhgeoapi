@@ -58,6 +58,8 @@ from .rebuild_stac import RebuildStacJob
 from .ingest_collection import IngestCollectionJob
 from .process_raster_docker import ProcessRasterDockerJob
 from .process_large_raster_docker import ProcessLargeRasterDockerJob
+from .detect_orphan_blobs import DetectOrphanBlobsJob
+from .register_silver_blobs import RegisterSilverBlobsJob
 
 # Job Registry - add new jobs here
 ALL_JOBS = {
@@ -113,6 +115,10 @@ ALL_JOBS = {
 
     # Ingest
     "ingest_collection": IngestCollectionJob,
+
+    # Orphan Blob Detection & Registration (F7.11 STAC Self-Healing)
+    "detect_orphan_blobs": DetectOrphanBlobsJob,
+    "register_silver_blobs": RegisterSilverBlobsJob,
 }
 
 def validate_job_registry():

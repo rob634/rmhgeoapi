@@ -88,9 +88,13 @@ def stac_rebuild_validate(params: Dict[str, Any]) -> Dict[str, Any]:
 
     elif data_type == "raster":
         valid_items, invalid_items = _validate_raster_sources(items)
-        # Default collection for rasters
+        # collection_id is required for rasters (14 JAN 2026)
         if not collection_id:
-            collection_id = STACDefaults.RASTER_COLLECTION
+            return {
+                "success": False,
+                "error": "collection_id is required for raster STAC rebuild",
+                "error_type": "ValidationError"
+            }
 
     else:
         return {
@@ -426,8 +430,15 @@ def _rebuild_raster_stac(
         # Create RasterMetadata domain object from database row
         raster_meta = RasterMetadata.from_db_row(cog_record)
 
-        # Use collection_id from parameter or fall back to stored value
-        target_collection = collection_id or raster_meta.stac_collection_id or STACDefaults.RASTER_COLLECTION
+        # Use collection_id from parameter or fall back to stored value (14 JAN 2026)
+        target_collection = collection_id or raster_meta.stac_collection_id
+        if not target_collection:
+            return {
+                "success": False,
+                "error": f"collection_id required: not in params or cog_metadata for {cog_id}",
+                "error_type": "ValidationError",
+                "cog_id": cog_id
+            }
 
         # Initialize pgSTAC infrastructure
         stac_infra = PgStacBootstrap()

@@ -426,14 +426,7 @@ ENV_VAR_RULES: Dict[str, EnvVarRule] = {
         default_value="10000",
     ),
 
-    "STAC_DEFAULT_COLLECTION": EnvVarRule(
-        pattern=re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$"),
-        pattern_description="STAC collection ID (lowercase, alphanumeric with hyphens/underscores)",
-        required=False,
-        fix_suggestion="Set default STAC collection for raster items",
-        example="system-rasters",
-        default_value="system-rasters",
-    ),
+    # STAC_DEFAULT_COLLECTION removed (14 JAN 2026) - collection_id now required for all raster jobs
 
     "RASTER_COG_COMPRESSION": EnvVarRule(
         pattern=re.compile(r"^(LZW|DEFLATE|ZSTD|JPEG|WEBP|NONE)$", re.IGNORECASE),

@@ -82,7 +82,7 @@ class ProcessRasterV2Job(JobBaseMixin, JobBase):
         'in_memory': {'type': 'bool', 'default': None},  # Override config.raster.cog_in_memory
 
         # STAC
-        'collection_id': {'type': 'str', 'default': None},  # Resolved from config.raster.stac_default_collection
+        'collection_id': {'type': 'str', 'required': True},  # Must specify target collection
         'item_id': {'type': 'str', 'default': None},
         'collection_must_exist': {'type': 'bool', 'default': False},  # Fail if collection doesn't exist (12 JAN 2026)
 
@@ -206,8 +206,8 @@ class ProcessRasterV2Job(JobBaseMixin, JobBase):
             if not cog_blob:
                 raise ValueError("Stage 2 missing COG blob path")
 
-            # Resolve collection_id from config if not specified
-            collection_id = job_params.get('collection_id') or config.raster.stac_default_collection
+            # collection_id is required (14 JAN 2026) - no more system-rasters fallback
+            collection_id = job_params['collection_id']
 
             # Prefer stac_item_id from Platform, fallback to item_id
             stac_item_id = job_params.get('stac_item_id') or job_params.get('item_id')

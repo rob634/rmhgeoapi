@@ -128,6 +128,13 @@ from .rebuild_stac_handlers import (
     stac_rebuild_item,
 )
 
+# Orphan Blob handlers (F7.11 STAC Self-Healing)
+from .orphan_blob_handlers import (
+    orphan_blob_inventory,
+    silver_blob_validate,
+    silver_blob_register,
+)
+
 # Docker consolidated handlers (F7.13, F7.18)
 from .handler_process_raster_complete import process_raster_complete
 from .handler_process_large_raster_complete import process_large_raster_complete
@@ -243,6 +250,11 @@ ALL_HANDLERS = {
     # STAC Rebuild handlers (F7.11)
     "stac_rebuild_validate": stac_rebuild_validate,
     "stac_rebuild_item": stac_rebuild_item,
+
+    # Orphan Blob handlers (F7.11 STAC Self-Healing)
+    "orphan_blob_inventory": orphan_blob_inventory,
+    "silver_blob_validate": silver_blob_validate,
+    "silver_blob_register": silver_blob_register,
 }
 
 # Validate no collisions before merging INGEST_HANDLERS

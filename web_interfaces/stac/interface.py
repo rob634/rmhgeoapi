@@ -1194,15 +1194,13 @@ class StacInterface(BaseInterface):
                     return;
                 }
 
-                // Find first COG URL for the header button (exclude system-rasters)
+                // Find first COG URL for the header button
                 let firstCogUrl = null;
-                if (collectionId !== 'system-rasters') {
-                    for (const item of items) {
-                        const cogUrl = getCogUrlFromItem(item);
-                        if (cogUrl) {
-                            firstCogUrl = cogUrl;
-                            break;
-                        }
+                for (const item of items) {
+                    const cogUrl = getCogUrlFromItem(item);
+                    if (cogUrl) {
+                        firstCogUrl = cogUrl;
+                        break;
                     }
                 }
 

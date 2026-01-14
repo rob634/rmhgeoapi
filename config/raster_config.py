@@ -260,28 +260,8 @@ class RasterConfig(BaseModel):
                     "Set based on your imagery's native resolution."
     )
 
-    # STAC configuration
-    stac_default_collection: str = Field(
-        default=STACDefaults.RASTER_COLLECTION,
-        description="""Default STAC collection for standalone raster processing.
-
-        Purpose:
-            System-managed collection for individual raster files processed via
-            process_raster job (as opposed to organized datasets in dedicated collections).
-
-        Behavior:
-            - Auto-created if missing when first raster is processed
-            - Used when collection_id parameter is not specified in process_raster
-            - Separate from user-defined collections for organized datasets
-
-        Usage:
-            - process_raster jobs default to this collection
-            - Users can override with collection_id parameter
-            - Collection is auto-created with warning if doesn't exist
-
-        Note: This separates "ad-hoc individual files" from "organized datasets"
-        """
-    )
+    # stac_default_collection removed (14 JAN 2026)
+    # collection_id is now a required parameter for all raster jobs - no more "system-rasters" catch-all
 
     @classmethod
     def from_environment(cls):
@@ -322,7 +302,7 @@ class RasterConfig(BaseModel):
             overview_resampling=os.environ.get("RASTER_OVERVIEW_RESAMPLING", RasterDefaults.OVERVIEW_RESAMPLING),
             reproject_resampling=os.environ.get("RASTER_REPROJECT_RESAMPLING", RasterDefaults.REPROJECT_RESAMPLING),
             strict_validation=os.environ.get("RASTER_STRICT_VALIDATION", str(RasterDefaults.STRICT_VALIDATION).lower()).lower() == "true",
-            # MosaicJSON and STAC
-            mosaicjson_maxzoom=int(os.environ.get("RASTER_MOSAICJSON_MAXZOOM", str(RasterDefaults.MOSAICJSON_MAXZOOM))),
-            stac_default_collection=os.environ.get("STAC_DEFAULT_COLLECTION", STACDefaults.RASTER_COLLECTION)
+            # MosaicJSON
+            mosaicjson_maxzoom=int(os.environ.get("RASTER_MOSAICJSON_MAXZOOM", str(RasterDefaults.MOSAICJSON_MAXZOOM)))
+            # stac_default_collection removed (14 JAN 2026) - collection_id required
         )

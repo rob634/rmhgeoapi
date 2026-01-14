@@ -369,7 +369,7 @@ from triggers.trigger_platform import (
     platform_unpublish_vector,
     platform_unpublish_raster
 )
-from triggers.trigger_platform_status import platform_request_status
+from triggers.trigger_platform_status import platform_request_status, platform_job_status
 # REMOVED (19 DEC 2025): platform_health, platform_stats, platform_failures
 # These were broken and redundant with /api/health
 
@@ -958,6 +958,30 @@ async def platform_status_list(req: func.HttpRequest) -> func.HttpResponse:
     Returns list of all platform requests with optional filtering.
     """
     return await platform_request_status(req)
+
+
+@app.route(route="platform/jobs/{job_id}/status", methods=["GET"])
+async def platform_job_status_by_id(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Get status of a CoreMachine job directly by job_id.
+
+    GET /api/platform/jobs/{job_id}/status
+    GET /api/platform/jobs/{job_id}/status?verbose=true
+
+    Returns job status with task summary - same format as /api/jobs/status/{job_id}.
+    This endpoint is for gateway integration where only /api/platform/* is exposed.
+
+    Response:
+        {
+            "jobId": "abc123...",
+            "jobType": "process_raster_v2",
+            "status": "completed",
+            "stage": 3,
+            "totalStages": 3,
+            "taskSummary": {...}
+        }
+    """
+    return await platform_job_status(req)
 
 
 # ============================================================================

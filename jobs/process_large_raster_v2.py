@@ -87,8 +87,8 @@ class ProcessLargeRasterV2Job(RasterMixin, RasterWorkflowsBase, JobBaseMixin, Jo
         # Large raster required parameters
         'blob_name': {'type': 'str', 'required': True},
 
-        # Override collection_id to not be required (has default)
-        'collection_id': {'type': 'str', 'default': STACDefaults.RASTER_COLLECTION},
+        # collection_id is required (14 JAN 2026) - no more system-rasters default
+        'collection_id': {'type': 'str', 'required': True},
 
         # Tiling-specific parameters
         'tile_size': {'type': 'int', 'default': None},  # None = auto-calculate

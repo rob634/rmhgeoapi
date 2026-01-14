@@ -211,11 +211,20 @@ class OGCFeaturesService:
 
         if vector_metadata:
             # Use VectorMetadata model for clean conversion
-            ogc_dict = vector_metadata.to_ogc_collection(base_url)
+            # 13 JAN 2026 (E8 TiPG Integration): Use TiPG as primary, Function App as fallback
+            from config import get_config
+            config = get_config()
+            tipg_base_url = config.tipg_base_url
+            fallback_base_url = config.ogc_features_base_url.rstrip('/')
 
-            # Add parent link (not included in to_ogc_collection)
+            ogc_dict = vector_metadata.to_ogc_collection(
+                tipg_base_url=tipg_base_url,
+                fallback_base_url=fallback_base_url
+            )
+
+            # Add parent link pointing to TiPG collections listing
             ogc_dict["links"].append({
-                "href": f"{base_url}/api/features/collections",
+                "href": f"{tipg_base_url}/collections",
                 "rel": "parent",
                 "type": "application/json",
                 "title": "All collections"

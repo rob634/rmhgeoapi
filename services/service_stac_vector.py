@@ -242,27 +242,35 @@ class StacVectorService:
             )
         }
 
-        # Build STAC Item links (12 JAN 2026 - F7.9 Phase 2)
-        # Include OGC Features API link for discoverability
-        base_url = self.config.ogc_features_base_url.rstrip('/')
+        # Build STAC Item links (13 JAN 2026 - E8 TiPG Integration)
+        # - STAC links use the STAC API base URL (Function App)
+        # - OGC Features link uses TiPG (primary endpoint)
+        # - Fallback URL stored in properties
+        stac_base_url = self.config.stac_api_base_url.rstrip('/')
+        tipg_base_url = self.config.tipg_base_url
+        fallback_base_url = self.config.ogc_features_base_url.rstrip('/')
+
+        # Add fallback URL to properties for redundancy
+        properties['ogc:fallback_url'] = f"{fallback_base_url}/collections/{table_name}/items"
+
         links = [
             {
                 'rel': 'self',
-                'href': f"{base_url}/api/stac/collections/{collection_id}/items/{item_id}",
+                'href': f"{stac_base_url}/collections/{collection_id}/items/{item_id}",
                 'type': 'application/geo+json',
                 'title': f'STAC Item {item_id}'
             },
             {
                 'rel': 'collection',
-                'href': f"{base_url}/api/stac/collections/{collection_id}",
+                'href': f"{stac_base_url}/collections/{collection_id}",
                 'type': 'application/json',
                 'title': f'Collection {collection_id}'
             },
             {
                 'rel': 'http://www.opengis.net/def/rel/ogc/1.0/items',
-                'href': f"{base_url}/api/features/collections/{table_name}/items",
+                'href': f"{tipg_base_url}/collections/{table_name}/items",
                 'type': 'application/geo+json',
-                'title': 'OGC Features API'
+                'title': 'OGC Features API (TiPG)'
             }
         ]
 

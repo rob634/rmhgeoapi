@@ -371,6 +371,13 @@ class JobResubmitHandler:
         if not job_class:
             raise ValueError(f"Unknown job type: {job_type}")
 
+        # For vector jobs, force overwrite=True since we're resubmitting after cleanup
+        # This prevents the pre-flight validation from failing if the table was only
+        # partially dropped or exists from a previous failed attempt (12 JAN 2026)
+        if 'vector' in job_type.lower():
+            parameters['overwrite'] = True
+            logger.info("  Set overwrite=True for vector job resubmission")
+
         # Validate parameters
         validated_params = job_class.validate_job_parameters(parameters)
 

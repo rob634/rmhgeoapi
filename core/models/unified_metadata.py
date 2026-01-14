@@ -541,29 +541,44 @@ class VectorMetadata(BaseMetadata):
 
         return props
 
-    def to_ogc_collection(self, base_url: str) -> Dict[str, Any]:
+    def to_ogc_collection(
+        self,
+        tipg_base_url: str,
+        fallback_base_url: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         Convert to full OGC Features Collection response.
 
+        Updated 13 JAN 2026 (E8 TiPG Integration):
+        - Primary links use TiPG URL pattern (high-performance Docker endpoint)
+        - Fallback URL (Function App) stored in properties for redundancy
+
         Args:
-            base_url: Base URL for link generation
+            tipg_base_url: TiPG base URL for primary links (e.g., https://titiler.../vector)
+            fallback_base_url: Optional Function App URL for secondary access
+                              (e.g., https://funcapp.../api/features)
 
         Returns:
-            Complete OGC Collection dict
+            Complete OGC Collection dict with TiPG as primary endpoint
         """
+        # Build properties including fallback URL if provided
+        properties = self.to_ogc_properties()
+        if fallback_base_url:
+            properties["ogc:fallback_url"] = f"{fallback_base_url}/collections/{self.id}/items"
+
         collection: Dict[str, Any] = {
             "id": self.id,
             "title": self.title or self.id.replace("_", " ").title(),
             "description": self.description or f"Vector dataset: {self.id}",
             "links": [
                 {
-                    "href": f"{base_url}/api/features/collections/{self.id}",
+                    "href": f"{tipg_base_url}/collections/{self.id}",
                     "rel": "self",
                     "type": "application/json",
                     "title": "This collection"
                 },
                 {
-                    "href": f"{base_url}/api/features/collections/{self.id}/items",
+                    "href": f"{tipg_base_url}/collections/{self.id}/items",
                     "rel": "items",
                     "type": "application/geo+json",
                     "title": "Collection items"
@@ -574,7 +589,7 @@ class VectorMetadata(BaseMetadata):
                 "http://www.opengis.net/def/crs/OGC/1.3/CRS84",
                 "http://www.opengis.net/def/crs/EPSG/0/4326"
             ],
-            "properties": self.to_ogc_properties()
+            "properties": properties
         }
 
         # Add extent if available
@@ -667,17 +682,30 @@ class VectorMetadata(BaseMetadata):
 
         return collection
 
-    def to_stac_item(self, base_url: str) -> Dict[str, Any]:
+    def to_stac_item(
+        self,
+        tipg_base_url: str,
+        stac_base_url: str,
+        fallback_base_url: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         Convert to STAC Item response.
 
         Creates a STAC Item representing this vector dataset.
 
+        Updated 13 JAN 2026 (E8 TiPG Integration):
+        - OGC Features links use TiPG URL pattern (high-performance Docker endpoint)
+        - STAC links use the STAC API base URL
+        - Fallback URL (Function App) stored in properties for redundancy
+
         Args:
-            base_url: Base URL for link generation
+            tipg_base_url: TiPG base URL for OGC Features links (e.g., https://titiler.../vector)
+            stac_base_url: STAC API base URL for self/collection links (e.g., https://funcapp.../api/stac)
+            fallback_base_url: Optional Function App URL for secondary access
+                              (e.g., https://funcapp.../api/features)
 
         Returns:
-            Complete STAC Item dict
+            Complete STAC Item dict with TiPG as primary OGC endpoint
         """
         from core.models.stac import STAC_VERSION
 
@@ -743,6 +771,13 @@ class VectorMetadata(BaseMetadata):
         if self.source_file:
             properties["processing:source_file"] = self.source_file
 
+        # Add fallback URL if provided (13 JAN 2026 - E8 TiPG Integration)
+        if fallback_base_url:
+            properties["ogc:fallback_url"] = f"{fallback_base_url}/collections/{self.id}/items"
+
+        # Build TiPG OGC Features URL (primary endpoint)
+        tipg_items_url = f"{tipg_base_url}/collections/{self.id}/items"
+
         item: Dict[str, Any] = {
             "type": "Feature",
             "stac_version": STAC_VERSION,
@@ -758,26 +793,26 @@ class VectorMetadata(BaseMetadata):
             "links": [
                 {
                     "rel": "self",
-                    "href": f"{base_url}/api/stac/collections/{self.stac_collection_id}/items/{self.stac_item_id or self.id}",
+                    "href": f"{stac_base_url}/collections/{self.stac_collection_id}/items/{self.stac_item_id or self.id}",
                     "type": "application/geo+json"
                 },
                 {
                     "rel": "collection",
-                    "href": f"{base_url}/api/stac/collections/{self.stac_collection_id}",
+                    "href": f"{stac_base_url}/collections/{self.stac_collection_id}",
                     "type": "application/json"
                 },
                 {
                     "rel": "http://www.opengis.net/def/rel/ogc/1.0/items",
-                    "href": f"{base_url}/api/features/collections/{self.id}/items",
+                    "href": tipg_items_url,
                     "type": "application/geo+json",
-                    "title": "OGC Features API"
+                    "title": "OGC Features API (TiPG)"
                 }
             ],
             "assets": {
                 "data": {
-                    "href": f"{base_url}/api/features/collections/{self.id}/items",
+                    "href": tipg_items_url,
                     "type": "application/geo+json",
-                    "title": "Vector features",
+                    "title": "Vector features (TiPG)",
                     "roles": ["data"]
                 }
             }

@@ -223,6 +223,27 @@ class AppConfig(BaseModel):
         description="Base URL for TiTiler-PgSTAC tile server (raster visualization)"
     )
 
+    # ========================================================================
+    # TiPG Configuration (13 JAN 2026 - E8 TiPG Integration)
+    # ========================================================================
+    # TiPG runs in the same Docker container as TiTiler at the /vector prefix.
+    # This is now the PRIMARY OGC Features endpoint for vector data access.
+    # The Function App OGC Features (/api/features) remains as fallback.
+    # ========================================================================
+
+    @property
+    def tipg_base_url(self) -> str:
+        """
+        TiPG OGC Features base URL - runs in same Docker container as TiTiler.
+
+        This is the PRIMARY endpoint for OGC Features vector data access.
+        Pattern: {TITILER_BASE_URL}/vector
+
+        Returns:
+            TiPG base URL for OGC Features API
+        """
+        return f"{self.titiler_base_url.rstrip('/')}/vector"
+
     ogc_features_base_url: str = Field(
         default_factory=lambda: os.getenv(
             "OGC_STAC_APP_URL",
@@ -619,6 +640,27 @@ class AppConfig(BaseModel):
             'https://rmhazuregeoapi-.../api/features/collections/config_test_vector'
         """
         return f"{self.ogc_features_base_url.rstrip('/')}/collections/{collection_id}"
+
+    def generate_tipg_features_url(self, collection_id: str) -> str:
+        """
+        Generate TiPG OGC Features collection URL (primary endpoint).
+
+        TiPG runs in the same Docker container as TiTiler and provides
+        high-performance OGC Features access directly from PostGIS.
+
+        Args:
+            collection_id: Collection name (same as PostGIS table name)
+
+        Returns:
+            TiPG OGC Features collection URL
+
+        Example:
+            >>> config = get_config()
+            >>> url = config.generate_tipg_features_url("my_vector_table")
+            >>> url
+            'https://titiler.../vector/collections/my_vector_table'
+        """
+        return f"{self.tipg_base_url}/collections/{collection_id}"
 
     def generate_vector_viewer_url(self, collection_id: str) -> str:
         """

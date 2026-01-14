@@ -4,7 +4,7 @@
 **Value Statement**: "Hi! Here's how to integrate me!" — Self-service onboarding for integrators.
 **Runs On**: E1, E2, E8, E9 (Data APIs)
 **Status**: 🚧 PARTIAL (Enablers ✅, Core Interfaces 📋)
-**Last Updated**: 07 JAN 2026
+**Last Updated**: 13 JAN 2026
 **Owner**: Geospatial Team
 
 **Strategic Context**:
@@ -43,6 +43,7 @@ Every button says "this is what you would copy." When integrators replicate this
 | F12.7 | 📋 | OGC Features Collections Browser |
 | F12.8 | 📋 | API Documentation Hub |
 | SP12.9 | ✅ | NiceGUI Evaluation Spike (Not Pursuing) |
+| SP12.10 | 📋 | MapLibre H3 Visualization Spike |
 
 **Architecture**:
 ```
@@ -420,6 +421,58 @@ Integration Onboarding UI (Azure Functions + HTMX)
 
 ---
 
+### Spike SP12.10: MapLibre H3 Visualization 📋 PLANNED
+
+**Deliverable**: Evaluate MapLibre GL JS for H3 hexagonal data visualization using vector tiles
+**Status**: 📋 PLANNED
+**Dependencies**: TiPG vector tile server (E8)
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| SP12.10.1 | 📋 | Research MapLibre GL JS integration patterns for HTMX interfaces |
+| SP12.10.2 | 📋 | Prototype TiPG vector tile endpoint for H3 data (`h3` schema tables) |
+| SP12.10.3 | 📋 | Implement basic H3 hexagon rendering with MapLibre fill-extrusion |
+| SP12.10.4 | 📋 | Add interactive features (hover tooltips, click for details) |
+| SP12.10.5 | 📋 | Evaluate performance with large H3 datasets (resolution 4-7) |
+| SP12.10.6 | 📋 | Document integration pattern and decision |
+
+**Context**:
+The H3 visualization use case requires rendering hexagonal grids with statistical data (flood exposure, crop production, etc.) at various resolutions. MapLibre GL JS is the leading open-source alternative to Mapbox GL JS and supports vector tiles natively.
+
+**Technical Approach**:
+```
+TiPG (Vector Tiles)              MapLibre GL JS
+┌─────────────────────┐         ┌─────────────────────────────────┐
+│ h3.fathom_stats     │         │ Vector Tile Layer               │
+│ h3.crop_production  │───MVT──▶│ ├── H3 hexagon polygons         │
+│ h3.population       │ tiles   │ ├── fill-color by value         │
+└─────────────────────┘         │ ├── fill-extrusion for 3D       │
+                                │ └── hover/click interactivity   │
+PostgreSQL + PostGIS            └─────────────────────────────────┘
+┌─────────────────────┐
+│ H3 index → geometry │  (h3_cell_to_boundary_wkb)
+│ aggregated stats    │
+└─────────────────────┘
+```
+
+**Key Questions to Answer**:
+1. Can TiPG serve H3 geometries efficiently (PostGIS h3 extension)?
+2. What's the optimal tile zoom → H3 resolution mapping?
+3. How to handle multi-resolution datasets (res 2 at zoom 4, res 7 at zoom 10)?
+4. Performance with ~500K hexagons at resolution 7?
+
+**Spike Output**:
+- Working prototype in `web_interfaces/h3_map/` (if successful)
+- Performance benchmarks for various H3 resolutions
+- Go/No-Go decision for full implementation
+
+**Alternative Approaches** (if MapLibre doesn't work):
+- Deck.gl H3HexagonLayer (WebGL-based, more complex integration)
+- Pre-rendered GeoJSON (simpler but limited scalability)
+- Leaflet with custom H3 plugin (less performant for large datasets)
+
+---
+
 # SUMMARY
 
 ## Story Counts
@@ -436,7 +489,8 @@ Integration Onboarding UI (Azure Functions + HTMX)
 | F12.7: OGC Features Browser | 4 | 📋 Planned |
 | F12.8: API Documentation Hub | 5 | 📋 Planned |
 | SP12.9: NiceGUI Spike | 4 | ✅ Complete (Not Pursuing) |
-| **Total** | **46** | |
+| SP12.10: MapLibre H3 Spike | 6 | 📋 Planned |
+| **Total** | **52** | |
 
 ## Implementation Order
 
@@ -460,4 +514,4 @@ Phase 1 (Complete)           Phase 2 (Current)
 
 ---
 
-**Last Updated**: 09 JAN 2026 (SP12.9 NiceGUI spike confirmed complete - staying with HTMX)
+**Last Updated**: 13 JAN 2026 (Added SP12.10 MapLibre H3 Visualization spike)

@@ -156,6 +156,23 @@ class StacCollectionInterface(BaseInterface):
             box-shadow: 0 2px 8px rgba(0,0,0,0.06);
         }
 
+        /* Header top row with title and action button (13 JAN 2026) */
+        .header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 20px;
+            margin-bottom: 16px;
+        }
+
+        .header-text {
+            flex: 1;
+        }
+
+        .header-actions {
+            flex-shrink: 0;
+        }
+
         .collection-header h1 {
             font-size: 24px;
             color: var(--ds-navy);
@@ -165,8 +182,46 @@ class StacCollectionInterface(BaseInterface):
         .collection-header .description {
             color: var(--ds-gray);
             font-size: 14px;
-            margin-bottom: 16px;
             line-height: 1.5;
+            margin: 0;
+        }
+
+        /* Mosaic view button (13 JAN 2026) */
+        .btn-mosaic-view {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 20px;
+            background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            transition: all 0.2s;
+            box-shadow: 0 2px 4px rgba(16, 185, 129, 0.3);
+        }
+
+        .btn-mosaic-view:hover {
+            background: linear-gradient(135deg, #059669 0%, #047857 100%);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(16, 185, 129, 0.4);
+        }
+
+        /* No search warning (13 JAN 2026) */
+        .no-search-warning {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 14px;
+            background: #FEF3C7;
+            border: 1px solid #F59E0B;
+            color: #92400E;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 500;
         }
 
         .collection-meta {
@@ -556,9 +611,28 @@ class StacCollectionInterface(BaseInterface):
                 bboxStr = `[${bbox.map(v => v.toFixed(2)).join(', ')}]`;
             }
 
+            // Find preview link for TiTiler mosaic viewer (13 JAN 2026)
+            let previewUrl = null;
+            if (collection.links) {
+                const previewLink = collection.links.find(link => link.rel === 'preview');
+                if (previewLink && previewLink.href) {
+                    previewUrl = previewLink.href;
+                }
+            }
+
+            // Build mosaic viewer button or warning if no search registered
+            const mosaicButton = previewUrl
+                ? `<a href="${previewUrl}" target="_blank" class="btn-mosaic-view">🗺️ View Collection Mosaic</a>`
+                : `<div class="no-search-warning">⚠️ No pgSTAC search registered</div>`;
+
             header.innerHTML = `
-                <h1>${title}</h1>
-                <div class="description">${desc}</div>
+                <div class="header-top">
+                    <div class="header-text">
+                        <h1>${title}</h1>
+                        <div class="description">${desc}</div>
+                    </div>
+                    <div class="header-actions">${mosaicButton}</div>
+                </div>
                 <div class="collection-meta">
                     <span class="meta-badge">
                         <span>${type === 'raster' ? '🌍' : '📐'}</span>

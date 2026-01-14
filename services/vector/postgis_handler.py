@@ -1405,7 +1405,9 @@ class VectorToPostGISHandler:
         keywords: str = None,
         temporal_start: str = None,
         temporal_end: str = None,
-        temporal_property: str = None
+        temporal_property: str = None,
+        # Custom properties (13 JAN 2026 - E8 TiPG Integration)
+        custom_properties: dict = None
     ) -> None:
         """
         Register or update table metadata in geo.table_metadata registry.
@@ -1434,11 +1436,17 @@ class VectorToPostGISHandler:
             temporal_start: Start of temporal extent ISO8601 (optional, 09 DEC 2025)
             temporal_end: End of temporal extent ISO8601 (optional, 09 DEC 2025)
             temporal_property: Column name containing date data (optional, 09 DEC 2025)
+            custom_properties: Additional JSONB properties (optional, 13 JAN 2026)
+                              Used for ogc:fallback_url and other extensible metadata.
         """
         # Handle None or invalid bbox gracefully
         bbox_values = (None, None, None, None)
         if bbox is not None and len(bbox) >= 4:
             bbox_values = (bbox[0], bbox[1], bbox[2], bbox[3])
+
+        # Convert custom_properties to JSON for psycopg
+        import json
+        custom_props_json = json.dumps(custom_properties) if custom_properties else None
 
         with self._pg_repo._get_connection() as conn:
             with conn.cursor() as cur:
@@ -1449,10 +1457,12 @@ class VectorToPostGISHandler:
                         bbox_minx, bbox_miny, bbox_maxx, bbox_maxy,
                         title, description, attribution, license, keywords,
                         temporal_start, temporal_end, temporal_property,
+                        custom_properties,
                         created_at, updated_at
                     ) VALUES (
                         %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                         %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s,
                         NOW(), NOW()
                     )
                     ON CONFLICT (table_name) DO UPDATE SET
@@ -1475,13 +1485,15 @@ class VectorToPostGISHandler:
                         temporal_start = COALESCE(EXCLUDED.temporal_start, geo.table_metadata.temporal_start),
                         temporal_end = COALESCE(EXCLUDED.temporal_end, geo.table_metadata.temporal_end),
                         temporal_property = COALESCE(EXCLUDED.temporal_property, geo.table_metadata.temporal_property),
+                        custom_properties = COALESCE(EXCLUDED.custom_properties, geo.table_metadata.custom_properties),
                         updated_at = NOW()
                 """, (
                     table_name, schema, etl_job_id, source_file,
                     source_format, source_crs, feature_count, geometry_type,
                     bbox_values[0], bbox_values[1], bbox_values[2], bbox_values[3],
                     title, description, attribution, license, keywords,
-                    temporal_start, temporal_end, temporal_property
+                    temporal_start, temporal_end, temporal_property,
+                    custom_props_json
                 ))
                 conn.commit()
 

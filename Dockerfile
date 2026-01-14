@@ -27,6 +27,9 @@
 # See: https://github.com/OSGeo/gdal/blob/master/docker/README.md
 FROM ghcr.io/osgeo/gdal:ubuntu-full-3.10.1
 
+# For Production use JFROG Artifactory base image (uncomment below)
+#FROM artifactory.worldbank.org/itsdt-docker-virtual/ubuntu-full:3.10.1
+
 # Install additional system dependencies:
 # - python3-pip: pip for Python 3 (not included in ubuntu-small)
 # - libpq: PostgreSQL client library (for psycopg2)

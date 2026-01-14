@@ -169,4 +169,76 @@
 
 ---
 
+### Feature F1.9: ArcGIS Feature Service Integration 📋 PLANNED
+
+**Deliverable**: Import vector data from ArcGIS Feature Services (REST API) into rmhgeoapi
+**Added**: 13 JAN 2026
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| SP1.9.1 | 📋 | **SPIKE**: ArcGIS Feature Service ETL Research |
+| S1.9.2 | 📋 | Import public ArcGIS Feature Service |
+| S1.9.3 | 📋 | Import authenticated ArcGIS Feature Service |
+| S1.9.4 | 📋 | ESRI metadata → VectorMetadata translator |
+
+**Spike SP1.9.1 Details**:
+- **Goal**: Research ArcGIS Feature Service REST API and design ETL approach
+- **Questions to Answer**:
+  1. What is the ArcGIS REST API structure for Feature Services?
+     - `/query` endpoint for feature retrieval (JSON format)
+     - Pagination patterns (`resultOffset`, `resultRecordCount`)
+     - Field metadata and geometry types
+  2. How does ESRI authentication work?
+     - Token-based auth via `/generateToken`
+     - OAuth 2.0 for ArcGIS Online
+     - Service account patterns for ArcGIS Enterprise
+  3. How to translate ESRI metadata to VectorMetadata?
+     - Field definitions → column types
+     - Spatial reference → EPSG codes
+     - Symbology → potential OGC Styles integration (F1.7)
+  4. Rate limiting and pagination strategies?
+     - `maxRecordCount` server limit (typically 1000-2000)
+     - Offset-based pagination vs OID-based pagination
+- **Timebox**: 4 hours
+- **Output**: Decision document with:
+  - Sample ArcGIS Feature Service URLs for testing
+  - ESRI → VectorMetadata field mapping table
+  - Authentication flow diagrams
+  - Recommended implementation approach
+
+**Story S1.9.2: Import Public Feature Service**:
+- **Goal**: Demonstrate import from publicly accessible ArcGIS Feature Service
+- **Input**: Feature Service URL (e.g., `https://services.arcgis.com/.../FeatureServer/0`)
+- **Output**: Vector data in PostGIS + STAC item in `system-vectors`
+- **Example Sources**:
+  - ESRI Living Atlas public layers
+  - State/local government open data portals
+  - USGS, NOAA, EPA public services
+
+**Story S1.9.3: Import Authenticated Feature Service**:
+- **Goal**: Demonstrate import from protected ArcGIS Feature Service
+- **Input**: Feature Service URL + credentials (token or OAuth)
+- **Output**: Same as S1.9.2
+- **Considerations**:
+  - Credential storage (Key Vault integration)
+  - Token refresh for long-running imports
+  - Error handling for auth failures
+
+**Story S1.9.4: ESRI Metadata Translator**:
+- **Goal**: Convert ESRI field definitions and symbology to VectorMetadata
+- **ESRI Metadata Elements**:
+  - `fields[]` → column definitions (name, type, alias, domain)
+  - `geometryType` → PostGIS geometry type
+  - `spatialReference.wkid` → SRID
+  - `drawingInfo.renderer` → potential OGC Style (F1.7)
+- **Output**: `VectorMetadata` instance ready for STAC registration
+
+**Key Integration Points**:
+- Reuses existing `PostGISHandler` for data loading
+- Reuses existing `VectorMetadata` model (F7.8)
+- Reuses existing OGC Styles infrastructure (F1.7) for symbology
+- New: ArcGIS REST client module
+
+---
+
 ---

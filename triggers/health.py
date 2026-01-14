@@ -99,17 +99,17 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
 
         Args:
             checks: List of (name, check_method) tuples
-                    e.g., [("titiler", self._check_titiler_health), ...]
+                    e.g., [("geotiler", self._check_geotiler_health), ...]
             max_workers: Maximum concurrent threads (default 4)
             timeout_seconds: Max time to wait for all checks (default 30s)
 
         Returns:
             Dict mapping check names to their results
-            e.g., {"titiler": {...}, "ogc_features": {...}}
+            e.g., {"geotiler": {...}, "ogc_features": {...}}
 
         Example:
             results = self._run_checks_parallel([
-                ("titiler", self._check_titiler_health),
+                ("geotiler", self._check_geotiler_health),
                 ("ogc_features", self._check_ogc_features_health),
                 ("external_api", self._check_some_other_service),
             ])
@@ -346,7 +346,7 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         # parallel since they're I/O-bound. Future external checks can be
         # added to this list.
         external_checks = [
-            ("titiler", self._check_titiler_health),
+            ("geotiler", self._check_geotiler_health),
             ("ogc_features", self._check_ogc_features_health),
         ]
 
@@ -358,14 +358,14 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
 
         parallel_results = self._run_checks_parallel(external_checks, timeout_seconds=25.0)
 
-        # Process TiTiler result
-        titiler_health = parallel_results.get("titiler", {"status": "error", "error": "Check not completed"})
-        health_data["components"]["titiler"] = titiler_health
-        titiler_status = titiler_health.get("status")
-        if titiler_status == "unhealthy":
-            health_data["errors"].append("TiTiler unavailable (raster tile visualization disabled)")
-        elif titiler_status == "warning":
-            health_data["warnings"].append("TiTiler degraded - alive but /health failing (PGSTAC connection issue?)")
+        # Process GeoTiler result (13 JAN 2026 - E8 TiPG Integration)
+        geotiler_health = parallel_results.get("geotiler", {"status": "error", "error": "Check not completed"})
+        health_data["components"]["geotiler"] = geotiler_health
+        geotiler_status = geotiler_health.get("status")
+        if geotiler_status == "unhealthy":
+            health_data["errors"].append("GeoTiler unavailable (COG tiles, TiPG OGC Features, STAC API disabled)")
+        elif geotiler_status == "warning":
+            health_data["warnings"].append("GeoTiler degraded - some services unavailable")
             if health_data["status"] == "healthy":
                 health_data["status"] = "degraded"
 
@@ -2294,48 +2294,60 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             description="Public-facing database for OGC Feature Collections"
         )
 
-    def _check_titiler_health(self) -> Dict[str, Any]:
+    def _check_geotiler_health(self) -> Dict[str, Any]:
         """
-        Check TiTiler tile server health (13 DEC 2025).
+        Check GeoTiler Docker app health (13 JAN 2026 - E8 TiPG Integration).
 
-        TiTiler is an external Docker container app that serves raster tiles.
-        Health logic:
-        - Both /livez and /health respond → healthy (green)
-        - Only /livez responds → warning (yellow) - app is alive but not fully ready
-        - Neither responds → unhealthy (red)
+        GeoTiler is a Docker container that hosts multiple services:
+        - COG: Cloud-Optimized GeoTIFF tile serving (TiTiler core)
+        - XArray: Zarr/NetCDF multidimensional array tiles
+        - pgSTAC: STAC mosaic searches and dynamic tiling
+        - TiPG: OGC Features API + Vector Tiles (MVT)
+        - STAC API: STAC catalog browsing and search
+
+        The /health endpoint returns structured status for each service:
+        {
+            "status": "healthy|degraded",
+            "services": {
+                "cog": {"status": "healthy", "available": true, ...},
+                "tipg": {"status": "healthy", "available": true, "details": {...}},
+                ...
+            },
+            "dependencies": {
+                "database": {"status": "ok", "ping_time_ms": 12.5, ...},
+                ...
+            }
+        }
 
         Returns:
-            Dict with TiTiler health status including:
-            - livez_status: Response from /livez endpoint
-            - health_status: Response from /health endpoint
-            - overall_status: healthy/warning/unhealthy based on combined results
+            Dict with GeoTiler health status including individual service statuses.
         """
-        def check_titiler():
+        def check_geotiler():
             import requests
             from config import get_config
 
             config = get_config()
-            titiler_url = config.titiler_base_url.rstrip('/')
+            geotiler_url = config.titiler_base_url.rstrip('/')
 
             # Check if URL is the placeholder default (not configured)
-            if titiler_url == "https://your-titiler-webapp-url":
+            if geotiler_url == "https://your-titiler-webapp-url":
                 return {
                     "configured": False,
                     "error": "TITILER_BASE_URL not configured (using placeholder default)",
-                    "impact": "Raster tile visualization unavailable",
-                    "fix": "Set TITILER_BASE_URL environment variable to your TiTiler deployment URL"
+                    "impact": "Tile serving and OGC Features unavailable",
+                    "fix": "Set TITILER_BASE_URL environment variable to your GeoTiler deployment URL"
                 }
 
             livez_ok = False
             health_ok = False
             livez_response = None
-            health_response = None
+            health_body = None
             livez_error = None
             health_error = None
 
             # Check /livez endpoint (basic liveness probe)
             try:
-                resp = requests.get(f"{titiler_url}/livez", timeout=10)
+                resp = requests.get(f"{geotiler_url}/livez", timeout=10)
                 livez_ok = resp.status_code == 200
                 livez_response = {
                     "status_code": resp.status_code,
@@ -2348,19 +2360,14 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             except Exception as e:
                 livez_error = f"Error: {str(e)[:100]}"
 
-            # Check /health endpoint (full readiness probe)
+            # Check /health endpoint (full readiness probe with service details)
             try:
-                resp = requests.get(f"{titiler_url}/health", timeout=10)
+                resp = requests.get(f"{geotiler_url}/health", timeout=10)
                 health_ok = resp.status_code == 200
-                health_response = {
-                    "status_code": resp.status_code,
-                    "ok": health_ok
-                }
-                # Try to get health response body if JSON
                 try:
-                    health_response["body"] = resp.json()
+                    health_body = resp.json()
                 except Exception:
-                    pass
+                    health_body = None
             except requests.exceptions.Timeout:
                 health_error = "Connection timed out (10s)"
             except requests.exceptions.ConnectionError as e:
@@ -2368,42 +2375,127 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             except Exception as e:
                 health_error = f"Error: {str(e)[:100]}"
 
-            # Determine overall status based on user requirements
-            # Both respond → healthy (green)
-            # Only livez responds → warning (yellow) - app is alive but degraded
-            # Neither responds → unhealthy (red)
+            # Parse individual service statuses from health response
+            services = {}
+            dependencies = {}
+            service_summary = {"healthy": 0, "degraded": 0, "disabled": 0, "unavailable": 0}
+
+            if health_body and isinstance(health_body, dict):
+                # Extract services section
+                if "services" in health_body:
+                    for svc_name, svc_data in health_body["services"].items():
+                        if isinstance(svc_data, dict):
+                            svc_status = svc_data.get("status", "unknown")
+                            svc_available = svc_data.get("available", False)
+
+                            services[svc_name] = {
+                                "status": svc_status,
+                                "available": svc_available,
+                            }
+
+                            # Include description if provided
+                            if "description" in svc_data:
+                                services[svc_name]["description"] = svc_data["description"]
+
+                            # Include endpoints if provided
+                            if "endpoints" in svc_data:
+                                services[svc_name]["endpoints"] = svc_data["endpoints"]
+
+                            # Include details (e.g., tipg collections count)
+                            if "details" in svc_data:
+                                services[svc_name]["details"] = svc_data["details"]
+
+                            # Include disabled reason if applicable
+                            if "disabled_reason" in svc_data:
+                                services[svc_name]["disabled_reason"] = svc_data["disabled_reason"]
+
+                            # Count by status
+                            if svc_status == "healthy":
+                                service_summary["healthy"] += 1
+                            elif svc_status == "disabled":
+                                service_summary["disabled"] += 1
+                            elif svc_status == "unavailable":
+                                service_summary["unavailable"] += 1
+                            else:
+                                service_summary["degraded"] += 1
+
+                # Extract dependencies section
+                if "dependencies" in health_body:
+                    for dep_name, dep_data in health_body["dependencies"].items():
+                        if isinstance(dep_data, dict):
+                            dependencies[dep_name] = {
+                                "status": dep_data.get("status", "unknown")
+                            }
+                            # Include ping time for database
+                            if "ping_time_ms" in dep_data:
+                                dependencies[dep_name]["ping_time_ms"] = dep_data["ping_time_ms"]
+                            # Include expiry for oauth tokens
+                            if "expires_in_seconds" in dep_data:
+                                dependencies[dep_name]["expires_in_seconds"] = dep_data["expires_in_seconds"]
+                            # Include required_by mapping
+                            if "required_by" in dep_data:
+                                dependencies[dep_name]["required_by"] = dep_data["required_by"]
+
+            # Determine overall status
+            # - All services healthy and both endpoints respond → healthy
+            # - Some services unavailable or degraded → warning
+            # - Neither endpoint responds → unhealthy
             if livez_ok and health_ok:
-                overall_status = "healthy"
-                status_reason = "Both /livez and /health endpoints responding"
+                geotiler_status = health_body.get("status", "healthy") if health_body else "healthy"
+                if geotiler_status == "healthy" and service_summary["unavailable"] == 0:
+                    overall_status = "healthy"
+                    status_reason = f"All {service_summary['healthy']} services healthy"
+                else:
+                    overall_status = "warning"
+                    status_reason = f"{service_summary['healthy']} healthy, {service_summary['unavailable']} unavailable, {service_summary['disabled']} disabled"
             elif livez_ok and not health_ok:
                 overall_status = "warning"
-                status_reason = "App is alive (/livez OK) but not fully ready (/health failed)"
+                status_reason = "App is alive (/livez OK) but health check failed"
             else:
                 overall_status = "unhealthy"
-                status_reason = "TiTiler not responding - neither /livez nor /health accessible"
+                status_reason = "GeoTiler not responding - neither /livez nor /health accessible"
 
             result = {
                 "configured": True,
-                "base_url": titiler_url,
+                "base_url": geotiler_url,
                 "livez": livez_response if livez_response else {"error": livez_error},
-                "health": health_response if health_response else {"error": health_error},
                 "overall_status": overall_status,
                 "status_reason": status_reason,
-                "purpose": "Raster tile server for COG visualization via TiTiler-pgstac",
-                # Use _status for wrapper to pick up warning/unhealthy states
+                "purpose": "Multi-service tile server: COG, XArray, pgSTAC mosaic, TiPG OGC Features, STAC API",
                 "_status": overall_status
             }
 
-            # Add error field for unhealthy status to trigger proper reporting
+            # Add version if available
+            if health_body and "version" in health_body:
+                result["version"] = health_body["version"]
+
+            # Add services breakdown
+            if services:
+                result["services"] = services
+                result["service_summary"] = service_summary
+
+            # Add dependencies breakdown
+            if dependencies:
+                result["dependencies"] = dependencies
+
+            # Add issues from health response
+            if health_body and health_body.get("issues"):
+                result["issues"] = health_body["issues"]
+
+            # Add health error if check failed
+            if health_error:
+                result["health_error"] = health_error
+
+            # Add error field for unhealthy status
             if overall_status == "unhealthy":
                 result["error"] = status_reason
 
             return result
 
         return self.check_component_health(
-            "titiler",
-            check_titiler,
-            description="TiTiler-pgstac raster tile server for COG visualization"
+            "geotiler",
+            check_geotiler,
+            description="GeoTiler Docker app: COG, XArray, pgSTAC, TiPG (OGC Features + Vector Tiles), STAC API"
         )
 
     def _check_ogc_features_health(self) -> Dict[str, Any]:

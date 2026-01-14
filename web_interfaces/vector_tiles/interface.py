@@ -495,7 +495,7 @@ class VectorTilesInterface(BaseInterface):
                     <span>🗺️ Vector Tiles</span>
                     <span class="maplibre-badge">MapLibre GL</span>
                 </h1>
-                <div class="collection-id">{collection_id or 'No collection specified'}</div>
+                <div class="collection-id" id="collection-display">{collection_id or 'No collection specified'}</div>
             </div>
 
             <div class="sidebar-content">
@@ -603,15 +603,19 @@ class VectorTilesInterface(BaseInterface):
 
     <script>
         // Configuration
-        const COLLECTION_ID = '{collection_id}';
+        const COLLECTION_ID_RAW = '{collection_id}';
         const TITILER_BASE_URL = '{titiler_base_url}';
         const TIPG_BASE_URL = `${{TITILER_BASE_URL}}/vector`;
 
-        // TiPG endpoints
-        const TILEJSON_URL = `${{TIPG_BASE_URL}}/collections/${{COLLECTION_ID}}/tilejson.json`;
+        // TiPG requires schema prefix (e.g., "geo.tablename")
+        // Auto-prepend "geo." if collection doesn't already have a schema prefix
+        const COLLECTION_ID = COLLECTION_ID_RAW.includes('.') ? COLLECTION_ID_RAW : `geo.${{COLLECTION_ID_RAW}}`;
+
+        // TiPG endpoints with TileMatrixSet in path
+        const TILEJSON_URL = `${{TIPG_BASE_URL}}/collections/${{COLLECTION_ID}}/tiles/WebMercatorQuad/tilejson.json`;
         const COLLECTION_URL = `${{TIPG_BASE_URL}}/collections/${{COLLECTION_ID}}`;
         const ITEMS_URL = `${{TIPG_BASE_URL}}/collections/${{COLLECTION_ID}}/items`;
-        const TIPG_MAP_URL = `${{TIPG_BASE_URL}}/collections/${{COLLECTION_ID}}/map`;
+        const TIPG_MAP_URL = `${{TIPG_BASE_URL}}/collections/${{COLLECTION_ID}}/tiles/WebMercatorQuad/map`;
 
         // Layer names
         const SOURCE_ID = 'vector-source';
@@ -700,8 +704,8 @@ class VectorTilesInterface(BaseInterface):
                     bounds: tileJsonData.bounds
                 }});
 
-                // The source-layer name is the collection/table name
-                const sourceLayer = COLLECTION_ID;
+                // TiPG uses "default" as the source-layer name for all collections
+                const sourceLayer = 'default';
 
                 // Add fill layer (for polygons)
                 map.addLayer({{
@@ -922,7 +926,13 @@ class VectorTilesInterface(BaseInterface):
         }});
 
         // Initialize on load
-        document.addEventListener('DOMContentLoaded', initMap);
+        document.addEventListener('DOMContentLoaded', () => {{
+            // Update collection display if prefix was added
+            if (COLLECTION_ID !== COLLECTION_ID_RAW) {{
+                document.getElementById('collection-display').textContent = COLLECTION_ID;
+            }}
+            initMap();
+        }});
 
         console.log('MapLibre Vector Tiles Viewer initialized');
         console.log('Collection:', COLLECTION_ID);

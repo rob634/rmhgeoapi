@@ -3,8 +3,7 @@
 # ============================================================================
 # STATUS: Infrastructure - Repository pattern with Azure Functions cold start fix
 # PURPOSE: Lazy import mechanism to defer env var reads until runtime ready
-# LAST_REVIEWED: 04 JAN 2026
-# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# LAST_REVIEWED: 14 JAN 2026
 # ============================================================================
 """
 Infrastructure Package - Lazy Loading Implementation.
@@ -30,47 +29,33 @@ The Problem:
     - Azure Functions loads function_app.py on EVERY cold start
     - All top-level imports execute immediately during load
     - This happens BEFORE environment variables are guaranteed available
-   - This happens BEFORE managed identity tokens are ready
-   - This happens BEFORE the Functions runtime is fully initialized
+    - This happens BEFORE managed identity tokens are ready
+    - This happens BEFORE the Functions runtime is fully initialized
 
-3. WHAT HAPPENS WITHOUT LAZY LOADING:
-   ❌ config.py imports and reads env vars immediately → KeyError
-   ❌ Singletons initialize during import → Missing configuration
-   ❌ DefaultAzureCredential tries to authenticate → Auth failures
-   ❌ Database connections attempt during module load → Connection refused
-   Result: Mysterious failures that "work locally but fail in Azure"
+What Happens Without Lazy Loading:
+    - config.py imports and reads env vars immediately -> KeyError
+    - Singletons initialize during import -> Missing configuration
+    - DefaultAzureCredential tries to authenticate -> Auth failures
+    - Database connections attempt during module load -> Connection refused
+    Result: Mysterious failures that "work locally but fail in Azure"
 
-4. WHAT HAPPENS WITH OUR LAZY LOADING:
-   ✅ function_app.py imports repositories package
-   ✅ repositories/__init__.py loads but DOESN'T import modules
-   ✅ Azure Functions runtime fully initializes
-   ✅ Environment variables become available
-   ✅ Managed identity tokens become ready
-   ✅ THEN your first HTTP/Queue trigger fires
-   ✅ ONLY NOW does config.py read environment variables
-   ✅ ONLY NOW do singletons initialize with proper config
+What Happens With Our Lazy Loading:
+    - function_app.py imports repositories package
+    - repositories/__init__.py loads but DOESN'T import modules
+    - Azure Functions runtime fully initializes
+    - Environment variables become available
+    - Managed identity tokens become ready
+    - THEN your first HTTP/Queue trigger fires
+    - ONLY NOW does config.py read environment variables
+    - ONLY NOW do singletons initialize with proper config
 
-5. COMMON SYMPTOMS WE'RE AVOIDING:
-   • "Works locally but fails in Azure"
-   • "Environment variable not found" (but it's definitely set)
-   • "DefaultAzureCredential failed" during cold starts
-   • "Connection refused" to services that should be available
-   • "Works after warm-up but fails on first request"
+How This Lazy Loading Works:
+    - __getattr__ intercepts any access to repository classes
+    - The actual import happens ONLY when the class is first used
+    - This is typically when RepositoryFactory.create_repositories() is called
+    - By then, Azure Functions runtime is fully initialized
 
-6. HOW THIS LAZY LOADING WORKS:
-   - __getattr__ intercepts any access to repository classes
-   - The actual import happens ONLY when the class is first used
-   - This is typically when RepositoryFactory.create_repositories() is called
-   - By then, Azure Functions runtime is fully initialized
-
-THIS IS A LEARNING PROJECT NOTE:
-This explanation documents our understanding of Azure Functions' runtime
-behavior through trial and error. The "mysterious" part is that there's
-a gap between when Python starts importing modules and when the Functions
-host has fully initialized the environment. Our lazy loading pattern
-elegantly bridges this gap!
-
-Updated: 27 SEP 2025 - Added Azure Functions runtime explanation
+Historical context archived in: docs/archive/INIT_PY_HISTORY.md
 """
 
 from typing import TYPE_CHECKING
@@ -87,26 +72,21 @@ if TYPE_CHECKING:
     from .vault import VaultRepository as _VaultRepository
     from .platform import PlatformRepository as _PlatformRepository
     from .platform import ApiRequestRepository as _ApiRequestRepository
-    # NOTE: PlatformStatusRepository REMOVED (22 NOV 2025) - thin tracking pattern
     from .h3_batch_tracking import H3BatchTracker as _H3BatchTracker
     from .interface_repository import (
         IJobRepository as _IJobRepository,
         ITaskRepository as _ITaskRepository,
         IBlobRepository as _IBlobRepository,
     )
-    # Resource validators (28 NOV 2025 - pre-flight validation)
     from .validators import (
         RESOURCE_VALIDATORS as _RESOURCE_VALIDATORS,
         run_validators as _run_validators,
         ValidatorResult as _ValidatorResult,
     )
-    # Azure Data Factory (29 NOV 2025 - ADF pipeline orchestration)
     from .data_factory import AzureDataFactoryRepository as _AzureDataFactoryRepository
     from .interface_repository import IDataFactoryRepository as _IDataFactoryRepository
-    # Curated datasets (15 DEC 2025 - system-managed data)
     from .curated_repository import CuratedDatasetRepository as _CuratedDatasetRepository
     from .curated_repository import CuratedUpdateLogRepository as _CuratedUpdateLogRepository
-    # Promoted datasets (23 DEC 2025 - gallery/system-reserved datasets)
     from .promoted_repository import PromotedDatasetRepository as _PromotedDatasetRepository
 
 
@@ -151,21 +131,20 @@ def __getattr__(name: str):
         from .vault import VaultRepository
         return VaultRepository
 
-    # Platform repositories (simplified 22 NOV 2025 - thin tracking)
+    # Platform repositories
     elif name == "PlatformRepository":
         from .platform import PlatformRepository
         return PlatformRepository
     elif name == "ApiRequestRepository":
         from .platform import ApiRequestRepository
         return ApiRequestRepository
-    # NOTE: PlatformStatusRepository REMOVED - use ApiRequestRepository instead
 
-    # H3 batch tracking (26 NOV 2025 - idempotency framework)
+    # H3 batch tracking
     elif name == "H3BatchTracker":
         from .h3_batch_tracking import H3BatchTracker
         return H3BatchTracker
 
-    # Resource validators (28 NOV 2025 - pre-flight validation)
+    # Resource validators
     elif name == "RESOURCE_VALIDATORS":
         from .validators import RESOURCE_VALIDATORS
         return RESOURCE_VALIDATORS
@@ -190,12 +169,12 @@ def __getattr__(name: str):
         from .interface_repository import IDataFactoryRepository
         return IDataFactoryRepository
 
-    # Azure Data Factory (29 NOV 2025 - ADF pipeline orchestration)
+    # Azure Data Factory
     elif name == "AzureDataFactoryRepository":
         from .data_factory import AzureDataFactoryRepository
         return AzureDataFactoryRepository
 
-    # Curated datasets (15 DEC 2025 - system-managed data)
+    # Curated datasets
     elif name == "CuratedDatasetRepository":
         from .curated_repository import CuratedDatasetRepository
         return CuratedDatasetRepository
@@ -203,12 +182,12 @@ def __getattr__(name: str):
         from .curated_repository import CuratedUpdateLogRepository
         return CuratedUpdateLogRepository
 
-    # Promoted datasets (23 DEC 2025 - gallery/system-reserved datasets)
+    # Promoted datasets
     elif name == "PromotedDatasetRepository":
         from .promoted_repository import PromotedDatasetRepository
         return PromotedDatasetRepository
 
-    # Pipeline Observability (28 DEC 2025 - E13)
+    # Pipeline Observability (E13)
     elif name == "MetricsRepository":
         from .metrics_repository import MetricsRepository
         return MetricsRepository
@@ -233,7 +212,7 @@ def __getattr__(name: str):
         from .factory import get_default_repositories
         return get_default_repositories
 
-    # Checkpoint Manager (11 JAN 2026 - Docker resume support)
+    # Checkpoint Manager (Docker resume support)
     elif name == "CheckpointManager":
         from .checkpoint_manager import CheckpointManager
         return CheckpointManager
@@ -257,9 +236,7 @@ __all__ = [
     "VaultRepository",
     "PlatformRepository",
     "ApiRequestRepository",
-    # NOTE: PlatformStatusRepository REMOVED (22 NOV 2025)
-    "H3BatchTracker",  # Added 26 NOV 2025 - idempotency framework
-    # Resource validators (28 NOV 2025 - pre-flight validation)
+    "H3BatchTracker",
     "RESOURCE_VALIDATORS",
     "run_validators",
     "ValidatorResult",
@@ -267,11 +244,10 @@ __all__ = [
     "ITaskRepository",
     "IBlobRepository",
     "IDataFactoryRepository",
-    "AzureDataFactoryRepository",  # Added 29 NOV 2025 - ADF pipeline orchestration
-    "CuratedDatasetRepository",  # Added 15 DEC 2025 - system-managed data
-    "CuratedUpdateLogRepository",  # Added 15 DEC 2025 - system-managed data
-    "PromotedDatasetRepository",  # Added 23 DEC 2025 - gallery/system-reserved datasets
-    # Pipeline Observability (28 DEC 2025 - E13)
+    "AzureDataFactoryRepository",
+    "CuratedDatasetRepository",
+    "CuratedUpdateLogRepository",
+    "PromotedDatasetRepository",
     "MetricsRepository",
     "JobProgressTracker",
     "JobProgressSnapshot",
@@ -279,7 +255,6 @@ __all__ = [
     "FathomETLTracker",
     "RasterCollectionTracker",
     "get_default_repositories",
-    # Checkpoint Manager (11 JAN 2026 - Docker resume support)
     "CheckpointManager",
     "CheckpointValidationError",
 ]

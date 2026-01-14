@@ -3,8 +3,7 @@
 # ============================================================================
 # STATUS: Core - Pure data structures without business logic
 # PURPOSE: Export all data models (enums, records, contexts, results)
-# LAST_REVIEWED: 03 JAN 2026
-# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# LAST_REVIEWED: 14 JAN 2026
 # ============================================================================
 """
 Core Data Models Package.
@@ -19,6 +18,10 @@ Exports:
     TaskResult, StageResultContract: Result types
     ApiRequest, PlatformRequest: Platform models
     JanitorRun: Janitor maintenance models
+    VectorMetadata, RasterMetadata: Unified metadata models
+    CogMetadataRecord: COG metadata tracking
+
+Historical context archived in: docs/archive/INIT_PY_HISTORY.md
 """
 
 # Enums
@@ -53,13 +56,12 @@ from .results import (
     StageResultContract,
     StageAdvancementResult,
     JobCompletionResult,
-    # GAP-006 FIX (15 DEC 2025): Process vector stage result validation models
     ProcessVectorStage1Data,
     ProcessVectorStage1Result,
     ProcessVectorStage2Result
 )
 
-# Platform models (simplified 22 NOV 2025 - thin tracking only)
+# Platform models
 from .platform import (
     ApiRequest,
     PlatformRequestStatus,
@@ -67,28 +69,27 @@ from .platform import (
     OperationType,
     PlatformRequest
 )
-# NOTE: OrchestrationJob REMOVED (22 NOV 2025) - no job chaining in Platform
 
-# Janitor models (21 NOV 2025)
+# Janitor models
 from .janitor import (
     JanitorRun,
     JanitorRunType,
     JanitorRunStatus
 )
 
-# ETL tracking models (21 DEC 2025 - generalized)
+# ETL tracking models
 from .etl import (
     EtlSourceFile
 )
 
-# Unpublish audit models (12 DEC 2025)
+# Unpublish audit models
 from .unpublish import (
     UnpublishJobRecord,
     UnpublishType,
     UnpublishStatus
 )
 
-# Curated dataset models (15 DEC 2025)
+# Curated dataset models
 from .curated import (
     CuratedDataset,
     CuratedUpdateLog,
@@ -98,7 +99,7 @@ from .curated import (
     CuratedUpdateStatus
 )
 
-# Promoted dataset models (23 DEC 2025)
+# Promoted dataset models
 from .promoted import (
     PromotedDataset,
     PromotedDatasetType,
@@ -106,13 +107,13 @@ from .promoted import (
     Classification
 )
 
-# System snapshot models (04 JAN 2026)
+# System snapshot models
 from .system_snapshot import (
     SystemSnapshotRecord,
     SnapshotTriggerType
 )
 
-# Unified metadata models (09 JAN 2026 - F7.8)
+# Unified metadata models (F7.8)
 from .unified_metadata import (
     ProviderRole,
     Provider,
@@ -121,19 +122,19 @@ from .unified_metadata import (
     Extent,
     BaseMetadata,
     VectorMetadata,
-    RasterMetadata  # F7.9
+    RasterMetadata
 )
 
-# External references models (09 JAN 2026 - F7.8)
+# External references models (F7.8)
 from .external_refs import (
-    DataType as ExternalDataType,  # Avoid conflict with platform.DataType
+    DataType as ExternalDataType,
     DDHRefs,
     ExternalRefs,
     DatasetRef,
     DatasetRefRecord
 )
 
-# Raster metadata models (09 JAN 2026 - F7.9)
+# Raster metadata models (F7.9)
 from .raster_metadata import (
     CogMetadataRecord
 )
@@ -164,33 +165,31 @@ __all__ = [
     'StageResultContract',
     'StageAdvancementResult',
     'JobCompletionResult',
-    # GAP-006 FIX (15 DEC 2025)
     'ProcessVectorStage1Data',
     'ProcessVectorStage1Result',
     'ProcessVectorStage2Result',
 
-    # Platform models (simplified 22 NOV 2025 - thin tracking)
+    # Platform models
     'ApiRequest',
     'PlatformRequestStatus',
     'DataType',
     'OperationType',
     'PlatformRequest',
-    # NOTE: OrchestrationJob REMOVED - no job chaining in Platform
 
-    # Janitor models (21 NOV 2025)
+    # Janitor models
     'JanitorRun',
     'JanitorRunType',
     'JanitorRunStatus',
 
-    # ETL tracking models (21 DEC 2025 - generalized)
+    # ETL tracking models
     'EtlSourceFile',
 
-    # Unpublish audit models (12 DEC 2025)
+    # Unpublish audit models
     'UnpublishJobRecord',
     'UnpublishType',
     'UnpublishStatus',
 
-    # Curated dataset models (15 DEC 2025)
+    # Curated dataset models
     'CuratedDataset',
     'CuratedUpdateLog',
     'CuratedSourceType',
@@ -198,17 +197,17 @@ __all__ = [
     'CuratedUpdateType',
     'CuratedUpdateStatus',
 
-    # Promoted dataset models (23 DEC 2025)
+    # Promoted dataset models
     'PromotedDataset',
     'PromotedDatasetType',
     'SystemRole',
     'Classification',
 
-    # System snapshot models (04 JAN 2026)
+    # System snapshot models
     'SystemSnapshotRecord',
     'SnapshotTriggerType',
 
-    # Unified metadata models (09 JAN 2026 - F7.8)
+    # Unified metadata models (F7.8)
     'ProviderRole',
     'Provider',
     'SpatialExtent',
@@ -216,15 +215,15 @@ __all__ = [
     'Extent',
     'BaseMetadata',
     'VectorMetadata',
-    'RasterMetadata',  # F7.9
+    'RasterMetadata',
 
-    # External references models (09 JAN 2026 - F7.8)
+    # External references models (F7.8)
     'ExternalDataType',
     'DDHRefs',
     'ExternalRefs',
     'DatasetRef',
     'DatasetRefRecord',
 
-    # Raster metadata models (09 JAN 2026 - F7.9)
+    # Raster metadata models (F7.9)
     'CogMetadataRecord',
 ]

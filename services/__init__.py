@@ -3,8 +3,7 @@
 # ============================================================================
 # STATUS: Services - Explicit task handler registration (no decorators)
 # PURPOSE: Central registry mapping task_type strings to handler functions
-# LAST_REVIEWED: 04 JAN 2026
-# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# LAST_REVIEWED: 14 JAN 2026
 # ============================================================================
 """
 Service Handler Registry - Explicit Registration (No Decorators!)
@@ -15,105 +14,64 @@ If you don't see it in ALL_HANDLERS, it's not registered.
 CRITICAL: We avoid decorator-based registration because:
 1. Decorators only execute when module is imported
 2. If service module never imported, decorators never run
-3. This caused silent registration failures in previous implementation (10 SEP 2025)
+3. This caused silent registration failures in previous implementations
 4. Explicit registration is clear, visible, and predictable
 
 Registration Process:
 1. Create your handler functions in services/service_your_domain.py
-2. Import them at the top of this file: `from .service_your_domain import handle_foo, handle_bar`
-3. Add entries to ALL_HANDLERS dict: `"task_type": handler_function`
+2. Import them at the top of this file
+3. Add entries to ALL_HANDLERS dict
 4. Done! No decorators, no magic, just a simple dict
-
-Example:
-    # In services/service_raster.py:
-    def handle_tile_processing(params: dict, context: dict = None) -> dict:
-        return {"success": True, "tile_id": params["tile_id"]}
-    
-    # In services/__init__.py (this file):
-    from .service_raster import handle_tile_processing
-    
-    ALL_HANDLERS = {
-        "hello_world_greeting": handle_greeting,
-        "process_tile": handle_tile_processing,  # <- Added here!
-    }
 
 Handler Function Contract (ENFORCED BY CoreMachine):
     def handler(params: Dict[str, Any], context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         '''
-        Task handler function signature and return contract.
-
         Args:
-            params: Task parameters from job definition (dict)
-            context: Optional context with predecessor results, job metadata, etc. (dict or None)
+            params: Task parameters from job definition
+            context: Optional context with predecessor results, job metadata
 
         Returns:
-            Dict with REQUIRED 'success' field (bool) and additional data:
+            Dict with REQUIRED 'success' field (bool):
 
-            SUCCESS FORMAT:
-                {
-                    "success": True,        # REQUIRED - Must be boolean True
-                    "result": {...}         # Optional - Your task results
-                }
-
-            FAILURE FORMAT:
-                {
-                    "success": False,       # REQUIRED - Must be boolean False
-                    "error": "error message",  # REQUIRED - Describe what went wrong
-                    "error_type": "ValueError" # Optional - Exception type name
-                }
+            SUCCESS: {"success": True, "result": {...}}
+            FAILURE: {"success": False, "error": "message", "error_type": "ValueError"}
 
         CONTRACT ENFORCEMENT:
-            - Missing 'success' field → ContractViolationError (crashes function)
-            - Non-boolean 'success' → ContractViolationError (crashes function)
+            - Missing 'success' field -> ContractViolationError
             - Task marked COMPLETED if success=True, FAILED if success=False
 
         EXCEPTION HANDLING:
             - Handlers can raise exceptions instead of returning {"success": False, ...}
             - CoreMachine catches exceptions and auto-creates failure result
-            - Prefer raising exceptions for unexpected errors (simpler code)
-            - Use {"success": False, ...} for expected business logic failures
         '''
-        # Your handler logic here
         return {"success": True, "result": {"foo": "bar"}}
 
+Historical context archived in: docs/archive/INIT_PY_HISTORY.md
 """
 
 from .service_hello_world import handle_greeting, handle_reply
 from .container_summary import analyze_container_summary
-# Old container_list handlers - ARCHIVED (07 DEC 2025)
-# list_container_blobs: replaced by list_blobs_with_metadata
-# analyze_single_blob: replaced by analyze_blob_basic
-# aggregate_blob_analysis: replaced by container_inventory.aggregate_blob_analysis
-# from .container_list import list_container_blobs, analyze_single_blob, aggregate_blob_analysis
 from .stac_catalog import list_raster_files, extract_stac_metadata
 from .stac_vector_catalog import extract_vector_stac_metadata, create_vector_stac
-# test_minimal removed (30 NOV 2025) - file doesn't exist
 from .raster_validation import validate_raster
 from .raster_cog import create_cog
 from .handler_create_h3_stac import create_h3_stac
 from .handler_h3_native_streaming import h3_native_streaming_postgis
-from .handler_generate_h3_grid import generate_h3_grid  # Universal H3 handler (14 NOV 2025) - replaces bootstrap_res2
-from .handler_cascade_h3_descendants import cascade_h3_descendants  # Multi-level cascade handler (15 NOV 2025) - res N → res N+1,N+2,etc
-from .handler_finalize_h3_pyramid import finalize_h3_pyramid  # H3 pyramid finalization (14 NOV 2025)
-# Old ingest_vector handlers REMOVED (27 NOV 2025) - process_vector uses new idempotent handlers
-# from .vector.tasks import prepare_vector_chunks, upload_pickled_chunk
-from .vector.process_vector_tasks import process_vector_prepare, process_vector_upload  # Idempotent (26 NOV 2025)
+from .handler_generate_h3_grid import generate_h3_grid
+from .handler_cascade_h3_descendants import cascade_h3_descendants
+from .handler_finalize_h3_pyramid import finalize_h3_pyramid
+from .vector.process_vector_tasks import process_vector_prepare, process_vector_upload
 from .raster_mosaicjson import create_mosaicjson
 from .stac_collection import create_stac_collection
 from .tiling_scheme import generate_tiling_scheme
 from .tiling_extraction import extract_tiles
 from .fathom_etl import (
-    # Phase 1: Band stacking (03 DEC 2025)
     fathom_tile_inventory,
     fathom_band_stack,
-    # Phase 2: Spatial merge (03 DEC 2025)
     fathom_grid_inventory,
     fathom_spatial_merge,
-    # Shared
     fathom_stac_register,
-    # STAC Rebuild (09 JAN 2026) - rebuild STAC from existing COGs
     fathom_stac_rebuild,
-    # Legacy handlers ARCHIVED (05 DEC 2025) → docs/archive/jobs/fathom_legacy_dec2025/
 )
 from .geospatial_inventory import (
     classify_geospatial_file,
@@ -122,7 +80,7 @@ from .geospatial_inventory import (
 from .container_inventory import (
     list_blobs_with_metadata,
     analyze_blob_basic,
-    aggregate_blob_analysis as aggregate_blob_analysis_v2,  # New consolidated handler
+    aggregate_blob_analysis as aggregate_blob_analysis_v2,
 )
 from .fathom_container_inventory import (
     fathom_generate_scan_prefixes,
@@ -131,7 +89,7 @@ from .fathom_container_inventory import (
     fathom_inventory_summary,
 )
 
-# Unpublish handlers - surgical data removal (12 DEC 2025)
+# Unpublish handlers
 from .unpublish_handlers import (
     inventory_raster_item,
     inventory_vector_item,
@@ -140,7 +98,7 @@ from .unpublish_handlers import (
     delete_stac_and_audit,
 )
 
-# Curated dataset update handlers (15 DEC 2025)
+# Curated dataset update handlers
 from jobs.curated_update import (
     curated_check_source,
     curated_fetch_data,
@@ -148,38 +106,36 @@ from jobs.curated_update import (
     curated_finalize,
 )
 
-# H3 Aggregation handlers (17 DEC 2025)
+# H3 Aggregation handlers
 from .h3_aggregation import (
     h3_inventory_cells,
     h3_raster_zonal_stats,
     h3_aggregation_finalize,
-    # H3 Export handlers (28 DEC 2025)
     h3_export_validate,
     h3_export_build,
     h3_export_register,
 )
 
-# STAC Repair handlers (22 DEC 2025)
+# STAC Repair handlers
 from .stac_repair_handlers import (
     stac_repair_inventory,
     stac_repair_item,
 )
 
-# STAC Rebuild handlers (10 JAN 2026) - F7.11 Self-Healing
+# STAC Rebuild handlers (F7.11 Self-Healing)
 from .rebuild_stac_handlers import (
     stac_rebuild_validate,
     stac_rebuild_item,
 )
 
-# Docker consolidated handlers (11 JAN 2026) - F7.13, F7.18
+# Docker consolidated handlers (F7.13, F7.18)
 from .handler_process_raster_complete import process_raster_complete
 from .handler_process_large_raster_complete import process_large_raster_complete
 
-# Ingest Collection handlers (29 DEC 2025)
+# Ingest Collection handlers
 from .ingest import ALL_HANDLERS as INGEST_HANDLERS
 
-# Validate no handler name collisions before merge (29 DEC 2025)
-# Python dict unpacking silently overwrites duplicates - fail explicitly instead
+# Validate no handler name collisions before merge
 def _validate_no_handler_collisions(base_keys: set, merge_dict: dict, merge_name: str):
     """Fail fast if handler registries have overlapping keys."""
     collisions = base_keys & set(merge_dict.keys())
@@ -190,9 +146,8 @@ def _validate_no_handler_collisions(base_keys: set, merge_dict: dict, merge_name
         )
 
 # ============================================================================
-# STAC METADATA HELPER (25 NOV 2025)
+# STAC METADATA HELPER
 # ============================================================================
-# Centralized STAC metadata enrichment - platform, app, geographic, visualization
 from .iso3_attribution import ISO3Attribution, ISO3AttributionService
 from .stac_metadata_helper import (
     STACMetadataHelper,
@@ -211,100 +166,90 @@ from .stac_metadata_helper import (
 # ============================================================================
 
 ALL_HANDLERS = {
+    # Hello World (test handlers)
     "hello_world_greeting": handle_greeting,
     "hello_world_reply": handle_reply,
+
+    # Container inventory
     "inventory_container_summary": analyze_container_summary,
-    # Old container_list handlers ARCHIVED (07 DEC 2025) - see Container Inventory handlers below
-    # "list_container_blobs": list_container_blobs,
-    # "analyze_single_blob": analyze_single_blob,
-    # Raster handlers, renamed (29 DEC 2025)
+    "inventory_list_blobs": list_blobs_with_metadata,
+    "inventory_analyze_blob": analyze_blob_basic,
+    "inventory_aggregate_analysis": aggregate_blob_analysis_v2,
+    "inventory_classify_geospatial": classify_geospatial_file,
+    "inventory_aggregate_geospatial": aggregate_geospatial_inventory,
+
+    # Raster handlers
     "raster_list_files": list_raster_files,
     "raster_extract_stac_metadata": extract_stac_metadata,
-    "vector_extract_stac_metadata": extract_vector_stac_metadata,
-    # "test_minimal" removed (30 NOV 2025) - file doesn't exist
     "raster_validate": validate_raster,
     "raster_create_cog": create_cog,
-    # H3 PostGIS + STAC handlers (9 NOV 2025 - Phase 2), renamed (29 DEC 2025)
-    "h3_create_stac": create_h3_stac,              # Stage 3: Create STAC item for H3 grid
-    # H3 Native Streaming Handler (9 NOV 2025 - Phase 3)
-    "h3_native_streaming_postgis": h3_native_streaming_postgis,  # Stage 1: h3-py → async stream → PostGIS (3.5x faster)
-    # H3 Universal Handlers (14-15 NOV 2025 - DRY Architecture), renamed (29 DEC 2025)
-    "h3_generate_grid": generate_h3_grid,  # Universal handler for ALL resolutions (0-15), base OR cascade, flexible filtering (replaces bootstrap_res2)
-    "h3_cascade_descendants": cascade_h3_descendants,  # Multi-level cascade handler (15 NOV 2025) - res N → [N+1, N+2, ..., N+K] in one operation
-    "h3_finalize_pyramid": finalize_h3_pyramid,  # H3 pyramid finalization and verification (14 NOV 2025)
-    # Vector ETL handlers - OLD ingest_vector handlers REMOVED (27 NOV 2025)
-    # "prepare_vector_chunks" and "upload_pickled_chunk" removed - use process_vector idempotent handlers
-    "vector_create_stac": create_vector_stac,        # Stage 3: Create STAC record (shared by process_vector)
-    # Raster collection handlers (20 OCT 2025), renamed (29 DEC 2025)
-    "raster_create_mosaicjson": create_mosaicjson,          # Stage 3: Create MosaicJSON from COG collection
-    "raster_create_stac_collection": create_stac_collection,  # Stage 4: Create STAC collection item
-    # Big Raster ETL handlers (24 OCT 2025), renamed (29 DEC 2025)
-    "raster_generate_tiling_scheme": generate_tiling_scheme,  # Stage 1: Generate tiling scheme in EPSG:4326
-    "raster_extract_tiles": extract_tiles,                   # Stage 2: Extract tiles sequentially
-    # Fathom ETL handlers - Two-Phase Architecture (03 DEC 2025)
-    # Phase 1: Band stacking (~500MB/task, 16+ concurrent)
-    "fathom_tile_inventory": fathom_tile_inventory,   # Stage 1: Group by tile + scenario
-    "fathom_band_stack": fathom_band_stack,           # Stage 2: Stack 8 RPs into multi-band COG
-    # Phase 2: Spatial merge (~2-3GB/task, 4-5 concurrent)
-    "fathom_grid_inventory": fathom_grid_inventory,   # Stage 1: Group by NxN grid cell
-    "fathom_spatial_merge": fathom_spatial_merge,     # Stage 2: Merge tiles band-by-band
-    # Shared handler (both phases)
-    "fathom_stac_register": fathom_stac_register,     # Stage 3: STAC collection/items
-    # STAC Rebuild (09 JAN 2026) - rebuild STAC from existing COGs
+    "raster_create_mosaicjson": create_mosaicjson,
+    "raster_create_stac_collection": create_stac_collection,
+    "raster_generate_tiling_scheme": generate_tiling_scheme,
+    "raster_extract_tiles": extract_tiles,
+
+    # Docker consolidated handlers (F7.13, F7.18)
+    "raster_process_complete": process_raster_complete,
+    "raster_process_large_complete": process_large_raster_complete,
+
+    # Vector handlers
+    "vector_extract_stac_metadata": extract_vector_stac_metadata,
+    "vector_create_stac": create_vector_stac,
+    "process_vector_prepare": process_vector_prepare,
+    "process_vector_upload": process_vector_upload,
+
+    # H3 handlers
+    "h3_create_stac": create_h3_stac,
+    "h3_native_streaming_postgis": h3_native_streaming_postgis,
+    "h3_generate_grid": generate_h3_grid,
+    "h3_cascade_descendants": cascade_h3_descendants,
+    "h3_finalize_pyramid": finalize_h3_pyramid,
+    "h3_inventory_cells": h3_inventory_cells,
+    "h3_raster_zonal_stats": h3_raster_zonal_stats,
+    "h3_aggregation_finalize": h3_aggregation_finalize,
+    "h3_export_validate": h3_export_validate,
+    "h3_export_build": h3_export_build,
+    "h3_export_register": h3_export_register,
+
+    # Fathom ETL handlers
+    "fathom_tile_inventory": fathom_tile_inventory,
+    "fathom_band_stack": fathom_band_stack,
+    "fathom_grid_inventory": fathom_grid_inventory,
+    "fathom_spatial_merge": fathom_spatial_merge,
+    "fathom_stac_register": fathom_stac_register,
     "fathom_stac_rebuild": fathom_stac_rebuild,
-    # Legacy handlers ARCHIVED (05 DEC 2025) → docs/archive/jobs/fathom_legacy_dec2025/
-    # Idempotent Vector ETL handlers (26 NOV 2025)
-    "process_vector_prepare": process_vector_prepare,  # Stage 1: Load, validate, chunk, create table
-    "process_vector_upload": process_vector_upload,    # Stage 2: DELETE+INSERT idempotent upload
-    # Note: vector_create_stac already registered above - reused for Stage 3
-    # Container Inventory handlers - consolidated (07 DEC 2025), renamed (29 DEC 2025)
-    # Base handlers (analysis_mode="basic")
-    "inventory_list_blobs": list_blobs_with_metadata,  # Stage 1: List blobs with full metadata
-    "inventory_analyze_blob": analyze_blob_basic,  # Stage 2: Basic per-blob analysis
-    "inventory_aggregate_analysis": aggregate_blob_analysis_v2,  # Stage 3: Aggregate basic analysis (replaces old handler)
-    # Geospatial handlers (analysis_mode="geospatial")
-    "inventory_classify_geospatial": classify_geospatial_file,  # Stage 2: Per-blob geospatial classification
-    "inventory_aggregate_geospatial": aggregate_geospatial_inventory,  # Stage 3: Group into collections
-    # Fathom Container Inventory handlers (05 DEC 2025)
-    "fathom_generate_scan_prefixes": fathom_generate_scan_prefixes,  # Stage 1: Generate prefix list
-    "fathom_scan_prefix": fathom_scan_prefix,  # Stage 2: Parallel scan + batch insert
-    "fathom_assign_grid_cells": fathom_assign_grid_cells,  # Stage 3: Calculate grid assignments
-    "fathom_inventory_summary": fathom_inventory_summary,  # Stage 4: Generate statistics
-    # Unpublish handlers - surgical data removal (12 DEC 2025), renamed (29 DEC 2025)
-    "unpublish_inventory_raster": inventory_raster_item,  # Stage 1: Query STAC, extract blob list
-    "unpublish_inventory_vector": inventory_vector_item,  # Stage 1: Query STAC, extract table ref
-    "unpublish_delete_blob": delete_blob,  # Stage 2: Delete blob from Azure Storage
-    "unpublish_drop_table": drop_postgis_table,  # Stage 2: DROP TABLE IF EXISTS
-    "unpublish_delete_stac": delete_stac_and_audit,  # Stage 3: Delete STAC item, audit
-    # Curated dataset update handlers (15 DEC 2025)
-    "curated_check_source": curated_check_source,  # Stage 1: Check source for updates
-    "curated_fetch_data": curated_fetch_data,  # Stage 2: Download data
-    "curated_etl_process": curated_etl_process,  # Stage 3: ETL to PostGIS
-    "curated_finalize": curated_finalize,  # Stage 4: Update registry, log
-    # H3 Aggregation handlers (17 DEC 2025)
-    "h3_inventory_cells": h3_inventory_cells,  # Stage 1: Count cells, calculate batches
-    "h3_raster_zonal_stats": h3_raster_zonal_stats,  # Stage 2: Compute zonal stats from COG
-    "h3_aggregation_finalize": h3_aggregation_finalize,  # Stage 3: Update registry, verify counts
-    # H3 Export handlers (28 DEC 2025)
-    "h3_export_validate": h3_export_validate,  # Stage 1: Check table, verify datasets
-    "h3_export_build": h3_export_build,  # Stage 2: Join + pivot + export
-    "h3_export_register": h3_export_register,  # Stage 3: Update catalog
-    # STAC Repair handlers (22 DEC 2025)
-    "stac_repair_inventory": stac_repair_inventory,  # Stage 1: Scan catalog for issues
-    "stac_repair_item": stac_repair_item,  # Stage 2: Repair individual items
-    # STAC Rebuild handlers (10 JAN 2026) - F7.11 Self-Healing
-    "stac_rebuild_validate": stac_rebuild_validate,  # Stage 1: Check sources exist
-    "stac_rebuild_item": stac_rebuild_item,  # Stage 2: Regenerate STAC item (fan-out)
-    # Docker consolidated handlers (11 JAN 2026) - F7.13, F7.18
-    "raster_process_complete": process_raster_complete,  # Single-stage Docker handler
-    "raster_process_large_complete": process_large_raster_complete,  # Large raster Docker handler
+    "fathom_generate_scan_prefixes": fathom_generate_scan_prefixes,
+    "fathom_scan_prefix": fathom_scan_prefix,
+    "fathom_assign_grid_cells": fathom_assign_grid_cells,
+    "fathom_inventory_summary": fathom_inventory_summary,
+
+    # Unpublish handlers
+    "unpublish_inventory_raster": inventory_raster_item,
+    "unpublish_inventory_vector": inventory_vector_item,
+    "unpublish_delete_blob": delete_blob,
+    "unpublish_drop_table": drop_postgis_table,
+    "unpublish_delete_stac": delete_stac_and_audit,
+
+    # Curated dataset handlers
+    "curated_check_source": curated_check_source,
+    "curated_fetch_data": curated_fetch_data,
+    "curated_etl_process": curated_etl_process,
+    "curated_finalize": curated_finalize,
+
+    # STAC Repair handlers
+    "stac_repair_inventory": stac_repair_inventory,
+    "stac_repair_item": stac_repair_item,
+
+    # STAC Rebuild handlers (F7.11)
+    "stac_rebuild_validate": stac_rebuild_validate,
+    "stac_rebuild_item": stac_rebuild_item,
 }
 
-# Validate no collisions before merging INGEST_HANDLERS (29 DEC 2025)
+# Validate no collisions before merging INGEST_HANDLERS
 _validate_no_handler_collisions(set(ALL_HANDLERS.keys()), INGEST_HANDLERS, "INGEST_HANDLERS")
 
-# Now safe to merge - Ingest Collection handlers
-ALL_HANDLERS.update(INGEST_HANDLERS)  # ingest_inventory, ingest_copy_batch, ingest_register_*, ingest_finalize
+# Merge Ingest Collection handlers
+ALL_HANDLERS.update(INGEST_HANDLERS)
 
 # ============================================================================
 # VALIDATION
@@ -313,18 +258,14 @@ ALL_HANDLERS.update(INGEST_HANDLERS)  # ingest_inventory, ingest_copy_batch, ing
 def validate_handler_registry():
     """
     Validate all handlers in registry on startup.
-
-    This catches configuration errors immediately at import time,
-    not when a task tries to execute.
+    Catches configuration errors immediately at import time.
     """
     for task_type, handler in ALL_HANDLERS.items():
-        # Verify handler is callable
         if not callable(handler):
             raise ValueError(
                 f"Handler for '{task_type}' is not callable. "
                 f"Got {type(handler).__name__} instead of function."
             )
-
     return True
 
 
@@ -347,22 +288,17 @@ def get_handler(task_type: str):
             f"Unknown task type: '{task_type}'. "
             f"Available handlers: {available}"
         )
-
     return ALL_HANDLERS[task_type]
 
 
 # ============================================================================
-# STARTUP VALIDATION - Fail Fast (12 DEC 2025)
+# STARTUP VALIDATION - Fail Fast
 # ============================================================================
-
 
 def validate_task_routing_coverage():
     """
     Validate all handlers have queue routing configured.
-
     Runs at import time - fail fast if misconfigured.
-    Added 12 DEC 2025.
-    Updated 11 JAN 2026: Include LONG_RUNNING_TASKS for Docker handlers.
     """
     from config.defaults import TaskRoutingDefaults
 
@@ -383,15 +319,15 @@ def validate_task_routing_coverage():
 
 # Validate on import - fail fast if something's wrong.
 validate_handler_registry()
-validate_task_routing_coverage()  # NEW - 12 DEC 2025
+validate_task_routing_coverage()
 
 __all__ = [
     # Handler registry
     'ALL_HANDLERS',
     'get_handler',
     'validate_handler_registry',
-    'validate_task_routing_coverage',  # 12 DEC 2025
-    # STAC Metadata Helper (25 NOV 2025)
+    'validate_task_routing_coverage',
+    # STAC Metadata Helper
     'STACMetadataHelper',
     'PlatformMetadata',
     'AppMetadata',

@@ -3,8 +3,7 @@
 # ============================================================================
 # STATUS: Jobs - Explicit job registration (no decorators, no auto-discovery)
 # PURPOSE: Central registry mapping job_type strings to job classes
-# LAST_REVIEWED: 04 JAN 2026
-# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# LAST_REVIEWED: 14 JAN 2026
 # ============================================================================
 """
 Job Registry - Explicit job registration.
@@ -23,16 +22,11 @@ Registration Process:
     3. Add entry to ALL_JOBS dict
     4. Done - no decorators, no magic
 
-Example:
-    from .container_list import ContainerListJob
-
-    ALL_JOBS = {
-        "container_list": ContainerListJob,
-    }
-
 Exports:
     ALL_JOBS: Dict mapping job_type to job class
     JobBase: Abstract base class for jobs
+
+Historical context archived in: docs/archive/INIT_PY_HISTORY.md
 """
 
 from .base import JobBase
@@ -52,100 +46,73 @@ from .raster_mixin import RasterMixin
 from .process_raster_collection_v2 import ProcessRasterCollectionV2Job
 from .process_large_raster_v2 import ProcessLargeRasterV2Job
 from .inventory_fathom_container import InventoryFathomContainerJob
-
-# Consolidated container inventory (07 DEC 2025)
 from .inventory_container_contents import InventoryContainerContentsJob
-
-# Unpublish workflows (12 DEC 2025)
 from .unpublish_raster import UnpublishRasterJob
 from .unpublish_vector import UnpublishVectorJob
-
-# Curated dataset update (15 DEC 2025)
 from .curated_update import CuratedDatasetUpdateJob
-
-# H3 Aggregation (17 DEC 2025)
 from .h3_raster_aggregation import H3RasterAggregationJob
 from .h3_register_dataset import H3RegisterDatasetJob
-
-# H3 Export (28 DEC 2025)
 from .h3_export_dataset import H3ExportDatasetJob
-
-# STAC Repair (22 DEC 2025)
 from .repair_stac_items import RepairStacItemsJob
-
-# STAC Rebuild (10 JAN 2026) - F7.11 Self-Healing
 from .rebuild_stac import RebuildStacJob
-
-# Ingest Collection (29 DEC 2025)
 from .ingest_collection import IngestCollectionJob
-
-# Docker Jobs (11 JAN 2026) - F7.13, F7.18
 from .process_raster_docker import ProcessRasterDockerJob
 from .process_large_raster_docker import ProcessLargeRasterDockerJob
 
-# ARCHIVED (07 DEC 2025) - replaced by inventory_container_contents
-# from .container_list import ListContainerContentsWorkflow
-# from .container_list_diamond import ListContainerContentsDiamondWorkflow
-# from .inventory_container_geospatial import InventoryContainerGeospatialJob
-
 # Job Registry - add new jobs here
 ALL_JOBS = {
-    # Production Workflows
+    # Test/Utility
     "hello_world": HelloWorldJob,
     "summarize_container": ContainerSummaryWorkflow,
+
+    # STAC Catalog
     "stac_catalog_container": StacCatalogContainerWorkflow,
     "stac_catalog_vectors": StacCatalogVectorsWorkflow,
+
+    # Validation
     "validate_raster_job": ValidateRasterJob,
+
+    # H3 Grid
     "generate_h3_level4": GenerateH3Level4Job,
     "create_h3_base": CreateH3BaseJob,
     "bootstrap_h3_land_grid_pyramid": BootstrapH3LandGridPyramidJob,
+    "h3_raster_aggregation": H3RasterAggregationJob,
+    "h3_register_dataset": H3RegisterDatasetJob,
+    "h3_export_dataset": H3ExportDatasetJob,
 
-    # Fathom ETL - Two-Phase Architecture
+    # Fathom ETL
     "process_fathom_stack": ProcessFathomStackJob,
     "process_fathom_merge": ProcessFathomMergeJob,
+    "inventory_fathom_container": InventoryFathomContainerJob,
 
-    # Vector and Raster ETL
+    # Vector ETL
     "process_vector": ProcessVectorJob,
+
+    # Raster ETL (Function App - multi-stage)
     "process_raster_v2": ProcessRasterV2Job,
     "process_raster_collection_v2": ProcessRasterCollectionV2Job,
     "process_large_raster_v2": ProcessLargeRasterV2Job,
 
-    # Container Analysis (consolidated 07 DEC 2025)
-    "inventory_container_contents": InventoryContainerContentsJob,  # Replaces list_container_contents, container_list_diamond, inventory_container_geospatial
-    "inventory_fathom_container": InventoryFathomContainerJob,
-
-    # Unpublish workflows - surgical data removal (12 DEC 2025)
-    "unpublish_raster": UnpublishRasterJob,
-    "unpublish_vector": UnpublishVectorJob,
-
-    # Curated dataset update (15 DEC 2025)
-    "curated_dataset_update": CuratedDatasetUpdateJob,
-
-    # H3 Aggregation (17 DEC 2025)
-    "h3_raster_aggregation": H3RasterAggregationJob,
-    "h3_register_dataset": H3RegisterDatasetJob,
-
-    # H3 Export (28 DEC 2025)
-    "h3_export_dataset": H3ExportDatasetJob,
-
-    # STAC Repair (22 DEC 2025)
-    "repair_stac_items": RepairStacItemsJob,
-
-    # STAC Rebuild (10 JAN 2026) - F7.11 Self-Healing
-    "rebuild_stac": RebuildStacJob,
-
-    # Ingest Collection (29 DEC 2025)
-    "ingest_collection": IngestCollectionJob,
-
-    # Docker Jobs (11 JAN 2026) - F7.13, F7.18
-    # Single-stage jobs designed for Docker worker (no timeout constraints)
+    # Raster ETL (Docker - single stage)
     "process_raster_docker": ProcessRasterDockerJob,
     "process_large_raster_docker": ProcessLargeRasterDockerJob,
 
-    # ARCHIVED (07 DEC 2025) - use inventory_container_contents instead
-    # "list_container_contents": ListContainerContentsWorkflow,
-    # "list_container_contents_diamond": ListContainerContentsDiamondWorkflow,
-    # "inventory_container_geospatial": InventoryContainerGeospatialJob,
+    # Container Inventory
+    "inventory_container_contents": InventoryContainerContentsJob,
+
+    # Unpublish
+    "unpublish_raster": UnpublishRasterJob,
+    "unpublish_vector": UnpublishVectorJob,
+
+    # Curated Datasets
+    "curated_dataset_update": CuratedDatasetUpdateJob,
+
+    # STAC Maintenance
+    "repair_stac_items": RepairStacItemsJob,
+    "rebuild_stac": RebuildStacJob,
+
+    # Ingest
+    "ingest_collection": IngestCollectionJob,
 }
 
 def validate_job_registry():
@@ -156,7 +123,7 @@ def validate_job_registry():
 
     Validates:
         1. Required attributes (stages, job_type, description)
-        2. Required methods (interface contract - 6 methods)
+        2. Required methods (interface contract - 5 methods)
         3. Stage structure (list, not empty)
         4. ABC inheritance (JobBase enforces method signatures)
 
@@ -165,13 +132,12 @@ def validate_job_registry():
         ValueError: If job has invalid attributes
         TypeError: If ABC instantiation attempted without implementing abstract methods
     """
-    # Interface contract: Methods that triggers/CoreMachine expect
     REQUIRED_METHODS = [
-        'validate_job_parameters',  # Called by: triggers/submit_job.py line 171
-        'generate_job_id',          # Called by: triggers/submit_job.py line 175
-        'create_job_record',        # Called by: triggers/submit_job.py line 220
-        'queue_job',                # Called by: triggers/submit_job.py line 226
-        'create_tasks_for_stage',   # Called by: core/machine.py line 248
+        'validate_job_parameters',
+        'generate_job_id',
+        'create_job_record',
+        'queue_job',
+        'create_tasks_for_stage',
     ]
 
     for job_type, job_class in ALL_JOBS.items():
@@ -194,7 +160,7 @@ def validate_job_registry():
                 f"Job {job_type} has empty 'stages' list. Jobs must have at least one stage."
             )
 
-        # NEW: Verify required methods exist (interface contract enforcement)
+        # Verify required methods exist (interface contract enforcement)
         missing_methods = []
         for method_name in REQUIRED_METHODS:
             if not hasattr(job_class, method_name):
@@ -203,7 +169,7 @@ def validate_job_registry():
         if missing_methods:
             raise AttributeError(
                 f"\n{'='*80}\n"
-                f"❌ JOB INTERFACE CONTRACT VIOLATION: {job_type}\n"
+                f"JOB INTERFACE CONTRACT VIOLATION: {job_type}\n"
                 f"{'='*80}\n"
                 f"Job class: {job_class.__name__}\n"
                 f"Missing required methods: {', '.join(missing_methods)}\n"
@@ -255,5 +221,5 @@ __all__ = [
     'ALL_JOBS',
     'get_job_class',
     'validate_job_registry',
-    'JobBase',  # Export ABC for job implementations
+    'JobBase',
 ]

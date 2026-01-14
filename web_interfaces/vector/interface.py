@@ -185,6 +185,17 @@ class VectorInterface(BaseInterface):
             margin-bottom: 6px;
         }
 
+        /* Tiles button (13 JAN 2026) */
+        .link-badge-tiles {
+            background: linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%) !important;
+            color: white !important;
+            border-color: #7C3AED !important;
+        }
+
+        .link-badge-tiles:hover {
+            background: linear-gradient(135deg, #7C3AED 0%, #6D28D9 100%) !important;
+        }
+
         /* Promote button */
         .link-badge-promote {
             background: linear-gradient(135deg, #10B981 0%, #059669 100%) !important;
@@ -539,14 +550,22 @@ class VectorInterface(BaseInterface):
                 const isPromoted = promotedCollectionIds.has(c.id);
                 const title = c.title || c.id;
 
-                // Build action buttons
+                // Build action buttons (13 JAN 2026: Added Vector Tiles viewer)
+                const tilesLink = `/api/interface/vector-tiles?collection=${encodeURIComponent(c.id)}`;
                 let actionButtons = `
                     <a href="${viewerLink}"
                        class="link-badge link-badge-primary"
                        onclick="event.stopPropagation()"
                        target="_blank"
-                       title="Interactive map viewer">
+                       title="Leaflet + GeoJSON viewer">
                         🗺️ Map
+                    </a>
+                    <a href="${tilesLink}"
+                       class="link-badge link-badge-tiles"
+                       onclick="event.stopPropagation()"
+                       target="_blank"
+                       title="MapLibre + MVT tiles (better for large datasets)">
+                        🧱 Tiles
                     </a>`;
 
                 if (isPromoted) {

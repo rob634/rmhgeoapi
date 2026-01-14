@@ -437,6 +437,12 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Could not import Integration interface: {e}")
 
+try:
+    from .vector_tiles import interface as _vector_tiles
+    logger.info("✅ Imported Vector Tiles interface module")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import Vector Tiles interface: {e}")
+
 
 # Public API
 __all__ = [

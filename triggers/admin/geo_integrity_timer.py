@@ -61,11 +61,17 @@ class GeoIntegrityTimerHandler(TimerHandlerBase):
         Returns:
             Result dict with validation report
         """
-        from infrastructure.database import get_connection
+        from infrastructure import RepositoryFactory, PostgreSQLRepository
         from core.diagnostics import GeoSchemaValidator
 
         try:
-            with get_connection() as conn:
+            repos = RepositoryFactory.create_repositories()
+            db_repo = repos['job_repo']
+
+            if not isinstance(db_repo, PostgreSQLRepository):
+                raise ValueError("Database repository is not PostgreSQL")
+
+            with db_repo._get_connection() as conn:
                 validator = GeoSchemaValidator(conn, schema='geo')
                 report = validator.validate_all(include_row_counts=False)
 

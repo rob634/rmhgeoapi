@@ -1116,10 +1116,12 @@ class AdminDbDiagnosticsTrigger:
         logger.info("🔍 Running geo schema integrity check")
 
         try:
-            from infrastructure.database import get_connection
             from core.diagnostics import GeoSchemaValidator
 
-            with get_connection() as conn:
+            if not isinstance(self.db_repo, PostgreSQLRepository):
+                raise ValueError("Database repository is not PostgreSQL")
+
+            with self.db_repo._get_connection() as conn:
                 validator = GeoSchemaValidator(conn, schema='geo')
                 report = validator.validate_all(include_row_counts=False)
 

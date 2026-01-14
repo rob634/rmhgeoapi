@@ -103,12 +103,13 @@ class GeoSchemaValidator:
     # System tables in geo schema to exclude from TiPG comparison
     # These are internal metadata tables, not user data
     SYSTEM_TABLES = {
-        'table_metadata',      # Vector metadata tracking
-        'spatial_ref_sys',     # PostGIS system table
-        'geometry_columns',    # PostGIS system view
-        'geography_columns',   # PostGIS system view
-        'raster_columns',      # PostGIS system view
-        'raster_overviews',    # PostGIS system view
+        'table_metadata',              # Vector metadata tracking
+        'feature_collection_styles',   # Styling metadata for feature collections
+        'spatial_ref_sys',             # PostGIS system table
+        'geometry_columns',            # PostGIS system view
+        'geography_columns',           # PostGIS system view
+        'raster_columns',              # PostGIS system view
+        'raster_overviews',            # PostGIS system view
     }
 
     # Geometry types that are properly typed (not generic)

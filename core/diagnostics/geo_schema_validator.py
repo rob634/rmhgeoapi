@@ -237,6 +237,9 @@ class GeoSchemaValidator:
             columns = [desc[0] for desc in cur.description]
             rows = cur.fetchall()
 
+        # Handle both tuple (psycopg2) and dict (psycopg3 with row_factory)
+        if rows and isinstance(rows[0], dict):
+            return list(rows)  # Already dicts, return as-is
         return [dict(zip(columns, row)) for row in rows]
 
     def _validate_table(

@@ -332,7 +332,12 @@ class GeoSchemaValidator:
         with self.conn.cursor() as cur:
             cur.execute(query, (schema, table_name, pattern))
             result = cur.fetchone()
-            return result[0] if result else False
+            if not result:
+                return False
+            # Handle both tuple (psycopg2) and dict (psycopg3 with row_factory)
+            if isinstance(result, dict):
+                return result.get('exists', False)
+            return result[0]
 
     def _get_row_count(self, schema: str, table_name: str) -> int:
         """
@@ -355,7 +360,12 @@ class GeoSchemaValidator:
         with self.conn.cursor() as cur:
             cur.execute(query)
             result = cur.fetchone()
-            return result[0] if result else 0
+            if not result:
+                return 0
+            # Handle both tuple (psycopg2) and dict (psycopg3 with row_factory)
+            if isinstance(result, dict):
+                return result.get('count', 0)
+            return result[0]
 
     def _build_summary(self, results: List[TableValidationResult]) -> Dict[str, Any]:
         """

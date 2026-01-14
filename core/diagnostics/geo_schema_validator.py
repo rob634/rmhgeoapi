@@ -535,6 +535,9 @@ class GeoSchemaValidator:
             cur.execute(query, (self.schema,))
             rows = cur.fetchall()
 
+        # Handle both tuple (psycopg2) and dict (psycopg3 with row_factory)
+        if rows and isinstance(rows[0], dict):
+            return [row.get('table_name') for row in rows]
         return [row[0] for row in rows]
 
 

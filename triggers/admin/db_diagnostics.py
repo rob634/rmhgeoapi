@@ -1151,8 +1151,12 @@ class AdminDbDiagnosticsTrigger:
                 "tipg_sync": {
                     "in_sync": tipg_sync.get('in_sync'),
                     "missing_from_tipg": missing_from_tipg,
+                    "extra_in_tipg": tipg_sync.get('extra_in_tipg', []),
                     "geo_tables_count": tipg_sync.get('geo_tables_count', 0),
                     "tipg_collections_count": tipg_sync.get('tipg_collections_count', 0),
+                    "geo_tables": tipg_sync.get('geo_tables', []),
+                    "tipg_collections": tipg_sync.get('tipg_collections', []),
+                    "tipg_url": tipg_sync.get('tipg_url'),
                     "error": tipg_sync.get('error')
                 },
                 "delete_candidates": [
@@ -1164,6 +1168,20 @@ class AdminDbDiagnosticsTrigger:
                 "srids": report.get('summary', {}).get('srids', {}),
                 "tables_without_index": report.get('summary', {}).get('tables_without_index', 0),
                 "issues_found": report.get('issues_found', []),
+                # Full table details for debugging TiPG discovery issues
+                "tables": [
+                    {
+                        "table_name": t.get('table_name'),
+                        "full_name": t.get('full_name'),
+                        "geometry_column": t.get('geometry_column'),
+                        "geometry_type": t.get('geometry_type'),
+                        "srid": t.get('srid'),
+                        "has_spatial_index": t.get('has_spatial_index'),
+                        "is_tipg_compatible": t.get('is_tipg_compatible'),
+                        "issues": t.get('issues', [])
+                    }
+                    for t in report.get('tables', [])
+                ],
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }
 

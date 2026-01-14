@@ -563,8 +563,12 @@ class VectorMetadata(BaseMetadata):
         """
         # Build properties including fallback URL if provided
         properties = self.to_ogc_properties()
+
+        # TiPG requires schema-qualified table names (14 JAN 2026)
+        tipg_collection_id = f"{self.schema_name}.{self.id}"
+
         if fallback_base_url:
-            properties["ogc:fallback_url"] = f"{fallback_base_url}/collections/{self.id}/items"
+            properties["ogc:fallback_url"] = f"{fallback_base_url}/collections/{tipg_collection_id}/items"
 
         collection: Dict[str, Any] = {
             "id": self.id,
@@ -572,16 +576,22 @@ class VectorMetadata(BaseMetadata):
             "description": self.description or f"Vector dataset: {self.id}",
             "links": [
                 {
-                    "href": f"{tipg_base_url}/collections/{self.id}",
+                    "href": f"{tipg_base_url}/collections/{tipg_collection_id}",
                     "rel": "self",
                     "type": "application/json",
                     "title": "This collection"
                 },
                 {
-                    "href": f"{tipg_base_url}/collections/{self.id}/items",
+                    "href": f"{tipg_base_url}/collections/{tipg_collection_id}/items",
                     "rel": "items",
                     "type": "application/geo+json",
                     "title": "Collection items"
+                },
+                {
+                    "href": f"{tipg_base_url}/collections",
+                    "rel": "parent",
+                    "type": "application/json",
+                    "title": "All collections"
                 }
             ],
             "itemType": "feature",
@@ -625,6 +635,9 @@ class VectorMetadata(BaseMetadata):
         """
         from core.models.stac import STAC_VERSION
 
+        # TiPG requires schema-qualified table names (14 JAN 2026)
+        tipg_collection_id = f"{self.schema_name}.{self.id}"
+
         collection: Dict[str, Any] = {
             "type": "Collection",
             "stac_version": STAC_VERSION,
@@ -650,7 +663,7 @@ class VectorMetadata(BaseMetadata):
                 },
                 {
                     "rel": "http://www.opengis.net/def/rel/ogc/1.0/items",
-                    "href": f"{base_url}/api/features/collections/{self.id}/items",
+                    "href": f"{base_url}/api/features/collections/{tipg_collection_id}/items",
                     "type": "application/geo+json",
                     "title": "OGC Features API items"
                 }
@@ -772,11 +785,13 @@ class VectorMetadata(BaseMetadata):
             properties["processing:source_file"] = self.source_file
 
         # Add fallback URL if provided (13 JAN 2026 - E8 TiPG Integration)
+        # TiPG requires schema-qualified table names (14 JAN 2026)
+        tipg_collection_id = f"{self.schema_name}.{self.id}"
         if fallback_base_url:
-            properties["ogc:fallback_url"] = f"{fallback_base_url}/collections/{self.id}/items"
+            properties["ogc:fallback_url"] = f"{fallback_base_url}/collections/{tipg_collection_id}/items"
 
         # Build TiPG OGC Features URL (primary endpoint)
-        tipg_items_url = f"{tipg_base_url}/collections/{self.id}/items"
+        tipg_items_url = f"{tipg_base_url}/collections/{tipg_collection_id}/items"
 
         item: Dict[str, Any] = {
             "type": "Feature",

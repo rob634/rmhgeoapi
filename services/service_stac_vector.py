@@ -251,7 +251,9 @@ class StacVectorService:
         fallback_base_url = self.config.ogc_features_base_url.rstrip('/')
 
         # Add fallback URL to properties for redundancy
-        properties['ogc:fallback_url'] = f"{fallback_base_url}/collections/{table_name}/items"
+        # TiPG requires schema-qualified table names (14 JAN 2026)
+        tipg_collection_id = f"{schema}.{table_name}"
+        properties['ogc:fallback_url'] = f"{fallback_base_url}/collections/{tipg_collection_id}/items"
 
         links = [
             {
@@ -268,7 +270,7 @@ class StacVectorService:
             },
             {
                 'rel': 'http://www.opengis.net/def/rel/ogc/1.0/items',
-                'href': f"{tipg_base_url}/collections/{table_name}/items",
+                'href': f"{tipg_base_url}/collections/{tipg_collection_id}/items",
                 'type': 'application/geo+json',
                 'title': 'OGC Features API (TiPG)'
             }

@@ -417,7 +417,7 @@ class ProcessRasterIntegrationInterface(BaseInterface):
                             <span class="curl-label">CURL - Check Job Status</span>
                             <button class="copy-btn" onclick="copyCurl('curl-status')">Copy</button>
                         </div>
-                        <pre class="curl-code" id="curl-status"><span class="cmd">curl</span> <span class="url" id="status-url-display">"{API_BASE_URL}/api/jobs/status/<span id="curl-job-id-1">{job_id}</span>"</span>
+                        <pre class="curl-code" id="curl-status"><span class="cmd">curl</span> <span class="url" id="status-url-display">"{API_BASE_URL}/api/platform/jobs/<span id="curl-job-id-1">{job_id}</span>/status"</span>
 
 <span class="comment"># Response:</span>
 {
@@ -441,7 +441,7 @@ class ProcessRasterIntegrationInterface(BaseInterface):
                 <div class="block-header">
                     <div class="block-number">3</div>
                     <div class="block-title">Retrieve Output Data</div>
-                    <div class="block-subtitle">GET /api/jobs/status/{job_id}</div>
+                    <div class="block-subtitle">GET /api/platform/jobs/{job_id}/status</div>
                 </div>
                 <div class="block-content">
                     <!-- Left: JSON Output -->
@@ -492,10 +492,10 @@ class ProcessRasterIntegrationInterface(BaseInterface):
                             <span class="curl-label">CURL - Get Completed Job</span>
                             <button class="copy-btn" onclick="copyCurl('curl-result')">Copy</button>
                         </div>
-                        <pre class="curl-code" id="curl-result"><span class="cmd">curl</span> <span class="url" id="result-url-display">"{API_BASE_URL}/api/jobs/status/<span id="curl-job-id-2">{job_id}</span>"</span>
+                        <pre class="curl-code" id="curl-result"><span class="cmd">curl</span> <span class="url" id="result-url-display">"{API_BASE_URL}/api/platform/jobs/<span id="curl-job-id-2">{job_id}</span>/status"</span>
 
 <span class="comment"># Extract COG URL with jq:</span>
-<span class="cmd">curl</span> <span class="url" id="jq-url-display">"{API_BASE_URL}/api/jobs/status/{job_id}"</span> | \\
+<span class="cmd">curl</span> <span class="url" id="jq-url-display">"{API_BASE_URL}/api/platform/jobs/{job_id}/status"</span> | \\
   <span class="cmd">jq</span> <span class="string">'.result_data.cog.output_url'</span>
 
 <span class="comment"># Get STAC Item metadata:</span>
@@ -955,15 +955,15 @@ class ProcessRasterIntegrationInterface(BaseInterface):
                 // Update static URL displays with actual API_BASE_URL
                 const statusUrl = document.getElementById('status-url-display');
                 if (statusUrl) {
-                    statusUrl.innerHTML = `"${API_BASE_URL}/api/jobs/status/<span id="curl-job-id-1">{job_id}</span>"`;
+                    statusUrl.innerHTML = `"${API_BASE_URL}/api/platform/jobs/<span id="curl-job-id-1">{job_id}</span>/status"`;
                 }
                 const resultUrl = document.getElementById('result-url-display');
                 if (resultUrl) {
-                    resultUrl.innerHTML = `"${API_BASE_URL}/api/jobs/status/<span id="curl-job-id-2">{job_id}</span>"`;
+                    resultUrl.innerHTML = `"${API_BASE_URL}/api/platform/jobs/<span id="curl-job-id-2">{job_id}</span>/status"`;
                 }
                 const jqUrl = document.getElementById('jq-url-display');
                 if (jqUrl) {
-                    jqUrl.textContent = `"${API_BASE_URL}/api/jobs/status/{job_id}"`;
+                    jqUrl.textContent = `"${API_BASE_URL}/api/platform/jobs/{job_id}/status"`;
                 }
                 const stacUrl = document.getElementById('stac-url-display');
                 if (stacUrl) {
@@ -1440,7 +1440,7 @@ class ProcessVectorIntegrationInterface(BaseInterface):
                             <span class="curl-label">CURL - Check Job Status</span>
                             <button class="copy-btn" onclick="copyCurl('curl-status')">Copy</button>
                         </div>
-                        <pre class="curl-code" id="curl-status"><span class="cmd">curl</span> <span class="url" id="status-url-display">"{API_BASE_URL}/api/jobs/status/<span id="curl-job-id-1">{job_id}</span>"</span>
+                        <pre class="curl-code" id="curl-status"><span class="cmd">curl</span> <span class="url" id="status-url-display">"{API_BASE_URL}/api/platform/jobs/<span id="curl-job-id-1">{job_id}</span>/status"</span>
 
 <span class="comment"># Response:</span>
 {
@@ -1516,7 +1516,7 @@ class ProcessVectorIntegrationInterface(BaseInterface):
                             <button class="copy-btn" onclick="copyCurl('curl-result')">Copy</button>
                         </div>
                         <pre class="curl-code" id="curl-result"><span class="comment"># Get job result:</span>
-<span class="cmd">curl</span> <span class="url" id="result-url-display">"{API_BASE_URL}/api/jobs/status/{job_id}"</span>
+<span class="cmd">curl</span> <span class="url" id="result-url-display">"{API_BASE_URL}/api/platform/jobs/{job_id}/status"</span>
 
 <span class="comment"># Query features via OGC Features API:</span>
 <span class="cmd">curl</span> <span class="url">"https://rmhtitiler-.../vector/collections/geo.{table}/items?limit=10"</span>
@@ -1884,11 +1884,11 @@ class ProcessVectorIntegrationInterface(BaseInterface):
             document.addEventListener('DOMContentLoaded', function() {
                 const statusUrl = document.getElementById('status-url-display');
                 if (statusUrl) {
-                    statusUrl.innerHTML = `"${API_BASE_URL}/api/jobs/status/<span id="curl-job-id-1">{job_id}</span>"`;
+                    statusUrl.innerHTML = `"${API_BASE_URL}/api/platform/jobs/<span id="curl-job-id-1">{job_id}</span>/status"`;
                 }
                 const resultUrl = document.getElementById('result-url-display');
                 if (resultUrl) {
-                    resultUrl.textContent = `"${API_BASE_URL}/api/jobs/status/{job_id}"`;
+                    resultUrl.textContent = `"${API_BASE_URL}/api/platform/jobs/{job_id}/status"`;
                 }
                 updateCurl();
             });

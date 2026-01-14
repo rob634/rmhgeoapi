@@ -648,17 +648,20 @@ class AppConfig(BaseModel):
         TiPG runs in the same Docker container as TiTiler and provides
         high-performance OGC Features access directly from PostGIS.
 
+        IMPORTANT: TiPG requires schema-qualified table names (14 JAN 2026).
+        Use format: "{schema}.{table_name}" (e.g., "geo.my_vector_table")
+
         Args:
-            collection_id: Collection name (same as PostGIS table name)
+            collection_id: Schema-qualified table name (e.g., "geo.my_table")
 
         Returns:
             TiPG OGC Features collection URL
 
         Example:
             >>> config = get_config()
-            >>> url = config.generate_tipg_features_url("my_vector_table")
+            >>> url = config.generate_tipg_features_url("geo.my_vector_table")
             >>> url
-            'https://titiler.../vector/collections/my_vector_table'
+            'https://titiler.../vector/collections/geo.my_vector_table'
         """
         return f"{self.tipg_base_url}/collections/{collection_id}"
 

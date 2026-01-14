@@ -253,7 +253,8 @@ class StacVectorService:
         # Add fallback URL to properties for redundancy
         # TiPG requires schema-qualified table names (14 JAN 2026)
         tipg_collection_id = f"{schema}.{table_name}"
-        properties['ogc:fallback_url'] = f"{fallback_base_url}/collections/{tipg_collection_id}/items"
+        # Fallback URL uses just table name (Function App OGC Features API)
+        properties['ogc:fallback_url'] = f"{fallback_base_url}/collections/{table_name}/items"
 
         links = [
             {

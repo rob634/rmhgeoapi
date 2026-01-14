@@ -567,8 +567,9 @@ class VectorMetadata(BaseMetadata):
         # TiPG requires schema-qualified table names (14 JAN 2026)
         tipg_collection_id = f"{self.schema_name}.{self.id}"
 
+        # Fallback URL uses just table name (Function App OGC Features API)
         if fallback_base_url:
-            properties["ogc:fallback_url"] = f"{fallback_base_url}/collections/{tipg_collection_id}/items"
+            properties["ogc:fallback_url"] = f"{fallback_base_url}/collections/{self.id}/items"
 
         collection: Dict[str, Any] = {
             "id": self.id,
@@ -663,7 +664,7 @@ class VectorMetadata(BaseMetadata):
                 },
                 {
                     "rel": "http://www.opengis.net/def/rel/ogc/1.0/items",
-                    "href": f"{base_url}/api/features/collections/{tipg_collection_id}/items",
+                    "href": f"{base_url}/api/features/collections/{self.id}/items",
                     "type": "application/geo+json",
                     "title": "OGC Features API items"
                 }
@@ -787,8 +788,9 @@ class VectorMetadata(BaseMetadata):
         # Add fallback URL if provided (13 JAN 2026 - E8 TiPG Integration)
         # TiPG requires schema-qualified table names (14 JAN 2026)
         tipg_collection_id = f"{self.schema_name}.{self.id}"
+        # Fallback URL uses just table name (Function App OGC Features API)
         if fallback_base_url:
-            properties["ogc:fallback_url"] = f"{fallback_base_url}/collections/{tipg_collection_id}/items"
+            properties["ogc:fallback_url"] = f"{fallback_base_url}/collections/{self.id}/items"
 
         # Build TiPG OGC Features URL (primary endpoint)
         tipg_items_url = f"{tipg_base_url}/collections/{tipg_collection_id}/items"

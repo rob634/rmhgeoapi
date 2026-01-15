@@ -443,6 +443,12 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Could not import Vector Tiles interface: {e}")
 
+try:
+    from .upload import interface as _upload
+    logger.info("✅ Imported Upload interface module")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import Upload interface: {e}")
+
 
 # Public API
 __all__ = [

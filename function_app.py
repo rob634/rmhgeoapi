@@ -400,6 +400,7 @@ from ogc_styles import get_styles_triggers
 from triggers.list_container_blobs import list_container_blobs_handler
 from triggers.get_blob_metadata import get_blob_metadata_handler
 from triggers.list_storage_containers import list_storage_containers_handler
+from triggers.storage_upload import storage_upload_handler
 
 # Janitor Triggers (21 NOV 2025) - System maintenance (timer handlers only)
 # HTTP handlers moved to triggers/admin/admin_janitor.py blueprint (12 JAN 2026)
@@ -2088,6 +2089,34 @@ def list_storage_containers(req: func.HttpRequest) -> func.HttpResponse:
     Note: This is a lightweight UI endpoint for discovering available containers.
     """
     return list_storage_containers_handler(req)
+
+
+@app.route(route="storage/upload", methods=["POST"])
+def storage_upload(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Upload file to bronze storage via multipart/form-data.
+
+    POST /api/storage/upload
+
+    Form Fields:
+        file: The file to upload (required)
+        container: Target container (required, must be bronze-*)
+        path: Blob path within container (optional, defaults to filename)
+
+    Returns:
+        JSON with upload result including container, path, size, etag
+
+    Security:
+        Only allows uploads to bronze-* containers (untrusted data zone).
+        Maximum file size: 100MB
+
+    Example:
+        curl -X POST "https://rmhazuregeoapi-.../api/storage/upload" \\
+            -F "file=@myfile.gpkg" \\
+            -F "container=bronze-vectors" \\
+            -F "path=uploads/myfile.gpkg"
+    """
+    return storage_upload_handler(req)
 
 
 # ============================================================================

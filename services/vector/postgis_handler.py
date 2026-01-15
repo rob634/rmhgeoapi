@@ -1779,7 +1779,12 @@ class VectorToPostGISHandler:
                     # Create materialized view with subdivided geometries
                     # Uses UNION ALL with LATERAL for ST_Subdivide (set-returning function)
                     # Simple geometries pass through unchanged, complex ones are subdivided
+                    # Table alias 't' used in LATERAL query to disambiguate column refs
                     if select_cols:
+                        # Build qualified column list for LATERAL query (t.col1, t.col2, ...)
+                        qualified_cols = sql.SQL(', ').join([
+                            sql.SQL('t.') + sql.Identifier(c) for c in columns
+                        ])
                         cur.execute(sql.SQL("""
                             CREATE MATERIALIZED VIEW {schema}.{view} AS
                             -- Simple geometries (no subdivision needed)
@@ -1789,17 +1794,18 @@ class VectorToPostGISHandler:
                                OR GeometryType({geom}) NOT IN ('POLYGON', 'MULTIPOLYGON')
                             UNION ALL
                             -- Complex geometries (subdivided via LATERAL)
-                            SELECT subdivided.geom AS {geom}, {cols}
-                            FROM {schema}.{table},
-                                 LATERAL ST_Subdivide({geom}, %s) AS subdivided(geom)
-                            WHERE ST_NPoints({geom}) > %s
-                              AND GeometryType({geom}) IN ('POLYGON', 'MULTIPOLYGON')
+                            SELECT subdivided.geom AS {geom}, {qualified_cols}
+                            FROM {schema}.{table} t,
+                                 LATERAL ST_Subdivide(t.{geom}, %s) AS subdivided(geom)
+                            WHERE ST_NPoints(t.{geom}) > %s
+                              AND GeometryType(t.{geom}) IN ('POLYGON', 'MULTIPOLYGON')
                         """).format(
                             schema=sql.Identifier(schema),
                             view=sql.Identifier(tile_view_name),
                             table=sql.Identifier(table_name),
                             geom=sql.Identifier(geometry_column),
-                            cols=select_cols
+                            cols=select_cols,
+                            qualified_cols=qualified_cols
                         ), (max_vertices, max_vertices, max_vertices))
                     else:
                         cur.execute(sql.SQL("""
@@ -1812,10 +1818,10 @@ class VectorToPostGISHandler:
                             UNION ALL
                             -- Complex geometries (subdivided via LATERAL)
                             SELECT subdivided.geom AS {geom}
-                            FROM {schema}.{table},
-                                 LATERAL ST_Subdivide({geom}, %s) AS subdivided(geom)
-                            WHERE ST_NPoints({geom}) > %s
-                              AND GeometryType({geom}) IN ('POLYGON', 'MULTIPOLYGON')
+                            FROM {schema}.{table} t,
+                                 LATERAL ST_Subdivide(t.{geom}, %s) AS subdivided(geom)
+                            WHERE ST_NPoints(t.{geom}) > %s
+                              AND GeometryType(t.{geom}) IN ('POLYGON', 'MULTIPOLYGON')
                         """).format(
                             schema=sql.Identifier(schema),
                             view=sql.Identifier(tile_view_name),

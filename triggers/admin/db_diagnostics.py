@@ -12,9 +12,11 @@ Database Diagnostics Admin Trigger.
 
 Database diagnostics and system testing endpoints.
 
-Consolidated endpoint pattern (15 DEC 2025, updated 14 JAN 2026):
-    GET /api/dbadmin/diagnostics?type={stats|enums|functions|all|config|errors|geo_integrity}
+Consolidated endpoint pattern (15 DEC 2025, updated 15 JAN 2026):
+    GET /api/dbadmin/diagnostics?type={stats|enums|functions|all|config|errors|geo_integrity|user_privileges}
     GET /api/dbadmin/diagnostics?type=lineage&job_id={job_id}
+    GET /api/dbadmin/diagnostics?type=user_privileges&username={username}
+    POST /api/dbadmin/diagnostics?type=grant_reader_privileges  (grants SELECT to reader UMI)
 
 Exports:
     AdminDbDiagnosticsTrigger: HTTP trigger class for diagnostics
@@ -71,9 +73,9 @@ class AdminDbDiagnosticsTrigger:
     ROUTES = [
         RouteDefinition(
             route="dbadmin/diagnostics",
-            methods=["GET"],
+            methods=["GET", "POST"],
             handler="handle_diagnostics",
-            description="Consolidated diagnostics: ?type={stats|enums|functions|all|config|errors|lineage|geo_integrity}"
+            description="Consolidated diagnostics: ?type={stats|enums|functions|all|config|errors|lineage|geo_integrity|user_privileges|grant_reader_privileges}"
         ),
     ]
 
@@ -89,6 +91,8 @@ class AdminDbDiagnosticsTrigger:
         "lineage": "_get_etl_lineage",
         "errors": "_get_error_aggregation",
         "geo_integrity": "_get_geo_integrity",  # 14 JAN 2026 - TiPG compatibility check
+        "user_privileges": "_get_user_privileges",  # 14 JAN 2026 - Check another user's privileges
+        "grant_reader_privileges": "_grant_reader_privileges",  # 15 JAN 2026 - Grant SELECT to reader UMI
     }
 
     def __new__(cls):
@@ -124,10 +128,12 @@ class AdminDbDiagnosticsTrigger:
 
     def handle_diagnostics(self, req: func.HttpRequest) -> func.HttpResponse:
         """
-        Consolidated diagnostics endpoint (15 DEC 2025).
+        Consolidated diagnostics endpoint (15 DEC 2025, updated 15 JAN 2026).
 
-        GET /api/dbadmin/diagnostics?type={stats|enums|functions|all|config|errors}
+        GET /api/dbadmin/diagnostics?type={stats|enums|functions|all|config|errors|geo_integrity|user_privileges}
         GET /api/dbadmin/diagnostics?type=lineage&job_id={job_id}
+        GET /api/dbadmin/diagnostics?type=user_privileges&username={username}
+        POST /api/dbadmin/diagnostics?type=grant_reader_privileges
 
         Query Parameters:
             type: Diagnostic type (required)
@@ -138,7 +144,12 @@ class AdminDbDiagnosticsTrigger:
                 - config: Configuration audit
                 - lineage: ETL lineage (requires job_id)
                 - errors: Error aggregation
+                - geo_integrity: Geo schema TiPG compatibility check
+                - user_privileges: Check another user's privileges (requires username)
+                - grant_reader_privileges: Grant SELECT to reader UMI (POST only)
             job_id: Required when type=lineage
+            username: Required when type=user_privileges
+            schema: For user_privileges type (default: geo)
             hours: For errors type (default: 24)
             limit: For errors type (default: 10)
 
@@ -648,10 +659,11 @@ class AdminDbDiagnosticsTrigger:
             # Azure resources (MUST override for new tenant)
             # NOTE: STORAGE_ACCOUNT_NAME removed 08 DEC 2025 - use zone-specific accounts instead
             # NOTE: managed_identity_name renamed to managed_identity_admin_name 08 DEC 2025
-            # NOTE (08 DEC 2025): managed_identity_reader_name removed - single admin identity for all operations
+            # NOTE (15 JAN 2026): managed_identity_reader_name added for TiPG/TiTiler docker app
             azure_configs = [
                 ("bronze_storage_account", "BRONZE_STORAGE_ACCOUNT", StorageDefaults.DEFAULT_ACCOUNT_NAME),
                 ("managed_identity_admin_name", "DB_ADMIN_MANAGED_IDENTITY_NAME", AzureDefaults.MANAGED_IDENTITY_NAME),
+                ("managed_identity_reader_name", "DB_READER_MANAGED_IDENTITY_NAME", None),  # Optional reader UMI
                 ("titiler_base_url", "TITILER_BASE_URL", AzureDefaults.TITILER_BASE_URL),
                 ("ogc_stac_app_url", "OGC_STAC_APP_URL", AzureDefaults.OGC_STAC_APP_URL),
                 ("etl_app_url", "ETL_APP_URL", AzureDefaults.ETL_APP_URL),
@@ -1203,6 +1215,418 @@ class AdminDbDiagnosticsTrigger:
             return func.HttpResponse(
                 body=json.dumps({
                     'error': str(e),
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                }),
+                status_code=500,
+                mimetype='application/json'
+            )
+
+
+    def _get_user_privileges(self, req: func.HttpRequest) -> func.HttpResponse:
+        """
+        Check another user's database privileges (14 JAN 2026).
+
+        GET /api/dbadmin/diagnostics?type=user_privileges&username={username}
+
+        Allows admin managed identity to check what privileges another user has.
+        Useful for diagnosing permission issues with reader identities in QA.
+
+        Query Parameters:
+            username: PostgreSQL username to check (required)
+            schema: Schema to check table privileges for (default: geo)
+
+        Returns:
+            {
+                "username": "migeoetldbreaderqa",
+                "schema": "geo",
+                "user_exists": true,
+                "role_memberships": ["pgstac_read"],
+                "table_privileges": {
+                    "table1": {"select": true, "insert": false, ...},
+                    ...
+                },
+                "tables_with_select": 15,
+                "tables_without_select": 2,
+                "missing_select": ["table_name1", "table_name2"],
+                "fix_sql": "GRANT SELECT ON geo.table1 TO username;...",
+                "timestamp": "..."
+            }
+        """
+        username = req.params.get('username')
+        schema = req.params.get('schema', 'geo')
+
+        if not username:
+            return func.HttpResponse(
+                body=json.dumps({
+                    'error': "username parameter required",
+                    'usage': 'GET /api/dbadmin/diagnostics?type=user_privileges&username={username}',
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                }),
+                status_code=400,
+                mimetype='application/json'
+            )
+
+        logger.info(f"🔍 Checking privileges for user '{username}' in schema '{schema}'")
+
+        try:
+            if not isinstance(self.db_repo, PostgreSQLRepository):
+                raise ValueError("Database repository is not PostgreSQL")
+
+            result = {
+                "username": username,
+                "schema": schema,
+                "checked_by": None,
+            }
+
+            with self.db_repo._get_connection() as conn:
+                with conn.cursor() as cursor:
+                    # Who is running this check?
+                    cursor.execute("SELECT current_user")
+                    result["checked_by"] = cursor.fetchone()['current_user']
+
+                    # 1. Check if user exists
+                    cursor.execute(
+                        "SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname = %s) as exists",
+                        [username]
+                    )
+                    user_exists = cursor.fetchone()['exists']
+                    result["user_exists"] = user_exists
+
+                    if not user_exists:
+                        result["error"] = f"User '{username}' does not exist in database"
+                        result["timestamp"] = datetime.now(timezone.utc).isoformat()
+                        return func.HttpResponse(
+                            body=json.dumps(result, indent=2),
+                            status_code=200,
+                            mimetype='application/json'
+                        )
+
+                    # 2. Get role memberships (what roles is this user a member of?)
+                    cursor.execute("""
+                        SELECT r.rolname as role_name
+                        FROM pg_auth_members m
+                        JOIN pg_roles r ON m.roleid = r.oid
+                        JOIN pg_roles member ON m.member = member.oid
+                        WHERE member.rolname = %s
+                        ORDER BY r.rolname
+                    """, [username])
+                    roles = [row['role_name'] for row in cursor.fetchall()]
+                    result["role_memberships"] = roles
+
+                    # 3. Get all tables in schema
+                    cursor.execute("""
+                        SELECT c.relname as table_name
+                        FROM pg_class c
+                        JOIN pg_namespace n ON c.relnamespace = n.oid
+                        WHERE n.nspname = %s
+                        AND c.relkind = 'r'
+                        ORDER BY c.relname
+                    """, [schema])
+                    tables = [row['table_name'] for row in cursor.fetchall()]
+                    result["total_tables_in_schema"] = len(tables)
+
+                    # 4. Check privileges for each table using has_table_privilege
+                    # Note: has_table_privilege(user, table, privilege) can be called by any user
+                    table_privileges = {}
+                    tables_with_select = []
+                    tables_without_select = []
+
+                    for table in tables:
+                        full_table = f"{schema}.{table}"
+                        cursor.execute("""
+                            SELECT
+                                has_table_privilege(%s, %s, 'SELECT') as can_select,
+                                has_table_privilege(%s, %s, 'INSERT') as can_insert,
+                                has_table_privilege(%s, %s, 'UPDATE') as can_update,
+                                has_table_privilege(%s, %s, 'DELETE') as can_delete
+                        """, [username, full_table, username, full_table,
+                              username, full_table, username, full_table])
+                        priv_row = cursor.fetchone()
+
+                        table_privileges[table] = {
+                            "select": priv_row['can_select'],
+                            "insert": priv_row['can_insert'],
+                            "update": priv_row['can_update'],
+                            "delete": priv_row['can_delete'],
+                        }
+
+                        if priv_row['can_select']:
+                            tables_with_select.append(table)
+                        else:
+                            tables_without_select.append(table)
+
+                    result["table_privileges"] = table_privileges
+                    result["tables_with_select"] = len(tables_with_select)
+                    result["tables_without_select"] = len(tables_without_select)
+                    result["missing_select"] = tables_without_select
+
+                    # 5. Generate fix SQL if there are missing privileges
+                    if tables_without_select:
+                        fix_lines = [
+                            f"-- Fix SELECT privileges for {username} in {schema} schema",
+                            f"-- Run as database admin/owner",
+                            ""
+                        ]
+                        for table in tables_without_select:
+                            fix_lines.append(f"GRANT SELECT ON {schema}.{table} TO {username};")
+
+                        # Also suggest default privileges
+                        fix_lines.extend([
+                            "",
+                            "-- To automatically grant SELECT on future tables:",
+                            f"ALTER DEFAULT PRIVILEGES IN SCHEMA {schema} GRANT SELECT ON TABLES TO {username};",
+                        ])
+
+                        result["fix_sql"] = "\n".join(fix_lines)
+                    else:
+                        result["fix_sql"] = None
+
+                    # 6. Check default privileges (what will future tables get?)
+                    cursor.execute("""
+                        SELECT
+                            defaclrole::regrole::text as grantor,
+                            defaclobjtype as object_type,
+                            defaclacl::text as acl
+                        FROM pg_default_acl d
+                        JOIN pg_namespace n ON d.defaclnamespace = n.oid
+                        WHERE n.nspname = %s
+                    """, [schema])
+                    default_privs = cursor.fetchall()
+                    result["default_privileges"] = [
+                        {
+                            "grantor": row['grantor'],
+                            "object_type": "table" if row['object_type'] == 'r' else row['object_type'],
+                            "acl": row['acl']
+                        }
+                        for row in default_privs
+                    ]
+
+            result["timestamp"] = datetime.now(timezone.utc).isoformat()
+
+            # Determine status
+            if result["tables_without_select"] == 0:
+                result["status"] = "OK"
+                logger.info(f"✅ User '{username}' has SELECT on all {len(tables)} tables in {schema}")
+            else:
+                result["status"] = "MISSING_PRIVILEGES"
+                logger.warning(
+                    f"⚠️ User '{username}' missing SELECT on {result['tables_without_select']} "
+                    f"of {len(tables)} tables in {schema}"
+                )
+
+            return func.HttpResponse(
+                body=json.dumps(result, indent=2),
+                status_code=200,
+                mimetype='application/json'
+            )
+
+        except Exception as e:
+            logger.error(f"❌ Error checking user privileges: {e}")
+            logger.error(traceback.format_exc())
+            return func.HttpResponse(
+                body=json.dumps({
+                    'error': str(e),
+                    'username': username,
+                    'schema': schema,
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                }),
+                status_code=500,
+                mimetype='application/json'
+            )
+
+
+    def _grant_reader_privileges(self, req: func.HttpRequest) -> func.HttpResponse:
+        """
+        Grant SELECT privileges to reader managed identity (15 JAN 2026).
+
+        POST /api/dbadmin/diagnostics?type=grant_reader_privileges
+
+        Grants the reader UMI (configured via DB_READER_MANAGED_IDENTITY_NAME) SELECT
+        access to the geo and h3 schemas. This is idempotent - it checks pg_default_acl
+        to see if default privileges are already configured before executing GRANTs.
+
+        The reader identity is used by TiPG/TiTiler docker container which needs to
+        read vector tables but doesn't need write access.
+
+        Grants:
+            - USAGE on geo and h3 schemas
+            - SELECT on all existing tables in geo and h3 schemas
+            - ALTER DEFAULT PRIVILEGES for SELECT on future tables
+
+        Returns:
+            {
+                "reader_identity": "migeoetldbreaderqa",
+                "status": "ALREADY_CONFIGURED|GRANTS_APPLIED|NOT_CONFIGURED",
+                "schemas_processed": ["geo", "h3"],
+                "existing_default_privileges": [...],
+                "grants_executed": [...],
+                "timestamp": "..."
+            }
+        """
+        from psycopg import sql
+
+        logger.info("🔑 Processing grant_reader_privileges request")
+
+        # Require POST for this operation (modifies database)
+        if req.method != "POST":
+            return func.HttpResponse(
+                body=json.dumps({
+                    'error': "grant_reader_privileges requires POST method",
+                    'usage': 'POST /api/dbadmin/diagnostics?type=grant_reader_privileges',
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                }),
+                status_code=405,
+                mimetype='application/json'
+            )
+
+        try:
+            # Get reader identity from config
+            reader_identity = self.config.database.managed_identity_reader_name
+
+            if not reader_identity:
+                return func.HttpResponse(
+                    body=json.dumps({
+                        'status': 'NOT_CONFIGURED',
+                        'error': "DB_READER_MANAGED_IDENTITY_NAME environment variable not set",
+                        'hint': "Set DB_READER_MANAGED_IDENTITY_NAME to the PostgreSQL username for the reader managed identity",
+                        'timestamp': datetime.now(timezone.utc).isoformat()
+                    }),
+                    status_code=400,
+                    mimetype='application/json'
+                )
+
+            if not isinstance(self.db_repo, PostgreSQLRepository):
+                raise ValueError("Database repository is not PostgreSQL")
+
+            result = {
+                "reader_identity": reader_identity,
+                "admin_identity": self.config.database.managed_identity_admin_name,
+                "schemas_processed": ["geo", "h3"],
+                "existing_default_privileges": [],
+                "grants_executed": [],
+                "status": None,
+            }
+
+            schemas_to_grant = ["geo", "h3"]
+
+            with self.db_repo._get_connection() as conn:
+                with conn.cursor() as cursor:
+                    # Check who we are connected as
+                    cursor.execute("SELECT current_user")
+                    result["executed_by"] = cursor.fetchone()['current_user']
+
+                    # 1. Check if user exists
+                    cursor.execute(
+                        "SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname = %s) as exists",
+                        [reader_identity]
+                    )
+                    user_exists = cursor.fetchone()['exists']
+
+                    if not user_exists:
+                        return func.HttpResponse(
+                            body=json.dumps({
+                                'status': 'USER_NOT_FOUND',
+                                'reader_identity': reader_identity,
+                                'error': f"User '{reader_identity}' does not exist in database",
+                                'hint': "Create the user first with pgaadauth_create_principal()",
+                                'timestamp': datetime.now(timezone.utc).isoformat()
+                            }),
+                            status_code=400,
+                            mimetype='application/json'
+                        )
+
+                    # 2. Check existing default privileges in pg_default_acl
+                    # Look for entries where the reader_identity appears in the ACL
+                    cursor.execute("""
+                        SELECT
+                            n.nspname as schema_name,
+                            d.defaclrole::regrole::text as grantor,
+                            d.defaclobjtype as object_type,
+                            d.defaclacl::text as acl
+                        FROM pg_default_acl d
+                        JOIN pg_namespace n ON d.defaclnamespace = n.oid
+                        WHERE n.nspname IN ('geo', 'h3')
+                        AND d.defaclobjtype = 'r'  -- 'r' = relation (table)
+                    """)
+                    existing_defaults = cursor.fetchall()
+
+                    # Check if reader already has default SELECT privilege
+                    reader_has_default_select = {}
+                    for row in existing_defaults:
+                        schema = row['schema_name']
+                        acl = row['acl'] or ""
+                        result["existing_default_privileges"].append({
+                            "schema": schema,
+                            "grantor": row['grantor'],
+                            "acl": acl
+                        })
+                        # ACL format: {grantee=privileges/grantor,...}
+                        # SELECT privilege is represented as 'r' (read)
+                        # e.g., {reader_identity=r/admin_identity}
+                        if f"{reader_identity}=r" in acl or f'"{reader_identity}"=r' in acl:
+                            reader_has_default_select[schema] = True
+
+                    # 3. Determine what needs to be granted
+                    schemas_needing_grants = [s for s in schemas_to_grant if s not in reader_has_default_select]
+                    schemas_already_configured = [s for s in schemas_to_grant if s in reader_has_default_select]
+
+                    if not schemas_needing_grants:
+                        # Already configured
+                        result["status"] = "ALREADY_CONFIGURED"
+                        result["schemas_already_configured"] = schemas_already_configured
+                        result["message"] = f"Reader '{reader_identity}' already has DEFAULT PRIVILEGES for SELECT on schemas: {', '.join(schemas_already_configured)}"
+                        result["note"] = "No grants executed - privileges already in place"
+                        logger.info(f"✅ Reader '{reader_identity}' already has default SELECT privileges on: {', '.join(schemas_already_configured)}")
+                    else:
+                        # 4. Execute grants (only for schemas that need them, but grant all for consistency)
+                        reader_ident = sql.Identifier(reader_identity)
+
+                        # Log what's already configured vs what needs grants
+                        if schemas_already_configured:
+                            result["schemas_already_configured"] = schemas_already_configured
+                            logger.info(f"ℹ️ Reader '{reader_identity}' already has privileges on: {', '.join(schemas_already_configured)}")
+
+                        result["schemas_granted"] = schemas_needing_grants
+                        logger.info(f"🔑 Granting privileges to '{reader_identity}' on: {', '.join(schemas_needing_grants)}")
+
+                        for schema in schemas_to_grant:
+                            schema_ident = sql.Identifier(schema)
+
+                            # Grant USAGE on schema
+                            grant_usage = sql.SQL("GRANT USAGE ON SCHEMA {} TO {}").format(schema_ident, reader_ident)
+                            cursor.execute(grant_usage)
+                            result["grants_executed"].append(f"GRANT USAGE ON SCHEMA {schema} TO {reader_identity}")
+
+                            # Grant SELECT on all existing tables
+                            grant_select = sql.SQL("GRANT SELECT ON ALL TABLES IN SCHEMA {} TO {}").format(schema_ident, reader_ident)
+                            cursor.execute(grant_select)
+                            result["grants_executed"].append(f"GRANT SELECT ON ALL TABLES IN SCHEMA {schema} TO {reader_identity}")
+
+                            # Set default privileges for future tables
+                            alter_default = sql.SQL("ALTER DEFAULT PRIVILEGES IN SCHEMA {} GRANT SELECT ON TABLES TO {}").format(schema_ident, reader_ident)
+                            cursor.execute(alter_default)
+                            result["grants_executed"].append(f"ALTER DEFAULT PRIVILEGES IN SCHEMA {schema} GRANT SELECT ON TABLES TO {reader_identity}")
+
+                        conn.commit()
+                        result["status"] = "GRANTS_APPLIED"
+                        result["message"] = f"Granted SELECT privileges to '{reader_identity}' on schemas: {', '.join(schemas_to_grant)}"
+                        logger.info(f"✅ Applied {len(result['grants_executed'])} grants for reader '{reader_identity}' on schemas: {', '.join(schemas_to_grant)}")
+
+            result["timestamp"] = datetime.now(timezone.utc).isoformat()
+
+            return func.HttpResponse(
+                body=json.dumps(result, indent=2),
+                status_code=200,
+                mimetype='application/json'
+            )
+
+        except Exception as e:
+            logger.error(f"❌ Error granting reader privileges: {e}")
+            logger.error(traceback.format_exc())
+            return func.HttpResponse(
+                body=json.dumps({
+                    'error': str(e),
+                    'reader_identity': reader_identity if 'reader_identity' in dir() else None,
                     'timestamp': datetime.now(timezone.utc).isoformat()
                 }),
                 status_code=500,

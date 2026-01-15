@@ -215,12 +215,13 @@ def admin_query_orchestration_jobs_for_request(req: func.HttpRequest) -> func.Ht
 # DIAGNOSTICS (1 consolidated route)
 # ============================================================================
 
-@bp.route(route="dbadmin/diagnostics", methods=["GET"])
+@bp.route(route="dbadmin/diagnostics", methods=["GET", "POST"])
 def admin_diagnostics(req: func.HttpRequest) -> func.HttpResponse:
     """
     Consolidated diagnostics endpoint.
 
-    GET /api/dbadmin/diagnostics?type={stats|enums|functions|all|config|errors|lineage}
+    GET /api/dbadmin/diagnostics?type={stats|enums|functions|all|config|errors|lineage|geo_integrity|user_privileges}
+    POST /api/dbadmin/diagnostics?type=grant_reader_privileges
     """
     from triggers.admin.db_diagnostics import admin_db_diagnostics_trigger
     return admin_db_diagnostics_trigger.handle_diagnostics(req)

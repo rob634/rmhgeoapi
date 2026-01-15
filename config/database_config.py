@@ -357,9 +357,34 @@ class DatabaseConfig(BaseModel):
         """
     )
 
-    # NOTE (08 DEC 2025): Reader identity removed - using single admin identity for all operations
-    # This simplifies the architecture and eliminates the need for separate reader/writer identities.
-    # OGC/STAC API and TiTiler now use the same admin identity as the ETL pipeline.
+    # Reader identity for external services (15 JAN 2026)
+    # TiPG/TiTiler docker app needs SELECT on geo schema tables.
+    # This identity gets SELECT-only via the grant_reader_privileges endpoint.
+    managed_identity_reader_name: Optional[str] = Field(
+        default=None,
+        description="""Reader managed identity name for external services (TiPG/TiTiler).
+
+        Purpose:
+            Specifies a separate PostgreSQL user that needs SELECT-only access to the
+            geo schema. Used by the TiPG/TiTiler docker container which runs under a
+            different managed identity than this ETL app.
+
+        Architecture (15 JAN 2026):
+            - Admin identity: Full access, used by ETL app for all operations
+            - Reader identity: SELECT-only, used by external services (TiPG/TiTiler)
+
+        The reader identity receives:
+            - USAGE on geo and h3 schemas
+            - SELECT on all existing tables
+            - DEFAULT PRIVILEGES for SELECT on future tables
+
+        Environment Variable: DB_READER_MANAGED_IDENTITY_NAME
+
+        Usage:
+            Call POST /api/dbadmin/diagnostics?type=grant_reader_privileges
+            after deployment to grant permissions to the reader identity.
+        """
+    )
 
     # Connection pooling (reserved for future use)
     min_connections: int = Field(
@@ -443,6 +468,7 @@ class DatabaseConfig(BaseModel):
             "password": "***MASKED***" if self.password else None,
             "managed_identity": self.use_managed_identity,
             "managed_identity_admin_name": self.managed_identity_admin_name,
+            "managed_identity_reader_name": self.managed_identity_reader_name,
             "managed_identity_client_id": self.managed_identity_client_id[:8] + "..." if self.managed_identity_client_id else None,
             "postgis_schema": self.postgis_schema,
             "app_schema": self.app_schema,
@@ -502,6 +528,7 @@ class DatabaseConfig(BaseModel):
             use_managed_identity=os.environ.get("USE_MANAGED_IDENTITY", "true").lower() == "true",
             managed_identity_admin_name=os.environ.get("DB_ADMIN_MANAGED_IDENTITY_NAME", AzureDefaults.MANAGED_IDENTITY_NAME),
             managed_identity_client_id=os.environ.get("DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID"),
+            managed_identity_reader_name=os.environ.get("DB_READER_MANAGED_IDENTITY_NAME"),  # Optional reader identity
             connection_timeout_seconds=int(os.environ.get("DB_CONNECTION_TIMEOUT", str(DatabaseDefaults.CONNECTION_TIMEOUT_SECONDS))),
             # Azure environment detection (set automatically by Azure Functions runtime)
             azure_website_name=os.environ.get("WEBSITE_SITE_NAME")

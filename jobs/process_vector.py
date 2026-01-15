@@ -529,10 +529,16 @@ class ProcessVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                         "viewer_url": tile_view_urls["viewer"]
                     }
             except Exception as e:
-                logger.warning(f"[{context.job_id[:8]}] ⚠️ Tile view creation failed (non-fatal): {e}")
+                import traceback
+                error_details = traceback.format_exc()
+                logger.warning(
+                    f"[{context.job_id[:8]}] ⚠️ Tile view creation failed (non-fatal): {type(e).__name__}: {e}\n"
+                    f"Traceback:\n{error_details}"
+                )
                 tile_view_result = {
                     "success": False,
-                    "error": str(e),
+                    "error": f"{type(e).__name__}: {e}",
+                    "error_type": type(e).__name__,
                     "message": "Tile view creation failed - original table still usable for tiles"
                 }
 

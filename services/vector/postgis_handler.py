@@ -1704,7 +1704,14 @@ class VectorToPostGISHandler:
 
         logger.info(f"🔪 Starting ST_Subdivide on {schema}.{table_name} (max_vertices={max_vertices}, mode={mode})")
 
-        with self._pg_repo._get_connection() as conn:
+        try:
+            conn = self._pg_repo._get_connection()
+            logger.debug(f"   Got database connection: {type(conn)}")
+        except Exception as conn_err:
+            logger.error(f"   ❌ Failed to get database connection: {type(conn_err).__name__}: {conn_err}")
+            raise
+
+        with conn:
             with conn.cursor() as cur:
                 # Get original row count
                 cur.execute(sql.SQL("""

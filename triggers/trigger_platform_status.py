@@ -833,7 +833,7 @@ async def platform_failures(req: func.HttpRequest) -> func.HttpResponse:
                         j.parameters->>'blob_name' as blob,
                         p.request_id
                     FROM {config.app_schema}.jobs j
-                    LEFT JOIN {config.app_schema}.platform_requests p ON j.id = p.job_id
+                    LEFT JOIN {config.app_schema}.api_requests p ON j.id = p.job_id
                     WHERE j.status = 'failed'
                       AND j.created_at >= NOW() - INTERVAL '%s hours'
                     ORDER BY j.updated_at DESC

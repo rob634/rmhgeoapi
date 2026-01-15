@@ -1754,7 +1754,7 @@ class VectorToPostGISHandler:
                     AND column_name NOT IN ('id', %s)
                     ORDER BY ordinal_position
                 """), (schema, table_name, geometry_column))
-                columns = [row[0] for row in cur.fetchall()]
+                columns = [row['column_name'] for row in cur.fetchall()]
 
                 # Build column list for SELECT
                 if columns:

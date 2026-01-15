@@ -1714,7 +1714,7 @@ class VectorToPostGISHandler:
                     table=sql.Identifier(table_name)
                 ))
                 result = cur.fetchone()
-                original_count = result[0] if result else 0
+                original_count = result['cnt'] if result else 0
 
                 # Count complex polygons (those that will be split)
                 cur.execute(sql.SQL("""
@@ -1728,7 +1728,7 @@ class VectorToPostGISHandler:
                     geom=sql.Identifier(geometry_column)
                 ), (max_vertices,))
                 result = cur.fetchone()
-                complex_count = result[0] if result else 0
+                complex_count = result['cnt'] if result else 0
 
                 if complex_count == 0:
                     logger.info(f"   No complex polygons found (none with >{max_vertices} vertices)")
@@ -1830,13 +1830,13 @@ class VectorToPostGISHandler:
 
                     # Get tile view row count
                     cur.execute(sql.SQL("""
-                        SELECT COUNT(*) FROM {schema}.{view}
+                        SELECT COUNT(*) as cnt FROM {schema}.{view}
                     """).format(
                         schema=sql.Identifier(schema),
                         view=sql.Identifier(tile_view_name)
                     ))
                     result = cur.fetchone()
-                    tile_count = result[0] if result else 0
+                    tile_count = result['cnt'] if result else 0
 
                     conn.commit()
 
@@ -2044,10 +2044,10 @@ class VectorToPostGISHandler:
                     SELECT EXISTS (
                         SELECT 1 FROM pg_matviews
                         WHERE schemaname = %s AND matviewname = %s
-                    )
+                    ) as view_exists
                 """, (schema, tile_view_name))
                 result = cur.fetchone()
-                exists = result[0] if result else False
+                exists = result['view_exists'] if result else False
 
                 if not exists:
                     logger.warning(f"⚠️  Materialized view {schema}.{tile_view_name} does not exist")

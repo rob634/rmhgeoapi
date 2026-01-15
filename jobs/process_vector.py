@@ -3,7 +3,7 @@
 # ============================================================================
 # STATUS: Jobs - 3-stage idempotent vector ETL pipeline
 # PURPOSE: Bronze→PostGIS+STAC with DELETE+INSERT idempotency pattern
-# LAST_REVIEWED: 04 JAN 2026
+# LAST_REVIEWED: 15 JAN 2026
 # REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
 # ============================================================================
 """
@@ -162,6 +162,20 @@ class ProcessVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
             'type': 'dict',
             'default': None,
             'description': 'Column rename mapping {source_name: target_name}. Validates source columns exist before rename.'
+        },
+        # Vector tile optimization (15 JAN 2026)
+        # Creates a _tiles materialized view with subdivided geometries for fast tile generation
+        'create_tile_view': {
+            'type': 'bool',
+            'default': True,
+            'description': 'Create tile-optimized materialized view ({table}_tiles) with ST_Subdivide for fast vector tile rendering'
+        },
+        'max_tile_vertices': {
+            'type': 'int',
+            'default': 256,
+            'min': 64,
+            'max': 2048,
+            'description': 'Max vertices per polygon in tile view (lower = more splits = faster tiles). 256 recommended for web.'
         }
     }
 
@@ -482,6 +496,46 @@ class ProcessVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
         # Vector Tile URLs (15 JAN 2026) - TiPG MVT endpoints
         vector_tile_urls = config.generate_vector_tile_urls(table_name, schema)
 
+        # Create tile-optimized materialized view if requested (15 JAN 2026)
+        # This creates {table}_tiles with ST_Subdivide for fast vector tile generation
+        tile_view_result = None
+        create_tile_view = params.get("create_tile_view", True)
+        max_tile_vertices = params.get("max_tile_vertices", 256)
+
+        if create_tile_view and failed_chunks == 0:
+            try:
+                from services.vector.postgis_handler import VectorToPostGISHandler
+                handler = VectorToPostGISHandler()
+
+                logger.info(f"[{context.job_id[:8]}] Creating tile-optimized view: {schema}.{table_name}_tiles")
+                tile_view_result = handler.subdivide_complex_polygons(
+                    table_name=table_name,
+                    schema=schema,
+                    max_vertices=max_tile_vertices,
+                    create_tile_view=True  # Always create view, not in-place
+                )
+
+                if tile_view_result.get("success"):
+                    logger.info(
+                        f"[{context.job_id[:8]}] ✅ Tile view created: {tile_view_result.get('tile_view')} "
+                        f"({tile_view_result.get('tile_count')} rows from {tile_view_result.get('original_count')} original)"
+                    )
+                    # Add tile view URLs
+                    tile_view_name = f"{table_name}_tiles"
+                    tile_view_urls = config.generate_vector_tile_urls(tile_view_name, schema)
+                    tile_view_result["tile_urls"] = {
+                        "tilejson_url": tile_view_urls["tilejson"],
+                        "tiles_url": tile_view_urls["tiles"],
+                        "viewer_url": tile_view_urls["viewer"]
+                    }
+            except Exception as e:
+                logger.warning(f"[{context.job_id[:8]}] ⚠️ Tile view creation failed (non-fatal): {e}")
+                tile_view_result = {
+                    "success": False,
+                    "error": str(e),
+                    "message": "Tile view creation failed - original table still usable for tiles"
+                }
+
         # Log completion with degraded mode indicator
         stac_status = "(STAC skipped - degraded mode)" if degraded_mode else "STAC cataloged"
         logger.info(
@@ -517,7 +571,9 @@ class ProcessVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                 "tilejson_url": vector_tile_urls["tilejson"],
                 "tiles_url": vector_tile_urls["tiles"],
                 "viewer_url": vector_tile_urls["viewer"],
-                "tipg_map_url": vector_tile_urls["tipg_map"]
+                "tipg_map_url": vector_tile_urls["tipg_map"],
+                # Tile-optimized view (if created)
+                "tile_view": tile_view_result
             },
             "stages_completed": context.current_stage,
             "total_tasks_executed": len(task_results),

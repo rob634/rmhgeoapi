@@ -1777,43 +1777,51 @@ class VectorToPostGISHandler:
                     ))
 
                     # Create materialized view with subdivided geometries
-                    # Uses CASE to only subdivide complex polygons, leaving simple ones unchanged
+                    # Uses UNION ALL with LATERAL for ST_Subdivide (set-returning function)
+                    # Simple geometries pass through unchanged, complex ones are subdivided
                     if select_cols:
                         cur.execute(sql.SQL("""
                             CREATE MATERIALIZED VIEW {schema}.{view} AS
-                            SELECT
-                                CASE
-                                    WHEN ST_NPoints({geom}) > %s
-                                         AND GeometryType({geom}) IN ('POLYGON', 'MULTIPOLYGON')
-                                    THEN ST_Subdivide({geom}, %s)
-                                    ELSE {geom}
-                                END AS {geom},
-                                {cols}
+                            -- Simple geometries (no subdivision needed)
+                            SELECT {geom}, {cols}
                             FROM {schema}.{table}
+                            WHERE ST_NPoints({geom}) <= %s
+                               OR GeometryType({geom}) NOT IN ('POLYGON', 'MULTIPOLYGON')
+                            UNION ALL
+                            -- Complex geometries (subdivided via LATERAL)
+                            SELECT subdivided.geom AS {geom}, {cols}
+                            FROM {schema}.{table},
+                                 LATERAL ST_Subdivide({geom}, %s) AS subdivided(geom)
+                            WHERE ST_NPoints({geom}) > %s
+                              AND GeometryType({geom}) IN ('POLYGON', 'MULTIPOLYGON')
                         """).format(
                             schema=sql.Identifier(schema),
                             view=sql.Identifier(tile_view_name),
                             table=sql.Identifier(table_name),
                             geom=sql.Identifier(geometry_column),
                             cols=select_cols
-                        ), (max_vertices, max_vertices))
+                        ), (max_vertices, max_vertices, max_vertices))
                     else:
                         cur.execute(sql.SQL("""
                             CREATE MATERIALIZED VIEW {schema}.{view} AS
-                            SELECT
-                                CASE
-                                    WHEN ST_NPoints({geom}) > %s
-                                         AND GeometryType({geom}) IN ('POLYGON', 'MULTIPOLYGON')
-                                    THEN ST_Subdivide({geom}, %s)
-                                    ELSE {geom}
-                                END AS {geom}
+                            -- Simple geometries (no subdivision needed)
+                            SELECT {geom}
                             FROM {schema}.{table}
+                            WHERE ST_NPoints({geom}) <= %s
+                               OR GeometryType({geom}) NOT IN ('POLYGON', 'MULTIPOLYGON')
+                            UNION ALL
+                            -- Complex geometries (subdivided via LATERAL)
+                            SELECT subdivided.geom AS {geom}
+                            FROM {schema}.{table},
+                                 LATERAL ST_Subdivide({geom}, %s) AS subdivided(geom)
+                            WHERE ST_NPoints({geom}) > %s
+                              AND GeometryType({geom}) IN ('POLYGON', 'MULTIPOLYGON')
                         """).format(
                             schema=sql.Identifier(schema),
                             view=sql.Identifier(tile_view_name),
                             table=sql.Identifier(table_name),
                             geom=sql.Identifier(geometry_column)
-                        ), (max_vertices, max_vertices))
+                        ), (max_vertices, max_vertices, max_vertices))
 
                     # Create spatial index on the materialized view
                     index_name = f"idx_{tile_view_name}_{geometry_column}"

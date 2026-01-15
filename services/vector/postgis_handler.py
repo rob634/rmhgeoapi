@@ -3,7 +3,7 @@
 # ============================================================================
 # STATUS: Service layer - PostGIS vector upload handler
 # PURPOSE: Prepare, validate, and upload vector data to PostGIS geo schema
-# LAST_REVIEWED: 04 JAN 2026
+# LAST_REVIEWED: 15 JAN 2026
 # REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
 # EXPORTS: VectorToPostGISHandler
 # DEPENDENCIES: geopandas, psycopg
@@ -140,12 +140,31 @@ class VectorToPostGISHandler:
             logger.warning(f"   - ⚠️  Removed {removed} null geometries ({removed/original_count*100:.1f}%)")
             logger.info(f"   - ✅ Valid geometries remaining: {len(gdf)}")
 
-        # Fix invalid geometries
+        # ========================================================================
+        # FIX INVALID GEOMETRIES - Using make_valid() (15 JAN 2026)
+        # ========================================================================
+        # Shapely's make_valid() is more robust than buffer(0) because:
+        # - buffer(0) can collapse thin geometries to nothing
+        # - buffer(0) may produce unexpected results with self-intersecting polygons
+        # - make_valid() mirrors PostGIS ST_MakeValid() behavior
+        # - make_valid() properly handles bowtie polygons, self-intersections, etc.
+        #
+        # Requires Shapely 1.8+ (available in azgeo environment)
+        # ========================================================================
+        from shapely.validation import make_valid
+
         invalid_mask = ~gdf.geometry.is_valid
         invalid_count = invalid_mask.sum()
         if invalid_count > 0:
-            logger.warning(f"Fixing {invalid_count} invalid geometries using buffer(0)")
-            gdf.loc[invalid_mask, 'geometry'] = gdf.loc[invalid_mask, 'geometry'].buffer(0)
+            logger.warning(f"⚠️  Fixing {invalid_count} invalid geometries using make_valid()")
+            gdf.loc[invalid_mask, 'geometry'] = gdf.loc[invalid_mask, 'geometry'].apply(make_valid)
+
+            # Verify repair was successful
+            still_invalid = (~gdf.geometry.is_valid).sum()
+            if still_invalid > 0:
+                logger.warning(f"   - {still_invalid} geometries still invalid after make_valid() - may be unfixable")
+            else:
+                logger.info(f"   - ✅ All {invalid_count} invalid geometries repaired successfully")
 
         # ========================================================================
         # FORCE 2D GEOMETRIES - Remove Z and M dimensions
@@ -221,6 +240,54 @@ class VectorToPostGISHandler:
         # Log after normalization
         type_counts_after = gdf.geometry.geom_type.value_counts().to_dict()
         logger.info(f"Geometry types after normalization: {type_counts_after}")
+
+        # ========================================================================
+        # POLYGON WINDING ORDER - Enforce CCW exterior rings (15 JAN 2026)
+        # ========================================================================
+        # MVT (Mapbox Vector Tile) specification requires:
+        # - Exterior rings: counter-clockwise (CCW)
+        # - Interior rings (holes): clockwise (CW)
+        #
+        # TiPG generates MVT tiles, so incorrect winding order can cause:
+        # - Rendering artifacts
+        # - Invisible polygons
+        # - Fill/hole inversion
+        #
+        # Shapely's orient() with sign=1.0 enforces this convention.
+        # Only applies to Polygon and MultiPolygon geometries.
+        # ========================================================================
+        from shapely.geometry.polygon import orient
+
+        def orient_polygon(geom):
+            """
+            Orient polygon rings for MVT compatibility.
+
+            Uses Shapely's orient() which:
+            - Sets exterior rings to CCW (sign=1.0)
+            - Sets interior rings (holes) to CW
+            - Returns non-polygon geometries unchanged
+            """
+            geom_type = geom.geom_type
+
+            if geom_type == 'Polygon':
+                return orient(geom, sign=1.0)
+            elif geom_type == 'MultiPolygon':
+                # Orient each polygon in the MultiPolygon
+                oriented_polys = [orient(p, sign=1.0) for p in geom.geoms]
+                from shapely.geometry import MultiPolygon
+                return MultiPolygon(oriented_polys)
+            else:
+                # Points and LineStrings don't have winding order
+                return geom
+
+        # Check if we have any polygon geometries to orient
+        polygon_types = {'Polygon', 'MultiPolygon'}
+        has_polygons = any(t in polygon_types for t in type_counts_after.keys())
+
+        if has_polygons:
+            logger.info("🔄 Enforcing polygon winding order (CCW exterior, CW holes) for MVT compatibility")
+            gdf['geometry'] = gdf.geometry.apply(orient_polygon)
+            logger.info("✅ Polygon winding order normalized")
 
         # ========================================================================
         # VALIDATE POSTGIS GEOMETRY TYPE SUPPORT (12 NOV 2025)
@@ -1537,3 +1604,497 @@ class VectorToPostGISHandler:
         else:
             logger.warning(f"⚠️ No metadata found for {table_name} - STAC link not recorded")
             return False
+
+    # =========================================================================
+    # GEOMETRY OPTIMIZATION - ST_Subdivide for complex polygons (15 JAN 2026)
+    # =========================================================================
+    # PostGIS ST_Subdivide splits complex polygons into smaller pieces, which
+    # significantly improves vector tile generation performance. TiPG must clip
+    # each polygon to tile boundaries - smaller polygons = faster clipping.
+    # =========================================================================
+
+    def subdivide_complex_polygons(
+        self,
+        table_name: str,
+        schema: str = "geo",
+        max_vertices: int = 256,
+        geometry_column: str = "geom",
+        create_tile_view: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Subdivide complex polygons using PostGIS ST_Subdivide for vector tile optimization.
+
+        This optimization improves vector tile generation performance by splitting
+        large polygons with many vertices into smaller pieces. Benefits:
+        - Faster tile clipping (TiPG/ST_AsMVT)
+        - Better spatial index utilization
+        - Reduced memory usage during tile generation
+
+        MODES OF OPERATION:
+
+        1. create_tile_view=True (DEFAULT, RECOMMENDED):
+           Creates a materialized view '{table_name}_tiles' with subdivided geometries.
+           - Original table preserved for OGC Features API queries
+           - Tile view optimized for TiPG vector tile serving
+           - Both appear in TiPG collection list (e.g., 'countries' and 'countries_tiles')
+           - Use '_tiles' suffix tables for MapLibre/vector tile viewers
+
+        2. create_tile_view=False:
+           Modifies the original table in-place (DESTRUCTIVE).
+           - Feature count increases as polygons are split
+           - Attributes duplicated across subdivisions
+           - Only use for visualization-only tables
+
+        When to use:
+        - Tables with polygons having >1000 vertices (coastlines, admin boundaries)
+        - Tables used heavily for vector tile serving
+        - When tile generation is slow due to complex geometries
+
+        When NOT to use:
+        - Point or line geometries (no effect)
+        - Simple polygons (adds overhead without benefit)
+
+        Args:
+            table_name: Target table name
+            schema: Target schema (default: 'geo')
+            max_vertices: Maximum vertices per subdivided polygon (default: 256)
+                         Lower = more splits = faster tiles but more rows
+                         Recommended: 256 for web tiles, 512 for detailed views
+            geometry_column: Geometry column name (default: 'geom')
+            create_tile_view: If True (default), create a materialized view '{table}_tiles'
+                             preserving the original table. If False, modify in-place.
+
+        Returns:
+            Dict with results:
+            {
+                'success': bool,
+                'mode': str,                # 'materialized_view' or 'in_place'
+                'original_table': str,      # Original table name
+                'tile_view': str,           # Tile view name (if create_tile_view=True)
+                'original_count': int,      # Rows in original table
+                'tile_count': int,          # Rows in tile view/modified table
+                'polygons_split': int,      # Number of complex polygons that were split
+                'execution_time_ms': float  # Time taken
+            }
+
+        Example:
+            handler = VectorToPostGISHandler()
+
+            # Recommended: Create tile-optimized view (preserves original)
+            result = handler.subdivide_complex_polygons(
+                table_name='countries',
+                max_vertices=256
+            )
+            # TiPG now serves both:
+            #   - geo.countries (original, for OGC Features)
+            #   - geo.countries_tiles (subdivided, for vector tiles)
+
+            # Alternative: Modify in-place (visualization-only tables)
+            result = handler.subdivide_complex_polygons(
+                table_name='basemap_water',
+                max_vertices=256,
+                create_tile_view=False
+            )
+        """
+        import time
+        start_time = time.time()
+
+        tile_view_name = f"{table_name}_tiles"
+        mode = "materialized_view" if create_tile_view else "in_place"
+
+        logger.info(f"🔪 Starting ST_Subdivide on {schema}.{table_name} (max_vertices={max_vertices}, mode={mode})")
+
+        with self._pg_repo._get_connection() as conn:
+            with conn.cursor() as cur:
+                # Get original row count
+                cur.execute(sql.SQL("""
+                    SELECT COUNT(*) as cnt FROM {schema}.{table}
+                """).format(
+                    schema=sql.Identifier(schema),
+                    table=sql.Identifier(table_name)
+                ))
+                result = cur.fetchone()
+                original_count = result[0] if result else 0
+
+                # Count complex polygons (those that will be split)
+                cur.execute(sql.SQL("""
+                    SELECT COUNT(*) as cnt
+                    FROM {schema}.{table}
+                    WHERE ST_NPoints({geom}) > %s
+                    AND GeometryType({geom}) IN ('POLYGON', 'MULTIPOLYGON')
+                """).format(
+                    schema=sql.Identifier(schema),
+                    table=sql.Identifier(table_name),
+                    geom=sql.Identifier(geometry_column)
+                ), (max_vertices,))
+                result = cur.fetchone()
+                complex_count = result[0] if result else 0
+
+                if complex_count == 0:
+                    logger.info(f"   No complex polygons found (none with >{max_vertices} vertices)")
+                    return {
+                        'success': True,
+                        'mode': mode,
+                        'original_table': f"{schema}.{table_name}",
+                        'tile_view': None,
+                        'original_count': original_count,
+                        'tile_count': original_count,
+                        'polygons_split': 0,
+                        'execution_time_ms': (time.time() - start_time) * 1000,
+                        'message': 'No complex polygons to subdivide'
+                    }
+
+                logger.info(f"   Found {complex_count} complex polygons to subdivide")
+
+                # Get all column names except geometry and id
+                cur.execute(sql.SQL("""
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_schema = %s AND table_name = %s
+                    AND column_name NOT IN ('id', %s)
+                    ORDER BY ordinal_position
+                """), (schema, table_name, geometry_column))
+                columns = [row[0] for row in cur.fetchall()]
+
+                # Build column list for SELECT
+                if columns:
+                    select_cols = sql.SQL(', ').join([sql.Identifier(c) for c in columns])
+                else:
+                    select_cols = None
+
+                # ================================================================
+                # MODE 1: Create Materialized View (RECOMMENDED)
+                # ================================================================
+                if create_tile_view:
+                    logger.info(f"   Creating materialized view: {schema}.{tile_view_name}")
+
+                    # Drop existing view if it exists
+                    cur.execute(sql.SQL("""
+                        DROP MATERIALIZED VIEW IF EXISTS {schema}.{view} CASCADE
+                    """).format(
+                        schema=sql.Identifier(schema),
+                        view=sql.Identifier(tile_view_name)
+                    ))
+
+                    # Create materialized view with subdivided geometries
+                    # Uses CASE to only subdivide complex polygons, leaving simple ones unchanged
+                    if select_cols:
+                        cur.execute(sql.SQL("""
+                            CREATE MATERIALIZED VIEW {schema}.{view} AS
+                            SELECT
+                                CASE
+                                    WHEN ST_NPoints({geom}) > %s
+                                         AND GeometryType({geom}) IN ('POLYGON', 'MULTIPOLYGON')
+                                    THEN ST_Subdivide({geom}, %s)
+                                    ELSE {geom}
+                                END AS {geom},
+                                {cols}
+                            FROM {schema}.{table}
+                        """).format(
+                            schema=sql.Identifier(schema),
+                            view=sql.Identifier(tile_view_name),
+                            table=sql.Identifier(table_name),
+                            geom=sql.Identifier(geometry_column),
+                            cols=select_cols
+                        ), (max_vertices, max_vertices))
+                    else:
+                        cur.execute(sql.SQL("""
+                            CREATE MATERIALIZED VIEW {schema}.{view} AS
+                            SELECT
+                                CASE
+                                    WHEN ST_NPoints({geom}) > %s
+                                         AND GeometryType({geom}) IN ('POLYGON', 'MULTIPOLYGON')
+                                    THEN ST_Subdivide({geom}, %s)
+                                    ELSE {geom}
+                                END AS {geom}
+                            FROM {schema}.{table}
+                        """).format(
+                            schema=sql.Identifier(schema),
+                            view=sql.Identifier(tile_view_name),
+                            table=sql.Identifier(table_name),
+                            geom=sql.Identifier(geometry_column)
+                        ), (max_vertices, max_vertices))
+
+                    # Create spatial index on the materialized view
+                    index_name = f"idx_{tile_view_name}_{geometry_column}"
+                    cur.execute(sql.SQL("""
+                        CREATE INDEX {idx} ON {schema}.{view} USING GIST ({geom})
+                    """).format(
+                        idx=sql.Identifier(index_name),
+                        schema=sql.Identifier(schema),
+                        view=sql.Identifier(tile_view_name),
+                        geom=sql.Identifier(geometry_column)
+                    ))
+
+                    logger.info(f"   ✅ Created spatial index: {index_name}")
+
+                    # Get tile view row count
+                    cur.execute(sql.SQL("""
+                        SELECT COUNT(*) FROM {schema}.{view}
+                    """).format(
+                        schema=sql.Identifier(schema),
+                        view=sql.Identifier(tile_view_name)
+                    ))
+                    result = cur.fetchone()
+                    tile_count = result[0] if result else 0
+
+                    conn.commit()
+
+                    execution_time = (time.time() - start_time) * 1000
+
+                    logger.info(f"✅ Materialized view created: {schema}.{tile_view_name}")
+                    logger.info(f"   Original table: {original_count} rows (preserved)")
+                    logger.info(f"   Tile view: {tile_count} rows (subdivided)")
+                    logger.info(f"   Execution time: {execution_time:.1f}ms")
+
+                    return {
+                        'success': True,
+                        'mode': 'materialized_view',
+                        'original_table': f"{schema}.{table_name}",
+                        'tile_view': f"{schema}.{tile_view_name}",
+                        'original_count': original_count,
+                        'tile_count': tile_count,
+                        'polygons_split': complex_count,
+                        'execution_time_ms': execution_time
+                    }
+
+                # ================================================================
+                # MODE 2: In-Place Modification (DESTRUCTIVE)
+                # ================================================================
+                else:
+                    logger.info(f"   ⚠️  Modifying table in-place (original data will be changed)")
+
+                    # Build column list for INSERT
+                    if columns:
+                        cols_sql = sql.SQL(', ').join([sql.Identifier(c) for c in columns])
+                        cols_with_geom = sql.SQL('{geom}, {cols}').format(
+                            geom=sql.Identifier(geometry_column),
+                            cols=cols_sql
+                        )
+                    else:
+                        cols_with_geom = sql.Identifier(geometry_column)
+                        cols_sql = None
+
+                    # Strategy: Create temp table with subdivided geometries, then swap
+                    temp_table = f"_temp_subdivide_{table_name}"
+
+                    # Create temp table with same structure
+                    cur.execute(sql.SQL("""
+                        CREATE TEMP TABLE {temp} AS
+                        SELECT * FROM {schema}.{table} WHERE 1=0
+                    """).format(
+                        temp=sql.Identifier(temp_table),
+                        schema=sql.Identifier(schema),
+                        table=sql.Identifier(table_name)
+                    ))
+
+                    # Insert simple polygons unchanged
+                    if cols_sql:
+                        cur.execute(sql.SQL("""
+                            INSERT INTO {temp} ({cols_with_geom})
+                            SELECT {geom}, {cols}
+                            FROM {schema}.{table}
+                            WHERE ST_NPoints({geom}) <= %s
+                            OR GeometryType({geom}) NOT IN ('POLYGON', 'MULTIPOLYGON')
+                        """).format(
+                            temp=sql.Identifier(temp_table),
+                            cols_with_geom=cols_with_geom,
+                            geom=sql.Identifier(geometry_column),
+                            cols=cols_sql,
+                            schema=sql.Identifier(schema),
+                            table=sql.Identifier(table_name)
+                        ), (max_vertices,))
+                    else:
+                        cur.execute(sql.SQL("""
+                            INSERT INTO {temp} ({geom})
+                            SELECT {geom}
+                            FROM {schema}.{table}
+                            WHERE ST_NPoints({geom}) <= %s
+                            OR GeometryType({geom}) NOT IN ('POLYGON', 'MULTIPOLYGON')
+                        """).format(
+                            temp=sql.Identifier(temp_table),
+                            geom=sql.Identifier(geometry_column),
+                            schema=sql.Identifier(schema),
+                            table=sql.Identifier(table_name)
+                        ), (max_vertices,))
+
+                    simple_inserted = cur.rowcount
+                    logger.info(f"   Copied {simple_inserted} simple geometries unchanged")
+
+                    # Insert subdivided complex polygons
+                    if cols_sql:
+                        cur.execute(sql.SQL("""
+                            INSERT INTO {temp} ({cols_with_geom})
+                            SELECT ST_Subdivide({geom}, %s), {cols}
+                            FROM {schema}.{table}
+                            WHERE ST_NPoints({geom}) > %s
+                            AND GeometryType({geom}) IN ('POLYGON', 'MULTIPOLYGON')
+                        """).format(
+                            temp=sql.Identifier(temp_table),
+                            cols_with_geom=cols_with_geom,
+                            geom=sql.Identifier(geometry_column),
+                            cols=cols_sql,
+                            schema=sql.Identifier(schema),
+                            table=sql.Identifier(table_name)
+                        ), (max_vertices, max_vertices))
+                    else:
+                        cur.execute(sql.SQL("""
+                            INSERT INTO {temp} ({geom})
+                            SELECT ST_Subdivide({geom}, %s)
+                            FROM {schema}.{table}
+                            WHERE ST_NPoints({geom}) > %s
+                            AND GeometryType({geom}) IN ('POLYGON', 'MULTIPOLYGON')
+                        """).format(
+                            temp=sql.Identifier(temp_table),
+                            geom=sql.Identifier(geometry_column),
+                            schema=sql.Identifier(schema),
+                            table=sql.Identifier(table_name)
+                        ), (max_vertices, max_vertices))
+
+                    subdivided_inserted = cur.rowcount
+                    logger.info(f"   Created {subdivided_inserted} subdivided geometries from {complex_count} complex polygons")
+
+                    # Truncate original and insert from temp
+                    cur.execute(sql.SQL("""
+                        TRUNCATE {schema}.{table}
+                    """).format(
+                        schema=sql.Identifier(schema),
+                        table=sql.Identifier(table_name)
+                    ))
+
+                    # Insert all from temp back to original
+                    cur.execute(sql.SQL("""
+                        INSERT INTO {schema}.{table} ({cols_with_geom})
+                        SELECT {cols_with_geom} FROM {temp}
+                    """).format(
+                        schema=sql.Identifier(schema),
+                        table=sql.Identifier(table_name),
+                        cols_with_geom=cols_with_geom,
+                        temp=sql.Identifier(temp_table)
+                    ))
+
+                    tile_count = cur.rowcount
+
+                    # Drop temp table
+                    cur.execute(sql.SQL("DROP TABLE IF EXISTS {temp}").format(
+                        temp=sql.Identifier(temp_table)
+                    ))
+
+                    conn.commit()
+
+                    execution_time = (time.time() - start_time) * 1000
+
+                    logger.info(f"✅ In-place subdivision complete: {original_count} → {tile_count} rows ({execution_time:.1f}ms)")
+
+                    return {
+                        'success': True,
+                        'mode': 'in_place',
+                        'original_table': f"{schema}.{table_name}",
+                        'tile_view': None,
+                        'original_count': original_count,
+                        'tile_count': tile_count,
+                        'polygons_split': complex_count,
+                        'execution_time_ms': execution_time
+                    }
+
+    def refresh_tile_view(
+        self,
+        table_name: str,
+        schema: str = "geo",
+        concurrently: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Refresh a tile-optimized materialized view after source table updates.
+
+        Call this method after updating the source table to sync the tile view.
+        Uses CONCURRENTLY by default to avoid locking during refresh.
+
+        Args:
+            table_name: Source table name (without _tiles suffix)
+            schema: Target schema (default: 'geo')
+            concurrently: If True (default), refresh without locking reads.
+                         Requires an existing unique index on the view.
+                         If False, locks the view during refresh.
+
+        Returns:
+            Dict with results:
+            {
+                'success': bool,
+                'tile_view': str,           # Full view name
+                'refresh_mode': str,        # 'concurrent' or 'blocking'
+                'execution_time_ms': float
+            }
+
+        Example:
+            # After updating geo.countries...
+            handler.refresh_tile_view('countries')
+            # geo.countries_tiles is now synced
+        """
+        import time
+        start_time = time.time()
+
+        tile_view_name = f"{table_name}_tiles"
+
+        logger.info(f"🔄 Refreshing materialized view: {schema}.{tile_view_name}")
+
+        with self._pg_repo._get_connection() as conn:
+            with conn.cursor() as cur:
+                # Check if view exists
+                cur.execute("""
+                    SELECT EXISTS (
+                        SELECT 1 FROM pg_matviews
+                        WHERE schemaname = %s AND matviewname = %s
+                    )
+                """, (schema, tile_view_name))
+                result = cur.fetchone()
+                exists = result[0] if result else False
+
+                if not exists:
+                    logger.warning(f"⚠️  Materialized view {schema}.{tile_view_name} does not exist")
+                    return {
+                        'success': False,
+                        'tile_view': f"{schema}.{tile_view_name}",
+                        'error': 'Materialized view does not exist'
+                    }
+
+                # Refresh the view
+                if concurrently:
+                    try:
+                        cur.execute(sql.SQL("""
+                            REFRESH MATERIALIZED VIEW CONCURRENTLY {schema}.{view}
+                        """).format(
+                            schema=sql.Identifier(schema),
+                            view=sql.Identifier(tile_view_name)
+                        ))
+                        refresh_mode = 'concurrent'
+                    except Exception as e:
+                        # CONCURRENTLY requires unique index - fall back to blocking
+                        logger.warning(f"   Concurrent refresh failed, using blocking refresh: {e}")
+                        cur.execute(sql.SQL("""
+                            REFRESH MATERIALIZED VIEW {schema}.{view}
+                        """).format(
+                            schema=sql.Identifier(schema),
+                            view=sql.Identifier(tile_view_name)
+                        ))
+                        refresh_mode = 'blocking'
+                else:
+                    cur.execute(sql.SQL("""
+                        REFRESH MATERIALIZED VIEW {schema}.{view}
+                    """).format(
+                        schema=sql.Identifier(schema),
+                        view=sql.Identifier(tile_view_name)
+                    ))
+                    refresh_mode = 'blocking'
+
+                conn.commit()
+
+        execution_time = (time.time() - start_time) * 1000
+
+        logger.info(f"✅ Refreshed {schema}.{tile_view_name} ({refresh_mode}, {execution_time:.1f}ms)")
+
+        return {
+            'success': True,
+            'tile_view': f"{schema}.{tile_view_name}",
+            'refresh_mode': refresh_mode,
+            'execution_time_ms': execution_time
+        }

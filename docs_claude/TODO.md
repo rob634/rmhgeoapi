@@ -1,6 +1,6 @@
 # Working Backlog
 
-**Last Updated**: 12 JAN 2026
+**Last Updated**: 15 JAN 2026
 **Source of Truth**: [docs/epics/README.md](/docs/epics/README.md) — Epic/Feature/Story definitions
 **Purpose**: Sprint-level task tracking and delegation
 
@@ -242,6 +242,37 @@ See [TABLE_MAINTENANCE.md](./TABLE_MAINTENANCE.md) for pg_cron setup steps.
 ---
 
 ## Other Active Work
+
+### ✅ Platform API Diagnostics for External Apps (F7.12) - COMPLETE
+
+**Epic**: E7 Pipeline Infrastructure
+**Goal**: Expose diagnostic endpoints via Platform API for external service layer apps
+**Added**: 15 JAN 2026
+**Completed**: 15 JAN 2026
+**Context**: Service layer apps submitting ETL jobs need visibility into system health, failures, and data lineage without accessing internal /api/dbadmin/ endpoints.
+
+#### F7.12: Platform Diagnostic Endpoints
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| S7.12.1 | `GET /api/platform/health` - Simplified system readiness check | ✅ 15 JAN 2026 |
+| S7.12.1a | Return ready_for_jobs boolean, queue backlog, avg job time | ✅ |
+| S7.12.1b | Hide internal details (enum errors, storage account names) | ✅ |
+| S7.12.2 | `GET /api/platform/failures` - Recent failures with sanitized errors | ✅ 15 JAN 2026 |
+| S7.12.2a | Group by error pattern, show counts | ✅ |
+| S7.12.2b | Sanitize error messages (no internal paths/secrets) | ✅ |
+| S7.12.3 | `GET /api/platform/lineage/{request_id}` - Data lineage by request ID | ✅ 15 JAN 2026 |
+| S7.12.3a | Map request_id → job_id → lineage | ✅ |
+| S7.12.3b | Show source → processing → output locations | ✅ |
+| S7.12.4 | `POST /api/platform/validate` - Pre-flight validation | ✅ 15 JAN 2026 |
+| S7.12.4a | Check file exists and readable | ✅ |
+| S7.12.4b | Return file size, recommended job type, time estimate | ✅ |
+
+**Key Files**:
+- `triggers/trigger_platform_status.py` - All four endpoints implemented here
+- `function_app.py` - Routes registered (lines 1052-1114)
+
+---
 
 ### ⚪ Future: Pipeline Builder (Low Priority)
 

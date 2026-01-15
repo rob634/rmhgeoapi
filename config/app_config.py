@@ -681,6 +681,90 @@ class AppConfig(BaseModel):
         # Viewer is hosted on ETL app, not OGC/STAC app (27 NOV 2025)
         return f"{self.etl_app_base_url.rstrip('/')}/api/vector/viewer?collection={collection_id}"
 
+    # ========================================================================
+    # Vector Tile URL Generation (15 JAN 2026)
+    # ========================================================================
+    # TiPG serves MVT (Mapbox Vector Tiles) from PostGIS tables.
+    # These URLs enable high-performance vector tile rendering in MapLibre GL.
+    # ========================================================================
+
+    def generate_vector_tile_urls(self, table_name: str, schema: str = "geo") -> dict:
+        """
+        Generate all vector tile URLs for a PostGIS table.
+
+        TiPG serves MVT tiles from PostGIS tables. These URLs enable:
+        - MapLibre GL JS rendering
+        - High-performance tile-based data loading
+        - Zoom-dependent data display
+
+        IMPORTANT: TiPG requires schema-qualified table names.
+
+        Args:
+            table_name: PostGIS table name (without schema prefix)
+            schema: Schema name (default: 'geo')
+
+        Returns:
+            Dictionary with all vector tile URLs:
+            {
+                'tilejson': str,         # TileJSON metadata endpoint
+                'tiles': str,            # Tile URL template with {z}/{x}/{y}
+                'viewer': str,           # MapLibre GL viewer (ETL app)
+                'tipg_map': str,         # TiPG's built-in viewer
+                'collection': str        # TiPG OGC Features collection
+            }
+
+        Example:
+            >>> config = get_config()
+            >>> urls = config.generate_vector_tile_urls("countries")
+            >>> urls['tilejson']
+            'https://titiler.../vector/collections/geo.countries/tiles/WebMercatorQuad/tilejson.json'
+        """
+        collection_id = f"{schema}.{table_name}"
+        base = f"{self.tipg_base_url}/collections/{collection_id}"
+
+        return {
+            "tilejson": f"{base}/tiles/WebMercatorQuad/tilejson.json",
+            "tiles": f"{base}/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}.pbf",
+            "viewer": f"{self.etl_app_base_url.rstrip('/')}/api/interface/vector-tiles?collection={table_name}",
+            "tipg_map": f"{base}/tiles/WebMercatorQuad/map",
+            "collection": base
+        }
+
+    def generate_vector_tilejson_url(self, table_name: str, schema: str = "geo") -> str:
+        """
+        Generate TileJSON URL for a PostGIS vector table.
+
+        TileJSON provides metadata for vector tile clients including:
+        - Tile URL template
+        - Bounding box
+        - Min/max zoom levels
+        - Layer information
+
+        Args:
+            table_name: PostGIS table name (without schema prefix)
+            schema: Schema name (default: 'geo')
+
+        Returns:
+            TileJSON URL for the vector table
+        """
+        collection_id = f"{schema}.{table_name}"
+        return f"{self.tipg_base_url}/collections/{collection_id}/tiles/WebMercatorQuad/tilejson.json"
+
+    def generate_vector_tiles_viewer_url(self, table_name: str) -> str:
+        """
+        Generate MapLibre GL vector tiles viewer URL.
+
+        This viewer uses MVT tiles from TiPG for high-performance rendering,
+        unlike the legacy Leaflet viewer which uses GeoJSON.
+
+        Args:
+            table_name: PostGIS table name (without schema prefix)
+
+        Returns:
+            MapLibre GL viewer URL for vector tiles
+        """
+        return f"{self.etl_app_base_url.rstrip('/')}/api/interface/vector-tiles?collection={table_name}"
+
     def generate_titiler_urls(self, collection_id: str, item_id: str) -> dict:
         """
         Generate TiTiler-PgSTAC URLs for raster visualization.

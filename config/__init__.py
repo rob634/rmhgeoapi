@@ -44,7 +44,9 @@ Created: 20 NOV 2025 as part of config.py god object refactoring
 # ============================================================================
 # VERSION
 # ============================================================================
-__version__ = "0.7.10.3"
+# Semantic versioning follows MAJOR.MINOR.PATCH.BUILD
+# Criteria for advance to 0.8.0: full integration of Docker worker
+__version__ = "0.7.11.1"
 
 from typing import Optional
 

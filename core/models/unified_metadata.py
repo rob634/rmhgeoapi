@@ -3,7 +3,7 @@
 # ============================================================================
 # STATUS: Core - Single source of truth for dataset metadata
 # PURPOSE: Pydantic models mapping to both OGC Features and STAC APIs
-# LAST_REVIEWED: 09 JAN 2026
+# LAST_REVIEWED: 15 JAN 2026
 # REVIEW_STATUS: Check 8 N/A - no infrastructure config
 # ============================================================================
 """
@@ -571,30 +571,46 @@ class VectorMetadata(BaseMetadata):
         if fallback_base_url:
             properties["ogc:fallback_url"] = f"{fallback_base_url}/collections/{self.id}/items"
 
+        # Build links array with OGC Features and Vector Tiles endpoints
+        links = [
+            {
+                "href": f"{tipg_base_url}/collections/{tipg_collection_id}",
+                "rel": "self",
+                "type": "application/json",
+                "title": "This collection"
+            },
+            {
+                "href": f"{tipg_base_url}/collections/{tipg_collection_id}/items",
+                "rel": "items",
+                "type": "application/geo+json",
+                "title": "Collection items"
+            },
+            {
+                "href": f"{tipg_base_url}/collections",
+                "rel": "parent",
+                "type": "application/json",
+                "title": "All collections"
+            },
+            # Vector Tile links (15 JAN 2026) - TiPG MVT endpoints
+            {
+                "href": f"{tipg_base_url}/collections/{tipg_collection_id}/tiles/WebMercatorQuad/tilejson.json",
+                "rel": "http://www.opengis.net/def/rel/ogc/1.0/tilesets-vector",
+                "type": "application/json",
+                "title": "Vector tiles (TileJSON)"
+            },
+            {
+                "href": f"{tipg_base_url}/collections/{tipg_collection_id}/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}.pbf",
+                "rel": "item",
+                "type": "application/vnd.mapbox-vector-tile",
+                "title": "Vector tiles (MVT)"
+            }
+        ]
+
         collection: Dict[str, Any] = {
             "id": self.id,
             "title": self.title or self.id.replace("_", " ").title(),
             "description": self.description or f"Vector dataset: {self.id}",
-            "links": [
-                {
-                    "href": f"{tipg_base_url}/collections/{tipg_collection_id}",
-                    "rel": "self",
-                    "type": "application/json",
-                    "title": "This collection"
-                },
-                {
-                    "href": f"{tipg_base_url}/collections/{tipg_collection_id}/items",
-                    "rel": "items",
-                    "type": "application/geo+json",
-                    "title": "Collection items"
-                },
-                {
-                    "href": f"{tipg_base_url}/collections",
-                    "rel": "parent",
-                    "type": "application/json",
-                    "title": "All collections"
-                }
-            ],
+            "links": links,
             "itemType": "feature",
             "crs": [
                 "http://www.opengis.net/def/crs/OGC/1.3/CRS84",

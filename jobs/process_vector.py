@@ -469,12 +469,18 @@ class ProcessVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                     "bbox": stac_result.get("bbox")
                 }
 
-        # Generate OGC Features URL and Vector Viewer URL
+        # Generate URLs for accessing the vector data
         from config import get_config
         config = get_config()
         table_name = params.get("table_name")
+        schema = params.get("schema", "geo")
+
+        # OGC Features URLs
         ogc_features_url = config.generate_ogc_features_url(table_name)
         viewer_url = config.generate_vector_viewer_url(table_name)
+
+        # Vector Tile URLs (15 JAN 2026) - TiPG MVT endpoints
+        vector_tile_urls = config.generate_vector_tile_urls(table_name, schema)
 
         # Log completion with degraded mode indicator
         stac_status = "(STAC skipped - degraded mode)" if degraded_mode else "STAC cataloged"
@@ -503,8 +509,16 @@ class ProcessVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                 "data_complete": failed_chunks == 0
             },
             "stac": stac_summary,
+            # OGC Features API URLs
             "ogc_features_url": ogc_features_url,
             "viewer_url": viewer_url,
+            # Vector Tile URLs (15 JAN 2026) - TiPG MVT endpoints for MapLibre GL
+            "vector_tiles": {
+                "tilejson_url": vector_tile_urls["tilejson"],
+                "tiles_url": vector_tile_urls["tiles"],
+                "viewer_url": vector_tile_urls["viewer"],
+                "tipg_map_url": vector_tile_urls["tipg_map"]
+            },
             "stages_completed": context.current_stage,
             "total_tasks_executed": len(task_results),
             "tasks_by_status": {

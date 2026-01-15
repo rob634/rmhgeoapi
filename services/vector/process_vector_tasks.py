@@ -3,7 +3,7 @@
 # ============================================================================
 # STATUS: Service layer - Vector ETL workflow handlers
 # PURPOSE: Idempotent vector processing with DELETE+INSERT pattern
-# LAST_REVIEWED: 04 JAN 2026
+# LAST_REVIEWED: 15 JAN 2026
 # REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
 # EXPORTS: process_vector_prepare, process_vector_upload
 # DEPENDENCIES: geopandas, infrastructure.blob
@@ -368,6 +368,20 @@ def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
     # Step 4b: Register table metadata in geo.table_metadata (06 DEC 2025, updated 09 DEC 2025)
     # This is the SOURCE OF TRUTH for vector metadata - STAC copies for convenience
     # Uses INSERT ON CONFLICT UPDATE for idempotency
+
+    # Generate vector tile URLs for custom_properties (15 JAN 2026)
+    # These are stored in metadata for retrieval via OGC Features API
+    vector_tile_urls = config.generate_vector_tile_urls(table_name, schema)
+    custom_props = {
+        "vector_tiles": {
+            "tilejson_url": vector_tile_urls["tilejson"],
+            "tiles_url": vector_tile_urls["tiles"],
+            "viewer_url": vector_tile_urls["viewer"],
+            "tipg_map_url": vector_tile_urls["tipg_map"]
+        },
+        "tipg_collection_id": f"{schema}.{table_name}"  # Schema-qualified ID for TiPG
+    }
+
     handler.register_table_metadata(
         table_name=table_name,
         schema=schema,
@@ -386,7 +400,9 @@ def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
         keywords=keywords,
         temporal_start=temporal_start,
         temporal_end=temporal_end,
-        temporal_property=temporal_property
+        temporal_property=temporal_property,
+        # Vector tile URLs (15 JAN 2026)
+        custom_properties=custom_props
     )
 
     # Step 5: Calculate optimal chunk size and split

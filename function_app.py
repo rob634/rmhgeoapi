@@ -60,8 +60,10 @@ Endpoints:
     Platform Layer:
         POST /api/platform/submit - Submit Platform API request
         GET  /api/platform/status/{request_id} - Get Platform request status
-        # REMOVED (19 DEC 2025): platform/health, platform/stats, platform/failures
-        # Use /api/health and /api/dbadmin/jobs?status=failed instead
+        GET  /api/platform/health - Simplified system readiness (F7.12)
+        GET  /api/platform/failures - Recent failures with sanitized errors (F7.12)
+        GET  /api/platform/lineage/{request_id} - Data lineage trace (F7.12)
+        POST /api/platform/validate - Pre-flight validation (F7.12)
 
     STAC API v1.0.0:
         GET  /api/stac_api - STAC landing page
@@ -481,26 +483,30 @@ logger.info(f"   ✅ Platform callback registered (will be connected on Platform
 # See STARTUP_REFORM.md for rationale.
 
 # ============================================================================
-# BLUEPRINT REGISTRATIONS (15 DEC 2025, updated 12 JAN 2026)
+# BLUEPRINT REGISTRATIONS (15 DEC 2025, updated 15 JAN 2026)
 # ============================================================================
-# DEV/Admin endpoints in triggers/admin/ Blueprint modules
-from triggers.admin import admin_db_bp, admin_servicebus_bp, snapshot_bp
-from triggers.admin.admin_janitor import bp as admin_janitor_bp
-from triggers.admin.admin_stac import bp as admin_stac_bp
-from triggers.admin.admin_h3 import bp as admin_h3_bp
-from triggers.admin.admin_system import bp as admin_system_bp
-from web_interfaces.h3_sources import bp as h3_sources_bp
+# Conditional registration based on APP_MODE (Gateway/Orchestrator separation)
 
-app.register_functions(admin_db_bp)
-app.register_functions(admin_servicebus_bp)
-app.register_functions(admin_janitor_bp)
-app.register_functions(admin_stac_bp)
-app.register_functions(admin_h3_bp)
-app.register_functions(admin_system_bp)
-app.register_functions(h3_sources_bp)
-app.register_functions(snapshot_bp)
+# Admin blueprints - only for modes with admin endpoints
+if _app_mode.has_admin_endpoints:
+    from triggers.admin import admin_db_bp, admin_servicebus_bp, snapshot_bp
+    from triggers.admin.admin_janitor import bp as admin_janitor_bp
+    from triggers.admin.admin_stac import bp as admin_stac_bp
+    from triggers.admin.admin_h3 import bp as admin_h3_bp
+    from triggers.admin.admin_system import bp as admin_system_bp
+    from web_interfaces.h3_sources import bp as h3_sources_bp
 
-logger.info("✅ Blueprints registered: admin_db, admin_servicebus, admin_janitor, admin_stac, admin_h3, admin_system, h3_sources, snapshot")
+    app.register_functions(admin_db_bp)
+    app.register_functions(admin_servicebus_bp)
+    app.register_functions(admin_janitor_bp)
+    app.register_functions(admin_stac_bp)
+    app.register_functions(admin_h3_bp)
+    app.register_functions(admin_system_bp)
+    app.register_functions(h3_sources_bp)
+    app.register_functions(snapshot_bp)
+    logger.info("✅ Admin blueprints registered (APP_MODE=%s)", _app_mode.mode.value)
+else:
+    logger.info("⏭️ SKIPPING admin blueprints (APP_MODE=%s)", _app_mode.mode.value)
 
 
 
@@ -573,9 +579,31 @@ def curated_dataset_action(req: func.HttpRequest) -> func.HttpResponse:
 # ============================================================================
 
 
+# ============================================================================
+# JOBS ENDPOINTS (conditional 15 JAN 2026)
+# ============================================================================
+# Only registered for modes with has_jobs_endpoints=True (orchestrator, standalone, platform_*)
+
+def _jobs_endpoint_guard() -> Optional[func.HttpResponse]:
+    """Return 404 response if jobs endpoints are disabled for this app mode."""
+    if not _app_mode.has_jobs_endpoints:
+        return func.HttpResponse(
+            json.dumps({
+                "error": "Jobs endpoints not available",
+                "message": f"APP_MODE={_app_mode.mode.value} does not expose jobs/* endpoints",
+                "hint": "Use orchestrator or standalone mode for jobs endpoints"
+            }),
+            status_code=404,
+            mimetype="application/json"
+        )
+    return None
+
+
 @app.route(route="jobs/submit/{job_type}", methods=["POST"])
 def submit_job(req: func.HttpRequest) -> func.HttpResponse:
     """Job submission endpoint using HTTP trigger base class."""
+    if guard := _jobs_endpoint_guard():
+        return guard
     return submit_job_trigger.handle_request(req)
 
 
@@ -583,6 +611,8 @@ def submit_job(req: func.HttpRequest) -> func.HttpResponse:
 @app.route(route="jobs/status/{job_id}", methods=["GET"])
 def get_job_status(req: func.HttpRequest) -> func.HttpResponse:
     """Job status retrieval endpoint using HTTP trigger base class."""
+    if guard := _jobs_endpoint_guard():
+        return guard
     return get_job_status_trigger.handle_request(req)
 
 
@@ -600,6 +630,8 @@ def get_job_logs(req: func.HttpRequest) -> func.HttpResponse:
         - timespan: How far back (default PT24H)
         - component: Filter by component name
     """
+    if guard := _jobs_endpoint_guard():
+        return guard
     return get_job_logs_trigger.handle_request(req)
 
 
@@ -616,6 +648,8 @@ def job_resubmit_route(req: func.HttpRequest) -> func.HttpResponse:
         - delete_blobs: Also delete COG files (default: false)
         - force: Resubmit even if job is processing (default: false)
     """
+    if guard := _jobs_endpoint_guard():
+        return guard
     return job_resubmit(req)
 
 
@@ -633,6 +667,8 @@ def job_delete_route(req: func.HttpRequest) -> func.HttpResponse:
         - delete_blobs=true: Also delete COG files
         - force=true: Delete even if job is processing
     """
+    if guard := _jobs_endpoint_guard():
+        return guard
     return job_delete(req)
 
 
@@ -901,10 +937,26 @@ def stac_extract(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # ============================================================================
-# PLATFORM SERVICE LAYER ENDPOINTS (25 OCT 2025)
+# PLATFORM SERVICE LAYER ENDPOINTS (25 OCT 2025, conditional 15 JAN 2026)
 # ============================================================================
 # Platform orchestration layer above CoreMachine for external applications (DDH)
 # Follows same patterns as Job→Task: PlatformRequest→Jobs→Tasks
+# Only registered for modes with has_platform_endpoints=True (gateway, standalone, platform_*)
+
+def _platform_endpoint_guard() -> Optional[func.HttpResponse]:
+    """Return 404 response if platform endpoints are disabled for this app mode."""
+    if not _app_mode.has_platform_endpoints:
+        return func.HttpResponse(
+            json.dumps({
+                "error": "Platform endpoints not available",
+                "message": f"APP_MODE={_app_mode.mode.value} does not expose platform/* endpoints",
+                "hint": "Use gateway or standalone mode for platform endpoints"
+            }),
+            status_code=404,
+            mimetype="application/json"
+        )
+    return None
+
 
 @app.route(route="platform/submit", methods=["POST"])
 def platform_submit(req: func.HttpRequest) -> func.HttpResponse:
@@ -933,6 +985,8 @@ def platform_submit(req: func.HttpRequest) -> func.HttpResponse:
             "monitor_url": "/api/platform/status/abc123"
         }
     """
+    if guard := _platform_endpoint_guard():
+        return guard
     return platform_request_submit(req)
 
 
@@ -945,6 +999,8 @@ async def platform_status_by_id(req: func.HttpRequest) -> func.HttpResponse:
 
     Returns detailed status including all CoreMachine jobs.
     """
+    if guard := _platform_endpoint_guard():
+        return guard
     return await platform_request_status(req)
 
 
@@ -957,6 +1013,8 @@ async def platform_status_list(req: func.HttpRequest) -> func.HttpResponse:
 
     Returns list of all platform requests with optional filtering.
     """
+    if guard := _platform_endpoint_guard():
+        return guard
     return await platform_request_status(req)
 
 
@@ -981,17 +1039,81 @@ async def platform_job_status_by_id(req: func.HttpRequest) -> func.HttpResponse:
             "taskSummary": {...}
         }
     """
+    if guard := _platform_endpoint_guard():
+        return guard
     return await platform_job_status(req)
 
 
 # ============================================================================
-# REMOVED (19 DEC 2025): platform/health, platform/stats, platform/failures
+# PLATFORM DIAGNOSTICS FOR EXTERNAL APPS (F7.12 - 15 JAN 2026)
 # ============================================================================
-# These endpoints were broken and redundant:
-#   - platform/health: Use /api/health instead (comprehensive system health)
-#   - platform/stats: Use /api/health instead (includes job statistics)
-#   - platform/failures: Use /api/dbadmin/jobs?status=failed instead
+# Simplified, external-facing diagnostics for service layer apps.
+# These replace the broken endpoints removed 19 DEC 2025.
 # ============================================================================
+
+@app.route(route="platform/health", methods=["GET"])
+async def platform_health_route(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Simplified system readiness check for external apps.
+
+    GET /api/platform/health
+
+    Returns simplified health status (ready_for_jobs, queue backlog, etc.)
+    without exposing internal details like enum errors or storage accounts.
+    """
+    if guard := _platform_endpoint_guard():
+        return guard
+    from triggers.trigger_platform_status import platform_health
+    return await platform_health(req)
+
+
+@app.route(route="platform/failures", methods=["GET"])
+async def platform_failures_route(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Recent failures with sanitized error summaries.
+
+    GET /api/platform/failures?hours=24&limit=20
+
+    Returns failure patterns and recent failures with sanitized messages
+    (no internal paths, secrets, or stack traces).
+    """
+    if guard := _platform_endpoint_guard():
+        return guard
+    from triggers.trigger_platform_status import platform_failures
+    return await platform_failures(req)
+
+
+@app.route(route="platform/lineage/{request_id}", methods=["GET"])
+async def platform_lineage_route(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Data lineage trace by Platform request ID.
+
+    GET /api/platform/lineage/{request_id}
+
+    Returns source → processing → output lineage for a Platform request.
+    """
+    if guard := _platform_endpoint_guard():
+        return guard
+    from triggers.trigger_platform_status import platform_lineage
+    return await platform_lineage(req)
+
+
+@app.route(route="platform/validate", methods=["POST"])
+async def platform_validate_route(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Pre-flight validation before job submission.
+
+    POST /api/platform/validate
+
+    Validates a file exists, returns size, recommended job type, and
+    estimated processing time before actually submitting a job.
+
+    Body: {"data_type": "raster", "container_name": "...", "blob_name": "..."}
+    """
+    if guard := _platform_endpoint_guard():
+        return guard
+    from triggers.trigger_platform_status import platform_validate
+    return await platform_validate(req)
 
 
 # Dedicated Raster Endpoints (05 DEC 2025)
@@ -1020,6 +1142,8 @@ def platform_raster(req: func.HttpRequest) -> func.HttpResponse:
 
     Note: file_name must be a string (single file), not a list.
     """
+    if guard := _platform_endpoint_guard():
+        return guard
     return platform_raster_submit(req)
 
 
@@ -1045,6 +1169,8 @@ def platform_raster_collection(req: func.HttpRequest) -> func.HttpResponse:
 
     Note: file_name must be a list with at least 2 files.
     """
+    if guard := _platform_endpoint_guard():
+        return guard
     return platform_raster_collection_submit(req)
 
 
@@ -1081,6 +1207,8 @@ def platform_unpublish_vector_route(req: func.HttpRequest) -> func.HttpResponse:
 
     Note: dry_run=true by default (preview mode, no deletions).
     """
+    if guard := _platform_endpoint_guard():
+        return guard
     return platform_unpublish_vector(req)
 
 
@@ -1118,6 +1246,8 @@ def platform_unpublish_raster_route(req: func.HttpRequest) -> func.HttpResponse:
 
     Note: dry_run=true by default (preview mode, no deletions).
     """
+    if guard := _platform_endpoint_guard():
+        return guard
     return platform_unpublish_raster(req)
 
 
@@ -2400,9 +2530,16 @@ logger.info("=" * 70)
 logger.info(f"   APP_MODE: {_app_mode.mode.value}")
 logger.info(f"   APP_NAME: {_app_mode.app_name}")
 logger.info(f"   STARTUP_STATE.all_passed: {STARTUP_STATE.all_passed}")
-logger.info(f"   listens_to_jobs_queue: {_app_mode.listens_to_jobs_queue}")
-logger.info(f"   listens_to_raster_tasks: {_app_mode.listens_to_raster_tasks}")
-logger.info(f"   listens_to_vector_tasks: {_app_mode.listens_to_vector_tasks}")
+logger.info("-" * 70)
+logger.info("   HTTP ENDPOINTS:")
+logger.info(f"      has_platform_endpoints: {_app_mode.has_platform_endpoints}")
+logger.info(f"      has_jobs_endpoints: {_app_mode.has_jobs_endpoints}")
+logger.info(f"      has_admin_endpoints: {_app_mode.has_admin_endpoints}")
+logger.info("-" * 70)
+logger.info("   QUEUE LISTENERS:")
+logger.info(f"      listens_to_jobs_queue: {_app_mode.listens_to_jobs_queue}")
+logger.info(f"      listens_to_raster_tasks: {_app_mode.listens_to_raster_tasks}")
+logger.info(f"      listens_to_vector_tasks: {_app_mode.listens_to_vector_tasks}")
 logger.info("-" * 70)
 
 # CRITICAL: Only register Service Bus triggers if startup validation passed

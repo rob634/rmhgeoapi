@@ -149,15 +149,12 @@ def unified_interface_handler(req: func.HttpRequest) -> func.HttpResponse:
     # Get interface name from route parameter
     interface_name = req.route_params.get('name')
 
+    # Redirect to home if no interface specified
     if not interface_name:
-        available = ", ".join(InterfaceRegistry.list_all())
         return func.HttpResponse(
-            f"❌ Missing interface name.\n\n"
-            f"Available interfaces: {available}\n\n"
-            f"Usage: /api/interface/{{name}}\n"
-            f"Example: /api/interface/stac",
-            status_code=400,
-            mimetype="text/plain"
+            body="",
+            status_code=302,
+            headers={"Location": "/api/interface/home"}
         )
 
     # Get interface class from registry

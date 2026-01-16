@@ -2125,6 +2125,13 @@ def storage_upload(req: func.HttpRequest) -> func.HttpResponse:
 
 from web_interfaces import unified_interface_handler
 
+
+@app.route(route="interface", methods=["GET"])
+def web_interface_root(req: func.HttpRequest) -> func.HttpResponse:
+    """Redirect /api/interface to /api/interface/home."""
+    return unified_interface_handler(req)
+
+
 @app.route(route="interface/{name}", methods=["GET", "POST"])
 def web_interface_unified(req: func.HttpRequest) -> func.HttpResponse:
     """

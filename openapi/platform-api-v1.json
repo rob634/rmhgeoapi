@@ -1,9 +1,9 @@
 {
   "openapi": "3.0.1",
   "info": {
-    "title": "Geospatial Service Layer API",
-    "version": "1.0.0",
-    "description": "**Read-Only Query APIs for Geospatial Data Access**\n\nThis API provides standardized access to processed geospatial data:\n\n**Components:**\n- **OGC Features**: Vector data from PostGIS via OGC API - Features Core 1.0\n- **STAC**: Raster/vector metadata catalog via STAC API v1.0.0\n- **Raster**: Convenience wrappers for TiTiler tile serving\n- **xarray**: Direct Zarr access for time-series queries\n\n**Related Services (separate docs):**\n- TiTiler (Docker): `/cog/*`, `/xarray/*` - see TiTiler's own swagger\n- ETL Platform: `/api/platform/*` - internal processing APIs\n",
+    "title": "Geospatial APIs",
+    "version": "1.1.0",
+    "description": "**Geospatial Data Platform API**\n\nThis API provides two categories of endpoints:\n\n## Data Query APIs (Consumer-Facing)\n- **OGC Features**: Vector data from PostGIS via OGC API - Features Core 1.0\n- **STAC**: Raster/vector metadata catalog via STAC API v1.0.0\n- **Raster**: Convenience wrappers for TiTiler tile serving\n- **xarray**: Direct Zarr access for time-series queries\n\n## Platform APIs (B2B Integration)\n- **Platform**: DDH integration endpoints for automated data onboarding\n- **Approvals**: Dataset QA workflow for publishing control\n\n**Related Services:**\n- TiTiler (Docker): `/cog/*`, `/xarray/*` - see TiTiler docs\n",
     "contact": {
       "name": "Geospatial Platform Team",
       "email": "platform-support@example.com"
@@ -34,6 +34,14 @@
     {
       "name": "xarray",
       "description": "Direct Zarr access for time-series and temporal aggregation.\nMore efficient than TiTiler for multi-timestep queries.\n"
+    },
+    {
+      "name": "Platform",
+      "description": "DDH integration endpoints for automated data onboarding.\nTranslates DDH API format to internal job orchestration.\n"
+    },
+    {
+      "name": "Approvals",
+      "description": "Dataset approval workflow for QA before publishing.\nReview, approve, or reject datasets before STAC publication.\n"
     }
   ],
   "paths": {
@@ -1051,6 +1059,603 @@
           }
         }
       }
+    },
+    "/api/platform/submit": {
+      "post": {
+        "summary": "Submit DDH platform request",
+        "description": "Submit a data processing request using DDH API format.\nAutomatically detects data type and routes to appropriate job.\n\n**Request ID Generation:**\nSHA256(dataset_id + resource_id + version_id) - idempotent\n",
+        "operationId": "platformSubmit",
+        "tags": ["Platform"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlatformRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Request accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/platform/status/{request_id}": {
+      "get": {
+        "summary": "Get platform request status",
+        "description": "Get status of a platform request by its request ID.",
+        "operationId": "platformStatus",
+        "tags": ["Platform"],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Request status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformStatusResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request not found"
+          }
+        }
+      }
+    },
+    "/api/platform/status": {
+      "get": {
+        "summary": "List all platform requests",
+        "description": "List all platform requests with optional filtering by status.",
+        "operationId": "platformStatusList",
+        "tags": ["Platform"],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 100
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["pending", "processing", "completed", "failed"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of platform requests"
+          }
+        }
+      }
+    },
+    "/api/platform/jobs/{job_id}/status": {
+      "get": {
+        "summary": "Get job status by job ID",
+        "description": "Get status of a CoreMachine job directly by job_id.\nThis endpoint is for gateway integration where only /api/platform/* is exposed.",
+        "operationId": "platformJobStatus",
+        "tags": ["Platform"],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "verbose",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Job status with task summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformJobStatus"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Job not found"
+          }
+        }
+      }
+    },
+    "/api/platform/health": {
+      "get": {
+        "summary": "Platform health check",
+        "description": "Simplified system readiness check for external apps.\nReturns ready_for_jobs status, queue backlog, and avg job time without exposing internal details.",
+        "operationId": "platformHealth",
+        "tags": ["Platform"],
+        "responses": {
+          "200": {
+            "description": "Health status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/platform/failures": {
+      "get": {
+        "summary": "Recent failures",
+        "description": "Get recent failures with sanitized error summaries.\nNo internal paths, secrets, or stack traces exposed.",
+        "operationId": "platformFailures",
+        "tags": ["Platform"],
+        "parameters": [
+          {
+            "name": "hours",
+            "in": "query",
+            "description": "Lookback period in hours",
+            "schema": {
+              "type": "integer",
+              "default": 24
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Failure patterns and recent failures"
+          }
+        }
+      }
+    },
+    "/api/platform/lineage/{request_id}": {
+      "get": {
+        "summary": "Data lineage trace",
+        "description": "Get data lineage trace by Platform request ID.\nReturns source → processing → output lineage.",
+        "operationId": "platformLineage",
+        "tags": ["Platform"],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Data lineage information"
+          },
+          "404": {
+            "description": "Request not found"
+          }
+        }
+      }
+    },
+    "/api/platform/validate": {
+      "post": {
+        "summary": "Pre-flight validation",
+        "description": "Validate a file exists and get processing recommendations before submitting a job.\nReturns file size, recommended job type, and estimated processing time.",
+        "operationId": "platformValidate",
+        "tags": ["Platform"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["data_type", "container_name", "blob_name"],
+                "properties": {
+                  "data_type": {
+                    "type": "string",
+                    "enum": ["raster", "vector"]
+                  },
+                  "container_name": {
+                    "type": "string"
+                  },
+                  "blob_name": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Validation result with recommendations"
+          },
+          "404": {
+            "description": "File not found"
+          }
+        }
+      }
+    },
+    "/api/platform/raster": {
+      "post": {
+        "summary": "Submit single raster for processing",
+        "description": "Submit a single raster file for processing.\nRoutes to process_raster_v2, with automatic fallback to process_large_raster_v2 for large files.",
+        "operationId": "platformRaster",
+        "tags": ["Platform"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlatformRasterRequest"
+              },
+              "example": {
+                "dataset_id": "aerial-imagery-2024",
+                "resource_id": "site-alpha",
+                "version_id": "v1.0",
+                "container_name": "bronze-rasters",
+                "file_name": "aerial-alpha.tif",
+                "service_name": "Aerial Imagery Site Alpha"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Job accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (e.g., file_name is a list)"
+          }
+        }
+      }
+    },
+    "/api/platform/raster-collection": {
+      "post": {
+        "summary": "Submit raster collection for processing",
+        "description": "Submit multiple raster files as a collection.\nProcessed as a single collection with MosaicJSON.",
+        "operationId": "platformRasterCollection",
+        "tags": ["Platform"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlatformRasterCollectionRequest"
+              },
+              "example": {
+                "dataset_id": "aerial-tiles-2024",
+                "resource_id": "site-alpha",
+                "version_id": "v1.0",
+                "container_name": "bronze-rasters",
+                "file_name": ["tile1.tif", "tile2.tif", "tile3.tif"],
+                "service_name": "Aerial Tiles Site Alpha"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Job accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (e.g., file_name is not a list or has <2 files)"
+          }
+        }
+      }
+    },
+    "/api/platform/unpublish/vector": {
+      "post": {
+        "summary": "Unpublish vector data",
+        "description": "Unpublish vector data via Platform layer.\nAccepts DDH identifiers, request_id, or direct table_name.\n\n**Note:** dry_run=true by default (preview mode, no deletions).",
+        "operationId": "platformUnpublishVector",
+        "tags": ["Platform"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnpublishVectorRequest"
+              },
+              "examples": {
+                "by_ddh_ids": {
+                  "summary": "By DDH Identifiers",
+                  "value": {
+                    "dataset_id": "aerial-imagery-2024",
+                    "resource_id": "site-alpha",
+                    "version_id": "v1.0",
+                    "dry_run": true
+                  }
+                },
+                "by_request_id": {
+                  "summary": "By Request ID",
+                  "value": {
+                    "request_id": "a3f2c1b8e9d7f6a5...",
+                    "dry_run": true
+                  }
+                },
+                "by_table_name": {
+                  "summary": "By Table Name (Cleanup Mode)",
+                  "value": {
+                    "table_name": "aerial_imagery_2024_site_alpha_v1_0",
+                    "dry_run": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Unpublish result (dry_run shows what would be deleted)"
+          },
+          "404": {
+            "description": "Data not found"
+          }
+        }
+      }
+    },
+    "/api/platform/unpublish/raster": {
+      "post": {
+        "summary": "Unpublish raster data",
+        "description": "Unpublish raster data via Platform layer.\nAccepts DDH identifiers, request_id, or direct STAC identifiers.\n\n**Note:** dry_run=true by default (preview mode, no deletions).",
+        "operationId": "platformUnpublishRaster",
+        "tags": ["Platform"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnpublishRasterRequest"
+              },
+              "examples": {
+                "by_ddh_ids": {
+                  "summary": "By DDH Identifiers",
+                  "value": {
+                    "dataset_id": "aerial-imagery-2024",
+                    "resource_id": "site-alpha",
+                    "version_id": "v1.0",
+                    "dry_run": true
+                  }
+                },
+                "by_request_id": {
+                  "summary": "By Request ID",
+                  "value": {
+                    "request_id": "a3f2c1b8e9d7f6a5...",
+                    "dry_run": true
+                  }
+                },
+                "by_stac_ids": {
+                  "summary": "By STAC Identifiers (Cleanup Mode)",
+                  "value": {
+                    "stac_item_id": "aerial-imagery-2024-site-alpha-v1-0",
+                    "collection_id": "aerial-imagery-2024",
+                    "dry_run": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Unpublish result (dry_run shows what would be deleted)"
+          },
+          "404": {
+            "description": "Data not found"
+          }
+        }
+      }
+    },
+    "/api/approvals": {
+      "get": {
+        "summary": "List dataset approvals",
+        "description": "List dataset approvals with optional filtering.\n\n**Query Parameters:**\n- `status`: Filter by status (pending, approved, rejected)\n- `limit`: Max results (default: 50)\n",
+        "operationId": "approvalsList",
+        "tags": ["Approvals"],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Filter by approval status",
+            "schema": {
+              "type": "string",
+              "enum": ["pending", "approved", "rejected"]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of approvals",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalList"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/approvals/{approval_id}": {
+      "get": {
+        "summary": "Get approval details",
+        "description": "Get details of a specific dataset approval.",
+        "operationId": "approvalsGet",
+        "tags": ["Approvals"],
+        "parameters": [
+          {
+            "name": "approval_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approval details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetApproval"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Approval not found"
+          }
+        }
+      }
+    },
+    "/api/approvals/{approval_id}/approve": {
+      "post": {
+        "summary": "Approve dataset",
+        "description": "Approve a dataset for publishing. Updates STAC item with published=true.",
+        "operationId": "approvalsApprove",
+        "tags": ["Approvals"],
+        "parameters": [
+          {
+            "name": "approval_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalAction"
+              },
+              "example": {
+                "reviewer": "user@example.com",
+                "notes": "Reviewed and approved for publication"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Dataset approved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetApproval"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/approvals/{approval_id}/reject": {
+      "post": {
+        "summary": "Reject dataset",
+        "description": "Reject a dataset with required reason.",
+        "operationId": "approvalsReject",
+        "tags": ["Approvals"],
+        "parameters": [
+          {
+            "name": "approval_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectionAction"
+              },
+              "example": {
+                "reviewer": "user@example.com",
+                "reason": "Data quality issues - missing attribute values"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Dataset rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetApproval"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1595,6 +2200,395 @@
                 }
               }
             }
+          }
+        }
+      },
+      "PlatformRequest": {
+        "type": "object",
+        "required": ["dataset_id", "resource_id", "version_id", "container_name", "file_name", "service_name"],
+        "properties": {
+          "dataset_id": {
+            "type": "string",
+            "maxLength": 255,
+            "description": "DDH dataset identifier"
+          },
+          "resource_id": {
+            "type": "string",
+            "maxLength": 255,
+            "description": "DDH resource identifier"
+          },
+          "version_id": {
+            "type": "string",
+            "maxLength": 50,
+            "description": "DDH version identifier"
+          },
+          "operation": {
+            "type": "string",
+            "enum": ["CREATE", "UPDATE", "DELETE"],
+            "default": "CREATE"
+          },
+          "container_name": {
+            "type": "string",
+            "description": "Azure storage container name"
+          },
+          "file_name": {
+            "oneOf": [
+              {"type": "string"},
+              {"type": "array", "items": {"type": "string"}}
+            ],
+            "description": "File name(s) - single string or array for raster collections"
+          },
+          "service_name": {
+            "type": "string",
+            "description": "Human-readable service name (maps to STAC item_id)"
+          },
+          "access_level": {
+            "type": "string",
+            "default": "OUO",
+            "description": "Data classification: public, OUO, restricted"
+          },
+          "description": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "processing_options": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Processing options (crs, nodata_value, overwrite, etc.)"
+          }
+        }
+      },
+      "PlatformResponse": {
+        "type": "object",
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "description": "Idempotent request ID (SHA256 of DDH identifiers)"
+          },
+          "job_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "PlatformStatusResponse": {
+        "type": "object",
+        "properties": {
+          "request_id": {
+            "type": "string"
+          },
+          "dataset_id": {
+            "type": "string"
+          },
+          "resource_id": {
+            "type": "string"
+          },
+          "version_id": {
+            "type": "string"
+          },
+          "job_id": {
+            "type": "string"
+          },
+          "job_status": {
+            "type": "string"
+          },
+          "data_type": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "PlatformJobStatus": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "jobType": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["queued", "processing", "completed", "failed", "completed_with_errors"]
+          },
+          "stage": {
+            "type": "integer"
+          },
+          "totalStages": {
+            "type": "integer"
+          },
+          "taskSummary": {
+            "type": "object",
+            "properties": {
+              "total": {"type": "integer"},
+              "completed": {"type": "integer"},
+              "failed": {"type": "integer"},
+              "pending": {"type": "integer"}
+            }
+          },
+          "resultData": {
+            "type": "object",
+            "description": "Job results (when completed)"
+          }
+        }
+      },
+      "PlatformRasterRequest": {
+        "type": "object",
+        "required": ["dataset_id", "resource_id", "container_name", "file_name"],
+        "properties": {
+          "dataset_id": {
+            "type": "string",
+            "description": "DDH dataset identifier"
+          },
+          "resource_id": {
+            "type": "string",
+            "description": "DDH resource identifier"
+          },
+          "version_id": {
+            "type": "string",
+            "description": "Version identifier (optional)"
+          },
+          "container_name": {
+            "type": "string",
+            "description": "Azure Blob Storage container"
+          },
+          "file_name": {
+            "type": "string",
+            "description": "Single file name (not a list)"
+          },
+          "service_name": {
+            "type": "string",
+            "description": "Human-readable service name"
+          }
+        }
+      },
+      "PlatformRasterCollectionRequest": {
+        "type": "object",
+        "required": ["dataset_id", "resource_id", "container_name", "file_name"],
+        "properties": {
+          "dataset_id": {
+            "type": "string",
+            "description": "DDH dataset identifier"
+          },
+          "resource_id": {
+            "type": "string",
+            "description": "DDH resource identifier"
+          },
+          "version_id": {
+            "type": "string",
+            "description": "Version identifier (optional)"
+          },
+          "container_name": {
+            "type": "string",
+            "description": "Azure Blob Storage container"
+          },
+          "file_name": {
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": 2,
+            "description": "List of file names (must have at least 2 files)"
+          },
+          "service_name": {
+            "type": "string",
+            "description": "Human-readable service name"
+          }
+        }
+      },
+      "UnpublishVectorRequest": {
+        "type": "object",
+        "properties": {
+          "dataset_id": {
+            "type": "string",
+            "description": "DDH dataset identifier (Option 1)"
+          },
+          "resource_id": {
+            "type": "string",
+            "description": "DDH resource identifier (Option 1)"
+          },
+          "version_id": {
+            "type": "string",
+            "description": "Version identifier (Option 1)"
+          },
+          "request_id": {
+            "type": "string",
+            "description": "Platform request ID (Option 2)"
+          },
+          "table_name": {
+            "type": "string",
+            "description": "Direct table name for cleanup mode (Option 3)"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "default": true,
+            "description": "Preview mode - no deletions (default: true)"
+          }
+        }
+      },
+      "UnpublishRasterRequest": {
+        "type": "object",
+        "properties": {
+          "dataset_id": {
+            "type": "string",
+            "description": "DDH dataset identifier (Option 1)"
+          },
+          "resource_id": {
+            "type": "string",
+            "description": "DDH resource identifier (Option 1)"
+          },
+          "version_id": {
+            "type": "string",
+            "description": "Version identifier (Option 1)"
+          },
+          "request_id": {
+            "type": "string",
+            "description": "Platform request ID (Option 2)"
+          },
+          "stac_item_id": {
+            "type": "string",
+            "description": "STAC item ID for cleanup mode (Option 3)"
+          },
+          "collection_id": {
+            "type": "string",
+            "description": "STAC collection ID for cleanup mode (Option 3)"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "default": true,
+            "description": "Preview mode - no deletions (default: true)"
+          }
+        }
+      },
+      "HealthResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["healthy", "degraded", "unhealthy"]
+          },
+          "components": {
+            "type": "object",
+            "properties": {
+              "database": {
+                "type": "object",
+                "properties": {
+                  "status": {"type": "string"},
+                  "latency_ms": {"type": "number"}
+                }
+              },
+              "storage": {
+                "type": "object",
+                "properties": {
+                  "status": {"type": "string"}
+                }
+              },
+              "service_bus": {
+                "type": "object",
+                "properties": {
+                  "status": {"type": "string"}
+                }
+              }
+            }
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      },
+      "ApprovalList": {
+        "type": "object",
+        "properties": {
+          "approvals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DatasetApproval"
+            }
+          },
+          "count": {
+            "type": "integer"
+          }
+        }
+      },
+      "DatasetApproval": {
+        "type": "object",
+        "properties": {
+          "approval_id": {
+            "type": "string"
+          },
+          "job_id": {
+            "type": "string"
+          },
+          "job_type": {
+            "type": "string"
+          },
+          "classification": {
+            "type": "string",
+            "enum": ["public", "ouo"]
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "approved", "rejected"]
+          },
+          "stac_item_id": {
+            "type": "string"
+          },
+          "stac_collection_id": {
+            "type": "string"
+          },
+          "reviewer": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "rejection_reason": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reviewed_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ApprovalAction": {
+        "type": "object",
+        "required": ["reviewer"],
+        "properties": {
+          "reviewer": {
+            "type": "string",
+            "description": "Email of the reviewer"
+          },
+          "notes": {
+            "type": "string",
+            "description": "Optional approval notes"
+          }
+        }
+      },
+      "RejectionAction": {
+        "type": "object",
+        "required": ["reviewer", "reason"],
+        "properties": {
+          "reviewer": {
+            "type": "string",
+            "description": "Email of the reviewer"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Required rejection reason"
           }
         }
       }

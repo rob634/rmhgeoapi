@@ -115,6 +115,221 @@ curl -X POST .../api/approvals/{id}/approve \
 
 ---
 
+## 🔥 ACTIVE: API Documentation Architecture (F12.8 + F12.9)
+
+**Epic**: E12 Integration Onboarding
+**Goal**: OpenAPI/Swagger for Function App ETL + Consumer docs for TiTiler
+**Added**: 16 JAN 2026
+**Status**: 🚧 IN PROGRESS (Structure first, content later)
+**Reference**: `documentation_plan.md`
+
+### Background
+
+Two separate documentation deployments for different audiences:
+
+| App | Audience | Docs Strategy |
+|-----|----------|---------------|
+| **Function App (ETL)** | B2B partners, internal systems | OpenAPI generation + Swagger/ReDoc |
+| **TiTiler (Consumer)** | Web devs, data scientists | MkDocs narrative guides |
+
+### F12.8: Function App API Documentation
+
+**Phase 1: OpenAPI Infrastructure** ✅ COMPLETE (16 JAN 2026)
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| S12.8.1-2 | Extend OpenAPI spec with Jobs/Platform/Approvals endpoints | ✅ 16 JAN |
+| S12.8.3 | `/api/openapi.json` endpoint - serve static spec | ✅ (existed) |
+| S12.8.4 | `/api/interface/swagger` - Swagger UI (inlined assets) | ✅ (existed) |
+| S12.8.5 | `/api/interface/redoc` - ReDoc (CDN-loaded) | ✅ 16 JAN |
+| S12.8.6 | Refactor to web_interfaces pattern (no inline code in function_app.py) | ✅ 16 JAN |
+
+**Deliverables:**
+- `/api/interface/swagger` - Interactive Swagger UI (inlined assets, self-contained)
+- `/api/interface/redoc` - Clean ReDoc documentation (CDN-loaded)
+- `/api/openapi.json` - OpenAPI 3.0 spec (now includes Jobs, Platform, Approvals)
+
+**Key Files:**
+- `web_interfaces/swagger/interface.py` - SwaggerInterface (pre-existing)
+- `web_interfaces/redoc/interface.py` - ReDocInterface (created 16 JAN 2026)
+- `openapi/platform-api-v1.json` - Extended spec
+
+**Phase 2-3**: Documentation Hub UI + Content Refinement (see E12_interfaces.md)
+
+### F12.9: TiTiler Consumer Documentation
+
+**Phase 1: Documentation Structure (This App → TiTiler Claude)** ✅ COMPLETE (16 JAN 2026)
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| S12.9.1 | Create `docs_titiler/IMPLEMENTATION_PLAN.md` - plan for TiTiler Claude | ✅ 16 JAN |
+| S12.9.2 | Define documentation site structure (MkDocs Material recommended) | ✅ 16 JAN |
+| S12.9.3 | Create content outline: Web Developer Guide | ✅ 16 JAN |
+| S12.9.4 | Create content outline: Data Scientist Guide | ✅ 16 JAN |
+| S12.9.5 | Create content outline: Auth Flow Guide | ✅ 16 JAN |
+
+**Deliverable:** `docs_titiler/IMPLEMENTATION_PLAN.md` - Handoff document for TiTiler Claude with:
+- MkDocs Material site structure
+- Content outlines for all audience tracks
+- Code examples for common use cases
+- FATHOM flood data case study
+
+**Phase 2**: Implementation by TiTiler Claude (see E12_interfaces.md for stories S12.9.6-12)
+
+### Key Deliverables
+
+1. **Function App**: `/api/interface/swagger`, `/api/interface/redoc`, `/api/openapi.json` ✅
+2. **TiTiler**: `docs_titiler/IMPLEMENTATION_PLAN.md` (handoff document) ✅
+3. **Shared**: FATHOM case study content (in TiTiler handoff)
+
+### Key Files
+
+- `docs/epics/E12_interfaces.md` - Full story definitions
+- `documentation_plan.md` - Original strategy document
+- `web_interfaces/swagger/interface.py` - SwaggerInterface
+- `web_interfaces/redoc/interface.py` - ReDocInterface (created 16 JAN 2026)
+- `openapi/platform-api-v1.json` - Extended OpenAPI spec
+- `docs_titiler/IMPLEMENTATION_PLAN.md` - TiTiler handoff ✅
+
+---
+
+## 🔥 ACTIVE: Docker Orchestration Framework (F7.18)
+
+**Epic**: E7 Pipeline Infrastructure
+**Goal**: Reusable infrastructure for Docker-based long-running jobs with connection pooling, checkpointing, and graceful shutdown
+**Added**: 16 JAN 2026
+**Updated**: 16 JAN 2026 (revised after reviewing `process_raster_docker`)
+**Status**: 🚧 IN PROGRESS
+**Priority**: HIGH - Foundation for ALL Docker jobs
+**Reference**: `docs/epics/E7_pipeline_infra.md` → F7.18
+
+### Existing Infrastructure (Already Implemented!)
+
+**IMPORTANT**: Review of `process_raster_docker` revealed substantial existing infrastructure:
+
+| Component | Status | Location |
+|-----------|--------|----------|
+| **CheckpointManager** | ✅ EXISTS | `infrastructure/checkpoint_manager.py` |
+| **Task checkpoint fields** | ✅ EXISTS | `checkpoint_phase`, `checkpoint_data`, `checkpoint_updated_at` |
+| **Handler pattern** | ✅ EXISTS | `services/handler_process_raster_complete.py` |
+| **Connection pooling** | ❌ MISSING | Need to create |
+| **DockerTaskContext** | ❌ MISSING | Need to create |
+| **Graceful shutdown** | ❌ MISSING | Need to integrate |
+
+**Existing CheckpointManager API**:
+```python
+# infrastructure/checkpoint_manager.py - ALREADY EXISTS!
+checkpoint = CheckpointManager(task_id, task_repo)
+checkpoint.should_skip(phase)      # Check if phase completed
+checkpoint.save(phase, data, validate_artifact)  # Save with artifact validation
+checkpoint.get_data(key, default)  # Retrieve checkpoint data
+```
+
+### Implementation Phases
+
+#### Phase 1: Connection Pool Manager (S7.18.1-4) 📋
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| S7.18.1 | Create `ConnectionPoolManager` class | 📋 |
+| S7.18.2 | Integrate with `PostgreSQLRepository._get_connection()` | 📋 |
+| S7.18.3 | Wire token refresh to call `recreate_pool()` | 📋 |
+| S7.18.4 | Add pool config env vars | 📋 |
+
+**Key Files**: `infrastructure/connection_pool.py`, `infrastructure/postgresql.py`
+
+#### Phase 2: Checkpoint Integration (S7.18.5-7) 🟡 MOSTLY DONE
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| S7.18.5 | Task checkpoint schema | ✅ DONE |
+| S7.18.6 | CheckpointManager class | ✅ DONE |
+| S7.18.7 | Add `is_shutdown_requested()` method | 📋 |
+
+**Key Files**: `infrastructure/checkpoint_manager.py`
+
+#### Phase 3: Docker Task Context (S7.18.8-11) 📋
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| S7.18.8 | Create `DockerTaskContext` dataclass | 📋 |
+| S7.18.9 | Modify `BackgroundQueueWorker` to create context | 📋 |
+| S7.18.10 | Pass context to handlers via CoreMachine | 📋 |
+| S7.18.11 | Add progress reporting to task metadata | 📋 |
+
+**Key Files**: `core/docker_context.py`, `docker_service.py`, `core/machine.py`
+
+#### Phase 4: Graceful Shutdown (S7.18.12-15) 📋
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| S7.18.12 | Create `DockerWorkerLifecycle` class | 📋 |
+| S7.18.13 | Integrate shutdown event with `BackgroundQueueWorker` | 📋 |
+| S7.18.14 | Add shutdown status to `/health` endpoint | 📋 |
+| S7.18.15 | Test graceful shutdown (SIGTERM → checkpoint saved) | 📋 |
+
+**Key Files**: `docker_service.py`
+
+#### Phase 5: H3 Bootstrap Docker - First Consumer (S7.18.16-20) 📋
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| S7.18.16 | Create `bootstrap_h3_docker` job definition | 📋 |
+| S7.18.17 | Create `h3_bootstrap_complete` handler | 📋 |
+| S7.18.18 | Register job and handler in `__init__.py` | 📋 |
+| S7.18.19 | Test: Rwanda bootstrap with checkpoint/resume | 📋 |
+| S7.18.20 | Test: Graceful shutdown mid-cascade | 📋 |
+
+**Key Files**: `jobs/bootstrap_h3_docker.py`, `services/handler_h3_bootstrap_complete.py`
+
+#### Phase 6: Migrate process_raster_docker (S7.18.21-23) 📋
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| S7.18.21 | Update handler to receive `DockerTaskContext` | 📋 |
+| S7.18.22 | Replace manual CheckpointManager with `context.checkpoint` | 📋 |
+| S7.18.23 | Add `context.should_stop()` checks | 📋 |
+
+**Key Files**: `services/handler_process_raster_complete.py`
+
+#### Phase 7: Documentation (S7.18.24-26) 📋
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| S7.18.24 | Create `docs_claude/DOCKER_FRAMEWORK.md` | 📋 |
+| S7.18.25 | Add handler template to `JOB_CREATION_QUICKSTART.md` | 📋 |
+| S7.18.26 | Update `ARCHITECTURE_DIAGRAMS.md` | 📋 |
+
+### Handler Pattern Evolution
+
+```python
+# OLD PATTERN (handler creates checkpoint)
+def process_raster_complete(params: Dict, context: Optional[Dict] = None):
+    task_id = params.get('_task_id')
+    if task_id:
+        checkpoint = CheckpointManager(task_id, task_repo)  # Handler creates
+
+# NEW PATTERN (context provides checkpoint + shutdown awareness)
+def process_raster_complete(params: Dict, context: DockerTaskContext):
+    if context.should_stop():  # Shutdown awareness!
+        return {'interrupted': True, 'resumable': True}
+    if not context.checkpoint.should_skip(1):  # Checkpoint provided
+        result = do_work()
+        context.checkpoint.save(1, data={'result': result})
+```
+
+### Implementation Order
+
+1. **Phase 1** (Connection Pool) - Independent, can ship first
+2. **Phase 2** (Checkpoint Integration) - Mostly done, add shutdown awareness
+3. **Phase 3** (Context) - Depends on Phase 2
+4. **Phase 4** (Shutdown) - Depends on Phase 3
+5. **Phase 5** (H3 Job) - First consumer, proves framework
+6. **Phase 6** (Raster Migration) - Second consumer
+7. **Phase 7** (Docs) - After framework proven
+
+---
+
 ## 🔥 NEXT UP: RasterMetadata + STAC Self-Healing (F7.9 + F7.11)
 
 **Epic**: E7 Pipeline Infrastructure → E2 Raster Data as API

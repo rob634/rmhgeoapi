@@ -446,6 +446,12 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Could not import Upload interface: {e}")
 
+try:
+    from .redoc import interface as _redoc
+    logger.info("✅ Imported ReDoc interface module")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import ReDoc interface: {e}")
+
 
 # Public API
 __all__ = [

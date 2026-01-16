@@ -2214,6 +2214,17 @@ def openapi_spec(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
+# =============================================================================
+# API DOCUMENTATION (F12.8)
+# =============================================================================
+# Documentation endpoints are served via the web_interfaces pattern:
+#   /api/interface/swagger  - Swagger UI (interactive, inlined assets)
+#   /api/interface/redoc    - ReDoc (clean three-panel docs, CDN-loaded)
+#   /api/interface/docs     - Platform documentation (static)
+#   /api/openapi.json       - Raw OpenAPI spec (below)
+# =============================================================================
+
+
 # ingest_vector HTTP endpoint REMOVED (27 NOV 2025)
 # Platform layer now routes vector requests to process_vector (idempotent DELETE+INSERT)
 # Direct vector job submission should use: POST /api/jobs/submit/process_vector

@@ -2,8 +2,8 @@
 
 **Type**: Foundational Enabler
 **Value Statement**: The ETL brain that makes everything else possible.
-**Status**: 🚧 PARTIAL (F7.1 ✅, F7.2 🟡, F7.3 ✅, F7.4 ✅, F7.8 ✅, F7.9 🚧, F7.10 ✅, F7.11 🚧, F7.12 ✅, F7.13 🚧, F7.16 ✅, F7.17 ✅)
-**Last Updated**: 12 JAN 2026
+**Status**: 🚧 PARTIAL (F7.1 ✅, F7.2 🟡, F7.3 ✅, F7.4 ✅, F7.8 ✅, F7.9 🚧, F7.10 ✅, F7.11 🚧, F7.12 ✅, F7.13 🚧, F7.16 ✅, F7.17 ✅, F7.18 🚧)
+**Last Updated**: 16 JAN 2026
 
 **This is the substrate.** E1, E2, E8, and E9 all run on E7. Without it, nothing processes.
 
@@ -40,6 +40,7 @@
 | F7.15 | 📋 | HTTP-Triggered Docker Worker (alternative architecture) |
 | F7.16 | ✅ | Code Maintenance - db_maintenance.py split (12 JAN 2026) |
 | F7.17 | ✅ | Job Resubmit & Platform Features (12 JAN 2026) |
+| F7.18 | 🚧 | **Docker Orchestration Framework** - Connection pooling, checkpointing, graceful shutdown (16 JAN 2026) |
 
 ---
 
@@ -799,5 +800,377 @@ ROUTE_TO_DOCKER=create_cog,create_cog_streaming
 - `triggers/trigger_jobs.py` — resubmit endpoint
 - `services/job_orchestrator.py` — resubmit logic
 - `triggers/trigger_platform.py` — processing_mode routing
+
+---
+
+### Feature F7.18: Docker Orchestration Framework 🚧 PRIORITY
+
+**Deliverable**: Reusable infrastructure for Docker-based long-running jobs
+**Status**: 🚧 IN PROGRESS
+**Added**: 16 JAN 2026
+**Updated**: 16 JAN 2026 (revised after reviewing existing implementation)
+**Priority**: HIGH - Foundation for all Docker jobs
+**Depends On**: F7.12 ✅ (Docker Worker Infrastructure)
+**Enables**: F7.13 (Docker Job Definitions), E8 H3 Docker Jobs
+
+---
+
+#### Existing Infrastructure (Already Implemented)
+
+**IMPORTANT**: Review of `process_raster_docker` (16 JAN 2026) revealed substantial existing infrastructure:
+
+| Component | Status | Location |
+|-----------|--------|----------|
+| **CheckpointManager** | ✅ EXISTS | `infrastructure/checkpoint_manager.py` |
+| **Task checkpoint fields** | ✅ EXISTS | `checkpoint_phase`, `checkpoint_data`, `checkpoint_updated_at` |
+| **Task schema deployed** | ✅ EXISTS | `core/models/task.py`, `core/schema/sql_generator.py` |
+| **Handler pattern** | ✅ EXISTS | `services/handler_process_raster_complete.py` |
+| **Connection pooling** | ❌ MISSING | Need to create |
+| **DockerTaskContext** | ❌ MISSING | Need to create |
+| **Graceful shutdown** | ❌ MISSING | Need to integrate |
+
+**Existing CheckpointManager API**:
+```python
+# infrastructure/checkpoint_manager.py - ALREADY EXISTS!
+checkpoint = CheckpointManager(task_id, task_repo)
+
+checkpoint.should_skip(phase)      # Check if phase completed
+checkpoint.save(phase, data, validate_artifact)  # Save checkpoint
+checkpoint.get_data(key, default)  # Retrieve checkpoint data
+checkpoint.reset()                 # Clear checkpoint
+```
+
+**Existing Handler Pattern** (`handler_process_raster_complete.py`):
+```python
+def process_raster_complete(params: Dict, context: Optional[Dict] = None):
+    task_id = params.get('_task_id')
+
+    # Handler creates CheckpointManager (current pattern)
+    if task_id:
+        checkpoint = CheckpointManager(task_id, task_repo)
+        if checkpoint.current_phase > 0:
+            logger.info(f"Resuming from phase {checkpoint.current_phase}")
+
+    # Phase 1
+    if checkpoint and checkpoint.should_skip(1):
+        validation_result = checkpoint.get_data('validation_result', {})
+    else:
+        validation_result = validate_raster(params)
+        checkpoint.save(1, data={'validation_result': validation_result})
+
+    # Phase 2 (with artifact validation)
+    if checkpoint and checkpoint.should_skip(2):
+        cog_blob = checkpoint.get_data('cog_blob')
+    else:
+        cog_result = create_cog(params)
+        checkpoint.save(2, data={'cog_blob': cog_blob},
+                       validate_artifact=lambda: blob_exists(cog_blob))
+```
+
+---
+
+#### Problem Statement
+
+Docker workers have different characteristics than Azure Functions:
+
+| Characteristic | Function App | Docker Worker |
+|----------------|--------------|---------------|
+| **Timeout** | 10 min max | Hours/unlimited |
+| **Lifecycle** | Unpredictable (serverless) | Predictable (container) |
+| **Connections** | Single-use (leak risk) | Pooled (safe) |
+| **Crash Recovery** | Auto-retry | Needs checkpoint/resume |
+| **Token Expiry** | Rarely hits expiry | Must handle mid-task |
+
+**Current Gap**: Handlers manually create CheckpointManager and have no shutdown awareness.
+
+**Solution**: Wrap existing CheckpointManager in DockerTaskContext with shutdown awareness.
+
+---
+
+#### Framework Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     Docker Orchestration Framework                           │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐             │
+│  │ ConnectionPool  │  │  Checkpoint     │  │  Graceful       │             │
+│  │ Manager         │  │  Manager        │  │  Shutdown       │             │
+│  │ (NEW)           │  │  (EXISTS ✅)    │  │  (NEW)          │             │
+│  │                 │  │                 │  │                 │             │
+│  │ • Mode-aware    │  │ • Phase-based   │  │ • SIGTERM       │             │
+│  │ • Token refresh │  │ • Data persist  │  │ • Save state    │             │
+│  │ • Auto-recreate │  │ • Resume logic  │  │ • Drain work    │             │
+│  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘             │
+│           │                    │                    │                       │
+│           └────────────────────┼────────────────────┘                       │
+│                                │                                            │
+│                    ┌───────────▼───────────┐                               │
+│                    │   DockerTaskContext   │                               │
+│                    │   (NEW - wraps above) │                               │
+│                    │                       │                               │
+│                    │  • checkpoint (mgr)   │                               │
+│                    │  • shutdown_event     │                               │
+│                    │  • should_stop()      │                               │
+│                    │  • report_progress()  │                               │
+│                    └───────────────────────┘                               │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+#### Phase 1: Connection Pool Manager (S7.18.1-4)
+
+**Goal**: Mode-aware database connections - pool for Docker, single-use for Functions
+
+**Design**:
+```python
+# infrastructure/connection_pool.py
+
+class ConnectionPoolManager:
+    """
+    Docker-aware connection pool manager.
+
+    - Function App mode: Returns single-use connections (current behavior)
+    - Docker mode: Returns pooled connections (new capability)
+    - Handles token refresh with pool recreation
+    """
+
+    _pool: Optional[ConnectionPool] = None
+    _pool_lock = threading.Lock()
+
+    @classmethod
+    def get_connection(cls) -> ContextManager[Connection]:
+        """Get connection (mode-aware)."""
+        if _is_docker_mode():
+            return cls._get_pool().connection()
+        else:
+            return _single_use_connection()
+
+    @classmethod
+    def recreate_pool(cls):
+        """Recreate pool with fresh credentials (called on token refresh)."""
+        with cls._pool_lock:
+            if cls._pool:
+                cls._pool.close(timeout=30)
+                cls._pool = None
+        # Next get_connection() creates new pool with new token
+```
+
+| Story | Status | Description | Files |
+|-------|--------|-------------|-------|
+| S7.18.1 | 📋 | Create `ConnectionPoolManager` class | `infrastructure/connection_pool.py` |
+| S7.18.2 | 📋 | Integrate with `PostgreSQLRepository._get_connection()` | `infrastructure/postgresql.py` |
+| S7.18.3 | 📋 | Wire token refresh to call `recreate_pool()` | `infrastructure/auth/__init__.py` |
+| S7.18.4 | 📋 | Add pool config env vars (`DOCKER_DB_POOL_MIN`, `DOCKER_DB_POOL_MAX`) | `config/database_config.py` |
+
+**Acceptance Criteria**:
+- [ ] Docker mode uses connection pool (verify via health endpoint)
+- [ ] Function App mode unchanged (single-use connections)
+- [ ] Token refresh recreates pool without losing in-flight connections
+- [ ] Pool stats available in `/health` endpoint
+
+---
+
+#### Phase 2: Checkpoint Integration (S7.18.5-7)
+
+**Goal**: Extend existing CheckpointManager for framework integration
+
+**NOTE**: Schema already exists! Task model has `checkpoint_phase`, `checkpoint_data`, `checkpoint_updated_at`.
+
+| Story | Status | Description | Files |
+|-------|--------|-------------|-------|
+| S7.18.5 | ✅ DONE | Task checkpoint schema (already exists) | `core/models/task.py` |
+| S7.18.6 | ✅ DONE | CheckpointManager class (already exists) | `infrastructure/checkpoint_manager.py` |
+| S7.18.7 | 📋 | Add `is_shutdown_requested(event)` method to CheckpointManager | `infrastructure/checkpoint_manager.py` |
+
+**New Method to Add**:
+```python
+# infrastructure/checkpoint_manager.py - ADD THIS METHOD
+
+def set_shutdown_event(self, shutdown_event: threading.Event) -> None:
+    """Set shutdown event for graceful shutdown awareness."""
+    self._shutdown_event = shutdown_event
+
+def is_shutdown_requested(self) -> bool:
+    """Check if shutdown has been requested."""
+    return self._shutdown_event.is_set() if self._shutdown_event else False
+
+def save_if_not_shutting_down(self, phase: int, data: Dict = None) -> bool:
+    """Save checkpoint only if not shutting down. Returns False if skipped."""
+    if self.is_shutdown_requested():
+        logger.warning(f"Shutdown requested, skipping checkpoint save for phase {phase}")
+        return False
+    self.save(phase, data)
+    return True
+```
+
+---
+
+#### Phase 3: Docker Task Context (S7.18.8-11)
+
+**Goal**: Unified context object passed to all Docker handlers
+
+**Design**:
+```python
+# core/docker_context.py
+
+@dataclass
+class DockerTaskContext:
+    """
+    Context provided to Docker handlers.
+
+    Wraps existing CheckpointManager with shutdown awareness and
+    additional Docker-specific services.
+    """
+
+    # Core identifiers
+    task_id: str
+    job_id: str
+
+    # Existing checkpoint manager (wrapped)
+    checkpoint: CheckpointManager
+
+    # Shutdown coordination
+    shutdown_event: threading.Event
+
+    def should_stop(self) -> bool:
+        """Check if handler should stop (shutdown requested)."""
+        return self.shutdown_event.is_set()
+
+    def report_progress(self, percent: float, message: str = None):
+        """Report progress (updates task metadata, visible in API)."""
+        # Updates task record with progress info
+```
+
+| Story | Status | Description | Files |
+|-------|--------|-------------|-------|
+| S7.18.8 | 📋 | Create `DockerTaskContext` dataclass | `core/docker_context.py` |
+| S7.18.9 | 📋 | Modify `BackgroundQueueWorker` to create context | `docker_service.py` |
+| S7.18.10 | 📋 | Pass context to handlers via CoreMachine | `core/machine.py` |
+| S7.18.11 | 📋 | Add progress reporting to task metadata | `infrastructure/postgresql.py` |
+
+**Handler Migration Pattern**:
+```python
+# OLD PATTERN (handler creates checkpoint)
+def handler(params, context):
+    task_id = params.get('_task_id')
+    checkpoint = CheckpointManager(task_id, repo)  # Handler creates
+    if not checkpoint.should_skip(1):
+        ...
+
+# NEW PATTERN (context provides checkpoint)
+def handler(params, context: DockerTaskContext):
+    if context.should_stop():  # Shutdown awareness!
+        return {'interrupted': True, 'resumable': True}
+    if not context.checkpoint.should_skip(1):  # Checkpoint provided
+        ...
+```
+
+---
+
+#### Phase 4: Graceful Shutdown Integration (S7.18.12-15)
+
+**Goal**: Docker worker saves checkpoint and exits cleanly on SIGTERM
+
+| Story | Status | Description | Files |
+|-------|--------|-------------|-------|
+| S7.18.12 | 📋 | Create `DockerWorkerLifecycle` class | `docker_service.py` |
+| S7.18.13 | 📋 | Integrate shutdown event with `BackgroundQueueWorker` | `docker_service.py` |
+| S7.18.14 | 📋 | Add shutdown status to `/health` endpoint | `docker_service.py` |
+| S7.18.15 | 📋 | Test graceful shutdown (SIGTERM → checkpoint saved) | Manual test |
+
+---
+
+#### Phase 5: First Consumer - H3 Bootstrap Docker (S7.18.16-20)
+
+**Goal**: Prove the framework with H3 bootstrap job
+
+| Story | Status | Description | Files |
+|-------|--------|-------------|-------|
+| S7.18.16 | 📋 | Create `bootstrap_h3_docker` job definition | `jobs/bootstrap_h3_docker.py` |
+| S7.18.17 | 📋 | Create `h3_bootstrap_complete` handler (uses DockerTaskContext) | `services/handler_h3_bootstrap_complete.py` |
+| S7.18.18 | 📋 | Register job and handler in `__init__.py` | `jobs/__init__.py`, `services/__init__.py` |
+| S7.18.19 | 📋 | Test: Rwanda bootstrap with checkpoint/resume | Manual test |
+| S7.18.20 | 📋 | Test: Graceful shutdown mid-cascade | Manual test |
+
+---
+
+#### Phase 6: Migrate process_raster_docker (S7.18.21-23)
+
+**Goal**: Migrate existing Docker raster job to use framework
+
+| Story | Status | Description | Files |
+|-------|--------|-------------|-------|
+| S7.18.21 | 📋 | Update `handler_process_raster_complete` to receive `DockerTaskContext` | `services/handler_process_raster_complete.py` |
+| S7.18.22 | 📋 | Replace manual CheckpointManager creation with `context.checkpoint` | `services/handler_process_raster_complete.py` |
+| S7.18.23 | 📋 | Add `context.should_stop()` checks in processing phases | `services/handler_process_raster_complete.py` |
+
+**Migration Diff**:
+```python
+# BEFORE (current)
+def process_raster_complete(params: Dict, context: Optional[Dict] = None):
+    task_id = params.get('_task_id')
+    if task_id:
+        checkpoint = CheckpointManager(task_id, task_repo)
+
+# AFTER (migrated)
+def process_raster_complete(params: Dict, context: DockerTaskContext):
+    # Checkpoint provided by framework
+    if context.should_stop():
+        return {'interrupted': True, 'resumable': True}
+    if not context.checkpoint.should_skip(1):
+        ...
+```
+
+---
+
+#### Phase 7: Documentation (S7.18.24-26)
+
+**Goal**: Document the framework for future Claude sessions
+
+| Story | Status | Description | Files |
+|-------|--------|-------------|-------|
+| S7.18.24 | 📋 | Create `docs_claude/DOCKER_FRAMEWORK.md` | `docs_claude/DOCKER_FRAMEWORK.md` |
+| S7.18.25 | 📋 | Add handler template to `JOB_CREATION_QUICKSTART.md` | `docs_claude/JOB_CREATION_QUICKSTART.md` |
+| S7.18.26 | 📋 | Update `ARCHITECTURE_DIAGRAMS.md` with framework diagram | `docs_claude/ARCHITECTURE_DIAGRAMS.md` |
+
+---
+
+**Story Summary**:
+
+| Phase | Stories | Status | Description |
+|-------|---------|--------|-------------|
+| 1 | S7.18.1-4 | 📋 | Connection Pool Manager |
+| 2 | S7.18.5-7 | 🟡 | Checkpoint Integration (5-6 already done) |
+| 3 | S7.18.8-11 | 📋 | Docker Task Context |
+| 4 | S7.18.12-15 | 📋 | Graceful Shutdown |
+| 5 | S7.18.16-20 | 📋 | H3 Bootstrap Docker (first consumer) |
+| 6 | S7.18.21-23 | 📋 | Migrate process_raster_docker |
+| 7 | S7.18.24-26 | 📋 | Documentation |
+
+**Total**: 26 stories across 7 phases (2 already complete)
+
+**Key Files**:
+| File | Status | Purpose |
+|------|--------|---------|
+| `infrastructure/checkpoint_manager.py` | ✅ EXISTS | Checkpoint management |
+| `infrastructure/connection_pool.py` | 📋 NEW | Connection pool manager |
+| `core/docker_context.py` | 📋 NEW | Docker task context |
+| `jobs/bootstrap_h3_docker.py` | 📋 NEW | H3 Docker job definition |
+| `services/handler_h3_bootstrap_complete.py` | 📋 NEW | H3 consolidated handler |
+| `services/handler_process_raster_complete.py` | ✅ EXISTS | Migrate to framework |
+| `docs_claude/DOCKER_FRAMEWORK.md` | 📋 NEW | Framework documentation |
+
+**Implementation Order**:
+1. Phase 1 (Connection Pool) - independent, can ship first
+2. Phase 2 (Checkpoint Integration) - mostly done, add shutdown awareness
+3. Phase 3 (Context) - depends on Phase 2
+4. Phase 4 (Shutdown) - depends on Phase 3
+5. Phase 5 (H3 Job) - first consumer, uses all above
+6. Phase 6 (Raster Migration) - second consumer
+7. Phase 7 (Docs) - after framework proven
 
 ---

@@ -91,7 +91,7 @@ class SwaggerInterface(BaseInterface):
         return {
             "openapi": "3.0.1",
             "info": {
-                "title": "Geospatial Platform API",
+                "title": "Geospatial APIs",
                 "version": "1.0.0",
                 "description": "OpenAPI spec failed to load. Check server logs."
             },
@@ -176,7 +176,7 @@ class SwaggerInterface(BaseInterface):
 </head>
 <body>
     <div class="custom-header">
-        <h1>Service Layer API Documentation</h1>
+        <h1>Geospatial APIs</h1>
         <div class="nav-links">
             <a href="/api/interface/home">Home</a>
             <a href="/api/interface/docs">Static Docs</a>

@@ -41,7 +41,8 @@ Every button says "this is what you would copy." When integrators replicate this
 | F12.5 | 📋 | Pipeline Workflow Hub |
 | F12.6 | 📋 | STAC & Raster Collections Browser |
 | F12.7 | 📋 | OGC Features Collections Browser |
-| F12.8 | 📋 | API Documentation Hub |
+| F12.8 | 🚧 | API Documentation Hub (Phase 1 ✅, Phase 2-3 📋) |
+| F12.9 | 📋 | TiTiler Consumer Documentation (for TiTiler Claude) |
 | SP12.9 | ✅ | NiceGUI Evaluation Spike (Not Pursuing) |
 | SP12.10 | 📋 | MapLibre H3 Visualization Spike |
 
@@ -348,18 +349,34 @@ Integration Onboarding UI (Azure Functions + HTMX)
 
 ---
 
-### Feature F12.8: API Documentation Hub 📋 PLANNED
+### Feature F12.8: API Documentation Hub 🚧 IN PROGRESS
 
-**Deliverable**: Unified API documentation with integration guides
-**Endpoint**: `/api/interface/docs` (enhanced)
+**Deliverable**: OpenAPI spec generation + Swagger/ReDoc + integration guides
+**Endpoint**: `/api/interface/docs` (enhanced), `/api/openapi.json`, `/api/docs`, `/api/redoc`
+**Added**: 16 JAN 2026
+**Reference**: `documentation_plan.md`
+
+**Context**: Azure Functions lacks built-in OpenAPI generation like FastAPI. This feature adds:
+1. Build-time OpenAPI spec generation from Pydantic models
+2. Static Swagger UI and ReDoc HTML endpoints
+3. Integration guides for B2B partners
 
 | Story | Status | Description |
 |-------|--------|-------------|
-| S12.8.1 | 📋 | Create unified docs landing page with sections |
-| S12.8.2 | 📋 | Integrate Swagger UI (link to `/api/interface/swagger`) |
-| S12.8.3 | 📋 | Add DDH Platform integration guide |
-| S12.8.4 | 📋 | Add job submission examples (curl, Python) |
-| S12.8.5 | 📋 | Add data access patterns guide (OGC Features, STAC, Raster) |
+| **Phase 1: OpenAPI Infrastructure** | ✅ COMPLETE 16 JAN 2026 |
+| S12.8.1-2 | ✅ | Extended `openapi/platform-api-v1.json` with Jobs/Platform/Approvals endpoints |
+| S12.8.3 | ✅ | `/api/openapi.json` endpoint - serve static spec (existed, updated) |
+| S12.8.4 | ✅ | `/api/docs` endpoint - Swagger UI HTML (CDN-loaded) |
+| S12.8.5 | ✅ | `/api/redoc` endpoint - ReDoc HTML (CDN-loaded) |
+| **Phase 2: Documentation Hub UI** |
+| S12.8.6 | 📋 | Create unified docs landing page with sections (refactor existing `/api/interface/docs`) |
+| S12.8.7 | 📋 | Add DDH Platform integration guide section |
+| S12.8.8 | 📋 | Add job submission examples (curl, Python) with copy-to-clipboard |
+| S12.8.9 | 📋 | Add data access patterns guide (OGC Features, STAC, Raster endpoints) |
+| **Phase 3: Content Refinement** |
+| S12.8.10 | 📋 | Document all Platform API endpoints with request/response schemas |
+| S12.8.11 | 📋 | Document all Job types with parameter schemas |
+| S12.8.12 | 📋 | Add authentication/authorization documentation |
 
 **Documentation Hub Layout**:
 ```
@@ -390,11 +407,103 @@ Integration Onboarding UI (Azure Functions + HTMX)
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**Key Files**: `web_interfaces/docs/interface.py`, `web_interfaces/swagger/`
+**Key Files**: `web_interfaces/docs/interface.py`, `web_interfaces/swagger/`, `scripts/generate_openapi.py`
 
 **Backend Dependencies**:
-- `/api/openapi.json` - OpenAPI spec ✅
+- `/api/openapi.json` - OpenAPI spec (to be generated)
 - `/api/interface/swagger` - Swagger UI ✅
+
+**OpenAPI Generation Approach**:
+```python
+# scripts/generate_openapi.py - Build-time spec generation
+# 1. Introspect Pydantic models from core/models/
+# 2. Map Azure Function routes from function_app.py
+# 3. Generate openapi.json with request/response schemas
+# 4. Output to static/openapi.json for serving
+
+# Key models to document:
+# - PlatformRequest, PlatformResponse (Platform API)
+# - JobSubmission, JobStatus (Jobs API)
+# - STACCollection, STACItem (STAC API)
+# - FeatureCollection (OGC Features API)
+```
+
+---
+
+### Feature F12.9: TiTiler Consumer Documentation 📋 PLANNED
+
+**Deliverable**: Narrative documentation for TiTiler/TiPG consumer-facing APIs
+**Target App**: `rmhtitiler` (Docker Container App)
+**Audience**: Web developers (ArcGIS/GEE migration) + Data scientists (notebook workflows)
+**Added**: 16 JAN 2026
+**Reference**: `documentation_plan.md`
+
+**Context**: The TiTiler app serves tiles, STAC, and point queries to two distinct audiences:
+1. **Web Developers**: Replacing ArcGIS/GEE with standards-based MapLibre workflows
+2. **Data Scientists**: Cloud-native geospatial analysis from notebooks
+
+This feature defines the documentation structure; **implementation is delegated to TiTiler Claude**.
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| **Phase 1: Documentation Structure (This App)** |
+| S12.9.1 | 📋 | Create `docs_titiler/IMPLEMENTATION_PLAN.md` - high-level plan for TiTiler Claude |
+| S12.9.2 | 📋 | Define documentation site structure (MkDocs Material or Docusaurus) |
+| S12.9.3 | 📋 | Create content outline for Web Developer Guide |
+| S12.9.4 | 📋 | Create content outline for Data Scientist Guide |
+| S12.9.5 | 📋 | Create content outline for Auth Flow Guide |
+| **Phase 2: Implementation (TiTiler Claude)** |
+| S12.9.6 | 📋 | TiTiler: Set up MkDocs/Docusaurus in rmhtitiler repo |
+| S12.9.7 | 📋 | TiTiler: Implement Web Developer Guide content |
+| S12.9.8 | 📋 | TiTiler: Implement Data Scientist Guide content |
+| S12.9.9 | 📋 | TiTiler: Implement Auth Flow Guide content |
+| S12.9.10 | 📋 | TiTiler: Add FATHOM case study with code examples |
+| **Phase 3: Integration** |
+| S12.9.11 | 📋 | Cross-link ETL docs ↔ Consumer docs |
+| S12.9.12 | 📋 | Add unified landing page linking both doc sets |
+
+**Dual-Track Documentation Structure**:
+```
+rmhtitiler/docs/
+├── index.md                    # Landing page with audience selector
+├── guide/
+│   ├── webdev/                 # Track A: Web Developers
+│   │   ├── index.md            # Why migrate from ArcGIS/GEE
+│   │   ├── concept-mapping.md  # ArcGIS → Standards translation
+│   │   ├── quick-start.md      # Tiles in 5 minutes (MapLibre)
+│   │   └── recipes/            # Common use cases
+│   │       ├── replace-feature-service.md
+│   │       ├── display-raster.md
+│   │       └── spatial-query.md
+│   ├── analysis/               # Track B: Data Scientists
+│   │   ├── index.md            # Cloud-native analysis philosophy
+│   │   ├── quick-start.md      # Query data in 5 minutes
+│   │   ├── point-queries.md    # FATHOM-style point extraction
+│   │   ├── windowed-reads.md   # COG partial reads
+│   │   └── stac-search.md      # pystac-client examples
+│   └── auth/                   # Shared: Authentication
+│       └── browser-to-notebook.md  # Token transfer workflow
+├── case-studies/
+│   └── fathom-flood-data.md    # The "killer demo"
+└── reference/                  # Auto-generated API reference
+    ├── docs/                   # Swagger UI (FastAPI native)
+    └── redoc/                  # ReDoc (FastAPI native)
+```
+
+**Concept Mapping Table** (for Web Developer Guide):
+| ArcGIS/GEE Concept | Standards-Based Equivalent |
+|--------------------|---------------------------|
+| ArcGIS Feature Service | TiPG `/collections/{id}/items` |
+| ArcGIS Map Service tiles | TiTiler `/cog/tiles/{z}/{x}/{y}` |
+| Portal item search | STAC catalog `/search` |
+| ArcGIS JS SDK (800kb) | MapLibre GL JS (30kb) |
+| GEE ImageCollection | STAC collection + COG access |
+| esriGeometryPolygon | GeoJSON (actual standard) |
+
+**FATHOM Case Study Highlights**:
+- **Problem**: 100s TB pre-rendered tiles (no value queries) OR upload 8TB to GEE
+- **Solution**: COGs on Azure + TiTiler (tiles on demand + point queries)
+- **Demo**: Click map → get actual flood depth value
 
 ---
 
@@ -487,22 +596,31 @@ PostgreSQL + PostGIS            └───────────────
 | F12.5: Pipeline Workflow Hub | 7 | 📋 Planned |
 | F12.6: STAC & Raster Browser | 4 | 📋 Planned |
 | F12.7: OGC Features Browser | 4 | 📋 Planned |
-| F12.8: API Documentation Hub | 5 | 📋 Planned |
+| F12.8: API Documentation Hub | 12 | 🚧 In Progress |
+| F12.9: TiTiler Consumer Docs | 12 | 📋 Planned |
 | SP12.9: NiceGUI Spike | 4 | ✅ Complete (Not Pursuing) |
 | SP12.10: MapLibre H3 Spike | 6 | 📋 Planned |
-| **Total** | **52** | |
+| **Total** | **71** | |
 
 ## Implementation Order
 
 ```
-Phase 1 (Complete)           Phase 2 (Current)
+Phase 1 (Complete)           Phase 2 (Current - Documentation Focus)
 ┌─────────────────────┐     ┌─────────────────────────────────────┐
-│ F12.1: Cleanup ✅    │     │ F12.EN1: Helper Enhancements        │
-│ F12.2: HTMX ✅       │────▶│ F12.4: System Dashboard             │
-│ F12.3: Migration ✅  │     │ F12.5: Pipeline Workflow Hub        │
-└─────────────────────┘     │ F12.6: STAC & Raster Browser        │
+│ F12.1: Cleanup ✅    │     │ F12.8: API Documentation Hub 🚧     │
+│ F12.2: HTMX ✅       │────▶│   └── OpenAPI generation            │
+│ F12.3: Migration ✅  │     │   └── Swagger/ReDoc endpoints       │
+└─────────────────────┘     │ F12.9: TiTiler Consumer Docs 📋      │
+                            │   └── (Delegated to TiTiler Claude)  │
+                            └─────────────────────────────────────┘
+                                           │
+                            Phase 3 (After Documentation)
+                            ┌─────────────────────────────────────┐
+                            │ F12.EN1: Helper Enhancements        │
+                            │ F12.4: System Dashboard             │
+                            │ F12.5: Pipeline Workflow Hub        │
+                            │ F12.6: STAC & Raster Browser        │
                             │ F12.7: OGC Features Browser         │
-                            │ F12.8: API Documentation Hub        │
                             └─────────────────────────────────────┘
 ```
 
@@ -514,4 +632,4 @@ Phase 1 (Complete)           Phase 2 (Current)
 
 ---
 
-**Last Updated**: 13 JAN 2026 (Added SP12.10 MapLibre H3 Visualization spike)
+**Last Updated**: 16 JAN 2026 (Added F12.8 OpenAPI generation, F12.9 TiTiler Consumer Docs)

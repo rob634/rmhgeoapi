@@ -1,6 +1,6 @@
 # Epic & Feature Summary
 
-**Updated**: 15 JAN 2026 | ✅ Complete | 🚧 In Progress | 📋 Planned | 🔵 Backlog
+**Updated**: 16 JAN 2026 | ✅ Complete | 🚧 In Progress | 📋 Planned | 🔵 Backlog
 
 ---
 
@@ -61,6 +61,7 @@
 - F7.15 📋 HTTP-Triggered Docker Worker
 - F7.16 ✅ Code Maintenance (db_maintenance split)
 - F7.17 ✅ Job Resubmit & Platform Features
+- F7.18 🚧 **Docker Orchestration Framework** (connection pooling, checkpointing, graceful shutdown)
 
 ## E4: Externalization 🔥 PRIORITY
 - F4.1 📋 Publishing Workflow
@@ -112,12 +113,12 @@
 | E12 | 3 | 0 | 6 | 0 |
 | E9 | 1 | 1 | 8 | 0 |
 | E8 | 5 | 0 | 9 | 0 |
-| E7 | 8 | 3 | 4 | 1 |
+| E7 | 8 | 4 | 4 | 1 |
 | E4 | 0 | 2 | 2 | 1 |
 | E3 | 3 | 0 | 3 | 2 |
 | E2 | 7 | 1 | 2 | 0 |
 | E1 | 7 | 0 | 3 | 0 |
-| **Total** | **34** | **7** | **37** | **4** |
+| **Total** | **34** | **8** | **37** | **4** |
 
 ---
 

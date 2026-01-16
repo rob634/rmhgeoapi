@@ -1780,6 +1780,9 @@ class VectorToPostGISHandler:
                     # Uses UNION ALL with LATERAL for ST_Subdivide (set-returning function)
                     # Simple geometries pass through unchanged, complex ones are subdivided
                     # Table alias 't' used in LATERAL query to disambiguate column refs
+                    # Note: PostgreSQL doesn't allow bind parameters in CREATE MATERIALIZED VIEW,
+                    # so we use sql.Literal to embed the max_vertices value directly
+                    max_vertices_lit = sql.Literal(max_vertices)
                     if select_cols:
                         # Build qualified column list for LATERAL query (t.col1, t.col2, ...)
                         qualified_cols = sql.SQL(', ').join([
@@ -1790,14 +1793,14 @@ class VectorToPostGISHandler:
                             -- Simple geometries (no subdivision needed)
                             SELECT {geom}, {cols}
                             FROM {schema}.{table}
-                            WHERE ST_NPoints({geom}) <= %s
+                            WHERE ST_NPoints({geom}) <= {max_v}
                                OR GeometryType({geom}) NOT IN ('POLYGON', 'MULTIPOLYGON')
                             UNION ALL
                             -- Complex geometries (subdivided via LATERAL)
                             SELECT subdivided.geom AS {geom}, {qualified_cols}
                             FROM {schema}.{table} t,
-                                 LATERAL ST_Subdivide(t.{geom}, %s) AS subdivided(geom)
-                            WHERE ST_NPoints(t.{geom}) > %s
+                                 LATERAL ST_Subdivide(t.{geom}, {max_v}) AS subdivided(geom)
+                            WHERE ST_NPoints(t.{geom}) > {max_v}
                               AND GeometryType(t.{geom}) IN ('POLYGON', 'MULTIPOLYGON')
                         """).format(
                             schema=sql.Identifier(schema),
@@ -1805,29 +1808,31 @@ class VectorToPostGISHandler:
                             table=sql.Identifier(table_name),
                             geom=sql.Identifier(geometry_column),
                             cols=select_cols,
-                            qualified_cols=qualified_cols
-                        ), (max_vertices, max_vertices, max_vertices))
+                            qualified_cols=qualified_cols,
+                            max_v=max_vertices_lit
+                        ))
                     else:
                         cur.execute(sql.SQL("""
                             CREATE MATERIALIZED VIEW {schema}.{view} AS
                             -- Simple geometries (no subdivision needed)
                             SELECT {geom}
                             FROM {schema}.{table}
-                            WHERE ST_NPoints({geom}) <= %s
+                            WHERE ST_NPoints({geom}) <= {max_v}
                                OR GeometryType({geom}) NOT IN ('POLYGON', 'MULTIPOLYGON')
                             UNION ALL
                             -- Complex geometries (subdivided via LATERAL)
                             SELECT subdivided.geom AS {geom}
                             FROM {schema}.{table} t,
-                                 LATERAL ST_Subdivide(t.{geom}, %s) AS subdivided(geom)
-                            WHERE ST_NPoints(t.{geom}) > %s
+                                 LATERAL ST_Subdivide(t.{geom}, {max_v}) AS subdivided(geom)
+                            WHERE ST_NPoints(t.{geom}) > {max_v}
                               AND GeometryType(t.{geom}) IN ('POLYGON', 'MULTIPOLYGON')
                         """).format(
                             schema=sql.Identifier(schema),
                             view=sql.Identifier(tile_view_name),
                             table=sql.Identifier(table_name),
-                            geom=sql.Identifier(geometry_column)
-                        ), (max_vertices, max_vertices, max_vertices))
+                            geom=sql.Identifier(geometry_column),
+                            max_v=max_vertices_lit
+                        ))
 
                     # Create spatial index on the materialized view
                     index_name = f"idx_{tile_view_name}_{geometry_column}"

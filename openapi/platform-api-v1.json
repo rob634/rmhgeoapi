@@ -3,7 +3,7 @@
   "info": {
     "title": "Geospatial APIs",
     "version": "1.1.0",
-    "description": "**Geospatial Data Platform API**\n\nThis API provides two categories of endpoints:\n\n## Data Query APIs (Consumer-Facing)\n- **OGC Features**: Vector data from PostGIS via OGC API - Features Core 1.0\n- **STAC**: Raster/vector metadata catalog via STAC API v1.0.0\n- **Raster**: Convenience wrappers for TiTiler tile serving\n- **xarray**: Direct Zarr access for time-series queries\n\n## Platform APIs (B2B Integration)\n- **Platform**: DDH integration endpoints for automated data onboarding\n- **Approvals**: Dataset QA workflow for publishing control\n\n**Related Services:**\n- TiTiler (Docker): `/cog/*`, `/xarray/*` - see TiTiler docs\n",
+    "description": "**Geospatial Data Platform API**\n\nThis API provides two categories of endpoints:\n\n## Platform APIs (B2B Integration)\n- **Platform**: DDH integration endpoints for automated data onboarding\n- **Approvals**: Dataset QA workflow for publishing control\n\n## Data Query APIs (B2C - see TiTiler for primary access)\n- **OGC Features**: Vector data from PostGIS via OGC API - Features Core 1.0\n- **STAC**: Raster/vector metadata catalog via STAC API v1.0.0\n- **Raster**: Convenience wrappers that proxy to TiTiler\n- **xarray**: Direct Zarr access for time-series queries\n\n**Related Services:**\n- TiTiler (Docker): `/cog/*`, `/xarray/*` - primary B2C interface\n",
     "contact": {
       "name": "Geospatial Platform Team",
       "email": "platform-support@example.com"
@@ -20,28 +20,28 @@
   ],
   "tags": [
     {
-      "name": "OGC Features",
-      "description": "OGC API - Features (Part 1: Core) compliant endpoints.\nQuery vector data stored in PostGIS using standard GeoJSON responses.\n"
-    },
-    {
-      "name": "STAC",
-      "description": "STAC API v1.0.0 compliant endpoints.\nSearch and browse raster/vector catalog metadata.\n"
-    },
-    {
-      "name": "Raster",
-      "description": "Raster query and extraction endpoints.\nConvenience wrappers that look up STAC items and proxy to TiTiler.\n"
-    },
-    {
-      "name": "xarray",
-      "description": "Direct Zarr access for time-series and temporal aggregation.\nMore efficient than TiTiler for multi-timestep queries.\n"
-    },
-    {
       "name": "Platform",
-      "description": "DDH integration endpoints for automated data onboarding.\nTranslates DDH API format to internal job orchestration.\n"
+      "description": "B2B Integration: DDH integration endpoints for automated data onboarding.\nTranslates DDH API format to internal job orchestration.\n"
     },
     {
       "name": "Approvals",
-      "description": "Dataset approval workflow for QA before publishing.\nReview, approve, or reject datasets before STAC publication.\n"
+      "description": "B2B Integration: Dataset approval workflow for QA before publishing.\nReview, approve, or reject datasets before STAC publication.\n"
+    },
+    {
+      "name": "OGC Features",
+      "description": "B2C Data Query: OGC API - Features (Part 1: Core) compliant endpoints.\nQuery vector data stored in PostGIS using standard GeoJSON responses.\n"
+    },
+    {
+      "name": "STAC",
+      "description": "B2C Data Query: STAC API v1.0.0 compliant endpoints.\nSearch and browse raster/vector catalog metadata.\n"
+    },
+    {
+      "name": "Raster",
+      "description": "B2C Data Query: Raster query and extraction endpoints.\nConvenience wrappers that look up STAC items and proxy to TiTiler.\n"
+    },
+    {
+      "name": "xarray",
+      "description": "B2C Data Query: Direct Zarr access for time-series and temporal aggregation.\nMore efficient than TiTiler for multi-timestep queries.\n"
     }
   ],
   "paths": {

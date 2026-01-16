@@ -359,6 +359,26 @@ class DocsInterface(BaseInterface):
                 transform: translateY(-2px);
                 box-shadow: 0 4px 8px rgba(0,0,0,0.15);
             }
+
+            .redoc-link {
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                padding: 10px 18px;
+                background: linear-gradient(135deg, #6B7280 0%, #374151 100%);
+                color: white;
+                text-decoration: none;
+                border-radius: 6px;
+                font-weight: 600;
+                font-size: 14px;
+                transition: all 0.2s;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
+
+            .redoc-link:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+            }
         """
 
     def _generate_html_content(self) -> str:
@@ -371,9 +391,14 @@ class DocsInterface(BaseInterface):
                         <h1>Platform API Documentation</h1>
                         <p class="subtitle">DDH Integration Endpoints for Geospatial Data Processing</p>
                     </div>
-                    <a href="/api/interface/swagger" class="swagger-link">
-                        <span>📋</span> Swagger UI →
-                    </a>
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                        <a href="/api/interface/swagger" class="swagger-link">
+                            <span>📋</span> Swagger UI →
+                        </a>
+                        <a href="/api/interface/redoc" class="redoc-link">
+                            <span>📖</span> ReDoc →
+                        </a>
+                    </div>
                 </div>
             </header>
 

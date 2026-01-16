@@ -165,9 +165,16 @@ class HomeInterface(BaseInterface):
 
                     <a href="/api/interface/docs" class="card">
                         <div class="card-icon">📖</div>
-                        <h3 class="card-title">API Documentation</h3>
-                        <p class="card-description">Interactive API reference with examples</p>
+                        <h3 class="card-title">Platform API Docs</h3>
+                        <p class="card-description">B2B integration endpoints for DDH</p>
                         <div class="card-footer">View Docs</div>
+                    </a>
+
+                    <a href="/api/interface/redoc" class="card">
+                        <div class="card-icon">📋</div>
+                        <h3 class="card-title">ReDoc</h3>
+                        <p class="card-description">OpenAPI reference documentation</p>
+                        <div class="card-footer">View ReDoc</div>
                     </a>
 
                     <a href="/api/interface/database" class="card">

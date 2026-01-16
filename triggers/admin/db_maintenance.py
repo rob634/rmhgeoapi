@@ -41,6 +41,7 @@ Exports:
 import azure.functions as func
 import json
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
@@ -548,9 +549,15 @@ class AdminDbMaintenanceTrigger:
         This is SAFE to run at any time:
         - Uses CREATE TABLE IF NOT EXISTS
         - Uses CREATE INDEX IF NOT EXISTS
-        - Uses CREATE TYPE IF NOT EXISTS (for enums)
+        - Skips existing enums (checks pg_type catalog)
         - Does NOT drop any existing data
         - Idempotent - can be run multiple times safely
+
+        Implementation Notes (16 JAN 2026):
+        - Uses AUTOCOMMIT mode so each statement is independent
+        - Skips DROP TYPE statements (destructive, not additive)
+        - Checks pg_type before creating enums to avoid errors
+        - Failures in one statement don't affect others
 
         Use Cases:
         - After deploying new code with new tables
@@ -604,8 +611,8 @@ class AdminDbMaintenanceTrigger:
         results = {
             "operation": "ensure_tables",
             "target": target,
-            "created": {"enums": [], "tables": [], "indexes": []},
-            "skipped": {"enums": [], "tables": [], "indexes": []},
+            "created": {"enums": [], "tables": [], "indexes": [], "functions": [], "triggers": [], "other": []},
+            "skipped": {"enums": [], "tables": [], "indexes": [], "functions": [], "triggers": [], "other": []},
             "errors": [],
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
@@ -618,36 +625,82 @@ class AdminDbMaintenanceTrigger:
             sql_gen = PydanticToSQL(schema_name='app')
             statements = sql_gen.generate_composed_statements()
 
-            logger.info(f"📋 Generated {len(statements)} SQL statements to execute")
+            logger.info(f"📋 Generated {len(statements)} SQL statements to process")
 
-            # Execute each statement
             repo = PostgreSQLRepository(schema_name='app')
 
+            # Get existing enums from pg_type catalog (to skip DROP/CREATE pairs)
+            existing_enums = set()
             with repo._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT t.typname
+                        FROM pg_type t
+                        JOIN pg_namespace n ON t.typnamespace = n.oid
+                        WHERE n.nspname = 'app' AND t.typtype = 'e'
+                    """)
+                    existing_enums = {row['typname'] for row in cur.fetchall()}
+            logger.info(f"📊 Found {len(existing_enums)} existing enums in app schema")
+
+            # Use autocommit mode - each statement is its own transaction
+            # This prevents rollback of successful statements when one fails
+            with repo._get_connection() as conn:
+                # Enable autocommit mode
+                conn.autocommit = True
+
                 with conn.cursor() as cur:
                     for i, stmt in enumerate(statements):
                         try:
                             # Convert to string for logging/categorization
                             stmt_str = stmt.as_string(conn)
+                            stmt_upper = stmt_str.upper()
                             stmt_preview = stmt_str[:100].replace('\n', ' ')
 
                             # Categorize the statement
-                            if 'CREATE TYPE' in stmt_str.upper():
+                            if 'DROP TYPE' in stmt_upper:
                                 category = 'enums'
-                            elif 'CREATE TABLE' in stmt_str.upper():
+                                # SKIP DROP TYPE in ensure mode - it's destructive
+                                # Extract enum name to check if we should skip the CREATE too
+                                # Pattern: DROP TYPE IF EXISTS app."enum_name" CASCADE
+                                match = re.search(r'DROP TYPE IF EXISTS "app"\."(\w+)"', stmt_str)
+                                if match:
+                                    enum_name = match.group(1)
+                                    if enum_name in existing_enums:
+                                        results["skipped"]["enums"].append(f"DROP {enum_name} (exists)")
+                                        logger.debug(f"⏭️ [{i+1}/{len(statements)}] Skipped DROP TYPE (enum exists): {enum_name}")
+                                        continue
+                                # If enum doesn't exist, we still skip DROP (nothing to drop)
+                                logger.debug(f"⏭️ [{i+1}/{len(statements)}] Skipped DROP TYPE (ensure mode): {stmt_preview}")
+                                continue
+
+                            elif 'CREATE TYPE' in stmt_upper:
+                                category = 'enums'
+                                # Check if this enum already exists
+                                match = re.search(r'CREATE TYPE "app"\."(\w+)"', stmt_str)
+                                if match:
+                                    enum_name = match.group(1)
+                                    if enum_name in existing_enums:
+                                        results["skipped"]["enums"].append(f"CREATE {enum_name} (exists)")
+                                        logger.debug(f"⏭️ [{i+1}/{len(statements)}] Skipped CREATE TYPE (exists): {enum_name}")
+                                        continue
+
+                            elif 'CREATE TABLE' in stmt_upper:
                                 category = 'tables'
-                            elif 'CREATE INDEX' in stmt_str.upper() or 'CREATE UNIQUE INDEX' in stmt_str.upper():
+                            elif 'CREATE INDEX' in stmt_upper or 'CREATE UNIQUE INDEX' in stmt_upper:
                                 category = 'indexes'
+                            elif 'CREATE OR REPLACE FUNCTION' in stmt_upper or 'CREATE FUNCTION' in stmt_upper:
+                                category = 'functions'
+                            elif 'CREATE TRIGGER' in stmt_upper or 'DROP TRIGGER' in stmt_upper:
+                                category = 'triggers'
                             else:
                                 category = 'other'
 
-                            # Execute
+                            # Execute the statement
                             cur.execute(stmt)
 
-                            # If we get here, it was created (or is a non-IF-NOT-EXISTS statement)
+                            # If we get here, statement succeeded
                             if category in results["created"]:
                                 results["created"][category].append(stmt_preview)
-
                             logger.debug(f"✅ [{i+1}/{len(statements)}] Executed: {stmt_preview}...")
 
                         except Exception as stmt_error:
@@ -658,19 +711,14 @@ class AdminDbMaintenanceTrigger:
                                 if category in results["skipped"]:
                                     results["skipped"][category].append(stmt_preview)
                                 logger.debug(f"⏭️ [{i+1}/{len(statements)}] Skipped (exists): {stmt_preview}...")
-                                # Rollback just this statement and continue
-                                conn.rollback()
                             else:
-                                # Real error - log it but continue
+                                # Real error - log it and continue
+                                # In autocommit mode, this only affects this statement
                                 results["errors"].append({
                                     "statement": stmt_preview,
                                     "error": str(stmt_error)
                                 })
                                 logger.warning(f"⚠️ [{i+1}/{len(statements)}] Error: {stmt_error}")
-                                conn.rollback()
-
-                    # Commit all successful changes
-                    conn.commit()
 
             results["status"] = "success" if not results["errors"] else "partial"
             results["execution_time_ms"] = int((time.time() - start_time) * 1000)
@@ -678,9 +726,13 @@ class AdminDbMaintenanceTrigger:
                 "enums_created": len(results["created"]["enums"]),
                 "tables_created": len(results["created"]["tables"]),
                 "indexes_created": len(results["created"]["indexes"]),
+                "functions_created": len(results["created"]["functions"]),
+                "triggers_created": len(results["created"]["triggers"]),
                 "enums_existed": len(results["skipped"]["enums"]),
                 "tables_existed": len(results["skipped"]["tables"]),
                 "indexes_existed": len(results["skipped"]["indexes"]),
+                "functions_existed": len(results["skipped"]["functions"]),
+                "triggers_existed": len(results["skipped"]["triggers"]),
                 "errors": len(results["errors"])
             }
 

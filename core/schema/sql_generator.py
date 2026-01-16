@@ -3,7 +3,7 @@
 # ============================================================================
 # STATUS: Core - DDL generation from Pydantic models
 # PURPOSE: Generate PostgreSQL CREATE statements using psycopg.sql composition
-# LAST_REVIEWED: 03 JAN 2026
+# LAST_REVIEWED: 16 JAN 2026
 # REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
 # ============================================================================
 """
@@ -12,6 +12,24 @@ Pydantic to PostgreSQL Schema Generator.
 Generates PostgreSQL DDL statements from Pydantic models,
 ensuring database schema always matches Python models.
 Pydantic models are the single source of truth for schema.
+
+SCHEMA EVOLUTION PATTERN (16 JAN 2026):
+    This generator uses IF NOT EXISTS patterns for safe, additive schema updates:
+    - CREATE TABLE IF NOT EXISTS: New tables added without affecting existing
+    - CREATE INDEX IF NOT EXISTS: New indexes added safely
+    - CREATE TYPE ... (enums): Recreated on rebuild, careful with ensure
+
+    Usage:
+        action=ensure  -> Additive: Creates missing objects, skips existing (SAFE)
+        action=rebuild -> Destructive: Drops and recreates everything
+
+    Adding New Tables:
+        1. Create Pydantic model in core/models/
+        2. Export from core/models/__init__.py
+        3. Import model here and add to generate_composed_statements()
+        4. Deploy and run: POST /api/dbadmin/maintenance?action=ensure&confirm=yes
+
+    See: docs_claude/SCHEMA_EVOLUTION.md for full patterns
 
 Exports:
     PydanticToSQL: Generator class for SQL DDL from Pydantic models
@@ -63,6 +81,7 @@ from ..models.promoted import PromotedDataset, SystemRole, Classification  # Pro
 from ..models.system_snapshot import SystemSnapshotRecord, SnapshotTriggerType  # System snapshots (04 JAN 2026)
 from ..models.external_refs import DatasetRefRecord  # External references (09 JAN 2026 - F7.8)
 from ..models.raster_metadata import CogMetadataRecord  # Raster metadata (09 JAN 2026 - F7.9)
+from ..models.approval import DatasetApproval, ApprovalStatus  # Dataset approvals (16 JAN 2026 - F4.AP)
 
 
 class PydanticToSQL:
@@ -410,6 +429,11 @@ class PydanticToSQL:
             constraints.append(
                 sql.SQL("PRIMARY KEY ({})").format(sql.Identifier("cog_id"))
             )
+        elif table_name == "dataset_approvals":
+            # Dataset approvals table (16 JAN 2026 - F4.AP)
+            constraints.append(
+                sql.SQL("PRIMARY KEY ({})").format(sql.Identifier("approval_id"))
+            )
 
         # Combine columns and constraints
         all_parts = columns + constraints
@@ -562,6 +586,20 @@ class PydanticToSQL:
                                               partial_where="etl_job_id IS NOT NULL"))
             indexes.append(IndexBuilder.btree(s, "cog_metadata", "container", name="idx_cog_metadata_container"))
             indexes.append(IndexBuilder.btree(s, "cog_metadata", "created_at", name="idx_cog_metadata_created_at", descending=True))
+
+        elif table_name == "dataset_approvals":
+            # Dataset approvals table (16 JAN 2026 - F4.AP)
+            # Indexes for approval workflow queries
+            indexes.append(IndexBuilder.btree(s, "dataset_approvals", "status", name="idx_dataset_approvals_status"))
+            indexes.append(IndexBuilder.btree(s, "dataset_approvals", "job_id", name="idx_dataset_approvals_job_id"))
+            indexes.append(IndexBuilder.btree(s, "dataset_approvals", "created_at", name="idx_dataset_approvals_created_at", descending=True))
+            indexes.append(IndexBuilder.btree(s, "dataset_approvals", "classification", name="idx_dataset_approvals_classification"))
+            # Partial index for pending approvals (most common query)
+            indexes.append(IndexBuilder.btree(s, "dataset_approvals", "created_at", name="idx_dataset_approvals_pending",
+                                              partial_where="status = 'pending'", descending=True))
+            # Reviewer lookup
+            indexes.append(IndexBuilder.btree(s, "dataset_approvals", "reviewer", name="idx_dataset_approvals_reviewer",
+                                              partial_where="reviewer IS NOT NULL"))
 
         self.logger.debug(f"✅ Generated {len(indexes)} indexes for table {table_name}")
         return indexes
@@ -916,6 +954,7 @@ $$""").format(
         composed.extend(self.generate_enum("system_role", SystemRole))  # Promoted datasets (23 DEC 2025)
         composed.extend(self.generate_enum("classification", Classification))
         composed.extend(self.generate_enum("snapshot_trigger_type", SnapshotTriggerType))  # System snapshots (04 JAN 2026)
+        composed.extend(self.generate_enum("approval_status", ApprovalStatus))  # Dataset approvals (16 JAN 2026 - F4.AP)
 
         # For tables, indexes, functions, and triggers, we still need string format
         # because they are complex multi-line statements
@@ -935,6 +974,7 @@ $$""").format(
         composed.append(self.generate_table_composed(SystemSnapshotRecord, "system_snapshots"))  # System snapshots (04 JAN 2026)
         composed.append(self.generate_table_composed(DatasetRefRecord, "dataset_refs"))  # External references (09 JAN 2026 - F7.8)
         composed.append(self.generate_table_composed(CogMetadataRecord, "cog_metadata"))  # Raster metadata (09 JAN 2026 - F7.9)
+        composed.append(self.generate_table_composed(DatasetApproval, "dataset_approvals"))  # Dataset approvals (16 JAN 2026 - F4.AP)
 
         # Indexes - now using composed SQL
         composed.extend(self.generate_indexes_composed("jobs", JobRecord))
@@ -949,6 +989,7 @@ $$""").format(
         composed.extend(self.generate_indexes_composed("system_snapshots", SystemSnapshotRecord))  # System snapshots (04 JAN 2026)
         composed.extend(self.generate_indexes_composed("dataset_refs", DatasetRefRecord))  # External references (09 JAN 2026 - F7.8)
         composed.extend(self.generate_indexes_composed("cog_metadata", CogMetadataRecord))  # Raster metadata (09 JAN 2026 - F7.9)
+        composed.extend(self.generate_indexes_composed("dataset_approvals", DatasetApproval))  # Dataset approvals (16 JAN 2026 - F4.AP)
 
         # Functions - already sql.Composed objects
         composed.extend(self.generate_static_functions())

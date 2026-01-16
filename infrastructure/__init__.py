@@ -88,6 +88,7 @@ if TYPE_CHECKING:
     from .curated_repository import CuratedDatasetRepository as _CuratedDatasetRepository
     from .curated_repository import CuratedUpdateLogRepository as _CuratedUpdateLogRepository
     from .promoted_repository import PromotedDatasetRepository as _PromotedDatasetRepository
+    from .approval_repository import ApprovalRepository as _ApprovalRepository
 
 
 def __getattr__(name: str):
@@ -187,6 +188,11 @@ def __getattr__(name: str):
         from .promoted_repository import PromotedDatasetRepository
         return PromotedDatasetRepository
 
+    # Dataset approvals (F4.AP)
+    elif name == "ApprovalRepository":
+        from .approval_repository import ApprovalRepository
+        return ApprovalRepository
+
     # Pipeline Observability (E13)
     elif name == "MetricsRepository":
         from .metrics_repository import MetricsRepository
@@ -248,6 +254,7 @@ __all__ = [
     "CuratedDatasetRepository",
     "CuratedUpdateLogRepository",
     "PromotedDatasetRepository",
+    "ApprovalRepository",
     "MetricsRepository",
     "JobProgressTracker",
     "JobProgressSnapshot",

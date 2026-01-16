@@ -139,6 +139,12 @@ from .raster_metadata import (
     CogMetadataRecord
 )
 
+# Dataset approval models (F4.AP)
+from .approval import (
+    DatasetApproval,
+    ApprovalStatus
+)
+
 __all__ = [
     # Enums
     'JobStatus',
@@ -226,4 +232,8 @@ __all__ = [
 
     # Raster metadata models (F7.9)
     'CogMetadataRecord',
+
+    # Dataset approval models (F4.AP)
+    'DatasetApproval',
+    'ApprovalStatus',
 ]

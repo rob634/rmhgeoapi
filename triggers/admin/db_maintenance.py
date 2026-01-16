@@ -2,8 +2,8 @@
 # DATABASE MAINTENANCE ADMIN TRIGGER
 # ============================================================================
 # STATUS: Trigger layer - POST /api/dbadmin/maintenance
-# PURPOSE: Database maintenance operations (rebuild, cleanup)
-# LAST_REVIEWED: 08 JAN 2026
+# PURPOSE: Database maintenance operations (ensure, rebuild, cleanup)
+# LAST_REVIEWED: 16 JAN 2026
 # REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
 # EXPORTS: AdminDbMaintenanceTrigger, admin_db_maintenance_trigger
 # ============================================================================
@@ -12,10 +12,26 @@ Database Maintenance Admin Trigger.
 
 Database maintenance operations with SQL injection prevention.
 
-Consolidated endpoint pattern (08 JAN 2026):
-    POST /api/dbadmin/maintenance?action=rebuild&confirm=yes              # Both schemas (RECOMMENDED)
-    POST /api/dbadmin/maintenance?action=rebuild&target=app&confirm=yes   # App only (with warning)
-    POST /api/dbadmin/maintenance?action=rebuild&target=pgstac&confirm=yes # pgSTAC only (with warning)
+SCHEMA EVOLUTION PATTERN (16 JAN 2026):
+    Use 'ensure' for safe additive updates, 'rebuild' for destructive resets.
+
+    action=ensure  -> SAFE: Creates missing tables/indexes, preserves data
+    action=rebuild -> DESTRUCTIVE: Drops and recreates schemas (data loss!)
+    action=cleanup -> SAFE: Removes old completed jobs/tasks
+
+Endpoint patterns:
+    POST /api/dbadmin/maintenance?action=ensure&confirm=yes               # SAFE - additive sync
+    POST /api/dbadmin/maintenance?action=rebuild&confirm=yes              # DESTRUCTIVE - both schemas
+    POST /api/dbadmin/maintenance?action=rebuild&target=app&confirm=yes   # DESTRUCTIVE - app only
+    POST /api/dbadmin/maintenance?action=rebuild&target=pgstac&confirm=yes # DESTRUCTIVE - pgstac only
+    POST /api/dbadmin/maintenance?action=cleanup&confirm=yes&days=30      # SAFE - remove old records
+
+When to use each:
+    - Deploying new tables/features -> action=ensure (safe, no data loss)
+    - Fresh dev/test environment -> action=rebuild (wipes everything)
+    - Disk space cleanup -> action=cleanup (removes old jobs)
+
+See: docs_claude/SCHEMA_EVOLUTION.md for full patterns
 
 Exports:
     AdminDbMaintenanceTrigger: HTTP trigger class for maintenance operations
@@ -94,6 +110,7 @@ class AdminDbMaintenanceTrigger:
     OPERATIONS = {
         "rebuild": "_rebuild",  # Consolidated rebuild (08 JAN 2026)
         "cleanup": "_cleanup_old_records",
+        "ensure": "_ensure_tables",  # Additive schema sync (16 JAN 2026)
         # Legacy aliases (deprecated - will be removed in future version)
         "full-rebuild": "_rebuild",  # Alias for backward compatibility
     }
@@ -165,11 +182,13 @@ class AdminDbMaintenanceTrigger:
         POST /api/dbadmin/maintenance?action=rebuild&confirm=yes              # Both schemas (RECOMMENDED)
         POST /api/dbadmin/maintenance?action=rebuild&target=app&confirm=yes   # App only (with warning)
         POST /api/dbadmin/maintenance?action=rebuild&target=pgstac&confirm=yes # pgSTAC only (with warning)
+        POST /api/dbadmin/maintenance?action=ensure&confirm=yes               # Additive - create missing tables/indexes
         POST /api/dbadmin/maintenance?action=cleanup&confirm=yes&days=30      # Clean old records
 
         Query Parameters:
             action: Operation to perform (required)
                 - rebuild: Rebuild schema(s) - RECOMMENDED for fresh start
+                - ensure: Additive sync - creates missing tables/indexes without dropping (SAFE)
                 - cleanup: Remove old completed jobs/tasks
             target: Schema target for rebuild (default: all)
                 - all: Both app+pgstac schemas (RECOMMENDED - maintains referential integrity)
@@ -192,9 +211,9 @@ class AdminDbMaintenanceTrigger:
                 return func.HttpResponse(
                     body=json.dumps({
                         'error': "action parameter required",
-                        'valid_actions': ['rebuild', 'cleanup'],
-                        'usage': 'POST /api/dbadmin/maintenance?action=rebuild&confirm=yes',
-                        'recommended': 'Use action=rebuild with no target for atomic rebuild of both schemas',
+                        'valid_actions': ['rebuild', 'ensure', 'cleanup'],
+                        'usage': 'POST /api/dbadmin/maintenance?action=ensure&confirm=yes',
+                        'recommended': 'Use action=ensure for safe additive updates, action=rebuild for fresh start',
                         'timestamp': datetime.now(timezone.utc).isoformat()
                     }),
                     status_code=400,
@@ -205,8 +224,8 @@ class AdminDbMaintenanceTrigger:
                 return func.HttpResponse(
                     body=json.dumps({
                         'error': f"Invalid action: '{action}'",
-                        'valid_actions': ['rebuild', 'cleanup'],
-                        'usage': 'POST /api/dbadmin/maintenance?action=rebuild&confirm=yes',
+                        'valid_actions': ['rebuild', 'ensure', 'cleanup'],
+                        'usage': 'POST /api/dbadmin/maintenance?action=ensure&confirm=yes',
                         'timestamp': datetime.now(timezone.utc).isoformat()
                     }),
                     status_code=400,
@@ -515,6 +534,182 @@ class AdminDbMaintenanceTrigger:
                 status_code=500,
                 mimetype='application/json'
             )
+
+    # ========================================================================
+    # ENSURE TABLES - ADDITIVE SCHEMA SYNC (16 JAN 2026)
+    # ========================================================================
+
+    def _ensure_tables(self, req: func.HttpRequest) -> func.HttpResponse:
+        """
+        Additive schema sync - creates missing tables/indexes without dropping existing data.
+
+        POST /api/dbadmin/maintenance?action=ensure&confirm=yes
+
+        This is SAFE to run at any time:
+        - Uses CREATE TABLE IF NOT EXISTS
+        - Uses CREATE INDEX IF NOT EXISTS
+        - Uses CREATE TYPE IF NOT EXISTS (for enums)
+        - Does NOT drop any existing data
+        - Idempotent - can be run multiple times safely
+
+        Use Cases:
+        - After deploying new code with new tables
+        - Adding new indexes to existing tables
+        - Adding new enum values (note: enum modification has limitations)
+
+        Query Parameters:
+            confirm: Must be 'yes' (required)
+            target: Schema to sync (default: app)
+                - app: Application schema only (jobs, tasks, approvals, etc.)
+
+        Returns:
+            {
+                "operation": "ensure_tables",
+                "status": "success",
+                "created": {"tables": [...], "indexes": [...], "enums": [...]},
+                "skipped": {"tables": [...], "indexes": [...], "enums": [...]},
+                "execution_time_ms": 150
+            }
+        """
+        import time
+        start_time = time.time()
+
+        confirm = req.params.get('confirm')
+        target = req.params.get('target', 'app')
+
+        if confirm != 'yes':
+            return func.HttpResponse(
+                body=json.dumps({
+                    'error': 'Ensure tables requires explicit confirmation',
+                    'usage': 'POST /api/dbadmin/maintenance?action=ensure&confirm=yes',
+                    'info': 'This is SAFE - it only creates missing tables/indexes, never drops data'
+                }),
+                status_code=400,
+                mimetype='application/json'
+            )
+
+        if target != 'app':
+            return func.HttpResponse(
+                body=json.dumps({
+                    'error': f"Invalid target: '{target}'",
+                    'valid_targets': ['app'],
+                    'info': 'Only app schema supports additive ensure. Use action=rebuild for pgstac.'
+                }),
+                status_code=400,
+                mimetype='application/json'
+            )
+
+        logger.info("🔧 ENSURE TABLES: Running additive schema sync for app schema")
+
+        results = {
+            "operation": "ensure_tables",
+            "target": target,
+            "created": {"enums": [], "tables": [], "indexes": []},
+            "skipped": {"enums": [], "tables": [], "indexes": []},
+            "errors": [],
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+        try:
+            from infrastructure.postgresql import PostgreSQLRepository
+            from core.schema.sql_generator import PydanticToSQL
+
+            # Get SQL generator for app schema
+            sql_gen = PydanticToSQL(schema_name='app')
+            statements = sql_gen.generate_composed_statements()
+
+            logger.info(f"📋 Generated {len(statements)} SQL statements to execute")
+
+            # Execute each statement
+            repo = PostgreSQLRepository(schema_name='app')
+
+            with repo._get_connection() as conn:
+                with conn.cursor() as cur:
+                    for i, stmt in enumerate(statements):
+                        try:
+                            # Convert to string for logging/categorization
+                            stmt_str = stmt.as_string(conn)
+                            stmt_preview = stmt_str[:100].replace('\n', ' ')
+
+                            # Categorize the statement
+                            if 'CREATE TYPE' in stmt_str.upper():
+                                category = 'enums'
+                            elif 'CREATE TABLE' in stmt_str.upper():
+                                category = 'tables'
+                            elif 'CREATE INDEX' in stmt_str.upper() or 'CREATE UNIQUE INDEX' in stmt_str.upper():
+                                category = 'indexes'
+                            else:
+                                category = 'other'
+
+                            # Execute
+                            cur.execute(stmt)
+
+                            # If we get here, it was created (or is a non-IF-NOT-EXISTS statement)
+                            if category in results["created"]:
+                                results["created"][category].append(stmt_preview)
+
+                            logger.debug(f"✅ [{i+1}/{len(statements)}] Executed: {stmt_preview}...")
+
+                        except Exception as stmt_error:
+                            error_str = str(stmt_error).lower()
+
+                            # Check if it's an "already exists" error (expected for IF NOT EXISTS)
+                            if 'already exists' in error_str or 'duplicate' in error_str:
+                                if category in results["skipped"]:
+                                    results["skipped"][category].append(stmt_preview)
+                                logger.debug(f"⏭️ [{i+1}/{len(statements)}] Skipped (exists): {stmt_preview}...")
+                                # Rollback just this statement and continue
+                                conn.rollback()
+                            else:
+                                # Real error - log it but continue
+                                results["errors"].append({
+                                    "statement": stmt_preview,
+                                    "error": str(stmt_error)
+                                })
+                                logger.warning(f"⚠️ [{i+1}/{len(statements)}] Error: {stmt_error}")
+                                conn.rollback()
+
+                    # Commit all successful changes
+                    conn.commit()
+
+            results["status"] = "success" if not results["errors"] else "partial"
+            results["execution_time_ms"] = int((time.time() - start_time) * 1000)
+            results["summary"] = {
+                "enums_created": len(results["created"]["enums"]),
+                "tables_created": len(results["created"]["tables"]),
+                "indexes_created": len(results["created"]["indexes"]),
+                "enums_existed": len(results["skipped"]["enums"]),
+                "tables_existed": len(results["skipped"]["tables"]),
+                "indexes_existed": len(results["skipped"]["indexes"]),
+                "errors": len(results["errors"])
+            }
+
+            logger.info(f"✅ Ensure tables completed: {results['summary']}")
+
+            return func.HttpResponse(
+                body=json.dumps(results, indent=2),
+                status_code=200,
+                mimetype='application/json'
+            )
+
+        except Exception as e:
+            logger.error(f"❌ Ensure tables failed: {e}")
+            logger.error(traceback.format_exc())
+
+            results["status"] = "failed"
+            results["error"] = str(e)
+            results["traceback"] = traceback.format_exc()
+            results["execution_time_ms"] = int((time.time() - start_time) * 1000)
+
+            return func.HttpResponse(
+                body=json.dumps(results, indent=2),
+                status_code=500,
+                mimetype='application/json'
+            )
+
+    # ========================================================================
+    # REBUILD - DESTRUCTIVE SCHEMA REBUILD
+    # ========================================================================
 
     def _rebuild(self, req: func.HttpRequest) -> func.HttpResponse:
         """

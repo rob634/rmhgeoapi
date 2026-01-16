@@ -37,7 +37,9 @@ All Claude-optimized documentation is in **`/docs_claude/`**.
 |----------|---------|
 | `docs_claude/CLAUDE_CONTEXT.md` | Primary context - start here |
 | `docs_claude/TODO.md` | **ONLY** active task list |
+| `docs_claude/DEV_BEST_PRACTICES.md` | **Lessons learned** - patterns, common mistakes, gotchas |
 | `docs_claude/ERRORS_AND_FIXES.md` | **Error tracking** - search here first when debugging |
+| `docs_claude/SCHEMA_EVOLUTION.md` | **Schema changes** - safe vs breaking, migration patterns |
 | `docs_claude/FATHOM_ETL.md` | FATHOM flood data pipeline (Phase 1 & 2) |
 | `docs_claude/ARCHITECTURE_REFERENCE.md` | Deep technical specs, error handling patterns |
 | `docs_claude/ARCHITECTURE_DIAGRAMS.md` | **Visual diagrams** - C4/Mermaid architecture |
@@ -201,10 +203,13 @@ curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/job
 
 | Endpoint | Purpose |
 |----------|---------|
-| `POST /api/dbadmin/maintenance?action=rebuild&confirm=yes` | **RECOMMENDED**: Atomic rebuild of app+pgstac schemas |
-| `POST /api/dbadmin/maintenance?action=rebuild&target=app&confirm=yes` | Rebuild app schema only (with warning) |
-| `POST /api/dbadmin/maintenance?action=rebuild&target=pgstac&confirm=yes` | Rebuild pgstac schema only (with warning) |
+| `POST /api/dbadmin/maintenance?action=ensure&confirm=yes` | **SAFE**: Additive sync - creates missing tables/indexes (no data loss) |
+| `POST /api/dbadmin/maintenance?action=rebuild&confirm=yes` | **DESTRUCTIVE**: Atomic rebuild of app+pgstac schemas |
+| `POST /api/dbadmin/maintenance?action=rebuild&target=app&confirm=yes` | **DESTRUCTIVE**: Rebuild app schema only (with warning) |
+| `POST /api/dbadmin/maintenance?action=rebuild&target=pgstac&confirm=yes` | **DESTRUCTIVE**: Rebuild pgstac schema only (with warning) |
 | `POST /api/dbadmin/maintenance?action=cleanup&confirm=yes&days=30` | Delete old jobs/tasks |
+
+**Use `action=ensure`** when deploying new tables - it's safe and won't drop existing data.
 
 **Note**: Rebuilding app and pgstac together is recommended because job IDs in app.jobs correspond to STAC items in pgstac.items. Rebuilding one without the other may create orphaned references.
 
@@ -213,6 +218,33 @@ curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/job
 # Clear all STAC items and collections
 curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/stac/nuke?confirm=yes&mode=all"
 ```
+
+---
+
+## 📐 SCHEMA EVOLUTION PATTERN
+
+**Principle**: Prefer non-breaking (additive) changes. Breaking changes require migration plans.
+
+### Decision Tree
+
+| Change Type | Action | Safe? |
+|-------------|--------|-------|
+| Add new table | `action=ensure` | ✅ Yes |
+| Add new column with DEFAULT | `action=ensure` | ✅ Yes |
+| Add new index | `action=ensure` | ✅ Yes |
+| Add new enum type | `action=ensure` | ✅ Yes |
+| Add value to existing enum | Migration script | ⚠️ Careful |
+| Rename column/table | Migration script | ❌ Breaking |
+| Change column type | Migration script | ❌ Breaking |
+| Remove column/table | Migration script | ❌ Breaking |
+
+### Quick Rules
+
+1. **New features** → Add new tables/columns, use `action=ensure`
+2. **Schema fixes** → Write migration script, test on dev first
+3. **Never** → Modify existing columns in production without migration plan
+
+**Full guide**: `docs_claude/SCHEMA_EVOLUTION.md`
 
 ---
 
@@ -434,10 +466,12 @@ app_mode_config.docker_worker_enabled
 
 | Topic | Document |
 |-------|----------|
+| **Dev best practices** | `docs_claude/DEV_BEST_PRACTICES.md` |
+| **Schema evolution** | `docs_claude/SCHEMA_EVOLUTION.md` |
+| **Error tracking** | `docs_claude/ERRORS_AND_FIXES.md` |
 | Job creation | `docs_claude/JOB_CREATION_QUICKSTART.md` |
 | Architecture details | `docs_claude/ARCHITECTURE_REFERENCE.md` |
 | **Architecture diagrams** | `docs_claude/ARCHITECTURE_DIAGRAMS.md` |
-| **Error tracking** | `docs_claude/ERRORS_AND_FIXES.md` |
 | Error handling patterns | `docs_claude/ARCHITECTURE_REFERENCE.md` → Error Handling Strategy |
 | APIM future plans | `docs_claude/APIM_ARCHITECTURE.md` |
 | Service Bus config | `docs_claude/SERVICE_BUS_HARMONIZATION.md` |

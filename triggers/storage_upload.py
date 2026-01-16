@@ -18,7 +18,7 @@ Accepts multipart/form-data with:
     - path: Blob path within container (optional, defaults to filename)
 
 Security:
-    - Only allows uploads to bronze-* containers (untrusted data zone)
+    - Only allows uploads to bronze-* containers
     - Admin functionality - not exposed to external Platform API
 
 Example Usage:
@@ -171,8 +171,7 @@ def storage_upload_handler(req: func.HttpRequest) -> func.HttpResponse:
                 json.dumps({
                     "error": f"Invalid container '{container}'",
                     "message": "Uploads are only allowed to bronze-* containers",
-                    "valid_prefixes": ["bronze-vectors", "bronze-rasters", "bronze-misc", "bronze-temp"],
-                    "hint": "Bronze is the untrusted data zone for raw uploads"
+                    "valid_prefixes": ["bronze-vectors", "bronze-rasters", "bronze-misc", "bronze-temp"]
                 }, indent=2),
                 status_code=403,
                 mimetype="application/json"

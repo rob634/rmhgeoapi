@@ -30,7 +30,7 @@ class UploadInterface(BaseInterface):
     Upload interface for bronze storage.
 
     Provides a form for uploading files to bronze-* containers.
-    Security: Only bronze containers allowed (untrusted data zone).
+    Security: Only bronze containers allowed.
     """
 
     def render(self, request: func.HttpRequest) -> str:
@@ -61,7 +61,7 @@ class UploadInterface(BaseInterface):
             <!-- Header -->
             <header class="dashboard-header">
                 <h1>Upload to Bronze Storage</h1>
-                <p class="subtitle">Upload files to bronze storage containers (untrusted data zone)</p>
+                <p class="subtitle">Upload files to bronze storage containers</p>
             </header>
 
             <!-- Upload Form Card -->

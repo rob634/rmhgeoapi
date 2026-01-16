@@ -2107,7 +2107,7 @@ def storage_upload(req: func.HttpRequest) -> func.HttpResponse:
         JSON with upload result including container, path, size, etag
 
     Security:
-        Only allows uploads to bronze-* containers (untrusted data zone).
+        Only allows uploads to bronze-* containers.
         Maximum file size: 100MB
 
     Example:

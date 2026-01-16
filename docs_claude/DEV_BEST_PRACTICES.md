@@ -15,14 +15,43 @@
 
 ## Table of Contents
 
-1. [Database Access Patterns](#database-access-patterns)
-2. [Configuration Access](#configuration-access)
-3. [Error Handling](#error-handling)
-4. [Import Patterns](#import-patterns)
-5. [Job/Task Patterns](#jobtask-patterns)
-6. [STAC Patterns](#stac-patterns)
-7. [Testing Patterns](#testing-patterns)
-8. [Common Mistakes](#common-mistakes)
+1. [Schema Management](#schema-management) ⭐ **READ FIRST**
+2. [Database Access Patterns](#database-access-patterns)
+3. [Configuration Access](#configuration-access)
+4. [Error Handling](#error-handling)
+5. [Import Patterns](#import-patterns)
+6. [Job/Task Patterns](#jobtask-patterns)
+7. [STAC Patterns](#stac-patterns)
+8. [Testing Patterns](#testing-patterns)
+9. [Common Mistakes](#common-mistakes)
+
+---
+
+## Schema Management
+
+### Always Use `action=ensure` by Default
+
+**CRITICAL**: After deployments, use `ensure` not `rebuild`.
+
+```bash
+# CORRECT - Safe, preserves data, idempotent
+curl -X POST ".../api/dbadmin/maintenance?action=ensure&confirm=yes"
+
+# WRONG - Deletes ALL data! Only for fresh dev/test environments
+curl -X POST ".../api/dbadmin/maintenance?action=rebuild&confirm=yes"
+```
+
+**Why**: `action=ensure` creates missing tables/indexes without dropping existing data. It's safe to run multiple times. `action=rebuild` drops and recreates everything, destroying all job history, STAC items, and approvals.
+
+### When to Add New Tables
+
+1. Create Pydantic model in `core/models/`
+2. Export from `core/models/__init__.py`
+3. Register in `core/schema/sql_generator.py`
+4. Deploy code
+5. Run `action=ensure` (NOT rebuild!)
+
+**Full guide**: `docs_claude/SCHEMA_EVOLUTION.md`
 
 ---
 
@@ -462,6 +491,18 @@ curl -X POST ".../api/dbadmin/maintenance?action=ensure"
 # RIGHT - Include confirmation
 curl -X POST ".../api/dbadmin/maintenance?action=ensure&confirm=yes"
 ```
+
+### Mistake 8: Using rebuild Instead of ensure
+
+```bash
+# WRONG - Deletes ALL data (jobs, tasks, STAC items, approvals)
+curl -X POST ".../api/dbadmin/maintenance?action=rebuild&confirm=yes"
+
+# RIGHT - Safe, preserves data, creates missing objects
+curl -X POST ".../api/dbadmin/maintenance?action=ensure&confirm=yes"
+```
+
+**Why**: `action=rebuild` drops and recreates schemas, destroying all data. Use `ensure` for normal deployments - it only creates missing tables/indexes. Only use `rebuild` for fresh dev/test environments where data loss is acceptable.
 
 ---
 

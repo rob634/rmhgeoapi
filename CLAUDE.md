@@ -1,6 +1,6 @@
 # CLAUDE.md - Project Context
 
-**Last Updated**: 10 JAN 2026
+**Last Updated**: 16 JAN 2026
 
 ---
 
@@ -185,8 +185,8 @@ curl -sf https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api
 
 ### Post-Deployment Testing (after health check passes)
 ```bash
-# 1. REBUILD DATABASE SCHEMAS (Required after deployment!)
-curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/maintenance?action=rebuild&confirm=yes"
+# 1. SYNC DATABASE SCHEMA (creates missing tables/indexes - NO data loss)
+curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/maintenance?action=ensure&confirm=yes"
 
 # 2. Submit Test Job
 curl -X POST https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/hello_world \
@@ -197,19 +197,32 @@ curl -X POST https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net
 curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/status/{JOB_ID}
 ```
 
+> ⚠️ **Only use `action=rebuild`** for fresh dev/test environments or after major schema redesigns.
+> It **DELETES ALL DATA** in app and pgstac schemas!
+
 ---
 
 ## 🔧 SCHEMA MANAGEMENT ENDPOINTS
 
-| Endpoint | Purpose |
-|----------|---------|
-| `POST /api/dbadmin/maintenance?action=ensure&confirm=yes` | **SAFE**: Additive sync - creates missing tables/indexes (no data loss) |
-| `POST /api/dbadmin/maintenance?action=rebuild&confirm=yes` | **DESTRUCTIVE**: Atomic rebuild of app+pgstac schemas |
-| `POST /api/dbadmin/maintenance?action=rebuild&target=app&confirm=yes` | **DESTRUCTIVE**: Rebuild app schema only (with warning) |
-| `POST /api/dbadmin/maintenance?action=rebuild&target=pgstac&confirm=yes` | **DESTRUCTIVE**: Rebuild pgstac schema only (with warning) |
-| `POST /api/dbadmin/maintenance?action=cleanup&confirm=yes&days=30` | Delete old jobs/tasks |
+> **DEFAULT: Always use `action=ensure`** - it's safe, preserves data, and is idempotent.
 
-**Use `action=ensure`** when deploying new tables - it's safe and won't drop existing data.
+| Endpoint | Purpose | Data Loss? |
+|----------|---------|------------|
+| `POST /api/dbadmin/maintenance?action=ensure&confirm=yes` | **RECOMMENDED**: Creates missing tables/indexes | ❌ No |
+| `POST /api/dbadmin/maintenance?action=rebuild&confirm=yes` | Fresh start - drops and recreates schemas | ⚠️ **YES** |
+| `POST /api/dbadmin/maintenance?action=rebuild&target=app&confirm=yes` | Rebuild app schema only | ⚠️ **YES** |
+| `POST /api/dbadmin/maintenance?action=rebuild&target=pgstac&confirm=yes` | Rebuild pgstac schema only | ⚠️ **YES** |
+| `POST /api/dbadmin/maintenance?action=cleanup&confirm=yes&days=30` | Delete old jobs/tasks | Partial |
+
+### When to Use Each
+
+| Scenario | Action | Why |
+|----------|--------|-----|
+| After deploying new tables/features | `ensure` | Creates missing objects, preserves data |
+| Regular deployments | `ensure` | Safe and idempotent |
+| Fresh dev/test environment | `rebuild` | Clean slate needed |
+| After major schema redesign | `rebuild` | Breaking changes require fresh start |
+| Data can be regenerated | `rebuild` | OK if you can repopulate |
 
 **Note**: Rebuilding app and pgstac together is recommended because job IDs in app.jobs correspond to STAC items in pgstac.items. Rebuilding one without the other may create orphaned references.
 

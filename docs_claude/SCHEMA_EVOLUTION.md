@@ -5,6 +5,23 @@
 
 ---
 
+## ⚠️ CRITICAL: Use `action=ensure` by Default
+
+```bash
+# CORRECT - Safe, preserves data, idempotent
+curl -X POST ".../api/dbadmin/maintenance?action=ensure&confirm=yes"
+
+# DANGEROUS - Deletes ALL data in app and pgstac schemas!
+curl -X POST ".../api/dbadmin/maintenance?action=rebuild&confirm=yes"
+```
+
+| Action | When to Use | Data Loss |
+|--------|-------------|-----------|
+| `ensure` | **Default** - After any deployment | ❌ No |
+| `rebuild` | Fresh dev/test environment only | ⚠️ **YES - ALL DATA** |
+
+---
+
 ## Core Principle
 
 > **Prefer non-breaking (additive) changes. Breaking changes require migration plans.**

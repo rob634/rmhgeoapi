@@ -1,6 +1,6 @@
 # Epic & Feature Summary
 
-**Updated**: 13 JAN 2026 | ✅ Complete | 🚧 In Progress | 📋 Planned | 🔵 Backlog
+**Updated**: 15 JAN 2026 | ✅ Complete | 🚧 In Progress | 📋 Planned | 🔵 Backlog
 
 ---
 
@@ -101,6 +101,7 @@
 - F1.7 📋 OGC Styles Basic
 - F1.8 📋 OGC Styles Advanced
 - F1.9 📋 ArcGIS Feature Service Integration (SP1.9.1 spike)
+- F1.10 ✅ Vector Tile Optimization (ST_Subdivide for TiPG)
 
 ---
 
@@ -115,8 +116,8 @@
 | E4 | 0 | 2 | 2 | 1 |
 | E3 | 3 | 0 | 3 | 2 |
 | E2 | 7 | 1 | 2 | 0 |
-| E1 | 6 | 0 | 3 | 0 |
-| **Total** | **33** | **7** | **37** | **4** |
+| E1 | 7 | 0 | 3 | 0 |
+| **Total** | **34** | **7** | **37** | **4** |
 
 ---
 

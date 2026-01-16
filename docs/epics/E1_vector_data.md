@@ -17,6 +17,8 @@
 | F1.6 | 🚧 | Enhanced Data Validation |
 | F1.7 | ✅ | OGC API Styles |
 | F1.8 | 📋 | ETL Style Integration |
+| F1.9 | 📋 | ArcGIS Feature Service Integration |
+| F1.10 | ✅ | Vector Tile Optimization (ST_Subdivide)
 
 ### Feature F1.1: Vector ETL Pipeline ✅
 
@@ -114,6 +116,7 @@
 | Story | Status | Description |
 |-------|--------|-------------|
 | S1.6.1 | ✅ | Datetime range validation - sanitize out-of-range timestamps (year > 9999) |
+| S1.6.6 | ✅ | Antimeridian fix - split geometries crossing 180° longitude |
 | SP1.6.2 | 📋 | **SPIKE**: Evaluate pandera for DataFrame validation |
 | S1.6.3 | 📋 | Implement pandera-based validation schema (if spike approved) |
 | S1.6.4 | 📋 | Add coordinate range validation (lat -90/90, lon -180/180) |
@@ -136,6 +139,13 @@
 - PostgreSQL accepted it (max year 294276) but psycopg crashed reading back (Python max year 9999)
 - S1.6.1 implemented: out-of-range timestamps set to NULL with warning in job results
 - Prompted discussion of systematic validation approach → pandera spike
+
+**Antimeridian Fix (15 JAN 2026 - S1.6.6)**:
+- Geometries crossing 180° longitude render incorrectly in web maps (edges span entire globe)
+- Detects: coords > 180, coords < -180, or bbox width > 180°
+- Solution: Split at antimeridian, shift parts to [-180, 180] range
+- Returns MultiPolygon with valid parts on each side of the dateline
+- Essential for country-level data (Russia, Fiji, New Zealand, etc.)
 
 ---
 
@@ -166,6 +176,40 @@
 |-------|--------|-------------|
 | S1.8.1 | 📋 | Design default style templates |
 | S1.8.2 | 📋 | Integrate into process_vector job |
+
+---
+
+### Feature F1.10: Vector Tile Optimization ✅ COMPLETE
+
+**Deliverable**: `{table}_tiles` materialized views with ST_Subdivide for TiPG performance
+**Completed**: 15 JAN 2026
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S1.10.1 | ✅ | Implement ST_Subdivide materialized view creation in PostGIS handler |
+| S1.10.2 | ✅ | Add automatic spatial GIST indexing on tile views |
+| S1.10.3 | ✅ | Integrate tile view creation into process_vector Stage 3 |
+| S1.10.4 | ✅ | Configure TiPG to serve tile views for complex polygon collections |
+
+**Key Files**: `services/vector/postgis_handler.py` (`subdivide_complex_polygons` method)
+
+**Technical Details**:
+- Creates `{schema}.{table}_tiles` materialized view during vector ETL
+- Complex polygons (>256 vertices) are subdivided using PostGIS `ST_Subdivide(geom, 256)`
+- Simple polygons pass through unchanged (UNION ALL pattern)
+- LATERAL join enables set-returning function for multi-row output
+- Spatial GIST index created on `geom` column for fast tile queries
+
+**Performance Metrics** (verified on test dataset):
+- Original table: 1401 rows, max 2296 vertices, 406 complex polygons
+- Tile view: 3982 rows, max 256 vertices, 0 complex polygons
+- 89% reduction in maximum vertex count
+- Execution time: ~638ms for view creation
+
+**TiPG Integration**:
+- TiPG vector tile server automatically discovers `_tiles` suffixed views
+- Clipping operations during MVT generation are dramatically faster
+- No changes required to TiPG configuration
 
 ---
 

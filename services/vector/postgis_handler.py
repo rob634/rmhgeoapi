@@ -205,6 +205,117 @@ class VectorToPostGISHandler:
 
             logger.info(f"✅ Successfully converted all geometries to 2D and rebuilt GeoDataFrame")
 
+        # ========================================================================
+        # ANTIMERIDIAN FIX - Split geometries crossing 180° longitude (15 JAN 2026)
+        # ========================================================================
+        # Geometries that cross the antimeridian (dateline) render incorrectly in
+        # web maps - their edges span the entire globe instead of wrapping.
+        #
+        # This fix detects and splits such geometries:
+        # - Coords > 180 (data stored in 0-360 range)
+        # - Coords < -180 (rare)
+        # - Bbox width > 180° (geometry spans the discontinuity)
+        #
+        # Result: MultiPolygon with parts on each side of the antimeridian,
+        # all coordinates in [-180, 180] range.
+        # ========================================================================
+        from shapely.geometry import LineString, GeometryCollection
+        from shapely.ops import split, transform
+        from shapely.affinity import translate
+        import numpy as np
+
+        def fix_antimeridian(geom):
+            """
+            Fix geometries that cross the antimeridian (180° longitude).
+
+            Returns: (fixed_geometry, was_fixed)
+            """
+            bounds = geom.bounds  # (minx, miny, maxx, maxy)
+            minx, miny, maxx, maxy = bounds
+            width = maxx - minx
+
+            # Detection conditions
+            needs_fix = maxx > 180 or minx < -180 or width > 180
+
+            if not needs_fix:
+                return geom, False
+
+            # Handle coords > 180: split at antimeridian and shift eastern parts
+            if maxx > 180:
+                antimeridian = LineString([(180, -90), (180, 90)])
+                try:
+                    result = split(geom, antimeridian)
+                    fixed_parts = []
+                    for part in result.geoms:
+                        if part.bounds[0] >= 180:
+                            part = translate(part, xoff=-360)
+                        fixed_parts.append(part)
+                    return _combine_antimeridian_parts(fixed_parts), True
+                except Exception:
+                    return geom, False
+
+            # Handle coords < -180: shift to positive range and recurse
+            if minx < -180:
+                shifted = translate(geom, xoff=360)
+                return fix_antimeridian(shifted)
+
+            # Handle wide bbox (coords jump from ~179 to ~-179)
+            if width > 180:
+                def unwrap_coords(x, y):
+                    """Shift negative longitudes to positive (add 360)"""
+                    x = np.array(x)
+                    y = np.array(y)
+                    x = np.where(x < 0, x + 360, x)
+                    return x, y
+
+                unwrapped = transform(unwrap_coords, geom)
+                antimeridian = LineString([(180, -90), (180, 90)])
+                try:
+                    result = split(unwrapped, antimeridian)
+                    fixed_parts = []
+                    for part in result.geoms:
+                        if part.bounds[0] >= 180:
+                            part = translate(part, xoff=-360)
+                        fixed_parts.append(part)
+                    return _combine_antimeridian_parts(fixed_parts), True
+                except Exception:
+                    return geom, False
+
+            return geom, False
+
+        def _combine_antimeridian_parts(parts):
+            """Combine split parts into appropriate geometry type."""
+            if len(parts) == 1:
+                return parts[0]
+
+            # Flatten nested multi-geometries
+            all_geoms = []
+            for p in parts:
+                if hasattr(p, 'geoms'):
+                    all_geoms.extend(p.geoms)
+                else:
+                    all_geoms.append(p)
+
+            if all(g.geom_type == 'Polygon' for g in all_geoms):
+                return MultiPolygon(all_geoms)
+            elif all(g.geom_type == 'LineString' for g in all_geoms):
+                return MultiLineString(all_geoms)
+            elif all(g.geom_type == 'Point' for g in all_geoms):
+                return MultiPoint(all_geoms)
+            return GeometryCollection(all_geoms)
+
+        # Apply antimeridian fix to all geometries
+        fixed_results = gdf.geometry.apply(fix_antimeridian)
+        fixed_geoms = fixed_results.apply(lambda x: x[0])
+        fixed_flags = fixed_results.apply(lambda x: x[1])
+        antimeridian_count = fixed_flags.sum()
+
+        if antimeridian_count > 0:
+            gdf['geometry'] = fixed_geoms
+            logger.warning(f"🌍 Fixed {antimeridian_count} geometries crossing the antimeridian (180° longitude)")
+        else:
+            logger.debug("No antimeridian-crossing geometries detected")
+
         # Normalize to Multi- geometry types for ArcGIS compatibility
         # This ensures uniform geometry types in PostGIS tables
         from shapely.geometry import MultiPolygon, MultiLineString, MultiPoint

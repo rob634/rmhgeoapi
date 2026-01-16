@@ -29,8 +29,8 @@ class UploadInterface(BaseInterface):
     """
     Upload interface for bronze storage.
 
-    Provides a form for uploading files to bronze-* containers.
-    Security: Only bronze containers allowed.
+    Provides a form for uploading files to bronze storage containers.
+    Security: Uploads restricted to bronze storage account.
     """
 
     def render(self, request: func.HttpRequest) -> str:
@@ -73,7 +73,7 @@ class UploadInterface(BaseInterface):
                         <select id="container-select" name="container" class="form-select" required>
                             <option value="">Loading containers...</option>
                         </select>
-                        <span class="form-hint">Only bronze-* containers allowed</span>
+                        <span class="form-hint">Select a container in the bronze storage account</span>
                     </div>
 
                     <!-- Path Input -->

@@ -2100,20 +2100,20 @@ def storage_upload(req: func.HttpRequest) -> func.HttpResponse:
 
     Form Fields:
         file: The file to upload (required)
-        container: Target container (required, must be bronze-*)
+        container: Target container (required)
         path: Blob path within container (optional, defaults to filename)
 
     Returns:
         JSON with upload result including container, path, size, etag
 
     Security:
-        Only allows uploads to bronze-* containers.
+        Uploads restricted to bronze storage account.
         Maximum file size: 100MB
 
     Example:
         curl -X POST "https://rmhazuregeoapi-.../api/storage/upload" \\
             -F "file=@myfile.gpkg" \\
-            -F "container=bronze-vectors" \\
+            -F "container=source-data" \\
             -F "path=uploads/myfile.gpkg"
     """
     return storage_upload_handler(req)

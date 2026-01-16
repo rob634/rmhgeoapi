@@ -14,17 +14,17 @@ Route: POST /api/storage/upload
 
 Accepts multipart/form-data with:
     - file: The file to upload (required)
-    - container: Target container name (required, must be bronze-*)
+    - container: Target container name (required)
     - path: Blob path within container (optional, defaults to filename)
 
 Security:
-    - Only allows uploads to bronze-* containers
+    - Uploads restricted to bronze storage account
     - Admin functionality - not exposed to external Platform API
 
 Example Usage:
     curl -X POST "https://rmhazuregeoapi-.../api/storage/upload" \\
         -F "file=@myfile.gpkg" \\
-        -F "container=bronze-vectors" \\
+        -F "container=source-data" \\
         -F "path=uploads/myfile.gpkg"
 
 Created: 15 JAN 2026
@@ -159,23 +159,14 @@ def storage_upload_handler(req: func.HttpRequest) -> func.HttpResponse:
             return func.HttpResponse(
                 json.dumps({
                     "error": "Container name required",
-                    "hint": "Include a 'container' field (e.g., 'bronze-vectors')"
+                    "hint": "Include a 'container' field"
                 }, indent=2),
                 status_code=400,
                 mimetype="application/json"
             )
 
-        # Security: Only allow bronze containers
-        if not container.startswith("bronze-"):
-            return func.HttpResponse(
-                json.dumps({
-                    "error": f"Invalid container '{container}'",
-                    "message": "Uploads are only allowed to bronze-* containers",
-                    "valid_prefixes": ["bronze-vectors", "bronze-rasters", "bronze-misc", "bronze-temp"]
-                }, indent=2),
-                status_code=403,
-                mimetype="application/json"
-            )
+        # Note: Security is enforced by BlobRepository.for_zone("bronze")
+        # which restricts uploads to the bronze storage account only
 
         # Use filename if path not provided
         if not path:

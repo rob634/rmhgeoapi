@@ -60,39 +60,39 @@ class HomeInterface(BaseInterface):
                 <h2 class="section-title">Submit Data</h2>
                 <div class="action-grid">
                     <a href="/api/interface/upload" class="action-card upload">
-                        <div class="action-icon">+</div>
+                        <div class="action-icon">📤</div>
                         <div class="action-content">
                             <h3>Upload File</h3>
                             <p>Upload files to bronze storage</p>
                         </div>
-                        <div class="action-arrow">-></div>
+                        <div class="action-arrow">→</div>
                     </a>
 
                     <a href="/api/interface/submit-vector" class="action-card vector">
-                        <div class="action-icon">V</div>
+                        <div class="action-icon">📐</div>
                         <div class="action-content">
                             <h3>Submit Vector</h3>
                             <p>Process GeoPackage, Shapefile, GeoJSON</p>
                         </div>
-                        <div class="action-arrow">-></div>
+                        <div class="action-arrow">→</div>
                     </a>
 
                     <a href="/api/interface/submit-raster" class="action-card raster">
-                        <div class="action-icon">R</div>
+                        <div class="action-icon">🖼️</div>
                         <div class="action-content">
                             <h3>Submit Raster</h3>
                             <p>Process GeoTIFF to Cloud-Optimized</p>
                         </div>
-                        <div class="action-arrow">-></div>
+                        <div class="action-arrow">→</div>
                     </a>
 
                     <a href="/api/interface/submit-raster-collection" class="action-card collection">
-                        <div class="action-icon">C</div>
+                        <div class="action-icon">🗂️</div>
                         <div class="action-content">
                             <h3>Raster Collection</h3>
                             <p>Process multiple rasters as collection</p>
                         </div>
-                        <div class="action-arrow">-></div>
+                        <div class="action-arrow">→</div>
                     </a>
                 </div>
             </section>
@@ -102,28 +102,28 @@ class HomeInterface(BaseInterface):
                 <h2 class="section-title">Browse Data</h2>
                 <div class="cards-grid">
                     <a href="/api/interface/gallery" class="card featured">
-                        <div class="card-icon">G</div>
+                        <div class="card-icon">🎨</div>
                         <h3 class="card-title">Data Gallery</h3>
                         <p class="card-description">Featured datasets with interactive visualizations</p>
                         <div class="card-footer">Explore Gallery</div>
                     </a>
 
                     <a href="/api/interface/stac" class="card">
-                        <div class="card-icon">S</div>
+                        <div class="card-icon">📦</div>
                         <h3 class="card-title">STAC Collections</h3>
                         <p class="card-description">Browse STAC metadata catalog for raster datasets</p>
                         <div class="card-footer">View Collections</div>
                     </a>
 
                     <a href="/api/interface/vector" class="card">
-                        <div class="card-icon">F</div>
+                        <div class="card-icon">📍</div>
                         <h3 class="card-title">OGC Features</h3>
                         <p class="card-description">Explore vector collections with map previews</p>
                         <div class="card-footer">Browse Features</div>
                     </a>
 
                     <a href="/api/interface/map" class="card">
-                        <div class="card-icon">M</div>
+                        <div class="card-icon">🗺️</div>
                         <h3 class="card-title">Map Viewer</h3>
                         <p class="card-description">Interactive Leaflet map for vector features</p>
                         <div class="card-footer">Open Map</div>
@@ -136,42 +136,42 @@ class HomeInterface(BaseInterface):
                 <h2 class="section-title">System</h2>
                 <div class="cards-grid">
                     <a href="/api/interface/storage" class="card">
-                        <div class="card-icon">B</div>
+                        <div class="card-icon">💾</div>
                         <h3 class="card-title">Storage Browser</h3>
                         <p class="card-description">Browse Bronze, Silver, and Gold storage zones</p>
                         <div class="card-footer">Browse Storage</div>
                     </a>
 
                     <a href="/api/interface/jobs" class="card">
-                        <div class="card-icon">J</div>
+                        <div class="card-icon">⚙️</div>
                         <h3 class="card-title">Job Monitor</h3>
                         <p class="card-description">Track ETL job execution and task progress</p>
                         <div class="card-footer">Monitor Jobs</div>
                     </a>
 
                     <a href="/api/interface/pipeline" class="card">
-                        <div class="card-icon">P</div>
+                        <div class="card-icon">🔄</div>
                         <h3 class="card-title">Pipeline Status</h3>
                         <p class="card-description">View pipeline workflows and recent activity</p>
                         <div class="card-footer">View Pipelines</div>
                     </a>
 
                     <a href="/api/interface/health" class="card">
-                        <div class="card-icon">H</div>
+                        <div class="card-icon">💚</div>
                         <h3 class="card-title">System Health</h3>
                         <p class="card-description">Platform status, database, and service health</p>
                         <div class="card-footer">Check Status</div>
                     </a>
 
                     <a href="/api/interface/docs" class="card">
-                        <div class="card-icon">D</div>
+                        <div class="card-icon">📖</div>
                         <h3 class="card-title">API Documentation</h3>
                         <p class="card-description">Interactive API reference with examples</p>
                         <div class="card-footer">View Docs</div>
                     </a>
 
                     <a href="/api/interface/database" class="card">
-                        <div class="card-icon">Q</div>
+                        <div class="card-icon">🗄️</div>
                         <h3 class="card-title">Database Admin</h3>
                         <p class="card-description">Database diagnostics and maintenance</p>
                         <div class="card-footer">Open Admin</div>
@@ -304,14 +304,14 @@ class HomeInterface(BaseInterface):
             justify-content: center;
             background: var(--ds-bg);
             border-radius: 8px;
-            font-size: 24px;
+            font-size: 28px;
             flex-shrink: 0;
         }
 
-        .action-card.upload .action-icon { background: #d1fae5; color: #059669; }
-        .action-card.vector .action-icon { background: #ede9fe; color: #7c3aed; }
-        .action-card.raster .action-icon { background: #fef3c7; color: #d97706; }
-        .action-card.collection .action-icon { background: #cffafe; color: #0891b2; }
+        .action-card.upload .action-icon { background: #d1fae5; }
+        .action-card.vector .action-icon { background: #ede9fe; }
+        .action-card.raster .action-icon { background: #fef3c7; }
+        .action-card.collection .action-icon { background: #cffafe; }
 
         .action-content {
             flex: 1;
@@ -384,15 +384,12 @@ class HomeInterface(BaseInterface):
             justify-content: center;
             background: var(--ds-bg);
             border-radius: 6px;
-            font-size: 18px;
-            font-weight: 700;
-            color: var(--ds-blue-primary);
+            font-size: 24px;
             margin-bottom: 12px;
         }
 
         .card.featured .card-icon {
             background: #fef3c7;
-            color: #d97706;
         }
 
         .card-title {

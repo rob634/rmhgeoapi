@@ -2126,7 +2126,17 @@ def storage_upload(req: func.HttpRequest) -> func.HttpResponse:
 from web_interfaces import unified_interface_handler
 
 
-@app.route(route="interface/{name?}", methods=["GET", "POST"])
+@app.route(route="interface", methods=["GET"])
+def web_interface_redirect(req: func.HttpRequest) -> func.HttpResponse:
+    """Redirect /api/interface to /api/interface/home."""
+    return func.HttpResponse(
+        body="",
+        status_code=302,
+        headers={"Location": "/api/interface/home"}
+    )
+
+
+@app.route(route="interface/{name}", methods=["GET", "POST"])
 def web_interface_unified(req: func.HttpRequest) -> func.HttpResponse:
     """
     Unified web interface handler - dynamic module loading.

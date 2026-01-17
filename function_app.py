@@ -372,6 +372,12 @@ from triggers.trigger_platform import (
     platform_unpublish_raster
 )
 from triggers.trigger_platform_status import platform_request_status, platform_job_status
+from triggers.trigger_approvals import (
+    platform_approve,
+    platform_revoke,
+    platform_approvals_list,
+    platform_approval_get
+)
 # REMOVED (19 DEC 2025): platform_health, platform_stats, platform_failures
 # These were broken and redundant with /api/health
 
@@ -1252,6 +1258,112 @@ def platform_unpublish_raster_route(req: func.HttpRequest) -> func.HttpResponse:
     if guard := _platform_endpoint_guard():
         return guard
     return platform_unpublish_raster(req)
+
+
+# =============================================================================
+# APPROVAL PLATFORM ENDPOINTS (17 JAN 2026)
+# =============================================================================
+
+@app.route(route="platform/approve", methods=["POST"])
+def platform_approve_route(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Approve a pending dataset for publication.
+
+    POST /api/platform/approve
+
+    Body:
+        {
+            "approval_id": "apr-abc123...",  // Or stac_item_id or job_id
+            "reviewer": "user@example.com",
+            "notes": "Looks good"            // Optional
+        }
+
+    Response:
+        {
+            "success": true,
+            "approval_id": "apr-abc123...",
+            "status": "approved",
+            "action": "stac_updated",
+            "message": "Dataset approved successfully"
+        }
+    """
+    if guard := _platform_endpoint_guard():
+        return guard
+    return platform_approve(req)
+
+
+@app.route(route="platform/revoke", methods=["POST"])
+def platform_revoke_route(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Revoke an approved dataset (unapprove).
+
+    POST /api/platform/revoke
+
+    This is an audit-logged operation for unpublishing approved data.
+
+    Body:
+        {
+            "approval_id": "apr-abc123...",       // Or stac_item_id or job_id
+            "revoker": "user@example.com",
+            "reason": "Data quality issue found"  // Required for audit
+        }
+
+    Response:
+        {
+            "success": true,
+            "approval_id": "apr-abc123...",
+            "status": "revoked",
+            "warning": "Approved dataset has been revoked - this action is logged for audit",
+            "message": "Approval revoked successfully"
+        }
+    """
+    if guard := _platform_endpoint_guard():
+        return guard
+    return platform_revoke(req)
+
+
+@app.route(route="platform/approvals", methods=["GET"])
+def platform_approvals_list_route(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    List approvals with optional filters.
+
+    GET /api/platform/approvals?status=pending&limit=50
+
+    Query Parameters:
+        status: pending, approved, rejected, revoked
+        classification: ouo, public
+        limit: Max results (default 100)
+        offset: Pagination offset
+
+    Response:
+        {
+            "success": true,
+            "approvals": [...],
+            "count": 25,
+            "status_counts": {"pending": 5, "approved": 15, ...}
+        }
+    """
+    if guard := _platform_endpoint_guard():
+        return guard
+    return platform_approvals_list(req)
+
+
+@app.route(route="platform/approvals/{approval_id}", methods=["GET"])
+def platform_approval_get_route(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Get a single approval by ID.
+
+    GET /api/platform/approvals/{approval_id}
+
+    Response:
+        {
+            "success": true,
+            "approval": {...}
+        }
+    """
+    if guard := _platform_endpoint_guard():
+        return guard
+    return platform_approval_get(req)
 
 
 @app.route(route="stac/vector", methods=["POST"])

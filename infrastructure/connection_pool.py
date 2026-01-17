@@ -217,7 +217,7 @@ class ConnectionPoolManager:
             f"host={db_config.host} "
             f"port={db_config.port} "
             f"dbname={db_config.database} "
-            f"user={db_config.managed_identity_name} "
+            f"user={db_config.managed_identity_admin_name} "
             f"password={token} "
             f"sslmode=require"
         )

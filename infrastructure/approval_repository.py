@@ -308,6 +308,38 @@ class ApprovalRepository(PostgreSQLRepository):
         """
         return self.list_by_status(ApprovalStatus.PENDING, limit=limit)
 
+    def list_by_collection(
+        self,
+        stac_collection_id: str,
+        limit: int = 100
+    ) -> List[DatasetApproval]:
+        """
+        List approvals for a given STAC collection.
+
+        Args:
+            stac_collection_id: STAC collection ID to filter by
+            limit: Maximum number of results
+
+        Returns:
+            List of DatasetApproval models for items in this collection
+        """
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL("""
+                        SELECT * FROM {}.{}
+                        WHERE stac_collection_id = %s
+                        ORDER BY created_at DESC
+                        LIMIT %s
+                    """).format(
+                        sql.Identifier(self.schema),
+                        sql.Identifier(self.table)
+                    ),
+                    (stac_collection_id, limit)
+                )
+                rows = cur.fetchall()
+                return [self._row_to_model(row) for row in rows]
+
     def list_all(
         self,
         limit: int = 100,

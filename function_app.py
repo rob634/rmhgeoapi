@@ -376,7 +376,8 @@ from triggers.trigger_approvals import (
     platform_approve,
     platform_revoke,
     platform_approvals_list,
-    platform_approval_get
+    platform_approval_get,
+    platform_approvals_status
 )
 # REMOVED (19 DEC 2025): platform_health, platform_stats, platform_failures
 # These were broken and redundant with /api/health
@@ -1364,6 +1365,31 @@ def platform_approval_get_route(req: func.HttpRequest) -> func.HttpResponse:
     if guard := _platform_endpoint_guard():
         return guard
     return platform_approval_get(req)
+
+
+@app.route(route="platform/approvals/status", methods=["GET"])
+def platform_approvals_status_route(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Get approval statuses for multiple STAC items/collections (batch lookup).
+
+    GET /api/platform/approvals/status?stac_item_ids=item1,item2,item3
+    GET /api/platform/approvals/status?stac_collection_ids=col1,col2
+
+    Returns a map of ID -> approval status for quick UI lookups.
+    Used by collection dashboards to show approved status and control delete buttons.
+
+    Response:
+        {
+            "success": true,
+            "statuses": {
+                "item1": {"has_approval": true, "is_approved": true, ...},
+                "item2": {"has_approval": false}
+            }
+        }
+    """
+    if guard := _platform_endpoint_guard():
+        return guard
+    return platform_approvals_status(req)
 
 
 @app.route(route="stac/vector", methods=["POST"])

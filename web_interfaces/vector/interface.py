@@ -505,6 +505,20 @@ class VectorInterface(BaseInterface):
                     (promotedData.data || []).map(p => p.stac_collection_id)
                 );
 
+                // Fetch approval statuses for all collections (17 JAN 2026)
+                if (allCollections.length > 0) {
+                    const tableNames = allCollections.map(c => c.id).join(',');
+                    try {
+                        const approvalData = await fetchJSON(
+                            `${API_BASE_URL}/api/platform/approvals/status?table_names=${encodeURIComponent(tableNames)}`
+                        );
+                        window.approvalStatuses = approvalData.statuses || {};
+                    } catch (e) {
+                        console.warn('Could not fetch approval statuses:', e);
+                        window.approvalStatuses = {};
+                    }
+                }
+
                 spinner.classList.add('hidden');
 
                 if (allCollections.length === 0) {

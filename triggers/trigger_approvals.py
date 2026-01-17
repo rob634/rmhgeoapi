@@ -581,10 +581,183 @@ def platform_approval_get(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
+def platform_approvals_status(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    HTTP trigger to get approval statuses for multiple STAC items/collections.
+
+    GET /api/platform/approvals/status?stac_item_ids=item1,item2,item3
+    GET /api/platform/approvals/status?stac_collection_ids=col1,col2
+
+    Returns a map of ID -> approval status for quick UI lookups.
+
+    Query Parameters:
+        stac_item_ids: Comma-separated list of STAC item IDs
+        stac_collection_ids: Comma-separated list of STAC collection IDs
+
+    Response:
+    {
+        "success": true,
+        "statuses": {
+            "item1": {
+                "has_approval": true,
+                "approval_id": "apr-abc123",
+                "status": "approved",
+                "is_approved": true,
+                "reviewer": "user@example.com",
+                "reviewed_at": "2026-01-17T..."
+            },
+            "item2": {
+                "has_approval": false
+            }
+        }
+    }
+    """
+    logger.info("Platform approvals status endpoint called")
+
+    try:
+        # Get query parameters
+        stac_item_ids_param = req.params.get('stac_item_ids', '')
+        stac_collection_ids_param = req.params.get('stac_collection_ids', '')
+        table_names_param = req.params.get('table_names', '')  # For OGC Features (vector tables)
+
+        # Parse comma-separated IDs
+        stac_item_ids = [id.strip() for id in stac_item_ids_param.split(',') if id.strip()]
+        stac_collection_ids = [id.strip() for id in stac_collection_ids_param.split(',') if id.strip()]
+        table_names = [name.strip() for name in table_names_param.split(',') if name.strip()]
+
+        if not stac_item_ids and not stac_collection_ids and not table_names:
+            return func.HttpResponse(
+                json.dumps({
+                    "success": False,
+                    "error": "Must provide stac_item_ids or stac_collection_ids query parameter",
+                    "error_type": "ValidationError"
+                }),
+                status_code=400,
+                headers={"Content-Type": "application/json"}
+            )
+
+        # Import service lazily
+        from services.approval_service import ApprovalService
+        from core.models.approval import ApprovalStatus
+
+        approval_service = ApprovalService()
+        statuses = {}
+
+        # Look up by STAC item IDs
+        for item_id in stac_item_ids:
+            approval = approval_service.get_approval_for_stac_item(item_id)
+            if approval:
+                is_approved = approval.status == ApprovalStatus.APPROVED
+                statuses[item_id] = {
+                    "has_approval": True,
+                    "approval_id": approval.approval_id,
+                    "status": approval.status.value,
+                    "is_approved": is_approved,
+                    "reviewer": approval.reviewer,
+                    "reviewed_at": approval.reviewed_at.isoformat() if approval.reviewed_at else None
+                }
+            else:
+                statuses[item_id] = {"has_approval": False}
+
+        # Look up by STAC collection IDs
+        # For collections, we check if ANY item in that collection has an approval
+        # This is a simplified approach - could be enhanced to check all items
+        for collection_id in stac_collection_ids:
+            # Query approvals by collection_id
+            approvals = approval_service.repo.list_by_collection(collection_id)
+            if approvals:
+                # Check if any are approved
+                approved_count = sum(1 for a in approvals if a.status == ApprovalStatus.APPROVED)
+                any_approved = approved_count > 0
+                statuses[collection_id] = {
+                    "has_approval": True,
+                    "approval_count": len(approvals),
+                    "approved_count": approved_count,
+                    "is_approved": any_approved,
+                    "status": "approved" if any_approved else approvals[0].status.value
+                }
+            else:
+                statuses[collection_id] = {"has_approval": False}
+
+        # Look up by table names (for OGC Features / vector tables)
+        # This looks up the stac_item_id from geo.table_metadata first
+        if table_names:
+            try:
+                from infrastructure.postgresql import PostgreSQLRepository
+                repo = PostgreSQLRepository()
+
+                with repo._get_connection() as conn:
+                    with conn.cursor() as cur:
+                        for table_name in table_names:
+                            # Look up stac_item_id from table_metadata
+                            cur.execute(
+                                """
+                                SELECT stac_item_id, stac_collection_id
+                                FROM geo.table_metadata
+                                WHERE table_name = %s
+                                """,
+                                (table_name,)
+                            )
+                            row = cur.fetchone()
+
+                            if row and row.get('stac_item_id'):
+                                # Found STAC item - check approval
+                                stac_item_id = row['stac_item_id']
+                                approval = approval_service.get_approval_for_stac_item(stac_item_id)
+
+                                if approval:
+                                    is_approved = approval.status == ApprovalStatus.APPROVED
+                                    statuses[table_name] = {
+                                        "has_approval": True,
+                                        "approval_id": approval.approval_id,
+                                        "status": approval.status.value,
+                                        "is_approved": is_approved,
+                                        "stac_item_id": stac_item_id,
+                                        "reviewer": approval.reviewer,
+                                        "reviewed_at": approval.reviewed_at.isoformat() if approval.reviewed_at else None
+                                    }
+                                else:
+                                    statuses[table_name] = {
+                                        "has_approval": False,
+                                        "stac_item_id": stac_item_id
+                                    }
+                            else:
+                                # No STAC item linked to this table
+                                statuses[table_name] = {"has_approval": False, "no_stac_item": True}
+            except Exception as e:
+                logger.warning(f"Error looking up table approvals: {e}")
+                # Don't fail the whole request - just mark these as unknown
+                for table_name in table_names:
+                    if table_name not in statuses:
+                        statuses[table_name] = {"has_approval": False, "error": str(e)}
+
+        return func.HttpResponse(
+            json.dumps({
+                "success": True,
+                "statuses": statuses
+            }),
+            status_code=200,
+            headers={"Content-Type": "application/json"}
+        )
+
+    except Exception as e:
+        logger.error(f"Platform approvals status failed: {e}", exc_info=True)
+        return func.HttpResponse(
+            json.dumps({
+                "success": False,
+                "error": str(e),
+                "error_type": type(e).__name__
+            }),
+            status_code=500,
+            headers={"Content-Type": "application/json"}
+        )
+
+
 # Module exports
 __all__ = [
     'platform_approve',
     'platform_revoke',
     'platform_approvals_list',
-    'platform_approval_get'
+    'platform_approval_get',
+    'platform_approvals_status'
 ]

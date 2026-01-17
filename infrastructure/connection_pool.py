@@ -240,7 +240,7 @@ class ConnectionPoolManager:
 
         schemas = [
             config.database.app_schema,
-            config.database.schema,  # geo schema
+            config.database.postgis_schema,  # geo schema
         ]
 
         # Only add pgstac and h3 if they're configured

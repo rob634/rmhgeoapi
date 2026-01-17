@@ -640,10 +640,12 @@ class PostgreSQLRepository(BaseRepository):
 
         if ConnectionPoolManager.is_pool_mode():
             # Docker mode: Use connection pool
-            yield from self._get_pooled_connection()
+            with self._get_pooled_connection() as conn:
+                yield conn
         else:
             # Function App mode: Single-use connection (original behavior)
-            yield from self._get_single_use_connection()
+            with self._get_single_use_connection() as conn:
+                yield conn
 
     @contextmanager
     def _get_pooled_connection(self):

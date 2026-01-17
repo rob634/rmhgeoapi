@@ -3,7 +3,8 @@
 # ============================================================================
 # STATUS: Services - Consolidated raster handler for Docker worker
 # PURPOSE: Single handler that does validate → COG → STAC in one execution
-# LAST_REVIEWED: 11 JAN 2026
+# LAST_REVIEWED: 16 JAN 2026
+# F7.18: Integrated with Docker Orchestration Framework (graceful shutdown)
 # ============================================================================
 """
 Process Raster Complete - Consolidated Docker Handler.
@@ -19,8 +20,17 @@ Why Consolidated:
     - Single atomic operation with rollback on failure
     - Reuses existing handler logic
 
-Checkpoint/Resume Support (11 JAN 2026):
-    When _task_id is provided in params, uses CheckpointManager for:
+Docker Orchestration Framework (F7.18 - 16 JAN 2026):
+    When running in Docker mode, receives DockerTaskContext via _docker_context:
+    - Pre-configured CheckpointManager with shutdown awareness
+    - Graceful shutdown support (saves checkpoint on SIGTERM)
+    - Progress reporting for visibility
+
+    The handler checks context.should_stop() between phases. If shutdown
+    is requested, it saves the checkpoint and returns with 'interrupted': True.
+    The task will resume from the saved phase when a new container picks it up.
+
+Checkpoint/Resume Support:
     - Phase tracking (skip completed phases on resume)
     - Artifact validation (ensure outputs exist before saving checkpoint)
     - Data persistence (pass results between phases on resume)
@@ -87,9 +97,19 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
         logger.info(f"Task ID: {task_id[:8]}... (checkpoint enabled)")
     logger.info("=" * 60)
 
-    # Initialize checkpoint manager if task_id provided
+    # Initialize checkpoint manager
+    # F7.18: Use DockerTaskContext if available (Docker mode)
+    # Otherwise fall back to manual creation (Function App mode)
+    docker_context = params.get('_docker_context')
     checkpoint = None
-    if task_id:
+
+    if docker_context:
+        # Docker mode: use pre-configured checkpoint from context
+        checkpoint = docker_context.checkpoint
+        if checkpoint.current_phase > 0:
+            logger.info(f"🔄 Resuming from phase {checkpoint.current_phase} (Docker context)")
+    elif task_id:
+        # Function App mode: create checkpoint manually
         try:
             from infrastructure import CheckpointManager
             from infrastructure.factory import RepositoryFactory
@@ -182,6 +202,17 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                         'validation_result': validation_result,
                     }
                 )
+
+        # F7.18: Check for graceful shutdown before Phase 2
+        if docker_context and docker_context.should_stop():
+            logger.info("🛑 Shutdown requested after Phase 1 - saving progress")
+            return {
+                "success": True,
+                "interrupted": True,
+                "resumable": True,
+                "phase_completed": 1,
+                "message": "Graceful shutdown after validation phase",
+            }
 
         # =====================================================================
         # PHASE 2: COG CREATION
@@ -278,6 +309,19 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                     },
                     validate_artifact=validate_cog_exists
                 )
+
+        # F7.18: Check for graceful shutdown before Phase 3
+        if docker_context and docker_context.should_stop():
+            logger.info("🛑 Shutdown requested after Phase 2 - COG created, saving progress")
+            return {
+                "success": True,
+                "interrupted": True,
+                "resumable": True,
+                "phase_completed": 2,
+                "message": "Graceful shutdown after COG creation phase",
+                "cog_blob": cog_blob,
+                "cog_container": cog_container,
+            }
 
         # =====================================================================
         # PHASE 3: STAC METADATA

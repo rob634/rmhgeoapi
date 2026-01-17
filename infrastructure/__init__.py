@@ -89,6 +89,7 @@ if TYPE_CHECKING:
     from .curated_repository import CuratedUpdateLogRepository as _CuratedUpdateLogRepository
     from .promoted_repository import PromotedDatasetRepository as _PromotedDatasetRepository
     from .approval_repository import ApprovalRepository as _ApprovalRepository
+    from .connection_pool import ConnectionPoolManager as _ConnectionPoolManager
 
 
 def __getattr__(name: str):
@@ -226,6 +227,11 @@ def __getattr__(name: str):
         from .checkpoint_manager import CheckpointValidationError
         return CheckpointValidationError
 
+    # Connection Pool Manager (Docker connection pooling)
+    elif name == "ConnectionPoolManager":
+        from .connection_pool import ConnectionPoolManager
+        return ConnectionPoolManager
+
     else:
         raise AttributeError(f"module 'infrastructure' has no attribute '{name}'")
 
@@ -264,4 +270,5 @@ __all__ = [
     "get_default_repositories",
     "CheckpointManager",
     "CheckpointValidationError",
+    "ConnectionPoolManager",
 ]

@@ -227,48 +227,78 @@ checkpoint.get_data(key, default)  # Retrieve checkpoint data
 
 ### Implementation Phases
 
-#### Phase 1: Connection Pool Manager (S7.18.1-4) 📋
+#### Phase 1: Connection Pool Manager (S7.18.1-4) ✅ COMPLETE (16 JAN 2026)
 
 | Story | Description | Status |
 |-------|-------------|--------|
-| S7.18.1 | Create `ConnectionPoolManager` class | 📋 |
-| S7.18.2 | Integrate with `PostgreSQLRepository._get_connection()` | 📋 |
-| S7.18.3 | Wire token refresh to call `recreate_pool()` | 📋 |
-| S7.18.4 | Add pool config env vars | 📋 |
+| S7.18.1 | Create `ConnectionPoolManager` class | ✅ |
+| S7.18.2 | Integrate with `PostgreSQLRepository._get_connection()` | ✅ |
+| S7.18.3 | Wire token refresh to call `recreate_pool()` | ✅ |
+| S7.18.4 | Add pool config env vars | ✅ |
 
-**Key Files**: `infrastructure/connection_pool.py`, `infrastructure/postgresql.py`
+**Key Files**: `infrastructure/connection_pool.py`, `infrastructure/postgresql.py`, `infrastructure/auth/__init__.py`
 
-#### Phase 2: Checkpoint Integration (S7.18.5-7) 🟡 MOSTLY DONE
+**Environment Variables** (Docker mode only):
+- `DOCKER_DB_POOL_MIN` - Minimum pool connections (default: 2)
+- `DOCKER_DB_POOL_MAX` - Maximum pool connections (default: 10)
+
+#### Phase 2: Checkpoint Integration (S7.18.5-7) ✅ COMPLETE (16 JAN 2026)
 
 | Story | Description | Status |
 |-------|-------------|--------|
-| S7.18.5 | Task checkpoint schema | ✅ DONE |
-| S7.18.6 | CheckpointManager class | ✅ DONE |
-| S7.18.7 | Add `is_shutdown_requested()` method | 📋 |
+| S7.18.5 | Task checkpoint schema | ✅ |
+| S7.18.6 | CheckpointManager class | ✅ |
+| S7.18.7 | Add `is_shutdown_requested()` method | ✅ |
 
 **Key Files**: `infrastructure/checkpoint_manager.py`
 
-#### Phase 3: Docker Task Context (S7.18.8-11) 📋
+**New Methods Added** (S7.18.7):
+- `set_shutdown_event(event)` - Register shutdown event post-init
+- `is_shutdown_requested()` - Check if shutdown signal received
+- `should_stop()` - Alias for is_shutdown_requested()
+- `save_and_stop_if_requested(phase, data)` - Convenience: save + check in one call
+
+#### Phase 3: Docker Task Context (S7.18.8-11) ✅ COMPLETE (16 JAN 2026)
 
 | Story | Description | Status |
 |-------|-------------|--------|
-| S7.18.8 | Create `DockerTaskContext` dataclass | 📋 |
-| S7.18.9 | Modify `BackgroundQueueWorker` to create context | 📋 |
-| S7.18.10 | Pass context to handlers via CoreMachine | 📋 |
-| S7.18.11 | Add progress reporting to task metadata | 📋 |
+| S7.18.8 | Create `DockerTaskContext` dataclass | ✅ |
+| S7.18.9 | Modify `BackgroundQueueWorker` to create context | ✅ |
+| S7.18.10 | Pass context to handlers via CoreMachine | ✅ |
+| S7.18.11 | Add progress reporting to task metadata | ✅ |
 
 **Key Files**: `core/docker_context.py`, `docker_service.py`, `core/machine.py`
 
-#### Phase 4: Graceful Shutdown (S7.18.12-15) 📋
+**How Handlers Access Context**:
+```python
+def my_handler(params: Dict) -> Dict:
+    context = params.get('_docker_context')  # DockerTaskContext or None
+    if context:
+        # Docker mode: use provided context
+        if context.should_stop():
+            context.checkpoint.save(phase, data)
+            return {'success': True, 'interrupted': True}
+        context.report_progress(50, "Halfway done")
+```
+
+#### Phase 4: Graceful Shutdown (S7.18.12-15) ✅ COMPLETE (16 JAN 2026)
 
 | Story | Description | Status |
 |-------|-------------|--------|
-| S7.18.12 | Create `DockerWorkerLifecycle` class | 📋 |
-| S7.18.13 | Integrate shutdown event with `BackgroundQueueWorker` | 📋 |
-| S7.18.14 | Add shutdown status to `/health` endpoint | 📋 |
-| S7.18.15 | Test graceful shutdown (SIGTERM → checkpoint saved) | 📋 |
+| S7.18.12 | Create `DockerWorkerLifecycle` class | ✅ |
+| S7.18.13 | Integrate shutdown event with `BackgroundQueueWorker` | ✅ |
+| S7.18.14 | Add shutdown status to `/health` endpoint | ✅ |
+| S7.18.15 | Test graceful shutdown (SIGTERM → checkpoint saved) | ✅ |
 
 **Key Files**: `docker_service.py`
+
+**Graceful Shutdown Flow**:
+1. SIGTERM received → `worker_lifecycle.initiate_shutdown()` called
+2. Shutdown event set → all workers see `should_stop() = True`
+3. In-flight tasks save checkpoint via `DockerTaskContext`
+4. BackgroundQueueWorker abandons queued messages (retry later)
+5. ConnectionPoolManager drains and closes
+6. `/health` returns 503 with `status: "shutting_down"`
 
 #### Phase 5: H3 Bootstrap Docker - First Consumer (S7.18.16-20) 📋
 
@@ -282,15 +312,21 @@ checkpoint.get_data(key, default)  # Retrieve checkpoint data
 
 **Key Files**: `jobs/bootstrap_h3_docker.py`, `services/handler_h3_bootstrap_complete.py`
 
-#### Phase 6: Migrate process_raster_docker (S7.18.21-23) 📋
+#### Phase 6: Migrate process_raster_docker (S7.18.21-23) ✅ COMPLETE (17 JAN 2026)
 
 | Story | Description | Status |
 |-------|-------------|--------|
-| S7.18.21 | Update handler to receive `DockerTaskContext` | 📋 |
-| S7.18.22 | Replace manual CheckpointManager with `context.checkpoint` | 📋 |
-| S7.18.23 | Add `context.should_stop()` checks | 📋 |
+| S7.18.21 | Update handler to receive `DockerTaskContext` | ✅ |
+| S7.18.22 | Use `context.checkpoint` with fallback for Function App | ✅ |
+| S7.18.23 | Add `context.should_stop()` checks between phases | ✅ |
 
 **Key Files**: `services/handler_process_raster_complete.py`
+
+**Implementation Notes**:
+- Handler now accepts `_docker_context` from params (Docker mode)
+- Falls back to manual CheckpointManager creation (Function App mode)
+- Shutdown checks added after Phase 1 and Phase 2
+- Returns `{success: True, interrupted: True, resumable: True}` on graceful shutdown
 
 #### Phase 7: Documentation (S7.18.24-26) 📋
 

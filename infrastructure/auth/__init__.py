@@ -123,9 +123,11 @@ def initialize_docker_auth() -> dict:
 
 def refresh_all_tokens() -> dict:
     """
-    Refresh all OAuth tokens.
+    Refresh all OAuth tokens and recreate connection pool.
 
     Called periodically by background refresh thread.
+    After refreshing tokens, recreates the connection pool (if in Docker mode)
+    to ensure connections use the fresh PostgreSQL token.
 
     Returns:
         dict with refresh status for each component
@@ -136,6 +138,7 @@ def refresh_all_tokens() -> dict:
     status = {
         "postgres": {"refreshed": False, "error": None},
         "storage": {"refreshed": False, "error": None},
+        "connection_pool": {"recreated": False, "error": None},
     }
 
     # PostgreSQL
@@ -155,6 +158,18 @@ def refresh_all_tokens() -> dict:
     except Exception as e:
         status["storage"]["error"] = str(e)
         logger.warning(f"Storage token refresh failed: {e}")
+
+    # Recreate connection pool with fresh credentials (Docker mode only)
+    # This must happen AFTER postgres token refresh
+    if status["postgres"]["refreshed"]:
+        try:
+            from infrastructure.connection_pool import ConnectionPoolManager
+            ConnectionPoolManager.recreate_pool()
+            status["connection_pool"]["recreated"] = True
+            logger.info("Connection pool recreated with fresh credentials")
+        except Exception as e:
+            status["connection_pool"]["error"] = str(e)
+            logger.warning(f"Connection pool recreation failed: {e}")
 
     return status
 

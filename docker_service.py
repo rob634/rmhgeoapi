@@ -4,7 +4,8 @@
 # ============================================================================
 # STATUS: Core Component - Docker container with HTTP API and queue processing
 # PURPOSE: Health checks + Service Bus queue polling for long-running tasks
-# LAST_REVIEWED: 11 JAN 2026
+# LAST_REVIEWED: 16 JAN 2026
+# F7.18: Added DockerWorkerLifecycle, graceful shutdown, shared shutdown event
 # ============================================================================
 """
 Docker Service - HTTP API + Background Queue Worker.
@@ -170,15 +171,138 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================================
+# DOCKER WORKER LIFECYCLE (F7.18 - Graceful Shutdown)
+# ============================================================================
+
+class DockerWorkerLifecycle:
+    """
+    Manages Docker worker lifecycle with graceful shutdown support.
+
+    Provides:
+    - Shared shutdown event for all components
+    - SIGTERM/SIGINT signal handling
+    - Coordinated shutdown across workers and connection pool
+
+    Usage:
+        lifecycle = DockerWorkerLifecycle()
+        lifecycle.register_signal_handlers()
+
+        # Workers use lifecycle.shutdown_event
+        queue_worker = BackgroundQueueWorker(shutdown_event=lifecycle.shutdown_event)
+
+        # On SIGTERM, lifecycle.initiate_shutdown() is called automatically
+        # All workers receive the shutdown signal and save checkpoints
+    """
+
+    def __init__(self):
+        self._shutdown_event = threading.Event()
+        self._shutdown_initiated = False
+        self._shutdown_initiated_at: Optional[datetime] = None
+        self._signal_received: Optional[str] = None
+
+    @property
+    def shutdown_event(self) -> threading.Event:
+        """Shared shutdown event for all components."""
+        return self._shutdown_event
+
+    @property
+    def is_shutting_down(self) -> bool:
+        """Check if shutdown has been initiated."""
+        return self._shutdown_initiated
+
+    def register_signal_handlers(self) -> None:
+        """
+        Register SIGTERM and SIGINT handlers for graceful shutdown.
+
+        SIGTERM: Sent by Docker/Kubernetes when stopping container
+        SIGINT: Sent when pressing Ctrl+C (useful for local dev)
+
+        These signals trigger initiate_shutdown() which:
+        1. Sets the shutdown event
+        2. Allows in-flight tasks to save checkpoints
+        3. Drains connection pool
+        """
+        import signal
+
+        def shutdown_handler(signum, frame):
+            signal_name = signal.Signals(signum).name
+            logger.warning(f"🛑 Received {signal_name} - initiating graceful shutdown")
+            self.initiate_shutdown(signal_name)
+
+        signal.signal(signal.SIGTERM, shutdown_handler)
+        signal.signal(signal.SIGINT, shutdown_handler)
+        logger.info("📡 Signal handlers registered (SIGTERM, SIGINT)")
+
+    def initiate_shutdown(self, reason: str = "manual") -> None:
+        """
+        Initiate graceful shutdown.
+
+        Sets the shutdown event which signals:
+        - BackgroundQueueWorker to stop accepting new messages
+        - Active tasks to save checkpoints (via DockerTaskContext.should_stop())
+        - ConnectionPoolManager to drain and close
+
+        Args:
+            reason: Why shutdown was initiated (for logging)
+        """
+        if self._shutdown_initiated:
+            logger.debug(f"Shutdown already initiated, ignoring duplicate request: {reason}")
+            return
+
+        self._shutdown_initiated = True
+        self._shutdown_initiated_at = datetime.now(timezone.utc)
+        self._signal_received = reason
+
+        logger.warning(f"🛑 GRACEFUL SHUTDOWN INITIATED: {reason}")
+        logger.info("  → Setting shutdown event for all components")
+        self._shutdown_event.set()
+
+        # Drain connection pool (F7.18 integration)
+        try:
+            from infrastructure.connection_pool import ConnectionPoolManager
+            logger.info("  → Shutting down connection pool...")
+            ConnectionPoolManager.shutdown()
+            logger.info("  → Connection pool shutdown complete")
+        except Exception as e:
+            logger.warning(f"  → Connection pool shutdown error (non-fatal): {e}")
+
+    def get_status(self) -> Dict[str, Any]:
+        """Get lifecycle status for health endpoint."""
+        status = {
+            "shutdown_initiated": self._shutdown_initiated,
+            "shutdown_event_set": self._shutdown_event.is_set(),
+        }
+
+        if self._shutdown_initiated:
+            status["shutdown_initiated_at"] = self._shutdown_initiated_at.isoformat()
+            status["shutdown_reason"] = self._signal_received
+            if self._shutdown_initiated_at:
+                elapsed = (datetime.now(timezone.utc) - self._shutdown_initiated_at).total_seconds()
+                status["shutdown_elapsed_seconds"] = round(elapsed, 1)
+
+        return status
+
+
+# Global lifecycle manager (singleton)
+worker_lifecycle = DockerWorkerLifecycle()
+
+
+# ============================================================================
 # BACKGROUND TOKEN REFRESH
 # ============================================================================
 
 class TokenRefreshWorker:
     """Background worker that refreshes OAuth tokens periodically."""
 
-    def __init__(self, interval_seconds: int = 45 * 60):
+    def __init__(
+        self,
+        interval_seconds: int = 45 * 60,
+        shutdown_event: Optional[threading.Event] = None
+    ):
         self._thread: Optional[threading.Thread] = None
-        self._stop_event = threading.Event()
+        # Use shared shutdown event if provided, otherwise create own
+        self._stop_event = shutdown_event if shutdown_event else threading.Event()
+        self._uses_shared_event = shutdown_event is not None
         self._interval = interval_seconds
         self._last_refresh: Optional[datetime] = None
         self._refresh_count = 0
@@ -211,14 +335,18 @@ class TokenRefreshWorker:
         if self._thread is not None and self._thread.is_alive():
             return
 
-        self._stop_event.clear()
+        # Only clear event if we own it (not shared)
+        if not self._uses_shared_event:
+            self._stop_event.clear()
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
         logger.info("[Token Refresh] Background thread started")
 
     def stop(self):
         """Stop the background thread."""
-        self._stop_event.set()
+        # Only set event if we own it (shared event is set by lifecycle)
+        if not self._uses_shared_event:
+            self._stop_event.set()
         if self._thread is not None:
             self._thread.join(timeout=5)
             self._thread = None
@@ -230,11 +358,8 @@ class TokenRefreshWorker:
             "interval_seconds": self._interval,
             "refresh_count": self._refresh_count,
             "last_refresh": self._last_refresh.isoformat() if self._last_refresh else None,
+            "uses_shared_shutdown": self._uses_shared_event,
         }
-
-
-# Global instances
-token_refresh_worker = TokenRefreshWorker()
 
 
 # ============================================================================
@@ -251,11 +376,19 @@ class BackgroundQueueWorker:
     The worker uses CoreMachine.process_task_message() - identical to how
     Azure Functions process tasks. The only difference is the trigger
     mechanism (polling vs Function trigger).
+
+    F7.18: Supports shared shutdown event for graceful shutdown coordination.
+    When shutdown is signaled:
+    - Stops accepting new messages
+    - Allows in-flight task to complete (with checkpoint support)
+    - Abandons queued messages for retry
     """
 
-    def __init__(self):
+    def __init__(self, shutdown_event: Optional[threading.Event] = None):
         self._thread: Optional[threading.Thread] = None
-        self._stop_event = threading.Event()
+        # Use shared shutdown event if provided, otherwise create own
+        self._stop_event = shutdown_event if shutdown_event else threading.Event()
+        self._uses_shared_event = shutdown_event is not None
         self._sb_client: Optional[ServiceBusClient] = None
         self._is_running = False
         self._messages_processed = 0
@@ -332,8 +465,10 @@ class BackgroundQueueWorker:
         message: ServiceBusReceivedMessage,
         receiver: ServiceBusReceiver
     ) -> bool:
-        """Process a single message via CoreMachine."""
+        """Process a single message via CoreMachine with Docker context."""
         from core.schema.queue import TaskQueueMessage
+        from core.docker_context import create_docker_context
+        from infrastructure import RepositoryFactory
 
         start_time = time.time()
         task_id = "unknown"
@@ -349,8 +484,22 @@ class BackgroundQueueWorker:
                 f"(type: {task_message.task_type}, stage: {task_message.stage})"
             )
 
-            # Process via CoreMachine - identical to Function App
-            result = self._core_machine.process_task_message(task_message)
+            # Create Docker context with checkpoint and shutdown awareness (F7.18)
+            task_repo = RepositoryFactory.create_task_repository()
+            docker_context = create_docker_context(
+                task_id=task_message.task_id,
+                job_id=task_message.parent_job_id,
+                job_type=task_message.job_type,
+                stage=task_message.stage,
+                shutdown_event=self._stop_event,
+                task_repo=task_repo,
+            )
+
+            # Process via CoreMachine with Docker context
+            result = self._core_machine.process_task_message(
+                task_message,
+                docker_context=docker_context
+            )
             elapsed = time.time() - start_time
 
             if result.get('success'):
@@ -462,7 +611,9 @@ class BackgroundQueueWorker:
             logger.warning("[Queue Worker] Already running")
             return
 
-        self._stop_event.clear()
+        # Only clear event if we own it (not shared)
+        if not self._uses_shared_event:
+            self._stop_event.clear()
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
         logger.info("[Queue Worker] Background thread started")
@@ -470,7 +621,9 @@ class BackgroundQueueWorker:
     def stop(self):
         """Stop the background worker thread."""
         logger.info("[Queue Worker] Stopping...")
-        self._stop_event.set()
+        # Only set event if we own it (shared event is set by lifecycle)
+        if not self._uses_shared_event:
+            self._stop_event.set()
         if self._thread is not None:
             self._thread.join(timeout=10)
             self._thread = None
@@ -484,11 +637,16 @@ class BackgroundQueueWorker:
             "started_at": self._started_at.isoformat() if self._started_at else None,
             "last_poll_time": self._last_poll_time.isoformat() if self._last_poll_time else None,
             "last_error": self._last_error,
+            "uses_shared_shutdown": self._uses_shared_event,
+            "shutdown_signaled": self._stop_event.is_set(),
         }
 
 
-# Global queue worker instance
-queue_worker = BackgroundQueueWorker()
+# Global instances with shared shutdown event (F7.18)
+# Both workers use the same shutdown event from worker_lifecycle
+# This enables coordinated graceful shutdown on SIGTERM
+token_refresh_worker = TokenRefreshWorker(shutdown_event=worker_lifecycle.shutdown_event)
+queue_worker = BackgroundQueueWorker(shutdown_event=worker_lifecycle.shutdown_event)
 
 
 # ============================================================================
@@ -589,6 +747,9 @@ async def lifespan(app: FastAPI):
     print("DOCKER SERVICE - STARTING", flush=True)
     print("=" * 60, flush=True)
 
+    # Register signal handlers for graceful shutdown (F7.18)
+    worker_lifecycle.register_signal_handlers()
+
     # Initialize authentication (acquire tokens, configure GDAL)
     logger.info("Initializing Docker authentication...")
     auth_status = initialize_docker_auth()
@@ -602,10 +763,18 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Shutdown
+    # Shutdown (may have been initiated by SIGTERM via worker_lifecycle)
     print("DOCKER SERVICE - SHUTTING DOWN", flush=True)
+
+    # Initiate shutdown if not already done (handles uvicorn shutdown)
+    if not worker_lifecycle.is_shutting_down:
+        worker_lifecycle.initiate_shutdown("lifespan_exit")
+
+    # Wait for workers to finish (they will stop on their own via shared event)
     queue_worker.stop()
     token_refresh_worker.stop()
+
+    print("DOCKER SERVICE - SHUTDOWN COMPLETE", flush=True)
 
 
 # FastAPI app
@@ -758,13 +927,30 @@ def health_check():
         "critical_threshold_percent": 90,
     }
 
-    # Overall health
-    healthy = db_status.get("connected", False)
+    # Overall health - unhealthy if DB down or shutdown in progress
+    healthy = db_status.get("connected", False) and not worker_lifecycle.is_shutting_down
+
+    # Connection pool stats (F7.18)
+    try:
+        from infrastructure.connection_pool import ConnectionPoolManager
+        pool_stats = ConnectionPoolManager.get_pool_stats()
+    except Exception as e:
+        pool_stats = {"error": str(e)}
+
+    # Determine status string
+    if worker_lifecycle.is_shutting_down:
+        status = "shutting_down"
+    elif healthy:
+        status = "healthy"
+    else:
+        status = "unhealthy"
 
     response = {
-        "status": "healthy" if healthy else "unhealthy",
+        "status": status,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "version": "1.0.0",
+        # Lifecycle status (F7.18 - graceful shutdown)
+        "lifecycle": worker_lifecycle.get_status(),
         # Runtime environment (matches Function App pattern)
         "runtime": {
             "hardware": hardware,
@@ -788,9 +974,12 @@ def health_check():
             "token_refresh": token_refresh_worker.get_status(),
             "queue_worker": queue_worker.get_status(),
         },
+        # Connection pool stats (F7.18)
+        "connection_pool": pool_stats,
     }
 
-    if not healthy:
+    # Return 503 if unhealthy OR shutting down (prevents new traffic during shutdown)
+    if not healthy or worker_lifecycle.is_shutting_down:
         return JSONResponse(status_code=503, content=response)
 
     return response

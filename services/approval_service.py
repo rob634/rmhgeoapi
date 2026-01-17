@@ -101,6 +101,10 @@ class ApprovalService:
         """Get the approval associated with a job."""
         return self.repo.get_by_job_id(job_id)
 
+    def get_approval_for_stac_item(self, stac_item_id: str) -> Optional[DatasetApproval]:
+        """Get the approval associated with a STAC item."""
+        return self.repo.get_by_stac_item_id(stac_item_id)
+
     def list_pending(self, limit: int = 50) -> List[DatasetApproval]:
         """List pending approvals."""
         return self.repo.list_pending(limit=limit)
@@ -277,6 +281,68 @@ class ApprovalService:
                 'error': str(e)
             }
 
+    def _update_stac_revoked(
+        self,
+        approval: DatasetApproval,
+        revoker: str,
+        reason: str
+    ) -> Dict[str, Any]:
+        """
+        Update STAC item with revocation properties.
+
+        Sets:
+            app:revoked = true
+            app:revoked_at = ISO timestamp
+            app:revoked_by = revoker
+            app:revocation_reason = reason
+
+        Args:
+            approval: The approval record being revoked
+            revoker: Who is revoking (user email or job ID)
+            reason: Why the approval is being revoked
+
+        Returns:
+            Dict with success and optional error
+        """
+        if not approval.stac_item_id or not approval.stac_collection_id:
+            return {
+                'success': False,
+                'error': 'No STAC item linked to approval'
+            }
+
+        try:
+            from infrastructure.pgstac_repository import PgStacRepository
+            pgstac = PgStacRepository()
+
+            properties_update = {
+                'app:revoked': True,
+                'app:revoked_at': datetime.now(timezone.utc).isoformat(),
+                'app:revoked_by': revoker,
+                'app:revocation_reason': reason
+            }
+
+            success = pgstac.update_item_properties(
+                item_id=approval.stac_item_id,
+                collection_id=approval.stac_collection_id,
+                properties_update=properties_update
+            )
+
+            if success:
+                logger.info(f"Updated STAC item {approval.stac_item_id} with revocation properties")
+                return {'success': True}
+            else:
+                return {
+                    'success': False,
+                    'error': f"STAC item not found: {approval.stac_item_id}"
+                }
+
+        except Exception as e:
+            logger.warning(f"Failed to update STAC revocation properties: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
     def _trigger_adf_pipeline(self, approval: DatasetApproval) -> Dict[str, Any]:
         """
         Trigger ADF pipeline for PUBLIC data export.
@@ -382,6 +448,99 @@ class ApprovalService:
                 }
 
         except ValueError as e:
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    # =========================================================================
+    # REVOKE
+    # =========================================================================
+
+    def revoke(
+        self,
+        approval_id: str,
+        revoker: str,
+        reason: str
+    ) -> Dict[str, Any]:
+        """
+        Revoke an approved dataset (for unpublishing).
+
+        This is a necessary but undesirable workflow - marks previously
+        approved data as revoked with full audit trail. Used when approved
+        data needs to be unpublished.
+
+        Workflow:
+        1. Validate approval is in APPROVED status
+        2. Update STAC item with revocation properties
+        3. Update approval record to REVOKED status
+
+        Args:
+            approval_id: The approval to revoke
+            revoker: Who is revoking (user email or job ID like "unpublish_job:xxx")
+            reason: Why it's being revoked (required for audit trail)
+
+        Returns:
+            Dict with:
+                success: bool
+                approval: Updated DatasetApproval dict (if successful)
+                stac_updated: Whether STAC properties were updated
+                warning: Audit note about approved data being revoked
+                error: Error message if failed
+        """
+        logger.info(f"Revoking approval {approval_id} by {revoker}: {reason}")
+
+        if not reason or not reason.strip():
+            return {
+                'success': False,
+                'error': 'Revocation reason is required for audit trail'
+            }
+
+        # Get approval
+        approval = self.repo.get_by_id(approval_id)
+        if not approval:
+            return {
+                'success': False,
+                'error': f'Approval not found: {approval_id}'
+            }
+
+        # Validate status - must be APPROVED to revoke
+        if approval.status != ApprovalStatus.APPROVED:
+            return {
+                'success': False,
+                'error': f"Cannot revoke: status is '{approval.status.value}', expected 'approved'"
+            }
+
+        # Update STAC item with revocation properties (best-effort)
+        stac_updated = self._update_stac_revoked(approval, revoker, reason)
+        if not stac_updated.get('success'):
+            logger.warning(f"STAC revocation update failed for {approval_id}: {stac_updated.get('error')}")
+            # Continue with revocation - STAC update is best-effort
+
+        # Update approval record
+        try:
+            updated = self.repo.revoke(
+                approval_id=approval_id,
+                revoker=revoker,
+                reason=reason
+            )
+
+            logger.warning(f"AUDIT: Approval {approval_id} REVOKED by {revoker}. Reason: {reason}")
+
+            return {
+                'success': True,
+                'approval': updated.model_dump() if updated else None,
+                'stac_updated': stac_updated.get('success', False),
+                'warning': 'Approved dataset has been revoked - this action is logged for audit'
+            }
+
+        except ValueError as e:
+            return {
+                'success': False,
+                'error': str(e)
+            }
+        except Exception as e:
+            logger.error(f"Failed to revoke approval {approval_id}: {e}")
             return {
                 'success': False,
                 'error': str(e)

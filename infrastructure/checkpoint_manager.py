@@ -4,9 +4,10 @@
 # EPOCH: 4 - ACTIVE
 # STATUS: Infrastructure - Docker task checkpoint/resume management
 # PURPOSE: Enable resumable Docker tasks with phase-based checkpointing
-# LAST_REVIEWED: 11 JAN 2026
+# LAST_REVIEWED: 16 JAN 2026
 # EXPORTS: CheckpointManager, CheckpointValidationError
-# DEPENDENCIES: core.schema.updates.TaskUpdateModel
+# DEPENDENCIES: core.schema.updates.TaskUpdateModel, threading
+# F7.18: Added shutdown awareness (is_shutdown_requested, should_stop, etc.)
 # ============================================================================
 """
 Checkpoint Manager for Docker Resume Support.
@@ -43,6 +44,7 @@ Exports:
     CheckpointValidationError: Raised when artifact validation fails
 """
 
+import threading
 from typing import Any, Callable, Dict, Optional
 from datetime import datetime, timezone
 
@@ -97,18 +99,21 @@ class CheckpointManager:
         data: Accumulated checkpoint data from all phases
     """
 
-    def __init__(self, task_id: str, task_repo):
+    def __init__(self, task_id: str, task_repo, shutdown_event: Optional[threading.Event] = None):
         """
         Initialize CheckpointManager and load existing checkpoint.
 
         Args:
             task_id: Task ID to manage checkpoints for
             task_repo: Task repository with get_task and update_task methods
+            shutdown_event: Optional threading.Event for graceful shutdown awareness.
+                           When set, is_shutdown_requested() returns True.
         """
         self.task_id = task_id
         self.task_repo = task_repo
         self.current_phase: int = 0
         self.data: Dict[str, Any] = {}
+        self._shutdown_event: Optional[threading.Event] = shutdown_event
         self._load_checkpoint()
 
     def _load_checkpoint(self) -> None:
@@ -285,6 +290,103 @@ class CheckpointManager:
             logger.warning(f"🔄 CheckpointManager: Reset checkpoint for task {self.task_id[:8]}...")
         else:
             logger.error(f"❌ CheckpointManager: Failed to reset task {self.task_id[:8]}...")
+
+    # =========================================================================
+    # SHUTDOWN AWARENESS (F7.18 - Docker Orchestration Framework)
+    # =========================================================================
+
+    def set_shutdown_event(self, shutdown_event: threading.Event) -> None:
+        """
+        Set the shutdown event for graceful shutdown awareness.
+
+        This allows the shutdown event to be set after initialization,
+        useful when the event is created by the worker infrastructure
+        after the checkpoint manager is created.
+
+        Args:
+            shutdown_event: Threading event that signals shutdown request
+        """
+        self._shutdown_event = shutdown_event
+        logger.debug(f"🔔 CheckpointManager: Shutdown event registered for task {self.task_id[:8]}...")
+
+    def is_shutdown_requested(self) -> bool:
+        """
+        Check if a graceful shutdown has been requested.
+
+        Returns True when the Docker worker receives SIGTERM and needs
+        to stop processing. Handlers should check this periodically
+        (e.g., between phases or iterations) and save checkpoint if True.
+
+        Returns:
+            True if shutdown was requested, False otherwise
+
+        Example:
+            for item in items:
+                if checkpoint.is_shutdown_requested():
+                    logger.info("Shutdown requested, saving checkpoint...")
+                    checkpoint.save(phase, data={"processed": processed_count})
+                    return  # Exit gracefully
+                process(item)
+        """
+        if self._shutdown_event is None:
+            return False
+        return self._shutdown_event.is_set()
+
+    def should_stop(self) -> bool:
+        """
+        Alias for is_shutdown_requested() with a more intuitive name.
+
+        Use in processing loops to check if work should stop:
+
+            while items_to_process:
+                if checkpoint.should_stop():
+                    checkpoint.save(current_phase, data=progress)
+                    return
+                process_next_item()
+
+        Returns:
+            True if processing should stop (shutdown requested)
+        """
+        return self.is_shutdown_requested()
+
+    def save_and_stop_if_requested(
+        self,
+        phase: int,
+        data: Optional[Dict[str, Any]] = None
+    ) -> bool:
+        """
+        Save checkpoint if shutdown requested, returning whether to stop.
+
+        Convenience method that combines the common pattern of checking
+        for shutdown, saving progress, and deciding whether to continue.
+
+        Args:
+            phase: Current phase number to checkpoint
+            data: Data to save with checkpoint
+
+        Returns:
+            True if shutdown was requested (caller should return/stop),
+            False if processing should continue
+
+        Example:
+            for i, item in enumerate(items):
+                result = process(item)
+                # Save progress and check for shutdown every 100 items
+                if i % 100 == 0:
+                    if checkpoint.save_and_stop_if_requested(
+                        phase=1,
+                        data={"processed": i, "last_result": result}
+                    ):
+                        return  # Graceful exit
+        """
+        if self.is_shutdown_requested():
+            logger.info(
+                f"🛑 CheckpointManager: Shutdown requested for task {self.task_id[:8]}..., "
+                f"saving checkpoint at phase {phase}"
+            )
+            self.save(phase, data=data)
+            return True
+        return False
 
 
 # ============================================================================

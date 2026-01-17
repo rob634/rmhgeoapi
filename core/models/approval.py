@@ -23,7 +23,7 @@ Tables:
 
 Exports:
     DatasetApproval: Approval record for a completed job
-    ApprovalStatus: Status enum (pending, approved, rejected)
+    ApprovalStatus: Status enum (pending, approved, rejected, revoked)
 
 Created: 16 JAN 2026
 """
@@ -44,10 +44,12 @@ class ApprovalStatus(str, Enum):
     - PENDING -> APPROVED (reviewer approves)
     - PENDING -> REJECTED (reviewer rejects)
     - REJECTED -> PENDING (resubmit for review)
+    - APPROVED -> REVOKED (unpublish approved dataset - requires audit trail)
     """
     PENDING = "pending"
     APPROVED = "approved"
     REJECTED = "rejected"
+    REVOKED = "revoked"  # Approved then unpublished (16 JAN 2026)
 
 
 class DatasetApproval(BaseModel):
@@ -151,6 +153,21 @@ class DatasetApproval(BaseModel):
         description="Reason for rejection (required if rejected)"
     )
 
+    # Revocation tracking (16 JAN 2026 - for unpublish workflow)
+    revoked_at: Optional[datetime] = Field(
+        default=None,
+        description="When the approval was revoked (for unpublish)"
+    )
+    revoked_by: Optional[str] = Field(
+        default=None,
+        max_length=200,
+        description="Who revoked (user email or job ID)"
+    )
+    revocation_reason: Optional[str] = Field(
+        default=None,
+        description="Reason for revocation (audit trail)"
+    )
+
     # ADF integration (for PUBLIC classification)
     adf_run_id: Optional[str] = Field(
         default=None,
@@ -180,6 +197,7 @@ class DatasetApproval(BaseModel):
         - PENDING -> APPROVED (approve)
         - PENDING -> REJECTED (reject)
         - REJECTED -> PENDING (resubmit)
+        - APPROVED -> REVOKED (unpublish - requires audit trail)
 
         Args:
             new_status: The proposed new status
@@ -192,7 +210,8 @@ class DatasetApproval(BaseModel):
         valid_transitions = {
             ApprovalStatus.PENDING: [ApprovalStatus.APPROVED, ApprovalStatus.REJECTED],
             ApprovalStatus.REJECTED: [ApprovalStatus.PENDING],
-            ApprovalStatus.APPROVED: [],  # Terminal state
+            ApprovalStatus.APPROVED: [ApprovalStatus.REVOKED],  # Can be revoked for unpublish
+            ApprovalStatus.REVOKED: [],  # Terminal state
         }
 
         return new_status in valid_transitions.get(current, [])

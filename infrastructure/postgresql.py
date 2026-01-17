@@ -585,26 +585,31 @@ class PostgreSQLRepository(BaseRepository):
     def _get_connection(self):
         """
         Context manager for PostgreSQL database connections.
-        
+
         This method provides a safe way to obtain and automatically clean up
         PostgreSQL connections. It ensures that:
         1. Connections are properly closed after use
         2. Transactions are rolled back on error
         3. Resources are freed even if exceptions occur
-        
+
+        Connection Modes (16 JAN 2026 - F7.18):
+        --------------------------------------
+        - Docker mode: Uses connection pool (ConnectionPoolManager)
+        - Function App mode: Single-use connections (original behavior)
+
         Connection Lifecycle:
         --------------------
-        1. Create connection using connection string
+        1. Create connection using connection string (or get from pool)
         2. Yield connection to caller
         3. On error: rollback transaction
-        4. Always: close connection in finally block
-        
+        4. Always: close connection (or return to pool)
+
         Yields:
         ------
         psycopg.Connection
             Active PostgreSQL connection object that can be used for queries.
             The connection has autocommit disabled by default.
-        
+
         Raises:
         ------
         psycopg.Error
@@ -613,7 +618,7 @@ class PostgreSQLRepository(BaseRepository):
             - OperationalError: Can't reach database
             - ProgrammingError: Invalid connection string
             - AuthenticationError: Invalid credentials
-        
+
         Usage Example:
         -------------
         ```python
@@ -623,20 +628,57 @@ class PostgreSQLRepository(BaseRepository):
                 results = cursor.fetchall()
             conn.commit()  # Explicit commit needed
         ```
-        
+
         Transaction Notes:
         -----------------
         - Autocommit is OFF by default (explicit commit needed)
         - On exception, transaction is rolled back automatically
         - For read-only operations, commit is still recommended
         """
+        # Check if connection pooling should be used (Docker mode)
+        from infrastructure.connection_pool import ConnectionPoolManager
+
+        if ConnectionPoolManager.is_pool_mode():
+            # Docker mode: Use connection pool
+            yield from self._get_pooled_connection()
+        else:
+            # Function App mode: Single-use connection (original behavior)
+            yield from self._get_single_use_connection()
+
+    @contextmanager
+    def _get_pooled_connection(self):
+        """
+        Get connection from pool (Docker mode).
+
+        Connection is automatically returned to pool when context exits.
+        Pool handles connection lifecycle (creation, health checks, etc.).
+        """
+        from infrastructure.connection_pool import ConnectionPoolManager
+
+        logger.debug("🔗 Getting connection from pool...")
+
+        try:
+            with ConnectionPoolManager.get_connection() as conn:
+                logger.debug("✅ Got pooled connection")
+                yield conn
+        except Exception as e:
+            logger.error(f"❌ Pool connection error: {e}")
+            raise
+
+    @contextmanager
+    def _get_single_use_connection(self):
+        """
+        Create single-use connection (Function App mode).
+
+        Original connection behavior - each request gets a new connection
+        that is closed after use.
+        """
         conn = None
         try:
             # Create connection with connection string
-            # psycopg3 handles connection pooling internally
             logger.debug(f"🔗 Attempting PostgreSQL connection...")
             logger.debug(f"  Connection string length: {len(self.conn_string)} chars")
-            
+
             # Extract and log the host being connected to
             if '@' in self.conn_string and '/' in self.conn_string:
                 try:
@@ -647,17 +689,17 @@ class PostgreSQLRepository(BaseRepository):
                     logger.debug(f"  Connecting to host: {host}")
                 except (IndexError, ValueError) as parse_err:
                     logger.debug(f"  Could not parse host from connection string: {parse_err}")
-            
+
             conn = psycopg.connect(self.conn_string, row_factory=dict_row)
             logger.debug(f"✅ PostgreSQL connection established successfully")
             yield conn
-            
+
         except psycopg.Error as e:
             # Log connection errors with context
             logger.error(f"❌ PostgreSQL connection error: {e}")
             logger.error(f"  Error type: {type(e).__name__}")
             logger.error(f"  Error details: {str(e)}")
-            
+
             # Try to extract more details about DNS errors
             if "Name or service not known" in str(e) or "could not translate host name" in str(e):
                 logger.error(f"  🚨 DNS Resolution Error - Cannot resolve database hostname")
@@ -669,14 +711,14 @@ class PostgreSQLRepository(BaseRepository):
                         logger.error(f"  Failed to resolve hostname: {host}")
                     except (IndexError, ValueError) as parse_err:
                         logger.error(f"  Could not extract hostname for error reporting: {parse_err}")
-            
+
             # Rollback any pending transaction
             if conn:
                 conn.rollback()
-            
+
             # Re-raise for caller to handle
             raise
-            
+
         finally:
             # Always close connection to free resources
             if conn:

@@ -638,10 +638,12 @@ def platform_unpublish_vector(req: func.HttpRequest) -> func.HttpResponse:
             )
 
         # Submit unpublish_vector job
+        force_approved = req_body.get('force_approved', False)  # 16 JAN 2026
         job_params = {
             "table_name": table_name,
             "schema_name": req_body.get('schema_name', 'geo'),
-            "dry_run": dry_run
+            "dry_run": dry_run,
+            "force_approved": force_approved
         }
 
         job_id = _create_and_submit_job("unpublish_vector", job_params, unpublish_request_id)
@@ -795,6 +797,7 @@ def platform_unpublish_raster(req: func.HttpRequest) -> func.HttpResponse:
             return _handle_collection_unpublish(
                 collection_id=collection_id,
                 dry_run=dry_run,
+                force_approved=req_body.get('force_approved', False),  # 16 JAN 2026
                 platform_repo=platform_repo
             )
 
@@ -838,10 +841,12 @@ def platform_unpublish_raster(req: func.HttpRequest) -> func.HttpResponse:
                 )
 
         # Submit unpublish_raster job
+        force_approved = req_body.get('force_approved', False)  # 16 JAN 2026
         job_params = {
             "stac_item_id": stac_item_id,
             "collection_id": collection_id,
-            "dry_run": dry_run
+            "dry_run": dry_run,
+            "force_approved": force_approved
         }
 
         job_id = _create_and_submit_job("unpublish_raster", job_params, unpublish_request_id)
@@ -1070,6 +1075,7 @@ def _generate_unpublish_request_id(data_type: str, internal_id: str) -> str:
 def _handle_collection_unpublish(
     collection_id: str,
     dry_run: bool,
+    force_approved: bool,  # 16 JAN 2026
     platform_repo: 'PlatformRepository'
 ) -> func.HttpResponse:
     """
@@ -1081,6 +1087,7 @@ def _handle_collection_unpublish(
     Args:
         collection_id: STAC collection ID to unpublish
         dry_run: If True, preview only (no deletions)
+        force_approved: If True, revoke approvals and unpublish approved items (16 JAN 2026)
         platform_repo: PlatformRepository instance
 
     Returns:
@@ -1146,7 +1153,8 @@ def _handle_collection_unpublish(
         job_params = {
             "stac_item_id": stac_item_id,
             "collection_id": collection_id,
-            "dry_run": dry_run
+            "dry_run": dry_run,
+            "force_approved": force_approved  # 16 JAN 2026
         }
 
         job_id = _create_and_submit_job("unpublish_raster", job_params, unpublish_request_id)

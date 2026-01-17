@@ -89,6 +89,10 @@ class UnpublishRasterJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
         "dry_run": {
             "type": "bool",
             "default": True  # Safety default - preview only!
+        },
+        "force_approved": {
+            "type": "bool",
+            "default": False  # 16 JAN 2026: Must explicitly override to unpublish approved items
         }
     }
 
@@ -138,6 +142,7 @@ class UnpublishRasterJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                     "stac_item_id": job_params["stac_item_id"],
                     "collection_id": job_params["collection_id"],
                     "dry_run": job_params.get("dry_run", True),
+                    "force_approved": job_params.get("force_approved", False),  # 16 JAN 2026
                     # Pass through validated STAC item data from resource_validators
                     "_stac_item": job_params.get("_stac_item"),
                     "_stac_item_assets": job_params.get("_stac_item_assets"),

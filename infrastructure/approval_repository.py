@@ -119,6 +119,7 @@ class ApprovalRepository(PostgreSQLRepository):
                             classification, status,
                             stac_item_id, stac_collection_id,
                             reviewer, notes, rejection_reason,
+                            revoked_at, revoked_by, revocation_reason,
                             adf_run_id,
                             created_at, reviewed_at, updated_at
                         ) VALUES (
@@ -126,6 +127,7 @@ class ApprovalRepository(PostgreSQLRepository):
                             %s, %s,
                             %s, %s,
                             %s, %s,
+                            %s, %s, %s,
                             %s, %s, %s,
                             %s,
                             %s, %s, %s
@@ -142,6 +144,7 @@ class ApprovalRepository(PostgreSQLRepository):
                         approval.status.value if approval.status else ApprovalStatus.PENDING.value,
                         approval.stac_item_id, approval.stac_collection_id,
                         approval.reviewer, approval.notes, approval.rejection_reason,
+                        approval.revoked_at, approval.revoked_by, approval.revocation_reason,
                         approval.adf_run_id,
                         now, approval.reviewed_at, now
                     )
@@ -230,6 +233,31 @@ class ApprovalRepository(PostgreSQLRepository):
                         sql.Identifier(self.table)
                     ),
                     (job_id,)
+                )
+                row = cur.fetchone()
+                return self._row_to_model(row) if row else None
+
+    def get_by_stac_item_id(self, stac_item_id: str) -> Optional[DatasetApproval]:
+        """
+        Get an approval by STAC item ID.
+
+        This is used by unpublish handlers to check if an item was approved
+        and needs revocation before unpublishing.
+
+        Args:
+            stac_item_id: STAC item identifier
+
+        Returns:
+            DatasetApproval if found, None otherwise
+        """
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL("SELECT * FROM {}.{} WHERE stac_item_id = %s").format(
+                        sql.Identifier(self.schema),
+                        sql.Identifier(self.table)
+                    ),
+                    (stac_item_id,)
                 )
                 row = cur.fetchone()
                 return self._row_to_model(row) if row else None
@@ -531,6 +559,54 @@ class ApprovalRepository(PostgreSQLRepository):
             logger.info(f"Resubmitted: {approval_id} back to pending")
         return result
 
+    def revoke(
+        self,
+        approval_id: str,
+        revoker: str,
+        reason: str
+    ) -> Optional[DatasetApproval]:
+        """
+        Revoke an APPROVED approval (for unpublishing).
+
+        This is an undesirable but necessary workflow - marks previously
+        approved data as revoked with full audit trail.
+
+        Args:
+            approval_id: Approval to revoke
+            revoker: Who is revoking (user email or job ID)
+            reason: Reason for revocation (required - audit trail)
+
+        Returns:
+            Updated DatasetApproval if found, None otherwise
+
+        Raises:
+            ValueError: If approval is not in APPROVED status or reason not provided
+        """
+        if not reason or not reason.strip():
+            raise ValueError("Revocation reason is required for audit trail")
+
+        existing = self.get_by_id(approval_id)
+        if not existing:
+            return None
+
+        if existing.status != ApprovalStatus.APPROVED:
+            raise ValueError(
+                f"Cannot revoke: approval {approval_id} is in '{existing.status.value}' status, not 'approved'"
+            )
+
+        now = datetime.now(timezone.utc)
+        updates = {
+            'status': ApprovalStatus.REVOKED,
+            'revoked_by': revoker,
+            'revoked_at': now,
+            'revocation_reason': reason
+        }
+
+        result = self.update(approval_id, updates)
+        if result:
+            logger.warning(f"REVOKED: {approval_id} by {revoker} - {reason}")
+        return result
+
     # =========================================================================
     # DELETE
     # =========================================================================
@@ -592,6 +668,10 @@ class ApprovalRepository(PostgreSQLRepository):
             reviewer=row.get('reviewer'),
             notes=row.get('notes'),
             rejection_reason=row.get('rejection_reason'),
+            # Revocation tracking (16 JAN 2026)
+            revoked_at=row.get('revoked_at'),
+            revoked_by=row.get('revoked_by'),
+            revocation_reason=row.get('revocation_reason'),
             adf_run_id=row.get('adf_run_id'),
             created_at=row.get('created_at'),
             reviewed_at=row.get('reviewed_at'),

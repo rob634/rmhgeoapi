@@ -90,6 +90,10 @@ class UnpublishVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
         "dry_run": {
             "type": "bool",
             "default": True  # Safety default - preview only!
+        },
+        "force_approved": {
+            "type": "bool",
+            "default": False  # 16 JAN 2026: Must explicitly override to unpublish approved items
         }
     }
 
@@ -144,7 +148,8 @@ class UnpublishVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                 "parameters": {
                     "table_name": table_name,
                     "schema_name": schema_name,
-                    "dry_run": dry_run
+                    "dry_run": dry_run,
+                    "force_approved": job_params.get("force_approved", False)  # 16 JAN 2026
                 }
             }]
 

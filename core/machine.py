@@ -718,7 +718,11 @@ class CoreMachine:
     # TASK PROCESSING - Entry point for task queue messages
     # ========================================================================
 
-    def process_task_message(self, task_message: TaskQueueMessage) -> Dict[str, Any]:
+    def process_task_message(
+        self,
+        task_message: TaskQueueMessage,
+        docker_context: Optional[Any] = None
+    ) -> Dict[str, Any]:
         """
         Process task message by executing the task handler.
 
@@ -733,6 +737,9 @@ class CoreMachine:
 
         Args:
             task_message: Message from task queue
+            docker_context: Optional DockerTaskContext for Docker workers (F7.18).
+                           When provided, injected as _docker_context in handler params.
+                           Provides checkpoint management and shutdown awareness.
 
         Returns:
             Result dict with success status and metadata
@@ -885,6 +892,15 @@ class CoreMachine:
                 '_task_id': task_id,
                 # '_pulse_fn': DISABLED - see note above
             }
+
+            # F7.18: Inject Docker context if provided (for Docker workers)
+            # Handlers can use params.get('_docker_context') to access:
+            #   - context.checkpoint for CheckpointManager
+            #   - context.should_stop() for graceful shutdown
+            #   - context.report_progress() for visibility
+            if docker_context is not None:
+                enriched_params['_docker_context'] = docker_context
+                self.logger.debug(f"📦 Docker context injected for task {task_id[:16]}...")
 
             # Execute handler (returns dict or TaskResult)
             raw_result = handler(enriched_params)

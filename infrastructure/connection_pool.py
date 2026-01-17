@@ -251,6 +251,7 @@ class ConnectionPoolManager:
 
         search_path = ', '.join(schemas)
         conn.execute(f"SET search_path TO {search_path}")
+        conn.commit()  # Required: psycopg_pool expects clean connection state after configure
 
     @classmethod
     def _create_pool(cls) -> ConnectionPool:

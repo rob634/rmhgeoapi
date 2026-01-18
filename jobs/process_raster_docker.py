@@ -211,10 +211,13 @@ class ProcessRasterDockerJob(JobBaseMixin, JobBase):
         task = task_results[0]
         result_data = task.result_data or {}
 
-        # Extract sub-results
-        validation = result_data.get('validation', {})
-        cog = result_data.get('cog', {})
-        stac = result_data.get('stac', {})
+        # Unwrap the 'result' key - handlers return {"success": bool, "result": {...}}
+        unwrapped = result_data.get('result', {})
+
+        # Extract sub-results from unwrapped data
+        validation = unwrapped.get('validation', {})
+        cog = unwrapped.get('cog', {})
+        stac = unwrapped.get('stac', {})
 
         # Generate TiTiler URLs if we have COG info
         titiler_urls = None

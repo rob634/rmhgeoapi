@@ -206,12 +206,15 @@ class ProcessLargeRasterDockerJob(JobBaseMixin, JobBase):
         task = task_results[0]
         result_data = task.result_data or {}
 
-        # Extract sub-results
-        tiling = result_data.get('tiling', {})
-        extraction = result_data.get('extraction', {})
-        cogs = result_data.get('cogs', {})
-        mosaicjson = result_data.get('mosaicjson', {})
-        stac = result_data.get('stac', {})
+        # Unwrap the 'result' key - handlers return {"success": bool, "result": {...}}
+        unwrapped = result_data.get('result', {})
+
+        # Extract sub-results from unwrapped data
+        tiling = unwrapped.get('tiling', {})
+        extraction = unwrapped.get('extraction', {})
+        cogs = unwrapped.get('cogs', {})
+        mosaicjson = unwrapped.get('mosaicjson', {})
+        stac = unwrapped.get('stac', {})
 
         # Generate TiTiler URLs if we have MosaicJSON
         titiler_urls = None

@@ -41,7 +41,7 @@ import time
 import json
 import signal
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 # Ensure APP_MODE is set before importing config
@@ -94,7 +94,7 @@ _azure_monitor_enabled = _configure_azure_monitor()
 
 
 # Azure SDK imports
-from azure.servicebus import ServiceBusClient, ServiceBusReceiver, ServiceBusReceivedMessage
+from azure.servicebus import ServiceBusClient, ServiceBusReceiver, ServiceBusReceivedMessage, AutoLockRenewer
 from azure.servicebus.exceptions import (
     ServiceBusError,
     ServiceBusConnectionError,
@@ -299,12 +299,18 @@ class DockerWorker:
 
         client = self._get_sb_client()
 
+        # Create AutoLockRenewer for long-running tasks (up to 2 hours)
+        # This prevents competing consumers during lengthy COG processing
+        lock_renewer = AutoLockRenewer(max_lock_renewal_duration=7200)  # 2 hours in seconds
+        logger.info("AutoLockRenewer initialized (max_lock_renewal_duration=2h)")
+
         while not _shutdown_requested:
             try:
                 # Create receiver with auto lock renewal for long-running tasks
                 with client.get_queue_receiver(
                     queue_name=self.queue_name,
                     max_wait_time=self.max_wait_time_seconds,
+                    auto_lock_renewer=lock_renewer,
                 ) as receiver:
 
                     # Receive one message at a time for long-running tasks
@@ -343,6 +349,7 @@ class DockerWorker:
 
         # Cleanup
         logger.info("Shutting down...")
+        lock_renewer.close()
         if self._sb_client:
             self._sb_client.close()
 

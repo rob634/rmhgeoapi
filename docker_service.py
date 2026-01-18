@@ -159,7 +159,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 # Azure Service Bus imports for queue polling
-from azure.servicebus import ServiceBusClient, ServiceBusReceiver, ServiceBusReceivedMessage
+from azure.servicebus import ServiceBusClient, ServiceBusReceiver, ServiceBusReceivedMessage, AutoLockRenewer
 from azure.servicebus.exceptions import (
     ServiceBusError,
     ServiceBusConnectionError,
@@ -552,11 +552,17 @@ class BackgroundQueueWorker:
             self._is_running = False
             return
 
+        # Create AutoLockRenewer for long-running tasks (up to 2 hours)
+        # This prevents competing consumers during lengthy COG processing
+        lock_renewer = AutoLockRenewer(max_lock_renewal_duration=7200)  # 2 hours in seconds
+        logger.info("[Queue Worker] AutoLockRenewer initialized (max_duration=2h)")
+
         while not self._stop_event.is_set():
             try:
                 with client.get_queue_receiver(
                     queue_name=self._queue_name,
                     max_wait_time=self.max_wait_time_seconds,
+                    auto_lock_renewer=lock_renewer,
                 ) as receiver:
 
                     self._last_poll_time = datetime.now(timezone.utc)
@@ -596,6 +602,10 @@ class BackgroundQueueWorker:
 
         # Cleanup
         self._is_running = False
+        try:
+            lock_renewer.close()
+        except Exception:
+            pass
         if self._sb_client:
             try:
                 self._sb_client.close()

@@ -2,9 +2,10 @@
 
 > **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [All Jobs](WIKI_API_JOB_SUBMISSION.md) | [Errors](WIKI_API_ERRORS.md) | [Glossary](WIKI_API_GLOSSARY.md)
 
-**Date**: 19 DEC 2025
+**Date**: 16 JAN 2026
 **Purpose**: External application integration via Anti-Corruption Layer (ACL)
 **Audience**: DDH developers, external application integrators
+**OpenAPI Spec**: `openapi/platform-api-v1.json` (v1.3.0)
 
 ---
 
@@ -49,10 +50,31 @@ https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `/api/platform/status/{request_id}` | GET | Check request/job status |
-| `/api/health` | GET | System health check (comprehensive) |
-| `/api/dbadmin/jobs?status=failed` | GET | Query failed jobs |
+| `/api/platform/status` | GET | List all platform requests |
+| `/api/platform/jobs/{job_id}/status` | GET | Direct job status lookup |
+| `/api/platform/health` | GET | Simplified system readiness (F7.12) |
+| `/api/platform/failures` | GET | Recent failures with sanitized errors (F7.12) |
+| `/api/platform/lineage/{request_id}` | GET | Data lineage trace (F7.12) |
+| `/api/platform/validate` | POST | Pre-flight validation before submission (F7.12) |
 
-> **Note (19 DEC 2025)**: `/api/platform/health`, `/api/platform/stats`, and `/api/platform/failures` were removed as redundant with `/api/health`.
+### Catalog - STAC Verification (16 JAN 2026 - F12.8)
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/platform/catalog/lookup` | GET | Lookup STAC item by DDH identifiers |
+| `/api/platform/catalog/item/{collection}/{item}` | GET | Get full STAC item |
+| `/api/platform/catalog/assets/{collection}/{item}` | GET | Get asset URLs + TiTiler preview URLs |
+| `/api/platform/catalog/dataset/{dataset_id}` | GET | List all items for a DDH dataset |
+
+### Approvals - QA Workflow (16 JAN 2026)
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/platform/approve` | POST | Approve a dataset for publishing |
+| `/api/platform/revoke` | POST | Revoke approval from a dataset |
+| `/api/platform/approvals` | GET | List dataset approvals |
+| `/api/platform/approvals/{approval_id}` | GET | Get approval details |
+| `/api/platform/approvals/status` | GET | Batch lookup approval status for multiple items |
 
 ### Unpublish/Delete (Delete)
 
@@ -829,21 +851,99 @@ curl -X POST \
 
 ## 7. System Health and Monitoring
 
-> **Note (19 DEC 2025)**: Platform-specific health endpoints (`/api/platform/health`, `/api/platform/stats`, `/api/platform/failures`) were removed as they were redundant with the comprehensive `/api/health` endpoint.
+### Platform Health (Simplified)
 
-### Health Check
-
-Use the main health endpoint for comprehensive system status:
+The `/api/platform/health` endpoint provides a simplified system readiness check designed for external apps:
 
 ```bash
-curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/health"
+curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/health"
 ```
 
-This provides status for all components: database, Service Bus, storage, STAC, TiTiler, and more.
+**Response:**
+```json
+{
+    "status": "healthy",
+    "ready_for_jobs": true,
+    "summary": {
+        "database": "healthy",
+        "storage": "healthy",
+        "service_bus": "healthy"
+    },
+    "jobs": {
+        "queue_backlog": 5,
+        "processing": 2,
+        "failed_last_24h": 1,
+        "avg_completion_minutes": 15.3
+    },
+    "timestamp": "2026-01-16T10:00:00Z"
+}
+```
 
-### Failed Jobs
+### Platform Failures
 
-Use the dbadmin endpoint to query failed jobs:
+Get recent failures with sanitized error summaries (no internal paths or secrets):
+
+```bash
+curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/failures?hours=24&limit=20"
+```
+
+**Response:**
+```json
+{
+    "period_hours": 24,
+    "total_failures": 5,
+    "failure_rate": "3.2%",
+    "common_patterns": [
+        {"pattern": "File not found", "count": 3},
+        {"pattern": "Invalid CRS", "count": 2}
+    ],
+    "recent_failures": [
+        {
+            "job_id": "abc123...",
+            "job_type": "process_raster_v2",
+            "failed_at": "2026-01-16T10:00:00Z",
+            "error_category": "file_not_found",
+            "error_summary": "Source file not accessible",
+            "request_id": "req-456..."
+        }
+    ]
+}
+```
+
+### Platform Lineage
+
+Trace data lineage for a Platform request (source → processing → outputs):
+
+```bash
+curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/lineage/{request_id}"
+```
+
+### Pre-flight Validation
+
+Validate a file before submitting a job:
+
+```bash
+curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/validate" \
+  -H "Content-Type: application/json" \
+  -d '{"data_type": "raster", "container_name": "bronze-rasters", "blob_name": "imagery.tif"}'
+```
+
+**Response:**
+```json
+{
+    "valid": true,
+    "file_exists": true,
+    "file_size_mb": 250.5,
+    "recommended_job_type": "process_raster_v2",
+    "processing_mode": "function",
+    "estimated_minutes": 15,
+    "warnings": []
+}
+```
+
+### Failed Jobs Query
+
+Use the dbadmin endpoint to query failed jobs with full details:
 
 ```bash
 curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/jobs?status=failed&hours=24&limit=10"
@@ -933,15 +1033,235 @@ When a raster job completes, the result includes:
 
 ---
 
+## 9. Catalog API - STAC Verification (F12.8)
+
+The Catalog API allows DDH to verify that processed data exists in the STAC catalog and retrieve asset URLs for visualization. This is the B2B interface for STAC access.
+
+### Catalog Lookup
+
+Verify a STAC item exists using DDH identifiers:
+
+```bash
+curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/catalog/lookup?dataset_id=flood-data&resource_id=res-001&version_id=v1.0"
+```
+
+**Query Parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `dataset_id` | Yes | DDH dataset identifier |
+| `resource_id` | Yes | DDH resource identifier |
+| `version_id` | Yes | DDH version identifier |
+
+**Response (found):**
+```json
+{
+    "found": true,
+    "stac": {
+        "collection_id": "flood-data",
+        "item_id": "flood-data-res-001-v1-0",
+        "item_url": "/api/platform/catalog/item/flood-data/flood-data-res-001-v1-0",
+        "assets_url": "/api/platform/catalog/assets/flood-data/flood-data-res-001-v1-0"
+    },
+    "processing": {
+        "request_id": "a3f2c1b8...",
+        "job_id": "abc123...",
+        "completed_at": "2026-01-15T10:00:00Z"
+    },
+    "metadata": {
+        "bbox": [-75.5, -56.5, -66.5, -49.0],
+        "datetime": "2026-01-15T00:00:00Z"
+    },
+    "ddh_refs": {
+        "dataset_id": "flood-data",
+        "resource_id": "res-001",
+        "version_id": "v1.0"
+    }
+}
+```
+
+**Response (not found - job still processing):**
+```json
+{
+    "found": false,
+    "reason": "job_not_completed",
+    "message": "Job is processing. STAC item will be available when job completes.",
+    "job_status": "processing",
+    "status_url": "/api/platform/status/a3f2c1b8..."
+}
+```
+
+### Get STAC Item
+
+Retrieve the full STAC item (GeoJSON Feature) with all metadata:
+
+```bash
+curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/catalog/item/{collection_id}/{item_id}"
+```
+
+Returns standard STAC Item format (GeoJSON Feature) with geometry, properties, and assets.
+
+### Get Asset URLs with TiTiler
+
+Retrieve asset URLs with pre-built TiTiler visualization URLs:
+
+```bash
+curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/catalog/assets/{collection_id}/{item_id}"
+```
+
+**Query Parameters:**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `include_titiler` | `true` | Include TiTiler URLs |
+
+**Response:**
+```json
+{
+    "item_id": "flood-data-res-001-v1-0",
+    "collection_id": "flood-data",
+    "bbox": [-75.5, -56.5, -66.5, -49.0],
+    "assets": {
+        "data": {
+            "href": "https://rmhazuregeocogs.blob.core.windows.net/silver-cogs/flood.tif",
+            "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+            "size_mb": 125.5
+        }
+    },
+    "titiler": {
+        "preview": "https://rmhtitiler-.../cog/preview?url=...",
+        "tiles": "https://rmhtitiler-.../cog/tiles/{z}/{x}/{y}?url=...",
+        "info": "https://rmhtitiler-.../cog/info?url=...",
+        "tilejson": "https://rmhtitiler-.../cog/tilejson.json?url=...",
+        "wmts": "https://rmhtitiler-.../cog/WMTSCapabilities.xml?url=..."
+    },
+    "platform_refs": {
+        "dataset_id": "flood-data",
+        "resource_id": "res-001",
+        "version_id": "v1.0"
+    }
+}
+```
+
+### List Items for Dataset
+
+List all STAC items for a DDH dataset:
+
+```bash
+curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/catalog/dataset/{dataset_id}?limit=50"
+```
+
+**Response:**
+```json
+{
+    "dataset_id": "flood-data",
+    "count": 3,
+    "items": [
+        {
+            "item_id": "flood-data-res-001-v1-0",
+            "collection_id": "flood-data",
+            "bbox": [-75.5, -56.5, -66.5, -49.0],
+            "datetime": "2026-01-15T00:00:00Z",
+            "resource_id": "res-001",
+            "version_id": "v1.0"
+        }
+    ]
+}
+```
+
+---
+
+## 10. Approvals API - QA Workflow
+
+The Approvals API provides a QA workflow for reviewing datasets before they are published. External apps can submit datasets for review and track approval status.
+
+### Approve Dataset
+
+Approve a dataset for publishing:
+
+```bash
+curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/approve" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "stac_item_id": "flood-data-res-001-v1-0",
+    "stac_collection_id": "flood-data",
+    "approved_by": "user@example.com",
+    "notes": "QA review passed"
+  }'
+```
+
+### Revoke Approval
+
+Revoke approval from a previously approved dataset:
+
+```bash
+curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/revoke" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "stac_item_id": "flood-data-res-001-v1-0",
+    "stac_collection_id": "flood-data",
+    "revoked_by": "admin@example.com",
+    "reason": "Data quality issue discovered"
+  }'
+```
+
+### List Approvals
+
+List dataset approvals with optional filtering:
+
+```bash
+curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/approvals?status=pending&limit=50"
+```
+
+**Query Parameters:**
+
+| Parameter | Description |
+|-----------|-------------|
+| `status` | Filter by status: `pending`, `approved`, `rejected` |
+| `limit` | Maximum results (default: 50) |
+
+### Get Approval Details
+
+Get details of a specific approval:
+
+```bash
+curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/approvals/{approval_id}"
+```
+
+### Batch Approval Status
+
+Get approval statuses for multiple items (for UI dashboards):
+
+```bash
+curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/approvals/status?stac_item_ids=item1,item2,item3"
+```
+
+**Response:**
+```json
+{
+    "success": true,
+    "statuses": {
+        "item1": {"has_approval": true, "is_approved": true, "approved_at": "2026-01-15T10:00:00Z"},
+        "item2": {"has_approval": true, "is_approved": false, "status": "pending"},
+        "item3": {"has_approval": false}
+    }
+}
+```
+
+---
+
 ## Related Documentation
 
 - **CoreMachine API**: See `WIKI_API_JOB_SUBMISSION.md` for direct ETL access
 - **STAC API**: See `/api/stac` endpoints for metadata queries
 - **OGC Features API**: See `/api/features` for vector data access
 - **Architecture**: See `docs_claude/COREMACHINE_PLATFORM_ARCHITECTURE.md`
+- **OpenAPI Spec**: See `openapi/platform-api-v1.json` for machine-readable API definition
+- **B2B Implementation Plan**: See `docs_claude/B2B_STAC_CATALOG_PLAN.md`
 
 ---
 
-**Last Updated**: 19 DEC 2025
+**Last Updated**: 16 JAN 2026
 **Function App**: rmhazuregeoapi
 **Region**: East US
+**API Version**: 1.3.0

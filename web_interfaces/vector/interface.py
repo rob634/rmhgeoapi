@@ -185,6 +185,27 @@ class VectorInterface(BaseInterface):
             margin-bottom: 6px;
         }
 
+        /* Approved badge (17 JAN 2026) */
+        .approved-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, #3B82F6 0%, #2563EB 100%);
+            color: white;
+            font-size: 10px;
+            font-weight: 600;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-bottom: 6px;
+            margin-right: 4px;
+        }
+
+        /* Disabled/protected button (17 JAN 2026) */
+        .link-badge-disabled {
+            background: linear-gradient(135deg, #9CA3AF 0%, #6B7280 100%) !important;
+            color: white !important;
+            cursor: not-allowed !important;
+            opacity: 0.7;
+        }
+
         /* Tiles button (13 JAN 2026) */
         .link-badge-tiles {
             background: linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%) !important;
@@ -564,6 +585,10 @@ class VectorInterface(BaseInterface):
                 const isPromoted = promotedCollectionIds.has(c.id);
                 const title = c.title || c.id;
 
+                // Check approval status (17 JAN 2026)
+                const approvalStatus = window.approvalStatuses?.[c.id] || {};
+                const isApproved = approvalStatus.is_approved === true;
+
                 // Build action buttons (13 JAN 2026: Added Vector Tiles viewer)
                 const tilesLink = `/api/interface/vector-tiles?collection=${encodeURIComponent(c.id)}`;
                 let actionButtons = `
@@ -584,8 +609,21 @@ class VectorInterface(BaseInterface):
 
                 if (isPromoted) {
                     // No action buttons for promoted - just view
+                } else if (isApproved) {
+                    // Approved: Show promote but NO delete button (17 JAN 2026)
+                    actionButtons += `
+                        <a href="${promoteLink}"
+                           class="link-badge link-badge-promote"
+                           onclick="event.stopPropagation()"
+                           title="Promote to gallery with styling">
+                            ⬆️ Promote
+                        </a>
+                        <span class="link-badge link-badge-disabled"
+                              title="Cannot delete: Dataset is approved. Use /api/platform/revoke first.">
+                            🔒 Protected
+                        </span>`;
                 } else {
-                    // Promote and Delete buttons for non-promoted
+                    // Not promoted, not approved: Show promote and delete buttons
                     actionButtons += `
                         <a href="${promoteLink}"
                            class="link-badge link-badge-promote"
@@ -602,6 +640,7 @@ class VectorInterface(BaseInterface):
 
                 return `
                     <div class="collection-card" onclick="showCollectionDetail('${c.id}', event)" title="${title}">
+                        ${isApproved ? '<span class="approved-badge">✓ Approved</span>' : ''}
                         ${isPromoted ? '<span class="promoted-badge">⭐ Promoted</span>' : ''}
                         <h3>${title}</h3>
                         <div class="description">${desc}</div>

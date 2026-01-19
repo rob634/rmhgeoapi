@@ -1392,6 +1392,75 @@ def platform_approvals_status_route(req: func.HttpRequest) -> func.HttpResponse:
     return platform_approvals_status(req)
 
 
+# ============================================================================
+# PLATFORM CATALOG API - B2B STAC Access (16 JAN 2026 - F12.8)
+# ============================================================================
+# B2B endpoints for DDH to verify STAC items exist and get asset URLs.
+# DDH can lookup using their identifiers without knowing our STAC IDs.
+# ============================================================================
+
+@app.route(route="platform/catalog/lookup", methods=["GET"])
+async def platform_catalog_lookup_route(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Lookup STAC item by DDH identifiers.
+
+    GET /api/platform/catalog/lookup?dataset_id=X&resource_id=Y&version_id=Z
+
+    Verifies that a STAC item exists for the given DDH identifiers.
+    Returns STAC collection/item IDs and metadata if found.
+    """
+    if guard := _platform_endpoint_guard():
+        return guard
+    from triggers.trigger_platform_catalog import platform_catalog_lookup
+    return await platform_catalog_lookup(req)
+
+
+@app.route(route="platform/catalog/item/{collection_id}/{item_id}", methods=["GET"])
+async def platform_catalog_item_route(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Get full STAC item by collection and item ID.
+
+    GET /api/platform/catalog/item/{collection_id}/{item_id}
+
+    Returns the complete STAC item (GeoJSON Feature) with all metadata.
+    """
+    if guard := _platform_endpoint_guard():
+        return guard
+    from triggers.trigger_platform_catalog import platform_catalog_item
+    return await platform_catalog_item(req)
+
+
+@app.route(route="platform/catalog/assets/{collection_id}/{item_id}", methods=["GET"])
+async def platform_catalog_assets_route(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Get asset URLs with pre-built TiTiler visualization URLs.
+
+    GET /api/platform/catalog/assets/{collection_id}/{item_id}
+
+    Returns asset URLs and TiTiler URLs for visualization.
+    Query param: include_titiler=false to skip TiTiler URLs.
+    """
+    if guard := _platform_endpoint_guard():
+        return guard
+    from triggers.trigger_platform_catalog import platform_catalog_assets
+    return await platform_catalog_assets(req)
+
+
+@app.route(route="platform/catalog/dataset/{dataset_id}", methods=["GET"])
+async def platform_catalog_dataset_route(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    List all STAC items for a DDH dataset.
+
+    GET /api/platform/catalog/dataset/{dataset_id}?limit=100
+
+    Returns all STAC items with the specified platform:dataset_id.
+    """
+    if guard := _platform_endpoint_guard():
+        return guard
+    from triggers.trigger_platform_catalog import platform_catalog_dataset
+    return await platform_catalog_dataset(req)
+
+
 @app.route(route="stac/vector", methods=["POST"])
 def stac_vector(req: func.HttpRequest) -> func.HttpResponse:
     """

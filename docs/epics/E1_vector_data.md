@@ -3,6 +3,7 @@
 **Type**: Business
 **Value Statement**: Any vector garbage you throw at us becomes clean, standardized, API-accessible data.
 **Runs On**: E7 (Pipeline Infrastructure)
+**Served By**: [E6 (Geospatial Tile Services)](E6_tile_services.md) - TiPG for OGC Features & Vector Tiles
 **Status**: 🚧 PARTIAL (Core ✅, Styles 🚧)
 **Completed**: NOV 2025 (core features)
 
@@ -39,6 +40,7 @@
 ### Feature F1.2: OGC Features API ✅
 
 **Deliverable**: `/api/features/collections/{id}/items` with bbox queries
+**Served By**: [E6.F6.2 (TiPG Vector Tiles & OGC Features)](E6_tile_services.md#feature-f62-vector-tiles--ogc-features-tipg-)
 
 | Story | Description |
 |-------|-------------|
@@ -48,6 +50,8 @@
 | S1.2.4 | Create interactive map web interface |
 
 **Key Files**: `web_interfaces/features/`, `triggers/ogc_features.py`
+
+**Note**: OGC Features API is served by TiPG in the geotiler service (E6). E1 handles ETL into PostGIS; E6 handles API serving.
 
 ---
 
@@ -182,6 +186,7 @@
 ### Feature F1.10: Vector Tile Optimization ✅ COMPLETE
 
 **Deliverable**: `{table}_tiles` materialized views with ST_Subdivide for TiPG performance
+**Optimizes For**: [E6.F6.2 (TiPG Vector Tiles)](E6_tile_services.md#feature-f62-vector-tiles--ogc-features-tipg-)
 **Completed**: 15 JAN 2026
 
 | Story | Status | Description |
@@ -206,10 +211,10 @@
 - 89% reduction in maximum vertex count
 - Execution time: ~638ms for view creation
 
-**TiPG Integration**:
-- TiPG vector tile server automatically discovers `_tiles` suffixed views
+**TiPG Integration (E6)**:
+- TiPG vector tile server (E6.F6.2) automatically discovers `_tiles` suffixed views
 - Clipping operations during MVT generation are dramatically faster
-- No changes required to TiPG configuration
+- No changes required to TiPG configuration in geotiler
 
 ---
 

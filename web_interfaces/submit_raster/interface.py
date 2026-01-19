@@ -4,7 +4,7 @@
 # EPOCH: 4 - ACTIVE
 # STATUS: Web Interface - Submit Raster Job Form
 # PURPOSE: HTMX interface for ProcessRasterV2Job submission
-# LAST_REVIEWED: 28 DEC 2025
+# LAST_REVIEWED: 19 JAN 2026
 # EXPORTS: SubmitRasterInterface
 # DEPENDENCIES: azure.functions, web_interfaces.base, jobs.process_raster_v2
 # ============================================================================
@@ -13,12 +13,14 @@ Submit Raster Job interface module.
 
 Web interface for submitting ProcessRasterV2Job with file browser and form.
 
-Features (28 DEC 2025):
+Features:
     - HTMX-powered file browser (reuses Storage patterns)
     - Auto-filter for raster extensions (.tif, .tiff, .img, .jp2, etc.)
     - Form for ProcessRasterV2Job parameters
     - HTMX job submission with result display
     - Raster-specific fields (CRS, raster_type, output_tier)
+    - Processing Mode toggle (19 JAN 2026): Route to Docker worker for
+      large files or long-running tasks (processing_mode="docker")
 
 Exports:
     SubmitRasterInterface: Job submission interface for raster ETL
@@ -330,6 +332,11 @@ class SubmitRasterInterface(BaseInterface):
             if collection_id:
                 processing_options['collection_id'] = collection_id
 
+            # Docker processing mode (19 JAN 2026)
+            use_docker = get_param('use_docker')
+            if use_docker == 'on':  # HTML checkbox sends 'on' when checked
+                processing_options['processing_mode'] = 'docker'
+
             if processing_options:
                 platform_payload['processing_options'] = processing_options
 
@@ -401,6 +408,7 @@ class SubmitRasterInterface(BaseInterface):
         """Render successful Platform API submission result."""
         request_id = result.get('request_id', 'N/A')
         job_id = result.get('job_id', 'N/A')
+        job_type = result.get('job_type', 'unknown')
         status = result.get('status', 'accepted')
 
         # Determine message based on status
@@ -410,6 +418,18 @@ class SubmitRasterInterface(BaseInterface):
             title = "Request Submitted Successfully"
         else:
             title = "Request Processed"
+
+        # Check if Docker mode was used (19 JAN 2026)
+        processing_options = payload.get('processing_options', {})
+        is_docker = processing_options.get('processing_mode') == 'docker'
+        processing_mode_row = ''
+        if is_docker:
+            processing_mode_row = '''
+                <div class="detail-row">
+                    <span class="detail-label">Processing Mode</span>
+                    <span class="detail-value" style="color: #2563eb; font-weight: 600;">Docker Worker</span>
+                </div>
+            '''
 
         return f'''
         <div class="submit-result success">
@@ -425,6 +445,10 @@ class SubmitRasterInterface(BaseInterface):
                     <span class="detail-value mono">{job_id}</span>
                 </div>
                 <div class="detail-row">
+                    <span class="detail-label">Job Type</span>
+                    <span class="detail-value mono">{job_type}</span>
+                </div>
+                <div class="detail-row">
                     <span class="detail-label">DDH Identifier</span>
                     <span class="detail-value">{payload.get('dataset_id')}/{payload.get('resource_id')}/{payload.get('version_id')}</span>
                 </div>
@@ -432,6 +456,7 @@ class SubmitRasterInterface(BaseInterface):
                     <span class="detail-label">Source File</span>
                     <span class="detail-value">{payload.get('file_name', 'N/A')}</span>
                 </div>
+                {processing_mode_row}
             </div>
             <div class="result-actions">
                 <a href="/api/interface/tasks?job_id={job_id}" class="btn btn-primary">Workflow Monitor</a>
@@ -710,6 +735,24 @@ class SubmitRasterInterface(BaseInterface):
                                     <input type="text" id="input_crs" name="input_crs"
                                            placeholder="e.g., EPSG:32618">
                                     <span class="field-hint">Override if source CRS is missing or wrong</span>
+                                </div>
+                                <!-- Processing Mode Toggle (19 JAN 2026) -->
+                                <div class="form-group processing-mode-group">
+                                    <label>Processing Mode</label>
+                                    <div class="toggle-container">
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" id="use_docker" name="use_docker"
+                                                   onchange="updateCurlPreview(); updateProcessingModeLabel()">
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                        <span id="processing-mode-label" class="toggle-label">
+                                            Function App (default)
+                                        </span>
+                                    </div>
+                                    <span class="field-hint docker-hint">
+                                        Enable Docker for large files, complex projections, or when Function times out.
+                                        Docker worker has longer timeouts and more memory.
+                                    </span>
                                 </div>
                             </div>
                         </div>
@@ -1310,6 +1353,81 @@ class SubmitRasterInterface(BaseInterface):
             margin-bottom: 0;
         }
 
+        /* Processing Mode Toggle (19 JAN 2026) */
+        .processing-mode-group {
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid var(--ds-gray-light);
+        }
+
+        .toggle-container {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 48px;
+            height: 26px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: 0.3s;
+            border-radius: 26px;
+        }
+
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 20px;
+            width: 20px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: 0.3s;
+            border-radius: 50%;
+        }
+
+        .toggle-switch input:checked + .toggle-slider {
+            background-color: #2563eb;
+        }
+
+        .toggle-switch input:checked + .toggle-slider:before {
+            transform: translateX(22px);
+        }
+
+        .toggle-label {
+            font-size: 14px;
+            color: var(--ds-navy);
+            font-weight: 500;
+        }
+
+        .toggle-label.docker-active {
+            color: #2563eb;
+            font-weight: 600;
+        }
+
+        .docker-hint {
+            display: block;
+            margin-top: 8px;
+            line-height: 1.4;
+        }
+
         /* Prominent cURL Section */
         .curl-section-prominent {
             background: #1e293b;
@@ -1515,6 +1633,19 @@ class SubmitRasterInterface(BaseInterface):
             }
         });
 
+        // Update processing mode label when toggle changes (19 JAN 2026)
+        function updateProcessingModeLabel() {
+            const useDocker = document.getElementById('use_docker').checked;
+            const label = document.getElementById('processing-mode-label');
+            if (useDocker) {
+                label.textContent = 'Docker Worker (long-running-tasks queue)';
+                label.classList.add('docker-active');
+            } else {
+                label.textContent = 'Function App (default)';
+                label.classList.remove('docker-active');
+            }
+        }
+
         // Generate Platform API cURL command from form values
         function generateCurl() {
             const blobName = document.getElementById('blob_name').value;
@@ -1529,6 +1660,7 @@ class SubmitRasterInterface(BaseInterface):
             const rasterType = document.getElementById('raster_type').value;
             const outputTier = document.getElementById('output_tier').value;
             const inputCrs = document.getElementById('input_crs').value;
+            const useDocker = document.getElementById('use_docker').checked;
 
             // Optional metadata
             const serviceName = document.getElementById('service_name').value;
@@ -1572,6 +1704,8 @@ class SubmitRasterInterface(BaseInterface):
             if (inputCrs) processingOptions.crs = inputCrs;
             if (rasterType && rasterType !== 'auto') processingOptions.raster_type = rasterType;
             if (collectionId) processingOptions.collection_id = collectionId;
+            // Docker processing mode (19 JAN 2026)
+            if (useDocker) processingOptions.processing_mode = 'docker';
 
             if (Object.keys(processingOptions).length > 0) {
                 payload.processing_options = processingOptions;
@@ -1609,7 +1743,7 @@ class SubmitRasterInterface(BaseInterface):
         document.addEventListener('DOMContentLoaded', () => {
             const formInputs = ['dataset_id', 'resource_id', 'version_id', 'raster_type',
                                 'output_tier', 'input_crs', 'service_name', 'description',
-                                'access_level', 'tags', 'collection_id'];
+                                'access_level', 'tags', 'collection_id', 'use_docker'];
             formInputs.forEach(id => {
                 const el = document.getElementById(id);
                 if (el) {

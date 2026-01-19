@@ -3,8 +3,9 @@
 **Type**: Business
 **Value Statement**: We can host and serve FATHOM/CMIP6-scale data.
 **Runs On**: E7 (Pipeline Infrastructure)
-**Status**: 🚧 PARTIAL (F9.1 ✅ Rwanda, F9.5 ✅, F9.6 🚧)
-**Last Updated**: 08 JAN 2026
+**Served By**: [E6 (Geospatial Tile Services)](E6_tile_services.md) - TiTiler-xarray for Zarr/NetCDF tile serving
+**Status**: 🚧 PARTIAL (F9.1 ✅ Rwanda, F9.5 ✅)
+**Last Updated**: 18 JAN 2026
 
 **Strategic Context**:
 > E9 is the "data hosting" epic. It handles ingesting, processing, and serving very large datasets
@@ -13,26 +14,26 @@
 
 **Architecture**:
 ```
-Raw Data                  Processing                Serving
+Raw Data                  Processing                Serving (E6)
 ┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
-│ FATHOM GeoTIFFs │─────▶│ Band Stack +    │─────▶│ TiTiler COG     │
-│ (1000s tiles)   │      │ Spatial Merge   │      │ Service         │
+│ FATHOM GeoTIFFs │─────▶│ Band Stack +    │─────▶│ E6: COG Tiles   │
+│ (1000s tiles)   │      │ Spatial Merge   │      │ (F6.1)          │
 ├─────────────────┤      ├─────────────────┤      ├─────────────────┤
-│ CMIP6 NetCDF    │─────▶│ VirtualiZarr    │─────▶│ TiTiler Zarr    │
-│ (TB-scale)      │      │ References      │      │ Service         │
+│ CMIP6 NetCDF    │─────▶│ VirtualiZarr    │─────▶│ E6: Zarr Tiles  │
+│ (TB-scale)      │      │ References      │      │ (F6.3)          │
 └─────────────────┘      └─────────────────┘      └─────────────────┘
-   Bronze Storage           Silver Storage           API Endpoints
+   Bronze Storage           Silver Storage         geotiler service
 ```
 
 **Feature Summary**:
 | Feature | Status | Description |
 |---------|--------|-------------|
-| F9.1 | 🚧 | FATHOM ETL Operations (~~E10~~) |
+| F9.1 | ✅ | FATHOM ETL Operations (~~E10~~) |
 | F9.2 | ⬜ | FATHOM Flood Data Hosting |
 | F9.3 | 📋 | VirtualiZarr Pipeline (NetCDF → Zarr references) |
 | F9.4 | 📋 | CMIP6 Data Hosting |
 | F9.5 | ✅ | xarray Service Layer |
-| F9.6 | 🚧 | TiTiler Services (COG ✅ + Zarr ✅) |
+| ~~F9.6~~ | → | **Moved to [E6.F6.1-F6.4](E6_tile_services.md)** (TiTiler Services) |
 | F9.7 | ⬜ | Reader App Migration |
 | F9.8 | 📋 | Pre-prepared Raster Ingest |
 | F9.9 | 📋 | FATHOM Query API |
@@ -90,11 +91,12 @@ Raw Data                  Processing                Serving
 ### Feature F9.3: VirtualiZarr Pipeline 📋 PLANNED
 
 **Deliverable**: Kerchunk/VirtualiZarr reference files enabling cloud-native access to legacy NetCDF
+**Served By**: [E6.F6.3 (Multidimensional Data)](E6_tile_services.md#feature-f63-multidimensional-data-titiler-xarray-)
 
 **Strategic Context**:
 Eliminates need for traditional THREDDS/OPeNDAP infrastructure. NetCDF files
 remain in blob storage unchanged; lightweight JSON references (~KB) enable
-**TiTiler Zarr Service** to serve data via modern cloud-optimized patterns.
+**E6 TiTiler Zarr Service** to serve data via modern cloud-optimized patterns.
 
 **Compute Profile**: Azure Function App (reference generation is I/O-bound, not compute-bound)
 
@@ -112,15 +114,15 @@ remain in blob storage unchanged; lightweight JSON references (~KB) enable
 
 **Architecture**:
 ```
-NetCDF Files (unchanged)     Reference Generation      TiTiler Zarr Service
+NetCDF Files (unchanged)     Reference Generation      E6: TiTiler-xarray
 ┌─────────────────────┐     ┌──────────────────┐     ┌────────────────┐
 │ tasmax_2015.nc      │     │                  │     │                │
 │ tasmax_2016.nc      │────▶│ Kerchunk JSON    │────▶│ /tiles/{z}/{x} │
 │ tasmax_2017.nc      │     │ (~5KB per file)  │     │ /point/{x},{y} │
 │ ...                 │     │                  │     │                │
 └─────────────────────┘     └──────────────────┘     └────────────────┘
-  Bronze Storage Account     Silver Storage Account   Cloud-Native API
-     (no conversion)           (lightweight refs)     (no THREDDS)
+  Bronze Storage Account     Silver Storage Account   geotiler service
+     (no conversion)           (lightweight refs)     (E6.F6.3)
 ```
 
 ---
@@ -150,6 +152,7 @@ NetCDF Files (unchanged)     Reference Generation      TiTiler Zarr Service
 ### Feature F9.5: xarray Service Layer ✅
 
 **Deliverable**: Time-series and statistics endpoints for multidimensional data
+**Served By**: [E6.F6.3 (Multidimensional Data)](E6_tile_services.md#feature-f63-multidimensional-data-titiler-xarray-)
 
 | Story | Status | Description |
 |-------|--------|-------------|
@@ -160,24 +163,24 @@ NetCDF Files (unchanged)     Reference Generation      TiTiler Zarr Service
 
 **Key Files**: `xarray_api/`, `services/xarray_reader.py`
 
+**Note**: Tile serving for Zarr/NetCDF data is handled by TiTiler-xarray in the geotiler service (E6).
+
 ---
 
-### Feature F9.6: TiTiler Services 🚧 PARTIAL
+### Feature F9.6: TiTiler Services → MOVED TO E6
 
-**Deliverable**: Unified tile serving for COG and Zarr data
-**Updated**: 04 JAN 2026 - TiTiler-xarray deployed to DEV
-
-| Story | Status | Description |
-|-------|--------|-------------|
-| S9.6.1 | ✅ | TiTiler COG deployed and operational |
-| S9.6.2 | ✅ | TiTiler-xarray (Zarr) deployed to DEV |
-| S9.6.3 | 📋 | STAC-based asset discovery for dynamic tiling |
-| S9.6.4 | 📋 | Colormap configuration for flood depth visualization |
-| S9.6.5 | 📋 | VirtualiZarr reference consumption validation |
-
-**DEV Deployment**:
-- TiTiler COG: Operational
-- TiTiler-xarray: Deployed 04 JAN 2026, supports native Zarr tile serving
+> **RELOCATED**: This feature has been moved to [Epic E6: Geospatial Tile Services](E6_tile_services.md)
+>
+> TiTiler is now recognized as a **Platform Epic** (E6) rather than a feature of E9, because:
+> 1. It's a standalone deployed service (geotiler) with its own repository
+> 2. It serves multiple epics (E1, E2, E9) not just E9
+> 3. It has strategic value as an **ArcGIS Server replacement**
+> 4. It has its own roadmap (ArcGIS migration capabilities)
+>
+> **See**:
+> - [E6.F6.1: COG Tile Serving](E6_tile_services.md#feature-f61-cog-tile-serving-)
+> - [E6.F6.3: Multidimensional Data (xarray)](E6_tile_services.md#feature-f63-multidimensional-data-titiler-xarray-)
+> - [E6.F6.4: pgSTAC Mosaic Searches](E6_tile_services.md#feature-f64-pgstac-mosaic-searches-)
 
 ---
 

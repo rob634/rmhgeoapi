@@ -3,10 +3,14 @@ Health monitoring interface module.
 
 Web dashboard for viewing system health status with component cards and expandable details.
 
-Features (24 DEC 2025 - S12.3.4):
+Features:
     - HTMX enabled for future partial updates
     - Dynamic architecture diagram with tooltips
     - Component cards with expandable details
+    - Docker worker status integration (19 JAN 2026):
+      - Long Queue / Long Worker diagram components driven by Docker health
+      - Docker Worker Resources section shows memory, CPU, tokens
+      - Grey status when DOCKER_WORKER_ENABLED=false
 
 Exports:
     HealthInterface: Health monitoring dashboard with status badges and component grid
@@ -1975,10 +1979,10 @@ class HealthInterface(BaseInterface):
             'comp-job-tables': 'database',               // PostgreSQL jobs/tasks tables
             'comp-parallel-queue': 'service_bus',        // Service Bus (all queues)
             'comp-compute-queue': 'service_bus',         // Service Bus (all queues)
-            'comp-long-queue': 'service_bus',            // Service Bus (all queues)
+            'comp-long-queue': 'service_bus',            // Note: Overridden by DOCKER_WORKER_COMPONENTS
             'comp-io-worker': 'imports',                 // Workers need imports healthy
             'comp-compute-worker': 'imports',            // Workers need imports healthy
-            'comp-container': 'duckdb',                  // Container worker (DuckDB)
+            'comp-container': 'service_bus',             // Note: Overridden by DOCKER_WORKER_COMPONENTS (Docker worker)
             'comp-task-tables': 'database',              // PostgreSQL tasks table
             'comp-input-storage': 'storage_containers',  // Bronze storage
             'comp-output-storage': 'storage_containers', // Silver storage
@@ -2007,9 +2011,9 @@ class HealthInterface(BaseInterface):
             const titilerComponent = components['titiler'];
             const titilerFeatures = titilerComponent?.details?.health?.body?.available_features || {{}};
 
-            // Get Docker Worker enabled setting from deployment_config
-            const deploymentConfig = components['deployment_config'];
-            const dockerWorkerEnabled = deploymentConfig?.details?.docker_worker_enabled === true;
+            // Get Docker Worker enabled setting from app_mode (not deployment_config)
+            const appModeConfig = components['app_mode'];
+            const dockerWorkerEnabled = appModeConfig?.details?.docker_worker_enabled === true;
 
             // Update each component in the diagram
             Object.entries(COMPONENT_MAPPING).forEach(([svgId, healthKey]) => {{
@@ -2142,10 +2146,12 @@ class HealthInterface(BaseInterface):
             if (!envInfo) return;
 
             // Extract health data from Docker worker response
+            // Note: hardware and memory are nested under 'runtime' in the Docker worker response
             const status = dockerHealth.status || 'unknown';
             const version = dockerHealth.version || 'N/A';
-            const hardware = dockerHealth.hardware || {{}};
-            const memory = dockerHealth.memory || {{}};
+            const runtime = dockerHealth.runtime || {{}};
+            const hardware = runtime.hardware || {{}};
+            const memory = runtime.memory || {{}};
             const tokens = dockerHealth.tokens || {{}};
             const workers = dockerHealth.background_workers || {{}};
             const url = dockerHealth.url || DOCKER_WORKER_URL;

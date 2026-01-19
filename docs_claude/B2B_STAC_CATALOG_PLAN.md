@@ -563,14 +563,42 @@ The OpenAPI spec has already been updated with these endpoints (see `openapi/pla
 
 ## 8. Implementation Checklist
 
-- [ ] Add `search_by_platform_ids()` to `infrastructure/pgstac_repository.py`
-- [ ] Create `services/platform_catalog_service.py`
-- [ ] Create `triggers/trigger_platform_catalog.py`
-- [ ] Register routes in `function_app.py`
+- [x] Add `search_by_platform_ids()` to `infrastructure/pgstac_repository.py` ✅ 16 JAN 2026
+- [x] Create `services/platform_catalog_service.py` ✅ 16 JAN 2026
+- [x] Create `triggers/trigger_platform_catalog.py` ✅ 16 JAN 2026
+- [x] Register routes in `function_app.py` ✅ 16 JAN 2026
 - [ ] Add unit tests
 - [ ] Add integration tests
-- [ ] Update version to 0.7.12.8
+- [x] Update version to 0.7.14.6 ✅ 16 JAN 2026
 - [ ] Deploy and validate
+
+### Implementation Notes (16 JAN 2026)
+
+**Files Created/Modified:**
+
+1. `infrastructure/pgstac_repository.py` - Added:
+   - `search_by_platform_ids()` - Direct STAC lookup using JSONB @> operator
+   - `get_items_by_platform_dataset()` - List items by dataset_id
+
+2. `services/platform_catalog_service.py` - New file with:
+   - `PlatformCatalogService` class
+   - `lookup_by_ddh_ids()` - Primary lookup via Platform thin-tracking
+   - `lookup_direct()` - Direct pgstac query (bypass Platform)
+   - `get_asset_urls()` - Asset URLs with TiTiler generation
+   - `list_items_for_dataset()` - List all items for a dataset_id
+   - `get_platform_catalog_service()` - Singleton factory
+
+3. `triggers/trigger_platform_catalog.py` - New file with HTTP handlers:
+   - `platform_catalog_lookup` - GET /api/platform/catalog/lookup
+   - `platform_catalog_item` - GET /api/platform/catalog/item/{collection}/{item}
+   - `platform_catalog_assets` - GET /api/platform/catalog/assets/{collection}/{item}
+   - `platform_catalog_dataset` - GET /api/platform/catalog/dataset/{dataset_id}
+
+4. `function_app.py` - Added 4 new routes under `/api/platform/catalog/`
+
+**Additional Endpoint (Bonus):**
+Added `/api/platform/catalog/dataset/{dataset_id}` endpoint that wasn't in the original plan.
+This allows DDH to list all STAC items for a given dataset_id.
 
 ---
 

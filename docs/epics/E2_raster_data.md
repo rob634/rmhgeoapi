@@ -3,6 +3,7 @@
 **Type**: Business
 **Value Statement**: Any imagery you have becomes analysis-ready and visualizable.
 **Runs On**: E7 (Pipeline Infrastructure)
+**Served By**: [E6 (Geospatial Tile Services)](E6_tile_services.md) - TiTiler for COG tile serving & pgSTAC mosaics
 **Status**: 🚧 PARTIAL (F2.7 Collection + F2.8 Classification pending)
 **Core Complete**: NOV 2025
 
@@ -42,6 +43,7 @@
 ### Feature F2.2: TiTiler Integration ✅
 
 **Deliverable**: Tile serving, previews, viewer URLs via **TiTiler Raster Service**
+**Served By**: [E6.F6.1 (COG Tile Serving)](E6_tile_services.md#feature-f61-cog-tile-serving-)
 
 | Story | Description |
 |-------|-------------|
@@ -51,6 +53,8 @@
 | S2.2.4 | Implement tile URL generation |
 
 **Key Files**: `services/titiler_client.py`
+
+**Note**: Tile serving is handled by the geotiler service (E6). E2 handles ETL to COG format; E6 handles tile rendering and serving.
 
 ---
 
@@ -213,6 +217,7 @@ Raster Input → F2.8 (Classify) → Route to F2.1/F2.6/F2.7 → Tier Selection 
 ### Feature F2.9: STAC-Integrated Raster Map Viewer ✅ COMPLETE
 
 **Deliverable**: Interactive Leaflet map viewer for browsing STAC raster collections with smart TiTiler URL generation
+**Uses**: [E6.F6.1 (COG Tiles)](E6_tile_services.md#feature-f61-cog-tile-serving-) + [E6.F6.4 (pgSTAC Mosaics)](E6_tile_services.md#feature-f64-pgstac-mosaic-searches-)
 **Created**: 30 DEC 2025
 **Completed**: 30 DEC 2025
 **Reference**: TiTiler URL Guide at `/rmhtitiler/docs/TITILER-URL-GUIDE.md`

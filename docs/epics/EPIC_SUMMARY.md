@@ -1,8 +1,17 @@
 # Epic & Feature Summary
 
-**Updated**: 16 JAN 2026 | ✅ Complete | 🚧 In Progress | 📋 Planned | 🔵 Backlog
+**Updated**: 18 JAN 2026 | ✅ Complete | 🚧 In Progress | 📋 Planned | 🔵 Backlog
 
 ---
+
+## E6: Geospatial Tile Services (geotiler) - ArcGIS Replacement
+- F6.1 ✅ COG Tile Serving (TiTiler-core)
+- F6.2 ✅ Vector Tiles & OGC Features (TiPG)
+- F6.3 ✅ Multidimensional Data (TiTiler-xarray)
+- F6.4 ✅ pgSTAC Mosaic Searches
+- F6.5 📋 ArcGIS Migration Capabilities
+- F6.6 ✅ Service Operations
+- F6.7 🚧 Consumer Documentation & Onboarding
 
 ## E12: Interfaces
 - F12.1 ✅ Interface Cleanup
@@ -18,14 +27,14 @@
 ## E9: Large Data
 - F9.1 ✅ FATHOM Flood ETL
 - F9.2 📋 FATHOM Global Expansion
-- F9.3 📋 CMIP6 Climate Data
-- F9.4 📋 VirtualiZarr Integration
-- F9.5 📋 Kerchunk Reference Files
-- F9.6 🚧 TiTiler Services
-- F9.7 📋 Zarr Query API
-- F9.8 📋 Time Series Extraction
-- F9.9 📋 Multi-Model Ensembles
-- F9.10 📋 Data Subsetting
+- F9.3 📋 VirtualiZarr Pipeline
+- F9.4 📋 CMIP6 Data Hosting
+- F9.5 ✅ xarray Service Layer
+- ~~F9.6~~ → Moved to E6 (Tile Services)
+- F9.7 📋 Reader App Migration
+- F9.8 📋 Pre-prepared Raster Ingest
+- F9.9 📋 FATHOM Query API
+- F9.10 📋 FATHOM Data Explorer UI
 
 ## E8: GeoAnalytics
 - F8.1 ✅ H3 Grid Infrastructure
@@ -110,15 +119,16 @@
 
 | Epic | ✅ | 🚧 | 📋 | 🔵 |
 |------|:--:|:--:|:--:|:--:|
+| **E6** | **5** | **1** | **1** | **0** |
 | E12 | 3 | 0 | 6 | 0 |
-| E9 | 1 | 1 | 8 | 0 |
+| E9 | 2 | 0 | 7 | 0 |
 | E8 | 5 | 0 | 9 | 0 |
 | E7 | 8 | 4 | 4 | 1 |
 | E4 | 0 | 2 | 2 | 1 |
 | E3 | 3 | 0 | 3 | 2 |
 | E2 | 7 | 1 | 2 | 0 |
 | E1 | 7 | 0 | 3 | 0 |
-| **Total** | **34** | **8** | **37** | **4** |
+| **Total** | **40** | **8** | **37** | **4** |
 
 ---
 

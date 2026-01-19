@@ -2,7 +2,7 @@
   "openapi": "3.0.1",
   "info": {
     "title": "Geospatial Platform API",
-    "version": "1.2.0",
+    "version": "1.3.0",
     "description": "**B2B Integration API for DDH (Data Hub)**\n\nThis API provides endpoints for automated data onboarding, processing status, and catalog verification.\n\n## Endpoint Categories\n\n### Platform - Data Onboarding\n- Submit vector/raster data for processing\n- Monitor job status and failures\n- Unpublish/delete data\n\n### Approvals - QA Workflow\n- Review pending datasets before publication\n- Approve or reject with audit trail\n\n### Catalog - STAC Verification\n- Verify processed data exists in catalog\n- Get asset URLs for downstream consumption\n\n**Note:** B2C data query endpoints (OGC Features, tile serving, point queries) are provided by the TiTiler service.\n",
     "contact": {
       "name": "Geospatial Platform Team",
@@ -594,6 +594,90 @@
           },
           "404": {
             "description": "Item not found"
+          }
+        }
+      }
+    },
+    "/api/platform/catalog/dataset/{dataset_id}": {
+      "get": {
+        "summary": "List items for DDH dataset",
+        "description": "List all STAC items for a DDH dataset identifier.\nReturns all items that have the specified platform:dataset_id.",
+        "operationId": "catalogDataset",
+        "tags": ["Catalog"],
+        "parameters": [
+          {
+            "name": "dataset_id",
+            "in": "path",
+            "required": true,
+            "description": "DDH dataset identifier",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum items to return",
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "maximum": 1000
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of STAC items",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "dataset_id": {
+                      "type": "string",
+                      "description": "DDH dataset identifier"
+                    },
+                    "count": {
+                      "type": "integer",
+                      "description": "Number of items returned"
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "item_id": {"type": "string"},
+                          "collection_id": {"type": "string"},
+                          "bbox": {"type": "array", "items": {"type": "number"}},
+                          "datetime": {"type": "string", "format": "date-time"},
+                          "resource_id": {"type": "string"},
+                          "version_id": {"type": "string"}
+                        }
+                      }
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                },
+                "example": {
+                  "dataset_id": "flood-hazard-data",
+                  "count": 3,
+                  "items": [
+                    {
+                      "item_id": "flood-v1.0-res001",
+                      "collection_id": "flood-hazard-2024",
+                      "bbox": [-75.5, -56.5, -66.5, -49.0],
+                      "datetime": "2026-01-15T00:00:00Z",
+                      "resource_id": "res-001",
+                      "version_id": "v1.0"
+                    }
+                  ],
+                  "timestamp": "2026-01-16T10:00:00Z"
+                }
+              }
+            }
           }
         }
       }

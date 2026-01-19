@@ -1,6 +1,6 @@
 # SAFe Epic & Feature Registry
 
-**Last Updated**: 11 JAN 2026
+**Last Updated**: 18 JAN 2026
 **Framework**: SAFe (Scaled Agile Framework)
 **Purpose**: Master reference for Azure DevOps Boards import
 **Source of Truth**: This directory defines Epic/Feature numbers; TODO.md should align
@@ -26,41 +26,59 @@
          ▼                         ▼                         ▼
 ┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
 │   E1: Vector    │      │   E2: Raster    │      │   E9: Large &   │
-│                 │      │                 │      │   Multidim      │
-│ CSV,KML,SHP,    │      │ GeoTIFF → COG   │      │                 │
-│ GeoJSON →       │      │ → TiTiler       │      │ FATHOM, CMIP6   │
-│ PostGIS + OGC   │      │                 │      │ Zarr/NetCDF     │
+│   Data ETL      │      │   Data ETL      │      │   Multidim      │
+│                 │      │                 │      │                 │
+│ CSV,KML,SHP →   │      │ GeoTIFF → COG   │      │ FATHOM, CMIP6   │
+│ PostGIS         │      │                 │      │ Zarr/NetCDF     │
 └────────┬────────┘      └────────┬────────┘      └────────┬────────┘
          │                        │                        │
          └────────────────────────┼────────────────────────┘
+                                  │
+                        ingests data to
                                   ▼
-                    ┌─────────────────────────┐
-                    │   E8: GeoAnalytics      │
-                    │                         │
-                    │   H3 Aggregation →      │
-                    │   GeoParquet / OGC      │
-                    └────────────┬────────────┘
-                                 │
-        ┌────────────────────────┼────────────────────────┐
-        ▼                        ▼                        ▼
-┌───────────────┐      ┌─────────────────┐      ┌─────────────────────┐
-│  E3: DDH      │      │ E4: External    │      │ E12: Integration    │
-│  Integration  │      │ Security Zones  │      │ Onboarding UI       │
-└───────────────┘      └─────────────────┘      └─────────────────────┘
+╔═════════════════════════════════════════════════════════════════════╗
+║           E6: GEOSPATIAL TILE SERVICES (geotiler)                   ║
+║                   (PLATFORM / ArcGIS REPLACEMENT)                   ║
+║                                                                     ║
+║   • COG tiles (TiTiler)      • Vector tiles (TiPG)                  ║
+║   • Zarr tiles (xarray)      • pgSTAC mosaics                       ║
+║   • OGC Features API         • ArcGIS migration path                ║
+╚══════════════════════════════════╦══════════════════════════════════╝
+                                   ║
+                                   ║ serves data to
+         ┌─────────────────────────╬─────────────────────────┐
+         ▼                         ▼                         ▼
+┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
+│   E8: Geo       │      │  E3: DDH        │      │ E12: Integration│
+│   Analytics     │      │  Integration    │      │ Onboarding UI   │
+│                 │      │                 │      │                 │
+│ H3 Aggregation  │      │ Platform coord  │      │ Self-service    │
+│ GeoParquet/OGC  │      │ API contracts   │      │ documentation   │
+└────────┬────────┘      └─────────────────┘      └─────────────────┘
+         │
+         ▼
+┌─────────────────┐
+│ E4: External    │
+│ Security Zones  │
+│                 │
+│ CDN / External  │
+│ data delivery   │
+└─────────────────┘
 ```
 
 ---
 
 ## Quick Reference
 
-**FY26 Target (ends 30 JUN 2026)**: E1 ✅, E2, E3, E4
+**FY26 Target (ends 30 JUN 2026)**: E1 ✅, E2, E3, E4, E6
 
 | Epic | Name | Type | Value Statement | Status | Features | Link |
 |------|------|------|-----------------|--------|:--------:|:----:|
-| E7 | Pipeline Infrastructure | Foundational | The ETL brain that makes everything possible | 🚧 Partial | 10 | [E7](E7_pipeline_infra.md) |
-| E1 | Vector Data as API | Business | Vector garbage → clean, API-accessible data | ✅ Operational | 8 | [E1](E1_vector_data.md) |
-| E2 | Raster Data as API | Business | Any imagery → analysis-ready and tileable | ✅ Operational | 9 | [E2](E2_raster_data.md) |
-| E9 | Large & Multidimensional | Business | Host FATHOM/CMIP6 at scale | 🚧 Partial | 10 | [E9](E9_large_data.md) |
+| E7 | Pipeline Infrastructure | Foundational | The ETL brain that makes everything possible | 🚧 Partial | 18 | [E7](E7_pipeline_infra.md) |
+| **E6** | **Geospatial Tile Services** | **Platform** | **ArcGIS replacement - cloud-native tile serving** | **🚧 Partial** | **7** | **[E6](E6_tile_services.md)** |
+| E1 | Vector Data as API | Business | Vector garbage → clean, API-accessible data | ✅ Operational | 10 | [E1](E1_vector_data.md) |
+| E2 | Raster Data as API | Business | Any imagery → analysis-ready and tileable | ✅ Operational | 10 | [E2](E2_raster_data.md) |
+| E9 | Large & Multidimensional | Business | Host FATHOM/CMIP6 at scale | 🚧 Partial | 9 | [E9](E9_large_data.md) |
 | E8 | GeoAnalytics Pipeline | Business | Raw data → H3-aggregated, analysis-ready | 🚧 Partial | 14 | [E8](E8_geoanalytics.md) |
 | **E4** | **Externalization & Security** | **Enabler** | **Data movement to external zones** | **🔥 PRIORITY** | 5 | [E4](E4_security_zones.md) |
 | E3 | DDH Integration | Coordination | DDH team coordination artifact | 📋 Political | 8 | [E3](E3_ddh_integration.md) |
@@ -68,10 +86,11 @@
 
 **Epic Types**:
 - **Foundational**: Infrastructure that other epics depend on (E7)
+- **Platform**: Product with direct B2C value that also enables other epics (E6)
 - **Business**: Delivers direct stakeholder value (E1, E2, E8, E9)
 - **Enabler**: Enables integration, consumption, or security (E3, E4, E12)
 
-**Consolidated Epics** (absorbed into E1, E7, E8, or E9):
+**Consolidated Epics** (absorbed into E1, E6, E7, E8, or E9):
 - ~~E5~~ → F1.7-F1.8 (OGC Styles) - now in E1
 - ~~E10~~ → F9.1 (FATHOM ETL Operations) - now in E9
 - ~~E11~~ → F8.10-12 (Analytics UI: Data Browser, H3 Visualization, Export)
@@ -79,16 +98,18 @@
 - ~~E14~~ → F8.9 (H3 Export Pipeline)
 - ~~E15~~ → F7.3 (Collection Ingestion)
 
-**Epic Structure** (30 DEC 2025 restructure):
+**Epic Structure** (18 JAN 2026 restructure):
 - **E7**: Pipeline Infrastructure — generic orchestration enablers (observability, builder, ingestion)
+- **E6**: Geospatial Tile Services — ArcGIS replacement, serves tiles for E1/E2/E9 (geotiler repo)
 - **E8**: GeoAnalytics Pipeline — H3 aggregation, GeoParquet export, OGC Features output
 - **E9**: Large and Multidimensional Data — hosting FATHOM + CMIP6 + VirtualiZarr datasets
 
 ```
-E9: Large Data (FATHOM, CMIP6)  →  E8: GeoAnalytics  →  GeoParquet / OGC Features
-         ↑                                                      ↓
-    E7: Pipeline Infrastructure                         Databricks / DuckDB
-         (enables both)                                       Maps
+E1/E2/E9: Data ETL  →  E6: Tile Services  →  E8: GeoAnalytics  →  GeoParquet / OGC
+         ↑                    ↓                      ↓
+    E7: Pipeline         Consumers              Databricks
+    Infrastructure       (ArcGIS clients,        DuckDB
+    (enables ETL)        Web apps, DDH)          Maps
 ```
 
 ---
@@ -101,6 +122,7 @@ E9: Large Data (FATHOM, CMIP6)  →  E8: GeoAnalytics  →  GeoParquet / OGC Fea
 
 | Epic | Business Value | Time Crit | Risk Red | **CoD** | Job Size | **WSJF** |
 |------|:--------------:|:---------:|:--------:|:-------:|:--------:|:--------:|
+| **E6** | **21 (ArcGIS replacement)** | **13 (blocks E1/E2/E9 serving)** | **13 (vendor lock-in)** | **47** | **8** | **5.9** |
 | E2 | 21 (platform foundation) | 13 (FATHOM blocked) | 13 (enables downstream) | **47** | 8 | **5.9** |
 | E3 | 21 (analytics front-end) | 13 (high urgency) | 13 (observability+diagnostics) | **48** | 10 | **4.8** |
 | E4 | 13 (external access) | 8 (post-platform) | 13 (security/audit) | **34** | 8 | **4.3** |
@@ -108,9 +130,9 @@ E9: Large Data (FATHOM, CMIP6)  →  E8: GeoAnalytics  →  GeoParquet / OGC Fea
 | E7 | 5 (operational efficiency) | 3 | 5 | **13** | 5 | **2.6** |
 | E8 | 8 (analytics capability) | 3 | 5 | **16** | 13 | **1.2** |
 
-**WSJF-Ordered Sequence**: E2 (5.9) → E3 (4.8) → E4 (4.3) → E7 (2.6) → E9 (2.0) → E8 (1.2)
+**WSJF-Ordered Sequence**: E6/E2 (5.9) → E3 (4.8) → E4 (4.3) → E7 (2.6) → E9 (2.0) → E8 (1.2)
 
-**Note**: E3 absorbs former E6 (Platform Observability) — observability is app-to-app monitoring that enables integration.
+**Note**: E6 (Geospatial Tile Services) is now a dedicated Platform epic for the geotiler app (ArcGIS replacement).
 
 ---
 
@@ -146,16 +168,14 @@ Abstract component names for ADO work items. Actual Azure resource names assigne
 | **ETL Function App** | Job orchestration, HTTP APIs | Azure Functions (Python) | ✅ Deployed |
 | **Reader Function App** | Read-only data access APIs | Azure Functions (Python) | 📋 Planned |
 | **Long-Running Worker** | Tasks exceeding 30-min timeout | Docker Container App (`rmhheavyapi`) | ✅ Deployed (11 JAN 2026) |
-| **TiTiler Raster Service** | COG tile serving | Docker Container App | ✅ Deployed |
-| **TiTiler Zarr Service** | Zarr/NetCDF tile serving | Docker Container App | 📋 Planned |
+| **Geospatial Tile Service (E6)** | COG, Vector, Zarr tile serving | Docker Container App (`geotiler`) | ✅ Deployed |
 
 ### Docker Deployments Detail
 
-| Service | Image Source | Deployment Target | Notes |
-|---------|--------------|-------------------|-------|
-| **TiTiler Raster** | `ghcr.io/stac-utils/titiler-pgstac` | Azure Container Apps | Production, serving COGs |
-| **TiTiler Zarr** | Custom (xarray/zarr stack) | Azure Container Apps | Pending E9 progress |
-| **Long-Running Worker** | `rmhazureacr.azurecr.io/geospatial-worker:v0.7.1-auth` | Azure Web App (`rmhheavyapi`) | ✅ Deployed 11 JAN 2026 |
+| Service | Image Source | Deployment Target | Epic | Notes |
+|---------|--------------|-------------------|------|-------|
+| **geotiler (TiTiler+TiPG)** | `{acr}.azurecr.io/titiler-pgstac:v{version}` | Azure App Service | **E6** | COG + Vector + Zarr tiles |
+| **Long-Running Worker** | `{acr}.azurecr.io/geospatial-worker:v0.7.8-otel` | Azure Web App (`rmhheavyapi`) | E7 | ✅ Deployed 11 JAN 2026 |
 
 ## Queues (Service Bus)
 
@@ -194,10 +214,12 @@ Abstract component names for ADO work items. Actual Azure resource names assigne
 docs/epics/
 ├── README.md              # This file - Quick Reference + Navigation
 ├── COMPLETED_FEATURES.md  # Archive of delivered capabilities (feature-level summaries)
+├── EPIC_SUMMARY.md        # Quick feature status across all epics
 ├── E1_vector_data.md      # Epic E1: Vector Data as API (✅ Operational)
 ├── E2_raster_data.md      # Epic E2: Raster Data as API (✅ Operational)
 ├── E3_ddh_integration.md  # Epic E3: DDH Coordination (political artifact)
 ├── E4_security_zones.md   # Epic E4: Data Externalization (🔥 PRIORITY)
+├── E6_tile_services.md    # Epic E6: Geospatial Tile Services (🚧 Platform - ArcGIS replacement)
 ├── E7_pipeline_infra.md   # Epic E7: Pipeline Infrastructure
 ├── E8_geoanalytics.md     # Epic E8: GeoAnalytics Pipeline
 ├── E9_large_data.md       # Epic E9: Large and Multidimensional Data

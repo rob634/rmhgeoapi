@@ -551,6 +551,137 @@ class PgStacRepository:
             logger.error(f"❌ Error listing collections: {e}")
             return []
 
+    # =========================================================================
+    # B2B CATALOG OPERATIONS (16 JAN 2026 - F12.8)
+    # =========================================================================
+    # These methods support B2B STAC catalog access for DDH integration.
+    # DDH can lookup STAC items using their identifiers (dataset_id, resource_id, version_id).
+    # =========================================================================
+
+    def search_by_platform_ids(
+        self,
+        dataset_id: str,
+        resource_id: str,
+        version_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Search for STAC item by DDH platform identifiers.
+
+        Uses the platform:* properties stored in STAC item properties.
+        This enables B2B catalog lookup where DDH can find STAC items
+        using their own identifiers without knowing our internal STAC IDs.
+
+        Args:
+            dataset_id: DDH dataset identifier
+            resource_id: DDH resource identifier
+            version_id: DDH version identifier
+
+        Returns:
+            STAC item dict if found, None otherwise
+
+        Note:
+            This query uses JSONB containment operator (@>) which can leverage
+            GIN indexes if available on pgstac.items.content.
+
+        Created: 16 JAN 2026 - F12.8 B2B STAC Catalog Access
+        """
+        logger.debug(
+            f"🔍 Searching by platform IDs: dataset={dataset_id}, "
+            f"resource={resource_id}, version={version_id}"
+        )
+
+        try:
+            with self._pg_repo._get_connection() as conn:
+                with conn.cursor() as cur:
+                    # Use JSONB containment for efficient matching
+                    # This allows the query to use GIN indexes if available
+                    cur.execute(
+                        """
+                        SELECT content, collection, id
+                        FROM pgstac.items
+                        WHERE content->'properties' @> %s::jsonb
+                        LIMIT 1
+                        """,
+                        (json.dumps({
+                            "platform:dataset_id": dataset_id,
+                            "platform:resource_id": resource_id,
+                            "platform:version_id": version_id
+                        }),)
+                    )
+                    result = cur.fetchone()
+
+                    if result:
+                        logger.debug(
+                            f"   ✅ Found item: {result['id']} "
+                            f"(collection: {result['collection']})"
+                        )
+                        return result['content']
+                    else:
+                        logger.debug("   ❌ No item found for platform IDs")
+                        return None
+
+        except Exception as e:
+            logger.error(f"❌ Error searching by platform IDs: {e}")
+            return None
+
+    def get_items_by_platform_dataset(
+        self,
+        dataset_id: str,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all STAC items for a DDH dataset.
+
+        Returns all items that have the specified platform:dataset_id,
+        regardless of resource_id or version_id. Useful for finding
+        all versions/resources within a DDH dataset.
+
+        Args:
+            dataset_id: DDH dataset identifier
+            limit: Maximum items to return (default 100)
+
+        Returns:
+            List of STAC item dicts (with id and collection added)
+
+        Note:
+            pgstac stores id and collection as table columns, not in content.
+            We merge them into the returned dict for convenience.
+
+        Created: 16 JAN 2026 - F12.8 B2B STAC Catalog Access
+        """
+        logger.debug(f"🔍 Getting items for platform dataset: {dataset_id}")
+
+        try:
+            with self._pg_repo._get_connection() as conn:
+                with conn.cursor() as cur:
+                    # Include id and collection columns (not in content JSON)
+                    cur.execute(
+                        """
+                        SELECT id, collection, content
+                        FROM pgstac.items
+                        WHERE content->'properties'->>'platform:dataset_id' = %s
+                        ORDER BY content->'properties'->>'datetime' DESC
+                        LIMIT %s
+                        """,
+                        (dataset_id, limit)
+                    )
+                    results = cur.fetchall()
+
+                    # Merge id and collection into content dict
+                    items = []
+                    for row in results:
+                        item = row['content']
+                        item['id'] = row['id']
+                        item['collection'] = row['collection']
+                        items.append(item)
+
+                    logger.debug(f"   ✅ Found {len(items)} items for dataset {dataset_id}")
+                    return items
+
+        except Exception as e:
+            logger.error(f"❌ Error getting items for platform dataset: {e}")
+            return []
+
 
 # Export the repository class
 __all__ = ['PgStacRepository']

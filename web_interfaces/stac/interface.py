@@ -257,6 +257,26 @@ class StacInterface(BaseInterface):
             background: linear-gradient(135deg, #DC2626 0%, #B91C1C 100%) !important;
         }
 
+        /* Approved badge (17 JAN 2026) */
+        .approved-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, #3B82F6 0%, #2563EB 100%);
+            color: white;
+            font-size: 10px;
+            font-weight: 600;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-bottom: 6px;
+        }
+
+        /* Disabled/protected button (17 JAN 2026) */
+        .link-badge-disabled {
+            background: linear-gradient(135deg, #9CA3AF 0%, #6B7280 100%) !important;
+            color: white !important;
+            cursor: not-allowed !important;
+            opacity: 0.7;
+        }
+
         /* Modal overlay */
         .modal-overlay {
             position: fixed;
@@ -632,6 +652,20 @@ class StacInterface(BaseInterface):
                 const data = await fetchJSON(`${API_BASE_URL}/api/stac/collections`);
                 allCollections = data.collections || [];
 
+                // Fetch approval statuses for all collections (17 JAN 2026)
+                if (allCollections.length > 0) {
+                    const collectionIds = allCollections.map(c => c.id).join(',');
+                    try {
+                        const approvalData = await fetchJSON(
+                            `${API_BASE_URL}/api/platform/approvals/status?stac_collection_ids=${encodeURIComponent(collectionIds)}`
+                        );
+                        window.approvalStatuses = approvalData.statuses || {};
+                    } catch (e) {
+                        console.warn('Could not fetch approval statuses:', e);
+                        window.approvalStatuses = {};
+                    }
+                }
+
                 spinner.classList.add('hidden');
 
                 if (allCollections.length === 0) {
@@ -668,8 +702,12 @@ class StacInterface(BaseInterface):
                     `[${bbox.map(v => v.toFixed(2)).join(', ')}]` :
                     'No extent';
 
-                // Build action buttons - Items, Map, Promote, Delete
-                const actionButtons = `
+                // Check approval status (17 JAN 2026)
+                const approvalStatus = window.approvalStatuses?.[c.id] || {};
+                const isApproved = approvalStatus.is_approved === true;
+
+                // Build action buttons - Items, Map, Promote, Delete (conditional)
+                let actionButtons = `
                     <a class="link-badge link-badge-info"
                        href="/api/interface/stac-collection?id=${c.id}"
                        onclick="event.stopPropagation()"
@@ -686,15 +724,29 @@ class StacInterface(BaseInterface):
                             title="Promote collection (coming soon)">
                         ⬆️ Promote
                     </button>
-                    <button class="link-badge link-badge-delete"
-                            onclick="deleteCollection('${c.id}', event)"
-                            title="Delete this collection (unpublish)">
-                        🗑️ Delete
-                    </button>
                 `;
+
+                // Show delete or protected based on approval status
+                if (isApproved) {
+                    actionButtons += `
+                        <span class="link-badge link-badge-disabled"
+                              title="Cannot delete: Collection has approved items. Use /api/platform/revoke first.">
+                            🔒 Protected
+                        </span>
+                    `;
+                } else {
+                    actionButtons += `
+                        <button class="link-badge link-badge-delete"
+                                onclick="deleteCollection('${c.id}', event)"
+                                title="Delete this collection (unpublish)">
+                            🗑️ Delete
+                        </button>
+                    `;
+                }
 
                 return `
                     <div class="collection-card" onclick="showCollectionDetail('${c.id}')" title="${title}">
+                        ${isApproved ? '<span class="approved-badge">✓ Approved</span>' : ''}
                         <h3>${title}</h3>
                         <div class="description">${desc}</div>
 

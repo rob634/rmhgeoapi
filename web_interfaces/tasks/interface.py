@@ -3,11 +3,16 @@ Task monitoring interface module.
 
 Web dashboard for viewing tasks of a specific job with workflow visualization.
 
-Features (24 DEC 2025 - S12.3.2):
+Features:
     - HTMX-powered auto-refresh
     - Visual workflow diagram showing predefined stages
     - Task counts per stage with status colors (P/Q/R/C/F)
     - Expandable task detail sections
+    - Docker Worker Progress Panel (F7.19 - 19 JAN 2026):
+      - Internal phase visualization (Validation → COG → STAC)
+      - Real-time progress bar and status message
+      - Checkpoint phase indicator
+      - Faster polling (5s) for active Docker tasks
 
 Task Status Legend:
     - P (Pending): Task record created, message sent to queue
@@ -2044,6 +2049,179 @@ class TasksInterface(BaseInterface):
                 padding: 5px 0;
             }
         }
+
+        /* ============================================
+         * Docker Worker Progress Panel (F7.19)
+         * 19 JAN 2026 - Real-time progress for single-stage Docker jobs
+         * ============================================ */
+
+        .docker-progress-panel {
+            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 16px;
+            margin-top: 12px;
+        }
+
+        .docker-progress-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .docker-progress-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: #475569;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .docker-progress-badge {
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            background: #dbeafe;
+            color: #1d4ed8;
+            font-weight: 500;
+        }
+
+        /* Internal phases list */
+        .docker-phases {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        .docker-phase {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            background: white;
+            border-radius: 6px;
+            border: 1px solid #e2e8f0;
+            font-size: 13px;
+        }
+
+        .docker-phase.completed {
+            border-color: #10b981;
+            background: #ecfdf5;
+        }
+
+        .docker-phase.active {
+            border-color: #f59e0b;
+            background: #fffbeb;
+            animation: phase-pulse 2s ease-in-out infinite;
+        }
+
+        .docker-phase.pending {
+            border-color: #e2e8f0;
+            background: #f8fafc;
+            color: #94a3b8;
+        }
+
+        @keyframes phase-pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.2); }
+            50% { box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.1); }
+        }
+
+        .docker-phase-icon {
+            font-size: 14px;
+            width: 20px;
+            text-align: center;
+        }
+
+        .docker-phase-name {
+            flex: 1;
+            font-weight: 500;
+            color: #334155;
+        }
+
+        .docker-phase.pending .docker-phase-name {
+            color: #94a3b8;
+        }
+
+        .docker-phase-duration {
+            font-size: 11px;
+            color: #64748b;
+            font-family: 'Courier New', monospace;
+        }
+
+        /* Progress bar */
+        .docker-progress-bar-container {
+            background: #e2e8f0;
+            border-radius: 8px;
+            height: 10px;
+            overflow: hidden;
+            margin-bottom: 8px;
+        }
+
+        .docker-progress-bar-fill {
+            height: 100%;
+            border-radius: 8px;
+            background: linear-gradient(90deg, #3b82f6 0%, #2563eb 100%);
+            transition: width 0.5s ease-out;
+        }
+
+        .docker-progress-bar-fill.complete {
+            background: linear-gradient(90deg, #10b981 0%, #059669 100%);
+        }
+
+        /* Status text */
+        .docker-progress-status {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+        }
+
+        .docker-progress-message {
+            color: #475569;
+            font-weight: 500;
+        }
+
+        .docker-progress-percent {
+            color: #1d4ed8;
+            font-weight: 700;
+            font-size: 14px;
+        }
+
+        .docker-progress-percent.complete {
+            color: #059669;
+        }
+
+        .docker-progress-updated {
+            font-size: 11px;
+            color: #94a3b8;
+            margin-top: 8px;
+            text-align: right;
+        }
+
+        /* Running indicator */
+        .docker-running-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            color: #f59e0b;
+            font-weight: 500;
+        }
+
+        .docker-running-dot {
+            width: 8px;
+            height: 8px;
+            background: #f59e0b;
+            border-radius: 50%;
+            animation: running-dot-pulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes running-dot-pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.8); }
+        }
         """
 
     def _generate_custom_js(self, job_id: str) -> str:
@@ -2055,6 +2233,10 @@ class TasksInterface(BaseInterface):
         let autoRefreshInterval = null;
         let countdownInterval = null;
         let countdownValue = 0;
+
+        // F7.19: Track active Docker task for faster polling
+        let hasActiveDockerTask = false;
+        const DOCKER_FAST_POLL_INTERVAL = 5; // 5 seconds for active Docker tasks
 
         // Predefined workflow definitions
         const WORKFLOW_DEFINITIONS = {{
@@ -2088,8 +2270,42 @@ class TasksInterface(BaseInterface):
                     {{ number: 1, name: 'Greeting', taskType: 'hello_world_greeting', description: 'Generate greetings' }},
                     {{ number: 2, name: 'Reply', taskType: 'hello_world_reply', description: 'Generate replies' }}
                 ]
+            }},
+            // Docker Worker Jobs (F7.19 - 19 JAN 2026)
+            // Single-stage with internal phases: Validate → COG → STAC
+            'process_raster_docker': {{
+                name: 'Docker Raster ETL',
+                isDockerJob: true,
+                stages: [
+                    {{ number: 1, name: 'Process Raster', taskType: 'raster_process_complete', description: 'Validate → COG → STAC (Docker)' }}
+                ],
+                internalPhases: [
+                    {{ number: 1, name: 'Validation', description: 'Validate CRS and raster type' }},
+                    {{ number: 2, name: 'COG Creation', description: 'Convert to Cloud Optimized GeoTIFF' }},
+                    {{ number: 3, name: 'STAC Registration', description: 'Register with STAC catalog' }}
+                ]
+            }},
+            'process_large_raster_docker': {{
+                name: 'Docker Large Raster ETL',
+                isDockerJob: true,
+                stages: [
+                    {{ number: 1, name: 'Process Large Raster', taskType: 'raster_process_large_complete', description: 'Tile → Extract → COG → STAC (Docker)' }}
+                ],
+                internalPhases: [
+                    {{ number: 1, name: 'Tiling Scheme', description: 'Generate tile grid' }},
+                    {{ number: 2, name: 'Tile Extraction', description: 'Extract tiles from source' }},
+                    {{ number: 3, name: 'COG Creation', description: 'Create COGs from tiles' }},
+                    {{ number: 4, name: 'MosaicJSON', description: 'Generate mosaic definition' }},
+                    {{ number: 5, name: 'STAC Registration', description: 'Register with STAC catalog' }}
+                ]
             }}
         }};
+
+        // Check if job is a Docker worker job (F7.19)
+        function isDockerJob(jobType) {{
+            const def = WORKFLOW_DEFINITIONS[jobType];
+            return def?.isDockerJob === true || jobType?.includes('docker');
+        }}
 
         // Load data on page load
         document.addEventListener('DOMContentLoaded', () => {{
@@ -2136,7 +2352,9 @@ class TasksInterface(BaseInterface):
 
         // Start auto-refresh
         function startAutoRefresh() {{
-            const intervalSec = parseInt(document.getElementById('refreshInterval').value) || 30;
+            // F7.19: Use faster polling for active Docker tasks
+            const selectedInterval = parseInt(document.getElementById('refreshInterval').value) || 30;
+            const intervalSec = hasActiveDockerTask ? DOCKER_FAST_POLL_INTERVAL : selectedInterval;
             countdownValue = intervalSec;
             updateCountdown();
 
@@ -2146,7 +2364,9 @@ class TasksInterface(BaseInterface):
                 updateCountdown();
 
                 if (countdownValue <= 0) {{
-                    countdownValue = intervalSec;
+                    // Re-check interval in case Docker task status changed
+                    const newInterval = hasActiveDockerTask ? DOCKER_FAST_POLL_INTERVAL : selectedInterval;
+                    countdownValue = newInterval;
                     loadData();
                 }}
             }}, 1000);
@@ -2165,7 +2385,9 @@ class TasksInterface(BaseInterface):
         function updateCountdown() {{
             const el = document.getElementById('refreshCountdown');
             if (countdownValue > 0) {{
-                el.textContent = countdownValue + 's';
+                // F7.19: Show Docker indicator when fast polling is active
+                const dockerIndicator = hasActiveDockerTask ? '🐳 ' : '';
+                el.textContent = dockerIndicator + countdownValue + 's';
             }} else {{
                 el.textContent = '...';
             }}
@@ -2203,6 +2425,17 @@ class TasksInterface(BaseInterface):
                 const tasks = tasksData.tasks || [];
                 const metrics = tasksData.metrics || {{}};
                 const job = jobResponse.job || jobResponse;
+
+                // F7.19: Check for active Docker tasks (for faster polling)
+                const prevHasActiveDocker = hasActiveDockerTask;
+                hasActiveDockerTask = isDockerJob(job.job_type) &&
+                    tasks.some(t => t.status === 'processing' || t.status === 'queued');
+
+                // If Docker task status changed, restart auto-refresh with new interval
+                if (prevHasActiveDocker !== hasActiveDockerTask && document.getElementById('autoRefreshToggle').checked) {{
+                    stopAutoRefresh();
+                    startAutoRefresh();
+                }}
 
                 // Render job summary (pass tasks for Stage 1 metadata)
                 renderJobSummary(job, tasks);
@@ -2746,6 +2979,15 @@ class TasksInterface(BaseInterface):
                     html += `</div>`;
                 }}
 
+                // F7.19: Add Docker progress panel for Docker worker jobs
+                if (isDockerJob(job.job_type)) {{
+                    // Find the task for this stage (Docker jobs have 1 task per stage)
+                    const dockerTask = tasks.find(t => t.stage === stage.number);
+                    if (dockerTask) {{
+                        html += renderDockerProgressPanel(dockerTask, job.job_type);
+                    }}
+                }}
+
                 html += `</div>`;
             }});
 
@@ -2889,6 +3131,104 @@ class TasksInterface(BaseInterface):
                         <span class="progress-percent">${{donePct.toFixed(0)}}% done</span>
                         <span class="progress-count">${{doneCount}}/${{total}} tasks</span>
                     </div>
+                </div>
+            `;
+        }}
+
+        // Render Docker progress panel (F7.19 - 19 JAN 2026)
+        // Shows internal phases, progress bar, and status message for Docker worker tasks
+        function renderDockerProgressPanel(task, jobType) {{
+            if (!task) return '';
+
+            const workflowDef = WORKFLOW_DEFINITIONS[jobType];
+            const internalPhases = workflowDef?.internalPhases || [
+                {{ number: 1, name: 'Validation' }},
+                {{ number: 2, name: 'COG Creation' }},
+                {{ number: 3, name: 'STAC Registration' }}
+            ];
+
+            // Get checkpoint phase (0 = not started, 1-3 = completed phases)
+            const checkpointPhase = task.checkpoint_phase || 0;
+
+            // Get progress from metadata
+            const progress = task.metadata?.progress || {{}};
+            const progressPercent = progress.percent || 0;
+            const progressMessage = progress.message || '';
+            const progressUpdated = progress.updated_at;
+
+            // Determine current active phase based on checkpoint
+            // checkpoint_phase = N means phase N is complete, so N+1 is active (if task is processing)
+            const isProcessing = task.status === 'processing';
+            const isComplete = task.status === 'completed';
+            const activePhase = isProcessing ? checkpointPhase + 1 : (isComplete ? internalPhases.length : 0);
+
+            // Format time ago for last update
+            function formatTimeAgo(isoString) {{
+                if (!isoString) return '';
+                const date = new Date(isoString);
+                const now = new Date();
+                const diffMs = now - date;
+                const diffSec = Math.floor(diffMs / 1000);
+                if (diffSec < 60) return `${{diffSec}}s ago`;
+                const diffMin = Math.floor(diffSec / 60);
+                if (diffMin < 60) return `${{diffMin}}m ago`;
+                return `${{Math.floor(diffMin / 60)}}h ago`;
+            }}
+
+            // Build phases HTML
+            let phasesHtml = '';
+            internalPhases.forEach(phase => {{
+                let phaseClass = 'pending';
+                let icon = '⏳';
+
+                if (phase.number <= checkpointPhase) {{
+                    phaseClass = 'completed';
+                    icon = '✅';
+                }} else if (phase.number === activePhase && isProcessing) {{
+                    phaseClass = 'active';
+                    icon = '🔄';
+                }}
+
+                phasesHtml += `
+                    <div class="docker-phase ${{phaseClass}}">
+                        <span class="docker-phase-icon">${{icon}}</span>
+                        <span class="docker-phase-name">Phase ${{phase.number}}: ${{phase.name}}</span>
+                    </div>
+                `;
+            }});
+
+            // Progress bar fill class
+            const barClass = isComplete ? 'complete' : '';
+            const percentClass = isComplete ? 'complete' : '';
+
+            // Running indicator for active tasks
+            const runningIndicator = isProcessing ? `
+                <span class="docker-running-indicator">
+                    <span class="docker-running-dot"></span>
+                    Processing
+                </span>
+            ` : '';
+
+            // Last updated text
+            const updatedText = progressUpdated ? `Last update: ${{formatTimeAgo(progressUpdated)}}` : '';
+
+            return `
+                <div class="docker-progress-panel">
+                    <div class="docker-progress-header">
+                        <span class="docker-progress-title">🐳 Docker Worker Progress</span>
+                        ${{runningIndicator}}
+                    </div>
+                    <div class="docker-phases">
+                        ${{phasesHtml}}
+                    </div>
+                    <div class="docker-progress-bar-container">
+                        <div class="docker-progress-bar-fill ${{barClass}}" style="width: ${{progressPercent}}%"></div>
+                    </div>
+                    <div class="docker-progress-status">
+                        <span class="docker-progress-message">${{progressMessage || (isComplete ? 'Complete' : 'Waiting for progress update...')}}</span>
+                        <span class="docker-progress-percent ${{percentClass}}">${{progressPercent.toFixed(0)}}%</span>
+                    </div>
+                    ${{updatedText ? `<div class="docker-progress-updated">${{updatedText}}</div>` : ''}}
                 </div>
             `;
         }}

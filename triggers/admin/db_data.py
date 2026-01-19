@@ -637,10 +637,12 @@ class AdminDbDataTrigger:
                     mimetype='application/json'
                 )
 
+            # F7.19: Include checkpoint fields for Docker progress display (19 JAN 2026)
             query = f"""
                 SELECT task_id, parent_job_id, task_type, status::text, stage, task_index,
                        parameters, result_data, metadata, error_details, last_pulse, retry_count,
-                       execution_started_at, created_at, updated_at
+                       execution_started_at, created_at, updated_at,
+                       checkpoint_phase, checkpoint_data, checkpoint_updated_at
                 FROM {self.config.app_schema}.tasks
                 WHERE parent_job_id = %s
                 ORDER BY stage ASC, task_index ASC
@@ -678,7 +680,11 @@ class AdminDbDataTrigger:
                             'execution_started_at': row['execution_started_at'].isoformat() if row['execution_started_at'] else None,
                             'execution_time_ms': execution_time_ms,
                             'created_at': row['created_at'].isoformat() if row['created_at'] else None,
-                            'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None
+                            'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None,
+                            # F7.19: Checkpoint fields for Docker progress (19 JAN 2026)
+                            'checkpoint_phase': row['checkpoint_phase'],
+                            'checkpoint_data': row['checkpoint_data'],
+                            'checkpoint_updated_at': row['checkpoint_updated_at'].isoformat() if row['checkpoint_updated_at'] else None,
                         })
 
             # Calculate aggregate metrics per stage

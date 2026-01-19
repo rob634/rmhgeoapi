@@ -3,8 +3,9 @@
 # ============================================================================
 # STATUS: Services - Consolidated raster handler for Docker worker
 # PURPOSE: Single handler that does validate → COG → STAC in one execution
-# LAST_REVIEWED: 16 JAN 2026
+# LAST_REVIEWED: 19 JAN 2026
 # F7.18: Integrated with Docker Orchestration Framework (graceful shutdown)
+# F7.19: Real-time progress reporting for Workflow Monitor (19 JAN 2026)
 # ============================================================================
 """
 Process Raster Complete - Consolidated Docker Handler.
@@ -45,9 +46,47 @@ Exports:
 
 import logging
 import time
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Callable
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# PROGRESS REPORTING HELPER (F7.19 - 19 JAN 2026)
+# =============================================================================
+
+def _report_progress(
+    docker_context,
+    percent: float,
+    phase: int,
+    phase_name: str,
+    message: str
+) -> None:
+    """
+    Report progress to task metadata for Workflow Monitor visibility.
+
+    Only reports if docker_context is available (Docker mode).
+    Progress data is stored in task.metadata.progress and displayed
+    in the Workflow Monitor UI.
+
+    Args:
+        docker_context: DockerTaskContext or None
+        percent: Progress percentage (0-100)
+        phase: Current phase number (1, 2, or 3)
+        phase_name: Human-readable phase name
+        message: Status message to display
+    """
+    if not docker_context:
+        return
+
+    try:
+        docker_context.report_progress(
+            percent=percent,
+            message=f"Phase {phase}/3: {phase_name} - {message}"
+        )
+    except Exception as e:
+        # Progress reporting is non-critical - log and continue
+        logger.debug(f"Progress report failed (non-critical): {e}")
 
 
 def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = None) -> Dict[str, Any]:
@@ -133,10 +172,11 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
 
     try:
         # =====================================================================
-        # PHASE 1: VALIDATION
+        # PHASE 1: VALIDATION (0-20%)
         # =====================================================================
         if checkpoint and checkpoint.should_skip(1):
             logger.info("⏭️ PHASE 1: Skipping validation (already completed)")
+            _report_progress(docker_context, 20, 1, "Validation", "Skipped (resumed)")
             # Restore validation result from checkpoint
             validation_result = checkpoint.get_data('validation_result', {})
             source_crs = checkpoint.get_data('source_crs')
@@ -150,6 +190,7 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                 }
         else:
             logger.info("🔄 PHASE 1: Validating raster...")
+            _report_progress(docker_context, 5, 1, "Validation", "Starting validation")
             phase1_start = time.time()
 
             from .raster_validation import validate_raster
@@ -192,6 +233,7 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             logger.info(f"✅ PHASE 1 complete: {phase1_duration:.2f}s")
             logger.info(f"  Source CRS: {source_crs}")
             logger.info(f"  Raster type: {validation_result.get('raster_type', {}).get('detected_type')}")
+            _report_progress(docker_context, 20, 1, "Validation", f"Complete ({phase1_duration:.1f}s)")
 
             # Save checkpoint after phase 1
             if checkpoint:
@@ -222,13 +264,14 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             }
 
         # =====================================================================
-        # PHASE 2: COG CREATION
+        # PHASE 2: COG CREATION (20-80%)
         # =====================================================================
         from config import get_config
         config = get_config()
 
         if checkpoint and checkpoint.should_skip(2):
             logger.info("⏭️ PHASE 2: Skipping COG creation (already completed)")
+            _report_progress(docker_context, 80, 2, "COG Creation", "Skipped (resumed)")
             # Restore COG result from checkpoint
             cog_result = checkpoint.get_data('cog_result', {})
             cog_blob = checkpoint.get_data('cog_blob')
@@ -243,6 +286,7 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                 }
         else:
             logger.info("🔄 PHASE 2: Creating COG...")
+            _report_progress(docker_context, 25, 2, "COG Creation", "Starting COG conversion")
             phase2_start = time.time()
 
             from .raster_cog import create_cog
@@ -290,9 +334,14 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                 }
 
             phase2_duration = time.time() - phase2_start
+            cog_size_mb = cog_result.get('size_mb', 0)
             logger.info(f"✅ PHASE 2 complete: {phase2_duration:.2f}s")
             logger.info(f"  COG blob: {cog_blob}")
-            logger.info(f"  Size: {cog_result.get('size_mb', 'unknown')} MB")
+            logger.info(f"  Size: {cog_size_mb} MB")
+            _report_progress(
+                docker_context, 80, 2, "COG Creation",
+                f"Complete ({phase2_duration:.1f}s, {cog_size_mb:.1f} MB)"
+            )
 
             # Save checkpoint after phase 2 with artifact validation
             if checkpoint:
@@ -339,14 +388,16 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             }
 
         # =====================================================================
-        # PHASE 3: STAC METADATA
+        # PHASE 3: STAC METADATA (80-100%)
         # =====================================================================
         if checkpoint and checkpoint.should_skip(3):
             logger.info("⏭️ PHASE 3: Skipping STAC metadata (already completed)")
+            _report_progress(docker_context, 100, 3, "STAC Registration", "Skipped (resumed)")
             # Restore STAC result from checkpoint
             stac_result = checkpoint.get_data('stac_result', {})
         else:
             logger.info("🔄 PHASE 3: Creating STAC metadata...")
+            _report_progress(docker_context, 85, 3, "STAC Registration", "Registering with catalog")
             phase3_start = time.time()
 
             from .stac_catalog import extract_stac_metadata
@@ -382,6 +433,7 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             logger.info(f"✅ PHASE 3 complete: {phase3_duration:.2f}s")
             if stac_result.get('item_id'):
                 logger.info(f"  STAC item: {stac_result.get('item_id')}")
+            _report_progress(docker_context, 100, 3, "STAC Registration", f"Complete ({phase3_duration:.1f}s)")
 
             # Save checkpoint after phase 3 (all phases complete)
             if checkpoint:

@@ -55,6 +55,9 @@ class TaskUpdateModel(BaseModel):
     last_pulse: Optional[datetime] = None
     retry_count: Optional[int] = Field(None, ge=0, le=10)
     metadata: Optional[Dict[str, Any]] = None
+    # Execution tracking (18 JAN 2026 - Docker worker execution metadata)
+    # Note: execution_time_ms is calculated at query time from (updated_at - execution_started_at)
+    execution_started_at: Optional[datetime] = None
     # Checkpoint fields (11 JAN 2026 - Docker worker resume support)
     checkpoint_phase: Optional[int] = None
     checkpoint_data: Optional[Dict[str, Any]] = None

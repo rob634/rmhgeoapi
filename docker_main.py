@@ -121,8 +121,15 @@ _shutdown_requested = False
 def signal_handler(signum, frame):
     """Handle shutdown signals gracefully."""
     global _shutdown_requested
-    logger.info(f"Received signal {signum}, initiating graceful shutdown...")
+    import signal as sig_module
+    signal_name = sig_module.Signals(signum).name
+    logger.warning("=" * 60)
+    logger.warning(f"🛑 Received {signal_name} (signal {signum})")
+    logger.warning(f"   Timestamp: {datetime.now(timezone.utc).isoformat()}")
+    logger.warning("   Initiating graceful shutdown...")
+    logger.warning("=" * 60)
     _shutdown_requested = True
+    logger.info("  → Shutdown flag SET - worker will stop after current task")
 
 
 class DockerWorker:
@@ -234,12 +241,16 @@ class DockerWorker:
             task_message = TaskQueueMessage(**task_data)
             task_id = task_message.task_id
 
-            logger.info(
-                f"Processing task: {task_id[:16]}... "
-                f"(type: {task_message.task_type}, "
-                f"job: {task_message.parent_job_id[:16]}..., "
-                f"stage: {task_message.stage})"
-            )
+            logger.info("=" * 50)
+            logger.info(f"📥 MESSAGE RECEIVED")
+            logger.info(f"  Task ID: {task_id}")
+            logger.info(f"  Task Type: {task_message.task_type}")
+            logger.info(f"  Job ID: {task_message.parent_job_id}")
+            logger.info(f"  Job Type: {task_message.job_type}")
+            logger.info(f"  Stage: {task_message.stage}")
+            logger.info("=" * 50)
+
+            logger.info(f"▶️ Starting task execution...")
 
             # Process via CoreMachine (same as Function App)
             result = self.core_machine.process_task_message(task_message)
@@ -247,18 +258,43 @@ class DockerWorker:
             elapsed = time.time() - start_time
 
             if result.get('success'):
-                logger.info(f"Task completed in {elapsed:.2f}s: {task_id[:16]}...")
-                receiver.complete_message(message)
+                if result.get('interrupted'):
+                    # Graceful shutdown - abandon message so another instance can resume
+                    # Checkpoint was saved, delivery_count increments, message becomes visible
+                    logger.warning("=" * 50)
+                    logger.warning(f"🛑 TASK INTERRUPTED (graceful shutdown)")
+                    logger.warning(f"  Task ID: {task_id[:16]}...")
+                    logger.warning(f"  Phase completed: {result.get('phase_completed', '?')}")
+                    logger.warning(f"  Elapsed: {elapsed:.2f}s")
+                    logger.warning(f"  Action: ABANDONING message for resume by another instance")
+                    logger.warning("=" * 50)
+                    receiver.abandon_message(message)
+                    return True  # Not an error, just interrupted
+                else:
+                    # Fully complete
+                    logger.info("=" * 50)
+                    logger.info(f"✅ TASK COMPLETED")
+                    logger.info(f"  Task ID: {task_id[:16]}...")
+                    logger.info(f"  Elapsed: {elapsed:.2f}s")
+                    logger.info(f"  Action: Message COMPLETED (removed from queue)")
+                    logger.info("=" * 50)
+                    receiver.complete_message(message)
 
-                if result.get('stage_complete'):
-                    logger.info(
-                        f"Stage {task_message.stage} complete for job "
-                        f"{task_message.parent_job_id[:16]}... - signaled to jobs queue"
-                    )
+                    if result.get('stage_complete'):
+                        logger.info(
+                            f"🏁 Stage {task_message.stage} complete for job "
+                            f"{task_message.parent_job_id[:16]}... - advancing to next stage"
+                        )
                 return True
             else:
                 error = result.get('error', 'Unknown error')
-                logger.error(f"Task failed after {elapsed:.2f}s: {error}")
+                logger.error("=" * 50)
+                logger.error(f"❌ TASK FAILED")
+                logger.error(f"  Task ID: {task_id[:16]}...")
+                logger.error(f"  Error: {error}")
+                logger.error(f"  Elapsed: {elapsed:.2f}s")
+                logger.error(f"  Action: Message DEAD-LETTERED")
+                logger.error("=" * 50)
                 # Dead-letter failed messages after all retries exhausted
                 receiver.dead_letter_message(
                     message,
@@ -301,16 +337,19 @@ class DockerWorker:
 
         # Create AutoLockRenewer for long-running tasks (up to 2 hours)
         # This prevents competing consumers during lengthy COG processing
+        # NOTE: We use MANUAL registration (not auto_lock_renewer param) for explicit control
         lock_renewer = AutoLockRenewer(max_lock_renewal_duration=7200)  # 2 hours in seconds
-        logger.info("AutoLockRenewer initialized (max_lock_renewal_duration=2h)")
+        logger.info("AutoLockRenewer initialized (max_lock_renewal_duration=2h, manual registration)")
+
+        logger.info("Entering main polling loop - waiting for messages...")
 
         while not _shutdown_requested:
             try:
-                # Create receiver with auto lock renewal for long-running tasks
+                # Don't pass auto_lock_renewer to receiver - use manual registration instead
+                # This provides explicit control over which messages get lock renewal
                 with client.get_queue_receiver(
                     queue_name=self.queue_name,
                     max_wait_time=self.max_wait_time_seconds,
-                    auto_lock_renewer=lock_renewer,
                 ) as receiver:
 
                     # Receive one message at a time for long-running tasks
@@ -321,13 +360,22 @@ class DockerWorker:
 
                     if not messages:
                         # No messages, continue polling
+                        logger.debug("No messages received, continuing poll...")
                         continue
 
                     for message in messages:
                         if _shutdown_requested:
-                            logger.info("Shutdown requested, abandoning current message")
+                            logger.warning(
+                                "🛑 Shutdown detected BEFORE processing - "
+                                "abandoning message for another instance"
+                            )
                             receiver.abandon_message(message)
                             break
+
+                        # MANUAL lock registration - register AFTER receiving, BEFORE processing
+                        # This ensures lock renewal only for messages we're actually processing
+                        lock_renewer.register(receiver, message, max_lock_renewal_duration=7200)
+                        logger.info(f"🔒 Lock registered for message (2h renewal)")
 
                         self._process_message(message, receiver)
 
@@ -348,13 +396,25 @@ class DockerWorker:
                     time.sleep(self.poll_interval_on_error)
 
         # Cleanup
-        logger.info("Shutting down...")
-        lock_renewer.close()
-        if self._sb_client:
-            self._sb_client.close()
+        logger.info("🛑 Exited polling loop - beginning cleanup")
 
-        logger.info("Docker Worker shutdown complete")
-        logger.info(f"Shutdown at: {datetime.now(timezone.utc).isoformat()}")
+        try:
+            lock_renewer.close()
+            logger.info("Lock renewer closed")
+        except Exception as e:
+            logger.warning(f"Error closing lock renewer: {e}")
+
+        if self._sb_client:
+            try:
+                self._sb_client.close()
+                logger.info("Service Bus client closed")
+            except Exception as e:
+                logger.warning(f"Error closing Service Bus client: {e}")
+
+        logger.info("=" * 60)
+        logger.info("DOCKER WORKER STOPPED")
+        logger.info(f"  Shutdown at: {datetime.now(timezone.utc).isoformat()}")
+        logger.info("=" * 60)
 
     def close(self):
         """Clean up resources."""

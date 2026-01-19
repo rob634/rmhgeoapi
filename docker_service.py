@@ -246,16 +246,20 @@ class DockerWorkerLifecycle:
             reason: Why shutdown was initiated (for logging)
         """
         if self._shutdown_initiated:
-            logger.debug(f"Shutdown already initiated, ignoring duplicate request: {reason}")
+            logger.warning(f"🛑 Shutdown already initiated, ignoring duplicate request: {reason}")
             return
 
         self._shutdown_initiated = True
         self._shutdown_initiated_at = datetime.now(timezone.utc)
         self._signal_received = reason
 
+        logger.warning("=" * 60)
         logger.warning(f"🛑 GRACEFUL SHUTDOWN INITIATED: {reason}")
+        logger.warning(f"   Timestamp: {self._shutdown_initiated_at.isoformat()}")
+        logger.warning("=" * 60)
         logger.info("  → Setting shutdown event for all components")
         self._shutdown_event.set()
+        logger.info("  → Shutdown event SET - workers will stop accepting new messages")
 
         # Drain connection pool (F7.18 integration)
         try:
@@ -265,6 +269,8 @@ class DockerWorkerLifecycle:
             logger.info("  → Connection pool shutdown complete")
         except Exception as e:
             logger.warning(f"  → Connection pool shutdown error (non-fatal): {e}")
+
+        logger.info("  → Graceful shutdown initiated - waiting for in-flight tasks to complete")
 
     def get_status(self) -> Dict[str, Any]:
         """Get lifecycle status for health endpoint."""
@@ -479,10 +485,14 @@ class BackgroundQueueWorker:
             task_message = TaskQueueMessage(**task_data)
             task_id = task_message.task_id
 
-            logger.info(
-                f"[Queue] Processing: {task_id[:16]}... "
-                f"(type: {task_message.task_type}, stage: {task_message.stage})"
-            )
+            logger.info("=" * 50)
+            logger.info(f"[Queue] 📥 MESSAGE RECEIVED")
+            logger.info(f"  Task ID: {task_id}")
+            logger.info(f"  Task Type: {task_message.task_type}")
+            logger.info(f"  Job ID: {task_message.parent_job_id}")
+            logger.info(f"  Job Type: {task_message.job_type}")
+            logger.info(f"  Stage: {task_message.stage}")
+            logger.info("=" * 50)
 
             # Create Docker context with checkpoint and shutdown awareness (F7.18)
             task_repo = RepositoryFactory.create_task_repository()
@@ -495,6 +505,14 @@ class BackgroundQueueWorker:
                 task_repo=task_repo,
             )
 
+            # Log checkpoint state if resuming
+            if docker_context.checkpoint.current_phase > 0:
+                logger.info(
+                    f"[Queue] 🔄 RESUMING from checkpoint phase {docker_context.checkpoint.current_phase}"
+                )
+
+            logger.info(f"[Queue] ▶️ Starting task execution...")
+
             # Process via CoreMachine with Docker context
             result = self._core_machine.process_task_message(
                 task_message,
@@ -503,19 +521,44 @@ class BackgroundQueueWorker:
             elapsed = time.time() - start_time
 
             if result.get('success'):
-                logger.info(f"[Queue] Completed in {elapsed:.2f}s: {task_id[:16]}...")
-                receiver.complete_message(message)
-                self._messages_processed += 1
+                if result.get('interrupted'):
+                    # Graceful shutdown - abandon message so another instance can resume
+                    # Checkpoint was saved, delivery_count increments, message becomes visible
+                    logger.warning("=" * 50)
+                    logger.warning(f"[Queue] 🛑 TASK INTERRUPTED (graceful shutdown)")
+                    logger.warning(f"  Task ID: {task_id[:16]}...")
+                    logger.warning(f"  Phase completed: {result.get('phase_completed', '?')}")
+                    logger.warning(f"  Elapsed: {elapsed:.2f}s")
+                    logger.warning(f"  Action: ABANDONING message for resume by another instance")
+                    logger.warning("=" * 50)
+                    receiver.abandon_message(message)
+                    return True  # Not an error, just interrupted
+                else:
+                    # Fully complete
+                    logger.info("=" * 50)
+                    logger.info(f"[Queue] ✅ TASK COMPLETED")
+                    logger.info(f"  Task ID: {task_id[:16]}...")
+                    logger.info(f"  Elapsed: {elapsed:.2f}s")
+                    logger.info(f"  Action: Message COMPLETED (removed from queue)")
+                    logger.info("=" * 50)
+                    receiver.complete_message(message)
+                    self._messages_processed += 1
 
-                if result.get('stage_complete'):
-                    logger.info(
-                        f"[Queue] Stage {task_message.stage} complete for job "
-                        f"{task_message.parent_job_id[:16]}..."
-                    )
+                    if result.get('stage_complete'):
+                        logger.info(
+                            f"[Queue] 🏁 Stage {task_message.stage} complete for job "
+                            f"{task_message.parent_job_id[:16]}... - advancing to next stage"
+                        )
                 return True
             else:
                 error = result.get('error', 'Unknown error')
-                logger.error(f"[Queue] Failed after {elapsed:.2f}s: {error}")
+                logger.error("=" * 50)
+                logger.error(f"[Queue] ❌ TASK FAILED")
+                logger.error(f"  Task ID: {task_id[:16]}...")
+                logger.error(f"  Error: {error}")
+                logger.error(f"  Elapsed: {elapsed:.2f}s")
+                logger.error(f"  Action: Message DEAD-LETTERED")
+                logger.error("=" * 50)
                 receiver.dead_letter_message(
                     message,
                     reason="TaskFailed",
@@ -554,15 +597,19 @@ class BackgroundQueueWorker:
 
         # Create AutoLockRenewer for long-running tasks (up to 2 hours)
         # This prevents competing consumers during lengthy COG processing
+        # NOTE: We use MANUAL registration (not auto_lock_renewer param) for explicit control
         lock_renewer = AutoLockRenewer(max_lock_renewal_duration=7200)  # 2 hours in seconds
-        logger.info("[Queue Worker] AutoLockRenewer initialized (max_duration=2h)")
+        logger.info("[Queue Worker] AutoLockRenewer initialized (max_duration=2h, manual registration)")
+
+        logger.info("[Queue Worker] Entering main polling loop - waiting for messages...")
 
         while not self._stop_event.is_set():
             try:
+                # Don't pass auto_lock_renewer to receiver - use manual registration instead
+                # This provides explicit control over which messages get lock renewal
                 with client.get_queue_receiver(
                     queue_name=self._queue_name,
                     max_wait_time=self.max_wait_time_seconds,
-                    auto_lock_renewer=lock_renewer,
                 ) as receiver:
 
                     self._last_poll_time = datetime.now(timezone.utc)
@@ -574,12 +621,23 @@ class BackgroundQueueWorker:
                     )
 
                     if not messages:
+                        logger.debug("[Queue Worker] No messages received, continuing poll...")
                         continue
 
                     for message in messages:
                         if self._stop_event.is_set():
+                            logger.warning(
+                                "[Queue Worker] 🛑 Shutdown detected BEFORE processing - "
+                                "abandoning message for another instance"
+                            )
                             receiver.abandon_message(message)
                             break
+
+                        # MANUAL lock registration - register AFTER receiving, BEFORE processing
+                        # This ensures lock renewal only for messages we're actually processing
+                        lock_renewer.register(receiver, message, max_lock_renewal_duration=7200)
+                        logger.info(f"[Queue Worker] 🔒 Lock registered for message (2h renewal)")
+
                         self._process_message(message, receiver)
 
             except (ServiceBusConnectionError, OperationTimeoutError) as e:
@@ -601,19 +659,30 @@ class BackgroundQueueWorker:
                     self._stop_event.wait(self.poll_interval_on_error)
 
         # Cleanup
+        logger.info("[Queue Worker] 🛑 Exited polling loop - beginning cleanup")
         self._is_running = False
+
         try:
             lock_renewer.close()
-        except Exception:
-            pass
+            logger.info("[Queue Worker] Lock renewer closed")
+        except Exception as e:
+            logger.warning(f"[Queue Worker] Error closing lock renewer: {e}")
+
         if self._sb_client:
             try:
                 self._sb_client.close()
-            except Exception:
-                pass
+                logger.info("[Queue Worker] Service Bus client closed")
+            except Exception as e:
+                logger.warning(f"[Queue Worker] Error closing Service Bus client: {e}")
             self._sb_client = None
 
-        logger.info("[Queue Worker] Stopped")
+        logger.info("=" * 60)
+        logger.info("[Queue Worker] STOPPED")
+        logger.info(f"  Messages processed this session: {self._messages_processed}")
+        if self._started_at:
+            uptime = (datetime.now(timezone.utc) - self._started_at).total_seconds()
+            logger.info(f"  Uptime: {int(uptime // 3600)}h {int((uptime % 3600) // 60)}m {int(uptime % 60)}s")
+        logger.info("=" * 60)
 
     def start(self):
         """Start the background worker thread."""

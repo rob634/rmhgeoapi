@@ -134,12 +134,14 @@ class CheckpointManager:
         self.data = task.checkpoint_data or {}
 
         if self.current_phase > 0:
-            logger.info(
-                f"🔄 CheckpointManager: Resuming task {self.task_id[:8]}... "
-                f"from phase {self.current_phase}"
-            )
+            logger.info("=" * 50)
+            logger.info(f"🔄 CHECKPOINT RESUME DETECTED")
+            logger.info(f"  Task ID: {self.task_id[:16]}...")
+            logger.info(f"  Resuming from phase: {self.current_phase}")
+            logger.info(f"  Checkpoint data keys: {list(self.data.keys())}")
+            logger.info("=" * 50)
         else:
-            logger.debug(f"📍 CheckpointManager: Starting fresh for task {self.task_id[:8]}...")
+            logger.info(f"📍 CheckpointManager: Starting fresh for task {self.task_id[:16]}... (no prior checkpoint)")
 
     def should_skip(self, phase: int) -> bool:
         """
@@ -330,7 +332,10 @@ class CheckpointManager:
         """
         if self._shutdown_event is None:
             return False
-        return self._shutdown_event.is_set()
+        is_set = self._shutdown_event.is_set()
+        if is_set:
+            logger.debug(f"🛑 CheckpointManager: Shutdown event IS SET for task {self.task_id[:8]}...")
+        return is_set
 
     def should_stop(self) -> bool:
         """
@@ -380,11 +385,15 @@ class CheckpointManager:
                         return  # Graceful exit
         """
         if self.is_shutdown_requested():
-            logger.info(
-                f"🛑 CheckpointManager: Shutdown requested for task {self.task_id[:8]}..., "
-                f"saving checkpoint at phase {phase}"
-            )
+            logger.warning("=" * 50)
+            logger.warning(f"🛑 SHUTDOWN DETECTED - CheckpointManager")
+            logger.warning(f"  Task ID: {self.task_id[:16]}...")
+            logger.warning(f"  Current phase: {phase}")
+            logger.warning(f"  Data keys: {list(data.keys()) if data else 'none'}")
+            logger.warning(f"  Action: Saving checkpoint and signaling handler to stop")
+            logger.warning("=" * 50)
             self.save(phase, data=data)
+            logger.info(f"💾 Checkpoint saved at phase {phase} - handler should return interrupted=True")
             return True
         return False
 

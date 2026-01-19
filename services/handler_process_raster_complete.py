@@ -205,7 +205,14 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
 
         # F7.18: Check for graceful shutdown before Phase 2
         if docker_context and docker_context.should_stop():
-            logger.info("🛑 Shutdown requested after Phase 1 - saving progress")
+            logger.warning("=" * 50)
+            logger.warning("🛑 GRACEFUL SHUTDOWN - Handler Interrupted")
+            logger.warning(f"  Task ID: {task_id[:16] if task_id else 'unknown'}...")
+            logger.warning(f"  Phase completed: 1 (validation)")
+            logger.warning(f"  Phase skipped: 2 (COG creation), 3 (STAC)")
+            logger.warning(f"  Source CRS saved: {source_crs}")
+            logger.warning("  Returning interrupted=True for message abandonment")
+            logger.warning("=" * 50)
             return {
                 "success": True,
                 "interrupted": True,
@@ -312,7 +319,15 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
 
         # F7.18: Check for graceful shutdown before Phase 3
         if docker_context and docker_context.should_stop():
-            logger.info("🛑 Shutdown requested after Phase 2 - COG created, saving progress")
+            logger.warning("=" * 50)
+            logger.warning("🛑 GRACEFUL SHUTDOWN - Handler Interrupted")
+            logger.warning(f"  Task ID: {task_id[:16] if task_id else 'unknown'}...")
+            logger.warning(f"  Phase completed: 2 (COG creation)")
+            logger.warning(f"  Phase skipped: 3 (STAC metadata)")
+            logger.warning(f"  COG blob saved: {cog_blob}")
+            logger.warning(f"  COG container: {cog_container}")
+            logger.warning("  Returning interrupted=True for message abandonment")
+            logger.warning("=" * 50)
             return {
                 "success": True,
                 "interrupted": True,

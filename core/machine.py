@@ -67,6 +67,7 @@ from core.models import (
     JobExecutionContext
 )
 from core.schema.queue import JobQueueMessage, TaskQueueMessage, StageCompleteMessage
+from core.schema.updates import TaskUpdateModel
 
 # Infrastructure
 from infrastructure import RepositoryFactory
@@ -783,19 +784,28 @@ class CoreMachine:
                 }
             )
 
-            success = self.state_manager.update_task_status_direct(
+            # 18 JAN 2026: Track execution_started_at for task timing metrics
+            execution_start = datetime.now(timezone.utc)
+
+            update_model = TaskUpdateModel(
+                status=TaskStatus.PROCESSING,
+                execution_started_at=execution_start
+            )
+            success = self.state_manager.update_task_with_model(
                 task_message.task_id,
-                TaskStatus.PROCESSING
+                update_model
             )
             if success:
                 self.logger.info(
-                    f"✅ [STATUS-UPDATE] Task {task_message.task_id[:16]}... → PROCESSING",
+                    f"✅ [STATUS-UPDATE] Task {task_message.task_id[:16]}... → PROCESSING "
+                    f"(execution_started_at: {execution_start.isoformat()})",
                     extra={
                         'checkpoint': 'TASK_STATUS_UPDATE_SUCCESS',
                         'task_id': task_message.task_id,
                         'job_id': task_message.parent_job_id,
                         'from_status': str(current_status) if current_status else 'NOT_FOUND',
-                        'to_status': 'PROCESSING'
+                        'to_status': 'PROCESSING',
+                        'execution_started_at': execution_start.isoformat()
                     }
                 )
             else:

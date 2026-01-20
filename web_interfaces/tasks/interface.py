@@ -12,7 +12,6 @@ Features:
       - Internal phase visualization (Validation → COG → STAC)
       - Real-time progress bar and status message
       - Checkpoint phase indicator
-      - Faster polling (5s) for active Docker tasks
 
 Task Status Legend:
     - P (Pending): Task record created, message sent to queue
@@ -2390,10 +2389,6 @@ class TasksInterface(BaseInterface):
         let countdownInterval = null;
         let countdownValue = 0;
 
-        // F7.19: Track active Docker task for faster polling
-        let hasActiveDockerTask = false;
-        const DOCKER_FAST_POLL_INTERVAL = 5; // 5 seconds for active Docker tasks
-
         // Predefined workflow definitions
         const WORKFLOW_DEFINITIONS = {{
             'process_vector': {{
@@ -2544,9 +2539,7 @@ class TasksInterface(BaseInterface):
 
         // Start auto-refresh
         function startAutoRefresh() {{
-            // F7.19: Use faster polling for active Docker tasks
-            const selectedInterval = parseInt(document.getElementById('refreshInterval').value) || 30;
-            const intervalSec = hasActiveDockerTask ? DOCKER_FAST_POLL_INTERVAL : selectedInterval;
+            const intervalSec = parseInt(document.getElementById('refreshInterval').value) || 30;
             countdownValue = intervalSec;
             updateCountdown();
 
@@ -2556,9 +2549,7 @@ class TasksInterface(BaseInterface):
                 updateCountdown();
 
                 if (countdownValue <= 0) {{
-                    // Re-check interval in case Docker task status changed
-                    const newInterval = hasActiveDockerTask ? DOCKER_FAST_POLL_INTERVAL : selectedInterval;
-                    countdownValue = newInterval;
+                    countdownValue = intervalSec;
                     loadData();
                 }}
             }}, 1000);
@@ -2577,9 +2568,7 @@ class TasksInterface(BaseInterface):
         function updateCountdown() {{
             const el = document.getElementById('refreshCountdown');
             if (countdownValue > 0) {{
-                // F7.19: Show Docker indicator when fast polling is active
-                const dockerIndicator = hasActiveDockerTask ? '🐳 ' : '';
-                el.textContent = dockerIndicator + countdownValue + 's';
+                el.textContent = countdownValue + 's';
             }} else {{
                 el.textContent = '...';
             }}
@@ -2617,17 +2606,6 @@ class TasksInterface(BaseInterface):
                 const tasks = tasksData.tasks || [];
                 const metrics = tasksData.metrics || {{}};
                 const job = jobResponse.job || jobResponse;
-
-                // F7.19: Check for active Docker tasks (for faster polling)
-                const prevHasActiveDocker = hasActiveDockerTask;
-                hasActiveDockerTask = isDockerJob(job.job_type) &&
-                    tasks.some(t => t.status === 'processing' || t.status === 'queued');
-
-                // If Docker task status changed, restart auto-refresh with new interval
-                if (prevHasActiveDocker !== hasActiveDockerTask && document.getElementById('autoRefreshToggle').checked) {{
-                    stopAutoRefresh();
-                    startAutoRefresh();
-                }}
 
                 // Render job summary (pass tasks for Stage 1 metadata)
                 renderJobSummary(job, tasks);

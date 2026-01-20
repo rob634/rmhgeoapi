@@ -2222,6 +2222,162 @@ class TasksInterface(BaseInterface):
             0%, 100% { opacity: 1; transform: scale(1); }
             50% { opacity: 0.5; transform: scale(0.8); }
         }
+
+        /* ============================================
+         * Job Details Panel (19 JAN 2026)
+         * Expandable section for full job context
+         * ============================================ */
+
+        .job-details-toggle {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 16px;
+            margin-top: 16px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            color: #475569;
+            transition: all 0.2s ease;
+        }
+
+        .job-details-toggle:hover {
+            background: #f1f5f9;
+            border-color: #cbd5e1;
+        }
+
+        .job-details-toggle .toggle-icon {
+            transition: transform 0.2s ease;
+        }
+
+        .job-details-toggle.expanded .toggle-icon {
+            transform: rotate(90deg);
+        }
+
+        .job-details-panel {
+            display: none;
+            margin-top: 12px;
+            padding: 16px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+        }
+
+        .job-details-panel.visible {
+            display: block;
+        }
+
+        .job-detail-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 8px 0;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .job-detail-row:last-child {
+            border-bottom: none;
+        }
+
+        .job-detail-label {
+            flex: 0 0 120px;
+            font-size: 12px;
+            font-weight: 600;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .job-detail-value {
+            flex: 1;
+            font-size: 13px;
+            color: #334155;
+            word-break: break-all;
+        }
+
+        .job-id-full {
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            background: #e2e8f0;
+            padding: 4px 8px;
+            border-radius: 4px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .copy-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 12px;
+            color: #64748b;
+            transition: all 0.2s;
+        }
+
+        .copy-btn:hover {
+            background: #cbd5e1;
+            color: #334155;
+        }
+
+        .copy-btn.copied {
+            color: #059669;
+        }
+
+        .job-params-container {
+            background: #1e293b;
+            border-radius: 6px;
+            padding: 12px;
+            overflow-x: auto;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .job-params-json {
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            color: #e2e8f0;
+            white-space: pre-wrap;
+            margin: 0;
+        }
+
+        .job-params-json .json-key {
+            color: #7dd3fc;
+        }
+
+        .job-params-json .json-string {
+            color: #86efac;
+        }
+
+        .job-params-json .json-number {
+            color: #fcd34d;
+        }
+
+        .job-params-json .json-boolean {
+            color: #f472b6;
+        }
+
+        .job-params-json .json-null {
+            color: #94a3b8;
+        }
+
+        .job-timestamps {
+            display: flex;
+            gap: 24px;
+            font-size: 12px;
+            color: #64748b;
+        }
+
+        .job-timestamps span {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
         """
 
     def _generate_custom_js(self, job_id: str) -> str:
@@ -2305,6 +2461,42 @@ class TasksInterface(BaseInterface):
         function isDockerJob(jobType) {{
             const def = WORKFLOW_DEFINITIONS[jobType];
             return def?.isDockerJob === true || jobType?.includes('docker');
+        }}
+
+        // Format JSON with syntax highlighting (19 JAN 2026)
+        function formatJsonWithHighlighting(obj, indent = 2) {{
+            const json = JSON.stringify(obj, null, indent);
+            return json
+                .replace(/"([^"]+)":/g, '<span class="json-key">"$1"</span>:')
+                .replace(/: "([^"]*)"/g, ': <span class="json-string">"$1"</span>')
+                .replace(/: (\\d+\\.?\\d*)/g, ': <span class="json-number">$1</span>')
+                .replace(/: (true|false)/g, ': <span class="json-boolean">$1</span>')
+                .replace(/: (null)/g, ': <span class="json-null">$1</span>');
+        }}
+
+        // Copy text to clipboard with feedback
+        function copyToClipboard(text, buttonEl) {{
+            navigator.clipboard.writeText(text).then(() => {{
+                const originalText = buttonEl.textContent;
+                buttonEl.textContent = '✓ Copied';
+                buttonEl.classList.add('copied');
+                setTimeout(() => {{
+                    buttonEl.textContent = originalText;
+                    buttonEl.classList.remove('copied');
+                }}, 2000);
+            }}).catch(err => {{
+                console.error('Copy failed:', err);
+            }});
+        }}
+
+        // Toggle job details panel visibility
+        function toggleJobDetails() {{
+            const toggle = document.getElementById('job-details-toggle');
+            const panel = document.getElementById('job-details-panel');
+            if (toggle && panel) {{
+                toggle.classList.toggle('expanded');
+                panel.classList.toggle('visible');
+            }}
         }}
 
         // Load data on page load
@@ -2650,6 +2842,52 @@ class TasksInterface(BaseInterface):
                     html += `</div></div>`;
                 }}
             }}
+
+            // Add Job Details toggle and panel (19 JAN 2026)
+            const jobParams = job.parameters || {{}};
+            const hasParams = Object.keys(jobParams).length > 0;
+
+            html += `
+                <div id="job-details-toggle" class="job-details-toggle" onclick="toggleJobDetails()">
+                    <span class="toggle-icon">▶</span>
+                    <span>Job Details</span>
+                    <span style="color: #94a3b8; font-weight: 400; margin-left: auto;">Full ID, Parameters, Timestamps</span>
+                </div>
+                <div id="job-details-panel" class="job-details-panel">
+                    <div class="job-detail-row">
+                        <span class="job-detail-label">Job ID</span>
+                        <span class="job-detail-value">
+                            <span class="job-id-full">
+                                ${{job.job_id}}
+                                <button class="copy-btn" onclick="event.stopPropagation(); copyToClipboard('${{job.job_id}}', this)">📋 Copy</button>
+                            </span>
+                        </span>
+                    </div>
+                    <div class="job-detail-row">
+                        <span class="job-detail-label">Job Type</span>
+                        <span class="job-detail-value">${{job.job_type}}</span>
+                    </div>
+                    <div class="job-detail-row">
+                        <span class="job-detail-label">Timestamps</span>
+                        <span class="job-detail-value">
+                            <div class="job-timestamps">
+                                <span>📅 Created: ${{job.created_at ? new Date(job.created_at).toLocaleString() : 'N/A'}}</span>
+                                <span>🔄 Updated: ${{job.updated_at ? new Date(job.updated_at).toLocaleString() : 'N/A'}}</span>
+                            </div>
+                        </span>
+                    </div>
+                    ${{hasParams ? `
+                    <div class="job-detail-row">
+                        <span class="job-detail-label">Parameters</span>
+                        <span class="job-detail-value">
+                            <div class="job-params-container">
+                                <pre class="job-params-json">${{formatJsonWithHighlighting(jobParams)}}</pre>
+                            </div>
+                        </span>
+                    </div>
+                    ` : ''}}
+                </div>
+            `;
 
             document.getElementById('job-summary-card').innerHTML = html;
         }}

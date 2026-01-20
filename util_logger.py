@@ -998,7 +998,7 @@ def track_peak_memory_to_task(
     """
     Track peak memory usage during long operations and persist to task metadata.
 
-    NOT YET WIRED UP - Built for future use after testing snapshot approach.
+    WIRED UP: 19 JAN 2026 - F7.20 in handler_process_raster_complete.py
 
     Uses background daemon thread to poll memory every poll_interval seconds.
     Only updates task record when a NEW maximum is observed, minimizing DB writes.

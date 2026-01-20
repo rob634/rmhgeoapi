@@ -533,6 +533,54 @@ class StacCollectionInterface(BaseInterface):
             color: var(--ds-gray-dark);
             word-break: break-all;
         }
+
+        /* STAC API Links Section (19 JAN 2026) */
+        .stac-api-links {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid var(--ds-gray-light);
+        }
+
+        .stac-api-links-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            color: var(--ds-gray);
+            font-weight: 600;
+            width: 100%;
+            margin-bottom: 4px;
+        }
+
+        .btn-stac-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            background: white;
+            color: var(--ds-blue-primary);
+            border: 1px solid var(--ds-blue-primary);
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            text-decoration: none;
+            transition: all 0.2s;
+            font-family: 'Monaco', 'Courier New', monospace;
+        }
+
+        .btn-stac-link:hover {
+            background: var(--ds-blue-primary);
+            color: white;
+        }
+
+        /* Default bbox warning */
+        .bbox-warning {
+            color: #D97706;
+            font-size: 10px;
+            font-style: italic;
+        }
         """
 
     def _generate_custom_js(self) -> str:
@@ -564,14 +612,17 @@ class StacCollectionInterface(BaseInterface):
             errorState.classList.add('hidden');
 
             try {
-                // Fetch collection metadata
-                const collection = await fetchJSON(`${API_BASE_URL}/api/stac/collections/${collectionId}`);
-                collectionData = collection;
-                renderCollectionHeader(collection);
+                // Fetch collection metadata and items in parallel
+                const [collection, itemsData] = await Promise.all([
+                    fetchJSON(`${API_BASE_URL}/api/stac/collections/${collectionId}`),
+                    fetchJSON(`${API_BASE_URL}/api/stac/collections/${collectionId}/items?limit=1000`)
+                ]);
 
-                // Fetch all items
-                const itemsData = await fetchJSON(`${API_BASE_URL}/api/stac/collections/${collectionId}/items?limit=1000`);
+                collectionData = collection;
                 allItems = itemsData.features || [];
+
+                // Render header with actual item count (19 JAN 2026 - fixes "?" display)
+                renderCollectionHeader(collection, allItems.length);
 
                 spinner.classList.add('hidden');
 
@@ -594,21 +645,35 @@ class StacCollectionInterface(BaseInterface):
             }
         }
 
-        // Render collection header
-        function renderCollectionHeader(collection) {
+        // Render collection header (updated 19 JAN 2026 - STAC API links + bbox fixes)
+        function renderCollectionHeader(collection, actualItemCount = null) {
             const header = document.getElementById('collection-header');
 
             const title = collection.title || collection.id;
             const desc = collection.description || 'No description available';
             const type = collection.type || 'unknown';
             const license = collection.license || 'Not specified';
-            const itemCount = collection.summaries?.total_items || '?';
+            // Use actual fetched count if available, otherwise fall back to summary
+            const itemCount = actualItemCount !== null ? actualItemCount : (collection.summaries?.total_items || '?');
 
-            // Get bbox
+            // Get bbox with default detection
             let bboxStr = 'Not specified';
+            let bboxIsDefault = false;
             if (collection.extent?.spatial?.bbox?.[0]) {
                 const bbox = collection.extent.spatial.bbox[0];
-                bboxStr = `[${bbox.map(v => v.toFixed(2)).join(', ')}]`;
+                // Detect world-spanning defaults [-180, -90, 180, 90]
+                const isWorldDefault = (
+                    Math.abs(bbox[0] + 180) < 0.01 &&
+                    Math.abs(bbox[1] + 90) < 0.01 &&
+                    Math.abs(bbox[2] - 180) < 0.01 &&
+                    Math.abs(bbox[3] - 90) < 0.01
+                );
+                if (isWorldDefault) {
+                    bboxStr = 'World (default)';
+                    bboxIsDefault = true;
+                } else {
+                    bboxStr = `[${bbox.map(v => v.toFixed(2)).join(', ')}]`;
+                }
             }
 
             // Find preview link for TiTiler mosaic viewer (13 JAN 2026)
@@ -624,6 +689,28 @@ class StacCollectionInterface(BaseInterface):
             const mosaicButton = previewUrl
                 ? `<a href="${previewUrl}" target="_blank" class="btn-mosaic-view">🗺️ View Collection Mosaic</a>`
                 : `<div class="no-search-warning">⚠️ No pgSTAC search registered</div>`;
+
+            // Build bbox display with warning if default
+            const bboxDisplay = bboxIsDefault
+                ? `<span style="font-family: monospace; font-size: 11px;">${bboxStr}</span> <span class="bbox-warning">(needs recalculation)</span>`
+                : `<span style="font-family: monospace; font-size: 11px;">${bboxStr}</span>`;
+
+            // STAC API JSON endpoint links (19 JAN 2026)
+            const collectionId = collection.id;
+            const stacApiLinks = `
+                <div class="stac-api-links">
+                    <div class="stac-api-links-label">STAC API Endpoints (JSON)</div>
+                    <a href="${API_BASE_URL}/api/stac/collections/${collectionId}" target="_blank" class="btn-stac-link">
+                        📄 /collections/${collectionId}
+                    </a>
+                    <a href="${API_BASE_URL}/api/stac/collections/${collectionId}/items" target="_blank" class="btn-stac-link">
+                        📋 /collections/${collectionId}/items
+                    </a>
+                    <a href="${API_BASE_URL}/api/stac/collections/${collectionId}/items?limit=10" target="_blank" class="btn-stac-link">
+                        🔍 /items?limit=10
+                    </a>
+                </div>
+            `;
 
             header.innerHTML = `
                 <div class="header-top">
@@ -648,9 +735,10 @@ class StacCollectionInterface(BaseInterface):
                     </span>
                     <span class="meta-badge">
                         <span>🗺️</span>
-                        <span style="font-family: monospace; font-size: 11px;">${bboxStr}</span>
+                        ${bboxDisplay}
                     </span>
                 </div>
+                ${stacApiLinks}
             `;
         }
 

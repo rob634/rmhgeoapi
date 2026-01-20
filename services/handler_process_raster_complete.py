@@ -6,6 +6,7 @@
 # LAST_REVIEWED: 19 JAN 2026
 # F7.18: Integrated with Docker Orchestration Framework (graceful shutdown)
 # F7.19: Real-time progress reporting for Workflow Monitor (19 JAN 2026)
+# F7.20: Resource metrics tracking (peak memory, CPU) for capacity planning
 # ============================================================================
 """
 Process Raster Complete - Consolidated Docker Handler.
@@ -47,6 +48,12 @@ Exports:
 import logging
 import time
 from typing import Dict, Any, Optional, Callable
+
+from util_logger import (
+    get_memory_stats,
+    get_peak_memory_mb,
+    track_peak_memory_to_task,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -169,6 +176,16 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
     phase1_duration = 0.0
     phase2_duration = 0.0
     phase3_duration = 0.0
+
+    # F7.20: Resource tracking for Docker jobs (19 JAN 2026)
+    # Captures initial/peak/final memory + CPU for capacity planning
+    resource_stats = {
+        "initial": get_memory_stats() or {},
+        "peak_memory_mb": None,
+        "peak_memory_phase": None,
+        "final": None,
+    }
+    task_repo = docker_context.task_repo if docker_context else None
 
     try:
         # =====================================================================
@@ -305,7 +322,22 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                 'in_memory': False,  # Docker uses disk for large files
             }
 
-            cog_response = create_cog(cog_params)
+            # F7.20: Track peak memory during COG creation (memory-intensive phase)
+            if task_id and task_repo:
+                with track_peak_memory_to_task(
+                    task_id=task_id,
+                    task_repo=task_repo,
+                    logger=logger,
+                    poll_interval=10.0,  # Poll every 10 seconds
+                    operation_name="cog_creation"
+                ) as mem_stats:
+                    cog_response = create_cog(cog_params)
+                # Capture peak memory from this phase
+                resource_stats["peak_memory_mb"] = mem_stats.get("peak_memory_mb")
+                resource_stats["peak_memory_phase"] = "cog_creation"
+                resource_stats["cog_polls"] = mem_stats.get("poll_count", 0)
+            else:
+                cog_response = create_cog(cog_params)
 
             if not cog_response.get('success'):
                 logger.error(f"COG creation failed: {cog_response.get('error')}")
@@ -460,6 +492,10 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             if resumed_from_phase >= 3:
                 phases_skipped.append("stac_metadata")
 
+        # F7.20: Capture final resource stats
+        resource_stats["final"] = get_memory_stats() or {}
+        resource_stats["peak_memory_overall_mb"] = get_peak_memory_mb()
+
         logger.info("=" * 60)
         logger.info("PROCESS RASTER COMPLETE - SUCCESS")
         if resumed_from_phase:
@@ -471,6 +507,11 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             logger.info(f"  COG creation: {phase2_duration:.2f}s")
         if phase3_duration > 0:
             logger.info(f"  STAC metadata: {phase3_duration:.2f}s")
+        # Log resource summary
+        if resource_stats.get("peak_memory_mb"):
+            logger.info(f"📊 Peak memory (COG): {resource_stats['peak_memory_mb']} MB")
+        if resource_stats.get("peak_memory_overall_mb"):
+            logger.info(f"📊 Peak memory (overall): {resource_stats['peak_memory_overall_mb']} MB")
         logger.info("=" * 60)
 
         return {
@@ -501,6 +542,16 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                     "resumed_from_phase": resumed_from_phase,
                     "phases_skipped": phases_skipped,
                 },
+                # F7.20: Resource metrics for capacity planning (19 JAN 2026)
+                "resources": {
+                    "initial_rss_mb": resource_stats["initial"].get("process_rss_mb"),
+                    "final_rss_mb": resource_stats["final"].get("process_rss_mb"),
+                    "peak_memory_cog_mb": resource_stats.get("peak_memory_mb"),
+                    "peak_memory_overall_mb": resource_stats.get("peak_memory_overall_mb"),
+                    "cog_memory_polls": resource_stats.get("cog_polls", 0),
+                    "system_available_mb": resource_stats["final"].get("system_available_mb"),
+                    "system_percent": resource_stats["final"].get("system_percent"),
+                },
             },
         }
 
@@ -516,12 +567,21 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                 "data_keys": list(checkpoint.data.keys()),
             }
 
+        # F7.20: Capture final resource state on failure (useful for OOM debugging)
+        resource_stats["final"] = get_memory_stats() or {}
+        resource_stats["peak_memory_overall_mb"] = get_peak_memory_mb()
+
         logger.error("=" * 60)
         logger.error("PROCESS RASTER COMPLETE - FAILED")
         logger.error(f"Error: {e}")
         logger.error(f"Duration before failure: {total_duration:.2f}s")
         if checkpoint_state:
             logger.error(f"Checkpoint state: phase={checkpoint_state['current_phase']}, keys={checkpoint_state['data_keys']}")
+        # Log resource state at failure
+        if resource_stats.get("peak_memory_mb"):
+            logger.error(f"📊 Peak memory (COG): {resource_stats['peak_memory_mb']} MB")
+        if resource_stats.get("peak_memory_overall_mb"):
+            logger.error(f"📊 Peak memory (overall): {resource_stats['peak_memory_overall_mb']} MB")
         logger.error("=" * 60)
         logger.error(traceback.format_exc())
 
@@ -535,4 +595,12 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             "stac": stac_result,
             "duration_seconds": total_duration,
             "checkpoint_state": checkpoint_state,
+            # F7.20: Resource metrics at failure (for OOM debugging)
+            "resources": {
+                "initial_rss_mb": resource_stats["initial"].get("process_rss_mb"),
+                "final_rss_mb": resource_stats["final"].get("process_rss_mb"),
+                "peak_memory_cog_mb": resource_stats.get("peak_memory_mb"),
+                "peak_memory_overall_mb": resource_stats.get("peak_memory_overall_mb"),
+                "system_available_mb": resource_stats["final"].get("system_available_mb"),
+            },
         }

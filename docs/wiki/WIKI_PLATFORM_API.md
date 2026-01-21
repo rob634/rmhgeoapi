@@ -38,7 +38,7 @@ The Platform API provides a complete lifecycle for geospatial data:
 | **1. Submit** | `POST /api/platform/submit` | Submit raster or vector for processing → returns polling URL |
 | **2. Poll** | `GET /api/platform/status/{request_id}` | Check job status → returns preview URLs on completion |
 | **3. Approve** | `POST /api/platform/approve` | Triggers finalization and Service Layer availability |
-| **4. Unpublish** | `POST /api/platform/unpublish/{type}` | Undo everything - delete outputs, STAC items, tables |
+| **4. Unpublish** | `POST /api/platform/unpublish` | Undo everything - delete outputs, STAC items, tables |
 
 ---
 
@@ -59,11 +59,6 @@ All endpoints use `{BASE_URL}` as the base. Replace with the environment-specifi
 
 ---
 
-## Authentication
-
-Currently using Azure AD authentication (when enabled). Contact platform admin for access credentials.
-
----
 
 ## 1. Submit Data for Processing
 
@@ -90,6 +85,40 @@ Generic submission endpoint that auto-detects data type from parameters.
     "access_level": "PUBLIC"
 }
 ```
+
+### Supported Operations
+
+| Operation | Description |
+|-----------|-------------|
+| `CREATE` | Create new dataset (default) |
+| `UPDATE` | Overwrite existing dataset - use `overwrite: true` in processing_options |
+
+### Update Workflow (Overwrite Existing Dataset)
+
+To update an existing dataset with new data while maintaining the same STAC item IDs:
+
+```json
+{
+    "dataset_id": "boundaries-2024",
+    "resource_id": "admin-regions",
+    "version_id": "v1.0",
+    "data_type": "vector",
+    "container_name": "{BRONZE_CONTAINER}",
+    "file_name": "boundaries_updated.geojson",
+    "service_name": "Administrative Boundaries",
+    "processing_options": {
+        "overwrite": true
+    }
+}
+```
+
+The `overwrite: true` parameter:
+- Replaces existing table/COG data with new source file
+- Maintains the same STAC item and collection IDs
+- Updates STAC metadata with new processing timestamp
+- Preserves approval status (if previously approved)
+
+---
 
 ## 2. Check Request Status
 
@@ -373,19 +402,124 @@ curl "{BASE_URL}/api/platform/status/abc123..."
 
 ---
 
-## 3. Unpublish Vector Data
+## 3. Approve Dataset
+
+The Approvals API manages dataset approval before publication. Approving a dataset marks it as published in the STAC catalog.
+
+### Approve
+
+```
+POST /api/platform/approve
+```
+
+**Request Body** - identify dataset by ONE of:
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `approval_id` | string | Option 1 | Approval record ID (e.g., `apr-abc123...`) |
+| `stac_item_id` | string | Option 2 | STAC item ID for the dataset |
+| `job_id` | string | Option 3 | Job ID that processed the dataset |
+| `reviewer` | string | **Yes** | Email of person approving |
+| `notes` | string | No | Review notes |
+
+**Example:**
+```bash
+curl -X POST "{BASE_URL}/api/platform/approve" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "stac_item_id": "flood-data-res-001-v1-0",
+    "reviewer": "user@example.com",
+    "notes": "QA review passed"
+  }'
+```
+
+**Response:**
+```json
+{
+    "success": true,
+    "approval_id": "apr-abc123...",
+    "status": "approved",
+    "action": "stac_updated",
+    "message": "Dataset approved successfully"
+}
+```
+
+### Revoke Approval
+
+```
+POST /api/platform/revoke
+```
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `approval_id` | string | Option 1 | Approval record ID |
+| `stac_item_id` | string | Option 2 | STAC item ID |
+| `job_id` | string | Option 3 | Job ID |
+| `revoker` | string | **Yes** | Email of person revoking |
+| `reason` | string | **Yes** | Reason for revocation (audit trail) |
+
+**Example:**
+```bash
+curl -X POST "{BASE_URL}/api/platform/revoke" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "stac_item_id": "flood-data-res-001-v1-0",
+    "revoker": "admin@example.com",
+    "reason": "Data quality issue discovered"
+  }'
+```
+
+### List Approvals
+
+```
+GET /api/platform/approvals?status=pending&limit=50
+```
+
+| Parameter | Description |
+|-----------|-------------|
+| `status` | Filter: `pending`, `approved`, `rejected`, `revoked` |
+| `classification` | Filter: `ouo`, `public` |
+| `limit` | Max results (default: 100) |
+| `offset` | Pagination offset |
+
+### Get Approval Details
+
+```
+GET /api/platform/approvals/{approval_id}
+```
+
+### Batch Approval Status (for UI dashboards)
+
+```
+GET /api/platform/approvals/status?stac_item_ids=item1,item2,item3
+```
+
+**Response:**
+```json
+{
+    "success": true,
+    "statuses": {
+        "item1": {"has_approval": true, "is_approved": true, "approval_id": "apr-abc123", "reviewer": "user@example.com"},
+        "item2": {"has_approval": true, "is_approved": false, "status": "pending"},
+        "item3": {"has_approval": false}
+    }
+}
+```
+
+---
+
+## 4. Unpublish Data
 
 ### Endpoint
 ```
-POST /api/platform/unpublish/vector
+POST /api/platform/unpublish
 ```
 
 ### Purpose
-Remove a vector dataset from the platform via the Platform ACL layer. Accepts DDH identifiers, request_id, or direct table_name (cleanup mode). Drops PostGIS table, deletes metadata, and optionally removes STAC item.
+Remove a dataset from the platform. Auto-detects data type (vector or raster) and removes all associated outputs: PostGIS tables, COG blobs, STAC items, and metadata.
 
-### Request Body Options
+### Request Body
 
-**Option 1: By DDH Identifiers (Preferred)**
 ```json
 {
     "dataset_id": "aerial-imagery-2024",
@@ -395,33 +529,13 @@ Remove a vector dataset from the platform via the Platform ACL layer. Accepts DD
 }
 ```
 
-**Option 2: By Request ID** (from original submission)
-```json
-{
-    "request_id": "a3f2c1b8e9d7f6a5c4b3a2e1d9c8b7a6",
-    "dry_run": true
-}
-```
-
-**Option 3: Cleanup Mode** (direct table_name - for orphaned data)
-```json
-{
-    "table_name": "city_parcels_v1_0",
-    "schema_name": "geo",
-    "dry_run": true
-}
-```
-
 ### Parameters
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `dataset_id` | string | Option 1 | - | DDH dataset identifier |
-| `resource_id` | string | Option 1 | - | DDH resource identifier |
-| `version_id` | string | Option 1 | - | DDH version identifier |
-| `request_id` | string | Option 2 | - | Original platform request ID |
-| `table_name` | string | Option 3 | - | Direct PostGIS table name (cleanup mode) |
-| `schema_name` | string | No | `geo` | PostgreSQL schema containing the table |
+| `dataset_id` | string | **Yes** | - | DDH dataset identifier |
+| `resource_id` | string | **Yes** | - | DDH resource identifier |
+| `version_id` | string | **Yes** | - | DDH version identifier |
 | `dry_run` | boolean | No | `true` | Preview mode - shows what would be deleted without executing |
 
 ### Response (202 Accepted)
@@ -431,11 +545,9 @@ Remove a vector dataset from the platform via the Platform ACL layer. Accepts DD
     "success": true,
     "request_id": "unpublish-abc123...",
     "job_id": "def456...",
-    "job_type": "unpublish_vector",
-    "mode": "platform",
+    "data_type": "raster",
     "dry_run": true,
-    "table_name": "aerial_imagery_2024_site_alpha_v1_0",
-    "message": "Vector unpublish job submitted (dry_run=true)",
+    "message": "Unpublish job submitted (dry_run=true)",
     "monitor_url": "/api/platform/status/unpublish-abc123..."
 }
 ```
@@ -443,194 +555,44 @@ Remove a vector dataset from the platform via the Platform ACL layer. Accepts DD
 ### Example (curl)
 
 ```bash
-# Option 1: By DDH identifiers (preferred)
+# Dry run first (default) - preview what will be deleted
 curl -X POST \
-  "{BASE_URL}/api/platform/unpublish/vector" \
+  "{BASE_URL}/api/platform/unpublish" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "dataset_id": "aerial-imagery-2024",
+    "resource_id": "site-alpha",
+    "version_id": "v1.0"
+  }'
+
+# Execute deletion
+curl -X POST \
+  "{BASE_URL}/api/platform/unpublish" \
   -H "Content-Type: application/json" \
   -d '{
     "dataset_id": "aerial-imagery-2024",
     "resource_id": "site-alpha",
     "version_id": "v1.0",
-    "dry_run": true
-  }'
-
-# Option 2: By request_id
-curl -X POST \
-  "{BASE_URL}/api/platform/unpublish/vector" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "request_id": "a3f2c1b8e9d7f6a5c4b3a2e1d9c8b7a6",
-    "dry_run": false
-  }'
-
-# Option 3: Cleanup mode (direct table_name)
-curl -X POST \
-  "{BASE_URL}/api/platform/unpublish/vector" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "table_name": "city_parcels_v1_0",
     "dry_run": false
   }'
 ```
 
-### Mode Behavior
+### What Gets Deleted
 
-| Mode | Description |
-|------|-------------|
-| `platform` | Original request found - uses DDH identifiers to generate table name |
-| `cleanup` | No request found - uses provided identifiers directly (logs warning) |
-
-### Workflow Stages
-
-| Stage | Task | Description |
-|-------|------|-------------|
-| 1 | `inventory_vector` | Query `geo.table_metadata` for ETL/STAC linkage |
-| 2 | `drop_vector_table` | DROP PostGIS table + DELETE metadata row |
-| 3 | `cleanup_vector` | Delete STAC item if linked + create audit record |
+| Data Type | Outputs Removed |
+|-----------|-----------------|
+| **Vector** | PostGIS table, `geo.table_catalog` metadata, STAC item |
+| **Raster** | COG blob(s), MosaicJSON (if collection), STAC item |
 
 ### Job Result (when completed)
 
 ```json
 {
     "job_result": {
-        "table_dropped": "geo.city_parcels_v1_0",
-        "metadata_deleted": true,
-        "stac_item_deleted": "city-parcels-v1-0",
-        "audit_record_id": "unpublish_abc123"
-    }
-}
-```
-
----
-
-## 4. Unpublish Raster Data
-
-### Endpoint
-```
-POST /api/platform/unpublish/raster
-```
-
-### Purpose
-Remove a raster dataset from the platform via the Platform ACL layer. Accepts DDH identifiers, request_id, or direct STAC identifiers (cleanup mode). Deletes STAC item and associated COG/MosaicJSON blobs from storage.
-
-### Request Body Options
-
-**Option 1: By DDH Identifiers (Preferred)**
-```json
-{
-    "dataset_id": "aerial-imagery-2024",
-    "resource_id": "site-alpha",
-    "version_id": "v1.0",
-    "dry_run": true
-}
-```
-
-**Option 2: By Request ID** (from original submission)
-```json
-{
-    "request_id": "a3f2c1b8e9d7f6a5c4b3a2e1d9c8b7a6",
-    "dry_run": true
-}
-```
-
-**Option 3: Cleanup Mode** (direct STAC identifiers - for orphaned data)
-```json
-{
-    "stac_item_id": "aerial-imagery-2024-site-alpha-v1-0",
-    "collection_id": "aerial-imagery-2024",
-    "dry_run": true
-}
-```
-
-### Parameters
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `dataset_id` | string | Option 1 | - | DDH dataset identifier |
-| `resource_id` | string | Option 1 | - | DDH resource identifier |
-| `version_id` | string | Option 1 | - | DDH version identifier |
-| `request_id` | string | Option 2 | - | Original platform request ID |
-| `stac_item_id` | string | Option 3 | - | Direct STAC item ID (cleanup mode) |
-| `collection_id` | string | Option 3 | - | Direct STAC collection ID (cleanup mode) |
-| `dry_run` | boolean | No | `true` | Preview mode - shows what would be deleted without executing |
-
-### Response (202 Accepted)
-
-```json
-{
-    "success": true,
-    "request_id": "unpublish-def456...",
-    "job_id": "ghi789...",
-    "job_type": "unpublish_raster",
-    "mode": "platform",
-    "dry_run": true,
-    "stac_item_id": "aerial-imagery-2024-site-alpha-v1-0",
-    "collection_id": "aerial-imagery-2024",
-    "message": "Raster unpublish job submitted (dry_run=true)",
-    "monitor_url": "/api/platform/status/unpublish-def456..."
-}
-```
-
-### Example (curl)
-
-```bash
-# Option 1: By DDH identifiers (preferred)
-curl -X POST \
-  "{BASE_URL}/api/platform/unpublish/raster" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "dataset_id": "aerial-imagery-2024",
-    "resource_id": "site-alpha",
-    "version_id": "v1.0",
-    "dry_run": true
-  }'
-
-# Option 2: By request_id
-curl -X POST \
-  "{BASE_URL}/api/platform/unpublish/raster" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "request_id": "a3f2c1b8e9d7f6a5c4b3a2e1d9c8b7a6",
-    "dry_run": false
-  }'
-
-# Option 3: Cleanup mode (direct STAC identifiers)
-curl -X POST \
-  "{BASE_URL}/api/platform/unpublish/raster" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "stac_item_id": "aerial-imagery-2024-site-alpha-v1-0",
-    "collection_id": "aerial-imagery-2024",
-    "dry_run": false
-  }'
-```
-
-### Mode Behavior
-
-| Mode | Description |
-|------|-------------|
-| `platform` | Original request found - uses DDH identifiers to generate STAC IDs |
-| `cleanup` | No request found - uses provided identifiers directly (logs warning) |
-
-### Workflow Stages
-
-| Stage | Task | Description |
-|-------|------|-------------|
-| 1 | `inventory_raster` | Query STAC item, extract asset hrefs for deletion |
-| 2 | `delete_raster_blobs` | Fan-out deletion of COG/MosaicJSON blobs |
-| 3 | `cleanup_raster` | Delete STAC item + create audit record |
-
-### Job Result (when completed)
-
-```json
-{
-    "job_result": {
+        "data_type": "raster",
         "stac_item_deleted": "aerial-imagery-2024-site-alpha-v1-0",
-        "blobs_deleted": [
-            "silver-cogs/aerial-imagery-2024/site-alpha/v1.0/site-alpha_cog_analysis.tif"
-        ],
-        "collection_cleanup": false,
-        "audit_record_id": "unpublish_def456"
+        "blobs_deleted": ["silver-cogs/.../site-alpha_cog_analysis.tif"],
+        "audit_record_id": "unpublish_abc123"
     }
 }
 ```
@@ -954,112 +916,6 @@ curl "{BASE_URL}/api/platform/catalog/dataset/{dataset_id}?limit=50"
             "version_id": "v1.0"
         }
     ]
-}
-```
-
----
-
-## 8. Approvals API - QA Workflow
-
-The Approvals API manages dataset approval before publication. Approving a dataset marks it as published in the STAC catalog.
-
-### Approve Dataset
-
-```
-POST /api/platform/approve
-```
-
-**Request Body** - identify dataset by ONE of:
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `approval_id` | string | Option 1 | Approval record ID (e.g., `apr-abc123...`) |
-| `stac_item_id` | string | Option 2 | STAC item ID for the dataset |
-| `job_id` | string | Option 3 | Job ID that processed the dataset |
-| `reviewer` | string | **Yes** | Email of person approving |
-| `notes` | string | No | Review notes |
-
-**Example:**
-```bash
-curl -X POST "{BASE_URL}/api/platform/approve" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "stac_item_id": "flood-data-res-001-v1-0",
-    "reviewer": "user@example.com",
-    "notes": "QA review passed"
-  }'
-```
-
-**Response:**
-```json
-{
-    "success": true,
-    "approval_id": "apr-abc123...",
-    "status": "approved",
-    "action": "stac_updated",
-    "message": "Dataset approved successfully"
-}
-```
-
-### Revoke Approval
-
-```
-POST /api/platform/revoke
-```
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `approval_id` | string | Option 1 | Approval record ID |
-| `stac_item_id` | string | Option 2 | STAC item ID |
-| `job_id` | string | Option 3 | Job ID |
-| `revoker` | string | **Yes** | Email of person revoking |
-| `reason` | string | **Yes** | Reason for revocation (audit trail) |
-
-**Example:**
-```bash
-curl -X POST "{BASE_URL}/api/platform/revoke" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "stac_item_id": "flood-data-res-001-v1-0",
-    "revoker": "admin@example.com",
-    "reason": "Data quality issue discovered"
-  }'
-```
-
-### List Approvals
-
-```
-GET /api/platform/approvals?status=pending&limit=50
-```
-
-| Parameter | Description |
-|-----------|-------------|
-| `status` | Filter: `pending`, `approved`, `rejected`, `revoked` |
-| `classification` | Filter: `ouo`, `public` |
-| `limit` | Max results (default: 100) |
-| `offset` | Pagination offset |
-
-### Get Approval Details
-
-```
-GET /api/platform/approvals/{approval_id}
-```
-
-### Batch Approval Status (for UI dashboards)
-
-```
-GET /api/platform/approvals/status?stac_item_ids=item1,item2,item3
-```
-
-**Response:**
-```json
-{
-    "success": true,
-    "statuses": {
-        "item1": {"has_approval": true, "is_approved": true, "approval_id": "apr-abc123", "reviewer": "user@example.com"},
-        "item2": {"has_approval": true, "is_approved": false, "status": "pending"},
-        "item3": {"has_approval": false}
-    }
 }
 ```
 

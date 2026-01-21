@@ -91,31 +91,12 @@ Generic submission endpoint that auto-detects data type from parameters.
 }
 ```
 
-### Supported Data Types
-
-| Data Type | Job Created | Status |
-|-----------|-------------|--------|
-| `vector` | `process_vector` | Production |
-| `raster` | `process_raster_v2` or `process_raster_collection_v2` | Production |
-| `pointcloud` | - | Phase 2 |
-| `mesh_3d` | - | Phase 2 |
-| `tabular` | - | Phase 2 |
-
-### Supported Operations
-
-| Operation | Status | Notes |
-|-----------|--------|-------|
-| `CREATE` | Production | Via `/api/platform/submit` |
-| `UPDATE` | Production | Re-submit with same identifiers (idempotent overwrite) |
-| `DELETE` | Production | Via `/api/jobs/submit/unpublish_vector` or `unpublish_raster` |
-
----
-
 ## 2. Check Request Status
 
 ### Endpoint
 ```
-GET /api/platform/status/{request_id}
+GET /api/platform/status/{request_id} OR
+GET /api/platform/status/{job_id}
 ```
 
 ### Purpose
@@ -153,7 +134,7 @@ Check the status of a submitted request, including underlying job progress.
         "total": 3,
         "completed": 3,
         "failed": 0,
-        "processing": 0,
+        "": 0,
         "by_stage": {
             "1": {"total": 1, "completed": 1, "task_types": ["validate_raster"]},
             "2": {"total": 1, "completed": 1, "task_types": ["create_cog"]},
@@ -303,7 +284,8 @@ Optional processing parameters can be included in the request:
     "processing_options": {
         "output_tier": "analysis",
         "crs": "EPSG:4326",
-        "raster_type": "auto"
+        "raster_type": "auto",
+        "overwrite": "false"
     }
 }
 ```
@@ -313,6 +295,7 @@ Optional processing parameters can be included in the request:
 | `output_tier` | `analysis`, `visualization`, `archive` | `analysis` | COG compression profile |
 | `crs` | EPSG code | `EPSG:4326` | Target coordinate system |
 | `raster_type` | `auto`, `rgb`, `dem`, `categorical` | `auto` | Raster type hint |
+| `overwrite` | Replace existing data |
 
 ### Vector Options
 

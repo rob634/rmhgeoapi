@@ -56,177 +56,7 @@ Currently using Azure AD authentication (when enabled). Contact platform admin f
 
 ---
 
-## 1. Single Raster Processing
-
-### Endpoint
-```
-POST /api/platform/raster
-```
-
-### Purpose
-Process a single raster file (GeoTIFF) into a Cloud-Optimized GeoTIFF (COG) with STAC metadata.
-
-### Request Body
-
-```json
-{
-    "dataset_id": "aerial-imagery-2024",
-    "resource_id": "site-alpha",
-    "version_id": "v1.0",
-    "container_name": "rmhazuregeobronze",
-    "file_name": "aerial-alpha.tif",
-    "service_name": "Aerial Imagery Site Alpha",
-    "access_level": "OUO",
-    "description": "High-resolution aerial imagery for Site Alpha",
-    "tags": ["aerial", "rgb", "2024"]
-}
-```
-
-### Parameters
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `dataset_id` | string | **Yes** | DDH dataset identifier (e.g., "aerial-imagery-2024") |
-| `resource_id` | string | **Yes** | DDH resource identifier (e.g., "site-alpha") |
-| `version_id` | string | **Yes** | DDH version identifier (e.g., "v1.0") |
-| `container_name` | string | **Yes** | Azure Blob container with source file |
-| `file_name` | string | **Yes** | Source raster filename (must be string, not list) |
-| `service_name` | string | No | Human-readable service name |
-| `access_level` | string | No | Access classification ("OUO", "PUBLIC", etc.) |
-| `description` | string | No | Dataset description for STAC metadata |
-| `tags` | list | No | Tags for searchability |
-
-### Response (202 Accepted)
-
-```json
-{
-    "success": true,
-    "request_id": "791147831f11d833c779f8288d34fa5a",
-    "job_id": "5a5f62fd4e0526a30d8aa6fa11fac9ecbf12cfe5298f0b23797e7eda6ab1aed9",
-    "job_type": "process_raster_v2",
-    "message": "Single raster request submitted.",
-    "monitor_url": "/api/platform/status/791147831f11d833c779f8288d34fa5a"
-}
-```
-
-### Example (curl)
-
-```bash
-curl -X POST \
-  "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/raster" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "dataset_id": "aerial-imagery-2024",
-    "resource_id": "site-alpha",
-    "version_id": "v1.0",
-    "container_name": "rmhazuregeobronze",
-    "file_name": "aerial-alpha.tif",
-    "service_name": "Aerial Imagery Site Alpha",
-    "access_level": "OUO"
-  }'
-```
-
-### Size Limits
-
-| Limit | Value | Behavior |
-|-------|-------|----------|
-| Max file size | 800 MB | Auto-fallback to `process_large_raster_v2` for larger files |
-| Min file size | None | Any size accepted |
-
-**Note**: Files exceeding 800 MB are automatically routed to the large raster tiling workflow - no action required from the caller.
-
----
-
-## 2. Raster Collection Processing
-
-### Endpoint
-```
-POST /api/platform/raster-collection
-```
-
-### Purpose
-Process multiple raster files into a unified STAC collection with MosaicJSON for seamless tile serving.
-
-### Request Body
-
-```json
-{
-    "dataset_id": "satellite-tiles-2024",
-    "resource_id": "region-alpha",
-    "version_id": "v1.0",
-    "container_name": "rmhazuregeobronze",
-    "file_name": [
-        "tiles/tile_R1C1.tif",
-        "tiles/tile_R1C2.tif",
-        "tiles/tile_R2C1.tif",
-        "tiles/tile_R2C2.tif"
-    ],
-    "service_name": "Satellite Tiles Region Alpha",
-    "access_level": "OUO",
-    "description": "Multi-tile satellite imagery mosaic"
-}
-```
-
-### Parameters
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `dataset_id` | string | **Yes** | DDH dataset identifier |
-| `resource_id` | string | **Yes** | DDH resource identifier |
-| `version_id` | string | **Yes** | DDH version identifier |
-| `container_name` | string | **Yes** | Azure Blob container with source files |
-| `file_name` | list | **Yes** | List of raster filenames (must be list, not string) |
-| `service_name` | string | No | Human-readable service name |
-| `access_level` | string | No | Access classification |
-| `description` | string | No | Collection description |
-
-### Response (202 Accepted)
-
-```json
-{
-    "success": true,
-    "request_id": "a1b2c3d4e5f6...",
-    "job_id": "def456abc789...",
-    "job_type": "process_raster_collection_v2",
-    "file_count": 4,
-    "message": "Raster collection request submitted (4 files).",
-    "monitor_url": "/api/platform/status/a1b2c3d4e5f6..."
-}
-```
-
-### Example (curl)
-
-```bash
-curl -X POST \
-  "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/raster-collection" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "dataset_id": "namangan-imagery",
-    "resource_id": "aug2019",
-    "version_id": "v1.0",
-    "container_name": "rmhazuregeobronze",
-    "file_name": [
-      "namangan/namangan14aug2019_R1C1cog.tif",
-      "namangan/namangan14aug2019_R1C2cog.tif",
-      "namangan/namangan14aug2019_R2C1cog.tif",
-      "namangan/namangan14aug2019_R2C2cog.tif"
-    ],
-    "service_name": "Namangan Satellite Imagery",
-    "access_level": "OUO"
-  }'
-```
-
-### Size and Count Limits
-
-| Limit | Value | Behavior |
-|-------|-------|----------|
-| Min files | 2 | Use `/api/platform/raster` for single files |
-| Max files | 20 | Submit in smaller batches for larger collections |
-| Max individual file | 800 MB | Rejected if ANY file exceeds this (Docker worker coming soon) |
-
----
-
-## 3. Generic Submit (Auto-Detection)
+## 1. Submit Data for Processing
 
 ### Endpoint
 ```
@@ -272,7 +102,7 @@ Generic submission endpoint that auto-detects data type from parameters.
 
 ---
 
-## 4. Check Request Status
+## 2. Check Request Status
 
 ### Endpoint
 ```
@@ -411,7 +241,7 @@ request_id = SHA256(dataset_id + resource_id + version_id)
 ```json
 {
     "success": false,
-    "error": "file_name must be a string for single raster endpoint. Use /api/platform/raster-collection for multiple files.",
+    "error": "Missing required parameter: dataset_id",
     "error_type": "ValidationError"
 }
 ```
@@ -498,16 +328,17 @@ Optional processing parameters can be included in the request:
 
 ## Complete Workflow Example
 
-### 1. Submit Raster
+### 1. Submit Data
 
 ```bash
 curl -X POST \
-  "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/raster" \
+  "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/submit" \
   -H "Content-Type: application/json" \
   -d '{
     "dataset_id": "project-alpha",
     "resource_id": "satellite-image",
     "version_id": "v1.0",
+    "data_type": "raster",
     "container_name": "rmhazuregeobronze",
     "file_name": "satellite.tif",
     "service_name": "Project Alpha Satellite",
@@ -550,7 +381,7 @@ https://rmhtitiler-.../cog/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=...
 
 ---
 
-## 5. Unpublish Vector Data
+## 3. Unpublish Vector Data
 
 ### Endpoint
 ```
@@ -680,7 +511,7 @@ curl -X POST \
 
 ---
 
-## 6. Unpublish Raster Data
+## 4. Unpublish Raster Data
 
 ### Endpoint
 ```
@@ -814,7 +645,7 @@ curl -X POST \
 
 ---
 
-## 7. System Health and Monitoring
+## 5. System Health and Monitoring
 
 ### Platform Health (Simplified)
 
@@ -924,7 +755,7 @@ curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db
 
 ---
 
-## 8. Data Access URLs
+## 6. Data Access URLs
 
 After successful processing, jobs return access URLs for the published data.
 
@@ -998,7 +829,7 @@ When a raster job completes, the result includes:
 
 ---
 
-## 9. Catalog API - STAC Verification (F12.8)
+## 7. Catalog API - STAC Verification
 
 The Catalog API allows DDH to verify that processed data exists in the STAC catalog and retrieve asset URLs for visualization. This is the B2B interface for STAC access.
 
@@ -1136,7 +967,7 @@ curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/pl
 
 ---
 
-## 10. Approvals API - QA Workflow
+## 8. Approvals API - QA Workflow
 
 The Approvals API manages dataset approval before publication. Approving a dataset marks it as published in the STAC catalog.
 

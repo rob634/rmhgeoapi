@@ -105,7 +105,9 @@ class StacMetadataService:
         item_id: Optional[str] = None,
         platform_meta: Optional['PlatformMetadata'] = None,
         app_meta: Optional['AppMetadata'] = None,
-        raster_meta: Optional['RasterVisualizationMetadata'] = None  # For DEM colormap (01 JAN 2026)
+        raster_meta: Optional['RasterVisualizationMetadata'] = None,  # For DEM colormap (01 JAN 2026)
+        file_checksum: Optional[str] = None,  # STAC file extension (21 JAN 2026)
+        file_size: Optional[int] = None,  # STAC file extension (21 JAN 2026)
     ) -> Item:
         """
         Extract STAC Item from raster blob using rio-stac.
@@ -411,7 +413,10 @@ class StacMetadataService:
                 app=app_meta,
                 raster=raster_meta,  # Now includes calculated rescale (04 JAN 2026)
                 include_iso3=True,
-                include_titiler=True  # Adds TiTiler links + thumbnail asset
+                include_titiler=True,  # Adds TiTiler links + thumbnail asset
+                # STAC file extension (21 JAN 2026)
+                file_checksum=file_checksum,
+                file_size=file_size,
             )
             logger.debug("   ✅ Step G.2: Metadata enrichment complete (platform, app, geo, titiler)")
         except Exception as e:

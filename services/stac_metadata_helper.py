@@ -742,7 +742,9 @@ class STACMetadataHelper:
         app: Optional[AppMetadata] = None,
         raster: Optional[RasterVisualizationMetadata] = None,
         include_iso3: bool = True,
-        include_titiler: bool = True
+        include_titiler: bool = True,
+        file_checksum: Optional[str] = None,  # STAC file extension (21 JAN 2026)
+        file_size: Optional[int] = None,  # STAC file extension (21 JAN 2026)
     ) -> Dict[str, Any]:
         """
         Augment STAC item dict with all metadata categories.
@@ -759,6 +761,8 @@ class STACMetadataHelper:
             raster: Raster visualization metadata (app:* properties + smart TiTiler URLs)
             include_iso3: Add ISO3 country codes (default True)
             include_titiler: Add TiTiler visualization links (default True)
+            file_checksum: SHA-256 multihash for STAC file:checksum (21 JAN 2026)
+            file_size: File size in bytes for STAC file:size (21 JAN 2026)
 
         Returns:
             Augmented item_dict with additional properties, links, assets
@@ -809,6 +813,35 @@ class STACMetadataHelper:
             item_dict['assets'].update(assets)
 
             logger.debug(f"   Added TiTiler links: {[l['rel'] for l in links]}")
+
+        # Add STAC file extension properties to data asset (21 JAN 2026)
+        # Per https://github.com/stac-extensions/file
+        if file_checksum or file_size:
+            if 'assets' not in item_dict:
+                item_dict['assets'] = {}
+
+            # Ensure 'data' asset exists (rio-stac creates it, but be defensive)
+            if 'data' not in item_dict['assets']:
+                item_dict['assets']['data'] = {
+                    'href': f"/vsiaz/{container}/{blob_name}" if container and blob_name else '',
+                    'type': 'image/tiff; application=geotiff; profile=cloud-optimized',
+                    'roles': ['data'],
+                }
+
+            # Add file extension properties
+            if file_checksum:
+                item_dict['assets']['data']['file:checksum'] = file_checksum
+            if file_size:
+                item_dict['assets']['data']['file:size'] = file_size
+
+            # Add file extension to stac_extensions if not present
+            file_extension_url = 'https://stac-extensions.github.io/file/v2.1.0/schema.json'
+            if 'stac_extensions' not in item_dict:
+                item_dict['stac_extensions'] = []
+            if file_extension_url not in item_dict['stac_extensions']:
+                item_dict['stac_extensions'].append(file_extension_url)
+
+            logger.debug(f"   Added file extension: checksum={file_checksum[:20] if file_checksum else None}..., size={file_size}")
 
         return item_dict
 

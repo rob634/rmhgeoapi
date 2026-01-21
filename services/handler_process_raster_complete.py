@@ -446,6 +446,9 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                 'access_level': params.get('access_level'),
                 # Raster type for visualization
                 'raster_type': cog_result.get('raster_type'),
+                # STAC file extension: checksum and size (21 JAN 2026)
+                'file_checksum': cog_result.get('file_checksum'),
+                'file_size': cog_result.get('file_size'),
             }
 
             stac_response = extract_stac_metadata(stac_params)
@@ -530,6 +533,9 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                     "compression": cog_result.get('compression'),
                     "processing_time_seconds": phase2_duration,
                     "raster_type": cog_result.get('raster_type'),
+                    # STAC file extension compliant (21 JAN 2026)
+                    "file_checksum": cog_result.get('file_checksum'),
+                    "file_size": cog_result.get('file_size'),
                 },
                 "stac": stac_result,
                 "processing": {

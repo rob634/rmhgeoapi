@@ -280,7 +280,10 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
                 item_id=item_id,  # Will be None if not provided, service will auto-generate
                 platform_meta=platform_meta,
                 app_meta=app_meta,
-                raster_meta=raster_meta  # For DEM colormap in preview URLs (01 JAN 2026)
+                raster_meta=raster_meta,  # For DEM colormap in preview URLs (01 JAN 2026)
+                # STAC file extension: checksum and size (21 JAN 2026)
+                file_checksum=params.get('file_checksum'),
+                file_size=params.get('file_size'),
             )
 
             extract_duration = (datetime.utcnow() - extract_start).total_seconds()

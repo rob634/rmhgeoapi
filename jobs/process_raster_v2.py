@@ -271,7 +271,10 @@ class ProcessRasterV2Job(JobBaseMixin, JobBase):
                 "cog_container": c.get("cog_container"),
                 "size_mb": c.get("size_mb"),
                 "compression": c.get("compression"),
-                "processing_time_seconds": c.get("processing_time_seconds")
+                "processing_time_seconds": c.get("processing_time_seconds"),
+                # STAC file extension compliant (21 JAN 2026)
+                "file_checksum": c.get("file_checksum"),
+                "file_size": c.get("file_size"),
             }
 
         # Build STAC summary and TiTiler URLs (with degraded mode detection - 6 DEC 2025)

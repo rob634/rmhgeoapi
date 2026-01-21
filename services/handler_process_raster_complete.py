@@ -517,6 +517,54 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             logger.info(f"📊 Peak memory (overall): {resource_stats['peak_memory_overall_mb']} MB")
         logger.info("=" * 60)
 
+        # =====================================================================
+        # ARTIFACT REGISTRY (21 JAN 2026)
+        # =====================================================================
+        # Create artifact record for lineage tracking with checksum
+        artifact_id = None
+        try:
+            from services.artifact_service import ArtifactService
+
+            # Build client_refs from platform parameters
+            client_refs = {}
+            if params.get('dataset_id'):
+                client_refs['dataset_id'] = params['dataset_id']
+            if params.get('resource_id'):
+                client_refs['resource_id'] = params['resource_id']
+            if params.get('version_id'):
+                client_refs['version_id'] = params['version_id']
+
+            # Only create artifact if we have client refs (platform job)
+            if client_refs:
+                artifact_service = ArtifactService()
+                artifact = artifact_service.create_artifact(
+                    storage_account=config.storage.silver.account_name,
+                    container=cog_container,
+                    blob_path=cog_blob,
+                    client_type='ddh',  # Platform client type
+                    client_refs=client_refs,
+                    stac_collection_id=stac_result.get('collection_id'),
+                    stac_item_id=stac_result.get('item_id'),
+                    source_job_id=params.get('_job_id'),
+                    source_task_id=params.get('_task_id'),
+                    content_hash=cog_result.get('file_checksum'),
+                    size_bytes=cog_result.get('file_size'),
+                    content_type='image/tiff; application=geotiff; profile=cloud-optimized',
+                    metadata={
+                        'cog_tier': cog_result.get('cog_tier'),
+                        'compression': cog_result.get('compression'),
+                        'raster_type': cog_result.get('raster_type', {}).get('detected_type') if isinstance(cog_result.get('raster_type'), dict) else cog_result.get('raster_type'),
+                    },
+                    overwrite=True  # Platform jobs always overwrite
+                )
+                artifact_id = str(artifact.artifact_id)
+                logger.info(f"📦 Artifact created: {artifact_id} (revision {artifact.revision})")
+            else:
+                logger.debug("Skipping artifact creation - no client_refs (non-platform job)")
+        except Exception as e:
+            # Artifact creation is non-fatal - log warning but continue
+            logger.warning(f"⚠️ Artifact creation failed (non-fatal): {e}")
+
         return {
             "success": True,
             "result": {
@@ -558,6 +606,8 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                     "system_available_mb": resource_stats["final"].get("system_available_mb"),
                     "system_percent": resource_stats["final"].get("system_percent"),
                 },
+                # Artifact registry (21 JAN 2026)
+                "artifact_id": artifact_id,
             },
         }
 

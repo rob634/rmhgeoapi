@@ -2449,6 +2449,20 @@ class TasksInterface(BaseInterface):
                     {{ number: 4, name: 'MosaicJSON', description: 'Generate mosaic definition' }},
                     {{ number: 5, name: 'STAC Registration', description: 'Register with STAC catalog' }}
                 ]
+            }},
+            // Docker H3 Pyramid Job (F7.20 - 20 JAN 2026)
+            // Single-stage with internal phases: Base → Cascade → Finalize
+            'bootstrap_h3_docker': {{
+                name: 'Docker H3 Pyramid',
+                isDockerJob: true,
+                stages: [
+                    {{ number: 1, name: 'H3 Pyramid', taskType: 'h3_pyramid_complete', description: 'Base → Cascade → Finalize (Docker)' }}
+                ],
+                internalPhases: [
+                    {{ number: 1, name: 'Base Generation', description: 'Generate res 2 base grid with land filter' }},
+                    {{ number: 2, name: 'Cascade', description: 'Cascade to res 3-7 (batched with checkpoints)' }},
+                    {{ number: 3, name: 'Finalization', description: 'Verify cell counts and update metadata' }}
+                ]
             }}
         }};
 

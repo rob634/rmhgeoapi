@@ -369,6 +369,53 @@ class ProcessRasterV2Job(JobBaseMixin, JobBase):
             except Exception:
                 pass
 
+        # =====================================================================
+        # ARTIFACT REGISTRY (21 JAN 2026)
+        # =====================================================================
+        # Create artifact record for lineage tracking with checksum
+        artifact_id = None
+        try:
+            from services.artifact_service import ArtifactService
+
+            # Build client_refs from platform parameters
+            client_refs = {}
+            if params.get('dataset_id'):
+                client_refs['dataset_id'] = params['dataset_id']
+            if params.get('resource_id'):
+                client_refs['resource_id'] = params['resource_id']
+            if params.get('version_id'):
+                client_refs['version_id'] = params['version_id']
+
+            # Only create artifact if we have client refs (platform job)
+            if client_refs and cog_summary.get('cog_blob'):
+                artifact_service = ArtifactService()
+                artifact = artifact_service.create_artifact(
+                    storage_account=config.storage.silver.account_name,
+                    container=cog_summary.get('cog_container'),
+                    blob_path=cog_summary.get('cog_blob'),
+                    client_type='ddh',  # Platform client type
+                    client_refs=client_refs,
+                    stac_collection_id=stac_summary.get('collection_id'),
+                    stac_item_id=stac_summary.get('item_id'),
+                    source_job_id=context.job_id,
+                    source_task_id=None,  # Multi-stage job, no single task
+                    content_hash=cog_summary.get('file_checksum'),
+                    size_bytes=cog_summary.get('file_size'),
+                    content_type='image/tiff; application=geotiff; profile=cloud-optimized',
+                    metadata={
+                        'compression': cog_summary.get('compression'),
+                        'raster_type': validation_summary.get('raster_type'),
+                    },
+                    overwrite=True  # Platform jobs always overwrite
+                )
+                artifact_id = str(artifact.artifact_id)
+                logger.info(f"📦 Artifact created: {artifact_id} (revision {artifact.revision})")
+            else:
+                logger.debug("Skipping artifact creation - no client_refs or cog_blob")
+        except Exception as e:
+            # Artifact creation is non-fatal - log warning but continue
+            logger.warning(f"⚠️ Artifact creation failed (non-fatal): {e}")
+
         # Build result with degraded mode info if applicable (6 DEC 2025)
         result = {
             "job_type": "process_raster_v2",
@@ -381,6 +428,7 @@ class ProcessRasterV2Job(JobBaseMixin, JobBase):
             "titiler_urls": titiler_urls,
             "app_urls": app_urls,  # Raster collection viewer URLs (30 DEC 2025)
             "share_url": share_url,
+            "artifact_id": artifact_id,  # Artifact registry (21 JAN 2026)
             "stages_completed": context.current_stage,
             "total_tasks_executed": len(task_results),
             "tasks_by_status": {

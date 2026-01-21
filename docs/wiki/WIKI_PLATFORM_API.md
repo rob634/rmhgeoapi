@@ -44,9 +44,18 @@ The Platform API provides a complete lifecycle for geospatial data:
 
 ## Base URL
 
-```
-https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net
-```
+All endpoints use `{BASE_URL}` as the base. Replace with the environment-specific URL provided by your platform administrator.
+
+**Placeholders used in this document:**
+
+| Placeholder | Description |
+|-------------|-------------|
+| `{BASE_URL}` | Platform API base URL |
+| `{TITILER_URL}` | TiTiler raster tile service URL |
+| `{STAC_URL}` | STAC catalog API URL |
+| `{WEB_MAP_URL}` | Interactive web map viewer URL |
+| `{STORAGE_URL}` | Azure Blob Storage URL |
+| `{BRONZE_CONTAINER}` | Input data container name |
 
 ---
 
@@ -75,7 +84,7 @@ Generic submission endpoint that auto-detects data type from parameters.
     "version_id": "v1.0",
     "data_type": "vector",
     "operation": "CREATE",
-    "container_name": "rmhazuregeobronze",
+    "container_name": "{BRONZE_CONTAINER}",
     "file_name": "boundaries.geojson",
     "service_name": "Administrative Boundaries",
     "access_level": "PUBLIC"
@@ -138,7 +147,7 @@ Check the status of a submitted request, including underlying job progress.
             "collection_id": "test-raster-14dec",
             "inserted_to_pgstac": true
         },
-        "share_url": "https://rmhtitiler-.../cog/WebMercatorQuad/map.html?url=..."
+        "share_url": "{TITILER_URL}/cog/WebMercatorQuad/map.html?url=..."
     },
     "task_summary": {
         "total": 3,
@@ -157,7 +166,7 @@ Check the status of a submitted request, including underlying job progress.
 ### Example (curl)
 
 ```bash
-curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/status/791147831f11d833c779f8288d34fa5a"
+curl "{BASE_URL}/api/platform/status/791147831f11d833c779f8288d34fa5a"
 ```
 
 ### Job Status Values
@@ -261,7 +270,7 @@ request_id = SHA256(dataset_id + resource_id + version_id)
 ```json
 {
     "success": false,
-    "error": "Pre-flight validation failed: Blob 'missing.tif' does not exist in container 'rmhazuregeobronze'",
+    "error": "Pre-flight validation failed: Blob 'missing.tif' does not exist in container '{BRONZE_CONTAINER}'",
     "error_type": "ValidationError"
 }
 ```
@@ -332,14 +341,14 @@ Optional processing parameters can be included in the request:
 
 ```bash
 curl -X POST \
-  "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/submit" \
+  "{BASE_URL}/api/platform/submit" \
   -H "Content-Type: application/json" \
   -d '{
     "dataset_id": "project-alpha",
     "resource_id": "satellite-image",
     "version_id": "v1.0",
     "data_type": "raster",
-    "container_name": "rmhazuregeobronze",
+    "container_name": "{BRONZE_CONTAINER}",
     "file_name": "satellite.tif",
     "service_name": "Project Alpha Satellite",
     "access_level": "OUO"
@@ -359,24 +368,24 @@ curl -X POST \
 ### 2. Poll Status
 
 ```bash
-curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/status/abc123..."
+curl "{BASE_URL}/api/platform/status/abc123..."
 ```
 
 ### 3. Access Results (when completed)
 
 **Interactive Map Viewer:**
 ```
-https://rmhtitiler-.../cog/WebMercatorQuad/map.html?url=...
+{TITILER_URL}/cog/WebMercatorQuad/map.html?url=...
 ```
 
 **STAC Item:**
 ```
-https://rmhogcstac-.../api/stac/collections/project-alpha/items/project-alpha-satellite-image-v1.0
+{STAC_URL}/api/stac/collections/project-alpha/items/project-alpha-satellite-image-v1.0
 ```
 
 **Tile Endpoint (for web maps):**
 ```
-https://rmhtitiler-.../cog/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=...
+{TITILER_URL}/cog/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=...
 ```
 
 ---
@@ -453,7 +462,7 @@ Remove a vector dataset from the platform via the Platform ACL layer. Accepts DD
 ```bash
 # Option 1: By DDH identifiers (preferred)
 curl -X POST \
-  "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/unpublish/vector" \
+  "{BASE_URL}/api/platform/unpublish/vector" \
   -H "Content-Type: application/json" \
   -d '{
     "dataset_id": "aerial-imagery-2024",
@@ -464,7 +473,7 @@ curl -X POST \
 
 # Option 2: By request_id
 curl -X POST \
-  "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/unpublish/vector" \
+  "{BASE_URL}/api/platform/unpublish/vector" \
   -H "Content-Type: application/json" \
   -d '{
     "request_id": "a3f2c1b8e9d7f6a5c4b3a2e1d9c8b7a6",
@@ -473,7 +482,7 @@ curl -X POST \
 
 # Option 3: Cleanup mode (direct table_name)
 curl -X POST \
-  "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/unpublish/vector" \
+  "{BASE_URL}/api/platform/unpublish/vector" \
   -H "Content-Type: application/json" \
   -d '{
     "table_name": "city_parcels_v1_0",
@@ -584,7 +593,7 @@ Remove a raster dataset from the platform via the Platform ACL layer. Accepts DD
 ```bash
 # Option 1: By DDH identifiers (preferred)
 curl -X POST \
-  "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/unpublish/raster" \
+  "{BASE_URL}/api/platform/unpublish/raster" \
   -H "Content-Type: application/json" \
   -d '{
     "dataset_id": "aerial-imagery-2024",
@@ -595,7 +604,7 @@ curl -X POST \
 
 # Option 2: By request_id
 curl -X POST \
-  "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/unpublish/raster" \
+  "{BASE_URL}/api/platform/unpublish/raster" \
   -H "Content-Type: application/json" \
   -d '{
     "request_id": "a3f2c1b8e9d7f6a5c4b3a2e1d9c8b7a6",
@@ -604,7 +613,7 @@ curl -X POST \
 
 # Option 3: Cleanup mode (direct STAC identifiers)
 curl -X POST \
-  "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/unpublish/raster" \
+  "{BASE_URL}/api/platform/unpublish/raster" \
   -H "Content-Type: application/json" \
   -d '{
     "stac_item_id": "aerial-imagery-2024-site-alpha-v1-0",
@@ -652,7 +661,7 @@ curl -X POST \
 The `/api/platform/health` endpoint provides a simplified system readiness check designed for external apps:
 
 ```bash
-curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/health"
+curl "{BASE_URL}/api/platform/health"
 ```
 
 **Response:**
@@ -680,7 +689,7 @@ curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/pl
 Get recent failures with sanitized error summaries (no internal paths or secrets):
 
 ```bash
-curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/failures?hours=24&limit=20"
+curl "{BASE_URL}/api/platform/failures?hours=24&limit=20"
 ```
 
 **Response:**
@@ -711,7 +720,7 @@ curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/pl
 Trace data lineage for a Platform request (source → processing → outputs):
 
 ```bash
-curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/lineage/{request_id}"
+curl "{BASE_URL}/api/platform/lineage/{request_id}"
 ```
 
 ### Pre-flight Validation
@@ -719,7 +728,7 @@ curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/pl
 Validate a file before submitting a job:
 
 ```bash
-curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/validate" \
+curl -X POST "{BASE_URL}/api/platform/validate" \
   -H "Content-Type: application/json" \
   -d '{"data_type": "raster", "container_name": "bronze-rasters", "blob_name": "imagery.tif"}'
 ```
@@ -742,7 +751,7 @@ curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.ne
 Use the dbadmin endpoint to query failed jobs with full details:
 
 ```bash
-curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/jobs?status=failed&hours=24&limit=10"
+curl "{BASE_URL}/api/dbadmin/jobs?status=failed&hours=24&limit=10"
 ```
 
 **Parameters:**
@@ -777,7 +786,7 @@ When a vector job completes, the result includes:
                 "items": "/api/features/collections/city_parcels_v1_0/items",
                 "bbox_query": "/api/features/collections/city_parcels_v1_0/items?bbox=-122.5,37.7,-122.4,37.8"
             },
-            "web_map": "https://rmhazuregeo.z13.web.core.windows.net/?collection=city_parcels_v1_0"
+            "web_map": "{WEB_MAP_URL}/?collection=city_parcels_v1_0"
         }
     }
 }
@@ -788,8 +797,8 @@ When a vector job completes, the result includes:
 | Method | URL Pattern | Description |
 |--------|-------------|-------------|
 | **OGC Features API** | `/api/features/collections/{table}/items` | Standards-compliant GeoJSON API |
-| **Interactive Map** | `https://rmhazuregeo.z13.web.core.windows.net/` | Web map viewer |
-| **Direct PostGIS** | Connect to `rmhpgflex.postgres.database.azure.com` | SQL access |
+| **Interactive Map** | `{WEB_MAP_URL}/` | Web map viewer |
+| **Direct PostGIS** | Connect to `{POSTGRES_HOST}` | SQL access |
 
 ### Raster Data Access
 
@@ -806,12 +815,12 @@ When a raster job completes, the result includes:
             "collection_id": "aerial-imagery-2024",
             "item_id": "aerial-imagery-2024-site-alpha-v1.0"
         },
-        "share_url": "https://rmhtitiler-drhvfgbxf0dqc6f5.eastus-01.azurewebsites.net/cog/map?url=...",
+        "share_url": "{TITILER_URL}/cog/map?url=...",
         "data_access": {
             "stac_item": "/api/stac/collections/aerial-imagery-2024/items/aerial-imagery-2024-site-alpha-v1.0",
             "stac_search": "/api/stac/search",
-            "tile_endpoint": "https://rmhtitiler-.../cog/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=...",
-            "preview": "https://rmhtitiler-.../cog/preview?url=..."
+            "tile_endpoint": "{TITILER_URL}/cog/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=...",
+            "preview": "{TITILER_URL}/cog/preview?url=..."
         }
     }
 }
@@ -823,8 +832,8 @@ When a raster job completes, the result includes:
 |--------|-------------|-------------|
 | **STAC Item** | `/api/stac/collections/{collection}/items/{item}` | Metadata + asset links |
 | **STAC Search** | `/api/stac/search?bbox=...&datetime=...` | Spatial/temporal search |
-| **XYZ Tiles** | `https://rmhtitiler-.../cog/tiles/{z}/{x}/{y}.png?url=...` | For web maps (Leaflet, MapLibre) |
-| **Preview Image** | `https://rmhtitiler-.../cog/preview?url=...` | Quick thumbnail |
+| **XYZ Tiles** | `{TITILER_URL}/cog/tiles/{z}/{x}/{y}.png?url=...` | For web maps (Leaflet, MapLibre) |
+| **Preview Image** | `{TITILER_URL}/cog/preview?url=...` | Quick thumbnail |
 | **Interactive Map** | `share_url` from job result | Full-screen map viewer |
 
 ---
@@ -838,7 +847,7 @@ The Catalog API allows DDH to verify that processed data exists in the STAC cata
 Verify a STAC item exists using DDH identifiers:
 
 ```bash
-curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/catalog/lookup?dataset_id=flood-data&resource_id=res-001&version_id=v1.0"
+curl "{BASE_URL}/api/platform/catalog/lookup?dataset_id=flood-data&resource_id=res-001&version_id=v1.0"
 ```
 
 **Query Parameters:**
@@ -892,7 +901,7 @@ curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/pl
 Retrieve the full STAC item (GeoJSON Feature) with all metadata:
 
 ```bash
-curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/catalog/item/{collection_id}/{item_id}"
+curl "{BASE_URL}/api/platform/catalog/item/{collection_id}/{item_id}"
 ```
 
 Returns standard STAC Item format (GeoJSON Feature) with geometry, properties, and assets.
@@ -902,7 +911,7 @@ Returns standard STAC Item format (GeoJSON Feature) with geometry, properties, a
 Retrieve asset URLs with pre-built TiTiler visualization URLs:
 
 ```bash
-curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/catalog/assets/{collection_id}/{item_id}"
+curl "{BASE_URL}/api/platform/catalog/assets/{collection_id}/{item_id}"
 ```
 
 **Query Parameters:**
@@ -919,17 +928,17 @@ curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/pl
     "bbox": [-75.5, -56.5, -66.5, -49.0],
     "assets": {
         "data": {
-            "href": "https://rmhazuregeocogs.blob.core.windows.net/silver-cogs/flood.tif",
+            "href": "{STORAGE_URL}/silver-cogs/flood.tif",
             "type": "image/tiff; application=geotiff; profile=cloud-optimized",
             "size_mb": 125.5
         }
     },
     "titiler": {
-        "preview": "https://rmhtitiler-.../cog/preview?url=...",
-        "tiles": "https://rmhtitiler-.../cog/tiles/{z}/{x}/{y}?url=...",
-        "info": "https://rmhtitiler-.../cog/info?url=...",
-        "tilejson": "https://rmhtitiler-.../cog/tilejson.json?url=...",
-        "wmts": "https://rmhtitiler-.../cog/WMTSCapabilities.xml?url=..."
+        "preview": "{TITILER_URL}/cog/preview?url=...",
+        "tiles": "{TITILER_URL}/cog/tiles/{z}/{x}/{y}?url=...",
+        "info": "{TITILER_URL}/cog/info?url=...",
+        "tilejson": "{TITILER_URL}/cog/tilejson.json?url=...",
+        "wmts": "{TITILER_URL}/cog/WMTSCapabilities.xml?url=..."
     },
     "platform_refs": {
         "dataset_id": "flood-data",
@@ -944,7 +953,7 @@ curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/pl
 List all STAC items for a DDH dataset:
 
 ```bash
-curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/catalog/dataset/{dataset_id}?limit=50"
+curl "{BASE_URL}/api/platform/catalog/dataset/{dataset_id}?limit=50"
 ```
 
 **Response:**
@@ -989,7 +998,7 @@ POST /api/platform/approve
 
 **Example:**
 ```bash
-curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/approve" \
+curl -X POST "{BASE_URL}/api/platform/approve" \
   -H "Content-Type: application/json" \
   -d '{
     "stac_item_id": "flood-data-res-001-v1-0",
@@ -1025,7 +1034,7 @@ POST /api/platform/revoke
 
 **Example:**
 ```bash
-curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/revoke" \
+curl -X POST "{BASE_URL}/api/platform/revoke" \
   -H "Content-Type: application/json" \
   -d '{
     "stac_item_id": "flood-data-res-001-v1-0",
@@ -1084,6 +1093,4 @@ GET /api/platform/approvals/status?stac_item_ids=item1,item2,item3
 ---
 
 **Last Updated**: 21 JAN 2026
-**Function App**: rmhazuregeoapi
-**Region**: East US
 **API Version**: 1.3.0

@@ -483,7 +483,7 @@ class PromoteService:
             logger.warning(f"No system dataset found for role: {system_role}")
             return None
 
-        # Get the STAC item to extract table name
+        # Get the STAC item to extract table name (for raster datasets)
         if dataset.stac_item_id:
             item = self._get_item_for_validation(dataset.stac_item_id)
             if item and 'properties' in item:
@@ -496,7 +496,13 @@ class PromoteService:
                     f"STAC item '{dataset.stac_item_id}' missing postgis:table property"
                 )
 
-        # Fallback: derive from promoted_id
+        # For vector datasets: stac_collection_id IS the table name (21 JAN 2026)
+        # Vector tables are registered as STAC collections, not items
+        if dataset.stac_collection_id:
+            logger.info(f"Using stac_collection_id as table name: {dataset.stac_collection_id}")
+            return dataset.stac_collection_id
+
+        # Final fallback: derive from promoted_id
         # Convention: promoted_id should match table name for system datasets
         logger.info(f"Using promoted_id as table name fallback: {dataset.promoted_id}")
         return dataset.promoted_id.replace('-', '_')

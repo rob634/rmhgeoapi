@@ -1003,11 +1003,16 @@ def platform_submit(req: func.HttpRequest) -> func.HttpResponse:
 @app.route(route="platform/status/{request_id}", methods=["GET"])
 async def platform_status_by_id(req: func.HttpRequest) -> func.HttpResponse:
     """
-    Get status of a platform request.
+    Get status of a platform request or job (consolidated endpoint).
 
-    GET /api/platform/status/{request_id}
+    GET /api/platform/status/{id}
 
-    Returns detailed status including all CoreMachine jobs.
+    The {id} parameter can be EITHER:
+    - A request_id (Platform request identifier)
+    - A job_id (CoreMachine job identifier)
+
+    The endpoint auto-detects which type of ID was provided (21 JAN 2026).
+    Returns detailed status including DDH identifiers and CoreMachine job status.
     """
     if guard := _platform_endpoint_guard():
         return guard
@@ -1031,23 +1036,15 @@ async def platform_status_list(req: func.HttpRequest) -> func.HttpResponse:
 @app.route(route="platform/jobs/{job_id}/status", methods=["GET"])
 async def platform_job_status_by_id(req: func.HttpRequest) -> func.HttpResponse:
     """
-    Get status of a CoreMachine job directly by job_id.
+    DEPRECATED: Get status of a CoreMachine job directly by job_id.
+
+    ⚠️ DEPRECATED (21 JAN 2026): Use GET /api/platform/status/{job_id} instead.
+    The consolidated endpoint accepts either request_id or job_id.
 
     GET /api/platform/jobs/{job_id}/status
-    GET /api/platform/jobs/{job_id}/status?verbose=true
 
-    Returns job status with task summary - same format as /api/jobs/status/{job_id}.
-    This endpoint is for gateway integration where only /api/platform/* is exposed.
-
-    Response:
-        {
-            "jobId": "abc123...",
-            "jobType": "process_raster_v2",
-            "status": "completed",
-            "stage": 3,
-            "totalStages": 3,
-            "taskSummary": {...}
-        }
+    Returns job status with task summary. Response includes deprecation headers
+    and migration URL pointing to the consolidated endpoint.
     """
     if guard := _platform_endpoint_guard():
         return guard

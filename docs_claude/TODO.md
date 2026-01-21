@@ -4,6 +4,141 @@
 **Source of Truth**: [docs/epics/README.md](/docs/epics/README.md) — Epic/Feature/Story definitions
 **Purpose**: Sprint-level task tracking and delegation
 
+> **🔴 HIGH PRIORITY items added**: Force Reprocess Parameter, Consolidate Unpublish Endpoints, Consolidate Status Endpoints
+
+---
+
+## 🔴 HIGH PRIORITY: Consolidate Status Endpoints
+
+**Added**: 21 JAN 2026
+**Priority**: HIGH
+**Status**: 📋 TODO
+
+### Problem
+
+Currently there are two separate status endpoints with different lookup patterns:
+
+| Endpoint | Lookup Key | Returns |
+|----------|-----------|---------|
+| `/api/platform/status/{request_id}` | Platform `request_id` | DDH identifiers + job status + task summary + data access URLs |
+| `/api/platform/jobs/{job_id}/status` | CoreMachine `job_id` | Raw job status only |
+
+The `monitor_url` in submit responses returns `/api/platform/status/{request_id}`, but having two different URL patterns is confusing for external consumers.
+
+### Proposed Solution
+
+Consolidate to single endpoint:
+```
+GET /api/platform/status/{id}
+```
+
+Where `{id}` can be EITHER:
+- A `request_id` (SHA256 hash of dataset_id + resource_id + version_id)
+- A `job_id` (CoreMachine job identifier)
+
+### Implementation Notes
+
+- Auto-detect ID type (request_id is 64-char hex, job_id may have different format)
+- If request_id: Return rich response with DDH identifiers + job status + data access URLs
+- If job_id: Look up associated platform request, return same rich response
+- Deprecate `/api/platform/jobs/{job_id}/status` (keep working but log deprecation warning)
+- Update `monitor_url` format in submit responses (no change needed - already uses `/api/platform/status/`)
+
+### Benefits
+
+1. Single URL pattern for external consumers to remember
+2. Can look up status by either ID type
+3. Consistent response format regardless of lookup method
+
+---
+
+## 🔴 HIGH PRIORITY: Force Reprocess Parameter for Platform Submit
+
+**Added**: 21 JAN 2026
+**Priority**: HIGH
+**Status**: 📋 TODO
+
+### Problem
+
+Currently, `/api/platform/submit` is fully idempotent based on `dataset_id + resource_id + version_id`. If a request with the same identifiers already exists, it returns the existing request without reprocessing.
+
+**Missing capability**: No way to force complete reprocessing of a dataset while maintaining the same STAC item IDs (e.g., when source data is updated but version stays the same).
+
+### Current Workaround
+
+1. Call `/api/platform/unpublish/{type}` first
+2. Then resubmit via `/api/platform/submit`
+
+### Proposed Solution
+
+Add `force_reprocess: true` parameter to `/api/platform/submit` that:
+
+1. Deletes the existing platform request record
+2. Unpublishes existing outputs (STAC item, COG blobs or PostGIS table)
+3. Submits a fresh job with the same DDH identifiers
+4. Maintains the same STAC item/collection IDs
+
+### Request Body
+
+```json
+{
+    "dataset_id": "...",
+    "resource_id": "...",
+    "version_id": "...",
+    "data_type": "raster",
+    "force_reprocess": true,
+    ...
+}
+```
+
+### Implementation Notes
+
+- Should call unpublish logic internally before creating new job
+- Must handle approval status (revoke if approved?)
+- Should log clearly that this is a force reprocess operation
+- Consider adding `force_reprocess_reason` for audit trail
+
+---
+
+## 🔴 HIGH PRIORITY: Consolidate Unpublish Endpoints
+
+**Added**: 21 JAN 2026
+**Priority**: HIGH
+**Status**: 📋 TODO
+
+### Problem
+
+Currently there are two separate unpublish endpoints:
+- `POST /api/platform/unpublish/vector`
+- `POST /api/platform/unpublish/raster`
+
+This is unnecessary complexity. The platform should auto-detect the data type (same pattern as `/api/platform/submit`).
+
+### Proposed Solution
+
+Consolidate into single endpoint:
+```
+POST /api/platform/unpublish
+```
+
+### Request Body
+
+```json
+{
+    "dataset_id": "...",
+    "resource_id": "...",
+    "version_id": "...",
+    "dry_run": true
+}
+```
+
+### Implementation Notes
+
+- Auto-detect data type from platform request record or STAC item
+- If both vector and raster outputs exist for same identifiers, unpublish both
+- Keep `dry_run: true` as default for safety
+- Deprecate `/unpublish/vector` and `/unpublish/raster` (keep working but log deprecation warning)
+
 ---
 
 ## 🔥 ACTIVE: Infrastructure as Code DRY Cleanup (F7.IaC)
@@ -704,18 +839,7 @@ async def platform_add_raster_to_collection(req: func.HttpRequest) -> func.HttpR
 
 ---
 
-## ✅ COMPLETED: Docker Worker Infrastructure (F7.12-13)
-
-**Status**: ✅ COMPLETE - Moved to HISTORY.md (12 JAN 2026)
-**Reference**: See HISTORY.md for full implementation details
-
-### Summary
-
-- F7.12: Docker Worker Infrastructure ✅ Deployed to `rmhheavyapi`
-- F7.13: Docker Job Definitions ✅ Phase 1 complete (checkpoint/resume architecture)
-- Tested: dctest.tif processed successfully via Docker worker
-
-### Remaining Backlog (Low Priority)
+## Docker Worker Remaining Backlog (Low Priority)
 
 | Story | Description | Status |
 |-------|-------------|--------|
@@ -797,37 +921,6 @@ See [TABLE_MAINTENANCE.md](./TABLE_MAINTENANCE.md) for pg_cron setup steps.
 ---
 
 ## Other Active Work
-
-### ✅ Platform API Diagnostics for External Apps (F7.12) - COMPLETE
-
-**Epic**: E7 Pipeline Infrastructure
-**Goal**: Expose diagnostic endpoints via Platform API for external service layer apps
-**Added**: 15 JAN 2026
-**Completed**: 15 JAN 2026
-**Context**: Service layer apps submitting ETL jobs need visibility into system health, failures, and data lineage without accessing internal /api/dbadmin/ endpoints.
-
-#### F7.12: Platform Diagnostic Endpoints
-
-| Story | Description | Status |
-|-------|-------------|--------|
-| S7.12.1 | `GET /api/platform/health` - Simplified system readiness check | ✅ 15 JAN 2026 |
-| S7.12.1a | Return ready_for_jobs boolean, queue backlog, avg job time | ✅ |
-| S7.12.1b | Hide internal details (enum errors, storage account names) | ✅ |
-| S7.12.2 | `GET /api/platform/failures` - Recent failures with sanitized errors | ✅ 15 JAN 2026 |
-| S7.12.2a | Group by error pattern, show counts | ✅ |
-| S7.12.2b | Sanitize error messages (no internal paths/secrets) | ✅ |
-| S7.12.3 | `GET /api/platform/lineage/{request_id}` - Data lineage by request ID | ✅ 15 JAN 2026 |
-| S7.12.3a | Map request_id → job_id → lineage | ✅ |
-| S7.12.3b | Show source → processing → output locations | ✅ |
-| S7.12.4 | `POST /api/platform/validate` - Pre-flight validation | ✅ 15 JAN 2026 |
-| S7.12.4a | Check file exists and readable | ✅ |
-| S7.12.4b | Return file size, recommended job type, time estimate | ✅ |
-
-**Key Files**:
-- `triggers/trigger_platform_status.py` - All four endpoints implemented here
-- `function_app.py` - Routes registered (lines 1052-1114)
-
----
 
 ### ⚪ Future: Pipeline Builder (Low Priority)
 
@@ -1382,6 +1475,8 @@ triggers/admin/
 |---------|-------------|--------|
 | Job Resubmit Endpoint | `POST /api/jobs/{job_id}/resubmit` - nuclear reset + resubmit | ✅ |
 | Platform processing_mode | Route Platform raster to Docker via `processing_mode=docker` | ✅ |
+| Platform Default to Docker | Auto-route to Docker when `docker_worker_enabled=true` (21 JAN) | ✅ |
+| Endpoint Consolidation | Removed `/platform/raster`, `/platform/raster-collection` - use `/platform/submit` (21 JAN) | ✅ |
 | Env Validation Warnings | Separate errors from warnings (don't block Service Bus) | ✅ |
 | PgStacRepository.delete_item | Delete STAC items for job resubmit cleanup | ✅ |
 | JobRepository.delete_job | Delete job records for resubmit | ✅ |
@@ -1700,6 +1795,10 @@ Tasks suitable for a colleague with Azure/Python/pipeline expertise but without 
 
 | Date | Item | Epic |
 |------|------|------|
+| 21 JAN 2026 | **F7.12.F Docker AAD Auth Fix** - Docker worker App Insights AAD auth + RBAC role assignment | E7 |
+| 21 JAN 2026 | **Docker Logging Health Check** - `/test/logging` and `/test/logging/verify` endpoints | E7 |
+| 21 JAN 2026 | **Platform Routing Default** - Platform raster jobs now default to Docker when enabled | E7 |
+| 21 JAN 2026 | **Endpoint Consolidation** - Removed redundant `/platform/raster`, `/platform/raster-collection` | E7 |
 | 12 JAN 2026 | **F7.17 Job Resubmit + Features** - `/api/jobs/{job_id}/resubmit` endpoint, env validation fix | E7 |
 | 12 JAN 2026 | **F7.16 db_maintenance.py Split** - Phase 1 complete (28% reduction, 2 modules extracted) | E7 |
 | 11 JAN 2026 | **F7.12 Docker OpenTelemetry** - Docker worker logs to App Insights (v0.7.8-otel) | E7 |
@@ -1725,512 +1824,6 @@ Tasks suitable for a colleague with Azure/Python/pipeline expertise but without 
 | [TABLE_MAINTENANCE.md](./TABLE_MAINTENANCE.md) | pg_cron + autovacuum setup |
 | [ARCHITECTURE_REFERENCE.md](./ARCHITECTURE_REFERENCE.md) | Technical patterns |
 | [docs/epics/README.md](/docs/epics/README.md) | Master Epic/Feature/Story definitions |
-
----
-
----
-
-## F7.12: Logging Architecture Consolidation (10 JAN 2026)
-
-**Epic**: E7 Pipeline Infrastructure
-**Goal**: Eliminate duplicate debug flags, unify diagnostics, add global log context for multi-app filtering
-**Priority**: HIGH - Duplicate flags are accumulating and causing confusion
-**Status**: ✅ COMPLETE (Function App + Docker Worker both logging to App Insights)
-
-### Background
-
-Systematic review (10 JAN 2026) identified significant issues in logging/metrics infrastructure:
-
-1. **Duplicate Debug Flags** - Multiple env vars controlling similar behavior
-2. **No Global App/Instance ID** - Can't filter logs by app in multi-app deployment
-3. **Duplicate Diagnostics Code** - `diagnostics.py` and `health.py` overlap
-4. **Unclear Metrics Systems** - Three different metrics systems with unclear purposes
-
-### Current State (Problems)
-
-**Duplicate Debug Flags**:
-| Env Var | Used By | Purpose |
-|---------|---------|---------|
-| `DEBUG_MODE` | util_logger.py | Memory/CPU checkpoints, runtime environment |
-| `DEBUG_LOGGING` | util_logger.py | Log level DEBUG vs INFO |
-| `METRICS_DEBUG_MODE` | service_latency.py, metrics_blob_logger.py | Service latency tracking + blob dumps |
-| `METRICS_ENABLED` | metrics_config.py, metrics_repository.py | ETL job progress to PostgreSQL |
-
-**Problem**: 4 different boolean flags for debug/metrics behavior. Very confusing!
-
-**Missing App/Instance Context**:
-- `util_logger.py` gathers `WEBSITE_INSTANCE_ID` but only logs it in debug checkpoints
-- `service_latency.py` logs to App Insights WITHOUT instance/app identification
-- In multi-app deployment (ETL + Reader + Docker workers), can't filter logs by source
-
-**Duplicate Code**:
-- `infrastructure/diagnostics.py` - DNS checks, connectivity checks, instance info
-- `triggers/health.py` - Also does connectivity checks, instance info
-- `util_logger.py:get_runtime_environment()` - Also gathers instance info
-
-### F7.12.A: Global Log Context ✅ COMPLETE
-
-**Goal**: Every log line includes app_name and instance_id for multi-app filtering
-
-| Story | Description | Status | Files |
-|-------|-------------|--------|-------|
-| S7.12.A.1 | Add `LOG_CONTEXT_APP_NAME` and `LOG_CONTEXT_INSTANCE_ID` to LoggerFactory | ✅ | `util_logger.py` |
-| S7.12.A.2 | Modify `create_logger()` to inject app/instance into every log | ✅ | `util_logger.py` |
-| S7.12.A.3 | Update `service_latency.py` to use LoggerFactory with context | ✅ | `infrastructure/service_latency.py` |
-| S7.12.A.4 | Update `metrics_blob_logger.py` to include app_name in blob path | ✅ | `infrastructure/metrics_blob_logger.py` |
-| S7.12.A.5 | Add `environment` (dev/qa/prod) to log context | ✅ | `util_logger.py` |
-| S7.12.A.6 | Document log filtering patterns for multi-app deployment | ✅ | `docs/wiki/WIKI_ENVIRONMENT_VARIABLES.md` |
-
-**Implementation for S7.12.A.1-2**:
-```python
-# util_logger.py - Module-level context (loaded once at import)
-import os
-
-# Global log context - every log gets these fields
-_GLOBAL_LOG_CONTEXT = {
-    "app_name": os.environ.get("APP_NAME", "unknown"),
-    "app_instance": os.environ.get("WEBSITE_INSTANCE_ID", "local")[:16],
-    "environment": os.environ.get("ENVIRONMENT", "dev"),
-}
-
-# In create_logger() wrapper:
-def log_with_context(level, msg, args, exc_info=None, extra=None, ...):
-    if extra is None:
-        extra = {}
-
-    custom_dims = {
-        **_GLOBAL_LOG_CONTEXT,  # Always include app/instance
-        'component_type': component_type.value,
-        'component_name': name
-    }
-    # ... rest of existing code
-```
-
-**KQL Query (after implementation)**:
-```kusto
-// Filter logs by app in multi-app deployment
-traces
-| where customDimensions.app_name == "rmhazuregeoapi"
-| where customDimensions.app_instance == "abc123"
-| where timestamp >= ago(1h)
-| order by timestamp desc
-```
-
-### F7.12.B: Unify Diagnostics Module ⏭️ SKIPPED
-
-**Goal**: Single source of truth for connectivity/DNS/instance checks
-
-**Decision (10 JAN 2026)**: Reviewed existing structure - determined current organization is clean enough. `infrastructure/diagnostics.py` already handles diagnostics, `triggers/health.py` delegates appropriately. No refactor needed at this time.
-
-| Story | Description | Status | Files |
-|-------|-------------|--------|-------|
-| S7.12.B.1-7 | Diagnostics module refactor | ⏭️ SKIPPED | Existing structure adequate |
-
-**Target Structure**:
-```
-infrastructure/
-  diagnostics/
-    __init__.py           # Unified API: get_diagnostics(), check_connectivity(), etc.
-    connectivity.py       # Database, storage, Service Bus connectivity checks
-    dns.py                # DNS resolution timing
-    instance.py           # Instance ID, cold start, Azure env vars
-    pools.py              # Connection pool statistics
-    network.py            # VNet, private IP, outbound IP
-
-infrastructure/diagnostics.py  # DEPRECATED - thin wrapper over diagnostics/
-triggers/health.py             # Delegates to infrastructure/diagnostics/
-util_logger.py                 # Delegates to infrastructure/diagnostics/instance.py
-```
-
-### F7.12.C: Consolidate Debug Flags ✅ COMPLETE
-
-**Goal**: Reduce 4 flags to 2 clear flags with distinct purposes
-
-| Story | Description | Status | Files |
-|-------|-------------|--------|-------|
-| S7.12.C.1 | Document current flag behavior and decide consolidation strategy | ✅ | This doc |
-| S7.12.C.2 | Implement flag consolidation (see strategy below) | ✅ | `config/observability_config.py` |
-| S7.12.C.3 | Update all usages to use new consolidated flags | ✅ | Multiple files |
-| S7.12.C.4 | Add deprecation warnings for old flag names | ✅ | Backward compat in observability_config.py |
-| S7.12.C.5 | Update WIKI_ENVIRONMENT_VARIABLES.md with new flag structure | ✅ | `docs/wiki/` |
-| S7.12.C.6 | Update startup_state.py ENV_VARS_WITH_DEFAULTS | ✅ | `startup_state.py` |
-
-**Consolidation Strategy**:
-
-| Current Flag | Behavior | New Flag | New Behavior |
-|--------------|----------|----------|--------------|
-| `DEBUG_MODE` | Memory/CPU checkpoints | `OBSERVABILITY_MODE` | All debug diagnostics (memory, CPU, DB stats) |
-| `DEBUG_LOGGING` | Log level DEBUG | `LOG_LEVEL=DEBUG` | Already exists! Remove DEBUG_LOGGING |
-| `METRICS_DEBUG_MODE` | Service latency + blob dumps | `OBSERVABILITY_MODE` | Merge into single flag |
-| `METRICS_ENABLED` | ETL job progress to PostgreSQL | `METRICS_ENABLED` | Keep - different purpose (dashboards) |
-
-**Result: 2 flags instead of 4**:
-- `OBSERVABILITY_MODE=true` → Memory checkpoints, service latency, blob dumps, database stats
-- `METRICS_ENABLED=true` → ETL job progress to PostgreSQL (for dashboards)
-
-**Implementation for S7.12.C.2**:
-```python
-# config/__init__.py - Add unified observability flag
-class Config:
-    @property
-    def observability_mode(self) -> bool:
-        """Master switch for debug diagnostics (memory, latency, blob dumps)."""
-        # Check new name first, fall back to old names for backward compat
-        if os.environ.get("OBSERVABILITY_MODE"):
-            return os.environ.get("OBSERVABILITY_MODE", "false").lower() == "true"
-        # Backward compat: any old flag enables observability
-        return (
-            os.environ.get("DEBUG_MODE", "false").lower() == "true" or
-            os.environ.get("METRICS_DEBUG_MODE", "false").lower() == "true"
-        )
-```
-
-### F7.12.D: Python App Insights Log Export ✅ COMPLETE
-
-**Goal**: On-demand export of App Insights logs to blob storage via Python endpoint
-
-| Story | Description | Status | Files |
-|-------|-------------|--------|-------|
-| S7.12.D.1 | Create `infrastructure/appinsights_exporter.py` with REST API client | ✅ | `infrastructure/appinsights_exporter.py` |
-| S7.12.D.2 | Implement `query_logs(query: str, hours: int)` method | ✅ | `appinsights_exporter.py` |
-| S7.12.D.3 | Implement `export_to_blob(query, hours, container, blob_name)` method | ✅ | `appinsights_exporter.py` |
-| S7.12.D.4 | Add `POST /api/appinsights/export` endpoint | ✅ | `triggers/probes.py` |
-| S7.12.D.5 | Add `POST /api/appinsights/query` endpoint for quick queries | ✅ | `triggers/probes.py` |
-| S7.12.D.6 | Document usage and KQL templates | ✅ | `docs/wiki/WIKI_API_HEALTH.md` |
-
-**Note**: App Insights REST API query endpoints require Monitoring Reader RBAC role (optional - see WIKI for setup).
-
-### F7.12.E: Docker Worker OpenTelemetry ✅ COMPLETE (11 JAN 2026)
-
-**Goal**: Docker worker logs to same Application Insights as Function App
-
-| Story | Description | Status | Files |
-|-------|-------------|--------|-------|
-| S7.12.E.1 | Add `azure-monitor-opentelemetry>=1.6.0` to requirements-docker.txt | ✅ | `requirements-docker.txt` |
-| S7.12.E.2 | Configure OpenTelemetry in `workers_entrance.py` BEFORE FastAPI import | ✅ | `workers_entrance.py` |
-| S7.12.E.3 | Configure OpenTelemetry in `docker_main.py` for queue polling | ✅ | `docker_main.py` |
-| S7.12.E.4 | Build and push to ACR (v0.7.8-otel) | ✅ | ACR |
-| S7.12.E.5 | Deploy to rmhheavyapi and verify telemetry transmission | ✅ | Azure Web App |
-
-**Result**: Docker worker and Function App both log to Application Insights with cross-app correlation via `cloud_RoleName`:
-```kql
-traces
-| where cloud_RoleName in ("rmhazuregeoapi", "docker-worker-azure")
-| project timestamp, cloud_RoleName, message
-| order by timestamp desc
-```
-
-**Key Files**:
-- `requirements-docker.txt` - Added `azure-monitor-opentelemetry>=1.6.0`
-- `workers_entrance.py` - `configure_azure_monitor_telemetry()` called before FastAPI
-- `docker_main.py` - `_configure_azure_monitor()` called early in startup
-
-**Environment Variables for Docker**:
-```bash
-APPLICATIONINSIGHTS_CONNECTION_STRING=InstrumentationKey=xxx;...
-APP_NAME=docker-worker-azure
-ENVIRONMENT=dev
-```
-
-**Implementation for S7.12.D.1-3** (`infrastructure/appinsights_export.py`):
-```python
-"""
-App Insights Log Export.
-
-Query Application Insights via REST API and export results to blob storage.
-Uses same auth pattern as documented in APPLICATION_INSIGHTS.md.
-"""
-
-import json
-import os
-from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional
-
-from azure.identity import DefaultAzureCredential
-import requests
-
-
-class AppInsightsExporter:
-    """Export App Insights logs to blob storage."""
-
-    def __init__(self):
-        self.app_id = os.environ.get("APPINSIGHTS_APP_ID")  # From Azure portal
-        self.api_endpoint = f"https://api.applicationinsights.io/v1/apps/{self.app_id}/query"
-        self._credential = None
-
-    def _get_token(self) -> str:
-        """Get bearer token for App Insights API."""
-        if self._credential is None:
-            self._credential = DefaultAzureCredential()
-        token = self._credential.get_token("https://api.applicationinsights.io/.default")
-        return token.token
-
-    def query_logs(
-        self,
-        query: str,
-        timespan: str = "PT24H"  # ISO 8601 duration (24 hours default)
-    ) -> List[Dict[str, Any]]:
-        """
-        Query App Insights and return results.
-
-        Args:
-            query: KQL query string
-            timespan: ISO 8601 duration (PT1H, PT24H, P7D, etc.)
-
-        Returns:
-            List of result rows as dicts
-        """
-        headers = {
-            "Authorization": f"Bearer {self._get_token()}",
-            "Content-Type": "application/json"
-        }
-
-        response = requests.post(
-            self.api_endpoint,
-            headers=headers,
-            json={"query": query, "timespan": timespan}
-        )
-        response.raise_for_status()
-
-        data = response.json()
-
-        # Convert to list of dicts
-        if "tables" not in data or not data["tables"]:
-            return []
-
-        table = data["tables"][0]
-        columns = [col["name"] for col in table["columns"]]
-
-        return [dict(zip(columns, row)) for row in table["rows"]]
-
-    def export_to_blob(
-        self,
-        query: str,
-        container: str = "applogs",
-        blob_prefix: str = "exports",
-        timespan: str = "PT24H"
-    ) -> Dict[str, Any]:
-        """
-        Query App Insights and export results to blob storage.
-
-        Args:
-            query: KQL query string
-            container: Blob container name
-            blob_prefix: Prefix for blob path
-            timespan: ISO 8601 duration
-
-        Returns:
-            Dict with export status, row count, blob path
-        """
-        from infrastructure.blob import BlobRepository
-
-        # Query logs
-        rows = self.query_logs(query, timespan)
-
-        if not rows:
-            return {"status": "empty", "row_count": 0, "blob_path": None}
-
-        # Generate blob name
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        blob_name = f"{blob_prefix}/{timestamp}.jsonl"
-
-        # Write as JSON Lines
-        content = "\n".join(json.dumps(row, default=str) for row in rows)
-
-        # Upload to blob
-        blob_repo = BlobRepository()
-        blob_repo.upload_blob(
-            container_name=container,
-            blob_name=blob_name,
-            data=content.encode("utf-8"),
-            overwrite=True
-        )
-
-        return {
-            "status": "exported",
-            "row_count": len(rows),
-            "blob_path": f"{container}/{blob_name}",
-            "timespan": timespan
-        }
-```
-
-**API Endpoint (S7.12.D.4)**:
-```python
-# triggers/probes.py or new file
-
-@bp.route(
-    route="logs/export",
-    methods=["POST"],
-    auth_level=func.AuthLevel.ANONYMOUS
-)
-def logs_export(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Export App Insights logs to blob storage.
-
-    POST /api/logs/export
-    {
-        "query": "traces | where timestamp >= ago(1h) | take 1000",
-        "timespan": "PT1H",
-        "container": "applogs",
-        "blob_prefix": "exports/service-logs"
-    }
-
-    Returns:
-        200: {"status": "exported", "row_count": 1000, "blob_path": "applogs/exports/..."}
-    """
-    try:
-        body = req.get_json()
-        query = body.get("query", "traces | where timestamp >= ago(1h) | take 1000")
-        timespan = body.get("timespan", "PT1H")
-        container = body.get("container", "applogs")
-        blob_prefix = body.get("blob_prefix", "exports")
-
-        from infrastructure.appinsights_export import AppInsightsExporter
-        exporter = AppInsightsExporter()
-
-        result = exporter.export_to_blob(
-            query=query,
-            container=container,
-            blob_prefix=blob_prefix,
-            timespan=timespan
-        )
-
-        return func.HttpResponse(
-            json.dumps(result, indent=2),
-            status_code=200,
-            mimetype="application/json"
-        )
-    except Exception as e:
-        return func.HttpResponse(
-            json.dumps({"status": "error", "error": str(e)}),
-            status_code=500,
-            mimetype="application/json"
-        )
-```
-
-**Required Env Var**:
-```
-APPINSIGHTS_APP_ID=d3af3d37-cfe3-411f-adef-bc540181cbca  # From Azure portal
-```
-
-### Implementation Order
-
-1. **F7.12.C (Consolidate Flags)** - FIRST - Reduces confusion before other changes
-2. **F7.12.A (Global Log Context)** - SECOND - Enables multi-app log filtering
-3. **F7.12.B (Unify Diagnostics)** - THIRD - Clean up code duplication
-4. **F7.12.D (App Insights Export)** - FOURTH - Nice-to-have for QA debugging
-
-### Acceptance Criteria
-
-**F7.12.C Complete When**:
-- Only 2 debug flags: `OBSERVABILITY_MODE` and `METRICS_ENABLED`
-- Old flags still work (backward compat) but log deprecation warning
-- Documentation updated
-
-**F7.12.A Complete When**:
-- Every log line has `app_name`, `app_instance`, `environment`
-- KQL queries can filter by app
-- Documentation includes multi-app filtering examples
-
-**F7.12.B Complete When**:
-- Single `infrastructure/diagnostics/` module for all checks
-- No duplicate DNS/connectivity/instance code
-- health.py delegates to diagnostics module
-
-**F7.12.D Complete When**:
-- `POST /api/logs/export` endpoint works
-- Exports to `applogs` container in silver storage
-- Documentation includes usage examples
-
-### Testing Checklist
-
-- [ ] Set `OBSERVABILITY_MODE=true`, verify memory checkpoints + service latency work
-- [ ] Set old `DEBUG_MODE=true`, verify backward compat + deprecation warning
-- [ ] Verify logs include `app_name`, `app_instance` in customDimensions
-- [ ] Run KQL query filtering by app_name
-- [ ] Call `/api/logs/export`, verify blob created with log data
-- [ ] Health endpoint still works after diagnostics refactor
-
----
-
-### F7.12.F: JSONL Log Dump System (IMPLEMENTED)
-
-**Added**: 11 JAN 2026
-**Implemented**: 11 JAN 2026
-**Goal**: Granular control over JSONL log exports with level-based filtering
-**Status**: ✅ IMPLEMENTED
-
-**Concept**: Separate JSONL exports based on observability mode and log level:
-
-| Mode | What Gets Exported | Blob Path |
-|------|-------------------|-----------|
-| `OBSERVABILITY_MODE=true` | Janitor/timer logs + WARNING+ from everywhere | `applogs/logs/default/` |
-| `OBSERVABILITY_MODE=true` + `VERBOSE_LOG_DUMP=true` | ALL logs including DEBUG | `applogs/logs/verbose/` |
-| Log cleanup timer | Delete old logs based on retention | Daily at 3 AM UTC |
-
-**Environment Variables**:
-```bash
-OBSERVABILITY_MODE=true           # Master switch for observability features
-VERBOSE_LOG_DUMP=true             # When combined with OBSERVABILITY_MODE, dump ALL logs
-JSONL_DEBUG_RETENTION_DAYS=7      # Days to keep verbose/debug logs
-JSONL_WARNING_RETENTION_DAYS=30   # Days to keep warning+ logs
-JSONL_METRICS_RETENTION_DAYS=14   # Days to keep metrics logs
-JSONL_LOG_CONTAINER=applogs       # Blob container name (default: applogs)
-JSONL_FLUSH_INTERVAL=60           # Seconds between flushes (default: 60)
-JSONL_BUFFER_SIZE=100             # Max records before flush (default: 100)
-```
-
-**Stories**:
-
-| Story | Description | Status | Files |
-|-------|-------------|--------|-------|
-| S7.12.F.1 | Define unified observability schema (logger/metrics/diagnostics) | ✅ | Research complete |
-| S7.12.F.2 | Create `JSONLBlobHandler` class extending logging.Handler | ✅ | `infrastructure/jsonl_log_handler.py` |
-| S7.12.F.3 | Add level-based routing (WARNING+ vs ALL based on env vars) | ✅ | `infrastructure/jsonl_log_handler.py` |
-| S7.12.F.4 | Integrate with LoggerFactory for automatic blob export | ✅ | `util_logger.py` |
-| S7.12.F.5 | Implement log cleanup timer logic | ✅ | `triggers/admin/log_cleanup_timer.py` |
-| S7.12.F.6 | Register log cleanup timer in function_app.py | ✅ | `function_app.py` |
-
-**Blob Structure**:
-```
-applogs/
-├── logs/
-│   ├── default/          # WARNING+ always (OBSERVABILITY_MODE=true)
-│   │   └── 2026-01-12/
-│   │       └── instance123/
-│   │           └── 1705012345.jsonl
-│   └── verbose/          # ALL logs (VERBOSE_LOG_DUMP=true)
-│       └── 2026-01-12/
-│           └── instance123/
-│               └── 1705012345.jsonl
-└── service-metrics/      # Existing service latency metrics
-    └── 2026-01-12/
-        └── ...
-```
-
-**Manual Trigger**:
-```bash
-# Trigger log cleanup manually
-curl -X POST "https://.../api/cleanup/run?type=log_cleanup"
-```
-
-**Schema Standardization Research** (11 JAN 2026):
-
-Comparison of current observability tools identified these standardization needs:
-
-| Issue | Current State | Recommendation |
-|-------|--------------|----------------|
-| Environment tag | Only in util_logger | Add to blob_logger, db_health |
-| Correlation ID | LogContext only | Add to MetricRecord, diagnostics |
-| Instance tracking | Inconsistent (16 vs 32 char) | Standardize on 16 char |
-| Status vocabulary | 3 different enums | Unify: success/warning/error/critical |
-| Metrics structure | Flat vs nested | Create standard `metrics` object |
-
-**Key Files**:
-- `infrastructure/jsonl_log_handler.py` - JSONL blob handler (created 11 JAN 2026)
-- `triggers/admin/log_cleanup_timer.py` - Cleanup timer (implemented 11 JAN 2026)
-- `config/observability_config.py` - Updated with retention settings
-- `util_logger.py` - Integrated JSONLBlobHandler into LoggerFactory
 
 ---
 

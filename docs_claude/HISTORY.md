@@ -12,6 +12,146 @@ This document tracks completed architectural changes and improvements to the Azu
 
 ---
 
+## 21 JAN 2026: Docker Worker Application Insights AAD Auth Fix ✅
+
+**Status**: ✅ **COMPLETE**
+**Epic**: E7 Pipeline Infrastructure
+**Feature**: F7.12.E Docker Worker OpenTelemetry
+
+### Problem
+
+Docker worker logs were not appearing in Application Insights. Investigation revealed three issues:
+1. Wrong App Insights connection string (different instrumentation key)
+2. App Insights has `DisableLocalAuth=true` requiring Entra ID authentication
+3. Missing RBAC role for managed identity
+
+### Solution
+
+1. **Updated connection string** - Pointed Docker worker to same App Insights as Function App (`rmhazuregeoapi`)
+2. **Added AAD authentication support** - Updated `configure_azure_monitor_telemetry()` to detect `APPLICATIONINSIGHTS_AUTHENTICATION_STRING=Authorization=AAD` and pass `DefaultAzureCredential`
+3. **Assigned RBAC role** - "Monitoring Metrics Publisher" to Docker worker's managed identity
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `docker_service.py` | Added AAD auth support to `configure_azure_monitor_telemetry()` |
+| `docker_service.py` | Added `/test/logging` and `/test/logging/verify` health check endpoints |
+| `docs_claude/DEPLOYMENT_GUIDE.md` | Added Docker Worker Application Insights Setup section |
+| `docs_claude/ERRORS_AND_FIXES.md` | Added OBSERVABILITY category with OBS-001, OBS-002, OBS-003 |
+
+### Environment Variables Required
+
+```bash
+APPLICATIONINSIGHTS_CONNECTION_STRING=InstrumentationKey=6aa0e75f-...;IngestionEndpoint=...
+APPLICATIONINSIGHTS_AUTHENTICATION_STRING=Authorization=AAD
+APP_NAME=rmhheavyapi
+ENVIRONMENT=dev
+```
+
+### RBAC Role Assignment
+
+```bash
+az role assignment create \
+  --assignee cea30c4b-8d75-4a39-8b53-adab9a904345 \
+  --role "Monitoring Metrics Publisher" \
+  --scope "/subscriptions/fc7a176b-9a1d-47eb-8a7f-08cc8058fcfa/resourceGroups/rmhazure_rg/providers/microsoft.insights/components/rmhazuregeoapi"
+```
+
+---
+
+## 21 JAN 2026: Platform Routing Improvements ✅
+
+**Status**: ✅ **COMPLETE**
+**Epic**: E7 Pipeline Infrastructure
+
+### Changes
+
+1. **Platform Default to Docker** - When `docker_worker_enabled=true` in config, platform raster jobs automatically route to Docker worker without requiring `processing_mode=docker` parameter
+2. **Endpoint Consolidation** - Removed redundant `/api/platform/raster` and `/api/platform/raster-collection` endpoints. All platform submissions now go through unified `/api/platform/submit`
+3. **Expected Data Type Validation** - Added validation for `expected_data_type` parameter
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `web_interfaces/stac/interface.py` | Default `processing_mode` based on config |
+| `web_interfaces/vector/interface.py` | Removed redundant endpoints |
+
+---
+
+## 15 JAN 2026: Platform API Diagnostics (F7.12) ✅
+
+**Status**: ✅ **COMPLETE**
+**Epic**: E7 Pipeline Infrastructure
+**Goal**: Expose diagnostic endpoints via Platform API for external service layer apps
+
+### Endpoints Created
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/platform/health` | Simplified system readiness check (ready_for_jobs boolean, queue backlog, avg job time) |
+| `GET /api/platform/failures` | Recent failures with sanitized errors, grouped by pattern |
+| `GET /api/platform/lineage/{request_id}` | Data lineage by request ID (source → processing → output) |
+| `POST /api/platform/validate` | Pre-flight validation (file exists, readable, size, recommended job type) |
+
+### Files Created/Modified
+
+| File | Change |
+|------|--------|
+| `triggers/platform/diagnostics.py` | New file with all diagnostic endpoints |
+| `triggers/platform/__init__.py` | Register diagnostic blueprint |
+
+---
+
+## 10-11 JAN 2026: F7.12 Logging Architecture Consolidation ✅
+
+**Status**: ✅ **COMPLETE**
+**Epic**: E7 Pipeline Infrastructure
+**Goal**: Eliminate duplicate debug flags, unify diagnostics, add global log context for multi-app filtering
+
+### Subsections Completed
+
+| Section | Description | Status |
+|---------|-------------|--------|
+| F7.12.A | Global Log Context - Every log includes app_name, instance_id, environment | ✅ |
+| F7.12.B | Unify Diagnostics Module | ⏭️ SKIPPED (existing structure adequate) |
+| F7.12.C | Consolidate Debug Flags - Reduced 4 flags to 2 (`OBSERVABILITY_MODE`, `METRICS_ENABLED`) | ✅ |
+| F7.12.D | Python App Insights Log Export - `/api/logs/export` endpoint | ✅ |
+| F7.12.E | Docker Worker OpenTelemetry - Docker logs to same App Insights | ✅ |
+| F7.12.F | JSONL Log Dump System - Level-based filtering with retention | ✅ |
+
+### Key Files Created/Modified
+
+| File | Purpose |
+|------|---------|
+| `config/observability_config.py` | Unified observability configuration |
+| `infrastructure/appinsights_exporter.py` | App Insights REST API client |
+| `infrastructure/jsonl_log_handler.py` | JSONL blob handler for log export |
+| `triggers/admin/log_cleanup_timer.py` | Log retention cleanup timer |
+| `util_logger.py` | Global log context injection |
+
+### Environment Variables
+
+```bash
+OBSERVABILITY_MODE=true           # Master switch for debug diagnostics
+METRICS_ENABLED=true              # ETL job progress to PostgreSQL
+VERBOSE_LOG_DUMP=true             # Combined with OBSERVABILITY_MODE, dumps ALL logs
+JSONL_DEBUG_RETENTION_DAYS=7      # Days to keep verbose logs
+JSONL_WARNING_RETENTION_DAYS=30   # Days to keep warning+ logs
+```
+
+### KQL Query for Multi-App Filtering
+
+```kql
+traces
+| where cloud_RoleName in ("rmhazuregeoapi", "rmhheavyapi")
+| project timestamp, cloud_RoleName, message
+| order by timestamp desc
+```
+
+---
+
 ## 21 JAN 2026: Artifact Registry - Blob Version Tracking ✅
 
 **Status**: ✅ **COMPLETE**

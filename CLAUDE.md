@@ -130,6 +130,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 | **URL** | https://rmhheavyapi-ebdffqhkcsevg7f3.eastus-01.azurewebsites.net |
 | **ACR Repository** | `geospatial-worker` (ONLY use this) |
 | **ACR** | `rmhazureacr.azurecr.io` |
+| **App Insights** | MUST use `rmhazuregeoapi` (same as Function App) |
 
 **DEPRECATED ACR REPOS** (never use): `rmhgeoapi-worker`, `docker-worker`, `rmhheavyapi`
 
@@ -144,7 +145,24 @@ az webapp config container set --name rmhheavyapi --resource-group rmhazure_rg \
 # Restart (stop/start required for env var changes)
 az webapp stop --name rmhheavyapi --resource-group rmhazure_rg && \
 az webapp start --name rmhheavyapi --resource-group rmhazure_rg
+
+# Verify logging works (after restart)
+curl https://rmhheavyapi-ebdffqhkcsevg7f3.eastus-01.azurewebsites.net/test/logging
 ```
+
+#### Docker Worker Application Insights Setup (CRITICAL)
+
+The Docker worker MUST use the same App Insights as Function App (`rmhazuregeoapi`). Required settings:
+
+| Setting | Value |
+|---------|-------|
+| `APPLICATIONINSIGHTS_CONNECTION_STRING` | `InstrumentationKey=6aa0e75f-3c96...` (from rmhazuregeoapi) |
+| `APPLICATIONINSIGHTS_AUTHENTICATION_STRING` | `Authorization=AAD` |
+| `ENVIRONMENT` | `dev` |
+
+**Also requires RBAC role**: The managed identity needs "Monitoring Metrics Publisher" role on the App Insights resource.
+
+See `docs_claude/DEPLOYMENT_GUIDE.md` → "Docker Worker Application Insights Setup" for full details and troubleshooting.
 
 ### Deploy Command (Function App)
 ```bash

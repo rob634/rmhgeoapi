@@ -58,6 +58,12 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
         "reviewer": "user@example.com"
     }
 
+    Alternative - by Platform request ID (21 JAN 2026):
+    {
+        "request_id": "a3f2c1b8...",      // Find approval by Platform request ID
+        "reviewer": "user@example.com"
+    }
+
     Response (success):
     {
         "success": true,
@@ -84,6 +90,7 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
         approval_id = req_body.get('approval_id')
         stac_item_id = req_body.get('stac_item_id')
         job_id = req_body.get('job_id')
+        request_id = req_body.get('request_id')  # Platform request ID (21 JAN 2026)
         reviewer = req_body.get('reviewer')
         notes = req_body.get('notes')
 

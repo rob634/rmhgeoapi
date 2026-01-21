@@ -49,13 +49,13 @@ Repository: geospatial-worker
 ### Build and Deploy
 ```bash
 # Build and push new image
-az acr build --registry rmhazureacr --image geospatial-worker:0.7.16.9 --file Dockerfile .
+az acr build --registry rmhazureacr --image geospatial-worker:VERSION --file Dockerfile .
 
 # Update container to use new image
 az webapp config container set \
   --name rmhheavyapi \
   --resource-group rmhazure_rg \
-  --docker-custom-image-name "rmhazureacr.azurecr.io/geospatial-worker:0.7.16.9"
+  --docker-custom-image-name "rmhazureacr.azurecr.io/geospatial-worker:VERSION"
 
 # Restart to apply (stop/start required for env var changes)
 az webapp stop --name rmhheavyapi --resource-group rmhazure_rg
@@ -73,6 +73,9 @@ curl https://rmhheavyapi-ebdffqhkcsevg7f3.eastus-01.azurewebsites.net/health
 | `/health` | Full health check with DB connectivity test |
 | `/readyz` | Readiness probe (token check only) |
 | `/livez` | Liveness probe (always returns ok) |
+| `/test/logging` | Verify Application Insights logging is working |
+| `/test/logging/verify` | Emit test logs at INFO/WARNING/ERROR levels |
+| `/queue/status` | Queue worker status and messages processed |
 
 ### Environment Variables
 Critical settings that must match Function App:
@@ -81,6 +84,140 @@ Critical settings that must match Function App:
 - `PGSTAC_SCHEMA=pgstac`
 - `H3_SCHEMA=h3`
 - `APP_SCHEMA=app`
+
+---
+
+## Docker Worker Application Insights Setup (21 JAN 2026)
+
+### Overview
+The Docker worker sends logs to Application Insights using Azure Monitor OpenTelemetry. This requires:
+1. Correct Application Insights connection string (same as Function App)
+2. Entra ID (AAD) authentication enabled
+3. RBAC role assignment for the managed identity
+
+### CRITICAL: Use the Same App Insights as Function App
+
+The Docker worker MUST use the same Application Insights resource as the Function App (`rmhazuregeoapi`).
+
+**Correct Connection String** (from `rmhazuregeoapi` App Insights):
+```
+InstrumentationKey=6aa0e75f-3c96-4e8e-a632-68d65137e39a;IngestionEndpoint=https://eastus-8.in.applicationinsights.azure.com/;LiveEndpoint=https://eastus.livediagnostics.monitor.azure.com/;ApplicationId=d3af3d37-cfe3-411f-adef-bc540181cbca
+```
+
+**DO NOT USE** connection strings from other App Insights resources:
+- `rmhheavyapi` (InstrumentationKey=5f779879...)
+- `rmhgeoapi-worker`
+- Any other resource
+
+### Required Environment Variables
+
+```bash
+az webapp config appsettings set --name rmhheavyapi --resource-group rmhazure_rg --settings \
+  APPLICATIONINSIGHTS_CONNECTION_STRING="InstrumentationKey=6aa0e75f-3c96-4e8e-a632-68d65137e39a;IngestionEndpoint=https://eastus-8.in.applicationinsights.azure.com/;LiveEndpoint=https://eastus.livediagnostics.monitor.azure.com/;ApplicationId=d3af3d37-cfe3-411f-adef-bc540181cbca" \
+  APPLICATIONINSIGHTS_AUTHENTICATION_STRING="Authorization=AAD" \
+  ENVIRONMENT="dev"
+```
+
+### Required RBAC Role Assignment
+
+The `rmhazuregeoapi` Application Insights has `DisableLocalAuth=true`, requiring Entra ID authentication. The Docker worker's managed identity needs the **"Monitoring Metrics Publisher"** role:
+
+```bash
+# Get Docker worker's managed identity principal ID
+PRINCIPAL_ID=$(az webapp identity show --name rmhheavyapi --resource-group rmhazure_rg --query principalId -o tsv)
+
+# Assign Monitoring Metrics Publisher role on App Insights
+az role assignment create \
+  --assignee $PRINCIPAL_ID \
+  --role "Monitoring Metrics Publisher" \
+  --scope "/subscriptions/fc7a176b-9a1d-47eb-8a7f-08cc8058fcfa/resourceGroups/rmhazure_rg/providers/microsoft.insights/components/rmhazuregeoapi"
+```
+
+### Verifying Logging Works
+
+**Step 1: Check logging configuration**
+```bash
+curl https://rmhheavyapi-ebdffqhkcsevg7f3.eastus-01.azurewebsites.net/test/logging
+```
+
+Expected output shows:
+- `instrumentation_key`: Should start with `6aa0e75f`
+- `application_id`: Should be `d3af3d37-cfe3-411f-adef-bc540181cbca`
+- `azure_monitor_enabled`: `true`
+
+**Step 2: Emit test logs**
+```bash
+curl -X POST https://rmhheavyapi-ebdffqhkcsevg7f3.eastus-01.azurewebsites.net/test/logging/verify
+```
+
+**Step 3: Query Application Insights (wait 1-3 minutes)**
+```bash
+TOKEN=$(az account get-access-token --resource https://api.applicationinsights.io --query accessToken -o tsv)
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "https://api.applicationinsights.io/v1/apps/d3af3d37-cfe3-411f-adef-bc540181cbca/query" \
+  --data-urlencode "query=traces | where message contains 'LOGGING_VERIFY' | order by timestamp desc | take 5" \
+  -G | python3 -m json.tool
+```
+
+### Troubleshooting Docker Worker Logging
+
+**Error: "Unauthorized" in container logs**
+```
+Retryable server side error: Operation returned an invalid status 'Unauthorized'.
+Your Application Insights resource may be configured to use entra ID authentication.
+```
+
+**Cause**: Missing `APPLICATIONINSIGHTS_AUTHENTICATION_STRING=Authorization=AAD` setting.
+
+**Fix**: Add the environment variable and restart the container.
+
+---
+
+**Error: "Forbidden" in container logs**
+```
+Retryable server side error: Operation returned an invalid status 'Forbidden'.
+Please make sure your Application Insights resource has the correct 'Monitoring Metrics Publisher' role assigned.
+```
+
+**Cause**: Managed identity doesn't have the required RBAC role.
+
+**Fix**: Assign the "Monitoring Metrics Publisher" role (see above).
+
+---
+
+**Logs appearing in wrong App Insights resource**
+
+**Cause**: Docker worker using a different connection string than Function App.
+
+**Fix**: Update `APPLICATIONINSIGHTS_CONNECTION_STRING` to use the `rmhazuregeoapi` App Insights connection string.
+
+---
+
+**cloud_RoleName shows as "rmhheavyapi" instead of "docker-worker-azure"**
+
+This is expected behavior. Azure's built-in App Service instrumentation sets the cloud_RoleName to the Web App name. The custom `service.name` resource attribute is captured in customDimensions but doesn't override cloud_RoleName.
+
+### Checking Container Logs for Errors
+
+```bash
+# Download logs
+az webapp log download --name rmhheavyapi --resource-group rmhazure_rg --log-file /tmp/docker_logs.zip
+
+# Extract and search for Azure Monitor errors
+cd /tmp && unzip -o docker_logs.zip -d docker_logs
+grep -i "azure monitor\|unauthorized\|forbidden" docker_logs/LogFiles/2026_*docker*.log | tail -20
+```
+
+### How Azure Monitor OpenTelemetry Works in Docker Worker
+
+The `docker_service.py` configures Azure Monitor at startup:
+
+1. Checks for `APPLICATIONINSIGHTS_CONNECTION_STRING`
+2. If `APPLICATIONINSIGHTS_AUTHENTICATION_STRING=Authorization=AAD` is set, uses `DefaultAzureCredential` for Entra ID auth
+3. Calls `configure_azure_monitor()` with the credential
+4. All Python logging is automatically captured and sent to App Insights
+
+**Code location**: `docker_service.py:configure_azure_monitor_telemetry()`
 
 ---
 
@@ -476,4 +613,4 @@ AND m.rolname = 'migeoetldbadminqa';
 
 ---
 
-**Last Updated**: 08 DEC 2025
+**Last Updated**: 21 JAN 2026

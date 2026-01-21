@@ -3,7 +3,7 @@
 # ============================================================================
 # STATUS: Trigger layer - Platform status and diagnostic endpoints
 # PURPOSE: Query Platform request/job status and diagnostics for gateway integration
-# LAST_REVIEWED: 15 JAN 2026
+# LAST_REVIEWED: 21 JAN 2026
 # REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
 # EXPORTS: platform_request_status, platform_job_status, platform_health, platform_failures, platform_lineage, platform_validate
 # DEPENDENCIES: infrastructure.PlatformRepository, infrastructure.JobRepository
@@ -15,9 +15,10 @@ Query Platform request/job status and diagnostics. These endpoints are designed 
 gateway integration where only /api/platform/* endpoints are exposed externally.
 
 Status Endpoints:
-    GET /api/platform/status/{request_id} - Platform request status (by request_id)
+    GET /api/platform/status/{id} - Consolidated status endpoint (21 JAN 2026)
+        Accepts EITHER request_id OR job_id - auto-detects ID type
     GET /api/platform/status - List all platform requests
-    GET /api/platform/jobs/{job_id}/status - Direct job status (by job_id) [14 JAN 2026]
+    GET /api/platform/jobs/{job_id}/status - DEPRECATED (use /status/{job_id})
 
 Diagnostic Endpoints (F7.12 - 15 JAN 2026):
     GET /api/platform/health - Simplified system readiness check
@@ -26,8 +27,8 @@ Diagnostic Endpoints (F7.12 - 15 JAN 2026):
     POST /api/platform/validate - Pre-flight validation before submission
 
 Exports:
-    platform_request_status: HTTP trigger for GET /api/platform/status/{request_id}
-    platform_job_status: HTTP trigger for GET /api/platform/jobs/{job_id}/status
+    platform_request_status: HTTP trigger for GET /api/platform/status/{id}
+    platform_job_status: DEPRECATED - HTTP trigger for GET /api/platform/jobs/{job_id}/status
     platform_health: HTTP trigger for GET /api/platform/health
     platform_failures: HTTP trigger for GET /api/platform/failures
     platform_lineage: HTTP trigger for GET /api/platform/lineage/{request_id}
@@ -56,10 +57,14 @@ logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "trigger_platform_st
 
 async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
     """
-    Get status of a Platform request.
+    Get status of a Platform request or job.
 
-    GET /api/platform/status/{request_id}
+    GET /api/platform/status/{id}
         Returns Platform request with delegated CoreMachine job status.
+        The {id} parameter can be EITHER:
+        - A request_id (Platform request identifier)
+        - A job_id (CoreMachine job identifier)
+        The endpoint auto-detects which type of ID was provided.
         Query params:
             - verbose=true: Include full task details (default: false)
 
@@ -99,25 +104,35 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
         job_repo = JobRepository()
         task_repo = TaskRepository()
 
-        # Check if specific request_id provided
-        request_id = req.route_params.get('request_id')
+        # Check if specific ID provided (can be request_id OR job_id)
+        lookup_id = req.route_params.get('request_id')
         verbose = req.params.get('verbose', 'false').lower() == 'true'
 
-        if request_id:
+        if lookup_id:
             # ================================================================
-            # Single request lookup with job status delegation
+            # Single request lookup with auto-detect ID type (21 JAN 2026)
+            # First try as request_id, then as job_id
             # ================================================================
-            platform_request = platform_repo.get_request(request_id)
+            platform_request = platform_repo.get_request(lookup_id)
+            lookup_type = "request_id"
+
+            if not platform_request:
+                # Try as job_id (reverse lookup)
+                platform_request = platform_repo.get_request_by_job(lookup_id)
+                lookup_type = "job_id"
 
             if not platform_request:
                 return func.HttpResponse(
                     json.dumps({
                         "success": False,
-                        "error": f"Platform request {request_id} not found"
+                        "error": f"No Platform request found for ID: {lookup_id}",
+                        "hint": "ID can be either a request_id or job_id"
                     }),
                     status_code=404,
                     headers={"Content-Type": "application/json"}
                 )
+
+            logger.debug(f"Found platform request via {lookup_type}: {platform_request.request_id}")
 
             # Get CoreMachine job status (delegation)
             job = job_repo.get_job(platform_request.job_id)
@@ -214,22 +229,24 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
 # ============================================================================
 # DIRECT JOB STATUS (14 JAN 2026)
 # ============================================================================
-# Gateway-accessible endpoint for direct job status lookup by job_id.
-# Same output as /api/jobs/status/{job_id} but via platform/ for gateway access.
+# DEPRECATED: Use /api/platform/status/{job_id} instead (21 JAN 2026)
+# This endpoint is maintained for backward compatibility but will be removed.
+# The consolidated /api/platform/status/{id} endpoint accepts either request_id
+# or job_id and returns the full Platform response with DDH identifiers.
 # ============================================================================
 
 async def platform_job_status(req: func.HttpRequest) -> func.HttpResponse:
     """
-    Get status of a CoreMachine job directly by job_id.
+    DEPRECATED: Get status of a CoreMachine job directly by job_id.
+
+    ⚠️ DEPRECATED (21 JAN 2026): Use GET /api/platform/status/{job_id} instead.
+    The consolidated endpoint accepts either request_id or job_id and returns
+    the full Platform response with DDH identifiers.
 
     GET /api/platform/jobs/{job_id}/status
         Returns job status with task summary - same format as /api/jobs/status/{job_id}.
         Query params:
             - verbose=true: Include full task details (default: false)
-
-    This endpoint is designed for gateway integration where only /api/platform/*
-    endpoints are exposed externally. Lazy users can click the job_status_url
-    returned from submission endpoints to see job progress.
 
     Response:
     {
@@ -248,10 +265,12 @@ async def platform_job_status(req: func.HttpRequest) -> func.HttpResponse:
             "completed": 5,
             "failed": 0,
             "byStage": {...}
-        }
+        },
+        "_deprecated": "Use /api/platform/status/{job_id} instead"
     }
     """
-    logger.info("Platform job status endpoint called")
+    # Log deprecation warning
+    logger.warning("DEPRECATED: /api/platform/jobs/{job_id}/status called - use /api/platform/status/{id} instead")
 
     try:
         job_repo = JobRepository()
@@ -295,10 +314,19 @@ async def platform_job_status(req: func.HttpRequest) -> func.HttpResponse:
         task_summary = _get_task_summary(task_repo, job_id, verbose=verbose)
         response_data["taskSummary"] = task_summary
 
+        # Add deprecation notice to response (21 JAN 2026)
+        response_data["_deprecated"] = "Use /api/platform/status/{job_id} instead"
+        response_data["_migration_url"] = f"/api/platform/status/{job_id}"
+
         return func.HttpResponse(
             json.dumps(response_data, indent=2, default=str),
             status_code=200,
-            headers={"Content-Type": "application/json"}
+            headers={
+                "Content-Type": "application/json",
+                "Deprecation": "true",
+                "Sunset": "2026-04-01",
+                "Link": f'</api/platform/status/{job_id}>; rel="successor-version"'
+            }
         )
 
     except Exception as e:

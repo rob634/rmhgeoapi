@@ -1,6 +1,6 @@
 # ERRORS_AND_FIXES.md - Error Tracking and Resolution Log
 
-**Last Updated**: 10 JAN 2026
+**Last Updated**: 21 JAN 2026
 **Purpose**: Canonical error tracking for pattern analysis and faster troubleshooting
 
 ---
@@ -35,6 +35,7 @@ When you encounter and fix an error, add an entry with:
 | [UI](#ui-errors) | Web interface rendering, HTMX, JavaScript |
 | [PIPELINE](#pipeline-errors) | Job/task processing, queue issues |
 | [CODE](#code-errors) | Service layer bugs, handler errors, GDAL/raster issues |
+| [OBSERVABILITY](#observability-errors) | Application Insights, logging, telemetry |
 
 ---
 
@@ -747,6 +748,130 @@ if isinstance(item, pystac.Item):
 
 ---
 
+## OBSERVABILITY Errors
+
+### OBS-001: Docker Worker logs not appearing in Application Insights
+
+**Date**: 21 JAN 2026
+**Version**: 0.7.17.x
+**Severity**: Breaking (no visibility into Docker worker processing)
+
+**Error Message** (in container logs):
+```
+azure.monitor.opentelemetry.exporter.export._base | Retryable server side error: Operation returned an invalid status 'Unauthorized'. Your Application Insights resource may be configured to use entra ID authentication.
+```
+
+**Location**: Docker worker container logs (`az webapp log download`)
+
+**Root Cause**:
+The Docker worker was sending logs to a **different** Application Insights resource than the Function App. Additionally, the App Insights resource has `DisableLocalAuth=true` requiring Entra ID authentication.
+
+**Key Discovery**: Multiple App Insights resources exist in the resource group:
+- `rmhazuregeoapi` (correct - Function App uses this)
+- `rmhheavyapi` (wrong - Docker worker was using this)
+- `rmhgeoapi-worker` (wrong)
+
+The connection strings have different instrumentation keys:
+- Correct: `6aa0e75f-3c96-4e8e-a632-68d65137e39a`
+- Wrong: `5f779879-7abf-409a-be84-cad2582d529d`
+
+**Resolution**:
+1. Update `APPLICATIONINSIGHTS_CONNECTION_STRING` to use the `rmhazuregeoapi` App Insights connection string
+2. Add `APPLICATIONINSIGHTS_AUTHENTICATION_STRING=Authorization=AAD` for Entra ID auth
+3. Update `docker_service.py` to pass `DefaultAzureCredential` when AAD auth is required
+
+**Related Changes**: Docker worker setup, Application Insights configuration
+
+**Prevention**:
+- Always verify Docker worker uses same App Insights as Function App
+- Check container logs for "Unauthorized" or "Forbidden" errors after deployment
+- Use `/test/logging` endpoint to verify logging configuration
+
+---
+
+### OBS-002: Docker Worker logs "Forbidden" after AAD auth enabled
+
+**Date**: 21 JAN 2026
+**Version**: 0.7.17.x
+**Severity**: Breaking
+
+**Error Message**:
+```
+azure.monitor.opentelemetry.exporter.export._base | Retryable server side error: Operation returned an invalid status 'Forbidden'. Your application may be configured with a token credential but your Application Insights resource may be configured incorrectly. Please make sure your Application Insights resource has enabled entra Id authentication and has the correct `Monitoring Metrics Publisher` role assigned.
+```
+
+**Location**: Docker worker container logs
+
+**Root Cause**:
+AAD authentication is working (error changed from "Unauthorized" to "Forbidden"), but the managed identity doesn't have the required RBAC role on the Application Insights resource.
+
+**Resolution**:
+Assign "Monitoring Metrics Publisher" role to the Docker worker's managed identity:
+
+```bash
+# Get Docker worker's managed identity principal ID
+PRINCIPAL_ID=$(az webapp identity show --name rmhheavyapi --resource-group rmhazure_rg --query principalId -o tsv)
+
+# Assign role
+az role assignment create \
+  --assignee $PRINCIPAL_ID \
+  --role "Monitoring Metrics Publisher" \
+  --scope "/subscriptions/fc7a176b-9a1d-47eb-8a7f-08cc8058fcfa/resourceGroups/rmhazure_rg/providers/microsoft.insights/components/rmhazuregeoapi"
+```
+
+**Note**: Role propagation can take several minutes. Restart the Docker worker after assigning the role.
+
+**Prevention**:
+- When setting up a new Docker worker, always check for existing RBAC role assignments
+- Document required roles in deployment checklist
+- Test with `/test/logging/verify` endpoint after deployment
+
+---
+
+### OBS-003: Docker Worker logs going to wrong App Insights resource
+
+**Date**: 21 JAN 2026
+**Version**: 0.7.17.x
+**Severity**: Critical (silent data loss)
+
+**Symptoms**:
+- Docker worker health shows `azure_monitor_enabled: true`
+- No errors in container logs
+- BUT logs don't appear when querying Function App's App Insights
+
+**Root Cause**:
+Docker worker's `APPLICATIONINSIGHTS_CONNECTION_STRING` points to a different App Insights resource than the Function App.
+
+**How to Diagnose**:
+1. Check Docker worker's instrumentation key:
+```bash
+curl https://rmhheavyapi-ebdffqhkcsevg7f3.eastus-01.azurewebsites.net/test/logging
+# Look at "instrumentation_key" in response
+```
+
+2. Compare with Function App's App Insights:
+```bash
+az resource show --name rmhazuregeoapi --resource-group rmhazure_rg \
+  --resource-type "microsoft.insights/components" \
+  --query "properties.InstrumentationKey" -o tsv
+```
+
+**Resolution**:
+Update Docker worker to use correct connection string:
+```bash
+az webapp config appsettings set --name rmhheavyapi --resource-group rmhazure_rg \
+  --settings APPLICATIONINSIGHTS_CONNECTION_STRING="InstrumentationKey=6aa0e75f-3c96-4e8e-a632-68d65137e39a;IngestionEndpoint=https://eastus-8.in.applicationinsights.azure.com/;LiveEndpoint=https://eastus.livediagnostics.monitor.azure.com/;ApplicationId=d3af3d37-cfe3-411f-adef-bc540181cbca"
+```
+
+Then stop/start the container.
+
+**Prevention**:
+- Document the correct App Insights connection string in CLAUDE.md
+- Add verification to deployment checklist
+- Use `/test/logging` endpoint to confirm correct instrumentation key
+
+---
+
 ## Adding New Errors
 
 Use this template:
@@ -781,6 +906,10 @@ How to fix it
 ## Related Documents
 
 - `APPLICATION_INSIGHTS.md` - Log query patterns for debugging
-- `DEPLOYMENT_GUIDE.md` - Deployment troubleshooting
+- `DEPLOYMENT_GUIDE.md` - Deployment troubleshooting, Docker Worker App Insights setup
 - `MEMORY_PROFILING.md` - OOM and memory issues
 - `HISTORY.md` - Completed fixes (search for "fix", "bug", "error")
+
+---
+
+**Last Updated**: 21 JAN 2026

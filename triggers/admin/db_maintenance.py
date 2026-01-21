@@ -621,11 +621,30 @@ class AdminDbMaintenanceTrigger:
             from infrastructure.postgresql import PostgreSQLRepository
             from core.schema.sql_generator import PydanticToSQL
 
-            # Get SQL generator for app schema
+            # Generate DDL for all schemas in dependency order (21 JAN 2026)
+            # Order: geo → app_core → app_etl (FK dependency)
             sql_gen = PydanticToSQL(schema_name='app')
-            statements = sql_gen.generate_composed_statements()
 
-            logger.info(f"📋 Generated {len(statements)} SQL statements to process")
+            # Collect all statements from all schema groups
+            statements = []
+
+            # 1. Geo schema (geo.table_catalog) - must come first for FK
+            geo_stmts = sql_gen.generate_geo_schema_ddl()
+            logger.info(f"📋 Generated {len(geo_stmts)} geo schema statements")
+            statements.extend(geo_stmts)
+
+            # 2. App core (jobs, tasks, etc.)
+            app_core_stmts = sql_gen.generate_composed_statements()
+            logger.info(f"📋 Generated {len(app_core_stmts)} app core statements")
+            statements.extend(app_core_stmts)
+
+            # 3. ETL tracking (app.vector_etl_tracking) - has FK to geo.table_catalog
+            # Note: Skip FK verification here since geo DDL runs first
+            etl_stmts = sql_gen.generate_etl_tracking_ddl(conn=None, verify_dependencies=False)
+            logger.info(f"📋 Generated {len(etl_stmts)} ETL tracking statements")
+            statements.extend(etl_stmts)
+
+            logger.info(f"📋 Total: {len(statements)} SQL statements to process")
 
             repo = PostgreSQLRepository(schema_name='app')
 

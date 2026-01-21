@@ -477,6 +477,57 @@ def process_large_raster_complete(params: Dict[str, Any], context: Optional[Dict
             logger.info(f"   STAC: {stac_result.get('collection_id')}")
         logger.info("=" * 70)
 
+        # =====================================================================
+        # ARTIFACT REGISTRY (21 JAN 2026)
+        # =====================================================================
+        # Create artifact record for lineage tracking
+        artifact_id = None
+        try:
+            from services.artifact_service import ArtifactService
+            from config import get_config as get_app_config
+
+            config = get_app_config()
+
+            # Build client_refs from platform parameters
+            client_refs = {}
+            if params.get('dataset_id'):
+                client_refs['dataset_id'] = params['dataset_id']
+            if params.get('resource_id'):
+                client_refs['resource_id'] = params['resource_id']
+            if params.get('version_id'):
+                client_refs['version_id'] = params['version_id']
+
+            # Only create artifact if we have client refs (platform job) and MosaicJSON
+            if client_refs and mosaicjson_result.get('mosaicjson_blob'):
+                artifact_service = ArtifactService()
+                artifact = artifact_service.create_artifact(
+                    storage_account=config.storage.silver.account_name,
+                    container=mosaicjson_result.get('mosaicjson_container'),
+                    blob_path=mosaicjson_result.get('mosaicjson_blob'),
+                    client_type='ddh',  # Platform client type
+                    client_refs=client_refs,
+                    stac_collection_id=stac_result.get('collection_id'),
+                    stac_item_id=stac_result.get('item_id'),
+                    source_job_id=params.get('_job_id'),
+                    source_task_id=params.get('_task_id'),
+                    content_hash=None,  # MosaicJSON doesn't have checksum yet
+                    size_bytes=None,
+                    content_type='application/json',
+                    metadata={
+                        'tile_count': tiling_result.get('tile_count'),
+                        'cog_count': len(cog_blobs),
+                        'raster_type': 'large_tiled',
+                    },
+                    overwrite=True  # Platform jobs always overwrite
+                )
+                artifact_id = str(artifact.artifact_id)
+                logger.info(f"📦 Artifact created: {artifact_id} (revision {artifact.revision})")
+            else:
+                logger.debug("Skipping artifact creation - no client_refs or MosaicJSON")
+        except Exception as e:
+            # Artifact creation is non-fatal - log warning but continue
+            logger.warning(f"⚠️ Artifact creation failed (non-fatal): {e}")
+
         return {
             "success": True,
             "result": {
@@ -492,6 +543,8 @@ def process_large_raster_complete(params: Dict[str, Any], context: Optional[Dict
                     "total_seconds": round(total_duration, 1),
                     "total_minutes": round(total_duration / 60, 2),
                 },
+                # Artifact registry (21 JAN 2026)
+                "artifact_id": artifact_id,
             }
         }
 

@@ -215,6 +215,8 @@ class ProcessLargeRasterDockerJob(JobBaseMixin, JobBase):
         cogs = unwrapped.get('cogs', {})
         mosaicjson = unwrapped.get('mosaicjson', {})
         stac = unwrapped.get('stac', {})
+        resources = unwrapped.get('resources', {})
+        artifact_id = unwrapped.get('artifact_id')  # Artifact registry (21 JAN 2026)
 
         # Generate TiTiler URLs if we have MosaicJSON
         titiler_urls = None
@@ -253,6 +255,8 @@ class ProcessLargeRasterDockerJob(JobBaseMixin, JobBase):
             "stac_urls": stac_urls,
             "titiler_urls": titiler_urls,
             "share_url": share_url,
+            "artifact_id": artifact_id,  # Artifact registry (21 JAN 2026)
+            "resources": resources,  # F7.20 resource metrics
             "processing_mode": "docker_large_raster_single_stage",
             "stages_completed": 1,
             "total_tasks_executed": len(task_results),

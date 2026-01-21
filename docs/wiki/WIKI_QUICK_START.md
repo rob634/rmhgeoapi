@@ -1,6 +1,6 @@
 # Quick Start Guide
 
-> **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [All Jobs](WIKI_API_JOB_SUBMISSION.md) | [Health](WIKI_API_HEALTH.md) | [Errors](WIKI_API_ERRORS.md) | [Glossary](WIKI_API_GLOSSARY.md)
+> **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [Health](WIKI_API_HEALTH.md) | [Errors](WIKI_API_ERRORS.md) | [Glossary](WIKI_API_GLOSSARY.md)
 
 **Date**: 14 DEC 2025
 **Status**: Reference Documentation
@@ -209,7 +209,7 @@ GET /api/dbadmin/stats
 | `process_raster` | Convert raster to COG (legacy) | `blob_name`, `container_name` |
 | `process_raster_collection` | Process multiple rasters | `blob_list`, `collection_id`, `container_name` |
 
-For complete parameter documentation, see [WIKI_API_JOB_SUBMISSION.md](WIKI_API_JOB_SUBMISSION.md).
+For complete parameter documentation, see [WIKI_PLATFORM_API.md](WIKI_PLATFORM_API.md).
 
 ---
 
@@ -254,7 +254,7 @@ For complete parameter documentation, see [WIKI_API_JOB_SUBMISSION.md](WIKI_API_
 
 ### Documentation
 
-- **[WIKI_API_JOB_SUBMISSION.md](WIKI_API_JOB_SUBMISSION.md)** - Complete API reference for all job types
+- **[WIKI_PLATFORM_API.md](WIKI_PLATFORM_API.md)** - Platform API reference (submit, poll, approve, unpublish)
 - **[WIKI_API_GLOSSARY.md](WIKI_API_GLOSSARY.md)** - Terminology and acronym definitions
 - **[WIKI_TECHNICAL_OVERVIEW.md](WIKI_TECHNICAL_OVERVIEW.md)** - Architecture and technology stack
 - **[WIKI_API_SERVICE_BUS.md](WIKI_API_SERVICE_BUS.md)** - Service Bus configuration
@@ -277,7 +277,7 @@ For issues or questions:
 
 After completing this quick start:
 
-1. **Read the API Reference**: [WIKI_API_JOB_SUBMISSION.md](WIKI_API_JOB_SUBMISSION.md) for complete parameter documentation
+1. **Read the API Reference**: [WIKI_PLATFORM_API.md](WIKI_PLATFORM_API.md) for complete parameter documentation
 2. **Understand the Architecture**: [WIKI_TECHNICAL_OVERVIEW.md](WIKI_TECHNICAL_OVERVIEW.md) for system design
 3. **Learn the Terminology**: [WIKI_API_GLOSSARY.md](WIKI_API_GLOSSARY.md) for definitions
 4. **Try Real Data**: Upload your own files and process them

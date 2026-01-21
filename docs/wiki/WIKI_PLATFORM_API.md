@@ -1,9 +1,9 @@
 # Platform API Guide
 
-> **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [All Jobs](WIKI_API_JOB_SUBMISSION.md) | [Errors](WIKI_API_ERRORS.md) | [Glossary](WIKI_API_GLOSSARY.md)
+> **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [Errors](WIKI_API_ERRORS.md) | [Glossary](WIKI_API_GLOSSARY.md)
 
-**Date**: 16 JAN 2026
-**Purpose**: External application integration via Anti-Corruption Layer (ACL)
+**Last Updated**: 21 JAN 2026
+**Purpose**: B2B integration API for geospatial data processing
 **Audience**: DDH developers, external application integrators
 **OpenAPI Spec**: `openapi/platform-api-v1.json` (v1.3.0)
 
@@ -11,19 +11,34 @@
 
 ## Overview
 
-The Platform API is an **Anti-Corruption Layer (ACL)** that shields external applications from CoreMachine (ETL engine) internals. External apps use high-level DDH identifiers; Platform translates them to CoreMachine job parameters automatically.
+The Platform API provides a complete lifecycle for geospatial data:
 
-### Why Use Platform API Instead of CoreMachine API?
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        PLATFORM API WORKFLOW                            │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   1. SUBMIT          2. POLL              3. APPROVE      4. UNPUBLISH  │
+│   ────────────       ────────────         ────────────    ────────────  │
+│   POST /submit   →   GET /status/{id} →   POST /approve → POST /unpublish│
+│                                                                         │
+│   Returns:           Returns:             Triggers:       Removes:      │
+│   • request_id       • job_status         • Finalization  • STAC items  │
+│   • polling URL      • progress           • Service Layer • COG blobs   │
+│                      • preview URLs         availability  • Tables      │
+│                        (on complete)                                    │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
 
-| Aspect | Platform API | CoreMachine API |
-|--------|--------------|-----------------|
-| **Audience** | External applications (DDH) | Internal tools, power users |
-| **Identifiers** | `dataset_id`, `resource_id`, `version_id` | `blob_name`, `table_name`, `collection_id` |
-| **Output naming** | Auto-generated from DDH IDs | You specify everything |
-| **Status tracking** | `request_id` (DDH-friendly) | `job_id` (internal hash) |
-| **Isolation** | DDH API changes absorbed here | Direct ETL access |
+### Four Key Workflows
 
-**Key Benefit**: If DDH changes their API contract, only Platform layer changes - CoreMachine jobs remain untouched.
+| Workflow | Endpoint | Purpose |
+|----------|----------|---------|
+| **1. Submit** | `POST /api/platform/submit` | Submit raster or vector for processing → returns polling URL |
+| **2. Poll** | `GET /api/platform/status/{request_id}` | Check job status → returns preview URLs on completion |
+| **3. Approve** | `POST /api/platform/approve` | Triggers finalization and Service Layer availability |
+| **4. Unpublish** | `POST /api/platform/unpublish/{type}` | Undo everything - delete outputs, STAC items, tables |
 
 ---
 
@@ -32,56 +47,6 @@ The Platform API is an **Anti-Corruption Layer (ACL)** that shields external app
 ```
 https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net
 ```
-
----
-
-## Endpoints Summary
-
-### Data Processing (Create)
-
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/api/platform/raster` | POST | Single raster file processing |
-| `/api/platform/raster-collection` | POST | Multiple raster files (2-20 files) |
-| `/api/platform/submit` | POST | Generic submission (auto-detects data type) |
-
-### Status & Monitoring (Read)
-
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/api/platform/status/{request_id}` | GET | Check request/job status |
-| `/api/platform/status` | GET | List all platform requests |
-| `/api/platform/jobs/{job_id}/status` | GET | Direct job status lookup |
-| `/api/platform/health` | GET | Simplified system readiness (F7.12) |
-| `/api/platform/failures` | GET | Recent failures with sanitized errors (F7.12) |
-| `/api/platform/lineage/{request_id}` | GET | Data lineage trace (F7.12) |
-| `/api/platform/validate` | POST | Pre-flight validation before submission (F7.12) |
-
-### Catalog - STAC Verification (16 JAN 2026 - F12.8)
-
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/api/platform/catalog/lookup` | GET | Lookup STAC item by DDH identifiers |
-| `/api/platform/catalog/item/{collection}/{item}` | GET | Get full STAC item |
-| `/api/platform/catalog/assets/{collection}/{item}` | GET | Get asset URLs + TiTiler preview URLs |
-| `/api/platform/catalog/dataset/{dataset_id}` | GET | List all items for a DDH dataset |
-
-### Approvals - QA Workflow (16 JAN 2026)
-
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/api/platform/approve` | POST | Approve a dataset for publishing |
-| `/api/platform/revoke` | POST | Revoke approval from a dataset |
-| `/api/platform/approvals` | GET | List dataset approvals |
-| `/api/platform/approvals/{approval_id}` | GET | Get approval details |
-| `/api/platform/approvals/status` | GET | Batch lookup approval status for multiple items |
-
-### Unpublish/Delete (Delete)
-
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/api/platform/unpublish/vector` | POST | Remove vector data (accepts DDH identifiers) |
-| `/api/platform/unpublish/raster` | POST | Remove raster data (accepts DDH identifiers) |
 
 ---
 
@@ -1173,67 +1138,94 @@ curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/pl
 
 ## 10. Approvals API - QA Workflow
 
-The Approvals API provides a QA workflow for reviewing datasets before they are published. External apps can submit datasets for review and track approval status.
+The Approvals API manages dataset approval before publication. Approving a dataset marks it as published in the STAC catalog.
 
 ### Approve Dataset
 
-Approve a dataset for publishing:
+```
+POST /api/platform/approve
+```
 
+**Request Body** - identify dataset by ONE of:
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `approval_id` | string | Option 1 | Approval record ID (e.g., `apr-abc123...`) |
+| `stac_item_id` | string | Option 2 | STAC item ID for the dataset |
+| `job_id` | string | Option 3 | Job ID that processed the dataset |
+| `reviewer` | string | **Yes** | Email of person approving |
+| `notes` | string | No | Review notes |
+
+**Example:**
 ```bash
 curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/approve" \
   -H "Content-Type: application/json" \
   -d '{
     "stac_item_id": "flood-data-res-001-v1-0",
-    "stac_collection_id": "flood-data",
-    "approved_by": "user@example.com",
+    "reviewer": "user@example.com",
     "notes": "QA review passed"
   }'
 ```
 
+**Response:**
+```json
+{
+    "success": true,
+    "approval_id": "apr-abc123...",
+    "status": "approved",
+    "action": "stac_updated",
+    "message": "Dataset approved successfully"
+}
+```
+
 ### Revoke Approval
 
-Revoke approval from a previously approved dataset:
+```
+POST /api/platform/revoke
+```
 
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `approval_id` | string | Option 1 | Approval record ID |
+| `stac_item_id` | string | Option 2 | STAC item ID |
+| `job_id` | string | Option 3 | Job ID |
+| `revoker` | string | **Yes** | Email of person revoking |
+| `reason` | string | **Yes** | Reason for revocation (audit trail) |
+
+**Example:**
 ```bash
 curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/revoke" \
   -H "Content-Type: application/json" \
   -d '{
     "stac_item_id": "flood-data-res-001-v1-0",
-    "stac_collection_id": "flood-data",
-    "revoked_by": "admin@example.com",
+    "revoker": "admin@example.com",
     "reason": "Data quality issue discovered"
   }'
 ```
 
 ### List Approvals
 
-List dataset approvals with optional filtering:
-
-```bash
-curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/approvals?status=pending&limit=50"
 ```
-
-**Query Parameters:**
+GET /api/platform/approvals?status=pending&limit=50
+```
 
 | Parameter | Description |
 |-----------|-------------|
-| `status` | Filter by status: `pending`, `approved`, `rejected` |
-| `limit` | Maximum results (default: 50) |
+| `status` | Filter: `pending`, `approved`, `rejected`, `revoked` |
+| `classification` | Filter: `ouo`, `public` |
+| `limit` | Max results (default: 100) |
+| `offset` | Pagination offset |
 
 ### Get Approval Details
 
-Get details of a specific approval:
-
-```bash
-curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/approvals/{approval_id}"
+```
+GET /api/platform/approvals/{approval_id}
 ```
 
-### Batch Approval Status
+### Batch Approval Status (for UI dashboards)
 
-Get approval statuses for multiple items (for UI dashboards):
-
-```bash
-curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/approvals/status?stac_item_ids=item1,item2,item3"
+```
+GET /api/platform/approvals/status?stac_item_ids=item1,item2,item3
 ```
 
 **Response:**
@@ -1241,7 +1233,7 @@ curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/pl
 {
     "success": true,
     "statuses": {
-        "item1": {"has_approval": true, "is_approved": true, "approved_at": "2026-01-15T10:00:00Z"},
+        "item1": {"has_approval": true, "is_approved": true, "approval_id": "apr-abc123", "reviewer": "user@example.com"},
         "item2": {"has_approval": true, "is_approved": false, "status": "pending"},
         "item3": {"has_approval": false}
     }
@@ -1252,16 +1244,15 @@ curl "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/pl
 
 ## Related Documentation
 
-- **CoreMachine API**: See `WIKI_API_JOB_SUBMISSION.md` for direct ETL access
+- **Architecture**: See [WIKI_TECHNICAL_OVERVIEW.md](WIKI_TECHNICAL_OVERVIEW.md) for system architecture and security zones
 - **STAC API**: See `/api/stac` endpoints for metadata queries
-- **OGC Features API**: See `/api/features` for vector data access
-- **Architecture**: See `docs_claude/COREMACHINE_PLATFORM_ARCHITECTURE.md`
+- **OGC Features API**: See [WIKI_OGC_FEATURES.md](WIKI_OGC_FEATURES.md) for vector data access
+- **Service Layer**: See [WIKI_SERVICE_LAYER.md](WIKI_SERVICE_LAYER.md) for TiTiler and data serving
 - **OpenAPI Spec**: See `openapi/platform-api-v1.json` for machine-readable API definition
-- **B2B Implementation Plan**: See `docs_claude/B2B_STAC_CATALOG_PLAN.md`
 
 ---
 
-**Last Updated**: 16 JAN 2026
+**Last Updated**: 21 JAN 2026
 **Function App**: rmhazuregeoapi
 **Region**: East US
 **API Version**: 1.3.0

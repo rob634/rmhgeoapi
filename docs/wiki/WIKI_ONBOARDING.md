@@ -1,9 +1,11 @@
 # Geospatial ETL Pipeline - Developer Onboarding
 
-> **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [All Jobs](WIKI_API_JOB_SUBMISSION.md) | [Errors](WIKI_API_ERRORS.md) | [Glossary](WIKI_API_GLOSSARY.md)
+> **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [Errors](WIKI_API_ERRORS.md) | [Glossary](WIKI_API_GLOSSARY.md)
 
-**Last Updated**: 18 NOV 2025
-**Purpose**: Comprehensive onboarding guide for new developers joining the geospatial data platform team
+**Last Updated**: 21 JAN 2026
+**Purpose**: Practical onboarding guide for new developers - code examples, workflows, and setup instructions
+
+> **Architecture Reference**: For system architecture, security zones, and component relationships, see [WIKI_TECHNICAL_OVERVIEW.md](WIKI_TECHNICAL_OVERVIEW.md)
 
 ---
 
@@ -38,45 +40,13 @@
 
 ## Architecture Overview
 
-### The Two-Layer Architecture
+> **Full Architecture Details**: See [WIKI_TECHNICAL_OVERVIEW.md](WIKI_TECHNICAL_OVERVIEW.md) for complete architecture diagrams, security zones, and component relationships.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│ PLATFORM LAYER (Client-Facing API)                         │
-│ • HTTP job submission (POST /api/jobs/submit/{job_type})   │
-│ • Status queries (GET /api/jobs/status/{job_id})           │
-│ • Standards APIs (OGC Features, STAC, TiTiler)             │
-│ • Interactive web maps (Leaflet-based viewers)             │
-└───────────────────────┬─────────────────────────────────────┘
-                        ↓
-┌─────────────────────────────────────────────────────────────┐
-│ COREMACHINE LAYER (Job Orchestration Engine)               │
-│ • Job→Stage→Task orchestration (450 lines)                 │
-│ • Service Bus queue management (jobs + tasks)              │
-│ • PostgreSQL state tracking + advisory locks               │
-│ • Composition over inheritance (dependencies injected)      │
-└───────────────────────┬─────────────────────────────────────┘
-                        ↓
-┌─────────────────────────────────────────────────────────────┐
-│ DATA STORAGE LAYER                                          │
-│ • PostgreSQL with PostGIS (vector data in geo schema)      │
-│ • PostgreSQL with pgSTAC (metadata in pgstac schema)       │
-│ • Azure Blob Storage (COG rasters for TiTiler)             │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### CoreMachine Design
-
-CoreMachine is a lightweight orchestration engine (450 lines) that coordinates workflow execution by delegating to specialized components:
-
-- **StateManager**: Database operations (create/update jobs and tasks)
-- **OrchestrationManager**: Dynamic task creation (fan-out patterns)
-- **RepositoryFactory**: Connection management (PostgreSQL, Service Bus, Blob Storage)
-
-**Architecture Pattern**: Dependency injection - all components are passed in, not created internally. Benefits:
-- Easy to test (mock dependencies)
-- Easy to swap implementations (e.g., different database backends)
-- Clear separation of concerns (each component has one responsibility)
+The platform uses a **3-zone architecture** (ETL Pipelines, Internal Service Layer, External Service Layer) with:
+- **PostgreSQL** for state management (jobs/tasks in `app` schema, metadata in `pgstac` schema, vectors in `geo` schema)
+- **Azure Service Bus** for job/task queue orchestration
+- **Azure Blob Storage** for raster data (COGs in tiered containers)
+- **CoreMachine** (~450 lines) - lightweight orchestration engine with dependency injection
 
 ---
 
@@ -106,133 +76,10 @@ JOB (Complete workflow, e.g., "ingest vector data")
 - **Stages execute sequentially**: Stage 2 waits for Stage 1 to complete
 - **Tasks within a stage can run in parallel**: 20+ concurrent uploads tested at production scale
 - **Results flow forward**: Stage 2 receives Stage 1 results via `previous_results` parameter
+- **Deterministic Task IDs**: Format `{job_id[0:8]}-{stage_name}-{task_index}` enables idempotency and debugging
+- **"Last One Turns Off the Lights"**: PostgreSQL advisory locks coordinate parallel task completion
 
-### State Management (PostgreSQL Tables)
-
-```sql
--- Jobs Table (app schema)
-CREATE TABLE jobs (
-    job_id VARCHAR PRIMARY KEY,      -- SHA256 hash of parameters (idempotency)
-    job_type VARCHAR,                -- 'process_vector', 'process_raster_v2', etc.
-    status VARCHAR,                  -- 'Queued', 'Processing', 'Completed', 'Failed'
-    stage INTEGER,                   -- Current stage (1 to n)
-    total_stages INTEGER,            -- Total number of stages
-    parameters JSONB,                -- Job configuration
-    stage_results JSONB,             -- Accumulated results from completed stages
-    error_message TEXT,
-    created_at TIMESTAMP,
-    updated_at TIMESTAMP
-);
-
--- Tasks Table (app schema)
-CREATE TABLE tasks (
-    task_id VARCHAR PRIMARY KEY,     -- Deterministic: {job_id[0:8]}-{stage_name}-{task_index}
-    job_id VARCHAR REFERENCES jobs(job_id),
-    task_type VARCHAR,               -- Handler name ('validate_vector', 'upload_postgis', etc.)
-    stage INTEGER,
-    status VARCHAR,                  -- 'Queued', 'Processing', 'Completed', 'Failed'
-    parameters JSONB,                -- Task-specific parameters
-    result_data JSONB,               -- Output data (passed to next stage)
-    error_message TEXT,
-    retry_count INTEGER,
-    created_at TIMESTAMP,
-    updated_at TIMESTAMP
-);
-```
-
-### Orchestration Flow
-
-```
-1. HTTP Trigger: Submit Job
-   ├─> Hash parameters → job_id (SHA256 for idempotency)
-   ├─> Validate parameters (job-specific validation)
-   ├─> Create Job Record (status: 'Queued', stage: 1)
-   ├─> Send Job Message to Service Bus jobs queue
-   └─> Return job_id to caller (202 Accepted)
-
-2. Job Queue Trigger: Process Job Message
-   ├─> Read Job Record from database
-   ├─> Call job.create_tasks_for_stage(stage=1, ...)
-   ├─> Create Task Record(s) for current stage
-   ├─> Send Task Message(s) to Service Bus tasks queue
-   └─> Update Job Record (status: 'Processing')
-
-3. Task Queue Trigger: Process Task Message(s)
-   ├─> Execute task handler (atomic operation)
-   ├─> Update Task Record (status: 'Completed', store results)
-   ├─> Call PostgreSQL function: complete_task_and_check_stage()
-   │   ├─> Acquires advisory lock (prevents race conditions)
-   │   ├─> Counts remaining incomplete tasks for this stage
-   │   ├─> If count = 0: Returns TRUE (last task indicator)
-   │   └─> Releases lock automatically
-   ├─> If TRUE returned:
-   │   ├─> Update Job Record (advance stage or mark complete)
-   │   ├─> If more stages: Send new Job Message to jobs queue
-   │   └─> If final stage: Call job.finalize_job()
-   └─> If FALSE: Done (other tasks still running)
-
-4. Repeat steps 2-3 for each stage until Job completes
-```
-
-### The "Last One Turns Off the Lights" Pattern
-
-**Design**: When multiple tasks complete simultaneously, PostgreSQL functions with advisory locks prevent race conditions
-
-**How it works**:
-1. Task completes and calls `complete_task_and_check_stage(job_id, task_id, stage)`
-2. PostgreSQL function:
-   - Acquires advisory lock on `job_id:stage` (single serialization point)
-   - Updates task status to 'Completed'
-   - Counts remaining incomplete tasks: `SELECT COUNT(*) WHERE status != 'Completed'`
-   - If count = 0, marks stage complete and returns TRUE
-   - Releases lock automatically (transaction scope)
-3. If TRUE returned, CoreMachine advances job to next stage
-
-
-**SQL Implementation** (in schema - developers do not write this):
-```sql
-CREATE OR REPLACE FUNCTION complete_task_and_check_stage(
-    p_job_id VARCHAR,
-    p_task_id VARCHAR,
-    p_stage INTEGER
-) RETURNS BOOLEAN AS $$
-DECLARE
-    v_remaining INTEGER;
-BEGIN
-    -- Single serialization point per job-stage (O(1) complexity)
-    PERFORM pg_advisory_xact_lock(hashtext(p_job_id || ':stage:' || p_stage::text));
-
-    -- Update task status
-    UPDATE tasks SET status = 'Completed', updated_at = NOW()
-    WHERE task_id = p_task_id;
-
-    -- Count remaining tasks (no row-level locks needed)
-    SELECT COUNT(*) INTO v_remaining
-    FROM tasks
-    WHERE job_id = p_job_id AND stage = p_stage AND status != 'Completed';
-
-    RETURN (v_remaining = 0);  -- TRUE if I'm the last one
-END;
-$$ LANGUAGE plpgsql;
-```
-
-### Deterministic Task IDs
-
-Task IDs follow a pattern that enables stage-to-stage result passing:
-
-```
-Format: {job_id[0:8]}-{stage_name}-{task_index}
-
-Example:
-Job ID: a3f7b2c1d4e5f6g7h8i9j0k1l2m3n4o5
-Stage 3, Task 2 of vector job:
-Task ID: a3f7b2c1-upload-002
-
-Why deterministic?
-- Enables idempotency (resubmit same task = same task_id)
-- Enables result lookup (Stage 3 queries Stage 2 results by task_id pattern)
-- Enables debugging (task ID tells you job, stage, and position)
-```
+> **Implementation Details**: See [WIKI_TECHNICAL_OVERVIEW.md](WIKI_TECHNICAL_OVERVIEW.md) for state management schemas, orchestration flow diagrams, and the complete CoreMachine design.
 
 ---
 
@@ -1275,7 +1122,7 @@ def generate_job_id(cls, params: dict) -> str:
     return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
 ```
 
-**Full Guide**: See [JOB_CREATION_QUICKSTART.md](JOB_CREATION_QUICKSTART.md) for complete documentation
+**API Reference**: For HTTP job submission endpoints, see [WIKI_PLATFORM_API.md](WIKI_PLATFORM_API.md)
 
 ---
 
@@ -1420,7 +1267,7 @@ POSTGRES_USER=function_app_name  # Matches managed identity name
 # NO POSTGRES_PASSWORD - system acquires token automatically
 ```
 
-**Managed Identity Setup Guide**: See [QA_DEPLOYMENT.md]
+**Managed Identity Setup**: See [WIKI_TECHNICAL_OVERVIEW.md](WIKI_TECHNICAL_OVERVIEW.md) for security model and Azure configuration.
 ### Running Locally
 
 ```bash

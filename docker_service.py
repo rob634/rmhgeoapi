@@ -72,6 +72,11 @@ def configure_azure_monitor_telemetry():
     - Exceptions → Application Insights exceptions table
     - Custom metrics → Application Insights customMetrics table
 
+    Authentication:
+    - If APPLICATIONINSIGHTS_AUTHENTICATION_STRING=Authorization=AAD is set,
+      uses DefaultAzureCredential (Managed Identity) for Entra ID auth.
+    - Otherwise uses connection string auth (requires local auth enabled on App Insights).
+
     Falls back gracefully if package not installed or connection string missing.
     """
     connection_string = os.environ.get("APPLICATIONINSIGHTS_CONNECTION_STRING")
@@ -87,19 +92,32 @@ def configure_azure_monitor_telemetry():
         app_name = os.environ.get("APP_NAME", "docker-worker")
         environment = os.environ.get("ENVIRONMENT", "dev")
 
-        configure_azure_monitor(
-            connection_string=connection_string,
-            # Cloud role helps identify this app in App Insights
-            resource_attributes={
+        # Check if AAD authentication is required (21 JAN 2026)
+        # App Insights may have DisableLocalAuth=true, requiring Entra ID auth
+        auth_string = os.environ.get("APPLICATIONINSIGHTS_AUTHENTICATION_STRING", "")
+        use_aad_auth = "Authorization=AAD" in auth_string
+
+        configure_kwargs = {
+            "connection_string": connection_string,
+            "resource_attributes": {
                 "service.name": app_name,
                 "service.namespace": "rmhgeoapi",
                 "deployment.environment": environment,
             },
-            # Enable all telemetry types
-            enable_live_metrics=True,
-        )
+            "enable_live_metrics": True,
+        }
 
-        print(f"✅ Azure Monitor OpenTelemetry configured (app={app_name}, env={environment})")
+        if use_aad_auth:
+            # Use Managed Identity for Entra ID authentication
+            from azure.identity import DefaultAzureCredential
+            credential = DefaultAzureCredential()
+            configure_kwargs["credential"] = credential
+            print(f"🔐 Using Entra ID (AAD) authentication for Application Insights")
+
+        configure_azure_monitor(**configure_kwargs)
+
+        auth_mode = "AAD" if use_aad_auth else "connection_string"
+        print(f"✅ Azure Monitor OpenTelemetry configured (app={app_name}, env={environment}, auth={auth_mode})")
         return True
 
     except ImportError:
@@ -1130,6 +1148,136 @@ def get_queue_status():
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "worker": queue_worker.get_status(),
+    }
+
+
+# ============================================================================
+# LOGGING HEALTH CHECK (21 JAN 2026)
+# ============================================================================
+
+@app.get("/test/logging")
+def test_logging():
+    """
+    Test that logging to Application Insights is working.
+
+    This endpoint:
+    1. Checks if APPLICATIONINSIGHTS_CONNECTION_STRING is set
+    2. Verifies Azure Monitor OpenTelemetry was configured
+    3. Emits a test log message at INFO level
+    4. Returns diagnostic information
+
+    Use this to verify logs will appear in Application Insights.
+
+    Returns:
+        Logging configuration status and test message ID
+    """
+    import uuid
+
+    test_id = str(uuid.uuid4())[:8]
+    timestamp = datetime.now(timezone.utc).isoformat()
+
+    # Check configuration
+    conn_string = os.environ.get("APPLICATIONINSIGHTS_CONNECTION_STRING")
+    app_name = os.environ.get("APP_NAME", "unknown")
+    environment = os.environ.get("ENVIRONMENT", "unknown")
+
+    # Parse instrumentation key from connection string
+    instrumentation_key = None
+    app_id = None
+    if conn_string:
+        for part in conn_string.split(";"):
+            if part.startswith("InstrumentationKey="):
+                instrumentation_key = part.split("=", 1)[1]
+            elif part.startswith("ApplicationId="):
+                app_id = part.split("=", 1)[1]
+
+    status = {
+        "timestamp": timestamp,
+        "test_id": test_id,
+        "configuration": {
+            "connection_string_set": bool(conn_string),
+            "instrumentation_key": instrumentation_key[:12] + "..." if instrumentation_key else None,
+            "application_id": app_id,
+            "azure_monitor_enabled": _azure_monitor_enabled,
+            "app_name": app_name,
+            "environment": environment,
+            "observability_mode": os.environ.get("OBSERVABILITY_MODE", "not set"),
+        },
+        "expected_behavior": {
+            "logs_visible_in": f"Application Insights → Logs → traces",
+            "query_hint": f"traces | where message contains 'LOGGING_TEST_{test_id}'",
+            "delay_note": "Logs may take 1-3 minutes to appear in App Insights",
+        }
+    }
+
+    if conn_string and _azure_monitor_enabled:
+        # Emit test log message - this should appear in Application Insights
+        logger.info(
+            f"LOGGING_TEST_{test_id} - Test log message from Docker worker health check",
+            extra={
+                "custom_dimensions": {
+                    "test_id": test_id,
+                    "test_type": "logging_health_check",
+                    "app_name": app_name,
+                    "environment": environment,
+                }
+            }
+        )
+        status["result"] = "success"
+        status["message"] = f"Test log emitted. Search for 'LOGGING_TEST_{test_id}' in App Insights."
+    elif not conn_string:
+        status["result"] = "error"
+        status["message"] = "APPLICATIONINSIGHTS_CONNECTION_STRING not set"
+    else:
+        status["result"] = "warning"
+        status["message"] = "Azure Monitor OpenTelemetry not enabled (check startup logs)"
+
+    return status
+
+
+@app.post("/test/logging/verify")
+def verify_logging():
+    """
+    Emit multiple test log messages at different levels for verification.
+
+    This endpoint logs at DEBUG, INFO, WARNING, and ERROR levels,
+    then provides Application Insights queries to find them.
+
+    Returns:
+        Test IDs and queries for verification
+    """
+    import uuid
+
+    batch_id = str(uuid.uuid4())[:8]
+    timestamp = datetime.now(timezone.utc).isoformat()
+
+    # Log at different levels
+    test_messages = []
+
+    # INFO level
+    info_msg = f"LOGGING_VERIFY_{batch_id}_INFO"
+    logger.info(info_msg, extra={"custom_dimensions": {"batch_id": batch_id, "level": "INFO"}})
+    test_messages.append({"level": "INFO", "message": info_msg})
+
+    # WARNING level
+    warn_msg = f"LOGGING_VERIFY_{batch_id}_WARNING"
+    logger.warning(warn_msg, extra={"custom_dimensions": {"batch_id": batch_id, "level": "WARNING"}})
+    test_messages.append({"level": "WARNING", "message": warn_msg})
+
+    # ERROR level
+    error_msg = f"LOGGING_VERIFY_{batch_id}_ERROR"
+    logger.error(error_msg, extra={"custom_dimensions": {"batch_id": batch_id, "level": "ERROR"}})
+    test_messages.append({"level": "ERROR", "message": error_msg})
+
+    return {
+        "timestamp": timestamp,
+        "batch_id": batch_id,
+        "messages_logged": test_messages,
+        "verification": {
+            "app_insights_query": f"traces | where message contains 'LOGGING_VERIFY_{batch_id}' | order by timestamp desc",
+            "expected_count": 3,
+            "delay_note": "Wait 1-3 minutes, then run the query in Application Insights → Logs",
+        }
     }
 
 

@@ -1,6 +1,6 @@
 # Internal Error Handling Architecture
 
-> **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [All Jobs](WIKI_API_JOB_SUBMISSION.md) | [Errors](WIKI_API_ERRORS.md) | [Glossary](WIKI_API_GLOSSARY.md)
+> **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [Errors](WIKI_API_ERRORS.md) | [Glossary](WIKI_API_GLOSSARY.md)
 
 **Date**: 29 DEC 2025
 **Purpose**: Internal error handling architecture for developers and operators
@@ -408,7 +408,7 @@ traces
 ## Related Documentation
 
 - **API Errors**: [WIKI_API_ERRORS.md](WIKI_API_ERRORS.md) - External API error reference
-- **Job Submission**: [WIKI_API_JOB_SUBMISSION.md](WIKI_API_JOB_SUBMISSION.md) - Full API reference
+- **Platform API**: [WIKI_PLATFORM_API.md](WIKI_PLATFORM_API.md) - Full API reference
 - **Architecture**: [docs_claude/CLAUDE_CONTEXT.md](docs_claude/CLAUDE_CONTEXT.md) - System architecture
 - **Log Access**: [docs_claude/APPLICATION_INSIGHTS.md](docs_claude/APPLICATION_INSIGHTS.md) - Querying logs
 

@@ -1,6 +1,6 @@
 # API Error Reference
 
-> **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [All Jobs](WIKI_API_JOB_SUBMISSION.md) | [Errors](WIKI_API_ERRORS.md) | [Glossary](WIKI_API_GLOSSARY.md)
+> **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [Errors](WIKI_API_ERRORS.md) | [Glossary](WIKI_API_GLOSSARY.md)
 
 **Date**: 29 DEC 2025
 **Purpose**: Reference for API error responses and troubleshooting
@@ -435,7 +435,7 @@ curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dba
 ## Related Documentation
 
 - **Internal Error Handling**: [WIKI_DEV_ERROR_HANDLING.md](WIKI_DEV_ERROR_HANDLING.md) - Exception hierarchy, retry telemetry, Application Insights queries
-- **Job Submission**: [WIKI_API_JOB_SUBMISSION.md](WIKI_API_JOB_SUBMISSION.md) - Full API reference
+- **Platform API**: [WIKI_PLATFORM_API.md](WIKI_PLATFORM_API.md) - Full API reference
 - **Glossary**: [WIKI_API_GLOSSARY.md](WIKI_API_GLOSSARY.md) - Technical terminology
 
 ---

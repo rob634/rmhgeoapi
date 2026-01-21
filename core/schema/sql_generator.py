@@ -44,6 +44,7 @@ from typing import Dict, List, Optional, Type, get_args, get_origin, Any, Union
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
+from uuid import UUID
 import inspect
 import re
 from pydantic import BaseModel
@@ -97,7 +98,7 @@ class PydanticToSQL:
     # Type mapping from Python/Pydantic to PostgreSQL
     TYPE_MAP = {
         str: "VARCHAR",
-        int: "INTEGER", 
+        int: "INTEGER",
         float: "DOUBLE PRECISION",
         bool: "BOOLEAN",
         datetime: "TIMESTAMP",
@@ -106,6 +107,7 @@ class PydanticToSQL:
         Dict: "JSONB",
         list: "JSONB",
         List: "JSONB",
+        UUID: "UUID",  # Artifact registry (21 JAN 2026)
     }
     
     def __init__(self, schema_name: str = "app"):

@@ -223,6 +223,9 @@ class ProcessRasterV2Job(JobBaseMixin, JobBase):
                 'access_level': job_params.get('access_level'),
                 # Raster visualization metadata (01 JAN 2026) - for DEM colormap in STAC preview
                 'raster_type': cog_result.get('raster_type'),
+                # STAC file extension (21 JAN 2026) - checksum from COG creation
+                'file_checksum': cog_result.get('file_checksum'),
+                'file_size': cog_result.get('file_size'),
             }
             if stac_item_id:
                 task_params['item_id'] = stac_item_id

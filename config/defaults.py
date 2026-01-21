@@ -426,6 +426,10 @@ class TaskRoutingDefaults:
         # Docker large raster handler (13 JAN 2026) - F7.18
         # Tiling → Extract → COG → MosaicJSON → STAC (100MB-30GB rasters)
         "raster_process_large_complete",
+
+        # Docker H3 pyramid handler (20 JAN 2026) - F7.20
+        # Base + Cascade + Finalize in single execution (no batch fan-out)
+        "h3_pyramid_complete",
     ]
 
     # Raster tasks → raster-tasks queue (memory-intensive, low concurrency)

@@ -60,6 +60,7 @@ from .process_raster_docker import ProcessRasterDockerJob
 from .process_large_raster_docker import ProcessLargeRasterDockerJob
 from .detect_orphan_blobs import DetectOrphanBlobsJob
 from .register_silver_blobs import RegisterSilverBlobsJob
+from .bootstrap_h3_docker import BootstrapH3DockerJob
 
 # Job Registry - add new jobs here
 ALL_JOBS = {
@@ -74,13 +75,16 @@ ALL_JOBS = {
     # Validation
     "validate_raster_job": ValidateRasterJob,
 
-    # H3 Grid
+    # H3 Grid (Function App - multi-stage)
     "generate_h3_level4": GenerateH3Level4Job,
     "create_h3_base": CreateH3BaseJob,
     "bootstrap_h3_land_grid_pyramid": BootstrapH3LandGridPyramidJob,
     "h3_raster_aggregation": H3RasterAggregationJob,
     "h3_register_dataset": H3RegisterDatasetJob,
     "h3_export_dataset": H3ExportDatasetJob,
+
+    # H3 Grid (Docker - single stage)
+    "bootstrap_h3_docker": BootstrapH3DockerJob,
 
     # Fathom ETL
     "process_fathom_stack": ProcessFathomStackJob,

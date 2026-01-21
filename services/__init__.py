@@ -138,6 +138,7 @@ from .orphan_blob_handlers import (
 # Docker consolidated handlers (F7.13, F7.18)
 from .handler_process_raster_complete import process_raster_complete
 from .handler_process_large_raster_complete import process_large_raster_complete
+from .handler_h3_pyramid_complete import h3_pyramid_complete
 
 # Ingest Collection handlers
 from .ingest import ALL_HANDLERS as INGEST_HANDLERS
@@ -205,7 +206,7 @@ ALL_HANDLERS = {
     "process_vector_prepare": process_vector_prepare,
     "process_vector_upload": process_vector_upload,
 
-    # H3 handlers
+    # H3 handlers (Function App)
     "h3_create_stac": create_h3_stac,
     "h3_native_streaming_postgis": h3_native_streaming_postgis,
     "h3_generate_grid": generate_h3_grid,
@@ -217,6 +218,9 @@ ALL_HANDLERS = {
     "h3_export_validate": h3_export_validate,
     "h3_export_build": h3_export_build,
     "h3_export_register": h3_export_register,
+
+    # H3 handlers (Docker - single stage)
+    "h3_pyramid_complete": h3_pyramid_complete,
 
     # Fathom ETL handlers
     "fathom_tile_inventory": fathom_tile_inventory,

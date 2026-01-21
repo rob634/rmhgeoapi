@@ -563,7 +563,9 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                 logger.debug("Skipping artifact creation - no client_refs (non-platform job)")
         except Exception as e:
             # Artifact creation is non-fatal - log warning but continue
+            import traceback
             logger.warning(f"⚠️ Artifact creation failed (non-fatal): {e}")
+            logger.warning(f"⚠️ Artifact error traceback: {traceback.format_exc()}")
 
         return {
             "success": True,

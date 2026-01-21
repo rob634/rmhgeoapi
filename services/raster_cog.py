@@ -620,15 +620,20 @@ def create_cog(params: dict) -> dict:
 
                     try:
                         # Upload bytes directly to silver zone (no BytesIO wrapper needed)
+                        # compute_checksum=True computes STAC-compliant SHA-256 multihash
                         silver_repo = BlobRepository.for_zone("silver")  # Output COGs go to silver zone
-                        silver_repo.write_blob(
+                        upload_result = silver_repo.write_blob(
                             container=silver_container,
                             blob_path=output_blob_name,
                             data=cog_bytes,
                             content_type='image/tiff',
-                            overwrite=True
+                            overwrite=True,
+                            compute_checksum=True
                         )
+                        file_checksum = upload_result.get('file_checksum')
+                        checksum_time_ms = upload_result.get('checksum_time_ms', 0)
                         logger.info(f"   Uploaded COG to {silver_container}/{output_blob_name}")
+                        logger.info(f"   Checksum: {file_checksum[:20]}... ({checksum_time_ms}ms)")
                     except Exception as e:
                         logger.error(f"❌ STEP 6 FAILED: Cannot upload COG to blob storage")
                         logger.error(f"   Error: {e}")
@@ -676,7 +681,11 @@ def create_cog(params: dict) -> dict:
                     "storage_tier": tier_profile.storage_tier.value,
                     "use_case": tier_profile.use_case,
                     "description": tier_profile.description
-                }
+                },
+                # STAC file extension compliant checksum (21 JAN 2026)
+                # Format: SHA-256 multihash hex string (e.g., "1220abc123...")
+                "file_checksum": file_checksum,
+                "file_size": len(cog_bytes),
             }
         }
 

@@ -3,7 +3,7 @@
 # ============================================================================
 # STATUS: Services - Cloud Optimized GeoTIFF creation with rio-cogeo
 # PURPOSE: Single-pass reprojection + COG creation with type-specific optimization
-# LAST_REVIEWED: 04 JAN 2026
+# LAST_REVIEWED: 21 JAN 2026
 # REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
 # ============================================================================
 """
@@ -632,8 +632,11 @@ def create_cog(params: dict) -> dict:
                         )
                         file_checksum = upload_result.get('file_checksum')
                         checksum_time_ms = upload_result.get('checksum_time_ms', 0)
+                        blob_version_id = upload_result.get('blob_version_id')  # None if versioning not enabled
                         logger.info(f"   Uploaded COG to {silver_container}/{output_blob_name}")
                         logger.info(f"   Checksum: {file_checksum[:20]}... ({checksum_time_ms}ms)")
+                        if blob_version_id:
+                            logger.info(f"   Blob version ID: {blob_version_id}")
                     except Exception as e:
                         logger.error(f"❌ STEP 6 FAILED: Cannot upload COG to blob storage")
                         logger.error(f"   Error: {e}")
@@ -686,6 +689,9 @@ def create_cog(params: dict) -> dict:
                 # Format: SHA-256 multihash hex string (e.g., "1220abc123...")
                 "file_checksum": file_checksum,
                 "file_size": len(cog_bytes),
+                # Azure Blob Storage version ID (21 JAN 2026)
+                # Only populated if versioning is enabled on the storage account
+                "blob_version_id": blob_version_id,
             }
         }
 

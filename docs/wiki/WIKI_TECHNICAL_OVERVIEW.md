@@ -2,7 +2,7 @@
 
 > **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [All Jobs](WIKI_API_JOB_SUBMISSION.md) | [Errors](WIKI_API_ERRORS.md) | [Glossary](WIKI_API_GLOSSARY.md)
 
-**Last Updated**: 29 DEC 2025
+**Last Updated**: 21 JAN 2026
 **Audience**: Development team (all disciplines)
 **Purpose**: High-level understanding of platform architecture, patterns, and technology stack
 **Wiki**: Azure DevOps Wiki - Technical architecture documentation
@@ -17,6 +17,168 @@ A **serverless geospatial ETL pipeline** that transforms raw spatial data (shape
 **Output**: 5 minutes later, OGC API endpoint serving GeoJSON + interactive web map + STAC catalog entry
 
 **Scale**: Handles multi-million feature datasets and multi-GB rasters with parallel processing
+
+---
+
+## System Architecture
+
+The platform is organized into three security zones with distinct responsibilities:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                    ETL PIPELINES (B2B)                                               │
+│                                                                                                      │
+│  ┌─────────────────────────────┐                                                                    │
+│  │  PLATFORM (Function App)    │  HTTP Triggers, B2B Auth (Managed Identity)                        │
+│  │  • Anti-corruption layer    │  Translates external params → CoreMachine params                   │
+│  │  • Request tracking         │  Writes to: geospatial-jobs queue                                  │
+│  └─────────────┬───────────────┘                                                                    │
+│                │ geospatial-jobs queue                                                              │
+│                ▼                                                                                    │
+│  ┌─────────────────────────────┐                                                                    │
+│  │  ORCHESTRATOR (Function App)│  Jobs Queue Consumer                                               │
+│  │  • CoreMachine              │  Job state, stage transitions, task routing                        │
+│  │  • Task routing             │  Writes to: task queues                                            │
+│  │  • ADF trigger              │  Triggers promotion to External                                    │
+│  └─────────────┬───────────────┘                                                                    │
+│                │                                                                                    │
+│       ┌────────┴────────┐                                                                           │
+│       ▼                 ▼                                                                           │
+│  ┌─────────────┐  ┌─────────────┐                                                                   │
+│  │  FUNCTION   │  │   DOCKER    │                                                                   │
+│  │  WORKER     │  │   WORKER    │                                                                   │
+│  │             │  │             │                                                                   │
+│  │ Lightweight │  │ GDAL Full   │                                                                   │
+│  │ DB ops,     │  │ Nearly ALL  │                                                                   │
+│  │ parallel    │  │ geospatial  │                                                                   │
+│  │             │  │ ETL         │                                                                   │
+│  └──────┬──────┘  └──────┬──────┘                                                                   │
+│         │                │                                                                          │
+│         └────────┬───────┘                                                                          │
+│                  │                                                                                  │
+│         READ     │     WRITE                                                                        │
+│           ┌──────┴──────┐                                                                           │
+│           ▼             ▼                                                                           │
+│  ┌─────────────┐  ┌─────────────┐         ┌─────────────────────────────────────────────────────┐  │
+│  │   BRONZE    │  │   SILVER    │         │              INTERNAL DATABASE                       │  │
+│  │  STORAGE    │  │  STORAGE    │         │  ┌─────────┬──────────┬─────────┐                   │  │
+│  │ (raw data)  │  │  (COGs)     │         │  │   app   │  pgstac  │   geo   │                   │  │
+│  └─────────────┘  └──────┬──────┘         │  │ (orch)  │  (STAC)  │(PostGIS)│                   │  │
+│                          │                │  └─────────┴──────────┴─────────┘                   │  │
+│                          │                └─────────────────────────────────────────────────────┘  │
+└──────────────────────────┼──────────────────────────────────────────────────────────────────────────┘
+                           │
+         ┌─────────────────┼─────────────────┐
+         │                 │                 │
+         ▼                 ▼                 ▼
+┌─────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                              INTERNAL SERVICE LAYER (B2C Internal)                                   │
+│                                                                                                      │
+│  ┌─────────────────────────────────────────────────────────────────────────────────────────────┐    │
+│  │  SERVICE LAYER APP (Docker Web App)                                                          │    │
+│  │                                                                                              │    │
+│  │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐                              │    │
+│  │  │     TiTiler     │  │      TiPG       │  │   STAC API      │                              │    │
+│  │  │                 │  │                 │  │   (B2C)         │                              │    │
+│  │  │ • COG tiles     │  │ • Vector API    │  │                 │                              │    │
+│  │  │ • Search mosaic │  │ • Vector tiles  │  │ • Curated       │                              │    │
+│  │  │ • xarray        │  │                 │  │   metadata only │                              │    │
+│  │  └─────────────────┘  └─────────────────┘  └─────────────────┘                              │    │
+│  │                                                                                              │    │
+│  │  READ-ONLY: Silver Storage, Internal DB (pgstac + geo schemas only)                         │    │
+│  │  NO ACCESS: app schema, Bronze Storage, Service Bus                                         │    │
+│  └─────────────────────────────────────────────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+                                              │
+                              ┌───────────────┴───────────────┐
+                              │   AZURE DATA FACTORY          │
+                              │   (Triggered by Orchestrator) │
+                              │   • Silver → External Storage │
+                              │   • Internal DB → External DB │
+                              └───────────────┬───────────────┘
+                                              │
+                                              ▼
+┌─────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                              EXTERNAL SERVICE LAYER (B2C External - Airgapped)                       │
+│                                                                                                      │
+│  Same Service Layer image deployed against isolated External Storage + External Database             │
+│  No direct connectivity to ETL zone - data promoted via Azure Data Factory                          │
+└─────────────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Access Zones
+
+| Zone | Type | Purpose | Components |
+|------|------|---------|------------|
+| **ETL Pipelines** | B2B | Data processing, job orchestration | Platform, Orchestrator, Workers |
+| **Internal Service Layer** | B2C Internal | Internal user data access | Service Layer App |
+| **External Service Layer** | B2C External | External user data access (airgapped) | Service Layer App (separate instance) |
+
+---
+
+## Compute Components
+
+### ETL Pipeline Components
+
+| Component | Runtime | Purpose | Details |
+|-----------|---------|---------|---------|
+| **Platform App** | Function App | Anti-corruption layer for external clients | Translates DDH params to CoreMachine params. See [WIKI_PLATFORM_API.md](WIKI_PLATFORM_API.md) |
+| **Orchestrator App** | Function App | CoreMachine job/stage/task orchestration | Manages job state, routes tasks to workers |
+| **Function Worker** | Function App | Lightweight parallelizable operations | Database operations, fan-out tasks |
+| **Docker Worker** | Container App | GDAL-heavy geospatial processing | COG creation, raster processing, long-running tasks. See [WIKI_DOCKER.md](WIKI_DOCKER.md) |
+
+### Service Layer Components
+
+| Component | Runtime | Purpose | Details |
+|-----------|---------|---------|---------|
+| **TiTiler** | Docker | Dynamic raster tile serving | COG tiles, search mosaics, xarray |
+| **TiPG** | Docker | Vector tile and feature serving | OGC API - Features, vector tiles |
+| **STAC API** | Docker | Metadata catalog search | Spatiotemporal asset discovery |
+
+See [WIKI_SERVICE_LAYER.md](WIKI_SERVICE_LAYER.md) for detailed service layer documentation.
+
+### Data Storage
+
+| Storage | Purpose | Access Pattern |
+|---------|---------|----------------|
+| **Bronze** | Raw uploaded data | Write by Platform, Read by Workers |
+| **Silver** | Processed COGs, outputs | Write by Workers, Read by Service Layer |
+| **External** | Airgapped copy for public access | Write by ADF, Read by External Service Layer |
+
+See [WIKI_API_STORAGE.md](WIKI_API_STORAGE.md) for storage configuration.
+
+### PostgreSQL Schemas
+
+| Schema | Purpose | Managed By |
+|--------|---------|------------|
+| `app` | Job/task orchestration state | CoreMachine |
+| `pgstac` | STAC metadata catalog | pypgstac |
+| `geo` | Vector data (PostGIS) | ETL jobs |
+| `h3` | H3 hexagonal grids | Static SQL |
+| `platform` | API request tracking | Platform App |
+
+See [WIKI_API_DATABASE.md](WIKI_API_DATABASE.md) for database setup.
+
+---
+
+## Artifact Registry (Revision Tracking)
+
+The platform includes an internal artifact registry for tracking pipeline outputs across revisions. This enables tracking changes to datasets when metadata or files are updated without a semantic version change.
+
+**Core Concept**: When a dataset is updated (metadata change, file replacement), the system:
+1. Creates a new artifact record with incremented revision number
+2. Links new artifact to the previous via `supersedes`/`superseded_by` references
+3. Captures content hash (SHA256) for duplicate detection
+4. Optionally captures Azure blob version ID for storage-level versioning
+
+**Key Features**:
+- Internal `artifact_id` (UUID) - never exposed to external clients
+- Full supersession chain for audit trail
+- Client-agnostic design (supports DDH, Data360, or manual submissions)
+- Content hash enables "no actual change" detection
+
+**Status**: Core revision tracking implemented. Blob versioning integration added 21 JAN 2026.
 
 ---
 
@@ -95,11 +257,12 @@ def process_task(msg: ServiceBusMessage):
 - Prototypes and MVPs (deploy quickly, scale later)
 
 **Not ideal for**:
-- Long-running processes (>10 min timeout per function)
 - Stateful applications (servers come and go)
 - Predictable constant load (dedicated VMs might be cheaper)
 
-**Our use case**: This architecture is well-suited to our needs. ETL jobs are event-driven (triggered by data uploads), highly parallelizable (chunks processed independently), and have variable load.
+**Long-running processes**: Azure Functions have a 10-minute timeout. For GDAL-heavy geospatial processing that exceeds this limit, we use the **Docker Worker** (Container App) which supports checkpoint/resume and graceful shutdown. See [WIKI_DOCKER.md](WIKI_DOCKER.md).
+
+**Our use case**: This architecture is well-suited to our needs. ETL jobs are event-driven (triggered by data uploads), highly parallelizable (chunks processed independently), and have variable load. The hybrid approach (Function Workers for lightweight tasks, Docker Worker for heavy processing) provides optimal resource utilization.
 
 ---
 
@@ -366,7 +529,7 @@ def bulk_insert_with_copy(conn, table_name, rows: list[dict]):
 4. **Budget connections explicitly** - Calculate max connections per task before scaling
 5. **Fail fast on connection errors** - Don't retry connection exhaustion (it makes it worse)
 
-**Further reading**: See `docs_claude/ARCHITECTURE_REFERENCE.md` for implementation details and the H3 cascade handler refactoring that applied this pattern.
+**Further reading**: The H3 cascade handler refactoring applied this pattern successfully.
 
 ### Distributed Systems Challenges We Solved
 
@@ -1228,7 +1391,7 @@ flowchart LR
 
 ---
 
-**Full diagram set**: See [ARCHITECTURE_DIAGRAMS.md](docs_claude/ARCHITECTURE_DIAGRAMS.md) for additional C4 views (System Context, Container, Data Flow, Sequences)
+**Full diagram set**: The diagrams above provide comprehensive coverage of CoreMachine internals. For C4-style system context views, see the System Architecture section at the top of this document.
 
 ---
 
@@ -1250,4 +1413,4 @@ flowchart LR
 
 ---
 
-**Questions?** See the [full onboarding guide](onboarding.md) or contact the team.
+**Questions?** See the [Developer Onboarding Guide](WIKI_ONBOARDING.md) or contact the team.

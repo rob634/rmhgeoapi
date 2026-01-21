@@ -151,6 +151,18 @@ from .artifact import (
     ArtifactStatus
 )
 
+# Geo schema models - Service Layer (21 JAN 2026 - F7.IaC)
+from .geo import (
+    GeoTableCatalog
+)
+
+# ETL tracking models - Internal App Schema (21 JAN 2026 - F7.IaC)
+from .etl_tracking import (
+    VectorEtlTracking,
+    RasterEtlTracking,
+    EtlStatus
+)
+
 __all__ = [
     # Enums
     'JobStatus',
@@ -246,4 +258,12 @@ __all__ = [
     # Artifact registry models (20 JAN 2026)
     'Artifact',
     'ArtifactStatus',
+
+    # Geo schema models - Service Layer (21 JAN 2026 - F7.IaC)
+    'GeoTableCatalog',
+
+    # ETL tracking models - Internal App Schema (21 JAN 2026 - F7.IaC)
+    'VectorEtlTracking',
+    'RasterEtlTracking',
+    'EtlStatus',
 ]

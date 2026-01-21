@@ -1,8 +1,203 @@
 # Working Backlog
 
-**Last Updated**: 16 JAN 2026
+**Last Updated**: 21 JAN 2026
 **Source of Truth**: [docs/epics/README.md](/docs/epics/README.md) — Epic/Feature/Story definitions
 **Purpose**: Sprint-level task tracking and delegation
+
+---
+
+## 🔥 ACTIVE: Infrastructure as Code DRY Cleanup (F7.IaC)
+
+**Epic**: E7 Pipeline Infrastructure
+**Goal**: Consolidate DDL and schema definitions into single source of truth
+**Added**: 21 JAN 2026
+**Status**: 🚧 IN PROGRESS (Phases 1-4 complete, Phase 5 pending)
+
+### Background
+
+Architecture review identified multiple DRY violations in database schema definitions.
+Same tables defined in multiple places with **conflicting schemas**.
+
+**Critical Issues Found**:
+1. `geo.table_metadata` defined in 3+ places with different column sets
+2. `ExpectedSchemaRegistry` manually duplicates Pydantic models
+3. H3 schema defined in both `h3_schema.py` and `schema_analyzer.py`
+
+### New Files Created (21 JAN 2026)
+
+| File | Purpose |
+|------|---------|
+| `infrastructure/database_initializer.py` | Consolidated database initialization orchestrator |
+| `infrastructure/schema_analyzer.py` | Drift detection and schema introspection |
+
+### Architecture Goal
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│              SINGLE SOURCE OF TRUTH (Pydantic)               │
+│  core/models/job.py, task.py, geo.py (NEW), h3.py (NEW)     │
+└──────────────────────────────┬───────────────────────────────┘
+                               ▼
+┌──────────────────────────────────────────────────────────────┐
+│                    DDL GENERATION                            │
+│  core/schema/sql_generator.py (PydanticToSQL - EXTENDED)    │
+└──────────────────────────────┬───────────────────────────────┘
+                               ▼
+┌──────────────────────────────────────────────────────────────┐
+│                    ORCHESTRATION                             │
+│  infrastructure/database_initializer.py (CONSOLIDATED)       │
+└──────────────────────────────┬───────────────────────────────┘
+                               ▼
+┌──────────────────────────────────────────────────────────────┐
+│                    DRIFT DETECTION                           │
+│  infrastructure/schema_analyzer.py (reads from Pydantic)     │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### Architecture Decision: Separation of Concerns (21 JAN 2026)
+
+**Problem**: `geo.table_metadata` mixed ETL traceability with service layer concerns.
+
+**Solution**: Split into two tables:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    INTERNAL DATABASE                            │
+├─────────────────────────────────────────────────────────────────┤
+│  app schema (NEVER replicated)     geo schema (replicated via ADF)
+│  ├── jobs                          ├── table_catalog ← Service Layer
+│  ├── tasks                         │   • title, description, bbox
+│  ├── vector_etl_tracking ──FK────────  • geometry_type, srid
+│  │   • etl_job_id                  │   • providers, keywords
+│  │   • source_file, source_crs     │   • stac_collection_id
+│  │   • processing_timestamp        │   (NO ETL internals)
+│  └── (internal only)               └── (replicable to external)
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Key Classes Created**:
+- `GeoTableCatalog` (core/models/geo.py) → `geo.table_catalog`
+- `VectorEtlTracking` (core/models/etl_tracking.py) → `app.vector_etl_tracking`
+- `VectorMetadata.from_service_catalog()` - External DB factory
+- `VectorMetadata.from_internal_db()` - Internal DB factory (joins both tables)
+- `VectorMetadata.split_to_catalog_and_tracking()` - Migration helper
+
+### Implementation Stories
+
+#### Phase 1: Pydantic Models ✅ COMPLETE
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| S7.IaC.1 | Create `core/models/geo.py` with `GeoTableCatalog` Pydantic model | ✅ 21 JAN |
+| S7.IaC.1b | Create `core/models/etl_tracking.py` with `VectorEtlTracking` model | ✅ 21 JAN |
+| S7.IaC.3 | Export new models from `core/models/__init__.py` | ✅ 21 JAN |
+| S7.IaC.3b | Add `from_service_catalog()`, `from_internal_db()`, `split_to_catalog_and_tracking()` to VectorMetadata | ✅ 21 JAN |
+
+#### Phase 2: DDL Generation ✅ COMPLETE
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| S7.IaC.5a | Extend `PydanticToSQL` to generate DDL for `GeoTableCatalog` → `geo.table_catalog` | ✅ 21 JAN |
+| S7.IaC.5b | Extend `PydanticToSQL` to generate DDL for `VectorEtlTracking` → `app.vector_etl_tracking` | ✅ 21 JAN |
+| S7.IaC.5c | Add FK constraint: `app.vector_etl_tracking.table_name` → `geo.table_catalog.table_name` | ✅ 21 JAN |
+| S7.IaC.4 | Update `ExpectedSchemaRegistry` to read from Pydantic models dynamically | 📋 Deferred |
+
+**New Methods Added to `PydanticToSQL`** (21 JAN 2026):
+- `get_model_sql_metadata()` - Extract `__sql_*` ClassVar attributes from models
+- `generate_table_from_model()` - Model-driven CREATE TABLE DDL
+- `generate_indexes_from_model()` - Model-driven CREATE INDEX DDL
+- `generate_enum_from_model()` - Schema-aware ENUM generation
+- `generate_geo_schema_ddl()` - Complete geo schema DDL
+- `generate_etl_tracking_ddl()` - ETL tracking tables DDL
+- `generate_all_schemas_ddl()` - Master method for all schemas
+
+#### Phase 3: Schema Migration ✅ COMPLETE
+
+**Note**: User confirmed nuke-and-rebuild approach - no migration scripts needed.
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| S7.IaC.13 | Drop `geo.table_metadata`, create `geo.table_catalog` via PydanticToSQL | ✅ 21 JAN |
+| S7.IaC.14 | Create `app.vector_etl_tracking` via PydanticToSQL | ✅ 21 JAN |
+| S7.IaC.7 | Refactor `DatabaseInitializer._initialize_geo_schema()` to use `generate_geo_schema_ddl()` | ✅ 21 JAN |
+| S7.IaC.7b | Refactor `DatabaseInitializer._initialize_app_schema()` to use `generate_etl_tracking_ddl()` | ✅ 21 JAN |
+
+**Changes Made** (21 JAN 2026):
+- `_initialize_geo_schema()` now calls `PydanticToSQL.generate_geo_schema_ddl()`
+- `_initialize_app_schema()` now calls both core DDL and `generate_etl_tracking_ddl()`
+- FK dependency verified: checks `geo.table_catalog` exists before creating `app.vector_etl_tracking`
+- Old hardcoded `geo.table_metadata` DDL removed
+
+#### Phase 4: Code Updates ✅ COMPLETE
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| S7.IaC.15 | Update `OgcRepository` to query `geo.table_catalog` instead of `geo.table_metadata` | ✅ 21 JAN |
+| S7.IaC.16 | Update vector ETL pipeline to INSERT into both `geo.table_catalog` AND `app.vector_etl_tracking` | ✅ 21 JAN |
+| S7.IaC.9 | Remove duplicate geo schema creation from `db_maintenance.py` | ✅ 21 JAN |
+| S7.IaC.12 | Add `geo.feature_collection_styles` to Pydantic models | 📋 Deferred |
+
+**Files Updated** (21 JAN 2026):
+- `ogc_features/repository.py` - `get_table_metadata()`, `get_vector_metadata()` now query `geo.table_catalog`
+- `services/vector/postgis_handler.py` - `register_table_metadata()` writes to BOTH tables
+- `services/unpublish_handlers.py` - Queries/deletes from both tables
+- `services/service_stac_vector.py` - `_get_vector_metadata()` uses `geo.table_catalog`
+- `services/metadata_consistency.py` - All vector checks use `geo.table_catalog`
+- `triggers/admin/db_maintenance.py` - Removed 100+ lines of hardcoded DDL, uses `PydanticToSQL`
+- `triggers/admin/geo_table_operations.py` - All operations use `geo.table_catalog`
+- `triggers/trigger_approvals.py` - STAC lookup uses `geo.table_catalog`
+- `services/janitor_service.py` - Orphan detection uses `geo.table_catalog`
+
+#### Phase 5: Cleanup (Priority 3) 🎯 NEXT
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| S7.IaC.10 | Deprecate `core/schema/deployer.py` (SchemaManager) | 📋 |
+| S7.IaC.11 | Update wiki/documentation to reference new table names | 📋 |
+| S7.IaC.17 | Deploy and test schema rebuild with new tables | 📋 |
+
+#### Future: H3 Schema (Deferred)
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| S7.IaC.2 | Create `core/models/h3.py` with H3 table Pydantic models | 🔮 Deferred |
+| S7.IaC.6 | Extend `PydanticToSQL` to support h3 schema DDL generation | 🔮 Deferred |
+| S7.IaC.8 | Refactor `H3SchemaDeployer` to use Pydantic models | 🔮 Deferred |
+
+### Key Files
+
+| File | Current State | Target State |
+|------|---------------|--------------|
+| `core/models/geo.py` | ✅ `GeoTableCatalog` model | Source of truth for `geo.table_catalog` |
+| `core/models/etl_tracking.py` | ✅ `VectorEtlTracking` model | Source of truth for `app.vector_etl_tracking` |
+| `core/schema/sql_generator.py` | App DDL only | Extended for geo + app ETL tables |
+| `infrastructure/database_initializer.py` | Uses raw SQL | Uses PydanticToSQL |
+| `infrastructure/schema_analyzer.py` | Hardcoded expectations | Reads from Pydantic models |
+| `triggers/admin/db_maintenance.py` | Has duplicate DDL | Remove DDL, call DatabaseInitializer |
+| `core/schema/deployer.py` | App schema validation | **DEPRECATED** |
+
+### Database Tables
+
+| Old Table | New Table(s) | Schema | Pydantic Model |
+|-----------|--------------|--------|----------------|
+| `geo.table_metadata` | `geo.table_catalog` | geo | `GeoTableCatalog` |
+| (new) | `app.vector_etl_tracking` | app | `VectorEtlTracking` |
+| `app.jobs` | `app.jobs` | app | `JobRecord` |
+| `app.tasks` | `app.tasks` | app | `TaskRecord` |
+
+### Verification
+
+```bash
+# After consolidation - analyze for drift
+python -c "
+from infrastructure import SchemaAnalyzer
+analyzer = SchemaAnalyzer()
+report = analyzer.generate_migration_report()
+print(report)
+"
+
+# Should show zero drift after proper consolidation
+```
 
 ---
 

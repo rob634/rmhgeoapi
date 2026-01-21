@@ -431,19 +431,20 @@ class StacVectorService:
 
     def _get_vector_metadata(self, table_name: str) -> Optional[VectorMetadata]:
         """
-        Fetch VectorMetadata from geo.table_metadata registry.
+        Fetch VectorMetadata from geo.table_catalog registry.
 
-        Refactored (09 JAN 2026 - F7.8): Now returns VectorMetadata model
-        instead of dict, enabling use of unified conversion methods.
+        NOTE (21 JAN 2026): Queries geo.table_catalog (SERVICE LAYER) only.
+        ETL internal fields (etl_job_id, source_file, etc.) are stored in
+        app.vector_etl_tracking and are NOT returned (separation of concerns).
 
-        This is the SOURCE OF TRUTH for vector metadata. STAC items should
+        This is the SOURCE OF TRUTH for service layer metadata. STAC items should
         read from here to stay synchronized with OGC Features API.
 
         Args:
-            table_name: Table name (primary key in geo.table_metadata)
+            table_name: Table name (primary key in geo.table_catalog)
 
         Returns:
-            VectorMetadata model, or None if not found
+            VectorMetadata model (with ETL fields = None), or None if not found
         """
         from infrastructure.postgresql import PostgreSQLRepository
         repo = PostgreSQLRepository(target_database=self.target_database)
@@ -451,20 +452,21 @@ class StacVectorService:
         try:
             with repo._get_connection() as conn:
                 with conn.cursor() as cur:
-                    # Check if geo.table_metadata exists
+                    # Check if geo.table_catalog exists
                     cur.execute("""
                         SELECT EXISTS (
                             SELECT 1 FROM information_schema.tables
                             WHERE table_schema = 'geo'
-                            AND table_name = 'table_metadata'
+                            AND table_name = 'table_catalog'
                         ) as table_exists
                     """)
                     result = cur.fetchone()
                     if not result or not result.get('table_exists'):
-                        logger.debug(f"geo.table_metadata does not exist - skipping metadata for {table_name}")
+                        logger.debug(f"geo.table_catalog does not exist - skipping metadata for {table_name}")
                         return None
 
-                    # Query all F7.8 metadata fields
+                    # Query SERVICE LAYER metadata only from geo.table_catalog
+                    # ETL fields are in app.vector_etl_tracking (not queried here)
                     cur.execute("""
                         SELECT
                             table_name,
@@ -479,10 +481,6 @@ class StacVectorService:
                             temporal_property,
                             feature_count,
                             geometry_type,
-                            etl_job_id,
-                            source_file,
-                            source_format,
-                            source_crs,
                             stac_item_id,
                             stac_collection_id,
                             created_at,
@@ -495,19 +493,22 @@ class StacVectorService:
                             stac_extensions,
                             sci_doi,
                             sci_citation,
-                            custom_properties
-                        FROM geo.table_metadata
+                            custom_properties,
+                            srid,
+                            primary_geometry
+                        FROM geo.table_catalog
                         WHERE table_name = %s
                     """, (table_name,))
 
                     row = cur.fetchone()
                     if not row:
-                        logger.debug(f"No metadata found in geo.table_metadata for {table_name}")
+                        logger.debug(f"No metadata found in geo.table_catalog for {table_name}")
                         return None
 
-                    # Convert row to VectorMetadata using factory method
-                    vector_metadata = VectorMetadata.from_db_row(dict(row))
-                    logger.debug(f"Retrieved VectorMetadata for {table_name} (F7.8)")
+                    # Convert row to VectorMetadata using service catalog factory
+                    # ETL fields will be None (intentional - separation of concerns)
+                    vector_metadata = VectorMetadata.from_service_catalog(dict(row))
+                    logger.debug(f"Retrieved VectorMetadata for {table_name} from table_catalog")
                     return vector_metadata
 
         except Exception as e:

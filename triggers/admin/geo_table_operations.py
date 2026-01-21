@@ -144,40 +144,40 @@ class GeoTableOperations:
                             mimetype='application/json'
                         )
 
-                    # Step 1: Look up STAC item ID from metadata (if exists)
+                    # Step 1: Look up STAC item ID from catalog (21 JAN 2026: geo.table_catalog)
                     stac_item_id = None
                     stac_collection_id = None
 
-                    # Check if geo.table_metadata exists first
+                    # Check if geo.table_catalog exists first
                     cur.execute("""
                         SELECT EXISTS (
                             SELECT 1 FROM information_schema.tables
-                            WHERE table_schema = 'geo' AND table_name = 'table_metadata'
-                        ) as metadata_table_exists
+                            WHERE table_schema = 'geo' AND table_name = 'table_catalog'
+                        ) as catalog_table_exists
                     """)
-                    metadata_table_exists = cur.fetchone()['metadata_table_exists']
+                    catalog_table_exists = cur.fetchone()['catalog_table_exists']
 
-                    if metadata_table_exists:
+                    if catalog_table_exists:
                         cur.execute("""
                             SELECT stac_item_id, stac_collection_id
-                            FROM geo.table_metadata
+                            FROM geo.table_catalog
                             WHERE table_name = %s
                         """, (table_name,))
-                        metadata_row = cur.fetchone()
+                        catalog_row = cur.fetchone()
 
-                        if metadata_row:
-                            stac_item_id = metadata_row.get('stac_item_id')
-                            stac_collection_id = metadata_row.get('stac_collection_id')
-                            logger.info(f"Found metadata for {table_name}: STAC item={stac_item_id}")
+                        if catalog_row:
+                            stac_item_id = catalog_row.get('stac_item_id')
+                            stac_collection_id = catalog_row.get('stac_collection_id')
+                            logger.info(f"Found catalog for {table_name}: STAC item={stac_item_id}")
                         else:
                             result["was_orphaned"] = True
                             result["warnings"].append(
-                                "No metadata found - table was orphaned (created outside ETL or metadata wiped)"
+                                "No catalog found - table was orphaned (created outside ETL or catalog wiped)"
                             )
                     else:
                         result["was_orphaned"] = True
                         result["warnings"].append(
-                            "geo.table_metadata table does not exist - cannot lookup STAC linkage"
+                            "geo.table_catalog table does not exist - cannot lookup STAC linkage"
                         )
 
                     # Step 2: Delete STAC item (if we have an ID)
@@ -230,17 +230,28 @@ class GeoTableOperations:
                             "No STAC item ID in metadata (STAC cataloging may have been skipped or degraded mode)"
                         )
 
-                    # Step 3: Delete metadata row (if table exists)
-                    if metadata_table_exists:
+                    # Step 3: Delete catalog and ETL tracking rows (21 JAN 2026)
+                    if catalog_table_exists:
                         cur.execute("""
-                            DELETE FROM geo.table_metadata
+                            DELETE FROM geo.table_catalog
                             WHERE table_name = %s
                             RETURNING table_name
                         """, (table_name,))
-                        deleted_metadata = cur.fetchone()
-                        result["deleted"]["metadata_row"] = deleted_metadata is not None
-                        if deleted_metadata:
-                            logger.info(f"Deleted metadata row for {table_name}")
+                        deleted_catalog = cur.fetchone()
+                        result["deleted"]["catalog_row"] = deleted_catalog is not None
+                        if deleted_catalog:
+                            logger.info(f"Deleted catalog row for {table_name}")
+
+                        # Also delete ETL tracking rows (may have multiple)
+                        cur.execute("""
+                            DELETE FROM app.vector_etl_tracking
+                            WHERE table_name = %s
+                            RETURNING table_name
+                        """, (table_name,))
+                        deleted_etl = cur.fetchone()
+                        result["deleted"]["etl_tracking_rows"] = deleted_etl is not None
+                        if deleted_etl:
+                            logger.info(f"Deleted ETL tracking rows for {table_name}")
 
                     # Step 4: DROP TABLE CASCADE
                     cur.execute(
@@ -300,19 +311,19 @@ class GeoTableOperations:
                         FROM information_schema.tables
                         WHERE table_schema = 'geo'
                         AND table_type = 'BASE TABLE'
-                        AND table_name != 'table_metadata'
+                        AND table_name NOT IN ('table_catalog', 'table_metadata', 'feature_collection_styles')
                         ORDER BY table_name
                     """)
                     geo_tables = [row['table_name'] for row in cur.fetchall()]
 
-                    # Check if geo.table_metadata exists
+                    # Check if geo.table_catalog exists (21 JAN 2026)
                     cur.execute("""
                         SELECT EXISTS (
                             SELECT 1 FROM information_schema.tables
-                            WHERE table_schema = 'geo' AND table_name = 'table_metadata'
-                        ) as metadata_table_exists
+                            WHERE table_schema = 'geo' AND table_name = 'table_catalog'
+                        ) as catalog_table_exists
                     """)
-                    metadata_table_exists = cur.fetchone()['metadata_table_exists']
+                    catalog_table_exists = cur.fetchone()['catalog_table_exists']
 
                     # Check if pgstac.items exists
                     cur.execute("""
@@ -323,24 +334,22 @@ class GeoTableOperations:
                     """)
                     pgstac_exists = cur.fetchone()['pgstac_exists']
 
-                    # Build metadata lookup dict if table exists
-                    metadata_lookup = {}
-                    if metadata_table_exists:
+                    # Build catalog lookup dict if table exists (21 JAN 2026)
+                    catalog_lookup = {}
+                    if catalog_table_exists:
                         cur.execute("""
                             SELECT
                                 table_name,
                                 title,
                                 feature_count,
-                                etl_job_id,
                                 stac_item_id,
                                 created_at
-                            FROM geo.table_metadata
+                            FROM geo.table_catalog
                         """)
                         for row in cur.fetchall():
-                            metadata_lookup[row['table_name']] = {
+                            catalog_lookup[row['table_name']] = {
                                 'title': row.get('title'),
                                 'feature_count': row.get('feature_count'),
-                                'etl_job_id': row.get('etl_job_id'),
                                 'stac_item_id': row.get('stac_item_id'),
                                 'created_at': row['created_at'].isoformat() if row.get('created_at') else None
                             }
@@ -351,28 +360,27 @@ class GeoTableOperations:
                         cur.execute("SELECT id FROM pgstac.items")
                         stac_item_ids = {row['id'] for row in cur.fetchall()}
 
-                    # Build table list with status
+                    # Build table list with status (21 JAN 2026: use catalog_lookup)
                     tracked_count = 0
                     orphaned_count = 0
 
                     for table_name in geo_tables:
-                        metadata = metadata_lookup.get(table_name)
-                        has_metadata = metadata is not None
-                        stac_item_id = metadata.get('stac_item_id') if metadata else None
+                        catalog = catalog_lookup.get(table_name)
+                        has_catalog = catalog is not None
+                        stac_item_id = catalog.get('stac_item_id') if catalog else None
                         has_stac_item = stac_item_id in stac_item_ids if stac_item_id else False
 
                         table_info = {
                             "table_name": table_name,
-                            "has_metadata": has_metadata,
+                            "has_catalog": has_catalog,
                             "has_stac_item": has_stac_item,
-                            "feature_count": metadata.get('feature_count') if metadata else None,
-                            "title": metadata.get('title') if metadata else None,
-                            "etl_job_id": metadata.get('etl_job_id')[:8] + "..." if metadata and metadata.get('etl_job_id') else None,
-                            "created_at": metadata.get('created_at') if metadata else None
+                            "feature_count": catalog.get('feature_count') if catalog else None,
+                            "title": catalog.get('title') if catalog else None,
+                            "created_at": catalog.get('created_at') if catalog else None
                         }
                         tables.append(table_info)
 
-                        if has_metadata:
+                        if has_catalog:
                             tracked_count += 1
                         else:
                             orphaned_count += 1
@@ -385,7 +393,7 @@ class GeoTableOperations:
                     "orphaned": orphaned_count
                 },
                 "schema_status": {
-                    "geo_table_metadata_exists": metadata_table_exists,
+                    "geo_table_catalog_exists": catalog_table_exists,
                     "pgstac_items_exists": pgstac_exists
                 }
             }
@@ -413,24 +421,24 @@ class GeoTableOperations:
 
     def list_metadata(self, req: func.HttpRequest) -> func.HttpResponse:
         """
-        List all records in geo.table_metadata with filtering options.
+        List all records in geo.table_catalog with filtering options.
 
         GET /api/dbadmin/geo?type=metadata
-        GET /api/dbadmin/geo?type=metadata&job_id=abc123
         GET /api/dbadmin/geo?type=metadata&has_stac=true
         GET /api/dbadmin/geo?type=metadata&limit=50&offset=0
 
+        NOTE (21 JAN 2026): Changed from geo.table_metadata to geo.table_catalog.
+        ETL fields (etl_job_id, source_file, etc.) are now in app.vector_etl_tracking.
+
         Query Parameters:
-            job_id: Filter by ETL job ID
             has_stac: Filter by STAC linkage (true/false)
             limit: Max records (default: 100, max: 500)
             offset: Pagination offset (default: 0)
 
         Returns:
-            JSON with metadata records, total count, and filters applied
+            JSON with catalog records, total count, and filters applied
         """
         # Parse query parameters
-        job_id = req.params.get('job_id')
         has_stac = req.params.get('has_stac')
 
         try:
@@ -451,17 +459,17 @@ class GeoTableOperations:
         try:
             with self.db_repo._get_connection() as conn:
                 with conn.cursor() as cur:
-                    # Check if table_metadata exists
+                    # Check if table_catalog exists (21 JAN 2026)
                     cur.execute("""
                         SELECT EXISTS (
                             SELECT 1 FROM information_schema.tables
-                            WHERE table_schema = 'geo' AND table_name = 'table_metadata'
+                            WHERE table_schema = 'geo' AND table_name = 'table_catalog'
                         )
                     """)
                     if not cur.fetchone()['exists']:
                         return func.HttpResponse(
                             body=json.dumps({
-                                'error': 'geo.table_metadata table does not exist',
+                                'error': 'geo.table_catalog table does not exist',
                                 'hint': 'Run full-rebuild to create schema'
                             }),
                             status_code=404,
@@ -471,11 +479,6 @@ class GeoTableOperations:
                     # Build dynamic WHERE clause
                     conditions = []
                     params = []
-
-                    if job_id:
-                        conditions.append("etl_job_id = %s")
-                        params.append(job_id)
-                        filters_applied['job_id'] = job_id
 
                     if has_stac is not None:
                         if has_stac.lower() == 'true':
@@ -490,7 +493,7 @@ class GeoTableOperations:
                         where_clause = "WHERE " + " AND ".join(conditions)
 
                     # Get total count
-                    count_sql = f"SELECT COUNT(*) FROM geo.table_metadata {where_clause}"
+                    count_sql = f"SELECT COUNT(*) FROM geo.table_catalog {where_clause}"
                     cur.execute(count_sql, params)
                     total = cur.fetchone()['count']
 
@@ -498,17 +501,16 @@ class GeoTableOperations:
                     cur.execute("""
                         SELECT column_name
                         FROM information_schema.columns
-                        WHERE table_schema = 'geo' AND table_name = 'table_metadata'
+                        WHERE table_schema = 'geo' AND table_name = 'table_catalog'
                     """)
                     existing_columns = set(row['column_name'] for row in cur.fetchall())
 
-                    # Define columns we want, in order (only include if they exist)
+                    # Define columns we want (21 JAN 2026: service layer only, no ETL fields)
                     desired_columns = [
                         'table_name', 'schema_name',
                         'title', 'description', 'attribution', 'license', 'keywords',
                         'feature_count', 'geometry_type',
-                        'source_file', 'source_format', 'source_crs',
-                        'etl_job_id', 'stac_item_id', 'stac_collection_id',
+                        'stac_item_id', 'stac_collection_id',
                         'bbox_minx', 'bbox_miny', 'bbox_maxx', 'bbox_maxy',
                         'temporal_start', 'temporal_end', 'temporal_property',
                         'created_at', 'updated_at'
@@ -520,7 +522,7 @@ class GeoTableOperations:
                     # Get records
                     query = f"""
                         SELECT {', '.join(select_columns)}
-                        FROM geo.table_metadata
+                        FROM geo.table_catalog
                         {where_clause}
                         ORDER BY created_at DESC
                         LIMIT %s OFFSET %s
@@ -533,17 +535,13 @@ class GeoTableOperations:
                             return row_dict.get(key, default)
                         return default
 
-                    metadata = []
+                    catalog_records = []
                     for row in cur.fetchall():
                         item = {
                             'table_name': row['table_name'],
                             'schema_name': safe_get(row, 'schema_name', 'geo'),
                             'feature_count': safe_get(row, 'feature_count'),
                             'geometry_type': safe_get(row, 'geometry_type'),
-                            'source_file': safe_get(row, 'source_file'),
-                            'source_format': safe_get(row, 'source_format'),
-                            'source_crs': safe_get(row, 'source_crs'),
-                            'etl_job_id': safe_get(row, 'etl_job_id'),
                             'stac_item_id': safe_get(row, 'stac_item_id'),
                             'stac_collection_id': safe_get(row, 'stac_collection_id'),
                         }
@@ -584,13 +582,13 @@ class GeoTableOperations:
                                     'property': safe_get(row, 'temporal_property')
                                 }
 
-                        metadata.append(item)
+                        catalog_records.append(item)
 
-            logger.info(f"Listed {len(metadata)} metadata records (total: {total}, filters: {filters_applied})")
+            logger.info(f"Listed {len(catalog_records)} catalog records (total: {total}, filters: {filters_applied})")
 
             return func.HttpResponse(
                 body=json.dumps({
-                    'metadata': metadata,
+                    'catalog': catalog_records,
                     'total': total,
                     'limit': limit,
                     'offset': offset,

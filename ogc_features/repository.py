@@ -227,33 +227,30 @@ class OGCFeaturesRepository:
             raise
 
     # ========================================================================
-    # TABLE METADATA REGISTRY (06 DEC 2025)
+    # TABLE CATALOG REGISTRY (21 JAN 2026 - Refactored from table_metadata)
     # ========================================================================
-    # Methods for accessing geo.table_metadata - the source of truth for
-    # vector table metadata populated by ETL (process_vector job).
+    # Methods for accessing geo.table_catalog - SERVICE LAYER metadata only.
+    # ETL internal fields (etl_job_id, source_file, etc.) are in app.vector_etl_tracking.
     # ========================================================================
 
     def get_table_metadata(self, collection_id: str) -> Optional[Dict[str, Any]]:
         """
-        Get custom metadata for a collection from geo.table_metadata registry.
+        Get service layer metadata for a collection from geo.table_catalog.
 
-        This registry is the SOURCE OF TRUTH for vector table metadata,
-        populated during ETL (process_vector Stage 1) and updated with
-        STAC linkage (Stage 3).
+        NOTE (21 JAN 2026): This method now queries geo.table_catalog which contains
+        ONLY service layer fields. ETL internal fields (etl_job_id, source_file,
+        source_format, source_crs) are stored in app.vector_etl_tracking and are
+        NOT returned by this method (separation of concerns).
 
         Returns None if no metadata exists (table created outside process_vector,
-        or geo.table_metadata table doesn't exist yet).
+        or geo.table_catalog table doesn't exist yet).
 
         Args:
             collection_id: Collection identifier (table name)
 
         Returns:
-            Dict with metadata fields, or None if not found:
+            Dict with SERVICE LAYER metadata fields, or None if not found:
             {
-                "etl_job_id": str,           # Full 64-char job ID
-                "source_file": str,          # Original filename
-                "source_format": str,        # File format (shp, gpkg, etc.)
-                "source_crs": str,           # Original CRS before reprojection
                 "stac_item_id": str,         # STAC item ID (if cataloged)
                 "stac_collection_id": str,   # STAC collection (if cataloged)
                 "feature_count": int,        # Number of features
@@ -261,7 +258,6 @@ class OGCFeaturesRepository:
                 "created_at": str,           # ISO 8601 timestamp
                 "updated_at": str,           # ISO 8601 timestamp
                 "cached_bbox": [float, ...], # [minx, miny, maxx, maxy] or None
-                # User-provided metadata (09 DEC 2025)
                 "title": str,                # User-friendly display name
                 "description": str,          # Full dataset description
                 "attribution": str,          # Data source attribution
@@ -271,33 +267,32 @@ class OGCFeaturesRepository:
                 "temporal_end": str,         # ISO 8601 end datetime
                 "temporal_property": str     # Column name for temporal data
             }
+
+        Note: ETL fields (etl_job_id, source_file, source_format, source_crs) are
+        no longer returned. They are stored in app.vector_etl_tracking for internal
+        debugging/audit only.
         """
         try:
             with self._get_connection() as conn:
                 with conn.cursor() as cur:
-                    # First check if geo.table_metadata exists
-                    # (might not exist on older deployments before full-rebuild)
+                    # First check if geo.table_catalog exists
                     cur.execute("""
                         SELECT EXISTS (
                             SELECT 1 FROM information_schema.tables
                             WHERE table_schema = 'geo'
-                            AND table_name = 'table_metadata'
+                            AND table_name = 'table_catalog'
                         ) as table_exists
                     """)
                     result = cur.fetchone()
                     table_exists = result['table_exists'] if result else False
 
                     if not table_exists:
-                        logger.debug(f"geo.table_metadata table does not exist - returning None for {collection_id}")
+                        logger.debug(f"geo.table_catalog table does not exist - returning None for {collection_id}")
                         return None
 
-                    # Query the metadata (09 DEC 2025 - added user-provided fields)
+                    # Query service layer metadata only (no ETL internal fields)
                     cur.execute("""
                         SELECT
-                            etl_job_id,
-                            source_file,
-                            source_format,
-                            source_crs,
                             stac_item_id,
                             stac_collection_id,
                             feature_count,
@@ -316,22 +311,19 @@ class OGCFeaturesRepository:
                             temporal_start,
                             temporal_end,
                             temporal_property
-                        FROM geo.table_metadata
+                        FROM geo.table_catalog
                         WHERE table_name = %s
                     """, (collection_id,))
 
                     row = cur.fetchone()
 
                     if not row:
-                        logger.debug(f"No metadata found in geo.table_metadata for {collection_id}")
+                        logger.debug(f"No metadata found in geo.table_catalog for {collection_id}")
                         return None
 
                     # Build result dict (row is a dict due to dict_row factory)
+                    # NOTE: ETL fields are intentionally omitted (separation of concerns)
                     result = {
-                        "etl_job_id": row.get('etl_job_id'),
-                        "source_file": row.get('source_file'),
-                        "source_format": row.get('source_format'),
-                        "source_crs": row.get('source_crs'),
                         "stac_item_id": row.get('stac_item_id'),
                         "stac_collection_id": row.get('stac_collection_id'),
                         "feature_count": row.get('feature_count'),
@@ -339,7 +331,6 @@ class OGCFeaturesRepository:
                         "created_at": row['created_at'].isoformat() if row.get('created_at') else None,
                         "updated_at": row['updated_at'].isoformat() if row.get('updated_at') else None,
                         "cached_bbox": None,
-                        # User-provided metadata (09 DEC 2025)
                         "title": row.get('title'),
                         "description": row.get('description'),
                         "attribution": row.get('attribution'),
@@ -358,20 +349,24 @@ class OGCFeaturesRepository:
                     if bbox_minx is not None and bbox_miny is not None and bbox_maxx is not None and bbox_maxy is not None:
                         result["cached_bbox"] = [bbox_minx, bbox_miny, bbox_maxx, bbox_maxy]
 
-                    etl_job_id = row.get('etl_job_id')
-                    logger.debug(f"Retrieved table metadata for {collection_id}: job={etl_job_id[:8] if etl_job_id else 'N/A'}...")
+                    logger.debug(f"Retrieved table catalog for {collection_id}")
                     return result
 
         except psycopg.Error as e:
             # Non-fatal - just log and return None
             # The collection can still be served without custom metadata
-            logger.warning(f"Error querying geo.table_metadata for '{collection_id}': {e}")
+            logger.warning(f"Error querying geo.table_catalog for '{collection_id}': {e}")
             return None
 
     @track_db_operation("ogc.db.get_vector_metadata")
     def get_vector_metadata(self, collection_id: str) -> Optional["VectorMetadata"]:
         """
-        Get VectorMetadata model for a collection from geo.table_metadata registry.
+        Get VectorMetadata model for a collection from geo.table_catalog.
+
+        NOTE (21 JAN 2026): This method now queries geo.table_catalog which contains
+        ONLY service layer fields. ETL internal fields are NOT populated in the
+        returned VectorMetadata (they will be None). This is intentional - service
+        layer code should not depend on ETL internals.
 
         This method returns the unified VectorMetadata Pydantic model instead of
         a raw dict. The VectorMetadata model provides:
@@ -380,13 +375,13 @@ class OGCFeaturesRepository:
         - to_stac_collection() for STAC responses
         - to_stac_item() for STAC item responses
 
-        This is the preferred method for new code (09 JAN 2026 - F7.8).
-
         Args:
             collection_id: Collection identifier (table name)
 
         Returns:
-            VectorMetadata instance or None if not found
+            VectorMetadata instance or None if not found.
+            Note: ETL fields (etl_job_id, source_file, source_format, source_crs)
+            will be None since they're stored in app.vector_etl_tracking.
 
         Example:
             metadata = repo.get_vector_metadata("admin_boundaries")
@@ -399,30 +394,27 @@ class OGCFeaturesRepository:
         try:
             with self._get_connection() as conn:
                 with conn.cursor() as cur:
-                    # Check if geo.table_metadata exists
+                    # Check if geo.table_catalog exists
                     cur.execute("""
                         SELECT EXISTS (
                             SELECT 1 FROM information_schema.tables
                             WHERE table_schema = 'geo'
-                            AND table_name = 'table_metadata'
+                            AND table_name = 'table_catalog'
                         ) as table_exists
                     """)
                     result = cur.fetchone()
                     table_exists = result['table_exists'] if result else False
 
                     if not table_exists:
-                        logger.debug(f"geo.table_metadata table does not exist - returning None for {collection_id}")
+                        logger.debug(f"geo.table_catalog table does not exist - returning None for {collection_id}")
                         return None
 
-                    # Query all metadata columns including F7.8 additions
+                    # Query SERVICE LAYER metadata only from geo.table_catalog
+                    # ETL fields are in app.vector_etl_tracking (not queried here)
                     cur.execute("""
                         SELECT
                             table_name,
                             schema_name,
-                            etl_job_id,
-                            source_file,
-                            source_format,
-                            source_crs,
                             stac_item_id,
                             stac_collection_id,
                             feature_count,
@@ -446,27 +438,28 @@ class OGCFeaturesRepository:
                             stac_extensions,
                             column_definitions,
                             primary_geometry,
-                            processing_software,
                             sci_doi,
                             sci_citation,
-                            custom_properties
-                        FROM geo.table_metadata
+                            custom_properties,
+                            srid
+                        FROM geo.table_catalog
                         WHERE table_name = %s
                     """, (collection_id,))
 
                     row = cur.fetchone()
 
                     if not row:
-                        logger.debug(f"No metadata found in geo.table_metadata for {collection_id}")
+                        logger.debug(f"No metadata found in geo.table_catalog for {collection_id}")
                         return None
 
-                    # Use VectorMetadata.from_db_row() factory method
-                    metadata = VectorMetadata.from_db_row(dict(row))
-                    logger.debug(f"Retrieved VectorMetadata for {collection_id}")
+                    # Use VectorMetadata.from_service_catalog() factory method
+                    # This creates VectorMetadata with ETL fields = None (intentional)
+                    metadata = VectorMetadata.from_service_catalog(dict(row))
+                    logger.debug(f"Retrieved VectorMetadata for {collection_id} from table_catalog")
                     return metadata
 
         except psycopg.Error as e:
-            logger.warning(f"Error querying geo.table_metadata for '{collection_id}': {e}")
+            logger.warning(f"Error querying geo.table_catalog for '{collection_id}': {e}")
             return None
 
     # ========================================================================

@@ -522,8 +522,11 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
         # =====================================================================
         # Create artifact record for lineage tracking with checksum
         artifact_id = None
+        logger.info(f"📦 ARTIFACT DEBUG: Starting artifact creation, params keys: {list(params.keys())}")
+        logger.info(f"📦 ARTIFACT DEBUG: dataset_id={params.get('dataset_id')}, resource_id={params.get('resource_id')}, version_id={params.get('version_id')}")
         try:
             from services.artifact_service import ArtifactService
+            logger.info("📦 ARTIFACT DEBUG: ArtifactService imported successfully")
 
             # Build client_refs from platform parameters
             client_refs = {}
@@ -534,9 +537,13 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             if params.get('version_id'):
                 client_refs['version_id'] = params['version_id']
 
+            logger.info(f"📦 ARTIFACT DEBUG: client_refs={client_refs}")
+
             # Only create artifact if we have client refs (platform job)
             if client_refs:
+                logger.info(f"📦 ARTIFACT DEBUG: Creating ArtifactService...")
                 artifact_service = ArtifactService()
+                logger.info(f"📦 ARTIFACT DEBUG: Calling create_artifact with cog_blob={cog_blob}, cog_container={cog_container}")
                 artifact = artifact_service.create_artifact(
                     storage_account=config.storage.silver.account_name,
                     container=cog_container,
@@ -550,6 +557,7 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                     content_hash=cog_result.get('file_checksum'),
                     size_bytes=cog_result.get('file_size'),
                     content_type='image/tiff; application=geotiff; profile=cloud-optimized',
+                    blob_version_id=cog_result.get('blob_version_id'),  # Azure version (21 JAN 2026)
                     metadata={
                         'cog_tier': cog_result.get('cog_tier'),
                         'compression': cog_result.get('compression'),
@@ -560,7 +568,7 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                 artifact_id = str(artifact.artifact_id)
                 logger.info(f"📦 Artifact created: {artifact_id} (revision {artifact.revision})")
             else:
-                logger.debug("Skipping artifact creation - no client_refs (non-platform job)")
+                logger.info("📦 ARTIFACT DEBUG: Skipping artifact creation - no client_refs (non-platform job)")
         except Exception as e:
             # Artifact creation is non-fatal - log warning but continue
             import traceback

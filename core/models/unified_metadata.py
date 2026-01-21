@@ -479,6 +479,179 @@ class VectorMetadata(BaseMetadata):
             custom_properties=row.get('custom_properties') or {}
         )
 
+    @classmethod
+    def from_service_catalog(cls, catalog_row: Dict[str, Any]) -> "VectorMetadata":
+        """
+        Create VectorMetadata from geo.table_catalog row (service fields only).
+
+        Use this factory for external database queries where only service layer
+        fields are available (no ETL tracking). ETL fields will be None.
+
+        This is the primary factory for TiPG and external service layer queries.
+
+        Args:
+            catalog_row: Database row from geo.table_catalog
+
+        Returns:
+            VectorMetadata with service fields populated, ETL fields as None
+
+        Example:
+            # TiPG external DB query
+            cursor.execute("SELECT * FROM geo.table_catalog WHERE table_name = %s", [name])
+            row = cursor.fetchone()
+            metadata = VectorMetadata.from_service_catalog(row)
+        """
+        # Build extent from bbox columns
+        extent = None
+        bbox_minx = catalog_row.get('bbox_minx')
+        bbox_miny = catalog_row.get('bbox_miny')
+        bbox_maxx = catalog_row.get('bbox_maxx')
+        bbox_maxy = catalog_row.get('bbox_maxy')
+
+        if all(v is not None for v in [bbox_minx, bbox_miny, bbox_maxx, bbox_maxy]):
+            spatial = SpatialExtent.from_flat_bbox(
+                bbox_minx, bbox_miny, bbox_maxx, bbox_maxy
+            )
+            temporal = None
+            temporal_start = catalog_row.get('temporal_start')
+            temporal_end = catalog_row.get('temporal_end')
+            if temporal_start or temporal_end:
+                temporal = TemporalExtent.from_datetimes(temporal_start, temporal_end)
+            extent = Extent(spatial=spatial, temporal=temporal)
+
+        # Parse keywords from comma-separated string
+        keywords_str = catalog_row.get('keywords')
+        keywords = []
+        if keywords_str:
+            keywords = [k.strip() for k in keywords_str.split(',') if k.strip()]
+
+        # Parse providers from JSONB
+        providers = []
+        providers_data = catalog_row.get('providers')
+        if providers_data and isinstance(providers_data, list):
+            providers = [Provider(**p) for p in providers_data]
+        elif catalog_row.get('attribution'):
+            providers = [Provider(name=catalog_row['attribution'], roles=[ProviderRole.PRODUCER])]
+
+        stac_extensions = catalog_row.get('stac_extensions') or []
+
+        return cls(
+            id=catalog_row.get('table_name'),
+            title=catalog_row.get('title'),
+            description=catalog_row.get('description'),
+            keywords=keywords,
+            license=catalog_row.get('license'),
+            providers=providers,
+            stac_extensions=stac_extensions,
+            extent=extent,
+            # ETL fields are None - not available in external DB
+            etl_job_id=None,
+            source_file=None,
+            source_format=None,
+            source_crs=None,
+            stac_item_id=catalog_row.get('stac_item_id'),
+            stac_collection_id=catalog_row.get('stac_collection_id'),
+            created_at=catalog_row.get('created_at'),
+            updated_at=catalog_row.get('updated_at'),
+            sci_doi=catalog_row.get('sci_doi'),
+            sci_citation=catalog_row.get('sci_citation'),
+            feature_count=catalog_row.get('feature_count'),
+            geometry_type=catalog_row.get('geometry_type'),
+            primary_geometry_column=catalog_row.get('primary_geometry') or 'geom',
+            schema_name=catalog_row.get('schema_name') or 'geo',
+            temporal_property=catalog_row.get('temporal_property'),
+            table_type=catalog_row.get('table_type') or 'user',
+            attribution=catalog_row.get('attribution'),
+            column_definitions=catalog_row.get('column_definitions'),
+            processing_software=None,  # ETL field
+            custom_properties=catalog_row.get('custom_properties') or {}
+        )
+
+    @classmethod
+    def from_internal_db(
+        cls,
+        catalog_row: Dict[str, Any],
+        etl_row: Optional[Dict[str, Any]] = None
+    ) -> "VectorMetadata":
+        """
+        Create VectorMetadata from internal DB (geo.table_catalog + app.vector_etl_tracking).
+
+        Use this factory for internal database queries where both service layer
+        and ETL tracking data are available.
+
+        This joins data from two tables:
+        - geo.table_catalog: Service layer fields
+        - app.vector_etl_tracking: ETL traceability fields
+
+        Args:
+            catalog_row: Database row from geo.table_catalog
+            etl_row: Optional row from app.vector_etl_tracking (most recent)
+
+        Returns:
+            VectorMetadata with all fields populated
+
+        Example:
+            # Internal DB query with join
+            cursor.execute('''
+                SELECT c.*, e.etl_job_id, e.source_file, e.source_format, e.source_crs
+                FROM geo.table_catalog c
+                LEFT JOIN app.vector_etl_tracking e ON c.table_name = e.table_name
+                WHERE c.table_name = %s
+                ORDER BY e.created_at DESC LIMIT 1
+            ''', [name])
+            row = cursor.fetchone()
+            metadata = VectorMetadata.from_internal_db(row)
+        """
+        # Start with service catalog fields
+        metadata = cls.from_service_catalog(catalog_row)
+
+        # Overlay ETL fields if provided
+        if etl_row:
+            metadata.etl_job_id = etl_row.get('etl_job_id')
+            metadata.source_file = etl_row.get('source_file')
+            metadata.source_format = etl_row.get('source_format')
+            metadata.source_crs = etl_row.get('source_crs')
+            # Build processing_software dict if available
+            if etl_row.get('processing_software') or etl_row.get('processing_version'):
+                metadata.processing_software = {
+                    'name': etl_row.get('processing_software'),
+                    'version': etl_row.get('processing_version')
+                }
+        else:
+            # Check if ETL fields are in the catalog_row (joined query)
+            if catalog_row.get('etl_job_id'):
+                metadata.etl_job_id = catalog_row.get('etl_job_id')
+            if catalog_row.get('source_file'):
+                metadata.source_file = catalog_row.get('source_file')
+            if catalog_row.get('source_format'):
+                metadata.source_format = catalog_row.get('source_format')
+            if catalog_row.get('source_crs'):
+                metadata.source_crs = catalog_row.get('source_crs')
+
+        return metadata
+
+    def split_to_catalog_and_tracking(self) -> tuple:
+        """
+        Split this VectorMetadata into service layer and ETL tracking models.
+
+        Returns:
+            Tuple of (GeoTableCatalog, VectorEtlTracking)
+
+        Example:
+            metadata = VectorMetadata.from_db_row(legacy_row)
+            catalog, tracking = metadata.split_to_catalog_and_tracking()
+            # catalog → INSERT INTO geo.table_catalog
+            # tracking → INSERT INTO app.vector_etl_tracking
+        """
+        # Import here to avoid circular dependency
+        from .geo import GeoTableCatalog
+        from .etl_tracking import VectorEtlTracking
+
+        catalog = GeoTableCatalog.from_vector_metadata(self)
+        tracking = VectorEtlTracking.from_vector_metadata(self)
+
+        return catalog, tracking
+
     # =========================================================================
     # CONVERSION METHODS
     # =========================================================================

@@ -90,6 +90,18 @@ if TYPE_CHECKING:
     from .promoted_repository import PromotedDatasetRepository as _PromotedDatasetRepository
     from .approval_repository import ApprovalRepository as _ApprovalRepository
     from .connection_pool import ConnectionPoolManager as _ConnectionPoolManager
+    from .database_initializer import (
+        DatabaseInitializer as _DatabaseInitializer,
+        InitializationResult as _InitializationResult,
+        SchemaType as _SchemaType,
+        initialize_database as _initialize_database,
+    )
+    from .schema_analyzer import (
+        SchemaAnalyzer as _SchemaAnalyzer,
+        SchemaReport as _SchemaReport,
+        DriftReport as _DriftReport,
+        DriftType as _DriftType,
+    )
 
 
 def __getattr__(name: str):
@@ -232,6 +244,34 @@ def __getattr__(name: str):
         from .connection_pool import ConnectionPoolManager
         return ConnectionPoolManager
 
+    # Database Initializer (21 JAN 2026 - Infrastructure as Code)
+    elif name == "DatabaseInitializer":
+        from .database_initializer import DatabaseInitializer
+        return DatabaseInitializer
+    elif name == "InitializationResult":
+        from .database_initializer import InitializationResult
+        return InitializationResult
+    elif name == "initialize_database":
+        from .database_initializer import initialize_database
+        return initialize_database
+    elif name == "SchemaType":
+        from .database_initializer import SchemaType
+        return SchemaType
+
+    # Schema Analyzer (21 JAN 2026 - Drift Detection)
+    elif name == "SchemaAnalyzer":
+        from .schema_analyzer import SchemaAnalyzer
+        return SchemaAnalyzer
+    elif name == "SchemaReport":
+        from .schema_analyzer import SchemaReport
+        return SchemaReport
+    elif name == "DriftReport":
+        from .schema_analyzer import DriftReport
+        return DriftReport
+    elif name == "DriftType":
+        from .schema_analyzer import DriftType
+        return DriftType
+
     else:
         raise AttributeError(f"module 'infrastructure' has no attribute '{name}'")
 
@@ -271,4 +311,14 @@ __all__ = [
     "CheckpointManager",
     "CheckpointValidationError",
     "ConnectionPoolManager",
+    # Database Initializer (21 JAN 2026 - Infrastructure as Code)
+    "DatabaseInitializer",
+    "InitializationResult",
+    "initialize_database",
+    "SchemaType",
+    # Schema Analyzer (21 JAN 2026 - Drift Detection)
+    "SchemaAnalyzer",
+    "SchemaReport",
+    "DriftReport",
+    "DriftType",
 ]

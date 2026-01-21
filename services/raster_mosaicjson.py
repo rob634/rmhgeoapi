@@ -3,7 +3,7 @@
 # ============================================================================
 # STATUS: Services - Virtual mosaic generation from COG collections
 # PURPOSE: Create MosaicJSON for client-side tile selection (TiTiler/QGIS/GDAL)
-# LAST_REVIEWED: 04 JAN 2026
+# LAST_REVIEWED: 21 JAN 2026
 # REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
 # ============================================================================
 """
@@ -503,12 +503,16 @@ def _create_mosaicjson_impl(
             "success": True,
             "mosaicjson_blob": output_blob_name,
             "mosaicjson_url": mosaicjson_url,
+            "mosaicjson_container": mosaicjson_container,
             "tile_count": len(cog_blobs),
             "bounds": mosaic.bounds,
             "minzoom": mosaic.minzoom,
             "maxzoom": mosaic.maxzoom,
             "quadkey_count": len(mosaic.tiles),
-            "center": mosaic.center
+            "center": mosaic.center,
+            # Azure Blob Storage version ID (21 JAN 2026)
+            # Only populated if versioning is enabled on the storage account
+            "blob_version_id": upload_result.get('blob_version_id'),
         }
 
     except Exception as e:

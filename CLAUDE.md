@@ -123,7 +123,30 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 
 **DEPRECATED DATABASE**: `rmhpgflex.postgres.database.azure.com` (decommissioned)
 
-### Deploy Command
+### Docker Worker (Heavy API)
+| Resource | Value |
+|----------|-------|
+| **Web App** | `rmhheavyapi` |
+| **URL** | https://rmhheavyapi-ebdffqhkcsevg7f3.eastus-01.azurewebsites.net |
+| **ACR Repository** | `geospatial-worker` (ONLY use this) |
+| **ACR** | `rmhazureacr.azurecr.io` |
+
+**DEPRECATED ACR REPOS** (never use): `rmhgeoapi-worker`, `docker-worker`, `rmhheavyapi`
+
+```bash
+# Build and push Docker worker
+az acr build --registry rmhazureacr --image geospatial-worker:VERSION --file Dockerfile .
+
+# Update container
+az webapp config container set --name rmhheavyapi --resource-group rmhazure_rg \
+  --docker-custom-image-name "rmhazureacr.azurecr.io/geospatial-worker:VERSION"
+
+# Restart (stop/start required for env var changes)
+az webapp stop --name rmhheavyapi --resource-group rmhazure_rg && \
+az webapp start --name rmhheavyapi --resource-group rmhazure_rg
+```
+
+### Deploy Command (Function App)
 ```bash
 func azure functionapp publish rmhazuregeoapi --python --build remote
 ```

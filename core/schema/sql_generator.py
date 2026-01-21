@@ -85,6 +85,10 @@ from ..models.raster_metadata import CogMetadataRecord  # Raster metadata (09 JA
 from ..models.approval import DatasetApproval, ApprovalStatus  # Dataset approvals (16 JAN 2026 - F4.AP)
 from ..models.artifact import Artifact, ArtifactStatus  # Artifact registry (20 JAN 2026)
 
+# Geo and ETL schema models (21 JAN 2026 - F7.IaC)
+from ..models.geo import GeoTableCatalog
+from ..models.etl_tracking import VectorEtlTracking, RasterEtlTracking, EtlStatus
+
 
 class PydanticToSQL:
     """
@@ -133,7 +137,514 @@ class PydanticToSQL:
             logging.basicConfig(level=logging.INFO)
             self.logger = logging.getLogger(__name__)
         self.statements: List[str] = []  # Track individual statements for deployment
-        
+
+    # =========================================================================
+    # MODEL-DRIVEN DDL GENERATION (21 JAN 2026 - F7.IaC)
+    # =========================================================================
+
+    @staticmethod
+    def get_model_sql_metadata(model: Type[BaseModel]) -> Dict[str, Any]:
+        """
+        Extract SQL DDL metadata from a Pydantic model's class attributes.
+
+        Looks for __sql_* ClassVar attributes that define:
+        - __sql_table_name: Target table name
+        - __sql_schema: Target schema name
+        - __sql_primary_key: List of primary key column(s)
+        - __sql_foreign_keys: Dict of {column: "schema.table(column)"}
+        - __sql_indexes: List of index definitions
+
+        Args:
+            model: Pydantic model class with __sql_* attributes
+
+        Returns:
+            Dict with table_name, schema, primary_key, foreign_keys, indexes
+
+        Raises:
+            ValueError: If model lacks required __sql_table_name attribute
+        """
+        # Access class attributes via name mangling
+        class_name = model.__name__
+        metadata = {}
+
+        # Required: table name
+        table_attr = f"_{class_name}__sql_table_name"
+        if not hasattr(model, table_attr):
+            raise ValueError(f"Model {class_name} missing required __sql_table_name attribute")
+        metadata["table_name"] = getattr(model, table_attr)
+
+        # Required: schema
+        schema_attr = f"_{class_name}__sql_schema"
+        if not hasattr(model, schema_attr):
+            raise ValueError(f"Model {class_name} missing required __sql_schema attribute")
+        metadata["schema"] = getattr(model, schema_attr)
+
+        # Required: primary key
+        pk_attr = f"_{class_name}__sql_primary_key"
+        if not hasattr(model, pk_attr):
+            raise ValueError(f"Model {class_name} missing required __sql_primary_key attribute")
+        metadata["primary_key"] = getattr(model, pk_attr)
+
+        # Optional: foreign keys
+        fk_attr = f"_{class_name}__sql_foreign_keys"
+        metadata["foreign_keys"] = getattr(model, fk_attr, {})
+
+        # Optional: indexes
+        idx_attr = f"_{class_name}__sql_indexes"
+        metadata["indexes"] = getattr(model, idx_attr, [])
+
+        return metadata
+
+    def generate_table_from_model(self, model: Type[BaseModel]) -> sql.Composed:
+        """
+        Generate CREATE TABLE DDL from a Pydantic model with __sql_* metadata.
+
+        This is the model-driven alternative to generate_table_composed().
+        It reads table name, schema, PK, and FK from model class attributes.
+
+        Args:
+            model: Pydantic model with __sql_* class attributes
+
+        Returns:
+            Composed CREATE TABLE statement
+        """
+        # Get metadata from model
+        meta = self.get_model_sql_metadata(model)
+        table_name = meta["table_name"]
+        schema_name = meta["schema"]
+        primary_key = meta["primary_key"]
+        foreign_keys = meta["foreign_keys"]
+
+        self.logger.debug(f"🔧 Generating table {schema_name}.{table_name} from model {model.__name__}")
+
+        columns = []
+        constraints = []
+
+        # Process model fields
+        for field_name, field_info in model.model_fields.items():
+            field_type = field_info.annotation
+
+            # Determine SQL type
+            sql_type_str = self.python_type_to_sql(field_type, field_info)
+
+            # Check if field is Optional
+            is_optional = False
+            origin = get_origin(field_type)
+            if origin in [Union, type(Optional)]:
+                args = get_args(field_type)
+                if type(None) in args:
+                    is_optional = True
+
+            # Build column definition
+            column_parts = [
+                sql.Identifier(field_name),
+                sql.SQL(" ")
+            ]
+
+            # Handle enum types with schema qualification
+            if sql_type_str in self.enums:
+                column_parts.extend([
+                    sql.Identifier(schema_name),
+                    sql.SQL("."),
+                    sql.Identifier(sql_type_str)
+                ])
+            else:
+                column_parts.append(sql.SQL(sql_type_str))
+
+            # Add NOT NULL if required (and not a PK column which gets it implicitly)
+            if not is_optional and field_name not in primary_key:
+                column_parts.extend([sql.SQL(" "), sql.SQL("NOT NULL")])
+
+            # Handle defaults
+            if field_info.default is not None and field_info.default != ...:
+                if isinstance(field_info.default, Enum):
+                    column_parts.extend([
+                        sql.SQL(" DEFAULT "),
+                        sql.Literal(field_info.default.value),
+                        sql.SQL("::"),
+                        sql.Identifier(schema_name),
+                        sql.SQL("."),
+                        sql.Identifier(sql_type_str)
+                    ])
+                elif isinstance(field_info.default, str):
+                    column_parts.extend([sql.SQL(" DEFAULT "), sql.Literal(field_info.default)])
+                elif isinstance(field_info.default, (int, float)):
+                    column_parts.extend([sql.SQL(" DEFAULT "), sql.Literal(field_info.default)])
+            elif hasattr(field_info, 'default_factory') and field_info.default_factory is not None:
+                # Handle default_factory for mutable defaults
+                if field_name in ["created_at", "updated_at"]:
+                    column_parts.extend([sql.SQL(" DEFAULT NOW()")])
+
+            # Special timestamp defaults
+            if field_name == "created_at" and " DEFAULT" not in str(sql.SQL("").join(column_parts)):
+                column_parts.extend([sql.SQL(" DEFAULT NOW()")])
+
+            columns.append(sql.SQL("").join(column_parts))
+
+        # Add PRIMARY KEY constraint
+        if len(primary_key) == 1:
+            constraints.append(
+                sql.SQL("PRIMARY KEY ({})").format(sql.Identifier(primary_key[0]))
+            )
+        else:
+            # Composite primary key
+            pk_columns = sql.SQL(", ").join(sql.Identifier(col) for col in primary_key)
+            constraints.append(
+                sql.SQL("PRIMARY KEY ({})").format(pk_columns)
+            )
+
+        # Add FOREIGN KEY constraints
+        for fk_column, fk_reference in foreign_keys.items():
+            # Parse reference: "schema.table(column)"
+            import re
+            match = re.match(r"(\w+)\.(\w+)\((\w+)\)", fk_reference)
+            if match:
+                ref_schema, ref_table, ref_column = match.groups()
+                constraints.append(
+                    sql.SQL("FOREIGN KEY ({}) REFERENCES {}.{} ({}) ON DELETE CASCADE").format(
+                        sql.Identifier(fk_column),
+                        sql.Identifier(ref_schema),
+                        sql.Identifier(ref_table),
+                        sql.Identifier(ref_column)
+                    )
+                )
+
+        # Combine columns and constraints
+        all_parts = columns + constraints
+
+        # Build CREATE TABLE statement
+        composed = sql.SQL("CREATE TABLE IF NOT EXISTS {}.{} ({})").format(
+            sql.Identifier(schema_name),
+            sql.Identifier(table_name),
+            sql.SQL(", ").join(all_parts)
+        )
+
+        self.logger.debug(f"✅ Table {schema_name}.{table_name} composed with {len(columns)} columns and {len(constraints)} constraints")
+        return composed
+
+    def generate_indexes_from_model(self, model: Type[BaseModel]) -> List[sql.Composed]:
+        """
+        Generate CREATE INDEX statements from a Pydantic model's __sql_indexes.
+
+        Args:
+            model: Pydantic model with __sql_indexes class attribute
+
+        Returns:
+            List of composed CREATE INDEX statements
+        """
+        meta = self.get_model_sql_metadata(model)
+        table_name = meta["table_name"]
+        schema_name = meta["schema"]
+        indexes = meta.get("indexes", [])
+
+        self.logger.debug(f"🔧 Generating indexes for {schema_name}.{table_name}")
+        result = []
+
+        for idx_def in indexes:
+            columns = idx_def.get("columns", [])
+            name = idx_def.get("name")
+            partial_where = idx_def.get("partial_where")
+            descending = idx_def.get("descending", False)
+            index_type = idx_def.get("type", "btree")
+
+            if not columns or not name:
+                continue
+
+            if index_type == "gin":
+                result.append(IndexBuilder.gin(schema_name, table_name, columns[0], name=name))
+            else:
+                result.append(IndexBuilder.btree(
+                    schema_name, table_name, columns,
+                    name=name,
+                    partial_where=partial_where,
+                    descending=descending
+                ))
+
+        self.logger.debug(f"✅ Generated {len(result)} indexes for {schema_name}.{table_name}")
+        return result
+
+    def generate_enum_from_model(self, enum_class: Type[Enum], schema_name: str) -> List[sql.Composed]:
+        """
+        Generate ENUM type DDL for a given schema.
+
+        Args:
+            enum_class: Python Enum class
+            schema_name: Target schema name
+
+        Returns:
+            List of composed SQL statements (DROP + CREATE)
+        """
+        # Convert CamelCase to snake_case
+        enum_name = re.sub(r'(?<!^)(?=[A-Z])', '_', enum_class.__name__).lower()
+        values_list = [member.value for member in enum_class]
+
+        statements = []
+
+        # DROP IF EXISTS
+        statements.append(sql.SQL("DROP TYPE IF EXISTS {}.{} CASCADE").format(
+            sql.Identifier(schema_name),
+            sql.Identifier(enum_name)
+        ))
+
+        # CREATE TYPE
+        statements.append(sql.SQL("CREATE TYPE {}.{} AS ENUM ({})").format(
+            sql.Identifier(schema_name),
+            sql.Identifier(enum_name),
+            sql.SQL(', ').join(sql.Literal(v) for v in values_list)
+        ))
+
+        return statements
+
+    def generate_geo_schema_ddl(self) -> List[sql.Composed]:
+        """
+        Generate complete DDL for geo schema tables.
+
+        Returns CREATE statements for:
+        - geo.table_catalog (service layer metadata)
+
+        Returns:
+            List of composed SQL statements
+        """
+        self.logger.info("🚀 Generating geo schema DDL")
+        statements = []
+
+        # Schema creation
+        statements.append(sql.SQL("CREATE SCHEMA IF NOT EXISTS geo"))
+
+        # Generate table DDL from model
+        statements.append(self.generate_table_from_model(GeoTableCatalog))
+
+        # Generate indexes
+        statements.extend(self.generate_indexes_from_model(GeoTableCatalog))
+
+        self.logger.info(f"✅ Geo schema DDL complete: {len(statements)} statements")
+        return statements
+
+    @staticmethod
+    def check_table_exists(conn, schema_name: str, table_name: str) -> bool:
+        """
+        Check if a table exists in the database.
+
+        Args:
+            conn: psycopg connection
+            schema_name: Schema name
+            table_name: Table name
+
+        Returns:
+            True if table exists, False otherwise
+        """
+        query = sql.SQL("""
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = {} AND table_name = {}
+            )
+        """).format(sql.Literal(schema_name), sql.Literal(table_name))
+
+        with conn.cursor() as cur:
+            cur.execute(query)
+            result = cur.fetchone()
+            return result[0] if result else False
+
+    def verify_fk_dependencies(self, conn, model: Type[BaseModel]) -> Dict[str, bool]:
+        """
+        Verify that all FK dependencies exist for a model.
+
+        Args:
+            conn: psycopg connection
+            model: Pydantic model with __sql_foreign_keys
+
+        Returns:
+            Dict mapping FK reference to existence status
+
+        Raises:
+            ValueError: If any FK dependency is missing
+        """
+        meta = self.get_model_sql_metadata(model)
+        foreign_keys = meta.get("foreign_keys", {})
+        results = {}
+
+        for fk_column, fk_reference in foreign_keys.items():
+            # Parse reference: "schema.table(column)"
+            match = re.match(r"(\w+)\.(\w+)\((\w+)\)", fk_reference)
+            if match:
+                ref_schema, ref_table, ref_column = match.groups()
+                exists = self.check_table_exists(conn, ref_schema, ref_table)
+                results[fk_reference] = exists
+
+                if not exists:
+                    raise ValueError(
+                        f"FK dependency missing: {model.__name__}.{fk_column} references "
+                        f"{ref_schema}.{ref_table} which does not exist. "
+                        f"Create {ref_schema}.{ref_table} first."
+                    )
+
+        return results
+
+    def generate_etl_tracking_ddl(
+        self,
+        conn=None,
+        verify_dependencies: bool = True
+    ) -> List[sql.Composed]:
+        """
+        Generate DDL for ETL tracking tables in app schema.
+
+        Returns CREATE statements for:
+        - app.vector_etl_tracking
+        - app.raster_etl_tracking (placeholder)
+        - Required ENUM types
+
+        Args:
+            conn: Optional psycopg connection for dependency verification
+            verify_dependencies: If True and conn provided, verify FK targets exist
+
+        Returns:
+            List of composed SQL statements
+
+        Raises:
+            ValueError: If verify_dependencies=True and geo.table_catalog doesn't exist
+        """
+        self.logger.info("🚀 Generating ETL tracking DDL")
+
+        # Verify FK dependencies if connection provided
+        if conn and verify_dependencies:
+            self.logger.info("🔍 Verifying FK dependencies...")
+            try:
+                self.verify_fk_dependencies(conn, VectorEtlTracking)
+                self.logger.info("✅ FK dependency verified: geo.table_catalog exists")
+            except ValueError as e:
+                self.logger.error(f"❌ FK dependency check failed: {e}")
+                raise
+
+        statements = []
+
+        # Generate EtlStatus enum
+        statements.extend(self.generate_enum_from_model(EtlStatus, "app"))
+
+        # Generate vector_etl_tracking table
+        statements.append(self.generate_table_from_model(VectorEtlTracking))
+        statements.extend(self.generate_indexes_from_model(VectorEtlTracking))
+
+        # Generate raster_etl_tracking table (placeholder - no FK dependencies)
+        statements.append(self.generate_table_from_model(RasterEtlTracking))
+        statements.extend(self.generate_indexes_from_model(RasterEtlTracking))
+
+        self.logger.info(f"✅ ETL tracking DDL complete: {len(statements)} statements")
+        return statements
+
+    def generate_all_schemas_ddl(
+        self,
+        conn=None,
+        verify_dependencies: bool = True
+    ) -> Dict[str, List[sql.Composed]]:
+        """
+        Generate DDL for all schemas (app, geo, etl).
+
+        This is the master method for full database initialization.
+        Respects dependency order: geo schema must be created before
+        ETL tracking tables that have FK references to geo.table_catalog.
+
+        Args:
+            conn: Optional psycopg connection for dependency verification
+            verify_dependencies: If True and conn provided, verify FK targets exist
+
+        Returns:
+            Dict with schema names as keys and statement lists as values.
+            Keys are ordered: ["geo", "app", "etl"] to respect FK dependencies.
+        """
+        self.logger.info("🚀 Generating complete schema DDL")
+        self.logger.info("📋 Execution order: geo → app_core → app_etl (FK dependency order)")
+
+        # IMPORTANT: Order matters due to FK dependencies
+        # geo.table_catalog must exist before app.vector_etl_tracking
+        #
+        # Schema mapping:
+        #   "geo"      → geo schema (geo.table_catalog)
+        #   "app_core" → app schema core tables (jobs, tasks, etc.)
+        #   "app_etl"  → app schema ETL tracking tables (app.vector_etl_tracking)
+        #
+        # NOTE: "app_etl" is NOT a separate schema - tables go in app schema
+        result = {
+            "geo": self.generate_geo_schema_ddl(),
+            "app_core": self.generate_composed_statements(),  # app.jobs, app.tasks, etc.
+            "app_etl": self.generate_etl_tracking_ddl(conn=conn, verify_dependencies=verify_dependencies),
+        }
+
+        total = sum(len(stmts) for stmts in result.values())
+        self.logger.info(f"✅ Complete DDL generation: {total} statements across {len(result)} schemas")
+
+        return result
+
+    def execute_with_dependency_order(
+        self,
+        conn,
+        schemas: Optional[List[str]] = None,
+        dry_run: bool = False
+    ) -> Dict[str, int]:
+        """
+        Execute DDL in correct dependency order with FK verification.
+
+        Execution order:
+        1. geo schema (geo.table_catalog)
+        2. app schema (jobs, tasks, etc.)
+        3. etl tracking (app.vector_etl_tracking - has FK to geo.table_catalog)
+
+        Args:
+            conn: psycopg connection (must be in autocommit or transaction)
+            schemas: Optional list of schemas to execute. Default: ["geo", "app", "etl"]
+            dry_run: If True, log statements but don't execute
+
+        Returns:
+            Dict mapping schema name to number of statements executed
+
+        Raises:
+            ValueError: If FK dependencies are not met
+        """
+        if schemas is None:
+            schemas = ["geo", "app_core", "app_etl"]
+
+        # Enforce correct order (geo must come before app_etl due to FK)
+        ordered_schemas = []
+        for s in ["geo", "app_core", "app_etl"]:
+            if s in schemas:
+                ordered_schemas.append(s)
+
+        self.logger.info(f"🚀 Executing DDL in order: {' → '.join(ordered_schemas)}")
+        results = {}
+
+        for schema in ordered_schemas:
+            if schema == "geo":
+                stmts = self.generate_geo_schema_ddl()
+            elif schema == "app_core":
+                stmts = self.generate_composed_statements()
+            elif schema == "app_etl":
+                # Verify geo.table_catalog exists before creating ETL tables in app schema
+                if not self.check_table_exists(conn, "geo", "table_catalog"):
+                    raise ValueError(
+                        "Cannot create app.vector_etl_tracking: geo.table_catalog does not exist. "
+                        "Run geo schema DDL first."
+                    )
+                stmts = self.generate_etl_tracking_ddl(conn=conn, verify_dependencies=True)
+            else:
+                self.logger.warning(f"Unknown schema group: {schema}, skipping")
+                continue
+
+            self.logger.info(f"📦 Executing {len(stmts)} statements for {schema} schema...")
+
+            if dry_run:
+                for stmt in stmts:
+                    self.logger.info(f"  [DRY RUN] {str(stmt)[:100]}...")
+                results[schema] = len(stmts)
+            else:
+                with conn.cursor() as cur:
+                    for stmt in stmts:
+                        cur.execute(stmt)
+                results[schema] = len(stmts)
+                self.logger.info(f"✅ {schema} schema complete: {len(stmts)} statements")
+
+        total = sum(results.values())
+        self.logger.info(f"🎉 DDL execution complete: {total} statements across {len(results)} schemas")
+        return results
+
     def python_type_to_sql(self, field_type: Type, field_info: FieldInfo) -> str:
         """
         Convert Python type to PostgreSQL type.

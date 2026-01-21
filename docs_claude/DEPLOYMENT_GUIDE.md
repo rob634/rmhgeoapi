@@ -31,6 +31,59 @@ curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/job
 
 ---
 
+## Docker Worker (Heavy API)
+
+### Overview
+The Docker worker (`rmhheavyapi`) handles long-running tasks that exceed Function App timeouts.
+
+### ACR Repository
+**IMPORTANT**: Use `geospatial-worker` repository ONLY.
+
+```
+ACR: rmhazureacr.azurecr.io
+Repository: geospatial-worker
+```
+
+**DO NOT USE**: `rmhgeoapi-worker`, `docker-worker`, `rmhheavyapi`, or any other repository.
+
+### Build and Deploy
+```bash
+# Build and push new image
+az acr build --registry rmhazureacr --image geospatial-worker:0.7.16.9 --file Dockerfile .
+
+# Update container to use new image
+az webapp config container set \
+  --name rmhheavyapi \
+  --resource-group rmhazure_rg \
+  --docker-custom-image-name "rmhazureacr.azurecr.io/geospatial-worker:0.7.16.9"
+
+# Restart to apply (stop/start required for env var changes)
+az webapp stop --name rmhheavyapi --resource-group rmhazure_rg
+az webapp start --name rmhheavyapi --resource-group rmhazure_rg
+```
+
+### Health Check
+```bash
+curl https://rmhheavyapi-ebdffqhkcsevg7f3.eastus-01.azurewebsites.net/health
+```
+
+### Key Endpoints
+| Endpoint | Purpose |
+|----------|---------|
+| `/health` | Full health check with DB connectivity test |
+| `/readyz` | Readiness probe (token check only) |
+| `/livez` | Liveness probe (always returns ok) |
+
+### Environment Variables
+Critical settings that must match Function App:
+- `POSTGIS_HOST=rmhpostgres.postgres.database.azure.com`
+- `POSTGIS_DATABASE=geopgflex`
+- `PGSTAC_SCHEMA=pgstac`
+- `H3_SCHEMA=h3`
+- `APP_SCHEMA=app`
+
+---
+
 ## Azure Resources
 
 ### Function App

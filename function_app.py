@@ -366,8 +366,8 @@ from triggers.curated.scheduler import curated_scheduler_trigger
 # Platform Service Layer triggers (25 OCT 2025)
 from triggers.trigger_platform import (
     platform_request_submit,
-    platform_raster_submit,
-    platform_raster_collection_submit,
+    # REMOVED (21 JAN 2026): platform_raster_submit, platform_raster_collection_submit
+    # Use platform_request_submit for all submissions via /platform/submit
     platform_unpublish_vector,
     platform_unpublish_raster
 )
@@ -1126,63 +1126,9 @@ async def platform_validate_route(req: func.HttpRequest) -> func.HttpResponse:
     return await platform_validate(req)
 
 
-# Dedicated Raster Endpoints (05 DEC 2025)
-# DDH explicitly chooses endpoint based on single vs multiple files
-
-@app.route(route="platform/raster", methods=["POST"])
-def platform_raster(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Submit a single raster file for processing.
-
-    POST /api/platform/raster
-
-    DDH uses this when submitting a single raster file.
-    Platform routes to process_raster_v2, with automatic fallback
-    to process_large_raster_v2 if file exceeds size threshold.
-
-    Body:
-        {
-            "dataset_id": "aerial-imagery-2024",
-            "resource_id": "site-alpha",
-            "version_id": "v1.0",
-            "container_name": "bronze-rasters",
-            "file_name": "aerial-alpha.tif",
-            "service_name": "Aerial Imagery Site Alpha"
-        }
-
-    Note: file_name must be a string (single file), not a list.
-    """
-    if guard := _platform_endpoint_guard():
-        return guard
-    return platform_raster_submit(req)
-
-
-@app.route(route="platform/raster-collection", methods=["POST"])
-def platform_raster_collection(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Submit multiple raster files as a collection.
-
-    POST /api/platform/raster-collection
-
-    DDH uses this when submitting multiple raster files to be processed
-    as a single collection with MosaicJSON.
-
-    Body:
-        {
-            "dataset_id": "aerial-tiles-2024",
-            "resource_id": "site-alpha",
-            "version_id": "v1.0",
-            "container_name": "bronze-rasters",
-            "file_name": ["tile1.tif", "tile2.tif", "tile3.tif"],
-            "service_name": "Aerial Tiles Site Alpha"
-        }
-
-    Note: file_name must be a list with at least 2 files.
-    """
-    if guard := _platform_endpoint_guard():
-        return guard
-    return platform_raster_collection_submit(req)
-
+# REMOVED (21 JAN 2026): /platform/raster and /platform/raster-collection endpoints
+# Use /platform/submit for all submissions - data_type is auto-detected from file extension
+# Single vs collection is determined by whether file_name is string or array
 
 @app.route(route="platform/unpublish/vector", methods=["POST"])
 def platform_unpublish_vector_route(req: func.HttpRequest) -> func.HttpResponse:

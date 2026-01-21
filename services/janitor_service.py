@@ -1340,29 +1340,30 @@ class GeoOrphanDetector:
         try:
             with self.db_repo._get_connection() as conn:
                 with conn.cursor() as cur:
-                    # Step 1: Get all tables in geo schema (excluding table_metadata itself)
+                    # Step 1: Get all tables in geo schema (excluding system tables)
+                    # 21 JAN 2026: Exclude table_catalog and feature_collection_styles
                     cur.execute("""
                         SELECT table_name
                         FROM information_schema.tables
                         WHERE table_schema = 'geo'
                         AND table_type = 'BASE TABLE'
-                        AND table_name != 'table_metadata'
+                        AND table_name NOT IN ('table_catalog', 'table_metadata', 'feature_collection_styles')
                         ORDER BY table_name
                     """)
                     geo_tables = set(row['table_name'] for row in cur.fetchall())
 
-                    # Step 2: Check if table_metadata exists
+                    # Step 2: Check if table_catalog exists (21 JAN 2026)
                     cur.execute("""
                         SELECT EXISTS (
                             SELECT 1 FROM information_schema.tables
-                            WHERE table_schema = 'geo' AND table_name = 'table_metadata'
+                            WHERE table_schema = 'geo' AND table_name = 'table_catalog'
                         )
                     """)
-                    metadata_table_exists = cur.fetchone()['exists']
+                    catalog_table_exists = cur.fetchone()['exists']
 
-                    if not metadata_table_exists:
-                        # No metadata table - all geo tables are orphaned
-                        logger.warning("⚠️ GeoOrphanDetector: geo.table_metadata does not exist!")
+                    if not catalog_table_exists:
+                        # No catalog table - all geo tables are orphaned
+                        logger.warning("⚠️ GeoOrphanDetector: geo.table_catalog does not exist!")
                         for table_name in sorted(geo_tables):
                             try:
                                 cur.execute(f'SELECT COUNT(*) FROM geo."{table_name}"')
@@ -1373,17 +1374,17 @@ class GeoOrphanDetector:
                             result["orphaned_tables"].append({
                                 "table_name": table_name,
                                 "row_count": row_count,
-                                "reason": "Table exists but geo.table_metadata does not exist"
+                                "reason": "Table exists but geo.table_catalog does not exist"
                             })
 
                         result["summary"] = {
                             "total_geo_tables": len(geo_tables),
-                            "total_metadata_records": 0,
+                            "total_catalog_records": 0,
                             "tracked": 0,
                             "orphaned_tables": len(geo_tables),
-                            "orphaned_metadata": 0,
+                            "orphaned_catalog": 0,
                             "health_status": "ORPHANS_DETECTED" if geo_tables else "HEALTHY",
-                            "metadata_table_missing": True
+                            "catalog_table_missing": True
                         }
                         result["success"] = True
                         result["duration_seconds"] = round(
@@ -1391,24 +1392,23 @@ class GeoOrphanDetector:
                         )
                         return result
 
-                    # Step 3: Get all table names in metadata
+                    # Step 3: Get all table names in catalog (21 JAN 2026)
                     cur.execute("""
-                        SELECT table_name, etl_job_id, created_at
-                        FROM geo.table_metadata
+                        SELECT table_name, created_at
+                        FROM geo.table_catalog
                         ORDER BY table_name
                     """)
-                    metadata_tables = {}
+                    catalog_tables = {}
                     for row in cur.fetchall():
-                        metadata_tables[row['table_name']] = {
-                            'etl_job_id': row.get('etl_job_id'),
+                        catalog_tables[row['table_name']] = {
                             'created_at': row['created_at'].isoformat() if row.get('created_at') else None
                         }
 
-                    metadata_names = set(metadata_tables.keys())
+                    catalog_names = set(catalog_tables.keys())
 
                     # Step 4: Identify orphans
-                    # Tables without metadata
-                    orphaned_tables = geo_tables - metadata_names
+                    # Tables without catalog entry
+                    orphaned_tables = geo_tables - catalog_names
                     for table_name in sorted(orphaned_tables):
                         # Get row count for context
                         try:
@@ -1420,31 +1420,30 @@ class GeoOrphanDetector:
                         result["orphaned_tables"].append({
                             "table_name": table_name,
                             "row_count": row_count,
-                            "reason": "Table exists in geo schema but has no metadata record"
+                            "reason": "Table exists in geo schema but has no catalog record"
                         })
 
-                    # Metadata without tables
-                    orphaned_metadata = metadata_names - geo_tables
-                    for table_name in sorted(orphaned_metadata):
-                        meta = metadata_tables[table_name]
+                    # Catalog entries without tables
+                    orphaned_catalog = catalog_names - geo_tables
+                    for table_name in sorted(orphaned_catalog):
+                        cat = catalog_tables[table_name]
                         result["orphaned_metadata"].append({
                             "table_name": table_name,
-                            "etl_job_id": meta['etl_job_id'],
-                            "created_at": meta['created_at'],
-                            "reason": "Metadata exists but table was dropped"
+                            "created_at": cat['created_at'],
+                            "reason": "Catalog entry exists but table was dropped"
                         })
 
-                    # Tracked (healthy) tables
-                    tracked = geo_tables & metadata_names
+                    # Tracked (healthy) tables (21 JAN 2026: use catalog_names)
+                    tracked = geo_tables & catalog_names
                     result["tracked_tables"] = sorted(tracked)
 
             # Build summary
             result["summary"] = {
                 "total_geo_tables": len(geo_tables),
-                "total_metadata_records": len(metadata_tables),
+                "total_catalog_records": len(catalog_tables),
                 "tracked": len(result["tracked_tables"]),
                 "orphaned_tables": len(result["orphaned_tables"]),
-                "orphaned_metadata": len(result["orphaned_metadata"]),
+                "orphaned_catalog": len(result["orphaned_metadata"]),
                 "health_status": "HEALTHY" if not result["orphaned_tables"] and not result["orphaned_metadata"] else "ORPHANS_DETECTED"
             }
 

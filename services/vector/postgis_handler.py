@@ -1558,10 +1558,11 @@ class VectorToPostGISHandler:
         return {'rows_deleted': rows_deleted, 'rows_inserted': rows_inserted}
 
     # =========================================================================
-    # TABLE METADATA REGISTRY (06 DEC 2025)
+    # TABLE METADATA REGISTRY (21 JAN 2026 - Split Architecture)
     # =========================================================================
-    # Methods for managing geo.table_metadata - the source of truth for
-    # vector table metadata. STAC copies this for catalog convenience.
+    # Writes to TWO tables with separation of concerns:
+    #   - geo.table_catalog: Service layer metadata (replicable to external DB)
+    #   - app.vector_etl_tracking: ETL internals (internal only, never replicated)
     # =========================================================================
 
     def register_table_metadata(
@@ -1588,34 +1589,38 @@ class VectorToPostGISHandler:
         custom_properties: dict = None
     ) -> None:
         """
-        Register or update table metadata in geo.table_metadata registry.
+        Register table metadata in BOTH geo.table_catalog AND app.vector_etl_tracking.
 
-        This is the SOURCE OF TRUTH for vector table metadata. STAC items
-        copy this information for catalog convenience.
+        21 JAN 2026 ARCHITECTURE (Separation of Concerns):
+        - geo.table_catalog: Service layer fields (title, description, bbox, etc.)
+          → Replicated to external DB via Azure Data Factory
+          → Queried by OGC Features, TiPG, external services
+        - app.vector_etl_tracking: ETL internal fields (etl_job_id, source_file, etc.)
+          → NEVER replicated to external DB
+          → Used for debugging, audit, data lineage
 
         Uses INSERT ... ON CONFLICT UPDATE for idempotency - safe to call
         multiple times (e.g., on job re-run).
 
         Args:
-            table_name: Target table name (PRIMARY KEY in registry)
+            table_name: Target table name (PRIMARY KEY in both tables)
             schema: Target schema (default 'geo')
-            etl_job_id: Full 64-char job ID for traceability
-            source_file: Original filename (e.g., 'countries.shp')
-            source_format: File format (shp, gpkg, geojson, csv, etc.)
-            source_crs: Original CRS string before reprojection (e.g., 'EPSG:32610')
-            feature_count: Total number of features in table
-            geometry_type: PostGIS geometry type (e.g., 'MULTIPOLYGON')
-            bbox: Bounding box tuple (minx, miny, maxx, maxy) for pre-computed extent
-            title: User-friendly display name (optional, 09 DEC 2025)
-            description: Full dataset description (optional, 09 DEC 2025)
-            attribution: Data source attribution (optional, 09 DEC 2025)
-            license: SPDX license identifier e.g. CC-BY-4.0 (optional, 09 DEC 2025)
-            keywords: Comma-separated tags for discoverability (optional, 09 DEC 2025)
-            temporal_start: Start of temporal extent ISO8601 (optional, 09 DEC 2025)
-            temporal_end: End of temporal extent ISO8601 (optional, 09 DEC 2025)
-            temporal_property: Column name containing date data (optional, 09 DEC 2025)
-            custom_properties: Additional JSONB properties (optional, 13 JAN 2026)
-                              Used for ogc:fallback_url and other extensible metadata.
+            etl_job_id: Full 64-char job ID for traceability (ETL INTERNAL)
+            source_file: Original filename (ETL INTERNAL)
+            source_format: File format (ETL INTERNAL)
+            source_crs: Original CRS before reprojection (ETL INTERNAL)
+            feature_count: Total number of features
+            geometry_type: PostGIS geometry type
+            bbox: Bounding box tuple (minx, miny, maxx, maxy)
+            title: User-friendly display name
+            description: Full dataset description
+            attribution: Data source attribution
+            license: SPDX license identifier
+            keywords: Comma-separated tags
+            temporal_start: Start of temporal extent ISO8601
+            temporal_end: End of temporal extent ISO8601
+            temporal_property: Column name containing date data
+            custom_properties: Additional JSONB properties
         """
         # Handle None or invalid bbox gracefully
         bbox_values = (None, None, None, None)
@@ -1628,54 +1633,77 @@ class VectorToPostGISHandler:
 
         with self._pg_repo._get_connection() as conn:
             with conn.cursor() as cur:
+                # =============================================================
+                # STEP 1: Write SERVICE LAYER fields to geo.table_catalog
+                # =============================================================
                 cur.execute("""
-                    INSERT INTO geo.table_metadata (
-                        table_name, schema_name, etl_job_id, source_file,
-                        source_format, source_crs, feature_count, geometry_type,
+                    INSERT INTO geo.table_catalog (
+                        table_name, schema_name, feature_count, geometry_type,
                         bbox_minx, bbox_miny, bbox_maxx, bbox_maxy,
                         title, description, attribution, license, keywords,
                         temporal_start, temporal_end, temporal_property,
                         custom_properties,
                         created_at, updated_at
                     ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s, %s,
                         %s, %s, %s, %s, %s, %s, %s, %s,
                         %s,
                         NOW(), NOW()
                     )
                     ON CONFLICT (table_name) DO UPDATE SET
                         schema_name = EXCLUDED.schema_name,
-                        etl_job_id = EXCLUDED.etl_job_id,
-                        source_file = EXCLUDED.source_file,
-                        source_format = EXCLUDED.source_format,
-                        source_crs = EXCLUDED.source_crs,
                         feature_count = EXCLUDED.feature_count,
                         geometry_type = EXCLUDED.geometry_type,
                         bbox_minx = EXCLUDED.bbox_minx,
                         bbox_miny = EXCLUDED.bbox_miny,
                         bbox_maxx = EXCLUDED.bbox_maxx,
                         bbox_maxy = EXCLUDED.bbox_maxy,
-                        title = COALESCE(EXCLUDED.title, geo.table_metadata.title),
-                        description = COALESCE(EXCLUDED.description, geo.table_metadata.description),
-                        attribution = COALESCE(EXCLUDED.attribution, geo.table_metadata.attribution),
-                        license = COALESCE(EXCLUDED.license, geo.table_metadata.license),
-                        keywords = COALESCE(EXCLUDED.keywords, geo.table_metadata.keywords),
-                        temporal_start = COALESCE(EXCLUDED.temporal_start, geo.table_metadata.temporal_start),
-                        temporal_end = COALESCE(EXCLUDED.temporal_end, geo.table_metadata.temporal_end),
-                        temporal_property = COALESCE(EXCLUDED.temporal_property, geo.table_metadata.temporal_property),
-                        custom_properties = COALESCE(EXCLUDED.custom_properties, geo.table_metadata.custom_properties),
+                        title = COALESCE(EXCLUDED.title, geo.table_catalog.title),
+                        description = COALESCE(EXCLUDED.description, geo.table_catalog.description),
+                        attribution = COALESCE(EXCLUDED.attribution, geo.table_catalog.attribution),
+                        license = COALESCE(EXCLUDED.license, geo.table_catalog.license),
+                        keywords = COALESCE(EXCLUDED.keywords, geo.table_catalog.keywords),
+                        temporal_start = COALESCE(EXCLUDED.temporal_start, geo.table_catalog.temporal_start),
+                        temporal_end = COALESCE(EXCLUDED.temporal_end, geo.table_catalog.temporal_end),
+                        temporal_property = COALESCE(EXCLUDED.temporal_property, geo.table_catalog.temporal_property),
+                        custom_properties = COALESCE(EXCLUDED.custom_properties, geo.table_catalog.custom_properties),
                         updated_at = NOW()
                 """, (
-                    table_name, schema, etl_job_id, source_file,
-                    source_format, source_crs, feature_count, geometry_type,
+                    table_name, schema, feature_count, geometry_type,
                     bbox_values[0], bbox_values[1], bbox_values[2], bbox_values[3],
                     title, description, attribution, license, keywords,
                     temporal_start, temporal_end, temporal_property,
                     custom_props_json
                 ))
+
+                # =============================================================
+                # STEP 2: Write ETL INTERNAL fields to app.vector_etl_tracking
+                # =============================================================
+                # This table is INTERNAL ONLY - never replicated to external DB
+                cur.execute("""
+                    INSERT INTO app.vector_etl_tracking (
+                        table_name, etl_job_id, source_file, source_format,
+                        source_crs, status, rows_written, target_crs,
+                        processing_completed_at, created_at
+                    ) VALUES (
+                        %s, %s, %s, %s, %s, 'completed', %s, 'EPSG:4326',
+                        NOW(), NOW()
+                    )
+                    ON CONFLICT (table_name, etl_job_id) DO UPDATE SET
+                        source_file = EXCLUDED.source_file,
+                        source_format = EXCLUDED.source_format,
+                        source_crs = EXCLUDED.source_crs,
+                        status = 'completed',
+                        rows_written = EXCLUDED.rows_written,
+                        processing_completed_at = NOW()
+                """, (
+                    table_name, etl_job_id, source_file, source_format,
+                    source_crs, feature_count
+                ))
+
                 conn.commit()
 
-        logger.info(f"✅ Registered metadata for {schema}.{table_name} (job: {etl_job_id[:8]}...)")
+        logger.info(f"✅ Registered metadata for {schema}.{table_name} in table_catalog + etl_tracking (job: {etl_job_id[:8]}...)")
 
     def update_table_stac_link(
         self,
@@ -1684,10 +1712,13 @@ class VectorToPostGISHandler:
         stac_collection_id: str
     ) -> bool:
         """
-        Update table_metadata with STAC item linkage after Stage 3 completion.
+        Update table_catalog with STAC item linkage after Stage 3 completion.
 
         Called after successful STAC item creation to establish the backlink
         from PostGIS table → STAC catalog item.
+
+        NOTE (21 JAN 2026): Updates geo.table_catalog (service layer) only.
+        STAC linkage is service layer metadata, not ETL internal.
 
         Args:
             table_name: Table name (must already exist in registry)
@@ -1700,7 +1731,7 @@ class VectorToPostGISHandler:
         with self._pg_repo._get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
-                    UPDATE geo.table_metadata
+                    UPDATE geo.table_catalog
                     SET stac_item_id = %s,
                         stac_collection_id = %s,
                         updated_at = NOW()
@@ -1713,7 +1744,7 @@ class VectorToPostGISHandler:
             logger.info(f"✅ Linked {table_name} → STAC item {stac_item_id}")
             return True
         else:
-            logger.warning(f"⚠️ No metadata found for {table_name} - STAC link not recorded")
+            logger.warning(f"⚠️ No metadata found for {table_name} in table_catalog - STAC link not recorded")
             return False
 
     # =========================================================================

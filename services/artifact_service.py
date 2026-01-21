@@ -4,7 +4,7 @@
 # STATUS: Service - Artifact registry business logic
 # PURPOSE: Manage artifact lifecycle with supersession tracking
 # CREATED: 20 JAN 2026
-# LAST_REVIEWED: 20 JAN 2026
+# LAST_REVIEWED: 21 JAN 2026
 # ============================================================================
 """
 Artifact Service - Internal Asset Tracking Business Logic.
@@ -110,6 +110,7 @@ class ArtifactService:
         content_hash: Optional[str] = None,
         size_bytes: Optional[int] = None,
         content_type: Optional[str] = None,
+        blob_version_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
         overwrite: bool = False
     ) -> Artifact:
@@ -134,6 +135,7 @@ class ArtifactService:
             content_hash: SHA256 of file content
             size_bytes: File size
             content_type: MIME type
+            blob_version_id: Azure Blob Storage version ID (if versioning enabled)
             metadata: Additional metadata
             overwrite: If True, supersede existing artifact
 
@@ -166,6 +168,7 @@ class ArtifactService:
             blob_path=blob_path,
             size_bytes=size_bytes,
             content_type=content_type,
+            blob_version_id=blob_version_id,
             stac_collection_id=stac_collection_id,
             stac_item_id=stac_item_id,
             client_type=client_type,

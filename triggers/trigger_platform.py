@@ -131,6 +131,10 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
         req_body = req.get_json()
         platform_req = PlatformRequest(**req_body)
 
+        # Validate expected_data_type if specified (21 JAN 2026)
+        # Catches mismatches like submitting .geojson when expecting raster
+        platform_req.validate_expected_data_type()
+
         # Generate deterministic request ID (idempotent)
         request_id = generate_platform_request_id(
             platform_req.dataset_id,
@@ -1368,12 +1372,29 @@ def _translate_to_coremachine(
             if isinstance(file_name, list):
                 file_name = file_name[0]
 
-            # Check for docker processing mode
-            processing_mode = opts.get('processing_mode', 'function').lower()
+            # Determine processing mode (21 JAN 2026)
+            # Default to Docker if docker_worker_enabled, else Function App
+            # Explicit processing_mode in options overrides the default
+            from config import get_app_mode_config
+            app_mode_config = get_app_mode_config()
+
+            processing_mode = opts.get('processing_mode')
+            if processing_mode:
+                # Explicit override from client
+                processing_mode = processing_mode.lower()
+            elif app_mode_config.docker_worker_enabled:
+                # Default to Docker when worker is enabled (phasing out Function App raster processing)
+                processing_mode = 'docker'
+            else:
+                # Fallback to Function App when no Docker worker
+                processing_mode = 'function'
+
             if processing_mode == 'docker':
                 job_type = 'process_raster_docker'
             else:
                 job_type = 'process_raster_v2'
+
+            logger.info(f"  Raster processing mode: {processing_mode} → {job_type}")
 
             return job_type, {
                 # File location (required)
@@ -1455,15 +1476,34 @@ def _translate_single_raster(
     if isinstance(file_name, list):
         file_name = file_name[0]
 
-    # Determine job type based on processing_mode (12 JAN 2026)
-    processing_mode = opts.get('processing_mode', 'function').lower()
+    # Determine processing mode (21 JAN 2026)
+    # Default to Docker if docker_worker_enabled, else Function App
+    # Explicit processing_mode in options overrides the default
+    from config import get_app_mode_config
+    app_mode_config = get_app_mode_config()
+
+    processing_mode = opts.get('processing_mode')
+    if processing_mode:
+        # Explicit override from client
+        processing_mode = processing_mode.lower()
+        if processing_mode not in ('docker', 'function'):
+            logger.warning(f"  Unknown processing_mode '{processing_mode}', using default")
+            processing_mode = None
+
+    if not processing_mode:
+        if app_mode_config.docker_worker_enabled:
+            # Default to Docker when worker is enabled (phasing out Function App raster processing)
+            processing_mode = 'docker'
+        else:
+            # Fallback to Function App when no Docker worker
+            processing_mode = 'function'
+
     if processing_mode == 'docker':
         job_type = 'process_raster_docker'
-        logger.info(f"  Processing mode: docker → {job_type}")
     else:
         job_type = 'process_raster_v2'
-        if processing_mode != 'function':
-            logger.warning(f"  Unknown processing_mode '{processing_mode}', defaulting to function")
+
+    logger.info(f"  Raster processing mode: {processing_mode} → {job_type}")
 
     return job_type, {
         # File location (required)

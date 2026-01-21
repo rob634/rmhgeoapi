@@ -207,6 +207,32 @@ class PlatformRequest(BaseModel):
         else:
             raise ValueError(f"Unsupported file format: {ext}")
 
+    def validate_expected_data_type(self) -> None:
+        """
+        Validate that detected data_type matches expected_data_type if specified.
+
+        Called explicitly after model creation to validate data type expectations.
+        This catches mismatches like submitting a .geojson file when expecting raster.
+
+        Raises:
+            ValueError: If expected_data_type doesn't match detected data_type
+
+        Example:
+            request = PlatformRequest(**body)
+            request.validate_expected_data_type()  # Raises if mismatch
+        """
+        expected = self.processing_options.get('expected_data_type')
+        if expected:
+            expected_lower = expected.lower()
+            detected = self.data_type.value.lower()
+            if expected_lower != detected:
+                file_name = self.file_name[0] if isinstance(self.file_name, list) else self.file_name
+                raise ValueError(
+                    f"Data type mismatch: file '{file_name}' detected as '{detected}' "
+                    f"but expected_data_type='{expected}'. "
+                    f"Check file extension or remove expected_data_type constraint."
+                )
+
     @property
     def stac_item_id(self) -> str:
         """

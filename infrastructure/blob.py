@@ -3,7 +3,7 @@
 # ============================================================================
 # STATUS: Infrastructure - Azure Blob Storage access
 # PURPOSE: Centralized blob operations with DefaultAzureCredential
-# LAST_REVIEWED: 02 JAN 2026
+# LAST_REVIEWED: 21 JAN 2026
 # REVIEW_STATUS: Checks 1-7 Applied (Check 8 ref: config/storage_config.py)
 # ============================================================================
 """
@@ -657,6 +657,7 @@ class BlobRepository(IBlobRepository):
         Returns:
             Dict with blob properties:
                 - container, blob_path, size, etag, last_modified
+                - blob_version_id: Azure version ID (only if versioning enabled on container)
                 - file_checksum: SHA-256 multihash (only if compute_checksum=True)
                 - file_size: Exact byte count (only if compute_checksum=True)
                 - checksum_time_ms: Computation time in ms (only if compute_checksum=True)
@@ -664,6 +665,9 @@ class BlobRepository(IBlobRepository):
         Note:
             Checksum computation adds ~5ms per MB of data (CPU only, no I/O).
             For a 500MB file, expect ~2.5 seconds overhead.
+            blob_version_id is only populated if blob versioning is enabled on the
+            storage account. See: az storage account blob-service-properties update
+            --enable-versioning true
         """
         try:
             container_client = self._get_container_client(container)
@@ -695,7 +699,8 @@ class BlobRepository(IBlobRepository):
 
             logger.debug(f"Writing blob: {container}/{blob_path} (overwrite={overwrite})")
 
-            blob_client.upload_blob(
+            # Upload blob and capture response (includes version_id if versioning enabled)
+            upload_response = blob_client.upload_blob(
                 data,
                 overwrite=overwrite,
                 content_settings=ContentSettings(content_type=content_type),
@@ -705,12 +710,21 @@ class BlobRepository(IBlobRepository):
             # Get properties of written blob
             properties = blob_client.get_blob_properties()
 
+            # Extract version_id from upload response (only present if versioning enabled)
+            # Azure returns version_id as a string like "2024-01-21T12:34:56.1234567Z"
+            blob_version_id = None
+            if upload_response and hasattr(upload_response, 'get'):
+                blob_version_id = upload_response.get('version_id')
+            elif upload_response and hasattr(upload_response, 'version_id'):
+                blob_version_id = upload_response.version_id
+
             result = {
                 'container': container,
                 'blob_path': blob_path,
                 'size': properties.size,
                 'etag': properties.etag,
-                'last_modified': properties.last_modified.isoformat() if properties.last_modified else None
+                'last_modified': properties.last_modified.isoformat() if properties.last_modified else None,
+                'blob_version_id': blob_version_id  # None if versioning not enabled
             }
 
             # Add checksum fields if computed

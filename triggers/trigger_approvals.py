@@ -680,7 +680,7 @@ def platform_approvals_status(req: func.HttpRequest) -> func.HttpResponse:
                 statuses[collection_id] = {"has_approval": False}
 
         # Look up by table names (for OGC Features / vector tables)
-        # This looks up the stac_item_id from geo.table_metadata first
+        # This looks up the stac_item_id from geo.table_catalog (21 JAN 2026)
         if table_names:
             try:
                 from infrastructure.postgresql import PostgreSQLRepository
@@ -689,11 +689,11 @@ def platform_approvals_status(req: func.HttpRequest) -> func.HttpResponse:
                 with repo._get_connection() as conn:
                     with conn.cursor() as cur:
                         for table_name in table_names:
-                            # Look up stac_item_id from table_metadata
+                            # Look up stac_item_id from table_catalog (21 JAN 2026)
                             cur.execute(
                                 """
                                 SELECT stac_item_id, stac_collection_id
-                                FROM geo.table_metadata
+                                FROM geo.table_catalog
                                 WHERE table_name = %s
                                 """,
                                 (table_name,)

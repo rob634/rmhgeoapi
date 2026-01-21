@@ -513,6 +513,7 @@ def process_large_raster_complete(params: Dict[str, Any], context: Optional[Dict
                     content_hash=None,  # MosaicJSON doesn't have checksum yet
                     size_bytes=None,
                     content_type='application/json',
+                    blob_version_id=mosaicjson_result.get('blob_version_id'),  # Azure version (21 JAN 2026)
                     metadata={
                         'tile_count': tiling_result.get('tile_count'),
                         'cog_count': len(cog_blobs),

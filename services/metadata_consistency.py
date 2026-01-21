@@ -179,14 +179,15 @@ class MetadataConsistencyChecker:
 
     def _check_stac_vector_orphans(self) -> Dict[str, Any]:
         """
-        Find STAC items for vector collections without geo.table_metadata.
+        Find STAC items for vector collections without geo.table_catalog.
 
+        NOTE (21 JAN 2026): Changed from geo.table_metadata to geo.table_catalog.
         Checks pgstac.items where collection starts with 'vector-' but
-        no corresponding geo.table_metadata record exists.
+        no corresponding geo.table_catalog record exists.
         """
         check = {
             "name": "stac_vector_orphans",
-            "description": "STAC vector items without geo.table_metadata",
+            "description": "STAC vector items without geo.table_catalog",
             "scanned": 0,
             "issues": []
         }
@@ -198,25 +199,25 @@ class MetadataConsistencyChecker:
         try:
             with self.db_repo._get_connection() as conn:
                 with conn.cursor() as cur:
-                    # Check if geo.table_metadata exists
+                    # Check if geo.table_catalog exists
                     cur.execute("""
                         SELECT EXISTS (
                             SELECT 1 FROM information_schema.tables
-                            WHERE table_schema = 'geo' AND table_name = 'table_metadata'
+                            WHERE table_schema = 'geo' AND table_name = 'table_catalog'
                         )
                     """)
                     if not cur.fetchone()['exists']:
-                        check["skipped"] = "geo.table_metadata not available"
+                        check["skipped"] = "geo.table_catalog not available"
                         return check
 
                     # Find orphaned STAC items
                     cur.execute("""
                         SELECT i.id as stac_item_id, i.collection
                         FROM pgstac.items i
-                        LEFT JOIN geo.table_metadata m
-                            ON i.id = m.stac_item_id
+                        LEFT JOIN geo.table_catalog c
+                            ON i.id = c.stac_item_id
                         WHERE i.collection LIKE 'vector-%'
-                        AND m.table_name IS NULL
+                        AND c.table_name IS NULL
                         LIMIT 100
                     """)
                     orphans = cur.fetchall()
@@ -227,7 +228,7 @@ class MetadataConsistencyChecker:
                             "type": "stac_vector_orphan",
                             "stac_item_id": orphan["stac_item_id"],
                             "collection": orphan["collection"],
-                            "message": "STAC item exists but no geo.table_metadata record found"
+                            "message": "STAC item exists but no geo.table_catalog record found"
                         })
 
         except Exception as e:
@@ -294,13 +295,14 @@ class MetadataConsistencyChecker:
 
     def _check_vector_backlinks(self) -> Dict[str, Any]:
         """
-        Find geo.table_metadata with stac_item_id that doesn't exist in pgstac.
+        Find geo.table_catalog with stac_item_id that doesn't exist in pgstac.
 
-        Detects broken backlinks where metadata points to deleted STAC items.
+        NOTE (21 JAN 2026): Changed from geo.table_metadata to geo.table_catalog.
+        Detects broken backlinks where catalog points to deleted STAC items.
         """
         check = {
             "name": "vector_backlinks",
-            "description": "geo.table_metadata with broken STAC backlinks",
+            "description": "geo.table_catalog with broken STAC backlinks",
             "scanned": 0,
             "issues": []
         }
@@ -312,23 +314,23 @@ class MetadataConsistencyChecker:
         try:
             with self.db_repo._get_connection() as conn:
                 with conn.cursor() as cur:
-                    # Check if geo.table_metadata exists
+                    # Check if geo.table_catalog exists
                     cur.execute("""
                         SELECT EXISTS (
                             SELECT 1 FROM information_schema.tables
-                            WHERE table_schema = 'geo' AND table_name = 'table_metadata'
+                            WHERE table_schema = 'geo' AND table_name = 'table_catalog'
                         )
                     """)
                     if not cur.fetchone()['exists']:
-                        check["skipped"] = "geo.table_metadata not available"
+                        check["skipped"] = "geo.table_catalog not available"
                         return check
 
                     # Find broken backlinks
                     cur.execute("""
-                        SELECT m.table_name, m.stac_item_id, m.stac_collection_id
-                        FROM geo.table_metadata m
-                        LEFT JOIN pgstac.items i ON m.stac_item_id = i.id
-                        WHERE m.stac_item_id IS NOT NULL
+                        SELECT c.table_name, c.stac_item_id, c.stac_collection_id
+                        FROM geo.table_catalog c
+                        LEFT JOIN pgstac.items i ON c.stac_item_id = i.id
+                        WHERE c.stac_item_id IS NOT NULL
                         AND i.id IS NULL
                         LIMIT 100
                     """)
@@ -341,7 +343,7 @@ class MetadataConsistencyChecker:
                             "table_name": row["table_name"],
                             "stac_item_id": row["stac_item_id"],
                             "stac_collection_id": row["stac_collection_id"],
-                            "message": "table_metadata.stac_item_id points to non-existent STAC item"
+                            "message": "table_catalog.stac_item_id points to non-existent STAC item"
                         })
 
         except Exception as e:
@@ -407,8 +409,9 @@ class MetadataConsistencyChecker:
 
     def _check_dataset_refs_vector(self) -> Dict[str, Any]:
         """
-        Find app.dataset_refs for vectors that don't exist in geo.table_metadata.
+        Find app.dataset_refs for vectors that don't exist in geo.table_catalog.
 
+        NOTE (21 JAN 2026): Changed from geo.table_metadata to geo.table_catalog.
         Detects orphaned DDH linkage records.
         """
         check = {
@@ -425,24 +428,24 @@ class MetadataConsistencyChecker:
         try:
             with self.db_repo._get_connection() as conn:
                 with conn.cursor() as cur:
-                    # Check if geo.table_metadata exists
+                    # Check if geo.table_catalog exists
                     cur.execute("""
                         SELECT EXISTS (
                             SELECT 1 FROM information_schema.tables
-                            WHERE table_schema = 'geo' AND table_name = 'table_metadata'
+                            WHERE table_schema = 'geo' AND table_name = 'table_catalog'
                         )
                     """)
                     if not cur.fetchone()['exists']:
-                        check["skipped"] = "geo.table_metadata not available"
+                        check["skipped"] = "geo.table_catalog not available"
                         return check
 
                     # Find orphaned refs
                     cur.execute("""
                         SELECT r.dataset_id, r.ddh_dataset_id, r.ddh_resource_id
                         FROM app.dataset_refs r
-                        LEFT JOIN geo.table_metadata m ON r.dataset_id = m.table_name
+                        LEFT JOIN geo.table_catalog c ON r.dataset_id = c.table_name
                         WHERE r.data_type = 'vector'
-                        AND m.table_name IS NULL
+                        AND c.table_name IS NULL
                         LIMIT 100
                     """)
                     orphans = cur.fetchall()

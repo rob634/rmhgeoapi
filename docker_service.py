@@ -149,6 +149,18 @@ def configure_docker_logging():
         uvi_logger.addHandler(handler)
         uvi_logger.propagate = False
 
+    # CRITICAL: Suppress verbose Azure SDK logs that drown out application logs
+    # Match function_app.py settings (21 JAN 2026)
+    logging.getLogger("azure.identity").setLevel(logging.WARNING)
+    logging.getLogger("azure.identity._internal").setLevel(logging.WARNING)
+    logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
+    logging.getLogger("azure.storage").setLevel(logging.WARNING)
+    logging.getLogger("azure.core").setLevel(logging.WARNING)
+    logging.getLogger("azure.servicebus").setLevel(logging.WARNING)
+    logging.getLogger("azure.servicebus._pyamqp").setLevel(logging.WARNING)
+    logging.getLogger("azure.monitor.opentelemetry").setLevel(logging.WARNING)
+    logging.getLogger("msal").setLevel(logging.WARNING)
+
 
 configure_docker_logging()
 

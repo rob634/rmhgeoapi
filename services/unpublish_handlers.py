@@ -172,11 +172,12 @@ def inventory_raster_item(params: Dict[str, Any], context: Optional[Dict[str, An
 
 def inventory_vector_item(params: Dict[str, Any], context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
-    Query geo.table_metadata for ETL/STAC linkage info.
+    Query geo.table_catalog + app.vector_etl_tracking for metadata.
 
     Stage 1 handler for unpublish_vector job.
-    PRIMARY SOURCE: geo.table_metadata (not STAC!)
-    STAC info is extracted from metadata if available (for optional cleanup).
+    NOTE (21 JAN 2026): Queries TWO tables due to separation of concerns:
+    - geo.table_catalog: Service layer (stac_item_id, feature_count, etc.)
+    - app.vector_etl_tracking: ETL internals (etl_job_id, source_file, etc.)
 
     Args:
         params: {
@@ -195,7 +196,7 @@ def inventory_vector_item(params: Dict[str, Any], context: Optional[Dict[str, An
             'etl_job_id': str or None,
             'stac_item_id': str or None,
             'stac_collection_id': str or None,
-            'metadata_snapshot': dict  # Full metadata row for audit
+            'metadata_snapshot': dict  # Full metadata from both tables
         }
     """
     from infrastructure.postgresql import PostgreSQLRepository
@@ -221,55 +222,76 @@ def inventory_vector_item(params: Dict[str, Any], context: Optional[Dict[str, An
         stac_collection_id = None
         source_file = None
         source_format = None
+        source_crs = None
         feature_count = None
 
         repo = PostgreSQLRepository()
         with repo._get_connection() as conn:
             with conn.cursor() as cur:
-                # Query geo.table_metadata for this table
-                # Note: table_metadata.schema_name column exists but table_name is PK
+                # Query geo.table_catalog for SERVICE LAYER metadata
                 cur.execute(
                     """
                     SELECT
                         table_name, schema_name,
-                        etl_job_id, source_file, source_format, source_crs,
                         stac_item_id, stac_collection_id,
                         feature_count, geometry_type,
                         created_at, updated_at,
                         bbox_minx, bbox_miny, bbox_maxx, bbox_maxy
-                    FROM geo.table_metadata
+                    FROM geo.table_catalog
                     WHERE table_name = %s
                     """,
                     (table_name,)
                 )
-                row = cur.fetchone()
+                catalog_row = cur.fetchone()
 
-                if row:
+                # Query app.vector_etl_tracking for ETL INTERNAL metadata
+                # (Get latest ETL run for this table)
+                cur.execute(
+                    """
+                    SELECT
+                        etl_job_id, source_file, source_format, source_crs,
+                        created_at
+                    FROM app.vector_etl_tracking
+                    WHERE table_name = %s
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    (table_name,)
+                )
+                etl_row = cur.fetchone()
+
+                if catalog_row or etl_row:
                     metadata_found = True
-                    # Access by column name (dict_row cursor)
-                    etl_job_id = row['etl_job_id']
-                    stac_item_id = row['stac_item_id']
-                    stac_collection_id = row['stac_collection_id']
-                    source_file = row['source_file']
-                    source_format = row['source_format']
-                    feature_count = row['feature_count']
 
-                    # Build full metadata snapshot for audit
+                    # Extract from catalog (service layer)
+                    if catalog_row:
+                        stac_item_id = catalog_row.get('stac_item_id')
+                        stac_collection_id = catalog_row.get('stac_collection_id')
+                        feature_count = catalog_row.get('feature_count')
+
+                    # Extract from ETL tracking (internal)
+                    if etl_row:
+                        etl_job_id = etl_row.get('etl_job_id')
+                        source_file = etl_row.get('source_file')
+                        source_format = etl_row.get('source_format')
+                        source_crs = etl_row.get('source_crs')
+
+                    # Build full metadata snapshot for audit (combines both tables)
                     metadata = {
-                        'table_name': row['table_name'],
-                        'schema_name': row['schema_name'],
+                        'table_name': catalog_row['table_name'] if catalog_row else table_name,
+                        'schema_name': catalog_row.get('schema_name', schema_name) if catalog_row else schema_name,
                         'etl_job_id': etl_job_id,
                         'source_file': source_file,
                         'source_format': source_format,
-                        'source_crs': row['source_crs'],
+                        'source_crs': source_crs,
                         'stac_item_id': stac_item_id,
                         'stac_collection_id': stac_collection_id,
                         'feature_count': feature_count,
-                        'geometry_type': row['geometry_type'],
-                        'created_at': str(row['created_at']) if row['created_at'] else None,
-                        'updated_at': str(row['updated_at']) if row['updated_at'] else None,
-                        'bbox': [row['bbox_minx'], row['bbox_miny'], row['bbox_maxx'], row['bbox_maxy']]
-                            if row['bbox_minx'] is not None else None
+                        'geometry_type': catalog_row.get('geometry_type') if catalog_row else None,
+                        'created_at': str(catalog_row['created_at']) if catalog_row and catalog_row.get('created_at') else None,
+                        'updated_at': str(catalog_row['updated_at']) if catalog_row and catalog_row.get('updated_at') else None,
+                        'bbox': [catalog_row['bbox_minx'], catalog_row['bbox_miny'], catalog_row['bbox_maxx'], catalog_row['bbox_maxy']]
+                            if catalog_row and catalog_row.get('bbox_minx') is not None else None
                     }
 
                     logger.info(
@@ -278,7 +300,7 @@ def inventory_vector_item(params: Dict[str, Any], context: Optional[Dict[str, An
                         f"stac_item={stac_item_id or 'none'}, features={feature_count}"
                     )
                 else:
-                    # No metadata row - table may have been created outside ETL
+                    # No metadata rows - table may have been created outside ETL
                     # This is OK - we can still drop the table
                     logger.info(
                         f"{'[DRY-RUN] ' if dry_run else ''}No metadata found for {schema_name}.{table_name} "
@@ -535,19 +557,28 @@ def drop_postgis_table(params: Dict[str, Any], context: Optional[Dict[str, Any]]
                     table_dropped = True
                     logger.info(f"Dropped table: {schema_name}.{table_name}")
 
-                # Delete metadata row if requested
+                # Delete metadata rows if requested (21 JAN 2026: both tables)
                 if delete_metadata:
+                    # Delete from geo.table_catalog (service layer)
                     cur.execute(
-                        "DELETE FROM geo.table_metadata WHERE table_name = %s RETURNING table_name",
+                        "DELETE FROM geo.table_catalog WHERE table_name = %s RETURNING table_name",
                         (table_name,)
                     )
-                    deleted_row = cur.fetchone()
-                    metadata_deleted = deleted_row is not None
+                    catalog_deleted = cur.fetchone()
+
+                    # Delete from app.vector_etl_tracking (ETL internal - all rows for this table)
+                    cur.execute(
+                        "DELETE FROM app.vector_etl_tracking WHERE table_name = %s RETURNING table_name",
+                        (table_name,)
+                    )
+                    etl_deleted = cur.fetchone()
+
+                    metadata_deleted = catalog_deleted is not None or etl_deleted is not None
 
                     if metadata_deleted:
-                        logger.info(f"Deleted metadata row for: {table_name}")
+                        logger.info(f"Deleted metadata for: {table_name} (catalog={catalog_deleted is not None}, etl={etl_deleted is not None})")
                     else:
-                        logger.info(f"No metadata row found for: {table_name} (idempotent)")
+                        logger.info(f"No metadata rows found for: {table_name} (idempotent)")
 
                 conn.commit()
 

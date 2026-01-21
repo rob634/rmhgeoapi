@@ -4,7 +4,7 @@
 # STATUS: Infrastructure - Artifact registry CRUD operations
 # PURPOSE: Database operations for app.artifacts table
 # CREATED: 20 JAN 2026
-# LAST_REVIEWED: 20 JAN 2026
+# LAST_REVIEWED: 21 JAN 2026
 # ============================================================================
 """
 Artifact Repository - Internal Asset Tracking.
@@ -87,12 +87,12 @@ class ArtifactRepository(PostgreSQLRepository):
             query = sql.SQL("""
                 INSERT INTO {}.artifacts (
                     artifact_id, content_hash, storage_account, container, blob_path,
-                    size_bytes, content_type, stac_collection_id, stac_item_id,
+                    size_bytes, content_type, blob_version_id, stac_collection_id, stac_item_id,
                     client_type, client_refs, source_job_id, source_task_id,
                     supersedes, superseded_by, revision, status, metadata,
                     created_at, updated_at, deleted_at
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
                 RETURNING *
             """).format(sql.Identifier(self.schema_name))
@@ -105,6 +105,7 @@ class ArtifactRepository(PostgreSQLRepository):
                 artifact.blob_path,
                 artifact.size_bytes,
                 artifact.content_type,
+                artifact.blob_version_id,
                 artifact.stac_collection_id,
                 artifact.stac_item_id,
                 artifact.client_type,
@@ -419,6 +420,7 @@ class ArtifactRepository(PostgreSQLRepository):
             blob_path=row['blob_path'],
             size_bytes=row.get('size_bytes'),
             content_type=row.get('content_type'),
+            blob_version_id=row.get('blob_version_id'),
             stac_collection_id=row.get('stac_collection_id'),
             stac_item_id=row.get('stac_item_id'),
             client_type=row['client_type'],

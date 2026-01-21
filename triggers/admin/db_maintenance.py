@@ -1465,118 +1465,25 @@ class AdminDbMaintenanceTrigger:
                         cur.execute("CREATE SCHEMA IF NOT EXISTS geo")
                         logger.info("✅ Ensured geo schema exists")
 
-                        # 0b. Create geo.table_metadata registry table (06 DEC 2025)
-                        # Stores table-level metadata for vector datasets:
-                        # - ETL traceability (job_id, source_file, source_format, source_crs)
-                        # - STAC linkage (stac_item_id, stac_collection_id)
-                        # - Pre-computed bbox for OGC Features performance
-                        # This is the SOURCE OF TRUTH - STAC copies for catalog convenience
-                        cur.execute("""
-                            CREATE TABLE IF NOT EXISTS geo.table_metadata (
-                                table_name VARCHAR(255) PRIMARY KEY,
-                                schema_name VARCHAR(63) DEFAULT 'geo',
+                        # 0b. Create geo.table_catalog using PydanticToSQL (21 JAN 2026)
+                        # Replaces old geo.table_metadata - now uses Pydantic model as DDL source
+                        # Service layer metadata only (ETL fields moved to app.vector_etl_tracking)
+                        from core.schema import PydanticToSQL
+                        from core.models.geo import GeoTableCatalog
 
-                                -- ETL Traceability (populated at Stage 1)
-                                etl_job_id VARCHAR(64),
-                                source_file VARCHAR(500),
-                                source_format VARCHAR(50),
-                                source_crs VARCHAR(50),
+                        geo_generator = PydanticToSQL(schema_name="geo")
+                        geo_ddl_statements = geo_generator.generate_geo_schema_ddl()
 
-                                -- STAC Linkage (populated at Stage 3)
-                                stac_item_id VARCHAR(100),
-                                stac_collection_id VARCHAR(100),
+                        for stmt in geo_ddl_statements:
+                            try:
+                                cur.execute(stmt)
+                            except Exception as ddl_err:
+                                # Log but continue - might be "already exists" errors
+                                logger.debug(f"geo DDL statement result: {ddl_err}")
 
-                                -- Statistics (populated at Stage 1)
-                                feature_count INTEGER,
-                                geometry_type VARCHAR(50),
+                        logger.info("✅ Ensured geo.table_catalog exists (via PydanticToSQL)")
 
-                                -- Timestamps
-                                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-
-                                -- Pre-computed extent for fast OGC collection response
-                                -- Avoids ST_Extent query on every /collections/{id} request
-                                bbox_minx DOUBLE PRECISION,
-                                bbox_miny DOUBLE PRECISION,
-                                bbox_maxx DOUBLE PRECISION,
-                                bbox_maxy DOUBLE PRECISION,
-
-                                -- User-provided descriptive metadata (09 DEC 2025)
-                                -- Optional fields for OGC/STAC catalog presentation
-                                title VARCHAR(500),              -- User-friendly display name
-                                description TEXT,                -- Full dataset description
-                                attribution VARCHAR(500),        -- Data source attribution
-                                license VARCHAR(100),            -- SPDX license identifier (CC-BY-4.0, etc.)
-                                keywords TEXT,                   -- Comma-separated tags for discoverability
-
-                                -- Temporal extent (09 DEC 2025)
-                                -- Auto-detected from temporal_property column or user-provided
-                                temporal_start TIMESTAMP WITH TIME ZONE,
-                                temporal_end TIMESTAMP WITH TIME ZONE,
-                                temporal_property VARCHAR(100)   -- Column name containing date data
-                            )
-                        """)
-
-                        # Index for job lookups (find all tables from a job)
-                        cur.execute("""
-                            CREATE INDEX IF NOT EXISTS idx_table_metadata_etl_job_id
-                            ON geo.table_metadata(etl_job_id)
-                        """)
-
-                        # Index for STAC linkage lookups
-                        cur.execute("""
-                            CREATE INDEX IF NOT EXISTS idx_table_metadata_stac_item_id
-                            ON geo.table_metadata(stac_item_id)
-                        """)
-
-                        logger.info("✅ Ensured geo.table_metadata registry table exists")
-
-                        # 0c. Add columns that may be missing from older deployments (10 DEC 2025)
-                        # ALTER TABLE ADD COLUMN IF NOT EXISTS is idempotent
-                        alter_columns = [
-                            "ALTER TABLE geo.table_metadata ADD COLUMN IF NOT EXISTS title VARCHAR(500)",
-                            "ALTER TABLE geo.table_metadata ADD COLUMN IF NOT EXISTS description TEXT",
-                            "ALTER TABLE geo.table_metadata ADD COLUMN IF NOT EXISTS attribution VARCHAR(500)",
-                            "ALTER TABLE geo.table_metadata ADD COLUMN IF NOT EXISTS license VARCHAR(100)",
-                            "ALTER TABLE geo.table_metadata ADD COLUMN IF NOT EXISTS keywords TEXT",
-                            "ALTER TABLE geo.table_metadata ADD COLUMN IF NOT EXISTS temporal_start TIMESTAMP WITH TIME ZONE",
-                            "ALTER TABLE geo.table_metadata ADD COLUMN IF NOT EXISTS temporal_end TIMESTAMP WITH TIME ZONE",
-                            "ALTER TABLE geo.table_metadata ADD COLUMN IF NOT EXISTS temporal_property VARCHAR(100)",
-                        ]
-                        for alter_sql in alter_columns:
-                            cur.execute(alter_sql)
-                        logger.info("✅ Ensured geo.table_metadata has all required columns")
-
-                        # 0d. Add table_type column for curated dataset tracking (15 DEC 2025)
-                        cur.execute("""
-                            ALTER TABLE geo.table_metadata
-                            ADD COLUMN IF NOT EXISTS table_type VARCHAR(20) DEFAULT 'user'
-                        """)
-                        logger.info("✅ Ensured geo.table_metadata has table_type column")
-
-                        # 0f. Add Unified Metadata columns (09 JAN 2026 - F7.8)
-                        # Per METADATA.md design document - adds STAC-aligned fields
-                        f78_columns = [
-                            # STAC providers (array of provider objects)
-                            "ALTER TABLE geo.table_metadata ADD COLUMN IF NOT EXISTS providers JSONB",
-                            # STAC extensions URIs
-                            "ALTER TABLE geo.table_metadata ADD COLUMN IF NOT EXISTS stac_extensions JSONB",
-                            # Table Extension fields
-                            "ALTER TABLE geo.table_metadata ADD COLUMN IF NOT EXISTS column_definitions JSONB",
-                            "ALTER TABLE geo.table_metadata ADD COLUMN IF NOT EXISTS primary_geometry VARCHAR(100) DEFAULT 'geom'",
-                            # Processing Extension fields
-                            "ALTER TABLE geo.table_metadata ADD COLUMN IF NOT EXISTS processing_software JSONB",
-                            # Scientific metadata
-                            "ALTER TABLE geo.table_metadata ADD COLUMN IF NOT EXISTS sci_doi VARCHAR(200)",
-                            "ALTER TABLE geo.table_metadata ADD COLUMN IF NOT EXISTS sci_citation TEXT",
-                            # Custom properties (extension point)
-                            "ALTER TABLE geo.table_metadata ADD COLUMN IF NOT EXISTS custom_properties JSONB DEFAULT '{}'",
-                        ]
-                        for alter_sql in f78_columns:
-                            cur.execute(alter_sql)
-                        logger.info("✅ Ensured geo.table_metadata has F7.8 unified metadata columns")
-
-                        # 0e. Migrate system_admin0 to curated_admin0 (15 DEC 2025)
+                        # 0c. Migrate system_admin0 to curated_admin0 (15 DEC 2025)
                         # Curated datasets use curated_ prefix for protection
                         cur.execute("""
                             SELECT EXISTS (
@@ -1595,14 +1502,14 @@ class AdminDbMaintenanceTrigger:
                             cur.execute("ALTER TABLE geo.system_admin0 RENAME TO curated_admin0")
                             logger.info("✅ Migrated geo.system_admin0 → geo.curated_admin0")
 
-                            # Update table_metadata if it exists
+                            # Update table_catalog if it exists
                             cur.execute("""
-                                UPDATE geo.table_metadata
+                                UPDATE geo.table_catalog
                                 SET table_name = 'curated_admin0',
                                     table_type = 'curated'
                                 WHERE table_name = 'system_admin0'
                             """)
-                            logger.info("✅ Updated table_metadata for curated_admin0")
+                            logger.info("✅ Updated table_catalog for curated_admin0")
                         elif migration_check['new_exists']:
                             logger.info("✅ geo.curated_admin0 already exists (no migration needed)")
                         else:
@@ -1683,13 +1590,13 @@ class AdminDbMaintenanceTrigger:
 
                 if grant_warnings:
                     step4["status"] = "partial"
-                    step4["tables_created"] = ["geo.table_metadata", "geo.feature_collection_styles"]
+                    step4["tables_created"] = ["geo.table_catalog", "geo.feature_collection_styles"]
                     step4["grant_warnings"] = grant_warnings
                     step4["note"] = "Tables created but some GRANTs failed - may need manual permission fixes"
                 else:
                     step4["status"] = "success"
                     step4["schema_created"] = "geo, h3 (if not exists)"
-                    step4["tables_created"] = ["geo.table_metadata (vector metadata registry)", "geo.feature_collection_styles (OGC Styles)"]
+                    step4["tables_created"] = ["geo.table_catalog (service layer metadata)", "geo.feature_collection_styles (OGC Styles)"]
                     step4["grants"] = [
                         "USAGE ON SCHEMA geo",
                         "SELECT ON ALL TABLES IN SCHEMA geo",

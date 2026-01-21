@@ -4,7 +4,7 @@
 # STATUS: Core - Internal artifact tracking with client-agnostic UUIDs
 # PURPOSE: Track data pipeline outputs with supersession/lineage support
 # CREATED: 20 JAN 2026
-# LAST_REVIEWED: 20 JAN 2026
+# LAST_REVIEWED: 21 JAN 2026
 # ============================================================================
 """
 Artifact Registry Models.
@@ -88,12 +88,13 @@ class Artifact(BaseModel):
     Auto-generates:
         CREATE TABLE app.artifacts (
             artifact_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            content_hash VARCHAR(64),
+            content_hash VARCHAR(128),
             storage_account VARCHAR(64) NOT NULL,
             container VARCHAR(64) NOT NULL,
             blob_path TEXT NOT NULL,
             size_bytes BIGINT,
             content_type VARCHAR(100),
+            blob_version_id VARCHAR(64),
             stac_collection_id VARCHAR(255),
             stac_item_id VARCHAR(255),
             client_type VARCHAR(50) NOT NULL,
@@ -131,8 +132,8 @@ class Artifact(BaseModel):
     # ========================================================================
     content_hash: Optional[str] = Field(
         None,
-        max_length=64,
-        description="SHA256 hash of output file content for duplicate detection"
+        max_length=128,
+        description="Multihash of output file (STAC file extension v2.1.0 format: 1220 prefix + 64 hex = 68 chars for SHA256)"
     )
 
     # ========================================================================
@@ -160,6 +161,11 @@ class Artifact(BaseModel):
         None,
         max_length=100,
         description="MIME type (e.g., 'image/tiff', 'application/geo+json')"
+    )
+    blob_version_id: Optional[str] = Field(
+        None,
+        max_length=64,
+        description="Azure Blob Storage version ID (if versioning enabled on container)"
     )
 
     # ========================================================================
@@ -262,6 +268,7 @@ class Artifact(BaseModel):
             'blob_path': self.blob_path,
             'size_bytes': self.size_bytes,
             'content_type': self.content_type,
+            'blob_version_id': self.blob_version_id,
             'stac_collection_id': self.stac_collection_id,
             'stac_item_id': self.stac_item_id,
             'client_type': self.client_type,

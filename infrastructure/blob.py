@@ -637,9 +637,10 @@ class BlobRepository(IBlobRepository):
     @dec_validate_container
     def write_blob(self, container: str, blob_path: str, data: Union[bytes, BinaryIO],
                    overwrite: bool = True, content_type: str = "application/octet-stream",
-                   metadata: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+                   metadata: Optional[Dict[str, str]] = None,
+                   compute_checksum: bool = False) -> Dict[str, Any]:
         """
-        Write blob from bytes or stream.
+        Write blob from bytes or stream with optional STAC-compliant checksum.
 
         Container existence validated automatically by decorator.
         Blob doesn't need to exist (we're creating/overwriting it).
@@ -651,26 +652,59 @@ class BlobRepository(IBlobRepository):
             overwrite: Whether to overwrite existing blob
             content_type: MIME type for blob
             metadata: Optional metadata dictionary
+            compute_checksum: If True, compute SHA-256 multihash (STAC file:checksum format)
 
         Returns:
-            Dict with blob properties (etag, last_modified, size)
+            Dict with blob properties:
+                - container, blob_path, size, etag, last_modified
+                - file_checksum: SHA-256 multihash (only if compute_checksum=True)
+                - file_size: Exact byte count (only if compute_checksum=True)
+                - checksum_time_ms: Computation time in ms (only if compute_checksum=True)
+
+        Note:
+            Checksum computation adds ~5ms per MB of data (CPU only, no I/O).
+            For a 500MB file, expect ~2.5 seconds overhead.
         """
         try:
             container_client = self._get_container_client(container)
             blob_client = container_client.get_blob_client(blob_path)
-            
+
+            # If computing checksum, ensure data is bytes (not stream)
+            # and compute before upload (bytes already in memory)
+            file_checksum = None
+            file_size = None
+            checksum_time_ms = None
+
+            if compute_checksum:
+                import time
+                from util_checksum import compute_multihash
+
+                # Convert stream to bytes if needed
+                if hasattr(data, 'read'):
+                    data = data.read()
+
+                file_size = len(data)
+                checksum_start = time.time()
+                file_checksum = compute_multihash(data, log_performance=False)
+                checksum_time_ms = (time.time() - checksum_start) * 1000
+
+                logger.debug(
+                    f"Computed checksum for {container}/{blob_path}: "
+                    f"{file_size} bytes in {checksum_time_ms:.0f}ms"
+                )
+
             logger.debug(f"Writing blob: {container}/{blob_path} (overwrite={overwrite})")
-            
+
             blob_client.upload_blob(
                 data,
                 overwrite=overwrite,
                 content_settings=ContentSettings(content_type=content_type),
                 metadata=metadata or {}
             )
-            
+
             # Get properties of written blob
             properties = blob_client.get_blob_properties()
-            
+
             result = {
                 'container': container,
                 'blob_path': blob_path,
@@ -678,10 +712,16 @@ class BlobRepository(IBlobRepository):
                 'etag': properties.etag,
                 'last_modified': properties.last_modified.isoformat() if properties.last_modified else None
             }
-            
+
+            # Add checksum fields if computed
+            if compute_checksum:
+                result['file_checksum'] = file_checksum
+                result['file_size'] = file_size
+                result['checksum_time_ms'] = round(checksum_time_ms, 1)
+
             logger.info(f"✅ Wrote blob: {container}/{blob_path} ({properties.size} bytes)")
             return result
-            
+
         except Exception as e:
             logger.error(f"Failed to write blob {container}/{blob_path}: {e}")
             raise

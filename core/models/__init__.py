@@ -145,6 +145,12 @@ from .approval import (
     ApprovalStatus
 )
 
+# Artifact registry models (20 JAN 2026)
+from .artifact import (
+    Artifact,
+    ArtifactStatus
+)
+
 __all__ = [
     # Enums
     'JobStatus',
@@ -236,4 +242,8 @@ __all__ = [
     # Dataset approval models (F4.AP)
     'DatasetApproval',
     'ApprovalStatus',
+
+    # Artifact registry models (20 JAN 2026)
+    'Artifact',
+    'ArtifactStatus',
 ]

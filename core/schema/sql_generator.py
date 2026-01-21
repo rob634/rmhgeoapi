@@ -82,6 +82,7 @@ from ..models.system_snapshot import SystemSnapshotRecord, SnapshotTriggerType  
 from ..models.external_refs import DatasetRefRecord  # External references (09 JAN 2026 - F7.8)
 from ..models.raster_metadata import CogMetadataRecord  # Raster metadata (09 JAN 2026 - F7.9)
 from ..models.approval import DatasetApproval, ApprovalStatus  # Dataset approvals (16 JAN 2026 - F4.AP)
+from ..models.artifact import Artifact, ArtifactStatus  # Artifact registry (20 JAN 2026)
 
 
 class PydanticToSQL:
@@ -434,6 +435,11 @@ class PydanticToSQL:
             constraints.append(
                 sql.SQL("PRIMARY KEY ({})").format(sql.Identifier("approval_id"))
             )
+        elif table_name == "artifacts":
+            # Artifact registry table (20 JAN 2026)
+            constraints.append(
+                sql.SQL("PRIMARY KEY ({})").format(sql.Identifier("artifact_id"))
+            )
 
         # Combine columns and constraints
         all_parts = columns + constraints
@@ -600,6 +606,30 @@ class PydanticToSQL:
             # Reviewer lookup
             indexes.append(IndexBuilder.btree(s, "dataset_approvals", "reviewer", name="idx_dataset_approvals_reviewer",
                                               partial_where="reviewer IS NOT NULL"))
+
+        elif table_name == "artifacts":
+            # Artifact registry table (20 JAN 2026)
+            # Primary lookup: Find artifact by client references (GIN index for JSONB)
+            indexes.append(IndexBuilder.gin(s, "artifacts", "client_refs", name="idx_artifacts_client_refs"))
+            # Client type filtering
+            indexes.append(IndexBuilder.btree(s, "artifacts", "client_type", name="idx_artifacts_client_type"))
+            # STAC reverse lookup
+            indexes.append(IndexBuilder.btree(s, "artifacts", ["stac_collection_id", "stac_item_id"], name="idx_artifacts_stac",
+                                              partial_where="stac_item_id IS NOT NULL"))
+            # Job lookup
+            indexes.append(IndexBuilder.btree(s, "artifacts", "source_job_id", name="idx_artifacts_job",
+                                              partial_where="source_job_id IS NOT NULL"))
+            # Lineage queries
+            indexes.append(IndexBuilder.btree(s, "artifacts", "supersedes", name="idx_artifacts_supersedes",
+                                              partial_where="supersedes IS NOT NULL"))
+            # Active artifacts only
+            indexes.append(IndexBuilder.btree(s, "artifacts", "status", name="idx_artifacts_active",
+                                              partial_where="status = 'active'"))
+            # Content deduplication
+            indexes.append(IndexBuilder.btree(s, "artifacts", "content_hash", name="idx_artifacts_content_hash",
+                                              partial_where="content_hash IS NOT NULL"))
+            # Time-based queries
+            indexes.append(IndexBuilder.btree(s, "artifacts", "created_at", name="idx_artifacts_created_at", descending=True))
 
         self.logger.debug(f"✅ Generated {len(indexes)} indexes for table {table_name}")
         return indexes
@@ -955,6 +985,7 @@ $$""").format(
         composed.extend(self.generate_enum("classification", Classification))
         composed.extend(self.generate_enum("snapshot_trigger_type", SnapshotTriggerType))  # System snapshots (04 JAN 2026)
         composed.extend(self.generate_enum("approval_status", ApprovalStatus))  # Dataset approvals (16 JAN 2026 - F4.AP)
+        composed.extend(self.generate_enum("artifact_status", ArtifactStatus))  # Artifact registry (20 JAN 2026)
 
         # For tables, indexes, functions, and triggers, we still need string format
         # because they are complex multi-line statements
@@ -975,6 +1006,7 @@ $$""").format(
         composed.append(self.generate_table_composed(DatasetRefRecord, "dataset_refs"))  # External references (09 JAN 2026 - F7.8)
         composed.append(self.generate_table_composed(CogMetadataRecord, "cog_metadata"))  # Raster metadata (09 JAN 2026 - F7.9)
         composed.append(self.generate_table_composed(DatasetApproval, "dataset_approvals"))  # Dataset approvals (16 JAN 2026 - F4.AP)
+        composed.append(self.generate_table_composed(Artifact, "artifacts"))  # Artifact registry (20 JAN 2026)
 
         # Indexes - now using composed SQL
         composed.extend(self.generate_indexes_composed("jobs", JobRecord))
@@ -990,6 +1022,7 @@ $$""").format(
         composed.extend(self.generate_indexes_composed("dataset_refs", DatasetRefRecord))  # External references (09 JAN 2026 - F7.8)
         composed.extend(self.generate_indexes_composed("cog_metadata", CogMetadataRecord))  # Raster metadata (09 JAN 2026 - F7.9)
         composed.extend(self.generate_indexes_composed("dataset_approvals", DatasetApproval))  # Dataset approvals (16 JAN 2026 - F4.AP)
+        composed.extend(self.generate_indexes_composed("artifacts", Artifact))  # Artifact registry (20 JAN 2026)
 
         # Functions - already sql.Composed objects
         composed.extend(self.generate_static_functions())

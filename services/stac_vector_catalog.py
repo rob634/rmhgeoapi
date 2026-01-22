@@ -3,10 +3,10 @@
 # ============================================================================
 # STATUS: Service layer - STAC metadata extraction from PostGIS tables
 # PURPOSE: Create and register STAC Items for vector tables in pgSTAC
-# LAST_REVIEWED: 04 JAN 2026
+# LAST_REVIEWED: 22 JAN 2026
 # REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
 # EXPORTS: create_vector_stac, extract_vector_stac_metadata
-# DEPENDENCIES: psycopg, stac-pydantic
+# DEPENDENCIES: psycopg, stac-pydantic, artifact_service
 # ============================================================================
 """
 STAC Vector Cataloging Handlers
@@ -200,11 +200,63 @@ def create_vector_stac(params: dict) -> dict[str, Any]:
             # Non-fatal - STAC item and metadata were created
             logger.warning(f"⚠️ STEP 4: Failed to upsert dataset_refs: {refs_error}")
 
+        # =====================================================================
+        # STEP 5: ARTIFACT REGISTRY (22 JAN 2026)
+        # =====================================================================
+        # Create artifact record for lineage/revision tracking
+        # Vector artifacts reference PostGIS tables rather than blob paths
+        artifact_id = None
+        try:
+            from services.artifact_service import ArtifactService
+
+            # Build client_refs from platform parameters (DDH identifiers)
+            client_refs = {}
+            if params.get('dataset_id'):
+                client_refs['dataset_id'] = params['dataset_id']
+            if params.get('resource_id'):
+                client_refs['resource_id'] = params['resource_id']
+            if params.get('version_id'):
+                client_refs['version_id'] = params['version_id']
+
+            # Only create artifact if we have client refs (platform job)
+            if client_refs:
+                artifact_service = ArtifactService()
+                artifact = artifact_service.create_artifact(
+                    storage_account='postgis',  # Indicates PostGIS storage
+                    container=schema,  # Schema acts as container
+                    blob_path=table_name,  # Table name as path
+                    client_type='ddh',  # Platform client type
+                    client_refs=client_refs,
+                    stac_collection_id=collection_id,
+                    stac_item_id=item.id,
+                    source_job_id=job_id,
+                    source_task_id=params.get('_task_id'),
+                    content_hash=None,  # No content hash for tables
+                    size_bytes=row_count,  # Use row count as size metric
+                    content_type='application/x-postgis-table',
+                    metadata={
+                        'geometry_types': geometry_types,
+                        'bbox': bbox,
+                        'source_format': source_format,
+                        'source_file': source_file,
+                    },
+                    overwrite=True  # Platform jobs always overwrite
+                )
+                artifact_id = str(artifact.artifact_id)
+                logger.info(f"📦 STEP 5: Artifact created: {artifact_id} (revision {artifact.revision})")
+            else:
+                logger.debug("📦 STEP 5: Skipping artifact creation - no client_refs (non-platform job)")
+        except Exception as artifact_error:
+            # Artifact creation is non-fatal - log warning but continue
+            import traceback as tb
+            logger.warning(f"⚠️ STEP 5: Artifact creation failed (non-fatal): {artifact_error}")
+            logger.debug(f"⚠️ Artifact error traceback: {tb.format_exc()}")
+
         duration = (datetime.utcnow() - start_time).total_seconds()
 
         # SUCCESS
         logger.info(f"🎉 SUCCESS: STAC cataloging completed in {duration:.2f}s for {schema}.{table_name}")
-        return {
+        result = {
             "success": True,
             "result": {
                 "item_id": item.id,
@@ -221,6 +273,10 @@ def create_vector_stac(params: dict) -> dict[str, Any]:
                 "stac_item": item_dict
             }
         }
+        # Include artifact_id if created (22 JAN 2026)
+        if artifact_id:
+            result["result"]["artifact_id"] = artifact_id
+        return result
 
     except Exception as e:
         duration = (datetime.utcnow() - start_time).total_seconds()

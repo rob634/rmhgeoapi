@@ -151,6 +151,13 @@ from .artifact import (
     ArtifactStatus
 )
 
+# External service registry models (22 JAN 2026)
+from .external_service import (
+    ExternalService,
+    ServiceType,
+    ServiceStatus
+)
+
 # Geo schema models - Service Layer (21 JAN 2026 - F7.IaC)
 from .geo import (
     GeoTableCatalog,
@@ -259,6 +266,11 @@ __all__ = [
     # Artifact registry models (20 JAN 2026)
     'Artifact',
     'ArtifactStatus',
+
+    # External service registry models (22 JAN 2026)
+    'ExternalService',
+    'ServiceType',
+    'ServiceStatus',
 
     # Geo schema models - Service Layer (21 JAN 2026 - F7.IaC)
     'GeoTableCatalog',

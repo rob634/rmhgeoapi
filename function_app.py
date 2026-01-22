@@ -653,6 +653,7 @@ if _app_mode.has_admin_endpoints:
     from triggers.admin.admin_approvals import bp as admin_approvals_bp  # Dataset approvals (16 JAN 2026)
     from triggers.admin.admin_external_db import bp as admin_external_db_bp  # External DB init (21 JAN 2026)
     from triggers.admin.admin_artifacts import bp as admin_artifacts_bp  # Artifact registry (22 JAN 2026)
+    from triggers.admin.admin_external_services import bp as admin_external_services_bp  # External service registry (22 JAN 2026)
     from web_interfaces.h3_sources import bp as h3_sources_bp
 
     app.register_functions(admin_db_bp)
@@ -664,6 +665,7 @@ if _app_mode.has_admin_endpoints:
     app.register_functions(admin_approvals_bp)  # Dataset approvals (16 JAN 2026)
     app.register_functions(admin_external_db_bp)  # External DB init (21 JAN 2026)
     app.register_functions(admin_artifacts_bp)  # Artifact registry (22 JAN 2026)
+    app.register_functions(admin_external_services_bp)  # External service registry (22 JAN 2026)
     app.register_functions(h3_sources_bp)
     app.register_functions(snapshot_bp)
     logger.info("✅ Admin blueprints registered (APP_MODE=%s)", _app_mode.mode.value)
@@ -849,7 +851,37 @@ def job_delete_route(req: func.HttpRequest) -> func.HttpResponse:
 # NOTE: H3 routes moved to triggers/admin/admin_h3.py blueprint (12 JAN 2026)
 # - /api/h3/debug
 # - /api/h3/datasets
-# - /api/h3/stats
+# - /api/h3/admin/stats
+
+
+# ============================================================================
+# DATA MIGRATION API - Trigger ADF Migration Pipelines (22 JAN 2026)
+# ============================================================================
+# Endpoints:
+#   POST /api/data-migration/trigger - Trigger blob or vector migration
+#   GET  /api/data-migration/status/{run_id} - Check pipeline run status
+#   POST /api/data-migration/cancel/{run_id} - Cancel a running pipeline
+
+from triggers.trigger_data_migration import (
+    handle_data_migration_cancel,
+    handle_data_migration_status,
+    handle_data_migration_trigger,
+)
+
+
+@app.route(route="data-migration/trigger", methods=["POST"])
+def data_migration_trigger(req: func.HttpRequest) -> func.HttpResponse:
+    return handle_data_migration_trigger(req)
+
+
+@app.route(route="data-migration/status/{run_id}", methods=["GET"])
+def data_migration_status(req: func.HttpRequest) -> func.HttpResponse:
+    return handle_data_migration_status(req)
+
+
+@app.route(route="data-migration/cancel/{run_id}", methods=["POST"])
+def data_migration_cancel(req: func.HttpRequest) -> func.HttpResponse:
+    return handle_data_migration_cancel(req)
 
 
 # ============================================================================
@@ -3824,6 +3856,35 @@ def log_cleanup_timer(timer: func.TimerRequest) -> None:
     """
     from triggers.admin.log_cleanup_timer import log_cleanup_timer_handler
     log_cleanup_timer_handler.handle(timer)
+
+
+# ============================================================================
+# EXTERNAL SERVICE HEALTH TIMER (22 JAN 2026)
+# ============================================================================
+# Hourly timer trigger to check health of registered external geospatial services.
+# Monitors ArcGIS, WMS, WFS, WMTS, OGC API, STAC API, XYZ tiles, etc.
+# Sends notifications for outages/recoveries via App Insights and Service Bus.
+# ============================================================================
+
+@app.timer_trigger(
+    schedule="0 0 * * * *",  # Every hour on the hour
+    arg_name="timer",
+    run_on_startup=False
+)
+def external_service_health_timer(timer: func.TimerRequest) -> None:
+    """
+    Timer trigger: Check health of registered external geospatial services.
+
+    Checks all services where next_check_at <= NOW() AND enabled = true.
+    Updates status, consecutive_failures, and health_history.
+    Sends notifications for status changes (outages and recoveries).
+
+    Schedule: Every hour on the hour
+
+    Handler: triggers/admin/external_service_timer.py (created 22 JAN 2026)
+    """
+    from triggers.admin.external_service_timer import external_service_health_timer_handler
+    external_service_health_timer_handler.handle(timer)
 
 
 # NOTE: Cleanup/janitor routes moved to triggers/admin/admin_janitor.py blueprint (12 JAN 2026)

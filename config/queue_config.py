@@ -167,6 +167,8 @@ class QueueNames:
     VECTOR_TASKS = QueueDefaults.VECTOR_TASKS_QUEUE
     # Long-running tasks (13 DEC 2025, renamed 22 DEC 2025 - Docker worker)
     LONG_RUNNING_TASKS = QueueDefaults.LONG_RUNNING_TASKS_QUEUE
+    # Service outage alerts (22 JAN 2026 - External service health monitoring)
+    SERVICE_OUTAGE_ALERTS = QueueDefaults.SERVICE_OUTAGE_ALERTS_QUEUE
 
 
 # ============================================================================
@@ -224,6 +226,14 @@ class QueueConfig(BaseModel):
                     "Used for large files or complex processing exceeding Function App limits."
     )
 
+    # Service outage alerts queue (22 JAN 2026 - External service health monitoring)
+    service_outage_alerts_queue: str = Field(
+        default=QueueDefaults.SERVICE_OUTAGE_ALERTS_QUEUE,
+        description="Service Bus queue for external service outage/recovery alerts. "
+                    "Receives notifications when registered external geospatial services "
+                    "go offline (3 consecutive failures) or recover."
+    )
+
     # Batch processing
     max_batch_size: int = Field(
         default=QueueDefaults.MAX_BATCH_SIZE,
@@ -261,6 +271,11 @@ class QueueConfig(BaseModel):
             long_running_tasks_queue=os.environ.get(
                 "SERVICE_BUS_LONG_RUNNING_TASKS_QUEUE",
                 QueueDefaults.LONG_RUNNING_TASKS_QUEUE
+            ),
+            # Service outage alerts (22 JAN 2026)
+            service_outage_alerts_queue=os.environ.get(
+                "SERVICE_BUS_SERVICE_OUTAGE_ALERTS_QUEUE",
+                QueueDefaults.SERVICE_OUTAGE_ALERTS_QUEUE
             ),
             max_batch_size=int(os.environ.get("SERVICE_BUS_MAX_BATCH_SIZE", str(QueueDefaults.MAX_BATCH_SIZE))),
             batch_threshold=int(os.environ.get("SERVICE_BUS_BATCH_THRESHOLD", str(QueueDefaults.BATCH_THRESHOLD))),

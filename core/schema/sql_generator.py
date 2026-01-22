@@ -84,6 +84,7 @@ from ..models.external_refs import DatasetRefRecord  # External references (09 J
 from ..models.raster_metadata import CogMetadataRecord  # Raster metadata (09 JAN 2026 - F7.9)
 from ..models.approval import DatasetApproval, ApprovalStatus  # Dataset approvals (16 JAN 2026 - F4.AP)
 from ..models.artifact import Artifact, ArtifactStatus  # Artifact registry (20 JAN 2026)
+from ..models.external_service import ExternalService, ServiceType, ServiceStatus  # External service registry (22 JAN 2026)
 
 # Geo and ETL schema models (21 JAN 2026 - F7.IaC)
 from ..models.geo import GeoTableCatalog, FeatureCollectionStyles  # OGC Styles (22 JAN 2026)
@@ -1544,6 +1545,8 @@ $$""").format(
         composed.extend(self.generate_enum("snapshot_trigger_type", SnapshotTriggerType))  # System snapshots (04 JAN 2026)
         composed.extend(self.generate_enum("approval_status", ApprovalStatus))  # Dataset approvals (16 JAN 2026 - F4.AP)
         composed.extend(self.generate_enum("artifact_status", ArtifactStatus))  # Artifact registry (20 JAN 2026)
+        composed.extend(self.generate_enum("service_type", ServiceType))  # External service registry (22 JAN 2026)
+        composed.extend(self.generate_enum("service_status", ServiceStatus))  # External service registry (22 JAN 2026)
 
         # For tables, indexes, functions, and triggers, we still need string format
         # because they are complex multi-line statements
@@ -1565,6 +1568,7 @@ $$""").format(
         composed.append(self.generate_table_composed(CogMetadataRecord, "cog_metadata"))  # Raster metadata (09 JAN 2026 - F7.9)
         composed.append(self.generate_table_composed(DatasetApproval, "dataset_approvals"))  # Dataset approvals (16 JAN 2026 - F4.AP)
         composed.append(self.generate_table_composed(Artifact, "artifacts"))  # Artifact registry (20 JAN 2026)
+        composed.append(self.generate_table_from_model(ExternalService))  # External service registry (22 JAN 2026)
 
         # Indexes - now using composed SQL
         composed.extend(self.generate_indexes_composed("jobs", JobRecord))
@@ -1581,6 +1585,7 @@ $$""").format(
         composed.extend(self.generate_indexes_composed("cog_metadata", CogMetadataRecord))  # Raster metadata (09 JAN 2026 - F7.9)
         composed.extend(self.generate_indexes_composed("dataset_approvals", DatasetApproval))  # Dataset approvals (16 JAN 2026 - F4.AP)
         composed.extend(self.generate_indexes_composed("artifacts", Artifact))  # Artifact registry (20 JAN 2026)
+        composed.extend(self.generate_indexes_from_model(ExternalService))  # External service registry (22 JAN 2026)
 
         # Functions - already sql.Composed objects
         composed.extend(self.generate_static_functions())

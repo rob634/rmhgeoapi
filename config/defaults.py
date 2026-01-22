@@ -345,6 +345,10 @@ class QueueDefaults:
     # When Docker support is added, large tasks route here (no timeout constraints)
     LONG_RUNNING_TASKS_QUEUE = "long-running-tasks"
 
+    # Service outage alerts queue (22 JAN 2026)
+    # External service health monitoring sends outage/recovery notifications here
+    SERVICE_OUTAGE_ALERTS_QUEUE = "service-outage-alerts"
+
     MAX_BATCH_SIZE = 100
     BATCH_THRESHOLD = 50
     RETRY_COUNT = 3

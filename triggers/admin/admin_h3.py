@@ -12,7 +12,7 @@ H3 Admin Blueprint - H3 grid administration routes.
 Routes (3 total):
     GET|POST /api/h3/debug      - H3 debug operations (schema, grids, filters)
     GET|POST|DELETE /api/h3/datasets - H3 dataset registry CRUD
-    GET /api/h3/stats           - H3 cell counts by resolution
+    GET /api/h3/admin/stats     - H3 cell counts by resolution (admin)
 
 NOTE: Changed from /api/admin/h3 to /api/h3/* because Azure Functions
 reserves /api/admin/* for built-in admin UI (returns 404).
@@ -67,10 +67,10 @@ def h3_datasets(req: func.HttpRequest) -> func.HttpResponse:
     return admin_h3_datasets_trigger.handle_request(req)
 
 
-@bp.route(route="h3/stats", methods=["GET"])
+@bp.route(route="h3/admin/stats", methods=["GET"])
 def h3_stats(req: func.HttpRequest) -> func.HttpResponse:
     """
-    Get H3 grid cell counts by resolution: GET /api/h3/stats
+    Get H3 grid cell counts by resolution: GET /api/h3/admin/stats
 
     Returns cell counts for each resolution level (2-7) in the h3.cells table.
 

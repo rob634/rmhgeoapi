@@ -1043,6 +1043,57 @@ Automatic routing can be added when:
 2. Real metrics show where the size threshold should be
 3. Client convenience outweighs explicit job selection
 
+---
+
+### F4.3.8: External Database Initialization ✅ COMPLETE (21 JAN 2026)
+
+**Epic**: E4 Security Zones / Externalization
+**Feature**: F4.3 External Delivery Infrastructure
+**Goal**: Initialize target databases with pgstac and geo schemas using temporary admin UMI
+
+**Background**: When replicating data to external databases for partners/public access,
+the target database needs pgstac and geo schemas. This is a SETUP operation run by
+DevOps with temporary admin credentials - the production app won't have write access.
+
+**Architecture**:
+```
+POST /api/admin/external/initialize
+{
+  "target_host": "external-db.postgres.database.azure.com",
+  "target_database": "geodb",
+  "admin_umi_client_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+  "dry_run": false
+}
+```
+
+**Implementation** (21 JAN 2026):
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| S4.3.8a | Create `ExternalDatabaseInitializer` service class | ✅ |
+| S4.3.8b | Reuse `PydanticToSQL.generate_geo_schema_ddl()` for geo schema | ✅ |
+| S4.3.8c | Run pypgstac migrate via subprocess with target DB env vars | ✅ |
+| S4.3.8d | Create HTTP endpoints `/api/admin/external/initialize` and `/prereqs` | ✅ |
+| S4.3.8e | Add dry-run mode for validation | ✅ |
+
+**Key Files**:
+- `services/external_db_initializer.py` - `ExternalDatabaseInitializer` class
+- `triggers/admin/admin_external_db.py` - Blueprint with HTTP endpoints
+
+**DBA Prerequisites** (must be done before running):
+1. External PostgreSQL server exists
+2. Admin UMI user created in target database
+3. Admin UMI has CREATE privilege on database
+4. PostGIS extension enabled (service request required)
+5. pgstac_admin, pgstac_ingest, pgstac_read roles created
+6. Admin UMI granted pgstac_* roles WITH ADMIN OPTION
+
+**API Endpoints**:
+- `GET /api/admin/external/prereqs` - Check DBA prerequisites
+- `POST /api/admin/external/initialize` - Initialize target database
+
+---
+
 ### F7.15: HTTP-Triggered Docker Worker (Alternative Architecture)
 
 **Status**: 📋 PLANNED - Alternative to Service Bus polling

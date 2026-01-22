@@ -3,7 +3,7 @@
 # ============================================================================
 # STATUS: Service layer - Centralized metadata enrichment for STAC items
 # PURPOSE: Ensure consistent metadata across all STAC items (raster and vector)
-# LAST_REVIEWED: 04 JAN 2026
+# LAST_REVIEWED: 22 JAN 2026
 # REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
 # EXPORTS: STACMetadataHelper, PlatformMetadata, AppMetadata, VisualizationMetadata, RasterVisualizationMetadata
 # DEPENDENCIES: stac-pydantic
@@ -143,6 +143,17 @@ class AppMetadata:
         job_type: Job type that created this item
         created_by: Application identifier (default: 'rmhazuregeoapi')
         processing_timestamp: When the item was created (auto-filled if None)
+
+    Properties Generated:
+        app:published - Always False on creation (requires explicit approval)
+        app:created_by - Application identifier
+        app:processing_timestamp - ISO timestamp
+        app:job_id - Job ID (if provided)
+        app:job_type - Job type (if provided)
+
+    Note:
+        F7.Approval (22 JAN 2026): All STAC items start with app:published=False.
+        Publication requires explicit approval via ApprovalService.
     """
     job_id: Optional[str] = None
     job_type: Optional[str] = None
@@ -155,10 +166,16 @@ class AppMetadata:
 
         Returns:
             Dict of namespaced properties
+
+        Note:
+            app:published defaults to False - requires explicit approval
+            to set True. This is part of the mandatory approval workflow
+            (F7.Approval - 22 JAN 2026).
         """
         props = {
             'app:created_by': self.created_by,
-            'app:processing_timestamp': self.processing_timestamp or datetime.now(timezone.utc).isoformat()
+            'app:processing_timestamp': self.processing_timestamp or datetime.now(timezone.utc).isoformat(),
+            'app:published': False,  # F7.Approval: Requires explicit approval to publish
         }
         if self.job_id:
             props['app:job_id'] = self.job_id

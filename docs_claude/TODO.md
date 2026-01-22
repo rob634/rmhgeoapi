@@ -1,10 +1,208 @@
 # Working Backlog
 
-**Last Updated**: 21 JAN 2026
+**Last Updated**: 22 JAN 2026
 **Source of Truth**: [docs/epics/README.md](/docs/epics/README.md) — Epic/Feature/Story definitions
 **Purpose**: Sprint-level task tracking and delegation
 
-> **✅ HIGH PRIORITY items completed (21 JAN 2026)**: ~~Force Reprocess~~ ✅, ~~Consolidate Unpublish~~ ✅, ~~Consolidate Status~~ ✅
+> **✅ HIGH PRIORITY items completed (22 JAN 2026)**: ~~Force Reprocess~~ ✅, ~~Consolidate Unpublish~~ ✅, ~~Consolidate Status~~ ✅, ~~Explicit Approval Records~~ ✅
+
+---
+
+## ✅ COMPLETE: Explicit Approval Record Creation (F7.Approval)
+
+**Added**: 22 JAN 2026
+**Completed**: 22 JAN 2026
+**Epic**: E7 Pipeline Infrastructure
+**Status**: ✅ DONE
+**Goal**: Every dataset MUST have an approval record - no implicit unapproved state
+
+### Problem Statement
+
+The approval workflow service exists but **no job handlers create approval records**:
+
+| Handler | Creates STAC Item | Creates Approval Record |
+|---------|------------------|------------------------|
+| `handler_process_raster_complete.py` | ✅ Yes | ❌ No |
+| `handler_process_large_raster_complete.py` | ✅ Yes | ❌ No |
+| Vector handlers | ✅ Yes | ❌ No |
+
+**Current behavior**: STAC items are published immediately with no QA gate.
+**Required behavior**: Every STAC item starts unpublished, requires explicit approval.
+
+### Design Decision: Option B - Centralized Hook
+
+Create approval records in **CoreMachine job finalization** via the existing `on_job_complete` callback.
+
+**Why this approach**:
+- Single integration point - can't be forgotten
+- Already has job context (`job_id`, `job_type`, `result`)
+- `result` dict contains STAC info (`stac_item_id`, `stac_collection_id`)
+- Non-fatal pattern already established (callback failures don't fail job)
+
+### Integration Point
+
+`core/machine.py:2092-2105` - The `on_job_complete` callback:
+
+```python
+if self.on_job_complete:
+    self.on_job_complete(
+        job_id=job_id,
+        job_type=job_type,
+        status='completed',
+        result=final_result  # Contains stac_item_id, stac_collection_id
+    )
+```
+
+### Implementation Stories
+
+#### Story 1: STAC Items Default to Unpublished
+
+**File**: `services/stac_catalog.py` (and similar STAC creation points)
+
+**Change**: When creating STAC items, set `app:published=false` by default:
+
+```python
+properties = {
+    ...
+    'app:published': False,  # Requires approval to publish
+}
+```
+
+**Acceptance Criteria**:
+- All new STAC items have `app:published=false`
+- Existing `app:published=true` logic only runs on approval
+
+#### Story 2: Create Approval Record in Job Completion Callback
+
+**File**: `triggers/trigger_platform.py` (where `on_job_complete` is registered)
+
+**Current callback location**: Search for where CoreMachine is instantiated with `on_job_complete`
+
+**New logic** (add to existing callback or create wrapper):
+
+```python
+def on_job_complete_with_approval(job_id: str, job_type: str, status: str, result: dict):
+    # Existing platform callback logic...
+
+    # NEW: Create approval record if job produced STAC item
+    if status == 'completed':
+        stac_item_id = _extract_stac_item_id(result)
+        stac_collection_id = _extract_stac_collection_id(result)
+
+        if stac_item_id:
+            try:
+                from services.approval_service import ApprovalService
+                from core.models.promoted import Classification
+
+                approval_service = ApprovalService()
+                approval_service.create_approval_for_job(
+                    job_id=job_id,
+                    job_type=job_type,
+                    classification=Classification.OUO,  # Default, can be overridden
+                    stac_item_id=stac_item_id,
+                    stac_collection_id=stac_collection_id
+                )
+                logger.info(f"📋 Approval record created for job {job_id[:8]}")
+            except Exception as e:
+                # Non-fatal - log warning
+                logger.warning(f"⚠️ Approval creation failed (non-fatal): {e}")
+
+
+def _extract_stac_item_id(result: dict) -> Optional[str]:
+    """Extract STAC item ID from various result structures."""
+    # Direct path
+    if result.get('stac', {}).get('item_id'):
+        return result['stac']['item_id']
+    # Nested in result
+    if result.get('result', {}).get('stac', {}).get('item_id'):
+        return result['result']['stac']['item_id']
+    # item_id at top level
+    if result.get('item_id'):
+        return result['item_id']
+    return None
+```
+
+**Acceptance Criteria**:
+- Every completed job that produces a STAC item gets an approval record
+- Approval records start in `PENDING` status
+- Callback failures don't fail the job (non-fatal)
+
+#### Story 3: Classification from Job Parameters
+
+**Enhancement**: Allow jobs to specify classification in parameters.
+
+```python
+# In job parameters:
+{
+    "classification": "public"  # or "ouo" (default)
+}
+
+# In callback:
+classification_str = result.get('classification') or params.get('classification') or 'ouo'
+classification = Classification.PUBLIC if classification_str == 'public' else Classification.OUO
+```
+
+**Acceptance Criteria**:
+- Jobs can specify `classification` parameter
+- Defaults to OUO if not specified
+- PUBLIC triggers ADF on approval (existing logic)
+
+#### Story 4: Query Filter for Published Items
+
+**File**: `infrastructure/pgstac_repository.py` or STAC query endpoints
+
+**Change**: Add ability to filter STAC queries by `app:published=true`.
+
+This enables:
+- Public-facing APIs show only approved items
+- Admin APIs can see all items (with approval status)
+
+**Acceptance Criteria**:
+- STAC search can filter by `app:published`
+- Default behavior TBD (show all vs show published only)
+
+### Implementation Summary (22 JAN 2026)
+
+**Files Modified**:
+
+| File | Change |
+|------|--------|
+| `services/stac_metadata_helper.py` | Added `app:published=False` to `AppMetadata.to_stac_properties()` |
+| `function_app.py` | Implemented `_global_platform_callback()` with approval creation |
+
+**Key Implementation Details**:
+
+1. **STAC Items Default to Unpublished**
+   - `AppMetadata.to_stac_properties()` now includes `'app:published': False`
+   - All STAC items created via `STACMetadataHelper` automatically get this property
+   - Applies to raster, vector, and collection items
+
+2. **Automatic Approval Record Creation**
+   - `_global_platform_callback()` in `function_app.py` creates approval records
+   - Triggered by CoreMachine's `on_job_complete` callback
+   - Extracts STAC item/collection IDs from job result
+   - Creates `PENDING` approval record via `ApprovalService`
+   - Non-fatal: failures logged but don't affect job completion
+
+3. **Classification Support**
+   - `_extract_classification()` helper extracts classification from job result
+   - Checks: `result.classification`, `result.parameters.classification`, `result.access_level`
+   - Default: `ouo` (Official Use Only)
+   - `public` triggers ADF pipeline on approval
+
+**Workflow**:
+```
+Job Completes → STAC item created (app:published=false)
+             → _global_platform_callback() called
+             → Approval record created (PENDING)
+             → Human approves via /api/platform/approve
+             → STAC updated (app:published=true)
+```
+
+**Helper Functions Added to function_app.py**:
+- `_extract_stac_item_id(result)` - Finds STAC item ID in various result structures
+- `_extract_stac_collection_id(result)` - Finds STAC collection ID
+- `_extract_classification(result)` - Gets classification (default: ouo)
 
 ---
 

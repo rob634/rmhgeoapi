@@ -523,6 +523,7 @@ app_mode_config.docker_worker_enabled
 | **Dev best practices** | `docs_claude/DEV_BEST_PRACTICES.md` |
 | **Schema evolution** | `docs_claude/SCHEMA_EVOLUTION.md` |
 | **Error tracking** | `docs_claude/ERRORS_AND_FIXES.md` |
+| **Artifact registry** | `docs_claude/ARTIFACT_REGISTRY.md` |
 | Job creation | `docs_claude/JOB_CREATION_QUICKSTART.md` |
 | Architecture details | `docs_claude/ARCHITECTURE_REFERENCE.md` |
 | **Architecture diagrams** | `docs_claude/ARCHITECTURE_DIAGRAMS.md` |

@@ -86,7 +86,7 @@ from ..models.approval import DatasetApproval, ApprovalStatus  # Dataset approva
 from ..models.artifact import Artifact, ArtifactStatus  # Artifact registry (20 JAN 2026)
 
 # Geo and ETL schema models (21 JAN 2026 - F7.IaC)
-from ..models.geo import GeoTableCatalog
+from ..models.geo import GeoTableCatalog, FeatureCollectionStyles  # OGC Styles (22 JAN 2026)
 from ..models.etl_tracking import VectorEtlTracking, RasterEtlTracking, EtlStatus
 
 
@@ -193,6 +193,10 @@ class PydanticToSQL:
         idx_attr = f"_{class_name}__sql_indexes"
         metadata["indexes"] = getattr(model, idx_attr, [])
 
+        # Optional: unique constraints (22 JAN 2026 - OGC Styles)
+        unique_attr = f"_{class_name}__sql_unique_constraints"
+        metadata["unique_constraints"] = getattr(model, unique_attr, [])
+
         return metadata
 
     def generate_table_from_model(self, model: Type[BaseModel]) -> sql.Composed:
@@ -214,6 +218,7 @@ class PydanticToSQL:
         schema_name = meta["schema"]
         primary_key = meta["primary_key"]
         foreign_keys = meta["foreign_keys"]
+        unique_constraints = meta.get("unique_constraints", [])
 
         self.logger.debug(f"🔧 Generating table {schema_name}.{table_name} from model {model.__name__}")
 
@@ -235,6 +240,11 @@ class PydanticToSQL:
                 if type(None) in args:
                     is_optional = True
 
+            # Handle SERIAL type for auto-increment id fields (22 JAN 2026)
+            # If field is named 'id', is Optional[int], and is the primary key, use SERIAL
+            if field_name == "id" and primary_key == ["id"] and is_optional:
+                sql_type_str = "SERIAL"
+
             # Build column definition
             column_parts = [
                 sql.Identifier(field_name),
@@ -252,7 +262,8 @@ class PydanticToSQL:
                 column_parts.append(sql.SQL(sql_type_str))
 
             # Add NOT NULL if required (and not a PK column which gets it implicitly)
-            if not is_optional and field_name not in primary_key:
+            # Skip for SERIAL as it's auto-generated
+            if not is_optional and field_name not in primary_key and sql_type_str != "SERIAL":
                 column_parts.extend([sql.SQL(" "), sql.SQL("NOT NULL")])
 
             # Handle defaults
@@ -270,6 +281,9 @@ class PydanticToSQL:
                     column_parts.extend([sql.SQL(" DEFAULT "), sql.Literal(field_info.default)])
                 elif isinstance(field_info.default, (int, float)):
                     column_parts.extend([sql.SQL(" DEFAULT "), sql.Literal(field_info.default)])
+                elif isinstance(field_info.default, bool):
+                    # Handle boolean defaults (22 JAN 2026 - OGC Styles)
+                    column_parts.extend([sql.SQL(" DEFAULT "), sql.SQL("true" if field_info.default else "false")])
             elif hasattr(field_info, 'default_factory') and field_info.default_factory is not None:
                 # Handle default_factory for mutable defaults
                 if field_name in ["created_at", "updated_at"]:
@@ -277,6 +291,8 @@ class PydanticToSQL:
 
             # Special timestamp defaults
             if field_name == "created_at" and " DEFAULT" not in str(sql.SQL("").join(column_parts)):
+                column_parts.extend([sql.SQL(" DEFAULT NOW()")])
+            if field_name == "updated_at" and " DEFAULT" not in str(sql.SQL("").join(column_parts)):
                 column_parts.extend([sql.SQL(" DEFAULT NOW()")])
 
             columns.append(sql.SQL("").join(column_parts))
@@ -308,6 +324,24 @@ class PydanticToSQL:
                         sql.Identifier(ref_column)
                     )
                 )
+
+        # Add UNIQUE constraints (22 JAN 2026 - OGC Styles)
+        for unique_def in unique_constraints:
+            uc_columns = unique_def.get("columns", [])
+            uc_name = unique_def.get("name")
+            if uc_columns:
+                uc_cols_sql = sql.SQL(", ").join(sql.Identifier(col) for col in uc_columns)
+                if uc_name:
+                    constraints.append(
+                        sql.SQL("CONSTRAINT {} UNIQUE ({})").format(
+                            sql.Identifier(uc_name),
+                            uc_cols_sql
+                        )
+                    )
+                else:
+                    constraints.append(
+                        sql.SQL("UNIQUE ({})").format(uc_cols_sql)
+                    )
 
         # Combine columns and constraints
         all_parts = columns + constraints
@@ -346,12 +380,20 @@ class PydanticToSQL:
             partial_where = idx_def.get("partial_where")
             descending = idx_def.get("descending", False)
             index_type = idx_def.get("type", "btree")
+            is_unique = idx_def.get("unique", False)  # Support unique indexes (22 JAN 2026)
 
             if not columns or not name:
                 continue
 
             if index_type == "gin":
                 result.append(IndexBuilder.gin(schema_name, table_name, columns[0], name=name))
+            elif is_unique:
+                # Use IndexBuilder.unique() for unique indexes
+                result.append(IndexBuilder.unique(
+                    schema_name, table_name, columns,
+                    name=name,
+                    partial_where=partial_where
+                ))
             else:
                 result.append(IndexBuilder.btree(
                     schema_name, table_name, columns,
@@ -401,6 +443,7 @@ class PydanticToSQL:
 
         Returns CREATE statements for:
         - geo.table_catalog (service layer metadata)
+        - geo.feature_collection_styles (OGC API Styles - 22 JAN 2026)
 
         Returns:
             List of composed SQL statements
@@ -411,11 +454,13 @@ class PydanticToSQL:
         # Schema creation
         statements.append(sql.SQL("CREATE SCHEMA IF NOT EXISTS geo"))
 
-        # Generate table DDL from model
+        # GeoTableCatalog: service layer metadata
         statements.append(self.generate_table_from_model(GeoTableCatalog))
-
-        # Generate indexes
         statements.extend(self.generate_indexes_from_model(GeoTableCatalog))
+
+        # FeatureCollectionStyles: OGC API Styles (22 JAN 2026)
+        statements.append(self.generate_table_from_model(FeatureCollectionStyles))
+        statements.extend(self.generate_indexes_from_model(FeatureCollectionStyles))
 
         self.logger.info(f"✅ Geo schema DDL complete: {len(statements)} statements")
         return statements

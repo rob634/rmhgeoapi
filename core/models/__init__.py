@@ -153,7 +153,8 @@ from .artifact import (
 
 # Geo schema models - Service Layer (21 JAN 2026 - F7.IaC)
 from .geo import (
-    GeoTableCatalog
+    GeoTableCatalog,
+    FeatureCollectionStyles  # OGC API Styles (22 JAN 2026)
 )
 
 # ETL tracking models - Internal App Schema (21 JAN 2026 - F7.IaC)
@@ -261,6 +262,7 @@ __all__ = [
 
     # Geo schema models - Service Layer (21 JAN 2026 - F7.IaC)
     'GeoTableCatalog',
+    'FeatureCollectionStyles',  # OGC API Styles (22 JAN 2026)
 
     # ETL tracking models - Internal App Schema (21 JAN 2026 - F7.IaC)
     'VectorEtlTracking',

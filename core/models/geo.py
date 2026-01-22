@@ -3,9 +3,9 @@
 # ============================================================================
 # EPOCH: 4 - ACTIVE
 # STATUS: Core - Models for external-replicable geo schema tables
-# PURPOSE: Pydantic models for geo.table_catalog (service layer, no ETL internals)
-# LAST_REVIEWED: 21 JAN 2026
-# EXPORTS: GeoTableCatalog
+# PURPOSE: Pydantic models for geo.table_catalog, geo.feature_collection_styles
+# LAST_REVIEWED: 22 JAN 2026
+# EXPORTS: GeoTableCatalog, FeatureCollectionStyles
 # DEPENDENCIES: pydantic
 # ============================================================================
 """
@@ -455,3 +455,253 @@ class GeoTableCatalog(BaseModel):
             String like "geo.brazilian_cities"
         """
         return f"{self.schema_name}.{self.table_name}"
+
+
+# ============================================================================
+# FEATURE COLLECTION STYLES (OGC API Styles)
+# ============================================================================
+
+class FeatureCollectionStyles(BaseModel):
+    """
+    OGC API Styles storage model.
+
+    Stores CartoSym-JSON styles for OGC Features collections. Each collection
+    can have multiple styles, with one designated as default.
+
+    Maps to: geo.feature_collection_styles
+
+    OGC Conformance:
+        - /req/core/styles-list
+        - /req/core/style
+
+    CartoSym-JSON (stored in style_spec):
+        {
+            "name": "protected-areas",
+            "title": "Protected Areas by Category",
+            "stylingRules": [
+                {
+                    "name": "category-ia",
+                    "selector": {"op": "=", "args": [{"property": "iucn_cat"}, "Ia"]},
+                    "symbolizer": {
+                        "type": "Polygon",
+                        "fill": {"color": "#1a9850", "opacity": 0.7},
+                        "stroke": {"color": "#006837", "width": 1.5}
+                    }
+                }
+            ]
+        }
+
+    Usage:
+        from core.models.geo import FeatureCollectionStyles
+
+        style = FeatureCollectionStyles(
+            collection_id="protected_areas",
+            style_id="by-category",
+            title="Protected Areas by Category",
+            style_spec=cartosym_json,
+            is_default=True
+        )
+
+    Created: 22 JAN 2026
+    Epic: E7 Infrastructure as Code → OGC Styles DDL Migration
+    """
+    model_config = ConfigDict(
+        use_enum_values=True,
+        extra='ignore',
+        str_strip_whitespace=True
+    )
+
+    # DDL generation hints (ClassVar = not a model field)
+    __sql_table_name: ClassVar[str] = "feature_collection_styles"
+    __sql_schema: ClassVar[str] = "geo"
+    __sql_primary_key: ClassVar[List[str]] = ["id"]
+    __sql_unique_constraints: ClassVar[List[Dict[str, Any]]] = [
+        {"columns": ["collection_id", "style_id"], "name": "uq_styles_collection_style"}
+    ]
+    __sql_indexes: ClassVar[List[Dict[str, Any]]] = [
+        {"columns": ["collection_id"], "name": "idx_styles_collection"},
+        # Partial unique index: only one default per collection
+        {"columns": ["collection_id"], "name": "idx_styles_default", "partial_where": "is_default = true", "unique": True},
+    ]
+
+    # ==========================================================================
+    # IDENTITY
+    # ==========================================================================
+    id: Optional[int] = Field(
+        default=None,
+        description="Auto-generated primary key (SERIAL)"
+    )
+
+    collection_id: str = Field(
+        ...,
+        max_length=255,
+        description="OGC Features collection identifier (table name)"
+    )
+
+    style_id: str = Field(
+        ...,
+        max_length=100,
+        description="URL-safe style identifier (e.g., 'default', 'by-category')"
+    )
+
+    # ==========================================================================
+    # METADATA
+    # ==========================================================================
+    title: Optional[str] = Field(
+        default=None,
+        max_length=500,
+        description="Human-readable style title"
+    )
+
+    description: Optional[str] = Field(
+        default=None,
+        description="Style description"
+    )
+
+    # ==========================================================================
+    # STYLE SPECIFICATION (CartoSym-JSON)
+    # ==========================================================================
+    style_spec: Dict[str, Any] = Field(
+        ...,
+        description="CartoSym-JSON style document (stored as JSONB)"
+    )
+
+    # ==========================================================================
+    # FLAGS
+    # ==========================================================================
+    is_default: bool = Field(
+        default=False,
+        description="Whether this is the default style for the collection"
+    )
+
+    # ==========================================================================
+    # TIMESTAMPS
+    # ==========================================================================
+    created_at: Optional[datetime] = Field(
+        default=None,
+        description="When the style was created"
+    )
+
+    updated_at: Optional[datetime] = Field(
+        default=None,
+        description="When the style was last updated"
+    )
+
+    # ==========================================================================
+    # FACTORY METHODS
+    # ==========================================================================
+
+    @classmethod
+    def from_db_row(cls, row: Dict[str, Any]) -> "FeatureCollectionStyles":
+        """
+        Create FeatureCollectionStyles from database row.
+
+        Args:
+            row: Database row as dict (from psycopg dict_row)
+
+        Returns:
+            FeatureCollectionStyles instance
+        """
+        return cls(
+            id=row.get('id'),
+            collection_id=row.get('collection_id'),
+            style_id=row.get('style_id'),
+            title=row.get('title'),
+            description=row.get('description'),
+            style_spec=row.get('style_spec', {}),
+            is_default=row.get('is_default', False),
+            created_at=row.get('created_at'),
+            updated_at=row.get('updated_at')
+        )
+
+    @classmethod
+    def create_default_for_geometry(
+        cls,
+        collection_id: str,
+        geometry_type: str,
+        fill_color: str = "#3388ff",
+        stroke_color: str = "#2266cc"
+    ) -> "FeatureCollectionStyles":
+        """
+        Create a default style for a collection based on geometry type.
+
+        Args:
+            collection_id: Collection identifier (table name)
+            geometry_type: PostGIS geometry type (Polygon, LineString, Point, etc.)
+            fill_color: Fill color (hex)
+            stroke_color: Stroke color (hex)
+
+        Returns:
+            FeatureCollectionStyles instance with default CartoSym-JSON
+        """
+        # Normalize geometry type
+        geom_type_map = {
+            "POLYGON": "Polygon",
+            "MULTIPOLYGON": "Polygon",
+            "LINESTRING": "Line",
+            "MULTILINESTRING": "Line",
+            "POINT": "Point",
+            "MULTIPOINT": "Point"
+        }
+        sym_type = geom_type_map.get(geometry_type.upper(), "Polygon")
+
+        # Build CartoSym-JSON based on geometry type
+        if sym_type == "Polygon":
+            style_spec = {
+                "name": f"{collection_id}-default",
+                "title": f"Default style for {collection_id}",
+                "stylingRules": [{
+                    "name": "default",
+                    "symbolizer": {
+                        "type": "Polygon",
+                        "fill": {"color": fill_color, "opacity": 0.6},
+                        "stroke": {"color": stroke_color, "width": 1.5}
+                    }
+                }]
+            }
+        elif sym_type == "Line":
+            style_spec = {
+                "name": f"{collection_id}-default",
+                "title": f"Default style for {collection_id}",
+                "stylingRules": [{
+                    "name": "default",
+                    "symbolizer": {
+                        "type": "Line",
+                        "stroke": {"color": stroke_color, "width": 2}
+                    }
+                }]
+            }
+        else:  # Point
+            style_spec = {
+                "name": f"{collection_id}-default",
+                "title": f"Default style for {collection_id}",
+                "stylingRules": [{
+                    "name": "default",
+                    "symbolizer": {
+                        "type": "Point",
+                        "marker": {
+                            "size": 8,
+                            "fill": {"color": fill_color},
+                            "stroke": {"color": stroke_color, "width": 1}
+                        }
+                    }
+                }]
+            }
+
+        return cls(
+            collection_id=collection_id,
+            style_id="default",
+            title=style_spec["title"],
+            description=f"Auto-generated default style for {collection_id}",
+            style_spec=style_spec,
+            is_default=True
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Convert to dictionary for database insertion.
+
+        Returns:
+            Dict suitable for INSERT/UPDATE operations
+        """
+        return self.model_dump(exclude_none=False, by_alias=True)

@@ -1534,38 +1534,11 @@ class AdminDbMaintenanceTrigger:
                         else:
                             logger.info("⚠️  geo.system_admin0 not found (load country boundaries later)")
 
-                        # 0f. Create OGC API Styles table (18 DEC 2025)
-                        # Stores CartoSym-JSON styles for OGC Features collections
-                        # Serves multiple output formats: Leaflet, Mapbox GL
-                        cur.execute("""
-                            CREATE TABLE IF NOT EXISTS geo.feature_collection_styles (
-                                id SERIAL PRIMARY KEY,
-                                collection_id TEXT NOT NULL,           -- matches OGC Features collection (table name)
-                                style_id TEXT NOT NULL,                -- url-safe identifier (e.g., "default", "by-category")
-                                title TEXT,                            -- human-readable title
-                                description TEXT,                      -- style description
-                                style_spec JSONB NOT NULL,             -- CartoSym-JSON document
-                                is_default BOOLEAN DEFAULT false,      -- default style for collection
-                                created_at TIMESTAMPTZ DEFAULT now(),
-                                updated_at TIMESTAMPTZ DEFAULT now(),
-                                UNIQUE(collection_id, style_id)
-                            )
-                        """)
-
-                        # Index for fast lookups by collection
-                        cur.execute("""
-                            CREATE INDEX IF NOT EXISTS idx_styles_collection
-                            ON geo.feature_collection_styles(collection_id)
-                        """)
-
-                        # Ensure only one default per collection (partial unique index)
-                        cur.execute("""
-                            CREATE UNIQUE INDEX IF NOT EXISTS idx_styles_default
-                            ON geo.feature_collection_styles(collection_id)
-                            WHERE is_default = true
-                        """)
-
-                        logger.info("✅ Ensured geo.feature_collection_styles table exists")
+                        # 0f. OGC API Styles table - MIGRATED TO IaC (22 JAN 2026)
+                        # DDL now generated from FeatureCollectionStyles Pydantic model
+                        # via PydanticToSQL.generate_geo_schema_ddl() in _ensure_tables()
+                        # See: core/models/geo.py for model definition
+                        logger.info("✅ geo.feature_collection_styles managed via IaC (ensure_tables)")
 
                         # 1. Create h3 schema if it doesn't exist (04 DEC 2025)
                         # h3 schema stores static bootstrap H3 grid data
@@ -1609,13 +1582,13 @@ class AdminDbMaintenanceTrigger:
 
                 if grant_warnings:
                     step4["status"] = "partial"
-                    step4["tables_created"] = ["geo.table_catalog", "geo.feature_collection_styles"]
+                    step4["tables_created"] = ["geo.table_catalog", "geo.feature_collection_styles (via IaC)"]
                     step4["grant_warnings"] = grant_warnings
                     step4["note"] = "Tables created but some GRANTs failed - may need manual permission fixes"
                 else:
                     step4["status"] = "success"
                     step4["schema_created"] = "geo, h3 (if not exists)"
-                    step4["tables_created"] = ["geo.table_catalog (service layer metadata)", "geo.feature_collection_styles (OGC Styles)"]
+                    step4["tables_created"] = ["geo.table_catalog (service layer metadata)", "geo.feature_collection_styles (OGC Styles - via IaC)"]
                     step4["grants"] = [
                         "USAGE ON SCHEMA geo",
                         "SELECT ON ALL TABLES IN SCHEMA geo",

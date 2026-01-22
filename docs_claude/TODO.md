@@ -4,79 +4,50 @@
 **Source of Truth**: [docs/epics/README.md](/docs/epics/README.md) — Epic/Feature/Story definitions
 **Purpose**: Sprint-level task tracking and delegation
 
-> **🔴 HIGH PRIORITY items added**: Force Reprocess Parameter, Consolidate Unpublish Endpoints, Consolidate Status Endpoints
+> **✅ HIGH PRIORITY items completed (21 JAN 2026)**: ~~Force Reprocess~~ ✅, ~~Consolidate Unpublish~~ ✅, ~~Consolidate Status~~ ✅
 
 ---
 
-## 🔴 HIGH PRIORITY: Consolidate Status Endpoints
+## ✅ COMPLETE: Consolidate Status Endpoints
 
 **Added**: 21 JAN 2026
-**Priority**: HIGH
-**Status**: 📋 TODO
+**Completed**: 21 JAN 2026
+**Status**: ✅ DONE
 
-### Problem
+### Implementation Summary
 
-Currently there are two separate status endpoints with different lookup patterns:
-
-| Endpoint | Lookup Key | Returns |
-|----------|-----------|---------|
-| `/api/platform/status/{request_id}` | Platform `request_id` | DDH identifiers + job status + task summary + data access URLs |
-| `/api/platform/jobs/{job_id}/status` | CoreMachine `job_id` | Raw job status only |
-
-The `monitor_url` in submit responses returns `/api/platform/status/{request_id}`, but having two different URL patterns is confusing for external consumers.
-
-### Proposed Solution
-
-Consolidate to single endpoint:
-```
-GET /api/platform/status/{id}
-```
-
-Where `{id}` can be EITHER:
-- A `request_id` (SHA256 hash of dataset_id + resource_id + version_id)
+`GET /api/platform/status/{id}` now accepts EITHER:
+- A `request_id` (Platform request identifier)
 - A `job_id` (CoreMachine job identifier)
 
-### Implementation Notes
+The endpoint auto-detects which type of ID was provided:
+1. First tries lookup by `request_id`
+2. If not found, tries reverse lookup by `job_id` via `PlatformRepository.get_request_by_job()`
 
-- Auto-detect ID type (request_id is 64-char hex, job_id may have different format)
-- If request_id: Return rich response with DDH identifiers + job status + data access URLs
-- If job_id: Look up associated platform request, return same rich response
-- Deprecate `/api/platform/jobs/{job_id}/status` (keep working but log deprecation warning)
-- Update `monitor_url` format in submit responses (no change needed - already uses `/api/platform/status/`)
+**Deprecated endpoint**: `/api/platform/jobs/{job_id}/status`
+- Still works but logs deprecation warning
+- Response includes `Deprecation: true` header and `_deprecated` field
 
-### Benefits
-
-1. Single URL pattern for external consumers to remember
-2. Can look up status by either ID type
-3. Consistent response format regardless of lookup method
+**Files modified**:
+- `triggers/trigger_platform_status.py` - Added auto-detect logic
+- `function_app.py` - Updated docstrings
 
 ---
 
-## 🔴 HIGH PRIORITY: Force Reprocess Parameter for Platform Submit
+## ✅ COMPLETE: Force Reprocess via processing_options.overwrite
 
 **Added**: 21 JAN 2026
-**Priority**: HIGH
-**Status**: 📋 TODO
+**Completed**: 21 JAN 2026
+**Status**: ✅ DONE
 
-### Problem
+### Implementation Summary
 
-Currently, `/api/platform/submit` is fully idempotent based on `dataset_id + resource_id + version_id`. If a request with the same identifiers already exists, it returns the existing request without reprocessing.
+Implemented via `processing_options.overwrite` (not separate `force_reprocess` parameter).
 
-**Missing capability**: No way to force complete reprocessing of a dataset while maintaining the same STAC item IDs (e.g., when source data is updated but version stays the same).
-
-### Current Workaround
-
-1. Call `/api/platform/unpublish/{type}` first
-2. Then resubmit via `/api/platform/submit`
-
-### Proposed Solution
-
-Add `force_reprocess: true` parameter to `/api/platform/submit` that:
-
-1. Deletes the existing platform request record
-2. Unpublishes existing outputs (STAC item, COG blobs or PostGIS table)
-3. Submits a fresh job with the same DDH identifiers
-4. Maintains the same STAC item/collection IDs
+When `processing_options.overwrite: true` and request already exists:
+1. Submits unpublish job for existing outputs (dry_run=False, force_approved=True)
+2. Deletes existing platform request record
+3. Creates new job with fresh processing
 
 ### Request Body
 
@@ -85,59 +56,66 @@ Add `force_reprocess: true` parameter to `/api/platform/submit` that:
     "dataset_id": "...",
     "resource_id": "...",
     "version_id": "...",
-    "data_type": "raster",
-    "force_reprocess": true,
-    ...
+    "container_name": "...",
+    "file_name": "...",
+    "processing_options": {
+        "overwrite": true
+    }
 }
 ```
 
-### Implementation Notes
+### Response (when overwrite bypasses idempotency)
 
-- Should call unpublish logic internally before creating new job
-- Must handle approval status (revoke if approved?)
-- Should log clearly that this is a force reprocess operation
-- Consider adding `force_reprocess_reason` for audit trail
+Normal 202 response with new job_id. The unpublish job runs in background.
 
----
-
-## 🔴 HIGH PRIORITY: Consolidate Unpublish Endpoints
-
-**Added**: 21 JAN 2026
-**Priority**: HIGH
-**Status**: 📋 TODO
-
-### Problem
-
-Currently there are two separate unpublish endpoints:
-- `POST /api/platform/unpublish/vector`
-- `POST /api/platform/unpublish/raster`
-
-This is unnecessary complexity. The platform should auto-detect the data type (same pattern as `/api/platform/submit`).
-
-### Proposed Solution
-
-Consolidate into single endpoint:
-```
-POST /api/platform/unpublish
-```
-
-### Request Body
+### Response (when request exists but overwrite=false)
 
 ```json
 {
-    "dataset_id": "...",
-    "resource_id": "...",
-    "version_id": "...",
-    "dry_run": true
+    "success": true,
+    "message": "Request already submitted (idempotent)",
+    "hint": "Use processing_options.overwrite=true to force reprocessing"
 }
 ```
 
-### Implementation Notes
+### Files Modified
 
-- Auto-detect data type from platform request record or STAC item
-- If both vector and raster outputs exist for same identifiers, unpublish both
-- Keep `dry_run: true` as default for safety
-- Deprecate `/unpublish/vector` and `/unpublish/raster` (keep working but log deprecation warning)
+- `triggers/trigger_platform.py`:
+  - Added `_handle_overwrite_unpublish()` helper
+  - Added `_delete_platform_request()` helper
+  - Added `_generate_table_name()` and `_generate_stac_item_id()` helpers
+  - Modified `platform_request_submit()` idempotency check
+
+---
+
+## ✅ COMPLETE: Consolidate Unpublish Endpoints
+
+**Added**: 21 JAN 2026
+**Completed**: 21 JAN 2026
+**Status**: ✅ DONE
+
+### Implementation Summary
+
+`POST /api/platform/unpublish` now auto-detects data type:
+
+**Input options** (in resolution order):
+1. `request_id` → Lookup platform request, get data_type
+2. `job_id` → Lookup platform request by job, get data_type
+3. DDH identifiers (`dataset_id`, `resource_id`, `version_id`) → Lookup platform request
+4. Explicit `data_type` with direct identifiers (cleanup mode)
+5. Fallback: Infer from `table_name` (vector) or `stac_item_id`/`collection_id` (raster)
+
+**Deprecated endpoints**:
+- `/api/platform/unpublish/vector` - Still works but logs deprecation warning
+- `/api/platform/unpublish/raster` - Still works but logs deprecation warning
+
+**Files modified**:
+- `triggers/trigger_platform.py` - Added `platform_unpublish()` and helper functions
+- `function_app.py` - Registered new route, marked old routes as deprecated
+
+**Also added `request_id` support to**:
+- `/api/platform/approve`
+- `/api/platform/revoke`
 
 ---
 

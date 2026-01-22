@@ -3,9 +3,9 @@
 # ============================================================================
 # STATUS: Trigger layer - POST /api/platform/*
 # PURPOSE: Anti-Corruption Layer translating DDH requests to CoreMachine jobs
-# LAST_REVIEWED: 05 JAN 2026
+# LAST_REVIEWED: 21 JAN 2026
 # REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
-# EXPORTS: platform_request_submit, platform_raster_submit, platform_raster_collection_submit, platform_unpublish_vector, platform_unpublish_raster
+# EXPORTS: platform_request_submit, platform_raster_submit, platform_raster_collection_submit, platform_unpublish, platform_unpublish_vector (deprecated), platform_unpublish_raster (deprecated)
 # DEPENDENCIES: infrastructure.PlatformRepository, infrastructure.service_bus
 # ============================================================================
 """
@@ -18,8 +18,9 @@ Exports:
     platform_request_submit: Generic HTTP trigger for POST /api/platform/submit
     platform_raster_submit: Raster HTTP trigger for POST /api/platform/raster
     platform_raster_collection_submit: Raster collection HTTP trigger for POST /api/platform/raster-collection
-    platform_unpublish_vector: Vector unpublish HTTP trigger for POST /api/platform/unpublish/vector
-    platform_unpublish_raster: Raster unpublish HTTP trigger for POST /api/platform/unpublish/raster
+    platform_unpublish: Consolidated unpublish HTTP trigger for POST /api/platform/unpublish (21 JAN 2026)
+    platform_unpublish_vector: DEPRECATED - Vector unpublish HTTP trigger
+    platform_unpublish_raster: DEPRECATED - Raster unpublish HTTP trigger
 """
 
 import json
@@ -91,6 +92,109 @@ def _generate_job_status_url(job_id: str) -> str:
 
 
 # ============================================================================
+# OVERWRITE HELPER (21 JAN 2026)
+# ============================================================================
+
+def _handle_overwrite_unpublish(existing_request: ApiRequest, platform_repo: PlatformRepository) -> None:
+    """
+    Handle unpublish before overwrite reprocessing (21 JAN 2026).
+
+    When processing_options.overwrite=true is specified and a request already exists,
+    this function:
+    1. Determines the data type from the existing request
+    2. Submits an unpublish job (synchronous call, dry_run=False)
+    3. Deletes the existing platform request record
+
+    Args:
+        existing_request: The existing ApiRequest record to overwrite
+        platform_repo: PlatformRepository instance
+
+    Raises:
+        RuntimeError: If unpublish job creation fails
+        Exception: Any error from unpublish process
+    """
+    from core.models.enums import JobStatus
+
+    data_type = _normalize_data_type(existing_request.data_type)
+    logger.info(f"Overwrite unpublish: data_type={data_type}, request_id={existing_request.request_id[:16]}")
+
+    # Generate unpublish parameters based on data type
+    if data_type == "vector":
+        table_name = _generate_table_name(
+            existing_request.dataset_id,
+            existing_request.resource_id,
+            existing_request.version_id
+        )
+        unpublish_request_id = _generate_unpublish_request_id("vector", table_name)
+
+        # Submit unpublish job (NOT dry_run - we want to actually delete)
+        job_params = {
+            "table_name": table_name,
+            "schema_name": "geo",
+            "dry_run": False,
+            "force_approved": True  # Allow unpublishing even if approved
+        }
+        job_id = _create_and_submit_job("unpublish_vector", job_params, unpublish_request_id)
+
+        if not job_id:
+            raise RuntimeError(f"Failed to create unpublish_vector job for overwrite")
+
+        logger.info(f"Overwrite: submitted unpublish_vector job {job_id[:16]} for table {table_name}")
+
+    elif data_type == "raster":
+        stac_item_id = _generate_stac_item_id(
+            existing_request.dataset_id,
+            existing_request.resource_id,
+            existing_request.version_id
+        )
+        collection_id = existing_request.dataset_id
+        unpublish_request_id = _generate_unpublish_request_id("raster", stac_item_id)
+
+        # Submit unpublish job (NOT dry_run - we want to actually delete)
+        job_params = {
+            "stac_item_id": stac_item_id,
+            "collection_id": collection_id,
+            "dry_run": False,
+            "force_approved": True  # Allow unpublishing even if approved
+        }
+        job_id = _create_and_submit_job("unpublish_raster", job_params, unpublish_request_id)
+
+        if not job_id:
+            raise RuntimeError(f"Failed to create unpublish_raster job for overwrite")
+
+        logger.info(f"Overwrite: submitted unpublish_raster job {job_id[:16]} for item {stac_item_id}")
+
+    else:
+        raise ValueError(f"Unknown data_type for overwrite unpublish: {data_type}")
+
+    # Delete the existing platform request record so the new one can be created
+    # This allows the new request to use the same request_id
+    _delete_platform_request(existing_request.request_id, platform_repo)
+    logger.info(f"Overwrite: deleted existing platform request {existing_request.request_id[:16]}")
+
+
+def _delete_platform_request(request_id: str, platform_repo: PlatformRepository) -> None:
+    """
+    Delete a platform request record (for overwrite operations).
+
+    Args:
+        request_id: Platform request ID to delete
+        platform_repo: PlatformRepository instance
+    """
+    from psycopg import sql
+
+    query = sql.SQL("""
+        DELETE FROM {}.{} WHERE request_id = %s
+    """).format(
+        sql.Identifier(platform_repo.schema_name),
+        sql.Identifier("api_requests")
+    )
+
+    platform_repo._execute_query(query, (request_id,), fetch=None)
+    logger.debug(f"Deleted platform request: {request_id[:16]}")
+
+
+# ============================================================================
 # HTTP HANDLER
 # ============================================================================
 
@@ -112,8 +216,18 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
         "container_name": "bronze-rasters",
         "file_name": "aerial-alpha.tif",
         "service_name": "Aerial Imagery Site Alpha",
-        "access_level": "OUO"
+        "access_level": "OUO",
+        "processing_options": {
+            "overwrite": false  // Set to true to force reprocessing (21 JAN 2026)
+        }
     }
+
+    Overwrite Mode (21 JAN 2026):
+    When processing_options.overwrite=true and a request with the same DDH identifiers
+    already exists:
+    1. Existing outputs are unpublished (STAC items, COGs, or PostGIS tables)
+    2. Existing platform request record is deleted
+    3. New job is submitted with fresh processing
 
     Response:
     {
@@ -150,22 +264,46 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
         logger.info(f"  Operation: {platform_req.operation.value}")
 
         # Check for existing request (idempotent)
+        # If processing_options.overwrite=true, unpublish existing and reprocess (21 JAN 2026)
         platform_repo = PlatformRepository()
         existing = platform_repo.get_request(request_id)
+        overwrite = platform_req.processing_options.get('overwrite', False) if platform_req.processing_options else False
+
         if existing:
-            logger.info(f"Request already exists: {request_id[:16]} → job {existing.job_id[:16]}")
-            return func.HttpResponse(
-                json.dumps({
-                    "success": True,
-                    "request_id": request_id,
-                    "job_id": existing.job_id,
-                    "message": "Request already submitted (idempotent)",
-                    "monitor_url": f"/api/platform/status/{request_id}",
-                    "job_status_url": _generate_job_status_url(existing.job_id)
-                }),
-                status_code=200,
-                headers={"Content-Type": "application/json"}
-            )
+            if overwrite:
+                # Overwrite mode: unpublish existing outputs and reprocess (21 JAN 2026)
+                logger.warning(f"OVERWRITE: Unpublishing existing request {request_id[:16]} before reprocessing")
+                try:
+                    _handle_overwrite_unpublish(existing, platform_repo)
+                except Exception as unpublish_err:
+                    logger.error(f"Failed to unpublish before overwrite: {unpublish_err}")
+                    return func.HttpResponse(
+                        json.dumps({
+                            "success": False,
+                            "error": f"Overwrite failed: could not unpublish existing outputs. {unpublish_err}",
+                            "error_type": "OverwriteError",
+                            "existing_request_id": request_id,
+                            "existing_job_id": existing.job_id
+                        }),
+                        status_code=500,
+                        headers={"Content-Type": "application/json"}
+                    )
+            else:
+                # Normal idempotent behavior: return existing request
+                logger.info(f"Request already exists: {request_id[:16]} → job {existing.job_id[:16]}")
+                return func.HttpResponse(
+                    json.dumps({
+                        "success": True,
+                        "request_id": request_id,
+                        "job_id": existing.job_id,
+                        "message": "Request already submitted (idempotent)",
+                        "monitor_url": f"/api/platform/status/{request_id}",
+                        "job_status_url": _generate_job_status_url(existing.job_id),
+                        "hint": "Use processing_options.overwrite=true to force reprocessing"
+                    }),
+                    status_code=200,
+                    headers={"Content-Type": "application/json"}
+                )
 
         # Translate DDH request to CoreMachine job parameters
         job_type, job_params = _translate_to_coremachine(platform_req, config)
@@ -548,16 +686,17 @@ def platform_raster_collection_submit(req: func.HttpRequest) -> func.HttpRespons
 # ============================================================================
 # UNPUBLISH ENDPOINTS (17 DEC 2025)
 # ============================================================================
-# Platform layer for unpublish operations - translates DDH identifiers to
-# CoreMachine unpublish jobs. Supports three input modes:
-#   1. By request_id (from original submission)
-#   2. By DDH identifiers (dataset_id, resource_id, version_id)
-#   3. Cleanup mode (direct table_name or stac_item_id)
+# DEPRECATED (21 JAN 2026): Use /api/platform/unpublish instead.
+# These endpoints are maintained for backward compatibility but will be removed.
+# The consolidated endpoint auto-detects data type from the platform request.
 # ============================================================================
 
 def platform_unpublish_vector(req: func.HttpRequest) -> func.HttpResponse:
     """
-    HTTP trigger for vector unpublish via Platform layer.
+    DEPRECATED: HTTP trigger for vector unpublish via Platform layer.
+
+    ⚠️ DEPRECATED (21 JAN 2026): Use POST /api/platform/unpublish instead.
+    The consolidated endpoint auto-detects data type.
 
     POST /api/platform/unpublish/vector
 
@@ -597,7 +736,8 @@ def platform_unpublish_vector(req: func.HttpRequest) -> func.HttpResponse:
         "monitor_url": "/api/platform/status/unpublish-abc123..."
     }
     """
-    logger.info("Platform unpublish vector endpoint called")
+    # Log deprecation warning (21 JAN 2026)
+    logger.warning("DEPRECATED: /api/platform/unpublish/vector called - use /api/platform/unpublish instead")
 
     try:
         req_body = req.get_json()
@@ -712,7 +852,10 @@ def platform_unpublish_vector(req: func.HttpRequest) -> func.HttpResponse:
 
 def platform_unpublish_raster(req: func.HttpRequest) -> func.HttpResponse:
     """
-    HTTP trigger for raster unpublish via Platform layer.
+    DEPRECATED: HTTP trigger for raster unpublish via Platform layer.
+
+    ⚠️ DEPRECATED (21 JAN 2026): Use POST /api/platform/unpublish instead.
+    The consolidated endpoint auto-detects data type.
 
     POST /api/platform/unpublish/raster
 
@@ -772,7 +915,8 @@ def platform_unpublish_raster(req: func.HttpRequest) -> func.HttpResponse:
         "message": "Submitted 5 unpublish jobs..."
     }
     """
-    logger.info("Platform unpublish raster endpoint called")
+    # Log deprecation warning (21 JAN 2026)
+    logger.warning("DEPRECATED: /api/platform/unpublish/raster called - use /api/platform/unpublish instead")
 
     try:
         req_body = req.get_json()
@@ -915,6 +1059,471 @@ def platform_unpublish_raster(req: func.HttpRequest) -> func.HttpResponse:
             status_code=500,
             headers={"Content-Type": "application/json"}
         )
+
+
+# ============================================================================
+# CONSOLIDATED UNPUBLISH ENDPOINT (21 JAN 2026)
+# ============================================================================
+# Single endpoint that auto-detects data type from platform request record.
+# Replaces separate /unpublish/vector and /unpublish/raster endpoints.
+# ============================================================================
+
+def platform_unpublish(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    HTTP trigger for consolidated unpublish via Platform layer (21 JAN 2026).
+
+    POST /api/platform/unpublish
+
+    Auto-detects data type (vector or raster) from platform request record or
+    direct parameters. Consolidates /unpublish/vector and /unpublish/raster.
+
+    Request Body Options:
+
+    Option 1 - By DDH Identifiers (Preferred):
+    {
+        "dataset_id": "aerial-imagery-2024",
+        "resource_id": "site-alpha",
+        "version_id": "v1.0",
+        "dry_run": true
+    }
+
+    Option 2 - By Request ID:
+    {
+        "request_id": "a3f2c1b8e9d7f6a5c4b3a2e1d9c8b7a6",
+        "dry_run": true
+    }
+
+    Option 3 - By Job ID:
+    {
+        "job_id": "abc123...",
+        "dry_run": true
+    }
+
+    Option 4 - Cleanup Mode (explicit data_type required):
+    {
+        "data_type": "vector",
+        "table_name": "my_table",
+        "dry_run": true
+    }
+    OR
+    {
+        "data_type": "raster",
+        "stac_item_id": "my-item",
+        "collection_id": "my-collection",
+        "dry_run": true
+    }
+
+    Response:
+    {
+        "success": true,
+        "request_id": "unpublish-abc123...",
+        "job_id": "def456...",
+        "job_type": "unpublish_vector" or "unpublish_raster",
+        "data_type": "vector" or "raster",
+        "dry_run": true,
+        "message": "Unpublish job submitted (dry_run=true)",
+        "monitor_url": "/api/platform/status/unpublish-abc123..."
+    }
+    """
+    logger.info("Platform consolidated unpublish endpoint called")
+
+    try:
+        req_body = req.get_json()
+        dry_run = req_body.get('dry_run', True)  # Safety default
+
+        # Resolve data type and parameters
+        data_type, resolved_params, original_request = _resolve_unpublish_data_type(req_body)
+
+        if not data_type:
+            return func.HttpResponse(
+                json.dumps({
+                    "success": False,
+                    "error": "Could not determine data type. Provide: request_id, job_id, DDH identifiers (dataset_id, resource_id, version_id), or explicit data_type with identifiers.",
+                    "error_type": "ValidationError"
+                }),
+                status_code=400,
+                headers={"Content-Type": "application/json"}
+            )
+
+        logger.info(f"Unpublish: data_type={data_type}, dry_run={dry_run}, params={resolved_params}")
+
+        # Delegate to appropriate handler based on data type
+        if data_type == "vector":
+            return _execute_vector_unpublish(
+                table_name=resolved_params.get('table_name'),
+                schema_name=req_body.get('schema_name', 'geo'),
+                dry_run=dry_run,
+                force_approved=req_body.get('force_approved', False),
+                original_request=original_request
+            )
+        elif data_type == "raster":
+            # Check for collection mode
+            if req_body.get('delete_collection') and resolved_params.get('collection_id'):
+                return _handle_collection_unpublish(
+                    collection_id=resolved_params['collection_id'],
+                    dry_run=dry_run,
+                    force_approved=req_body.get('force_approved', False),
+                    platform_repo=PlatformRepository()
+                )
+            return _execute_raster_unpublish(
+                stac_item_id=resolved_params.get('stac_item_id'),
+                collection_id=resolved_params.get('collection_id'),
+                dry_run=dry_run,
+                force_approved=req_body.get('force_approved', False),
+                original_request=original_request
+            )
+        else:
+            return func.HttpResponse(
+                json.dumps({
+                    "success": False,
+                    "error": f"Unknown data type: {data_type}. Must be 'vector' or 'raster'.",
+                    "error_type": "ValidationError"
+                }),
+                status_code=400,
+                headers={"Content-Type": "application/json"}
+            )
+
+    except ValueError as e:
+        logger.warning(f"Validation error: {e}")
+        return func.HttpResponse(
+            json.dumps({
+                "success": False,
+                "error": str(e),
+                "error_type": "ValidationError"
+            }),
+            status_code=400,
+            headers={"Content-Type": "application/json"}
+        )
+
+    except Exception as e:
+        logger.error(f"Platform unpublish failed: {e}", exc_info=True)
+        return func.HttpResponse(
+            json.dumps({
+                "success": False,
+                "error": str(e),
+                "error_type": type(e).__name__
+            }),
+            status_code=500,
+            headers={"Content-Type": "application/json"}
+        )
+
+
+def _resolve_unpublish_data_type(req_body: dict) -> tuple:
+    """
+    Auto-detect data type and resolve parameters for unpublish (21 JAN 2026).
+
+    Resolution order:
+    1. request_id → lookup platform request, get data_type
+    2. job_id → lookup platform request by job, get data_type
+    3. DDH identifiers → lookup platform request, get data_type
+    4. Explicit data_type parameter → use direct identifiers
+
+    Args:
+        req_body: Request body dict
+
+    Returns:
+        Tuple of (data_type, resolved_params, original_request)
+        - data_type: "vector" or "raster" (or None if can't determine)
+        - resolved_params: Dict with identifiers (table_name or stac_item_id/collection_id)
+        - original_request: ApiRequest if found, None otherwise
+    """
+    platform_repo = PlatformRepository()
+    original_request = None
+    data_type = None
+    resolved_params = {}
+
+    # Option 1: By request_id
+    request_id = req_body.get('request_id')
+    if request_id:
+        original_request = platform_repo.get_request(request_id)
+        if original_request:
+            data_type = _normalize_data_type(original_request.data_type)
+            resolved_params = _get_unpublish_params_from_request(original_request, data_type)
+            return data_type, resolved_params, original_request
+
+    # Option 2: By job_id
+    job_id = req_body.get('job_id')
+    if job_id:
+        original_request = platform_repo.get_request_by_job(job_id)
+        if original_request:
+            data_type = _normalize_data_type(original_request.data_type)
+            resolved_params = _get_unpublish_params_from_request(original_request, data_type)
+            return data_type, resolved_params, original_request
+
+    # Option 3: By DDH identifiers
+    dataset_id = req_body.get('dataset_id')
+    resource_id = req_body.get('resource_id')
+    version_id = req_body.get('version_id')
+    if dataset_id and resource_id and version_id:
+        original_request = platform_repo.get_request_by_ddh_ids(dataset_id, resource_id, version_id)
+        if original_request:
+            data_type = _normalize_data_type(original_request.data_type)
+            resolved_params = _get_unpublish_params_from_request(original_request, data_type)
+            return data_type, resolved_params, original_request
+
+    # Option 4: Explicit data_type with direct identifiers (cleanup mode)
+    explicit_data_type = req_body.get('data_type')
+    if explicit_data_type:
+        data_type = _normalize_data_type(explicit_data_type)
+        if data_type == "vector":
+            table_name = req_body.get('table_name')
+            if table_name:
+                resolved_params = {'table_name': table_name}
+                return data_type, resolved_params, None
+        elif data_type == "raster":
+            stac_item_id = req_body.get('stac_item_id')
+            collection_id = req_body.get('collection_id')
+            if stac_item_id and collection_id:
+                resolved_params = {'stac_item_id': stac_item_id, 'collection_id': collection_id}
+                return data_type, resolved_params, None
+            elif collection_id and req_body.get('delete_collection'):
+                resolved_params = {'collection_id': collection_id}
+                return data_type, resolved_params, None
+
+    # Fallback: Try to infer from direct parameters
+    if req_body.get('table_name'):
+        return "vector", {'table_name': req_body['table_name']}, None
+    if req_body.get('stac_item_id') and req_body.get('collection_id'):
+        return "raster", {'stac_item_id': req_body['stac_item_id'], 'collection_id': req_body['collection_id']}, None
+
+    return None, {}, None
+
+
+def _normalize_data_type(data_type: str) -> str:
+    """Normalize data_type to 'vector' or 'raster'."""
+    if not data_type:
+        return None
+    dt_lower = data_type.lower()
+    if dt_lower in ('vector', 'unpublish_vector', 'process_vector'):
+        return 'vector'
+    if dt_lower in ('raster', 'unpublish_raster', 'process_raster', 'process_raster_v2', 'process_raster_docker'):
+        return 'raster'
+    return dt_lower
+
+
+def _generate_table_name(dataset_id: str, resource_id: str, version_id: str) -> str:
+    """
+    Generate PostGIS table name from DDH identifiers.
+
+    Uses PlatformConfig.generate_vector_table_name() for consistency.
+
+    Args:
+        dataset_id: DDH dataset identifier
+        resource_id: DDH resource identifier
+        version_id: DDH version identifier
+
+    Returns:
+        URL-safe table name
+    """
+    return config.platform.generate_vector_table_name(dataset_id, resource_id, version_id)
+
+
+def _generate_stac_item_id(dataset_id: str, resource_id: str, version_id: str) -> str:
+    """
+    Generate STAC item ID from DDH identifiers.
+
+    Uses PlatformConfig.generate_stac_item_id() for consistency.
+
+    Args:
+        dataset_id: DDH dataset identifier
+        resource_id: DDH resource identifier
+        version_id: DDH version identifier
+
+    Returns:
+        URL-safe STAC item ID
+    """
+    return config.platform.generate_stac_item_id(dataset_id, resource_id, version_id)
+
+
+def _get_unpublish_params_from_request(request: ApiRequest, data_type: str) -> dict:
+    """Extract unpublish parameters from a platform request."""
+    if data_type == "vector":
+        # Generate table_name from DDH identifiers
+        table_name = _generate_table_name(request.dataset_id, request.resource_id, request.version_id)
+        return {'table_name': table_name}
+    elif data_type == "raster":
+        # Generate STAC identifiers from DDH identifiers
+        stac_item_id = _generate_stac_item_id(request.dataset_id, request.resource_id, request.version_id)
+        collection_id = request.dataset_id
+        return {'stac_item_id': stac_item_id, 'collection_id': collection_id}
+    return {}
+
+
+def _execute_vector_unpublish(
+    table_name: str,
+    schema_name: str,
+    dry_run: bool,
+    force_approved: bool,
+    original_request: Optional[ApiRequest]
+) -> func.HttpResponse:
+    """Execute vector unpublish job."""
+    if not table_name:
+        return func.HttpResponse(
+            json.dumps({
+                "success": False,
+                "error": "table_name is required for vector unpublish",
+                "error_type": "ValidationError"
+            }),
+            status_code=400,
+            headers={"Content-Type": "application/json"}
+        )
+
+    platform_repo = PlatformRepository()
+    unpublish_request_id = _generate_unpublish_request_id("vector", table_name)
+
+    # Check for existing (idempotent)
+    existing = platform_repo.get_request(unpublish_request_id)
+    if existing:
+        return func.HttpResponse(
+            json.dumps({
+                "success": True,
+                "request_id": unpublish_request_id,
+                "job_id": existing.job_id,
+                "data_type": "vector",
+                "message": "Unpublish request already submitted (idempotent)",
+                "monitor_url": f"/api/platform/status/{unpublish_request_id}",
+                "job_status_url": _generate_job_status_url(existing.job_id)
+            }),
+            status_code=200,
+            headers={"Content-Type": "application/json"}
+        )
+
+    # Submit job
+    job_params = {
+        "table_name": table_name,
+        "schema_name": schema_name,
+        "dry_run": dry_run,
+        "force_approved": force_approved
+    }
+    job_id = _create_and_submit_job("unpublish_vector", job_params, unpublish_request_id)
+
+    if not job_id:
+        raise RuntimeError("Failed to create unpublish_vector job")
+
+    # Track request
+    api_request = ApiRequest(
+        request_id=unpublish_request_id,
+        dataset_id=original_request.dataset_id if original_request else "cleanup",
+        resource_id=original_request.resource_id if original_request else table_name,
+        version_id=original_request.version_id if original_request else "cleanup",
+        job_id=job_id,
+        data_type="unpublish_vector"
+    )
+    platform_repo.create_request(api_request)
+
+    logger.info(f"Vector unpublish submitted: {unpublish_request_id[:16]} → job {job_id[:16]}")
+
+    return func.HttpResponse(
+        json.dumps({
+            "success": True,
+            "request_id": unpublish_request_id,
+            "job_id": job_id,
+            "job_type": "unpublish_vector",
+            "data_type": "vector",
+            "dry_run": dry_run,
+            "table_name": table_name,
+            "message": f"Vector unpublish job submitted (dry_run={dry_run})",
+            "monitor_url": f"/api/platform/status/{unpublish_request_id}",
+            "job_status_url": _generate_job_status_url(job_id)
+        }),
+        status_code=202,
+        headers={"Content-Type": "application/json"}
+    )
+
+
+def _execute_raster_unpublish(
+    stac_item_id: str,
+    collection_id: str,
+    dry_run: bool,
+    force_approved: bool,
+    original_request: Optional[ApiRequest]
+) -> func.HttpResponse:
+    """Execute raster unpublish job."""
+    if not stac_item_id or not collection_id:
+        return func.HttpResponse(
+            json.dumps({
+                "success": False,
+                "error": "stac_item_id and collection_id are required for raster unpublish",
+                "error_type": "ValidationError"
+            }),
+            status_code=400,
+            headers={"Content-Type": "application/json"}
+        )
+
+    platform_repo = PlatformRepository()
+    unpublish_request_id = _generate_unpublish_request_id("raster", stac_item_id)
+
+    # Check for existing with retry support
+    existing = platform_repo.get_request(unpublish_request_id)
+    is_retry = False
+    if existing:
+        job_repo = JobRepository()
+        existing_job = job_repo.get_job(existing.job_id)
+
+        if existing_job and existing_job.status == JobStatus.FAILED:
+            is_retry = True
+            logger.info(f"Previous job failed, allowing retry: {unpublish_request_id[:16]}")
+        else:
+            job_status = existing_job.status.value if existing_job else "unknown"
+            return func.HttpResponse(
+                json.dumps({
+                    "success": True,
+                    "request_id": unpublish_request_id,
+                    "job_id": existing.job_id,
+                    "job_status": job_status,
+                    "data_type": "raster",
+                    "message": "Unpublish request already submitted (idempotent)",
+                    "monitor_url": f"/api/platform/status/{unpublish_request_id}",
+                    "job_status_url": _generate_job_status_url(existing.job_id)
+                }),
+                status_code=200,
+                headers={"Content-Type": "application/json"}
+            )
+
+    # Submit job
+    job_params = {
+        "stac_item_id": stac_item_id,
+        "collection_id": collection_id,
+        "dry_run": dry_run,
+        "force_approved": force_approved
+    }
+    job_id = _create_and_submit_job("unpublish_raster", job_params, unpublish_request_id)
+
+    if not job_id:
+        raise RuntimeError("Failed to create unpublish_raster job")
+
+    # Track request
+    api_request = ApiRequest(
+        request_id=unpublish_request_id,
+        dataset_id=original_request.dataset_id if original_request else collection_id,
+        resource_id=original_request.resource_id if original_request else stac_item_id,
+        version_id=original_request.version_id if original_request else "cleanup",
+        job_id=job_id,
+        data_type="unpublish_raster"
+    )
+    created_request = platform_repo.create_request(api_request, is_retry=is_retry)
+
+    retry_msg = f" (retry #{created_request.retry_count})" if is_retry else ""
+    logger.info(f"Raster unpublish submitted{retry_msg}: {unpublish_request_id[:16]} → job {job_id[:16]}")
+
+    return func.HttpResponse(
+        json.dumps({
+            "success": True,
+            "request_id": unpublish_request_id,
+            "job_id": job_id,
+            "job_type": "unpublish_raster",
+            "data_type": "raster",
+            "dry_run": dry_run,
+            "is_retry": is_retry,
+            "stac_item_id": stac_item_id,
+            "collection_id": collection_id,
+            "message": f"Raster unpublish job submitted{retry_msg} (dry_run={dry_run})",
+            "monitor_url": f"/api/platform/status/{unpublish_request_id}",
+            "job_status_url": _generate_job_status_url(job_id)
+        }),
+        status_code=202,
+        headers={"Content-Type": "application/json"}
+    )
 
 
 # ============================================================================

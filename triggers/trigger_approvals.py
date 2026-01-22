@@ -111,6 +111,7 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
         approval_service = ApprovalService()
 
         # Resolve approval_id from various inputs
+        # Supports: approval_id, stac_item_id, job_id, or request_id (21 JAN 2026)
         if not approval_id:
             if stac_item_id:
                 approval = approval_service.get_approval_for_stac_item(stac_item_id)
@@ -140,11 +141,39 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
                         status_code=404,
                         headers={"Content-Type": "application/json"}
                     )
+            elif request_id:
+                # Resolve request_id → job_id → approval (21 JAN 2026)
+                from infrastructure import PlatformRepository
+                platform_repo = PlatformRepository()
+                platform_request = platform_repo.get_request(request_id)
+                if not platform_request:
+                    return func.HttpResponse(
+                        json.dumps({
+                            "success": False,
+                            "error": f"No platform request found: {request_id}",
+                            "error_type": "NotFound"
+                        }),
+                        status_code=404,
+                        headers={"Content-Type": "application/json"}
+                    )
+                approval = approval_service.get_approval_for_job(platform_request.job_id)
+                if approval:
+                    approval_id = approval.approval_id
+                else:
+                    return func.HttpResponse(
+                        json.dumps({
+                            "success": False,
+                            "error": f"No approval found for request: {request_id} (job: {platform_request.job_id})",
+                            "error_type": "NotFound"
+                        }),
+                        status_code=404,
+                        headers={"Content-Type": "application/json"}
+                    )
             else:
                 return func.HttpResponse(
                     json.dumps({
                         "success": False,
-                        "error": "Must provide approval_id, stac_item_id, or job_id",
+                        "error": "Must provide approval_id, stac_item_id, job_id, or request_id",
                         "error_type": "ValidationError"
                     }),
                     status_code=400,
@@ -243,6 +272,13 @@ def platform_revoke(req: func.HttpRequest) -> func.HttpResponse:
         "reason": "Source data was incorrect"
     }
 
+    Alternative - by Platform request ID (21 JAN 2026):
+    {
+        "request_id": "a3f2c1b8...",
+        "revoker": "admin@example.com",
+        "reason": "Processing error discovered"
+    }
+
     Response (success):
     {
         "success": true,
@@ -269,6 +305,7 @@ def platform_revoke(req: func.HttpRequest) -> func.HttpResponse:
         approval_id = req_body.get('approval_id')
         stac_item_id = req_body.get('stac_item_id')
         job_id = req_body.get('job_id')
+        request_id = req_body.get('request_id')  # Platform request ID (21 JAN 2026)
         revoker = req_body.get('revoker')
         reason = req_body.get('reason')
 
@@ -300,6 +337,7 @@ def platform_revoke(req: func.HttpRequest) -> func.HttpResponse:
         approval_service = ApprovalService()
 
         # Resolve approval_id from various inputs
+        # Supports: approval_id, stac_item_id, job_id, or request_id (21 JAN 2026)
         if not approval_id:
             if stac_item_id:
                 approval = approval_service.get_approval_for_stac_item(stac_item_id)
@@ -329,11 +367,39 @@ def platform_revoke(req: func.HttpRequest) -> func.HttpResponse:
                         status_code=404,
                         headers={"Content-Type": "application/json"}
                     )
+            elif request_id:
+                # Resolve request_id → job_id → approval (21 JAN 2026)
+                from infrastructure import PlatformRepository
+                platform_repo = PlatformRepository()
+                platform_request = platform_repo.get_request(request_id)
+                if not platform_request:
+                    return func.HttpResponse(
+                        json.dumps({
+                            "success": False,
+                            "error": f"No platform request found: {request_id}",
+                            "error_type": "NotFound"
+                        }),
+                        status_code=404,
+                        headers={"Content-Type": "application/json"}
+                    )
+                approval = approval_service.get_approval_for_job(platform_request.job_id)
+                if approval:
+                    approval_id = approval.approval_id
+                else:
+                    return func.HttpResponse(
+                        json.dumps({
+                            "success": False,
+                            "error": f"No approval found for request: {request_id} (job: {platform_request.job_id})",
+                            "error_type": "NotFound"
+                        }),
+                        status_code=404,
+                        headers={"Content-Type": "application/json"}
+                    )
             else:
                 return func.HttpResponse(
                     json.dumps({
                         "success": False,
-                        "error": "Must provide approval_id, stac_item_id, or job_id",
+                        "error": "Must provide approval_id, stac_item_id, job_id, or request_id",
                         "error_type": "ValidationError"
                     }),
                     status_code=400,

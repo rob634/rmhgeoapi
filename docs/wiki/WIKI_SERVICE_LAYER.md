@@ -162,7 +162,7 @@ The Service Layer is **read-only** and accesses only these schemas:
 
 | Schema | Tables | Access |
 |--------|--------|--------|
-| `geo` | `table_metadata`, vector tables | SELECT only |
+| `geo` | `table_catalog`, `feature_collection_styles`, vector tables | SELECT only |
 | `pgstac` | `collections`, `items`, `searches` | SELECT only |
 | `h3` | H3 grid tables | SELECT only |
 

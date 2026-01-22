@@ -47,20 +47,29 @@ The platform uses Azure Database for PostgreSQL Flexible Server with the followi
 
 ```
 PostgreSQL Database
-├── app (CoreMachine)
-│   ├── jobs          # Job records with status and results
-│   ├── tasks         # Task records with execution details
-│   └── functions     # PostgreSQL functions for atomic operations
+├── app (CoreMachine + ETL Tracking)
+│   ├── jobs                    # Job records with status and results
+│   ├── tasks                   # Task records with execution details
+│   ├── vector_etl_tracking     # Internal ETL traceability (22 JAN 2026)
+│   ├── raster_etl_tracking     # Internal ETL traceability (22 JAN 2026)
+│   └── functions               # PostgreSQL functions for atomic operations
 │
-├── geo (Vector Data)
-│   ├── {user_tables} # PostGIS tables created by ingest_vector jobs
+├── geo (Service Layer - Replicable to External DBs)
+│   ├── table_catalog           # Vector table metadata (replaces table_metadata)
+│   ├── feature_collection_styles # OGC API Styles (CartoSym-JSON)
+│   ├── {user_tables}           # PostGIS tables created by process_vector jobs
 │   └── spatial indexes
+│
+├── h3 (Analytics)
+│   └── {h3_cells}              # Static H3 grid data for zonal aggregation
 │
 └── pgstac (STAC Metadata)
     ├── collections   # STAC collection records
     ├── items         # STAC item records
     └── searches      # Registered search configurations
 ```
+
+**Architecture Note (22 JAN 2026)**: The `geo` schema contains only **service layer metadata** suitable for replication to external/partner databases. Internal ETL traceability (source files, processing timestamps) is stored in `app.vector_etl_tracking` which is **never replicated**. DDL for all tables is generated from Pydantic models via `PydanticToSQL` (Infrastructure as Code pattern).
 
 ---
 
@@ -542,13 +551,20 @@ curl -X POST "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/dbadmin/maintena
 **WARNING**: Schema operations delete data. Use only in development/test environments.
 **RECOMMENDED**: Use `action=rebuild` without a target to rebuild both schemas atomically. This maintains referential integrity between app.jobs and pgstac.items.
 
-### Geo Schema Management (11 DEC 2025)
+### Geo Schema Management (Updated 22 JAN 2026)
 
-The geo schema contains vector tables created by `process_vector` jobs. These endpoints help manage and audit geo tables.
+The geo schema contains vector tables created by `process_vector` jobs plus service layer metadata. These endpoints help manage and audit geo tables.
+
+**Schema Structure (IaC Pattern)**:
+- `geo.table_catalog` - Service layer metadata (title, description, bbox, STAC linkage)
+- `geo.feature_collection_styles` - OGC API Styles (CartoSym-JSON storage)
+- `geo.{user_tables}` - Actual vector data tables with PostGIS geometries
+
+**Note**: DDL is generated from Pydantic models (`GeoTableCatalog`, `FeatureCollectionStyles`) via `PydanticToSQL`. See `core/models/geo.py` for the source of truth.
 
 #### List Geo Table Metadata
 
-Query all records in `geo.table_metadata` (the source of truth for vector datasets):
+Query all records in `geo.table_catalog` (the source of truth for vector datasets):
 
 ```bash
 # List all metadata records
@@ -643,7 +659,7 @@ Cascade delete a vector table from the geo schema. Handles both tracked tables (
 
 **Deletion order** (with SAVEPOINT isolation for fault tolerance):
 1. Delete STAC item from `pgstac.items` (if exists) - *isolated with SAVEPOINT*
-2. Delete metadata row from `geo.table_metadata` (if exists)
+2. Delete metadata row from `geo.table_catalog` (if exists)
 3. DROP TABLE `geo.{table_name}` CASCADE
 
 **Fault Tolerance**: STAC deletion uses PostgreSQL SAVEPOINTs so that if pgSTAC triggers fail (e.g., missing partition tables after schema rebuild), the operation rolls back only the STAC deletion and continues with metadata/table cleanup.
@@ -871,7 +887,9 @@ curl -X POST "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/admin/external/i
 ```
 
 **What gets created**:
-- `geo` schema with `table_catalog` table (same structure as internal DB)
+- `geo` schema with:
+  - `table_catalog` table (vector metadata - same structure as internal DB)
+  - `feature_collection_styles` table (OGC API Styles)
 - `pgstac` schema with all pgSTAC tables, functions, and triggers
 
 **Architecture Note**: This endpoint uses a **temporary admin UMI** passed by DevOps. The production Function App identity has **read-only access** to external databases. After running this endpoint, DevOps should revoke or remove the admin UMI.
@@ -963,4 +981,4 @@ EXPLAIN ANALYZE SELECT * FROM app.jobs WHERE status = 'processing';
 
 ---
 
-**Last Updated**: 23 DEC 2025
+**Last Updated**: 22 JAN 2026

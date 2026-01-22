@@ -74,7 +74,7 @@ HTTP Request
 ┌─────────────────────────────────────────────────┐
 │ PostgreSQL + PostGIS                             │
 │ ├── geo.* tables (vector data)                  │
-│ ├── geo.table_metadata (ETL metadata)           │
+│ ├── geo.table_catalog (service layer metadata)  │
 │ └── geometry_columns (PostGIS catalog)          │
 └─────────────────────────────────────────────────┘
 ```
@@ -206,39 +206,46 @@ except ValueError:
 
 ## Metadata Integration
 
-### Source of Truth: `geo.table_metadata`
+### Source of Truth: `geo.table_catalog` (22 JAN 2026)
 
 Vector table metadata is stored in PostGIS, with STAC as an optional catalog copy.
 
-```sql
-CREATE TABLE geo.table_metadata (
-    table_name VARCHAR(255) PRIMARY KEY,
-    schema_name VARCHAR(63) DEFAULT 'geo',
+**Architecture Note**: The schema was refactored in JAN 2026 to separate:
+- **Service layer metadata** (`geo.table_catalog`) - Suitable for replication to external databases
+- **ETL traceability** (`app.vector_etl_tracking`) - Internal only, never replicated
 
-    -- ETL Traceability
-    etl_job_id VARCHAR(64),
-    source_file VARCHAR(500),
-    source_format VARCHAR(50),
-    source_crs VARCHAR(50),
+DDL is generated from Pydantic models via IaC pattern. See `core/models/geo.py`.
+
+```sql
+-- geo.table_catalog: Service layer metadata (replicable)
+CREATE TABLE geo.table_catalog (
+    table_name VARCHAR(255) PRIMARY KEY,
+    schema_name VARCHAR(100) NOT NULL DEFAULT 'geo',
+
+    -- Service Layer Metadata
+    title VARCHAR(500),
+    description TEXT,
+    attribution VARCHAR(500),
+    license VARCHAR(100),
+    keywords VARCHAR(500),
+    providers JSONB DEFAULT '[]',
 
     -- STAC Linkage
-    stac_item_id VARCHAR(100),
+    stac_item_id VARCHAR(255),
     stac_collection_id VARCHAR(100),
 
     -- Statistics
     feature_count INTEGER,
     geometry_type VARCHAR(50),
-
-    -- Pre-computed bbox
-    bbox_minx DOUBLE PRECISION,
-    bbox_miny DOUBLE PRECISION,
-    bbox_maxx DOUBLE PRECISION,
-    bbox_maxy DOUBLE PRECISION,
+    srid INTEGER DEFAULT 4326,
+    bbox JSONB,
 
     -- Timestamps
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
 );
+
+-- ETL traceability is stored separately in app.vector_etl_tracking (internal only)
 ```
 
 ### Collection Response with Metadata
@@ -298,7 +305,7 @@ def _build_geometry_expression(
 
 ### Cached Bounding Box
 
-When available, `geo.table_metadata.bbox_*` fields are used instead of computing `ST_Extent(geom)` on every request.
+When available, `geo.table_catalog.bbox_*` fields are used instead of computing `ST_Extent(geom)` on every request.
 
 ```python
 if custom_metadata and custom_metadata.get('cached_bbox'):
@@ -409,5 +416,5 @@ Expected conformance classes:
 | Date | Change |
 |------|--------|
 | 23 DEC 2025 | Added OGC-compliant 400 errors for invalid parameter values |
-| 06 DEC 2025 | Added `geo.table_metadata` integration |
+| 06 DEC 2025 | Added `geo.table_catalog` integration |
 | 14 NOV 2025 | Added `precision` and `simplify` parameters |

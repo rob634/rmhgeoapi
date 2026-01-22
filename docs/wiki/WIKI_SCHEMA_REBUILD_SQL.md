@@ -2,12 +2,12 @@
 
 > **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [Errors](WIKI_API_ERRORS.md) | [Glossary](WIKI_API_GLOSSARY.md)
 
-**Date**: 05 JAN 2026
+**Date**: 22 JAN 2026
 **Status**: Reference Documentation
 **Wiki**: Azure DevOps Wiki - Database schema rebuild instructions
 **Purpose**: Manual SQL instructions for rebuilding `app` and `pgstac` schemas
 **Audience**: Database administrators with PostgreSQL access
-**Last Updated**: 07 DEC 2025 - Added geo schema step, updated to 9-step process
+**Last Updated**: 22 JAN 2026 - Updated geo schema to IaC pattern (table_catalog, feature_collection_styles)
 
 ---
 
@@ -468,32 +468,70 @@ CREATE TRIGGER "update_tasks_updated_at"
 
 **CRITICAL for vector workflows**: The `geo` schema must exist before any vector processing jobs can run. This step uses `IF NOT EXISTS` so it never deletes existing data.
 
-**Architecture Principle (07 DEC 2025)**: The geo schema stores vector data created by `process_vector` jobs. Unlike app/pgstac (rebuilt from code), geo contains **USER DATA** and is **NEVER dropped**. This step was promoted from step 5b to ensure it runs immediately after app schema deployment.
+**Architecture Principle (22 JAN 2026)**: The geo schema stores:
+- **Service layer metadata** (`table_catalog`, `feature_collection_styles`) - suitable for replication to external DBs
+- **User vector data** (`{table_name}`) - PostGIS tables created by `process_vector` jobs
+
+Unlike app/pgstac (rebuilt from code), geo contains **USER DATA** and is **NEVER dropped**.
+
+**IaC Pattern (22 JAN 2026)**: DDL is generated from Pydantic models via `PydanticToSQL.generate_geo_schema_ddl()`. Source of truth: `core/models/geo.py` (`GeoTableCatalog`, `FeatureCollectionStyles`).
 
 ```sql
 -- ============================================================================
 -- STEP 4: ENSURE GEO SCHEMA EXISTS (NON-FATAL)
 -- Uses IF NOT EXISTS - safe to run on existing schema
 -- Never deletes existing tables or data
+-- DDL generated from Pydantic models (22 JAN 2026)
 -- ============================================================================
 
 -- Create geo schema if it doesn't exist
 CREATE SCHEMA IF NOT EXISTS geo;
 
--- Create table_metadata tracking table if it doesn't exist
--- This tracks all vector tables created by process_vector jobs
-CREATE TABLE IF NOT EXISTS geo.table_metadata (
+-- geo.table_catalog: Service layer metadata for vector tables
+-- Replaces old geo.table_metadata (21 JAN 2026)
+CREATE TABLE IF NOT EXISTS geo.table_catalog (
     table_name VARCHAR(255) PRIMARY KEY,
-    created_at TIMESTAMP DEFAULT NOW(),
-    source_blob VARCHAR(500),
-    source_container VARCHAR(255),
-    job_id VARCHAR(64),
+    schema_name VARCHAR(100) NOT NULL DEFAULT 'geo',
+    title VARCHAR(500),
+    description TEXT,
+    attribution VARCHAR(500),
+    license VARCHAR(100),
+    keywords VARCHAR(500),
+    providers JSONB DEFAULT '[]',
     feature_count INTEGER,
     geometry_type VARCHAR(50),
-    srid INTEGER,
+    srid INTEGER DEFAULT 4326,
     bbox JSONB,
-    properties JSONB DEFAULT '{}'
+    stac_item_id VARCHAR(255),
+    stac_collection_id VARCHAR(100),
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
 );
+
+-- Indexes for table_catalog
+CREATE INDEX IF NOT EXISTS idx_table_catalog_schema ON geo.table_catalog(schema_name);
+CREATE INDEX IF NOT EXISTS idx_table_catalog_geometry_type ON geo.table_catalog(geometry_type);
+CREATE INDEX IF NOT EXISTS idx_table_catalog_type ON geo.table_catalog(stac_collection_id);
+CREATE INDEX IF NOT EXISTS idx_table_catalog_stac ON geo.table_catalog(stac_item_id) WHERE stac_item_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_table_catalog_created ON geo.table_catalog(created_at DESC);
+
+-- geo.feature_collection_styles: OGC API Styles (CartoSym-JSON)
+CREATE TABLE IF NOT EXISTS geo.feature_collection_styles (
+    id SERIAL PRIMARY KEY,
+    collection_id VARCHAR(255) NOT NULL,
+    style_id VARCHAR(100) NOT NULL,
+    title VARCHAR(500),
+    description TEXT,
+    style_spec JSONB NOT NULL,
+    is_default BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+    CONSTRAINT uq_styles_collection_style UNIQUE (collection_id, style_id)
+);
+
+-- Indexes for feature_collection_styles
+CREATE INDEX IF NOT EXISTS idx_styles_collection ON geo.feature_collection_styles(collection_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_styles_default ON geo.feature_collection_styles(collection_id) WHERE is_default = true;
 
 -- Grant permissions to reader identity (for OGC Features API)
 -- Replace 'rmhpgflexreader' with your reader managed identity name
@@ -507,9 +545,9 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA geo GRANT SELECT ON TABLES TO rmhpgflexreader
 -- Verify geo schema exists
 SELECT schema_name FROM information_schema.schemata WHERE schema_name = 'geo';
 
--- Verify table_metadata exists
+-- Verify geo tables exist
 SELECT table_name FROM information_schema.tables
-WHERE table_schema = 'geo' AND table_name = 'table_metadata';
+WHERE table_schema = 'geo' AND table_name IN ('table_catalog', 'feature_collection_styles');
 ```
 
 ---
@@ -754,4 +792,4 @@ GRANT pgstac_admin TO <your_user>;
 
 ---
 
-**Last Updated**: 05 JAN 2026 - Updated permissions to use WITH ADMIN OPTION (no CREATEROLE needed)
+**Last Updated**: 22 JAN 2026 - Updated geo schema to IaC pattern (GeoTableCatalog, FeatureCollectionStyles Pydantic models)

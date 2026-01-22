@@ -727,6 +727,157 @@ When pgSTAC has issues (e.g., missing partition tables after schema rebuild), th
 
 ---
 
+### External Database Initialization (21 JAN 2026)
+
+Initialize external/partner databases with `geo` and `pgstac` schemas. This is a **setup operation** run by DevOps using a temporary admin identity - the production app does NOT have write access to external databases.
+
+#### Prerequisites (DBA must complete first)
+
+1. External PostgreSQL server exists and is accessible
+2. PostGIS extension enabled (requires Azure service request)
+3. Admin UMI user created in target database
+4. Admin UMI has `CREATE` privilege on database
+5. pgstac roles created: `pgstac_admin`, `pgstac_ingest`, `pgstac_read`
+6. Admin UMI granted pgstac roles `WITH ADMIN OPTION`
+
+#### Check Prerequisites
+
+Verify all prerequisites are met before attempting initialization:
+
+```bash
+curl "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/admin/external/prereqs?\
+target_host=external-db.postgres.database.azure.com&\
+target_database=geodb&\
+admin_umi_client_id=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+```
+
+**Response (Ready)**:
+```json
+{
+  "ready": true,
+  "checks": {
+    "admin_token": true,
+    "connection": true,
+    "postgis_extension": true,
+    "role_pgstac_admin": true,
+    "role_pgstac_ingest": true,
+    "role_pgstac_read": true,
+    "create_privilege": true
+  },
+  "missing": [],
+  "dba_sql": []
+}
+```
+
+**Response (Not Ready)**:
+```json
+{
+  "ready": false,
+  "checks": {
+    "admin_token": true,
+    "connection": true,
+    "postgis_extension": false,
+    "role_pgstac_admin": false,
+    "role_pgstac_ingest": false,
+    "role_pgstac_read": false,
+    "create_privilege": true
+  },
+  "missing": [
+    "PostGIS extension not installed",
+    "Role 'pgstac_admin' does not exist",
+    "Role 'pgstac_ingest' does not exist",
+    "Role 'pgstac_read' does not exist"
+  ],
+  "dba_sql": [
+    "CREATE EXTENSION IF NOT EXISTS postgis;",
+    "DO $$ BEGIN CREATE ROLE pgstac_admin; EXCEPTION WHEN duplicate_object THEN NULL; END $$;",
+    "DO $$ BEGIN CREATE ROLE pgstac_ingest; EXCEPTION WHEN duplicate_object THEN NULL; END $$;",
+    "DO $$ BEGIN CREATE ROLE pgstac_read; EXCEPTION WHEN duplicate_object THEN NULL; END $$;"
+  ]
+}
+```
+
+#### Initialize External Database
+
+Run a dry-run first to validate, then execute:
+
+```bash
+# Dry run (validate without executing)
+curl -X POST "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/admin/external/initialize" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "target_host": "external-db.postgres.database.azure.com",
+    "target_database": "geodb",
+    "admin_umi_client_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+    "admin_umi_name": "external-db-admin-umi",
+    "dry_run": true
+  }'
+
+# Actual execution
+curl -X POST "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/admin/external/initialize" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "target_host": "external-db.postgres.database.azure.com",
+    "target_database": "geodb",
+    "admin_umi_client_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+    "admin_umi_name": "external-db-admin-umi",
+    "dry_run": false
+  }'
+```
+
+**Parameters**:
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `target_host` | Yes | External database hostname |
+| `target_database` | Yes | External database name |
+| `admin_umi_client_id` | Yes | Client ID of temporary admin UMI |
+| `admin_umi_name` | No | Display name of admin UMI (for PostgreSQL username) |
+| `dry_run` | No | If true, validate without executing (default: false) |
+| `schemas` | No | List of schemas to create: `["geo", "pgstac"]` (default: both) |
+
+**Response (Success)**:
+```json
+{
+  "target_host": "external-db.postgres.database.azure.com",
+  "target_database": "geodb",
+  "admin_umi_client_id": "xxxxxxxx...",
+  "timestamp": "2026-01-21T22:00:00Z",
+  "dry_run": false,
+  "success": true,
+  "steps": [
+    {
+      "name": "check_prerequisites",
+      "status": "success",
+      "message": "All prerequisites met"
+    },
+    {
+      "name": "initialize_geo_schema",
+      "status": "success",
+      "message": "Geo schema 'geo' initialized (8 statements)",
+      "sql_count": 8
+    },
+    {
+      "name": "initialize_pgstac_schema",
+      "status": "success",
+      "message": "pypgstac migrate completed successfully"
+    }
+  ],
+  "summary": {
+    "total_steps": 3,
+    "successful": 3,
+    "failed": 0
+  }
+}
+```
+
+**What gets created**:
+- `geo` schema with `table_catalog` table (same structure as internal DB)
+- `pgstac` schema with all pgSTAC tables, functions, and triggers
+
+**Architecture Note**: This endpoint uses a **temporary admin UMI** passed by DevOps. The production Function App identity has **read-only access** to external databases. After running this endpoint, DevOps should revoke or remove the admin UMI.
+
+---
+
 ## Troubleshooting
 
 ### Issue 1: Connection Refused

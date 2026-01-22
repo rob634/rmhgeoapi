@@ -129,8 +129,51 @@ final = adf_repo.wait_for_pipeline_completion(result['run_id'])
 | S4.3.5 | ✅ | Create **External PostgreSQL** | DevOps | Database server exists |
 | S4.3.6 | ⬜ | Validate database connectivity | DevOps | Can connect from approved networks |
 | S4.3.7 | ⬜ | Install PostGIS extension | DevOps | **Service Request Required** — PostGIS enabled on external DB |
-| S4.3.8 | ⬜ | Create external schemas | Geospatial | `geo`, `app`, `pgstac` schemas created |
+| S4.3.8 | ✅ | Create external schemas | Geospatial | `geo`, `pgstac` schemas created via API endpoint |
 | S4.3.9 | ⬜ | Configure database RBAC | DevOps | Required identities have appropriate roles |
+
+#### S4.3.8 Implementation Details (21 JAN 2026)
+
+**Workflow**: HTTP endpoint for DevOps to initialize external databases using temporary admin UMI.
+
+```
+POST /api/admin/external/initialize
+{
+  "target_host": "external-db.postgres.database.azure.com",
+  "target_database": "geodb",
+  "admin_umi_client_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+  "admin_umi_name": "external-db-admin-umi",  // Optional: UMI display name
+  "dry_run": false,                            // Optional: validate without executing
+  "schemas": ["geo", "pgstac"]                 // Optional: default both
+}
+```
+
+**Key Files**:
+- `services/external_db_initializer.py` - `ExternalDatabaseInitializer` class
+- `triggers/admin/admin_external_db.py` - HTTP endpoints blueprint
+
+**API Endpoints**:
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| GET | `/api/admin/external/prereqs` | Check DBA prerequisites before running |
+| POST | `/api/admin/external/initialize` | Initialize target database schemas |
+
+**Architecture Principle**: Production app has **NO write access** to external database.
+This endpoint uses a **temporary admin UMI** passed by DevOps, not the app's identity.
+
+**DBA Prerequisites** (must complete before running endpoint):
+1. External PostgreSQL server exists
+2. PostGIS extension enabled (service request to Azure)
+3. Admin UMI user created in target database
+4. Admin UMI has `CREATE` privilege on database
+5. pgstac roles created: `pgstac_admin`, `pgstac_ingest`, `pgstac_read`
+6. Admin UMI granted pgstac roles `WITH ADMIN OPTION`
+
+**What the endpoint creates**:
+1. **geo schema** - Uses `PydanticToSQL.generate_geo_schema_ddl()` (same as internal DB)
+   - `geo.table_catalog` - Service layer metadata for vectors
+2. **pgstac schema** - Runs `pypgstac migrate` via subprocess
+   - All pgstac tables, functions, and roles
 
 #### Phase 3: Identity Setup
 

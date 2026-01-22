@@ -42,6 +42,9 @@ from triggers.admin.admin_stac import bp as admin_stac_bp
 from triggers.admin.admin_h3 import bp as admin_h3_bp
 from triggers.admin.admin_system import bp as admin_system_bp
 
+# Phase 6: External Database Admin Blueprint (21 JAN 2026)
+from triggers.admin.admin_external_db import bp as admin_external_db_bp
+
 # Export all admin triggers
 __all__ = [
     # Phase 1: Database Admin - Classes
@@ -75,4 +78,6 @@ __all__ = [
     'admin_stac_bp',
     'admin_h3_bp',
     'admin_system_bp',
+    # Phase 6: External Database Admin Blueprint (21 JAN 2026)
+    'admin_external_db_bp',
 ]

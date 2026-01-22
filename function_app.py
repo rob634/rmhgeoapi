@@ -504,6 +504,7 @@ if _app_mode.has_admin_endpoints:
     from triggers.admin.admin_h3 import bp as admin_h3_bp
     from triggers.admin.admin_system import bp as admin_system_bp
     from triggers.admin.admin_approvals import bp as admin_approvals_bp  # Dataset approvals (16 JAN 2026)
+    from triggers.admin.admin_external_db import bp as admin_external_db_bp  # External DB init (21 JAN 2026)
     from web_interfaces.h3_sources import bp as h3_sources_bp
 
     app.register_functions(admin_db_bp)
@@ -513,6 +514,7 @@ if _app_mode.has_admin_endpoints:
     app.register_functions(admin_h3_bp)
     app.register_functions(admin_system_bp)
     app.register_functions(admin_approvals_bp)  # Dataset approvals (16 JAN 2026)
+    app.register_functions(admin_external_db_bp)  # External DB init (21 JAN 2026)
     app.register_functions(h3_sources_bp)
     app.register_functions(snapshot_bp)
     logger.info("✅ Admin blueprints registered (APP_MODE=%s)", _app_mode.mode.value)

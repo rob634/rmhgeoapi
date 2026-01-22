@@ -8,6 +8,13 @@
 
 ---
 
+## 📋 TESTING NEEDED
+
+- [ ] **Test Approval Workflow** - Submit job, verify approval record created (PENDING), approve via API, verify `app:published=true`
+- [ ] **Test Artifact/Revision Workflow** - Submit job with same dataset_id/resource_id/version_id, verify artifact revision increments
+
+---
+
 ## ✅ COMPLETE: Explicit Approval Record Creation (F7.Approval)
 
 **Added**: 22 JAN 2026
@@ -317,12 +324,13 @@ Normal 202 response with new job_id. The unpublish job runs in background.
 
 ---
 
-## 🔥 ACTIVE: Infrastructure as Code DRY Cleanup (F7.IaC)
+## ✅ COMPLETE: Infrastructure as Code DRY Cleanup (F7.IaC)
 
 **Epic**: E7 Pipeline Infrastructure
 **Goal**: Consolidate DDL and schema definitions into single source of truth
 **Added**: 21 JAN 2026
-**Status**: 🚧 IN PROGRESS (Phases 1-4 complete, Phase 5 pending)
+**Completed**: 22 JAN 2026
+**Status**: ✅ DONE (Phases 1-5 complete, H3 schema deferred)
 
 ### Background
 
@@ -459,13 +467,14 @@ Same tables defined in multiple places with **conflicting schemas**.
 - `triggers/trigger_approvals.py` - STAC lookup uses `geo.table_catalog`
 - `services/janitor_service.py` - Orphan detection uses `geo.table_catalog`
 
-#### Phase 5: Cleanup (Priority 3) 🎯 NEXT
+#### Phase 5: Cleanup (Priority 3) ✅ COMPLETE (22 JAN 2026)
 
 | Story | Description | Status |
 |-------|-------------|--------|
-| S7.IaC.10 | Deprecate `core/schema/deployer.py` (SchemaManager) | 📋 |
-| S7.IaC.11 | Update wiki/documentation to reference new table names | 📋 |
-| S7.IaC.17 | Deploy and test schema rebuild with new tables | 📋 |
+| S7.IaC.10 | Deprecate `core/schema/deployer.py` (SchemaManager) | 📋 Low priority |
+| S7.IaC.11 | Update wiki/documentation to reference new table names | ✅ 22 JAN |
+| S7.IaC.12 | Add `geo.feature_collection_styles` to Pydantic models | ✅ 22 JAN |
+| S7.IaC.17 | Deploy and test schema rebuild with new tables | ✅ 22 JAN |
 
 #### Future: H3 Schema (Deferred)
 

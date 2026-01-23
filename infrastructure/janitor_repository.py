@@ -170,22 +170,119 @@ class JanitorRepository(PostgreSQLRepository):
 
     def get_stale_processing_tasks(
         self,
-        timeout_minutes: int = 30
+        timeout_minutes: int = 30,
+        exclude_task_types: Optional[List[str]] = None
     ) -> List[Dict[str, Any]]:
         """
-        Find tasks stuck in PROCESSING state beyond timeout.
+        Find Function App tasks stuck in PROCESSING state beyond timeout.
 
         Azure Functions have a max execution time of 10-30 minutes depending
         on the plan. Tasks in PROCESSING for longer have silently failed.
 
+        22 JAN 2026: Added exclude_task_types to skip Docker/long-running tasks.
+        Docker tasks have separate timeout handling via get_stale_docker_tasks().
+
         Args:
             timeout_minutes: Minutes after which PROCESSING tasks are considered stale
+            exclude_task_types: Task types to exclude (e.g., LONG_RUNNING_TASKS)
 
         Returns:
             List of stale task dicts with task_id, parent_job_id, job_type, etc.
         """
         # 15 DEC 2025: Added last_pulse, parameters, task_index for PROCESSING retry logic
         # 11 JAN 2026: Renamed heartbeat → last_pulse
+        # 22 JAN 2026: Added exclude_task_types for Docker task separation
+
+        # Build exclusion clause if task types provided
+        if exclude_task_types:
+            # Use ANY array comparison for efficient exclusion
+            exclusion_clause = sql.SQL(" AND t.task_type != ALL(%s)")
+            query = sql.SQL("""
+                SELECT
+                    t.task_id,
+                    t.parent_job_id,
+                    t.job_type,
+                    t.task_type,
+                    t.stage,
+                    t.task_index,
+                    t.status,
+                    t.last_pulse,
+                    t.parameters,
+                    t.updated_at,
+                    t.created_at,
+                    t.retry_count,
+                    EXTRACT(EPOCH FROM (NOW() - t.updated_at)) / 60 AS minutes_stuck
+                FROM {schema}.tasks t
+                WHERE t.status = 'processing'
+                  AND t.updated_at < NOW() - make_interval(mins => %s)
+            """).format(schema=sql.Identifier(self.schema_name)) + exclusion_clause + sql.SQL("""
+                ORDER BY t.updated_at ASC
+            """)
+            params = (timeout_minutes, exclude_task_types)
+        else:
+            query = sql.SQL("""
+                SELECT
+                    t.task_id,
+                    t.parent_job_id,
+                    t.job_type,
+                    t.task_type,
+                    t.stage,
+                    t.task_index,
+                    t.status,
+                    t.last_pulse,
+                    t.parameters,
+                    t.updated_at,
+                    t.created_at,
+                    t.retry_count,
+                    EXTRACT(EPOCH FROM (NOW() - t.updated_at)) / 60 AS minutes_stuck
+                FROM {schema}.tasks t
+                WHERE t.status = 'processing'
+                  AND t.updated_at < NOW() - make_interval(mins => %s)
+                ORDER BY t.updated_at ASC
+            """).format(schema=sql.Identifier(self.schema_name))
+            params = (timeout_minutes,)
+
+        excluded_info = f", excluding {len(exclude_task_types)} task types" if exclude_task_types else ""
+        logger.debug(
+            f"[JANITOR] get_stale_processing_tasks: timeout={timeout_minutes}min{excluded_info}"
+        )
+        with self._error_context("get stale processing tasks"):
+            result = self._execute_query(query, params, fetch='all')
+            count = len(result) if result else 0
+            logger.debug(f"[JANITOR] get_stale_processing_tasks: Query returned {count} rows")
+            logger.info(f"[JANITOR] Found {count} stale PROCESSING tasks (>{timeout_minutes}min){excluded_info}")
+            return result or []
+
+    def get_stale_docker_tasks(
+        self,
+        timeout_hours: int = 24,
+        docker_task_types: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Find Docker/long-running tasks stuck in PROCESSING beyond timeout.
+
+        Docker tasks can legitimately run for hours (COG processing, H3 pyramids).
+        Uses a much longer timeout than Function App tasks.
+
+        22 JAN 2026: Added for separate Docker task monitoring.
+
+        Args:
+            timeout_hours: Hours after which Docker tasks are considered stale
+            docker_task_types: Task types to check (defaults to LONG_RUNNING_TASKS)
+
+        Returns:
+            List of stale Docker task dicts
+        """
+        # Default to LONG_RUNNING_TASKS from config if not provided
+        if docker_task_types is None:
+            from config.defaults import TaskRoutingDefaults
+            docker_task_types = TaskRoutingDefaults.LONG_RUNNING_TASKS
+
+        if not docker_task_types:
+            logger.debug("[JANITOR] get_stale_docker_tasks: No Docker task types configured")
+            return []
+
+        # Use ANY array comparison to match task types
         query = sql.SQL("""
             SELECT
                 t.task_id,
@@ -200,21 +297,23 @@ class JanitorRepository(PostgreSQLRepository):
                 t.updated_at,
                 t.created_at,
                 t.retry_count,
-                EXTRACT(EPOCH FROM (NOW() - t.updated_at)) / 60 AS minutes_stuck
+                EXTRACT(EPOCH FROM (NOW() - t.updated_at)) / 60 AS minutes_stuck,
+                EXTRACT(EPOCH FROM (NOW() - t.updated_at)) / 3600 AS hours_stuck
             FROM {schema}.tasks t
             WHERE t.status = 'processing'
-              AND t.updated_at < NOW() - make_interval(mins => %s)
+              AND t.task_type = ANY(%s)
+              AND t.updated_at < NOW() - make_interval(hours => %s)
             ORDER BY t.updated_at ASC
         """).format(schema=sql.Identifier(self.schema_name))
 
         logger.debug(
-            f"[JANITOR] get_stale_processing_tasks: Executing query with timeout={timeout_minutes} minutes"
+            f"[JANITOR] get_stale_docker_tasks: timeout={timeout_hours}h, "
+            f"task_types={docker_task_types}"
         )
-        with self._error_context("get stale processing tasks"):
-            result = self._execute_query(query, (timeout_minutes,), fetch='all')
+        with self._error_context("get stale docker tasks"):
+            result = self._execute_query(query, (docker_task_types, timeout_hours), fetch='all')
             count = len(result) if result else 0
-            logger.debug(f"[JANITOR] get_stale_processing_tasks: Query returned {count} rows")
-            logger.info(f"[JANITOR] Found {count} stale PROCESSING tasks (>{timeout_minutes}min)")
+            logger.info(f"[JANITOR] Found {count} stale Docker PROCESSING tasks (>{timeout_hours}h)")
             return result or []
 
     def mark_tasks_as_failed(

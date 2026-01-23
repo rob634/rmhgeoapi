@@ -37,7 +37,7 @@ Dependencies:
 """
 
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, ClassVar
 from enum import Enum
 from pydantic import BaseModel, Field, ConfigDict
 import hashlib
@@ -149,11 +149,12 @@ class ExternalService(BaseModel):
 
     # ========================================================================
     # SQL DDL METADATA (Used by PydanticToSQL generator)
+    # ClassVar annotations required for Pydantic 2 compatibility
     # ========================================================================
-    __sql_table_name = "external_services"
-    __sql_schema = "app"
-    __sql_primary_key = ["service_id"]
-    __sql_indexes = [
+    __sql_table_name: ClassVar[str] = "external_services"
+    __sql_schema: ClassVar[str] = "app"
+    __sql_primary_key: ClassVar[List[str]] = ["service_id"]
+    __sql_indexes: ClassVar[List[Dict[str, Any]]] = [
         {"name": "idx_external_services_status", "columns": ["status"]},
         {"name": "idx_external_services_type", "columns": ["service_type"]},
         {"name": "idx_external_services_next_check", "columns": ["next_check_at"]},

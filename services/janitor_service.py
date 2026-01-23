@@ -45,10 +45,21 @@ class JanitorConfig:
     Janitor configuration with sensible defaults.
 
     All values can be overridden via environment variables.
+
+    Function App vs Docker Task Timeouts (22 JAN 2026):
+        Function App tasks have hard 10-30 minute timeout limits.
+        Docker tasks can run for hours (COG processing, H3 pyramids, etc).
+        Separate timeout configurations prevent Janitor from interfering
+        with legitimate long-running Docker tasks.
     """
 
-    # Task watchdog settings
+    # Task watchdog settings - Function App tasks
     task_timeout_minutes: int = 30  # Azure Functions max is 10-30 min
+
+    # Task watchdog settings - Docker worker tasks (22 JAN 2026)
+    # Docker tasks can legitimately run for hours (large COGs, H3 pyramids)
+    # Use much longer timeout to avoid interfering with valid processing
+    docker_task_timeout_hours: int = 24  # Docker tasks can run up to 24 hours
 
     # Orphaned pending task settings (16 DEC 2025 - PENDING status tracking)
     # PENDING = task created, message sent but trigger hasn't confirmed receipt yet
@@ -72,6 +83,7 @@ class JanitorConfig:
         """Load configuration from environment variables."""
         return cls(
             task_timeout_minutes=int(os.environ.get("JANITOR_TASK_TIMEOUT_MINUTES", "30")),
+            docker_task_timeout_hours=int(os.environ.get("JANITOR_DOCKER_TASK_TIMEOUT_HOURS", "24")),
             orphaned_pending_timeout_minutes=int(os.environ.get("JANITOR_ORPHANED_PENDING_TIMEOUT_MINUTES", "2")),
             orphaned_queued_timeout_minutes=int(os.environ.get("JANITOR_ORPHANED_QUEUED_TIMEOUT_MINUTES", "5")),
             orphaned_queued_max_retries=int(os.environ.get("JANITOR_ORPHANED_QUEUED_MAX_RETRIES", "3")),
@@ -183,7 +195,7 @@ class JanitorService:
             task_type: Type of task (e.g., 'validate_raster', 'create_cog')
 
         Returns:
-            Queue name ('raster-tasks', 'vector-tasks', or 'geospatial-jobs')
+            Queue name ('raster-tasks', 'vector-tasks', 'long-running-tasks', or 'geospatial-jobs')
         """
         from config.defaults import TaskRoutingDefaults
 
@@ -191,6 +203,8 @@ class JanitorService:
             return "raster-tasks"
         elif task_type in TaskRoutingDefaults.VECTOR_TASKS:
             return "vector-tasks"
+        elif task_type in TaskRoutingDefaults.LONG_RUNNING_TASKS:
+            return TaskRoutingDefaults.LONG_RUNNING_TASKS_QUEUE
         else:
             # Default to jobs queue for unknown types
             return "geospatial-jobs"
@@ -300,16 +314,20 @@ class JanitorService:
 
         try:
             # ================================================================
-            # PART 1: STALE PROCESSING TASKS (tasks that timed out)
+            # PART 1: STALE FUNCTION APP TASKS (tasks that timed out)
             # 15 DEC 2025: Added retry logic for tasks that never started
+            # 22 JAN 2026: Excludes Docker/long-running tasks (separate handling)
             # ================================================================
+            from config.defaults import TaskRoutingDefaults
+
             logger.info(
-                f"[JANITOR] PART 1: Checking for stale PROCESSING tasks "
-                f"(>{self.config.task_timeout_minutes}min)"
+                f"[JANITOR] PART 1: Checking for stale Function App PROCESSING tasks "
+                f"(>{self.config.task_timeout_minutes}min, excluding Docker tasks)"
             )
 
             stale_tasks = self.repo.get_stale_processing_tasks(
-                timeout_minutes=self.config.task_timeout_minutes
+                timeout_minutes=self.config.task_timeout_minutes,
+                exclude_task_types=TaskRoutingDefaults.LONG_RUNNING_TASKS
             )
             result.items_scanned += len(stale_tasks)
 
@@ -445,7 +463,78 @@ class JanitorService:
                     f"re-queued={requeued_count}, failed={failed_count}"
                 )
             else:
-                logger.info("[JANITOR] No stale PROCESSING tasks found ✓")
+                logger.info("[JANITOR] No stale Function App PROCESSING tasks found ✓")
+
+            # ================================================================
+            # PART 1B: STALE DOCKER TASKS (22 JAN 2026)
+            # Docker tasks have much longer timeout (hours, not minutes)
+            # Only mark as failed - no retry logic for these long-running tasks
+            # ================================================================
+            logger.info(
+                f"[JANITOR] PART 1B: Checking for stale Docker PROCESSING tasks "
+                f"(>{self.config.docker_task_timeout_hours}h)"
+            )
+
+            stale_docker_tasks = self.repo.get_stale_docker_tasks(
+                timeout_hours=self.config.docker_task_timeout_hours,
+                docker_task_types=TaskRoutingDefaults.LONG_RUNNING_TASKS
+            )
+            result.items_scanned += len(stale_docker_tasks)
+
+            if stale_docker_tasks:
+                logger.warning(
+                    f"[JANITOR] Found {len(stale_docker_tasks)} stale Docker PROCESSING tasks "
+                    f"(>{self.config.docker_task_timeout_hours}h)"
+                )
+
+                docker_failed_count = 0
+
+                for i, task in enumerate(stale_docker_tasks, 1):
+                    task_id = task['task_id']
+                    hours_stuck = round(task.get('hours_stuck', 0), 1)
+                    task_type = task.get('task_type', '')
+                    last_pulse = task.get('last_pulse')
+
+                    logger.warning(
+                        f"[JANITOR] Stale Docker task {i}/{len(stale_docker_tasks)}: "
+                        f"task_id={task_id[:16]}..., "
+                        f"job_id={task['parent_job_id'][:16]}..., "
+                        f"task_type={task_type}, "
+                        f"stuck={hours_stuck}h, "
+                        f"last_pulse={'SET' if last_pulse else 'None'}"
+                    )
+
+                    # Docker tasks that exceed 24 hours are considered failed
+                    # No retry logic - if it ran that long and didn't finish, something is wrong
+                    error_message = (
+                        f"[JANITOR] Docker task exceeded {self.config.docker_task_timeout_hours} hour timeout. "
+                        f"Task ran for {hours_stuck}h without completing. "
+                        f"last_pulse={'set' if last_pulse else 'never set'}."
+                    )
+
+                    self.repo.mark_tasks_as_failed([task_id], error_message)
+                    docker_failed_count += 1
+                    result.items_fixed += 1
+                    result.actions_taken.append({
+                        "action": "mark_docker_task_failed",
+                        "task_id": task_id,
+                        "parent_job_id": task['parent_job_id'],
+                        "task_type": task_type,
+                        "hours_stuck": hours_stuck,
+                        "last_pulse_set": last_pulse is not None,
+                        "reason": "docker_task_timeout"
+                    })
+
+                    logger.warning(
+                        f"[JANITOR] ❌ Marked stale Docker task FAILED: task_id={task_id[:16]}..., "
+                        f"hours_stuck={hours_stuck}h"
+                    )
+
+                logger.info(
+                    f"[JANITOR] Stale Docker task handling complete: failed={docker_failed_count}"
+                )
+            else:
+                logger.info("[JANITOR] No stale Docker PROCESSING tasks found ✓")
 
             # ================================================================
             # PART 2: ORPHANED QUEUED TASKS (messages lost in Service Bus)

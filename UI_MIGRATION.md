@@ -38,83 +38,90 @@ This document outlines the migration of web interfaces from inline Python f-stri
 
 ## Complete Web Interface Module Inventory
 
-### Tier 1: Core Operations (High Priority)
+### Priority 1: System Health (FIRST)
 
-| Module | Lines | Purpose | HTMX Partials | Complexity |
-|--------|-------|---------|---------------|------------|
-| `tasks` | 4,378 | Task monitoring, workflow diagrams, Docker progress | Yes | High |
-| `jobs` | 562 | Job listing, status, resubmit | Yes | Medium |
-| `pipeline` | 897 | Pipeline overview, stage visualization | No | Medium |
-| `submit_vector` | 1,587 | Vector data submission workflow | Yes | High |
-| `submit_raster` | 1,778 | Raster data submission workflow | Yes | High |
-| `submit_raster_collection` | 1,643 | Multi-file raster submission | Yes | High |
-| `health` | 2,910 | System health dashboard | Yes | Medium |
-| `queues` | 901 | Service Bus queue monitoring | Yes | Medium |
+| Module | Lines | Purpose | HTMX Partials | Phase |
+|--------|-------|---------|---------------|-------|
+| `health` | 2,910 | System health dashboard | Yes | **Phase 2** |
 
-**Subtotal: 14,656 lines (36%)**
+### Priority 2: Unified Collection Browser (NEW)
 
-### Tier 2: Data Browsing (Medium Priority)
+This is a **new interface** that will replace separate STAC and Vector browsers:
 
-| Module | Lines | Purpose | HTMX Partials | Complexity |
-|--------|-------|---------|---------------|------------|
-| `vector` | 944 | Vector collections browser | Yes | Medium |
-| `stac` | 1,342 | STAC collections browser | Yes | Medium |
-| `stac_collection` | 900 | Single STAC collection detail | No | Medium |
-| `gallery` | 747 | Dataset gallery view | No | Low |
-| `promoted_viewer` | 692 | Promoted datasets browser | No | Low |
-| `storage` | 898 | Blob storage browser | Yes | Medium |
+| Current Modules | Lines | To Be Replaced By |
+|-----------------|-------|-------------------|
+| `vector` | 944 | Unified Collection Browser |
+| `stac` | 1,342 | Unified Collection Browser |
+| `stac_collection` | 900 | Collection Detail View |
 
-**Subtotal: 5,523 lines (14%)**
+**Phase 3** will create a single searchable interface for both STAC and OGC Feature collections.
 
-### Tier 3: Map Viewers (Medium Priority)
+### Priority 3: Job Pipeline (REVIEW BEFORE MIGRATION)
 
-| Module | Lines | Purpose | HTMX Partials | Complexity |
-|--------|-------|---------|---------------|------------|
-| `map` | 665 | General map viewer (Leaflet) | No | Medium |
-| `stac_map` | 905 | STAC items on map | No | Medium |
-| `h3_map` | 827 | H3 hexagon visualization | No | Medium |
-| `raster_viewer` | 993 | COG/raster tile viewer | No | Medium |
-| `fathom_viewer` | 1,019 | FATHOM flood data viewer | No | Medium |
-| `vector_tiles` | 946 | Vector tile preview | No | Medium |
-| `service_preview` | 923 | External service map preview | No | Medium |
+| Module | Lines | Purpose | HTMX Partials | Phase |
+|--------|-------|---------|---------------|-------|
+| `jobs` | 562 | Job listing, status, resubmit | Yes | Phase 4 |
+| `tasks` | 4,378 | Task monitoring, workflow diagrams, Docker progress | Yes | Phase 4 |
+| `pipeline` | 897 | Pipeline overview, stage visualization | No | Phase 4 |
+| `queues` | 901 | Service Bus queue monitoring | Yes | Phase 4 |
+| `execution` | 1,469 | Execution timeline viewer | No | Phase 4 |
 
-**Subtotal: 6,278 lines (16%)**
+**Subtotal: 8,207 lines** - Each interface requires design review before migration.
 
-### Tier 4: Admin & System (Lower Priority)
+### Priority 4: Submit Workflows (REVIEW BEFORE MIGRATION)
 
-| Module | Lines | Purpose | HTMX Partials | Complexity |
-|--------|-------|---------|---------------|------------|
-| `external_services` | 1,749 | External service registry | Yes | Medium |
-| `database` | 835 | Database admin interface | Yes | Medium |
-| `metrics` | 697 | Pipeline metrics dashboard | No | Low |
-| `platform` | 500 | Platform integration status | No | Low |
-| `execution` | 1,469 | Execution timeline viewer | No | Medium |
-| `integration` | 2,066 | System integration dashboard | No | Medium |
+| Module | Lines | Purpose | HTMX Partials | Phase |
+|--------|-------|---------|---------------|-------|
+| `submit_vector` | 1,587 | Vector data submission workflow | Yes | Phase 5 |
+| `submit_raster` | 1,778 | Raster data submission workflow | Yes | Phase 5 |
+| `submit_raster_collection` | 1,643 | Multi-file raster submission | Yes | Phase 5 |
+| `upload` | 714 | File upload interface | Yes | Phase 5 |
 
-**Subtotal: 7,316 lines (18%)**
+**Subtotal: 5,722 lines** - Each interface requires design review before migration.
 
-### Tier 5: Specialized Tools (Lower Priority)
+### Priority 5: Map Viewers (REVIEW BEFORE MIGRATION)
 
-| Module | Lines | Purpose | HTMX Partials | Complexity |
-|--------|-------|---------|---------------|------------|
-| `promote_vector` | 1,389 | Vector promotion workflow | Yes | Medium |
-| `upload` | 714 | File upload interface | Yes | Medium |
-| `h3` | 656 | H3 index tools | No | Low |
-| `h3_sources` | 554 | H3 data sources | No | Low |
-| `zarr` | 1,131 | Zarr/XArray viewer | No | Medium |
+| Module | Lines | Purpose | HTMX Partials | Phase |
+|--------|-------|---------|---------------|-------|
+| `map` | 665 | General map viewer (Leaflet) | No | Phase 6 |
+| `stac_map` | 905 | STAC items on map | No | Phase 6 |
+| `h3_map` | 827 | H3 hexagon visualization | No | Phase 6 |
+| `raster_viewer` | 993 | COG/raster tile viewer | No | Phase 6 |
+| `fathom_viewer` | 1,019 | FATHOM flood data viewer | No | Phase 6 |
+| `vector_tiles` | 946 | Vector tile preview | No | Phase 6 |
+| `service_preview` | 923 | External service map preview | No | Phase 6 |
 
-**Subtotal: 4,444 lines (11%)**
+**Subtotal: 6,278 lines**
 
-### Tier 6: Documentation & API Docs (Lowest Priority)
+### Priority 6: Admin & Specialized (REVIEW BEFORE MIGRATION)
 
-| Module | Lines | Purpose | HTMX Partials | Complexity |
-|--------|-------|---------|---------------|------------|
-| `home` | 471 | Landing page, navigation | No | Low |
-| `docs` | 1,332 | API documentation browser | No | Low |
-| `swagger` | 271 | Swagger UI wrapper | No | Low |
-| `redoc` | 194 | ReDoc wrapper | No | Low |
+| Module | Lines | Purpose | HTMX Partials | Phase |
+|--------|-------|---------|---------------|-------|
+| `external_services` | 1,749 | External service registry | Yes | Phase 7 |
+| `database` | 835 | Database admin interface | Yes | Phase 7 |
+| `metrics` | 697 | Pipeline metrics dashboard | No | Phase 7 |
+| `platform` | 500 | Platform integration status | No | Phase 7 |
+| `integration` | 2,066 | System integration dashboard | No | Phase 7 |
+| `storage` | 898 | Blob storage browser | Yes | Phase 7 |
+| `promote_vector` | 1,389 | Vector promotion workflow | Yes | Phase 7 |
+| `gallery` | 747 | Dataset gallery view | No | Phase 7 |
+| `promoted_viewer` | 692 | Promoted datasets browser | No | Phase 7 |
 
-**Subtotal: 2,268 lines (6%)**
+**Subtotal: 9,573 lines**
+
+### Priority 7: Documentation & Utilities (LOW PRIORITY)
+
+| Module | Lines | Purpose | HTMX Partials | Phase |
+|--------|-------|---------|---------------|-------|
+| `home` | 471 | Landing page, navigation | No | Phase 8 |
+| `docs` | 1,332 | API documentation browser | No | Phase 8 |
+| `swagger` | 271 | Swagger UI wrapper | No | Phase 8 |
+| `redoc` | 194 | ReDoc wrapper | No | Phase 8 |
+| `h3` | 656 | H3 index tools | No | Phase 8 |
+| `h3_sources` | 554 | H3 data sources | No | Phase 8 |
+| `zarr` | 1,131 | Zarr/XArray viewer | No | Phase 8 |
+
+**Subtotal: 4,609 lines**
 
 ---
 
@@ -380,7 +387,11 @@ def test_status_badge_renders_correctly():
 
 ## Implementation Plan
 
-### Phase 1: Foundation Setup (Week 1)
+> **Migration Philosophy**: Each interface will be **reviewed before migration** to identify redesign opportunities. We are not just porting code - we are improving the UI/UX.
+
+---
+
+### Phase 1: Foundation Setup
 
 **Goal**: Set up Jinja2 infrastructure in Docker app
 
@@ -455,107 +466,209 @@ def test_status_badge_renders_correctly():
 
 ---
 
-### Phase 2: Pilot Migration - Jobs & Tasks (Week 2)
+### Phase 2: System Health Dashboard (TOP PRIORITY)
 
-**Goal**: Migrate highest-value interfaces to prove the pattern
+**Goal**: Migrate and enhance the system health interface
+
+**Why First**: Health dashboard is the primary operational interface - provides visibility into system status, service health, and quick diagnostics. Critical for operations.
+
+#### Current State
+- `health/interface.py`: 2,910 lines
+- Shows: database status, queue depths, storage accounts, service endpoints
+- Has HTMX partials for auto-refresh
 
 #### Tasks
 
-1. **Migrate jobs interface** (562 lines → ~150 lines)
-   - Create `pages/jobs/list.html`
-   - Create `pages/jobs/detail.html`
-   - Create `pages/jobs/_list_fragment.html` (HTMX partial)
-   - Create `routers/ui_jobs.py`
-
-2. **Migrate tasks interface** (4,378 lines → ~800 lines)
-   - Create `pages/tasks/list.html`
-   - Create `pages/tasks/detail.html`
-   - Create `pages/tasks/_workflow_fragment.html`
-   - Create `pages/tasks/_docker_progress.html`
-   - Create `routers/ui_tasks.py`
-
-3. **Migrate pipeline interface** (897 lines → ~200 lines)
-   - Create `pages/pipeline/index.html`
-   - Create `routers/ui_pipeline.py`
+1. **Review current health interface for redesign opportunities**
+2. **Create `pages/admin/health.html`**
+3. **Create `pages/admin/_health_status.html`** (HTMX partial for auto-refresh)
+4. **Create `routers/ui_admin.py`**
+5. **Add service status cards using macros**
 
 #### Deliverables
-- [ ] Jobs interface in Jinja2 (3 templates + 1 router)
-- [ ] Tasks interface in Jinja2 (4 templates + 1 router)
-- [ ] Pipeline interface in Jinja2 (1 template + 1 router)
-- [ ] Verification that HTMX partials work correctly
+- [ ] Health dashboard in Jinja2
+- [ ] Auto-refresh via HTMX working
+- [ ] Improved layout and information hierarchy
 
 ---
 
-### Phase 3: Submit Workflows (Week 3)
+### Phase 3: Unified Collection Browser (NEW INTERFACE)
 
-**Goal**: Migrate complex submission interfaces
+**Goal**: Create a **new** unified collection browser that combines STAC collections and OGC Feature Collections in one searchable interface
+
+**Why New**: Currently STAC (`stac/interface.py`, 1,342 lines) and Vector/OGC Features (`vector/interface.py`, 944 lines) are separate interfaces. Users must know which type of data they're looking for. A unified browser provides:
+- Single search across all geospatial collections
+- Consistent card-based display
+- Filter by type (raster/vector), date, tags
+- Preview on map
+
+#### Design Concept
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Collection Browser                          [Search...]    │
+├─────────────────────────────────────────────────────────────┤
+│  Filters: [All Types ▼] [All Tags ▼] [Date Range]  [Reset] │
+├─────────────────────────────────────────────────────────────┤
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
+│  │ 🛰️ STAC      │  │ 📐 Vector    │  │ 🛰️ STAC      │       │
+│  │ Flood Data   │  │ Watersheds   │  │ Elevation    │       │
+│  │ 24 items     │  │ 1,234 feat.  │  │ 156 items    │       │
+│  │ [View] [Map] │  │ [View] [Map] │  │ [View] [Map] │       │
+│  └──────────────┘  └──────────────┘  └──────────────┘       │
+│  ...                                                         │
+└─────────────────────────────────────────────────────────────┘
+```
 
 #### Tasks
 
-1. **Migrate submit_vector** (1,587 lines → ~400 lines)
-2. **Migrate submit_raster** (1,778 lines → ~450 lines)
-3. **Migrate submit_raster_collection** (1,643 lines → ~400 lines)
-4. **Create shared file browser component**
+1. **Design unified collection data model**
+   - Common fields: id, title, description, type, bbox, item_count, created_at
+   - Type-specific: stac_version (STAC), geometry_type (vector)
+
+2. **Create API endpoint for unified collection list**
+   - Aggregates from pgstac + PostGIS metadata tables
+   - Returns normalized collection objects
+
+3. **Create `pages/browse/collections.html`**
+4. **Create `pages/browse/_collection_card.html`** (reusable component)
+5. **Create `pages/browse/_collection_grid.html`** (HTMX partial)
+6. **Create collection detail pages**
+   - `pages/browse/stac_collection.html`
+   - `pages/browse/feature_collection.html`
+
+7. **Create `routers/ui_browse.py`**
 
 #### Deliverables
-- [ ] Submit vector in Jinja2
-- [ ] Submit raster in Jinja2
-- [ ] Submit raster collection in Jinja2
-- [ ] Reusable `_file_browser.html` component
+- [ ] Unified collection browser (NEW)
+- [ ] Search across STAC + OGC collections
+- [ ] Filter by type, tags, date
+- [ ] Collection detail views
+- [ ] Map preview integration
 
 ---
 
-### Phase 4: Data Browsing (Week 4)
+### Phase 4: Job Pipeline Interfaces (REVIEW REQUIRED)
 
-**Goal**: Migrate browsing interfaces
+**Goal**: Migrate job monitoring interfaces after design review
 
-#### Tasks
+**Note**: Before migration, each interface will be reviewed with Robert to identify:
+- Features to keep, remove, or add
+- Layout improvements
+- Better information hierarchy
+- Mobile responsiveness needs
 
-1. **Migrate vector** (944 lines → ~250 lines)
-2. **Migrate stac** (1,342 lines → ~350 lines)
-3. **Migrate storage** (898 lines → ~250 lines)
-4. **Create collection card component**
+#### Interfaces to Review & Migrate
+
+| Interface | Lines | Review Status | Migration Status |
+|-----------|-------|---------------|------------------|
+| `jobs` | 562 | ⬜ Pending | ⬜ Pending |
+| `tasks` | 4,378 | ⬜ Pending | ⬜ Pending |
+| `pipeline` | 897 | ⬜ Pending | ⬜ Pending |
+| `queues` | 901 | ⬜ Pending | ⬜ Pending |
+| `execution` | 1,469 | ⬜ Pending | ⬜ Pending |
 
 #### Deliverables
-- [ ] Vector browser in Jinja2
-- [ ] STAC browser in Jinja2
-- [ ] Storage browser in Jinja2
-- [ ] Reusable `collection_card.html` component
+- [ ] Design review completed for each interface
+- [ ] Jobs interface migrated
+- [ ] Tasks interface migrated
+- [ ] Pipeline interface migrated
+- [ ] Queues interface migrated
 
 ---
 
-### Phase 5: Map Viewers (Week 5)
+### Phase 5: Submit Workflows (REVIEW REQUIRED)
 
-**Goal**: Migrate map-based interfaces
+**Goal**: Migrate submission interfaces after design review
 
-#### Tasks
+#### Interfaces to Review & Migrate
 
-1. **Create base_map.html** (map viewer template with Leaflet/MapLibre)
-2. **Extract map utilities** → static/js/map-utils.js
-3. **Migrate map, stac_map, h3_map, raster_viewer**
+| Interface | Lines | Review Status | Migration Status |
+|-----------|-------|---------------|------------------|
+| `submit_vector` | 1,587 | ⬜ Pending | ⬜ Pending |
+| `submit_raster` | 1,778 | ⬜ Pending | ⬜ Pending |
+| `submit_raster_collection` | 1,643 | ⬜ Pending | ⬜ Pending |
+| `upload` | 714 | ⬜ Pending | ⬜ Pending |
 
 #### Deliverables
-- [ ] Map viewer base template
-- [ ] 4 map interfaces migrated
-- [ ] Reusable map initialization patterns
+- [ ] Design review completed for each interface
+- [ ] Shared file browser component created
+- [ ] All submit interfaces migrated
 
 ---
 
-### Phase 6: Admin & Remaining (Week 6)
+### Phase 6: Map Viewers (REVIEW REQUIRED)
 
-**Goal**: Complete migration
+**Goal**: Migrate map-based interfaces after design review
+
+#### Interfaces to Review & Migrate
+
+| Interface | Lines | Review Status | Migration Status |
+|-----------|-------|---------------|------------------|
+| `map` | 665 | ⬜ Pending | ⬜ Pending |
+| `stac_map` | 905 | ⬜ Pending | ⬜ Pending |
+| `h3_map` | 827 | ⬜ Pending | ⬜ Pending |
+| `raster_viewer` | 993 | ⬜ Pending | ⬜ Pending |
+| `fathom_viewer` | 1,019 | ⬜ Pending | ⬜ Pending |
+| `vector_tiles` | 946 | ⬜ Pending | ⬜ Pending |
+| `service_preview` | 923 | ⬜ Pending | ⬜ Pending |
+
+#### Deliverables
+- [ ] base_map.html template created
+- [ ] static/js/map-utils.js extracted
+- [ ] All map interfaces migrated
+
+---
+
+### Phase 7: Admin & Specialized (REVIEW REQUIRED)
+
+**Goal**: Migrate remaining interfaces after design review
+
+#### Interfaces to Review & Migrate
+
+| Interface | Lines | Review Status | Migration Status |
+|-----------|-------|---------------|------------------|
+| `database` | 835 | ⬜ Pending | ⬜ Pending |
+| `metrics` | 697 | ⬜ Pending | ⬜ Pending |
+| `platform` | 500 | ⬜ Pending | ⬜ Pending |
+| `external_services` | 1,749 | ⬜ Pending | ⬜ Pending |
+| `integration` | 2,066 | ⬜ Pending | ⬜ Pending |
+| `storage` | 898 | ⬜ Pending | ⬜ Pending |
+| `promote_vector` | 1,389 | ⬜ Pending | ⬜ Pending |
+| `gallery` | 747 | ⬜ Pending | ⬜ Pending |
+| `promoted_viewer` | 692 | ⬜ Pending | ⬜ Pending |
+
+#### Deliverables
+- [ ] Design review completed for each interface
+- [ ] All admin interfaces migrated
+
+---
+
+### Phase 8: Documentation & Cleanup
+
+**Goal**: Complete migration and deprecate Function App interfaces
 
 #### Tasks
 
-1. **Migrate health, database, metrics, platform**
-2. **Migrate external_services, execution, integration**
-3. **Migrate remaining specialized tools**
-4. **Deprecate Function App web interfaces**
+1. **Migrate remaining interfaces**
+   - `home`, `docs`, `swagger`, `redoc`
+   - `h3`, `h3_sources`, `zarr`
+   - `stac_collection`
+
+2. **Update Function App**
+   - Remove web_interfaces/ directory
+   - Update routing to redirect to Docker app
+   - Function App becomes API-only
+
+3. **Documentation**
+   - Update CLAUDE.md with new UI architecture
+   - Document Docker app UI routes
 
 #### Deliverables
-- [ ] All 36 interfaces migrated
+- [ ] All interfaces migrated
 - [ ] Function App serves API only
 - [ ] Docker App serves all UI
+- [ ] Documentation updated
 
 ---
 

@@ -173,9 +173,6 @@ class BootstrapH3DockerJob(JobBaseMixin, JobBase):
         if stage != 1:
             raise ValueError(f"BootstrapH3DockerJob has 1 stage, got stage {stage}")
 
-        # Resolve admin0 table
-        spatial_filter_table = cls._resolve_admin0_table()
-
         # Extract parameters with defaults
         grid_id_prefix = job_params.get('grid_id_prefix', 'land')
         country_filter = job_params.get('country_filter')
@@ -185,14 +182,21 @@ class BootstrapH3DockerJob(JobBaseMixin, JobBase):
         cascade_batch_size = job_params.get('cascade_batch_size', 10)
         checkpoint_interval = job_params.get('checkpoint_interval', 20)
 
+        # Resolve admin0 table - only needed for country_filter or global land filtering
+        # bbox_filter uses pure H3 polygon_to_cells and doesn't need admin0 table
+        spatial_filter_table = None
+        if country_filter or not bbox_filter:
+            # Need admin0 table for country lookup or global land filtering
+            spatial_filter_table = cls._resolve_admin0_table()
+
         task_params = {
             # Grid configuration
             'grid_id_prefix': grid_id_prefix,
             'base_resolution': base_resolution,
             'target_resolutions': target_resolutions,
 
-            # Spatial filtering
-            'spatial_filter_table': f"geo.{spatial_filter_table}",
+            # Spatial filtering - may be None for bbox-only mode
+            'spatial_filter_table': f"geo.{spatial_filter_table}" if spatial_filter_table else None,
             'country_filter': country_filter,
             'bbox_filter': bbox_filter,
 

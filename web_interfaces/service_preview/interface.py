@@ -583,6 +583,8 @@ class ServicePreviewInterface(BaseInterface):
                 for i, layer in enumerate(layers[:5]):  # Limit to first 5 layers
                     layer_name = layer.get('name', f'Layer {i}') if isinstance(layer, dict) else str(layer)
                     layer_id = layer.get('id', i) if isinstance(layer, dict) else i
+                    # Add first layer to map immediately
+                    add_to_map = f"serviceLayers['{layer_id}'].addTo(map);" if i == 0 else ''
                     layer_code.append(f"""
                     try {{
                         serviceLayers['{layer_id}'] = L.esri.featureLayer({{
@@ -591,7 +593,7 @@ class ServicePreviewInterface(BaseInterface):
                                 return {{ color: '#{self._get_layer_color(i)}', weight: 2, fillOpacity: 0.3 }};
                             }}
                         }});
-                        {'serviceLayers[\\''+str(layer_id)+'\\'].addTo(map);' if i == 0 else ''}
+                        {add_to_map}
 
                         serviceLayers['{layer_id}'].on('load', function() {{
                             hideLoading();

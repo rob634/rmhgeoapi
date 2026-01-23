@@ -3,6 +3,11 @@ Map interface module.
 
 Interactive Leaflet map viewer for OGC Features collections with vector data visualization.
 
+Updated (23 JAN 2026 - TiPG Standardization):
+    - Collections and features fetched from TiPG (high-performance Docker endpoint)
+    - Internal OGC Features API reserved for emergency backup only
+    - Schema-qualified collection IDs (geo.{table_name}) for TiPG
+
 Exports:
     MapInterface: Interactive map viewer with collection selection and feature display
 """
@@ -10,6 +15,7 @@ Exports:
 import azure.functions as func
 from web_interfaces.base import BaseInterface
 from web_interfaces import InterfaceRegistry
+from config import get_config
 
 
 @InterfaceRegistry.register('map')
@@ -39,10 +45,23 @@ class MapInterface(BaseInterface):
         Returns:
             Complete HTML document string
         """
-        return self._generate_full_page()
+        # Get TiPG base URL from config (23 JAN 2026)
+        try:
+            config = get_config()
+            tipg_base_url = config.tipg_base_url.rstrip('/')
+        except Exception:
+            # Fallback for local dev
+            tipg_base_url = 'https://rmhtitiler-ckdxapgkg4e2gtfp.eastus-01.azurewebsites.net/vector'
 
-    def _generate_full_page(self) -> str:
+        return self._generate_full_page(tipg_base_url)
+
+    def _generate_full_page(self, tipg_base_url: str) -> str:
         """Generate complete HTML page with Leaflet dependencies."""
+        css_content = self._generate_css()
+        navbar_content = self._generate_navbar()
+        html_content = self._generate_html_content()
+        js_content = self._generate_js(tipg_base_url)
+
         return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -56,12 +75,12 @@ class MapInterface(BaseInterface):
           crossorigin=""/>
 
     <style>
-        {self._generate_css()}
+        {css_content}
     </style>
 </head>
 <body>
-    {self._generate_navbar()}
-    {self._generate_html_content()}
+    {navbar_content}
+    {html_content}
 
     <!-- Leaflet JS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
@@ -69,7 +88,7 @@ class MapInterface(BaseInterface):
             crossorigin=""></script>
 
     <script>
-        {self._generate_js()}
+        {js_content}
     </script>
 </body>
 </html>"""
@@ -427,11 +446,22 @@ class MapInterface(BaseInterface):
         }
         """
 
-    def _generate_js(self) -> str:
-        """Generate JavaScript code."""
+    def _generate_js(self, tipg_base_url: str) -> str:
+        """Generate JavaScript code.
+
+        Updated 23 JAN 2026: Use TiPG as primary endpoint for collections and features.
+
+        Args:
+            tipg_base_url: TiPG base URL for OGC Features (e.g., https://titiler.../vector)
+        """
         return """
         // API Configuration
         const API_BASE_URL = window.location.origin;
+        // TiPG endpoint for high-performance OGC Features (23 JAN 2026)
+        const TIPG_BASE_URL = '""" + tipg_base_url + """';
+
+        // Helper: Extract table name from schema-qualified ID (geo.table -> table)
+        const getTableName = (id) => id.includes('.') ? id.split('.').pop() : id;
 
         // Initialize map centered on global view
         const map = L.map('map').setView([20, 0], 2);
@@ -461,11 +491,11 @@ class MapInterface(BaseInterface):
             document.getElementById('spinner').classList.remove('active');
         }
 
-        // Load collections on page load
+        // Load collections from TiPG (23 JAN 2026 - standardized to TiPG)
         async function loadCollections() {
             try {
                 setStatus('Loading collections...');
-                const response = await fetch(`${API_BASE_URL}/api/features/collections`);
+                const response = await fetch(`${TIPG_BASE_URL}/collections`);
 
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}`);
@@ -485,8 +515,9 @@ class MapInterface(BaseInterface):
 
                 collections.forEach(collection => {
                     const option = document.createElement('option');
+                    // Store full TiPG ID as value, display table name
                     option.value = collection.id;
-                    option.textContent = collection.id;
+                    option.textContent = getTableName(collection.id);
                     select.appendChild(option);
                 });
 
@@ -499,7 +530,7 @@ class MapInterface(BaseInterface):
             }
         }
 
-        // Load features
+        // Load features from TiPG (23 JAN 2026 - standardized to TiPG)
         async function loadFeatures() {
             const collectionId = document.getElementById('collection-select').value;
             const limit = document.getElementById('limit-select').value;
@@ -515,7 +546,8 @@ class MapInterface(BaseInterface):
                 setStatus('Loading features...');
                 document.getElementById('load-btn').disabled = true;
 
-                let url = `${API_BASE_URL}/api/features/collections/${collectionId}/items?limit=${limit}`;
+                // Use TiPG for features (schema-qualified ID)
+                let url = `${TIPG_BASE_URL}/collections/${collectionId}/items?limit=${limit}`;
                 if (simplify && parseFloat(simplify) > 0) {
                     url += `&simplify=${simplify}`;
                 }

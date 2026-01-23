@@ -40,7 +40,9 @@ Created: 23 JAN 2026
 import logging
 from typing import Any, Dict, List, Optional
 
-from core.models.map_state import MapState, MapStateSnapshot, MapLayer
+from pydantic import ValidationError
+
+from core.models.map_state import MapState, MapStateSnapshot, MapLayer, MapType
 from infrastructure.map_state_repository import (
     MapStateRepository,
     get_map_state_repository
@@ -281,14 +283,14 @@ class MapStateService:
         if self.repository.map_exists(map_id):
             raise ValueError(f"Map with name '{name}' already exists")
 
-        # Validate layers if provided
+        # Validate layers through Pydantic model (trust boundary)
         if layers:
-            self._validate_layers(layers)
+            validated_layers = self._validate_layers(layers)
         else:
             # Add default OSM basemap
-            layers = [MapLayer.create_osm_basemap().model_dump()]
+            validated_layers = [MapLayer.create_osm_basemap().model_dump()]
 
-        # Create via repository
+        # Create via repository with validated data
         self.repository.create_map(
             map_id=map_id,
             name=name,
@@ -298,7 +300,7 @@ class MapStateService:
             center_lat=center_lat,
             zoom_level=zoom_level,
             bounds=bounds,
-            layers=layers,
+            layers=validated_layers,
             custom_attributes=custom_attributes,
             tags=tags,
             thumbnail_url=thumbnail_url
@@ -342,9 +344,10 @@ class MapStateService:
         Returns:
             Updated map state dict, or None if not found
         """
-        # Validate layers if provided
+        # Validate layers through Pydantic model (trust boundary)
+        validated_layers = None
         if layers:
-            self._validate_layers(layers)
+            validated_layers = self._validate_layers(layers)
 
         # Update via repository (auto-creates snapshot)
         updated = self.repository.update_map(
@@ -356,7 +359,7 @@ class MapStateService:
             center_lat=center_lat,
             zoom_level=zoom_level,
             bounds=bounds,
-            layers=layers,
+            layers=validated_layers,
             custom_attributes=custom_attributes,
             tags=tags,
             thumbnail_url=thumbnail_url
@@ -507,40 +510,34 @@ class MapStateService:
     # VALIDATION
     # =========================================================================
 
-    def _validate_layers(self, layers: List[Dict[str, Any]]) -> List[str]:
+    def _validate_layers(self, layers: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        Validate layer configurations.
+        Validate layer configurations through Pydantic model.
+
+        This is the trust boundary - untrusted JSON is validated and converted
+        to clean model output. Invalid data raises ValueError.
 
         Args:
-            layers: List of layer configs
+            layers: List of layer configs from untrusted input
 
         Returns:
-            List of validation warnings (empty if valid)
+            List of validated layer dicts (from model_dump())
+
+        Raises:
+            ValueError: If any layer fails validation
         """
-        warnings = []
+        validated = []
 
-        for i, layer in enumerate(layers):
-            # Required fields
-            if not layer.get('layer_id'):
-                warnings.append(f"Layer {i}: missing layer_id")
-            if not layer.get('source_type'):
-                warnings.append(f"Layer {i}: missing source_type")
-            if not layer.get('source_id'):
-                warnings.append(f"Layer {i}: missing source_id")
-            if not layer.get('name'):
-                warnings.append(f"Layer {i}: missing name")
+        for i, layer_data in enumerate(layers):
+            try:
+                layer = MapLayer(**layer_data)
+                validated.append(layer.model_dump())
+            except ValidationError as e:
+                # Format Pydantic errors into readable message
+                errors = [f"{err['loc'][0]}: {err['msg']}" for err in e.errors()]
+                raise ValueError(f"Layer {i} validation failed: {'; '.join(errors)}")
 
-            # Validate source_type
-            valid_types = {'stac_item', 'external_service', 'vector_collection', 'xyz_tiles', 'wms'}
-            if layer.get('source_type') and layer['source_type'] not in valid_types:
-                warnings.append(f"Layer {i}: unknown source_type '{layer['source_type']}'")
-
-            # Validate opacity
-            opacity = layer.get('opacity')
-            if opacity is not None and (opacity < 0 or opacity > 1):
-                warnings.append(f"Layer {i}: opacity must be between 0 and 1")
-
-        return warnings
+        return validated
 
     def validate_map_config(self, config: Dict[str, Any]) -> List[str]:
         """
@@ -557,10 +554,12 @@ class MapStateService:
         if not config.get('name'):
             messages.append("name is required")
 
-        # Validate map_type
-        valid_types = {'maplibre', 'leaflet', 'openlayers'}
-        if config.get('map_type') and config['map_type'] not in valid_types:
-            messages.append(f"Unknown map_type '{config['map_type']}'")
+        # Validate map_type using MapType enum
+        map_type = config.get('map_type')
+        if map_type:
+            valid_types = {e.value for e in MapType}
+            if map_type not in valid_types:
+                messages.append(f"Unknown map_type '{map_type}'. Valid: {', '.join(valid_types)}")
 
         # Validate coordinates
         if config.get('center_lon') is not None:
@@ -586,8 +585,11 @@ class MapStateService:
             elif bounds[0] > bounds[2] or bounds[1] > bounds[3]:
                 messages.append("bounds min values must be less than max values")
 
-        # Validate layers
+        # Validate layers through Pydantic model
         if config.get('layers'):
-            messages.extend(self._validate_layers(config['layers']))
+            try:
+                self._validate_layers(config['layers'])
+            except ValueError as e:
+                messages.append(str(e))
 
         return messages

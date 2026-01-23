@@ -7,6 +7,11 @@ Features (24 DEC 2025 - S12.3.3):
     - HTMX enabled for future partial updates
     - Uses COMMON_CSS and COMMON_JS utilities
 
+Updated (23 JAN 2026 - TiPG Standardization):
+    - Collections fetched from TiPG (high-performance Docker endpoint)
+    - Internal OGC Features API reserved for emergency backup only
+    - Schema-qualified collection IDs (geo.{table_name}) for TiPG
+
 Exports:
     VectorInterface: OGC Features collections browser with clickable cards and spatial extents
 """
@@ -14,6 +19,7 @@ Exports:
 import azure.functions as func
 from web_interfaces.base import BaseInterface
 from web_interfaces import InterfaceRegistry
+from config import get_config
 
 
 @InterfaceRegistry.register('vector')
@@ -23,6 +29,8 @@ class VectorInterface(BaseInterface):
 
     Displays OGC API - Features collections in grid format with clickable
     cards that open the collection's API endpoint.
+
+    Updated 23 JAN 2026: Uses TiPG as primary endpoint for collections.
     """
 
     def render(self, request: func.HttpRequest) -> str:
@@ -35,9 +43,17 @@ class VectorInterface(BaseInterface):
         Returns:
             Complete HTML document string
         """
+        # Get TiPG base URL from config (23 JAN 2026)
+        try:
+            config = get_config()
+            tipg_base_url = config.tipg_base_url.rstrip('/')
+        except Exception:
+            # Fallback for local dev
+            tipg_base_url = 'https://rmhtitiler-ckdxapgkg4e2gtfp.eastus-01.azurewebsites.net/vector'
+
         content = self._generate_html_content()
         custom_css = self._generate_custom_css()
-        custom_js = self._generate_custom_js()
+        custom_js = self._generate_custom_js(tipg_base_url)
 
         return self.wrap_html(
             title="OGC Features Collections",
@@ -486,20 +502,28 @@ class VectorInterface(BaseInterface):
         }
         """
 
-    def _generate_custom_js(self) -> str:
+    def _generate_custom_js(self, tipg_base_url: str) -> str:
         """Generate custom JavaScript for OGC Features dashboard.
 
         Updated 30 DEC 2025: Fetch promoted datasets, conditional buttons, delete, modal.
+        Updated 23 JAN 2026: Use TiPG as primary endpoint for collections.
+
+        Args:
+            tipg_base_url: TiPG base URL for OGC Features (e.g., https://titiler.../vector)
         """
+        # Inject TiPG URL at start, keep rest as plain string to avoid escaping issues
         return """
         // State
         let allCollections = [];
         let promotedCollectionIds = new Set();
 
+        // TiPG endpoint for high-performance OGC Features (23 JAN 2026)
+        const TIPG_BASE_URL = '""" + tipg_base_url + """';
+
         // Load collections on page load
         document.addEventListener('DOMContentLoaded', loadCollections);
 
-        // Load collections from API
+        // Load collections from TiPG API (23 JAN 2026 - standardized to TiPG)
         async function loadCollections() {
             const grid = document.getElementById('collections-grid');
             const spinner = document.getElementById('loading-spinner');
@@ -513,9 +537,10 @@ class VectorInterface(BaseInterface):
             countDisplay.textContent = 'Loading...';
 
             try {
-                // Fetch collections and promoted datasets in parallel
+                // Fetch collections from TiPG and promoted datasets in parallel
+                // TiPG is the primary endpoint; Function App is emergency backup only
                 const [collectionsData, promotedData] = await Promise.all([
-                    fetchJSON(`${API_BASE_URL}/api/features/collections`),
+                    fetchJSON(`${TIPG_BASE_URL}/collections`),
                     fetchJSON(`${API_BASE_URL}/api/promote`).catch(() => ({ data: [] }))
                 ]);
 
@@ -526,9 +551,14 @@ class VectorInterface(BaseInterface):
                     (promotedData.data || []).map(p => p.stac_collection_id)
                 );
 
+                // Helper: Extract table name from schema-qualified ID (geo.table_name -> table_name)
+                // TiPG returns schema-qualified IDs but other APIs use just the table name
+                const getTableName = (id) => id.includes('.') ? id.split('.').pop() : id;
+
                 // Fetch approval statuses for all collections (17 JAN 2026)
                 if (allCollections.length > 0) {
-                    const tableNames = allCollections.map(c => c.id).join(',');
+                    // Use table names (without schema) for approval API
+                    const tableNames = allCollections.map(c => getTableName(c.id)).join(',');
                     try {
                         const approvalData = await fetchJSON(
                             `${API_BASE_URL}/api/platform/approvals/status?table_names=${encodeURIComponent(tableNames)}`
@@ -560,11 +590,17 @@ class VectorInterface(BaseInterface):
             }
         }
 
+        // Helper: Extract table name from schema-qualified ID (geo.table -> table)
+        const getTableName = (id) => id.includes('.') ? id.split('.').pop() : id;
+
         // Render collections grid
         function renderCollections(collections) {
             const grid = document.getElementById('collections-grid');
 
             grid.innerHTML = collections.map(c => {
+                // Get table name without schema for lookups and links
+                const tableName = getTableName(c.id);
+
                 // Extract feature count from description
                 const desc = c.description || 'No description available';
                 const featureCount = desc.match(/\\((\\d+) features\\)/);
@@ -576,21 +612,22 @@ class VectorInterface(BaseInterface):
                     `[${bbox.map(v => v.toFixed(2)).join(', ')}]` :
                     'No extent';
 
-                // Get links
+                // Get links - use table name (without schema) for internal links
                 const selfLink = c.links?.find(l => l.rel === 'self')?.href || '';
-                const viewerLink = `${API_BASE_URL}/api/vector/viewer?collection=${encodeURIComponent(c.id)}`;
-                const promoteLink = `/api/interface/promote-vector?collection=${encodeURIComponent(c.id)}`;
+                const viewerLink = `${API_BASE_URL}/api/vector/viewer?collection=${encodeURIComponent(tableName)}`;
+                const promoteLink = `/api/interface/promote-vector?collection=${encodeURIComponent(tableName)}`;
 
-                // Check if promoted
-                const isPromoted = promotedCollectionIds.has(c.id);
-                const title = c.title || c.id;
+                // Check if promoted (use table name for lookup)
+                const isPromoted = promotedCollectionIds.has(tableName);
+                const title = c.title || tableName;
 
-                // Check approval status (17 JAN 2026)
-                const approvalStatus = window.approvalStatuses?.[c.id] || {};
+                // Check approval status (17 JAN 2026) - use table name for lookup
+                const approvalStatus = window.approvalStatuses?.[tableName] || {};
                 const isApproved = approvalStatus.is_approved === true;
 
                 // Build action buttons (13 JAN 2026: Added Vector Tiles viewer)
-                const tilesLink = `/api/interface/vector-tiles?collection=${encodeURIComponent(c.id)}`;
+                // Note: Tiles viewer handles schema qualification internally
+                const tilesLink = `/api/interface/vector-tiles?collection=${encodeURIComponent(tableName)}`;
                 let actionButtons = `
                     <a href="${viewerLink}"
                        class="link-badge link-badge-primary"
@@ -632,14 +669,14 @@ class VectorInterface(BaseInterface):
                             ⬆️ Promote
                         </a>
                         <button class="link-badge link-badge-delete"
-                                onclick="deleteCollection('${c.id}', event)"
+                                onclick="deleteCollection('${tableName}', event)"
                                 title="Delete this collection (unpublish)">
                             🗑️ Delete
                         </button>`;
                 }
 
                 return `
-                    <div class="collection-card" onclick="showCollectionDetail('${c.id}', event)" title="${title}">
+                    <div class="collection-card" onclick="showCollectionDetail('${c.id}', '${tableName}', event)" title="${title}">
                         ${isApproved ? '<span class="approved-badge">✓ Approved</span>' : ''}
                         ${isPromoted ? '<span class="promoted-badge">⭐ Promoted</span>' : ''}
                         <h3>${title}</h3>
@@ -666,19 +703,20 @@ class VectorInterface(BaseInterface):
 
         // filterCollections() now in COMMON_JS (S12.5.4 - 08 JAN 2026)
 
-        // Show collection detail modal
-        async function showCollectionDetail(collectionId, event) {
+        // Show collection detail modal (23 JAN 2026: Uses TiPG with schema-qualified ID)
+        async function showCollectionDetail(tipgId, tableName, event) {
             // Don't open modal if clicking links/buttons
             if (event.target.tagName === 'A' || event.target.tagName === 'BUTTON') {
                 return;
             }
 
             try {
-                const data = await fetchJSON(`${API_BASE_URL}/api/features/collections/${encodeURIComponent(collectionId)}`);
+                // Fetch from TiPG using schema-qualified ID
+                const data = await fetchJSON(`${TIPG_BASE_URL}/collections/${encodeURIComponent(tipgId)}`);
 
                 const selfLink = data.links?.find(l => l.rel === 'self')?.href || '';
                 const itemsLink = data.links?.find(l => l.rel === 'items')?.href || '';
-                const viewerLink = `${API_BASE_URL}/api/vector/viewer?collection=${encodeURIComponent(collectionId)}`;
+                const viewerLink = `${API_BASE_URL}/api/vector/viewer?collection=${encodeURIComponent(tableName)}`;
 
                 // Format extent
                 const bbox = data.extent?.spatial?.bbox?.[0];

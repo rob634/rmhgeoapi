@@ -158,6 +158,13 @@ from .external_service import (
     ServiceStatus
 )
 
+# Job event tracking models (23 JAN 2026 - Execution Timeline)
+from .job_event import (
+    JobEvent,
+    JobEventType,
+    JobEventStatus
+)
+
 # Geo schema models - Service Layer (21 JAN 2026 - F7.IaC)
 from .geo import (
     GeoTableCatalog,
@@ -274,6 +281,11 @@ __all__ = [
     'ExternalService',
     'ServiceType',
     'ServiceStatus',
+
+    # Job event tracking models (23 JAN 2026 - Execution Timeline)
+    'JobEvent',
+    'JobEventType',
+    'JobEventStatus',
 
     # Geo schema models - Service Layer (21 JAN 2026 - F7.IaC)
     'GeoTableCatalog',

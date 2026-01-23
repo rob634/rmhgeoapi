@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% from "components/macros.html" import card, status_badge %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="dashboard-header">
+    <h1>Docker Worker Dashboard</h1>
+    <p class="subtitle">Geospatial data processing worker - Jinja2 UI (Phase 1)</p>
+</div>
+
+<div class="cards-grid">
+    {{ card(
+        title="System Health",
+        description="View database, storage, and queue connectivity status",
+        icon="heartbeat",
+        footer="View Health Dashboard",
+        href="/ui/admin/health"
+    ) }}
+
+    {{ card(
+        title="Collections",
+        description="Browse STAC and vector feature collections",
+        icon="layers",
+        footer="Browse Collections",
+        href="/ui/collections"
+    ) }}
+
+    {{ card(
+        title="Jobs",
+        description="Monitor job status and progress",
+        icon="list-check",
+        footer="View Jobs",
+        href="/ui/jobs"
+    ) }}
+
+    {{ card(
+        title="Tasks",
+        description="View task execution details",
+        icon="gear",
+        footer="View Tasks",
+        href="/ui/tasks"
+    ) }}
+</div>
+
+<div class="stats-banner">
+    <div class="stat-item">
+        <div class="stat-label">Version</div>
+        <div class="stat-value">{{ version }}</div>
+    </div>
+    <div class="stat-item">
+        <div class="stat-label">Environment</div>
+        <div class="stat-value">{{ environment }}</div>
+    </div>
+    <div class="stat-item">
+        <div class="stat-label">Database</div>
+        <div class="stat-value" style="font-size: 14px;">{{ database_host }}</div>
+    </div>
+</div>
+
+<div class="dashboard-header" style="margin-top: 20px;">
+    <h2>Quick Links</h2>
+    <p class="subtitle">API endpoints and external resources</p>
+</div>
+
+<div class="cards-grid" style="grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));">
+    <a href="/health" class="card">
+        <h3 class="card-title">Health API</h3>
+        <p class="card-description">JSON health status</p>
+    </a>
+    <a href="/docs" class="card">
+        <h3 class="card-title">API Documentation</h3>
+        <p class="card-description">OpenAPI / Swagger UI</p>
+    </a>
+    <a href="/queue/status" class="card">
+        <h3 class="card-title">Queue Status</h3>
+        <p class="card-description">Background worker status</p>
+    </a>
+    <a href="/handlers" class="card">
+        <h3 class="card-title">Handlers</h3>
+        <p class="card-description">Registered task handlers</p>
+    </a>
+</div>
+{% endblock %}
+
+{% block styles %}
+<style>
+    .cards-grid {
+        margin-bottom: 30px;
+    }
+</style>
+{% endblock %}

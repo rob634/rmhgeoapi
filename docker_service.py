@@ -184,7 +184,7 @@ configure_docker_logging()
 
 import json
 import logging
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -907,6 +907,44 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+
+
+# ============================================================================
+# STATIC FILES AND TEMPLATES (23 JAN 2026 - UI Migration Phase 1)
+# ============================================================================
+
+from pathlib import Path
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse
+
+# Mount static files (CSS, JS)
+_static_dir = Path(__file__).parent / "static"
+if _static_dir.exists():
+    app.mount("/static", StaticFiles(directory=_static_dir), name="static")
+    logger.info(f"Static files mounted from: {_static_dir}")
+else:
+    logger.warning(f"Static directory not found: {_static_dir}")
+
+
+# ============================================================================
+# UI ENDPOINTS (Jinja2 Templates)
+# ============================================================================
+
+@app.get("/ui/", response_class=HTMLResponse)
+def ui_home(request: Request):
+    """
+    UI Home Page - Landing page for Docker worker UI.
+
+    Returns:
+        HTML landing page with links to all UI sections
+    """
+    from templates_utils import render_template
+
+    return render_template(
+        request,
+        "pages/admin/home.html",
+        nav_active="/ui/"
+    )
 
 
 # ============================================================================

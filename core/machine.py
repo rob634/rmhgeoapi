@@ -785,11 +785,13 @@ class CoreMachine:
             )
 
             # 18 JAN 2026: Track execution_started_at for task timing metrics
+            # 22 JAN 2026: Set initial last_pulse for liveness tracking (Docker tasks)
             execution_start = datetime.now(timezone.utc)
 
             update_model = TaskUpdateModel(
                 status=TaskStatus.PROCESSING,
-                execution_started_at=execution_start
+                execution_started_at=execution_start,
+                last_pulse=execution_start  # Initial pulse when task starts
             )
             success = self.state_manager.update_task_with_model(
                 task_message.task_id,

@@ -524,7 +524,8 @@ class BackgroundQueueWorker:
             logger.info(f"  Stage: {task_message.stage}")
             logger.info("=" * 50)
 
-            # Create Docker context with checkpoint and shutdown awareness (F7.18)
+            # Create Docker context with checkpoint, shutdown awareness, and pulse (F7.18, 22 JAN 2026)
+            # Pulse is auto-started by create_docker_context() - updates last_pulse every 60s
             task_repo = RepositoryFactory.create_task_repository()
             docker_context = create_docker_context(
                 task_id=task_message.task_id,
@@ -533,6 +534,7 @@ class BackgroundQueueWorker:
                 stage=task_message.stage,
                 shutdown_event=self._stop_event,
                 task_repo=task_repo,
+                auto_start_pulse=True,  # Start pulse immediately
             )
 
             # Log checkpoint state if resuming
@@ -543,11 +545,16 @@ class BackgroundQueueWorker:
 
             logger.info(f"[Queue] ▶️ Starting task execution...")
 
-            # Process via CoreMachine with Docker context
-            result = self._core_machine.process_task_message(
-                task_message,
-                docker_context=docker_context
-            )
+            try:
+                # Process via CoreMachine with Docker context
+                result = self._core_machine.process_task_message(
+                    task_message,
+                    docker_context=docker_context
+                )
+            finally:
+                # Always stop pulse when task processing ends (22 JAN 2026)
+                docker_context.stop_pulse()
+
             elapsed = time.time() - start_time
 
             if result.get('success'):
@@ -559,6 +566,7 @@ class BackgroundQueueWorker:
                     logger.warning(f"  Task ID: {task_id[:16]}...")
                     logger.warning(f"  Phase completed: {result.get('phase_completed', '?')}")
                     logger.warning(f"  Elapsed: {elapsed:.2f}s")
+                    logger.warning(f"  Pulses sent: {docker_context.pulse_count}")
                     logger.warning(f"  Action: ABANDONING message for resume by another instance")
                     logger.warning("=" * 50)
                     receiver.abandon_message(message)
@@ -569,6 +577,7 @@ class BackgroundQueueWorker:
                     logger.info(f"[Queue] ✅ TASK COMPLETED")
                     logger.info(f"  Task ID: {task_id[:16]}...")
                     logger.info(f"  Elapsed: {elapsed:.2f}s")
+                    logger.info(f"  Pulses sent: {docker_context.pulse_count}")
                     logger.info(f"  Action: Message COMPLETED (removed from queue)")
                     logger.info("=" * 50)
                     receiver.complete_message(message)
@@ -587,6 +596,7 @@ class BackgroundQueueWorker:
                 logger.error(f"  Task ID: {task_id[:16]}...")
                 logger.error(f"  Error: {error}")
                 logger.error(f"  Elapsed: {elapsed:.2f}s")
+                logger.error(f"  Pulses sent: {docker_context.pulse_count}")
                 logger.error(f"  Action: Message DEAD-LETTERED")
                 logger.error("=" * 50)
                 receiver.dead_letter_message(

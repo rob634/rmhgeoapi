@@ -4,7 +4,7 @@
 # EPOCH: 4 - ACTIVE
 # STATUS: Core - Docker task execution context
 # PURPOSE: Unified context object for Docker handlers (F7.18)
-# LAST_REVIEWED: 16 JAN 2026
+# LAST_REVIEWED: 23 JAN 2026
 # EXPORTS: DockerTaskContext
 # DEPENDENCIES: infrastructure.checkpoint_manager, threading
 # ============================================================================
@@ -16,6 +16,7 @@ Provides a unified context object passed to Docker handlers, wrapping:
 - Shutdown event for graceful termination
 - Progress reporting for task visibility
 - Task/Job identifiers
+- Pulse mechanism for liveness tracking (22 JAN 2026)
 
 ================================================================================
 ARCHITECTURE
@@ -95,7 +96,9 @@ EXPORTS
 
 from __future__ import annotations
 
+import os
 import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
@@ -107,14 +110,22 @@ if TYPE_CHECKING:
 
 logger = LoggerFactory.create_logger(ComponentType.SERVICE, "docker_context")
 
+# =============================================================================
+# PULSE CONFIGURATION (22 JAN 2026)
+# =============================================================================
+# Default interval for pulse updates (seconds)
+# Can be overridden via DOCKER_PULSE_INTERVAL_SECONDS environment variable
+DEFAULT_PULSE_INTERVAL_SECONDS = 60
+
 
 @dataclass
 class DockerTaskContext:
     """
     Unified context for Docker task handlers.
 
-    Provides checkpoint management, shutdown awareness, and progress reporting
-    in a single object passed to handlers via the _docker_context parameter.
+    Provides checkpoint management, shutdown awareness, progress reporting,
+    and pulse mechanism in a single object passed to handlers via the
+    _docker_context parameter.
 
     Attributes:
         task_id: Current task identifier
@@ -124,7 +135,18 @@ class DockerTaskContext:
         checkpoint: CheckpointManager instance for resume support
         shutdown_event: Threading event signaling graceful shutdown
         task_repo: Task repository for progress updates (optional)
+        pulse_interval_seconds: Interval between pulse updates (default: 60)
         created_at: When this context was created
+
+    Pulse Mechanism (22 JAN 2026):
+        The pulse mechanism updates task.last_pulse periodically to signal
+        that the task is still alive. This allows the Janitor to distinguish
+        between tasks that are legitimately running vs. tasks that crashed.
+
+        Usage:
+            context.start_pulse()  # Start background pulse thread
+            # ... handler work ...
+            context.stop_pulse()   # Stop pulse (automatic on context exit)
 
     Example:
         context = DockerTaskContext(
@@ -136,10 +158,15 @@ class DockerTaskContext:
             shutdown_event=worker_stop_event,
         )
 
+        # Start pulse before long-running work
+        context.start_pulse()
+
         # In handler
         if context.should_stop():
             context.checkpoint.save(current_phase, data=progress)
             return {'success': True, 'interrupted': True}
+
+        # Pulse stops automatically when context is cleaned up
     """
 
     # Core identifiers
@@ -154,16 +181,134 @@ class DockerTaskContext:
     # Shutdown coordination (shared across all tasks in worker)
     shutdown_event: threading.Event
 
-    # Optional: for progress reporting
+    # Optional: for progress reporting and pulse updates
     task_repo: Optional[Any] = None
+
+    # Pulse configuration (22 JAN 2026)
+    pulse_interval_seconds: int = field(default_factory=lambda: int(
+        os.environ.get('DOCKER_PULSE_INTERVAL_SECONDS', DEFAULT_PULSE_INTERVAL_SECONDS)
+    ))
 
     # Metadata
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    # Pulse state (initialized in __post_init__)
+    _pulse_thread: Optional[threading.Thread] = field(default=None, init=False, repr=False)
+    _pulse_stop_event: threading.Event = field(default_factory=threading.Event, init=False, repr=False)
+    _pulse_count: int = field(default=0, init=False, repr=False)
+    _pulse_started: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self):
         """Wire shutdown event to checkpoint manager."""
         if self.checkpoint and self.shutdown_event:
             self.checkpoint.set_shutdown_event(self.shutdown_event)
+
+    # =========================================================================
+    # PULSE MECHANISM (22 JAN 2026)
+    # =========================================================================
+
+    def start_pulse(self) -> None:
+        """
+        Start the background pulse thread.
+
+        The pulse thread updates task.last_pulse periodically to signal
+        that the task is still running. This allows the Janitor to distinguish
+        between active tasks and crashed tasks.
+
+        Call this at the start of long-running handler work.
+        Pulse stops automatically on shutdown or when stop_pulse() is called.
+        """
+        if self._pulse_started:
+            logger.debug(f"💓 Pulse already running for task {self.task_id[:8]}...")
+            return
+
+        if not self.task_repo:
+            logger.warning(
+                f"💔 Cannot start pulse for task {self.task_id[:8]}... - no task_repo"
+            )
+            return
+
+        self._pulse_stop_event.clear()
+        self._pulse_thread = threading.Thread(
+            target=self._pulse_loop,
+            daemon=True,
+            name=f"pulse-{self.task_id[:8]}"
+        )
+        self._pulse_thread.start()
+        self._pulse_started = True
+
+        logger.info(
+            f"💓 Started pulse thread for task {self.task_id[:8]}... "
+            f"(interval={self.pulse_interval_seconds}s)"
+        )
+
+    def stop_pulse(self) -> None:
+        """
+        Stop the background pulse thread.
+
+        Called automatically when shutdown is signaled, or can be called
+        explicitly at the end of handler work.
+        """
+        if not self._pulse_started:
+            return
+
+        self._pulse_stop_event.set()
+
+        if self._pulse_thread and self._pulse_thread.is_alive():
+            self._pulse_thread.join(timeout=5)
+
+        self._pulse_started = False
+
+        logger.info(
+            f"💓 Stopped pulse thread for task {self.task_id[:8]}... "
+            f"(total pulses: {self._pulse_count})"
+        )
+
+    def _pulse_loop(self) -> None:
+        """
+        Background thread loop that updates last_pulse periodically.
+
+        Runs until stop_pulse() is called or shutdown is signaled.
+        """
+        logger.debug(f"💓 Pulse loop started for task {self.task_id[:8]}...")
+
+        while not self._pulse_stop_event.wait(timeout=self.pulse_interval_seconds):
+            # Check for shutdown
+            if self.shutdown_event.is_set():
+                logger.debug(f"💓 Pulse loop stopping (shutdown) for task {self.task_id[:8]}...")
+                break
+
+            try:
+                # Update last_pulse in database
+                success = self.task_repo.update_task_pulse(self.task_id)
+                self._pulse_count += 1
+
+                if success:
+                    logger.debug(
+                        f"💓 Pulse #{self._pulse_count} for task {self.task_id[:8]}..."
+                    )
+                else:
+                    logger.warning(
+                        f"💔 Pulse #{self._pulse_count} failed for task {self.task_id[:8]}..."
+                    )
+
+            except Exception as e:
+                # Pulse failure is non-fatal - log and continue
+                logger.warning(
+                    f"💔 Pulse error for task {self.task_id[:8]}...: {e}"
+                )
+
+        logger.debug(f"💓 Pulse loop ended for task {self.task_id[:8]}...")
+
+    @property
+    def pulse_count(self) -> int:
+        """Number of successful pulse updates."""
+        return self._pulse_count
+
+    @property
+    def is_pulse_running(self) -> bool:
+        """Check if pulse thread is currently running."""
+        return self._pulse_started and self._pulse_thread is not None and self._pulse_thread.is_alive()
 
     # =========================================================================
     # SHUTDOWN AWARENESS
@@ -316,6 +461,8 @@ def create_docker_context(
     stage: int,
     shutdown_event: threading.Event,
     task_repo: Any,
+    auto_start_pulse: bool = True,
+    pulse_interval_seconds: Optional[int] = None,
 ) -> DockerTaskContext:
     """
     Factory function to create DockerTaskContext with CheckpointManager.
@@ -330,9 +477,11 @@ def create_docker_context(
         stage: Current stage number
         shutdown_event: Worker's shutdown event
         task_repo: Task repository for persistence
+        auto_start_pulse: Whether to start pulse thread immediately (default: True)
+        pulse_interval_seconds: Override pulse interval (default: from env or 60s)
 
     Returns:
-        Fully configured DockerTaskContext
+        Fully configured DockerTaskContext with pulse optionally started
 
     Example:
         # In BackgroundQueueWorker._process_message()
@@ -344,10 +493,13 @@ def create_docker_context(
             shutdown_event=self._stop_event,
             task_repo=task_repo,
         )
+        # Pulse is already running!
         result = self._core_machine.process_task_message(
             task_message,
             docker_context=context
         )
+        # Stop pulse when done
+        context.stop_pulse()
     """
     from infrastructure.checkpoint_manager import CheckpointManager
 
@@ -358,15 +510,28 @@ def create_docker_context(
         shutdown_event=shutdown_event
     )
 
-    return DockerTaskContext(
-        task_id=task_id,
-        job_id=job_id,
-        job_type=job_type,
-        stage=stage,
-        checkpoint=checkpoint,
-        shutdown_event=shutdown_event,
-        task_repo=task_repo,
-    )
+    # Build context kwargs
+    context_kwargs = {
+        'task_id': task_id,
+        'job_id': job_id,
+        'job_type': job_type,
+        'stage': stage,
+        'checkpoint': checkpoint,
+        'shutdown_event': shutdown_event,
+        'task_repo': task_repo,
+    }
+
+    # Add pulse interval if specified
+    if pulse_interval_seconds is not None:
+        context_kwargs['pulse_interval_seconds'] = pulse_interval_seconds
+
+    context = DockerTaskContext(**context_kwargs)
+
+    # Auto-start pulse if requested
+    if auto_start_pulse:
+        context.start_pulse()
+
+    return context
 
 
 # =============================================================================

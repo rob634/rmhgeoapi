@@ -1,6 +1,6 @@
 # Working Backlog
 
-**Last Updated**: 22 JAN 2026
+**Last Updated**: 23 JAN 2026
 **Source of Truth**: [docs/epics/README.md](/docs/epics/README.md) — Epic/Feature/Story definitions
 **Purpose**: Sprint-level task tracking and delegation
 
@@ -126,6 +126,77 @@ CREATE INDEX idx_job_events_time ON app.job_events(created_at);
 
 #### Story 6: Create Execution Timeline UI (PENDING)
 **Status**: Waiting - complete events table first
+
+---
+
+## 🔥 ACTIVE: UI Migration - Function App to Docker/Jinja2
+
+**Added**: 23 JAN 2026
+**Epic**: New - UI Infrastructure
+**Status**: Phase 1 COMPLETE, Phase 2 PENDING
+**Plan Document**: [UI_MIGRATION.md](/UI_MIGRATION.md)
+
+### Goal
+
+Migrate 36 web interface modules (~44,000 lines) from inline Python f-strings in Function App to proper Jinja2 templates in Docker app. Benefits:
+- 60% code reduction through component reuse
+- Static CSS/JS caching (currently regenerated every request)
+- IDE support for HTML/CSS/JS
+- Reusable macros instead of copy/paste duplication
+
+### Phase 1: Foundation Setup ✅ COMPLETE (23 JAN 2026)
+
+| Deliverable | Status | Notes |
+|-------------|--------|-------|
+| `templates/` directory structure | ✅ Done | base.html, components/, pages/ |
+| `static/css/styles.css` | ✅ Done | 26KB extracted from base.py |
+| `static/js/common.js` | ✅ Done | 22KB extracted from base.py |
+| `templates_utils.py` | ✅ Done | Jinja2 config, render_template() |
+| `templates/base.html` | ✅ Done | Layout with navbar, footer, HTMX |
+| `templates/components/macros.html` | ✅ Done | 11 reusable macros |
+| `templates/components/navbar.html` | ✅ Done | Navigation component |
+| `templates/components/footer.html` | ✅ Done | Footer component |
+| Static files mount in docker_service.py | ✅ Done | `/static/` endpoint |
+| `/interface/home` route | ✅ Done | Landing page |
+| Root `/` redirect | ✅ Done | Redirects to `/interface/home` |
+
+**Available Macros**: `status_badge`, `card`, `stat_item`, `spinner`, `empty_state`, `error_state`, `modal`, `confirm_dialog`, `data_table`, `collection_card`, `service_status_card`
+
+### Phase 2: System Health Dashboard (TOP PRIORITY) ⬜ PENDING
+
+**Goal**: Migrate health interface as first real page
+
+| Task | Status |
+|------|--------|
+| Review current `health/interface.py` (2,910 lines) | ⬜ Pending |
+| Create `pages/admin/health.html` template | ⬜ Pending |
+| Create `_health_status.html` HTMX partial | ⬜ Pending |
+| Add `/interface/health` route | ⬜ Pending |
+| Test auto-refresh via HTMX | ⬜ Pending |
+
+### Phase 3: Unified Collection Browser (NEW) ⬜ PENDING
+
+**Goal**: NEW interface combining STAC + OGC Feature Collections
+
+| Task | Status |
+|------|--------|
+| Design unified collection data model | ⬜ Pending |
+| Create API endpoint for unified list | ⬜ Pending |
+| Create `pages/browse/collections.html` | ⬜ Pending |
+| Create search/filter UI | ⬜ Pending |
+| Create collection detail views | ⬜ Pending |
+
+### Remaining Phases (REVIEW BEFORE MIGRATION)
+
+All remaining interfaces require design review before migration:
+
+| Phase | Interfaces | Total Lines |
+|-------|------------|-------------|
+| Phase 4 | jobs, tasks, pipeline, queues, execution | 8,207 |
+| Phase 5 | submit_vector, submit_raster, submit_raster_collection, upload | 5,722 |
+| Phase 6 | map, stac_map, h3_map, raster_viewer, fathom_viewer, vector_tiles, service_preview | 6,278 |
+| Phase 7 | database, metrics, platform, external_services, integration, storage, promote_vector, gallery, promoted_viewer | 9,573 |
+| Phase 8 | home, docs, swagger, redoc, h3, h3_sources, zarr, stac_collection | 4,609 |
 
 ---
 

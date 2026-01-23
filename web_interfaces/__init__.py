@@ -452,6 +452,12 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Could not import ReDoc interface: {e}")
 
+try:
+    from .external_services import interface as _external_services
+    logger.info("✅ Imported External Services interface module")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import External Services interface: {e}")
+
 
 # Public API
 __all__ = [

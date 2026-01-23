@@ -183,6 +183,13 @@ class HomeInterface(BaseInterface):
                         <p class="card-description">Database diagnostics and maintenance</p>
                         <div class="card-footer">Open Admin</div>
                     </a>
+
+                    <a href="/api/interface/external-services" class="card">
+                        <div class="card-icon">🌐</div>
+                        <h3 class="card-title">External Services</h3>
+                        <p class="card-description">Register and monitor external geospatial services</p>
+                        <div class="card-footer">Manage Services</div>
+                    </a>
                 </div>
             </section>
 

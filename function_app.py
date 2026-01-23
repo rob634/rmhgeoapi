@@ -411,6 +411,12 @@ from triggers.trigger_raster_renders import (
     set_default_render, create_default_render
 )
 
+# Map State API - Saveable web map configurations (23 JAN 2026)
+from triggers.trigger_map_states import (
+    list_maps, get_map, create_map, update_map, delete_map,
+    list_snapshots, get_snapshot, restore_snapshot
+)
+
 # Pipeline Dashboard - Container blob browser (21 NOV 2025) - Read-only UI operations
 from triggers.list_container_blobs import list_container_blobs_handler
 from triggers.get_blob_metadata import get_blob_metadata_handler
@@ -2232,6 +2238,77 @@ def raster_renders_delete(req: func.HttpRequest) -> func.HttpResponse:
 def raster_renders_set_default(req: func.HttpRequest) -> func.HttpResponse:
     """Set as default: POST /api/raster/{cog_id}/renders/{render_id}/default"""
     return set_default_render(req)
+
+
+# ============================================================================
+# MAP STATE API ENDPOINTS (23 JAN 2026)
+# ============================================================================
+#
+# Saveable web map configurations with layer management and version history.
+#
+# Features:
+#   - Save/restore map states (center, zoom, layers)
+#   - Layer symbology references (STAC renders, OGC styles)
+#   - Automatic snapshot versioning on updates
+#   - Support for multiple map container types (MapLibre, Leaflet, OpenLayers)
+#
+# Available Endpoints:
+#   GET    /api/maps                              - List maps
+#   GET    /api/maps/{map_id}                     - Get map
+#   POST   /api/maps                              - Create map
+#   PUT    /api/maps/{map_id}                     - Update map
+#   DELETE /api/maps/{map_id}                     - Delete map
+#   GET    /api/maps/{map_id}/snapshots           - List snapshots
+#   GET    /api/maps/{map_id}/snapshots/{version} - Get snapshot
+#   POST   /api/maps/{map_id}/restore/{version}   - Restore from snapshot
+
+
+@app.route(route="maps", methods=["GET"])
+def maps_list(req: func.HttpRequest) -> func.HttpResponse:
+    """List maps: GET /api/maps"""
+    return list_maps(req)
+
+
+@app.route(route="maps", methods=["POST"])
+def maps_create(req: func.HttpRequest) -> func.HttpResponse:
+    """Create map: POST /api/maps"""
+    return create_map(req)
+
+
+@app.route(route="maps/{map_id}", methods=["GET"])
+def maps_get(req: func.HttpRequest) -> func.HttpResponse:
+    """Get map: GET /api/maps/{map_id}"""
+    return get_map(req)
+
+
+@app.route(route="maps/{map_id}", methods=["PUT"])
+def maps_update(req: func.HttpRequest) -> func.HttpResponse:
+    """Update map: PUT /api/maps/{map_id}"""
+    return update_map(req)
+
+
+@app.route(route="maps/{map_id}", methods=["DELETE"])
+def maps_delete(req: func.HttpRequest) -> func.HttpResponse:
+    """Delete map: DELETE /api/maps/{map_id}"""
+    return delete_map(req)
+
+
+@app.route(route="maps/{map_id}/snapshots", methods=["GET"])
+def maps_snapshots_list(req: func.HttpRequest) -> func.HttpResponse:
+    """List snapshots: GET /api/maps/{map_id}/snapshots"""
+    return list_snapshots(req)
+
+
+@app.route(route="maps/{map_id}/snapshots/{version}", methods=["GET"])
+def maps_snapshot_get(req: func.HttpRequest) -> func.HttpResponse:
+    """Get snapshot: GET /api/maps/{map_id}/snapshots/{version}"""
+    return get_snapshot(req)
+
+
+@app.route(route="maps/{map_id}/restore/{version}", methods=["POST"])
+def maps_restore(req: func.HttpRequest) -> func.HttpResponse:
+    """Restore from snapshot: POST /api/maps/{map_id}/restore/{version}"""
+    return restore_snapshot(req)
 
 
 # ============================================================================

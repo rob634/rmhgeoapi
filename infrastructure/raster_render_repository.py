@@ -79,6 +79,12 @@ class RasterRenderRepository:
         self._schema = self.config.database.app_schema
         logger.debug(f"RasterRenderRepository initialized (schema: {self._schema})")
 
+    def _get_connection_string(self) -> str:
+        """Get PostgreSQL connection string with managed identity support."""
+        # Use OGC Features config which has proper managed identity handling
+        from ogc_features.config import get_ogc_config
+        return get_ogc_config().get_connection_string()
+
     @contextmanager
     def _get_connection(self):
         """
@@ -90,7 +96,7 @@ class RasterRenderRepository:
         conn = None
         try:
             conn = psycopg.connect(
-                self.config.database.get_connection_string(),
+                self._get_connection_string(),
                 row_factory=dict_row
             )
             yield conn

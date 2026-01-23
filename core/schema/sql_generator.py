@@ -90,6 +90,7 @@ from ..models.external_service import ExternalService, ServiceType, ServiceStatu
 from ..models.geo import GeoTableCatalog, FeatureCollectionStyles  # OGC Styles (22 JAN 2026)
 from ..models.etl_tracking import VectorEtlTracking, RasterEtlTracking, EtlStatus
 from ..models.raster_render_config import RasterRenderConfig  # Render configs (22 JAN 2026 - F2.11)
+from ..models.map_state import MapState, MapStateSnapshot, MapType  # Map states (23 JAN 2026)
 
 
 class PydanticToSQL:
@@ -1552,6 +1553,7 @@ $$""").format(
         composed.extend(self.generate_enum("artifact_status", ArtifactStatus))  # Artifact registry (20 JAN 2026)
         composed.extend(self.generate_enum("service_type", ServiceType))  # External service registry (22 JAN 2026)
         composed.extend(self.generate_enum("service_status", ServiceStatus))  # External service registry (22 JAN 2026)
+        composed.extend(self.generate_enum("map_type", MapType))  # Map states (23 JAN 2026)
 
         # For tables, indexes, functions, and triggers, we still need string format
         # because they are complex multi-line statements
@@ -1574,6 +1576,8 @@ $$""").format(
         composed.append(self.generate_table_composed(DatasetApproval, "dataset_approvals"))  # Dataset approvals (16 JAN 2026 - F4.AP)
         composed.append(self.generate_table_composed(Artifact, "artifacts"))  # Artifact registry (20 JAN 2026)
         composed.append(self.generate_table_from_model(ExternalService))  # External service registry (22 JAN 2026)
+        composed.append(self.generate_table_from_model(MapState))  # Map states (23 JAN 2026)
+        composed.append(self.generate_table_from_model(MapStateSnapshot))  # Map state snapshots (23 JAN 2026)
 
         # Indexes - now using composed SQL
         composed.extend(self.generate_indexes_composed("jobs", JobRecord))
@@ -1591,6 +1595,8 @@ $$""").format(
         composed.extend(self.generate_indexes_composed("dataset_approvals", DatasetApproval))  # Dataset approvals (16 JAN 2026 - F4.AP)
         composed.extend(self.generate_indexes_composed("artifacts", Artifact))  # Artifact registry (20 JAN 2026)
         composed.extend(self.generate_indexes_from_model(ExternalService))  # External service registry (22 JAN 2026)
+        composed.extend(self.generate_indexes_from_model(MapState))  # Map states (23 JAN 2026)
+        composed.extend(self.generate_indexes_from_model(MapStateSnapshot))  # Map state snapshots (23 JAN 2026)
 
         # Functions - already sql.Composed objects
         composed.extend(self.generate_static_functions())

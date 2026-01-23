@@ -531,11 +531,11 @@ class ExternalServicesInterface(BaseInterface):
                     </div>
                     <div class="detail-row">
                         <label>Avg Response</label>
-                        <span>{svc.avg_response_ms}ms</span> if svc.avg_response_ms else '<span>-</span>'
+                        <span>{f'{svc.avg_response_ms}ms' if svc.avg_response_ms else '-'}</span>
                     </div>
                     <div class="detail-row">
                         <label>Consecutive Failures</label>
-                        <span class="{'failure-count' if svc.consecutive_failures > 0 else ''}">{svc.consecutive_failures}</span>
+                        <span class="{'failure-count' if svc.consecutive_failures and svc.consecutive_failures > 0 else ''}">{svc.consecutive_failures or 0}</span>
                     </div>
                     {f'<div class="detail-row"><label>Last Failure</label><span class="failure-reason">{svc.last_failure_reason}</span></div>' if svc.last_failure_reason else ''}
                 </div>

@@ -133,7 +133,7 @@ CREATE INDEX idx_job_events_time ON app.job_events(created_at);
 
 **Added**: 23 JAN 2026
 **Epic**: New - UI Infrastructure
-**Status**: Phase 1 COMPLETE, Phase 2 COMPLETE, Phase 3 PENDING
+**Status**: Phase 1 COMPLETE, Phase 2 COMPLETE, Phase 3 COMPLETE
 **Plan Document**: [UI_MIGRATION.md](/UI_MIGRATION.md)
 
 ### Goal
@@ -186,17 +186,32 @@ Migrate 36 web interface modules (~44,000 lines) from inline Python f-strings in
 - Skeleton loading states
 - Auto-refresh capability
 
-### Phase 3: Unified Collection Browser (NEW) ⬜ PENDING
+### Phase 3: Unified Collection Browser (NEW) ✅ COMPLETE (23 JAN 2026)
 
 **Goal**: NEW interface combining STAC + OGC Feature Collections
 
-| Task | Status |
-|------|--------|
-| Design unified collection data model | ⬜ Pending |
-| Create API endpoint for unified list | ⬜ Pending |
-| Create `pages/browse/collections.html` | ⬜ Pending |
-| Create search/filter UI | ⬜ Pending |
-| Create collection detail views | ⬜ Pending |
+| Deliverable | Status | Notes |
+|-------------|--------|-------|
+| `templates/pages/browse/collections.html` | ✅ Done | Unified browser template |
+| `static/css/collections.css` | ✅ Done | Collections-specific styles (~500 lines) |
+| `static/js/collections.js` | ✅ Done | Fetch/merge/filter/render logic (~450 lines) |
+| `/interface/collections` route | ✅ Done | Added to docker_service.py |
+| Unified data model | ✅ Done | Transforms STAC + OGC to common format |
+
+**Features Implemented**:
+- Fetches STAC collections from `/api/stac/collections`
+- Fetches OGC collections from `/api/features/collections` (or TiPG)
+- Merges both into unified format with common fields
+- Type filter pills (All, Raster, Vector) with counts
+- Source filter pills (All, STAC, OGC)
+- Text search across title, description, keywords
+- Sort by title, item count, or type
+- Stats banner (total, raster, vector, items)
+- Collection cards with badges, description, extent
+- Detail modal with full metadata and links
+- Action buttons: Items/Features, Map, Details
+- Loading, empty, and error states
+- Keyboard navigation (Escape to close modal)
 
 ### Remaining Phases (REVIEW BEFORE MIGRATION)
 

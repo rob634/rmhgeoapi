@@ -1034,6 +1034,46 @@ def interface_health(request: Request):
     )
 
 
+@app.get("/interface/collections", response_class=HTMLResponse)
+def interface_collections(request: Request):
+    """
+    UI Collections Browser - Unified STAC + OGC collections.
+
+    Displays all collections from both STAC (raster) and OGC Features (vector)
+    APIs in a unified browsing interface with filtering and search.
+
+    Returns:
+        HTML collections browser
+    """
+    from templates_utils import render_template
+    from config import get_config
+
+    # Get API URLs for JavaScript
+    stac_api_url = '/api/stac'
+    ogc_api_url = '/api/features'
+    tipg_url = ''
+    titiler_url = ''
+
+    try:
+        config = get_config()
+        # TiPG URL for vector tiles/map
+        tipg_url = getattr(config, 'tipg_base_url', '') or ''
+        # TiTiler URL for raster tiles/map
+        titiler_url = config.titiler_base_url or ''
+    except Exception:
+        pass
+
+    return render_template(
+        request,
+        "pages/browse/collections.html",
+        nav_active="/interface/collections",
+        stac_api_url=stac_api_url,
+        ogc_api_url=ogc_api_url,
+        tipg_url=tipg_url,
+        titiler_url=titiler_url
+    )
+
+
 # ============================================================================
 # HEALTH CHECK ENDPOINTS
 # ============================================================================

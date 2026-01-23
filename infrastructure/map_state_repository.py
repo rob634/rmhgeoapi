@@ -636,7 +636,7 @@ class MapStateRepository:
                         json.dumps(state.get('bounds')) if state.get('bounds') else None,
                         json.dumps(state.get('layers', [])),
                         json.dumps(state.get('custom_attributes', {})),
-                        state.get('tags', []),
+                        json.dumps(state.get('tags', [])),  # tags is JSONB column
                         state.get('thumbnail_url'),
                         map_id
                     ))

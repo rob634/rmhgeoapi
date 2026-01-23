@@ -307,7 +307,8 @@ from config import get_app_mode_config, get_config
 _app_mode = get_app_mode_config()
 
 # CoreMachine - Universal orchestrator (Epoch 4)
-from core.machine import CoreMachine
+# NOTE: CoreMachine import moved to core/machine_factory.py (APP_CLEANUP Phase 4)
+# The factory function handles the import internally
 
 # Import service modules - no longer needed for registration (Phase 4 complete)
 # Services are now explicitly registered in initialize_catalogs()
@@ -361,27 +362,12 @@ from triggers.admin.servicebus import servicebus_admin_trigger
 
 # Curated Dataset Admin (15 DEC 2025) - System-managed geospatial data
 from triggers.curated.admin import curated_admin_trigger
-from triggers.curated.scheduler import curated_scheduler_trigger
+# curated_scheduler_trigger import removed (23 JAN 2026 - APP_CLEANUP Phase 3)
+# Timer trigger now in triggers/timers/timer_bp.py blueprint
 
-# Platform Service Layer triggers (25 OCT 2025)
-from triggers.trigger_platform import (
-    platform_request_submit,
-    # REMOVED (21 JAN 2026): platform_raster_submit, platform_raster_collection_submit
-    # Use platform_request_submit for all submissions via /platform/submit
-    platform_unpublish,  # Consolidated endpoint (21 JAN 2026)
-    platform_unpublish_vector,  # DEPRECATED - use platform_unpublish
-    platform_unpublish_raster   # DEPRECATED - use platform_unpublish
-)
-from triggers.trigger_platform_status import platform_request_status, platform_job_status
-from triggers.trigger_approvals import (
-    platform_approve,
-    platform_revoke,
-    platform_approvals_list,
-    platform_approval_get,
-    platform_approvals_status
-)
-# REMOVED (19 DEC 2025): platform_health, platform_stats, platform_failures
-# These were broken and redundant with /api/health
+# Platform Service Layer triggers moved to blueprint (23 JAN 2026 - APP_CLEANUP Phase 5)
+# triggers/platform/platform_bp.py now contains all 17 platform endpoints
+# Registered conditionally via app.register_functions(platform_bp) below
 
 # OGC Features API - Standalone module (29 OCT 2025)
 from ogc_features import get_ogc_triggers
@@ -423,13 +409,8 @@ from triggers.get_blob_metadata import get_blob_metadata_handler
 from triggers.list_storage_containers import list_storage_containers_handler
 from triggers.storage_upload import storage_upload_handler
 
-# Janitor Triggers (21 NOV 2025) - System maintenance (timer handlers only)
-# HTTP handlers moved to triggers/admin/admin_janitor.py blueprint (12 JAN 2026)
-from triggers.janitor import (
-    task_watchdog_handler,
-    job_health_handler,
-    orphan_detector_handler
-)
+# Janitor handler imports removed (23 JAN 2026 - APP_CLEANUP Phase 3)
+# Timer triggers now in triggers/timers/timer_bp.py blueprint
 
 # ========================================================================
 # PHASE 2: EXPLICIT REGISTRATION PATTERN (Parallel with decorators)
@@ -468,184 +449,20 @@ from triggers.janitor import (
 logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "function_app")
 
 # ============================================================================
-# PLATFORM ORCHESTRATION CALLBACK (30 OCT 2025)
+# COREMACHINE INITIALIZATION (23 JAN 2026 - APP_CLEANUP Phase 4)
 # ============================================================================
-# Global callback for Platform job completion - imported by PlatformOrchestrator
-# This allows Platform to react to job completions from the global CoreMachine instance
+# CoreMachine factory and callbacks moved to: core/machine_factory.py
+#
+# Features extracted:
+#   - Platform orchestration callback (_default_platform_callback)
+#   - STAC extraction helpers (extract_stac_item_id, etc.)
+#   - Factory function (create_core_machine)
 # ============================================================================
 
-def _global_platform_callback(job_id: str, job_type: str, status: str, result: dict):
-    """
-    Global callback for Platform orchestration.
-
-    This callback is invoked by the global CoreMachine instance when jobs complete.
-    Handles:
-    1. Approval record creation for jobs that produce STAC items (F7.Approval - 22 JAN 2026)
-
-    Args:
-        job_id: CoreMachine job ID
-        job_type: Type of job that completed
-        status: 'completed' or 'failed'
-        result: Job result dict containing STAC item info
-
-    Note:
-        All operations are non-fatal - failures are logged but don't affect job status.
-    """
-    # Skip if job failed - no approval needed for failed jobs
-    if status != 'completed':
-        return
-
-    # F7.Approval (22 JAN 2026): Create approval record for STAC items
-    # Every dataset requires explicit approval before publication
-    try:
-        stac_item_id = _extract_stac_item_id(result)
-        stac_collection_id = _extract_stac_collection_id(result)
-
-        if stac_item_id:
-            from services.approval_service import ApprovalService
-            from core.models.promoted import Classification
-
-            # Extract classification from job parameters (default: OUO)
-            classification_str = _extract_classification(result)
-            classification = Classification.PUBLIC if classification_str == 'public' else Classification.OUO
-
-            approval_service = ApprovalService()
-            approval = approval_service.create_approval_for_job(
-                job_id=job_id,
-                job_type=job_type,
-                classification=classification,
-                stac_item_id=stac_item_id,
-                stac_collection_id=stac_collection_id
-            )
-            logger.info(
-                f"📋 [APPROVAL] Created approval record {approval.approval_id[:12]}... "
-                f"for job {job_id[:8]}... (STAC: {stac_item_id}, status: PENDING)"
-            )
-    except Exception as e:
-        # Non-fatal: approval creation failure should not affect job completion
-        logger.warning(f"⚠️ [APPROVAL] Failed to create approval for job {job_id[:8]}... (non-fatal): {e}")
-
-
-def _extract_stac_item_id(result: dict) -> str | None:
-    """
-    Extract STAC item ID from various result structures.
-
-    Handlers return results in different formats, so we check multiple paths.
-
-    Args:
-        result: Job result dict
-
-    Returns:
-        STAC item ID if found, None otherwise
-    """
-    if not result:
-        return None
-
-    # Path 1: result.stac.item_id (common pattern)
-    if result.get('stac', {}).get('item_id'):
-        return result['stac']['item_id']
-
-    # Path 2: result.result.stac.item_id (nested result)
-    if result.get('result', {}).get('stac', {}).get('item_id'):
-        return result['result']['stac']['item_id']
-
-    # Path 3: result.item_id (flat result)
-    if result.get('item_id'):
-        return result['item_id']
-
-    # Path 4: result.stac_item_id (alternative key)
-    if result.get('stac_item_id'):
-        return result['stac_item_id']
-
-    # Path 5: result.result.item_id (nested flat)
-    if result.get('result', {}).get('item_id'):
-        return result['result']['item_id']
-
-    return None
-
-
-def _extract_stac_collection_id(result: dict) -> str | None:
-    """
-    Extract STAC collection ID from various result structures.
-
-    Args:
-        result: Job result dict
-
-    Returns:
-        STAC collection ID if found, None otherwise
-    """
-    if not result:
-        return None
-
-    # Path 1: result.stac.collection_id
-    if result.get('stac', {}).get('collection_id'):
-        return result['stac']['collection_id']
-
-    # Path 2: result.result.stac.collection_id
-    if result.get('result', {}).get('stac', {}).get('collection_id'):
-        return result['result']['stac']['collection_id']
-
-    # Path 3: result.collection_id
-    if result.get('collection_id'):
-        return result['collection_id']
-
-    # Path 4: result.stac_collection_id
-    if result.get('stac_collection_id'):
-        return result['stac_collection_id']
-
-    # Path 5: result.result.collection_id
-    if result.get('result', {}).get('collection_id'):
-        return result['result']['collection_id']
-
-    return None
-
-
-def _extract_classification(result: dict) -> str:
-    """
-    Extract classification from job result (for approval workflow).
-
-    Jobs can specify classification in their parameters. Default is 'ouo'.
-
-    Args:
-        result: Job result dict
-
-    Returns:
-        Classification string ('ouo' or 'public')
-    """
-    if not result:
-        return 'ouo'
-
-    # Check various locations where classification might be stored
-    # Path 1: Direct in result
-    if result.get('classification'):
-        return result['classification'].lower()
-
-    # Path 2: In parameters
-    if result.get('parameters', {}).get('classification'):
-        return result['parameters']['classification'].lower()
-
-    # Path 3: In result.result
-    if result.get('result', {}).get('classification'):
-        return result['result']['classification'].lower()
-
-    # Path 4: access_level mapping (public → public, everything else → ouo)
-    access_level = result.get('access_level') or result.get('parameters', {}).get('access_level')
-    if access_level and access_level.lower() == 'public':
-        return 'public'
-
-    return 'ouo'
+from core.machine_factory import create_core_machine
 
 # Initialize CoreMachine at module level with EXPLICIT registries (reused across all triggers)
-core_machine = CoreMachine(
-    all_jobs=ALL_JOBS,
-    all_handlers=ALL_HANDLERS,
-    on_job_complete=_global_platform_callback
-)
-
-logger.info("✅ CoreMachine initialized with explicit registries")
-logger.info(f"   Registered jobs: {list(ALL_JOBS.keys())}")
-logger.info(f"   Registered handlers: {list(ALL_HANDLERS.keys())}")
-logger.info(f"   ✅ Platform callback registered (will be connected on Platform trigger load)")
+core_machine = create_core_machine(ALL_JOBS, ALL_HANDLERS)
 
 # NOTE: app = func.FunctionApp() is now created at the TOP of the file (Phase 1)
 # This ensures probe endpoints are registered BEFORE any validation runs.
@@ -687,8 +504,14 @@ if _app_mode.has_admin_endpoints:
 else:
     logger.info("⏭️ SKIPPING admin blueprints (APP_MODE=%s)", _app_mode.mode.value)
 
-
-
+# Platform blueprint - Anti-corruption layer for external apps (DDH)
+# Contains all 17 platform endpoints (APP_CLEANUP Phase 5 - 23 JAN 2026)
+if _app_mode.has_platform_endpoints:
+    from triggers.platform import platform_bp
+    app.register_functions(platform_bp)
+    logger.info("✅ Platform blueprint registered (APP_MODE=%s)", _app_mode.mode.value)
+else:
+    logger.info("⏭️ SKIPPING platform blueprint (APP_MODE=%s)", _app_mode.mode.value)
 
 
 # NOTE: /api/health moved to triggers/admin/admin_system.py blueprint (12 JAN 2026)
@@ -1122,469 +945,14 @@ def stac_extract(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # ============================================================================
-# PLATFORM SERVICE LAYER ENDPOINTS (25 OCT 2025, conditional 15 JAN 2026)
+# PLATFORM SERVICE LAYER ENDPOINTS - MOVED TO BLUEPRINT (23 JAN 2026)
 # ============================================================================
-# Platform orchestration layer above CoreMachine for external applications (DDH)
-# Follows same patterns as Job→Task: PlatformRequest→Jobs→Tasks
-# Only registered for modes with has_platform_endpoints=True (gateway, standalone, platform_*)
-
-def _platform_endpoint_guard() -> Optional[func.HttpResponse]:
-    """Return 404 response if platform endpoints are disabled for this app mode."""
-    if not _app_mode.has_platform_endpoints:
-        return func.HttpResponse(
-            json.dumps({
-                "error": "Platform endpoints not available",
-                "message": f"APP_MODE={_app_mode.mode.value} does not expose platform/* endpoints",
-                "hint": "Use gateway or standalone mode for platform endpoints"
-            }),
-            status_code=404,
-            mimetype="application/json"
-        )
-    return None
-
-
-@app.route(route="platform/submit", methods=["POST"])
-def platform_submit(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Submit a platform request from external application (DDH).
-
-    POST /api/platform/submit
-
-    Body:
-        {
-            "dataset_id": "landsat-8",
-            "resource_id": "LC08_L1TP_044034_20210622",
-            "version_id": "v1.0",
-            "container_name": "bronze-rasters",
-            "file_name": "example.tif",
-            "service_name": "Landsat 8 Scene",
-            "client_id": "ddh"
-        }
-
-    Returns:
-        {
-            "success": true,
-            "request_id": "abc123...",
-            "status": "processing",
-            "jobs_created": ["job1", "job2", "job3"],
-            "monitor_url": "/api/platform/status/abc123"
-        }
-    """
-    if guard := _platform_endpoint_guard():
-        return guard
-    return platform_request_submit(req)
-
-
-@app.route(route="platform/status/{request_id}", methods=["GET"])
-async def platform_status_by_id(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Get status of a platform request or job (consolidated endpoint).
-
-    GET /api/platform/status/{id}
-
-    The {id} parameter can be EITHER:
-    - A request_id (Platform request identifier)
-    - A job_id (CoreMachine job identifier)
-
-    The endpoint auto-detects which type of ID was provided (21 JAN 2026).
-    Returns detailed status including DDH identifiers and CoreMachine job status.
-    """
-    if guard := _platform_endpoint_guard():
-        return guard
-    return await platform_request_status(req)
-
-
-@app.route(route="platform/status", methods=["GET"])
-async def platform_status_list(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    List all platform requests.
-
-    GET /api/platform/status?limit=100&status=pending
-
-    Returns list of all platform requests with optional filtering.
-    """
-    if guard := _platform_endpoint_guard():
-        return guard
-    return await platform_request_status(req)
-
-
-@app.route(route="platform/jobs/{job_id}/status", methods=["GET"])
-async def platform_job_status_by_id(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    DEPRECATED: Get status of a CoreMachine job directly by job_id.
-
-    ⚠️ DEPRECATED (21 JAN 2026): Use GET /api/platform/status/{job_id} instead.
-    The consolidated endpoint accepts either request_id or job_id.
-
-    GET /api/platform/jobs/{job_id}/status
-
-    Returns job status with task summary. Response includes deprecation headers
-    and migration URL pointing to the consolidated endpoint.
-    """
-    if guard := _platform_endpoint_guard():
-        return guard
-    return await platform_job_status(req)
-
-
-# ============================================================================
-# PLATFORM DIAGNOSTICS FOR EXTERNAL APPS (F7.12 - 15 JAN 2026)
-# ============================================================================
-# Simplified, external-facing diagnostics for service layer apps.
-# These replace the broken endpoints removed 19 DEC 2025.
+# Platform orchestration layer moved to: triggers/platform/platform_bp.py
+# All 17 platform endpoints registered via blueprint below.
+# See APP_CLEANUP Phase 5 for details.
 # ============================================================================
 
-@app.route(route="platform/health", methods=["GET"])
-async def platform_health_route(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Simplified system readiness check for external apps.
 
-    GET /api/platform/health
-
-    Returns simplified health status (ready_for_jobs, queue backlog, etc.)
-    without exposing internal details like enum errors or storage accounts.
-    """
-    if guard := _platform_endpoint_guard():
-        return guard
-    from triggers.trigger_platform_status import platform_health
-    return await platform_health(req)
-
-
-@app.route(route="platform/failures", methods=["GET"])
-async def platform_failures_route(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Recent failures with sanitized error summaries.
-
-    GET /api/platform/failures?hours=24&limit=20
-
-    Returns failure patterns and recent failures with sanitized messages
-    (no internal paths, secrets, or stack traces).
-    """
-    if guard := _platform_endpoint_guard():
-        return guard
-    from triggers.trigger_platform_status import platform_failures
-    return await platform_failures(req)
-
-
-@app.route(route="platform/lineage/{request_id}", methods=["GET"])
-async def platform_lineage_route(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Data lineage trace by Platform request ID.
-
-    GET /api/platform/lineage/{request_id}
-
-    Returns source → processing → output lineage for a Platform request.
-    """
-    if guard := _platform_endpoint_guard():
-        return guard
-    from triggers.trigger_platform_status import platform_lineage
-    return await platform_lineage(req)
-
-
-@app.route(route="platform/validate", methods=["POST"])
-async def platform_validate_route(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Pre-flight validation before job submission.
-
-    POST /api/platform/validate
-
-    Validates a file exists, returns size, recommended job type, and
-    estimated processing time before actually submitting a job.
-
-    Body: {"data_type": "raster", "container_name": "...", "blob_name": "..."}
-    """
-    if guard := _platform_endpoint_guard():
-        return guard
-    from triggers.trigger_platform_status import platform_validate
-    return await platform_validate(req)
-
-
-# REMOVED (21 JAN 2026): /platform/raster and /platform/raster-collection endpoints
-# Use /platform/submit for all submissions - data_type is auto-detected from file extension
-# Single vs collection is determined by whether file_name is string or array
-
-
-# ============================================================================
-# CONSOLIDATED UNPUBLISH ENDPOINT (21 JAN 2026)
-# ============================================================================
-
-@app.route(route="platform/unpublish", methods=["POST"])
-def platform_unpublish_route(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Consolidated unpublish endpoint - auto-detects data type.
-
-    POST /api/platform/unpublish
-
-    Automatically detects whether to unpublish vector or raster data based on
-    the platform request record or explicit parameters.
-
-    Body Options:
-        Option 1 - By DDH Identifiers (Preferred):
-        {
-            "dataset_id": "aerial-imagery-2024",
-            "resource_id": "site-alpha",
-            "version_id": "v1.0",
-            "dry_run": true
-        }
-
-        Option 2 - By Request ID:
-        {
-            "request_id": "a3f2c1b8e9d7f6a5...",
-            "dry_run": true
-        }
-
-        Option 3 - By Job ID:
-        {
-            "job_id": "abc123...",
-            "dry_run": true
-        }
-
-        Option 4 - Explicit data_type (cleanup mode):
-        {
-            "data_type": "vector",
-            "table_name": "my_table",
-            "dry_run": true
-        }
-
-    Note: dry_run=true by default (preview mode, no deletions).
-    """
-    if guard := _platform_endpoint_guard():
-        return guard
-    return platform_unpublish(req)
-
-
-# ============================================================================
-# DEPRECATED UNPUBLISH ENDPOINTS (21 JAN 2026)
-# Use /api/platform/unpublish instead - it auto-detects data type
-# ============================================================================
-
-@app.route(route="platform/unpublish/vector", methods=["POST"])
-def platform_unpublish_vector_route(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    DEPRECATED: Unpublish vector data via Platform layer.
-
-    ⚠️ DEPRECATED (21 JAN 2026): Use POST /api/platform/unpublish instead.
-    The consolidated endpoint auto-detects data type.
-
-    POST /api/platform/unpublish/vector
-    """
-    if guard := _platform_endpoint_guard():
-        return guard
-    return platform_unpublish_vector(req)
-
-
-@app.route(route="platform/unpublish/raster", methods=["POST"])
-def platform_unpublish_raster_route(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    DEPRECATED: Unpublish raster data via Platform layer.
-
-    ⚠️ DEPRECATED (21 JAN 2026): Use POST /api/platform/unpublish instead.
-    The consolidated endpoint auto-detects data type.
-
-    POST /api/platform/unpublish/raster
-    """
-    if guard := _platform_endpoint_guard():
-        return guard
-    return platform_unpublish_raster(req)
-
-
-# =============================================================================
-# APPROVAL PLATFORM ENDPOINTS (17 JAN 2026)
-# =============================================================================
-
-@app.route(route="platform/approve", methods=["POST"])
-def platform_approve_route(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Approve a pending dataset for publication.
-
-    POST /api/platform/approve
-
-    Body:
-        {
-            "approval_id": "apr-abc123...",  // Or stac_item_id or job_id
-            "reviewer": "user@example.com",
-            "notes": "Looks good"            // Optional
-        }
-
-    Response:
-        {
-            "success": true,
-            "approval_id": "apr-abc123...",
-            "status": "approved",
-            "action": "stac_updated",
-            "message": "Dataset approved successfully"
-        }
-    """
-    if guard := _platform_endpoint_guard():
-        return guard
-    return platform_approve(req)
-
-
-@app.route(route="platform/revoke", methods=["POST"])
-def platform_revoke_route(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Revoke an approved dataset (unapprove).
-
-    POST /api/platform/revoke
-
-    This is an audit-logged operation for unpublishing approved data.
-
-    Body:
-        {
-            "approval_id": "apr-abc123...",       // Or stac_item_id or job_id
-            "revoker": "user@example.com",
-            "reason": "Data quality issue found"  // Required for audit
-        }
-
-    Response:
-        {
-            "success": true,
-            "approval_id": "apr-abc123...",
-            "status": "revoked",
-            "warning": "Approved dataset has been revoked - this action is logged for audit",
-            "message": "Approval revoked successfully"
-        }
-    """
-    if guard := _platform_endpoint_guard():
-        return guard
-    return platform_revoke(req)
-
-
-@app.route(route="platform/approvals", methods=["GET"])
-def platform_approvals_list_route(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    List approvals with optional filters.
-
-    GET /api/platform/approvals?status=pending&limit=50
-
-    Query Parameters:
-        status: pending, approved, rejected, revoked
-        classification: ouo, public
-        limit: Max results (default 100)
-        offset: Pagination offset
-
-    Response:
-        {
-            "success": true,
-            "approvals": [...],
-            "count": 25,
-            "status_counts": {"pending": 5, "approved": 15, ...}
-        }
-    """
-    if guard := _platform_endpoint_guard():
-        return guard
-    return platform_approvals_list(req)
-
-
-@app.route(route="platform/approvals/{approval_id}", methods=["GET"])
-def platform_approval_get_route(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Get a single approval by ID.
-
-    GET /api/platform/approvals/{approval_id}
-
-    Response:
-        {
-            "success": true,
-            "approval": {...}
-        }
-    """
-    if guard := _platform_endpoint_guard():
-        return guard
-    return platform_approval_get(req)
-
-
-@app.route(route="platform/approvals/status", methods=["GET"])
-def platform_approvals_status_route(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Get approval statuses for multiple STAC items/collections (batch lookup).
-
-    GET /api/platform/approvals/status?stac_item_ids=item1,item2,item3
-    GET /api/platform/approvals/status?stac_collection_ids=col1,col2
-
-    Returns a map of ID -> approval status for quick UI lookups.
-    Used by collection dashboards to show approved status and control delete buttons.
-
-    Response:
-        {
-            "success": true,
-            "statuses": {
-                "item1": {"has_approval": true, "is_approved": true, ...},
-                "item2": {"has_approval": false}
-            }
-        }
-    """
-    if guard := _platform_endpoint_guard():
-        return guard
-    return platform_approvals_status(req)
-
-
-# ============================================================================
-# PLATFORM CATALOG API - B2B STAC Access (16 JAN 2026 - F12.8)
-# ============================================================================
-# B2B endpoints for DDH to verify STAC items exist and get asset URLs.
-# DDH can lookup using their identifiers without knowing our STAC IDs.
-# ============================================================================
-
-@app.route(route="platform/catalog/lookup", methods=["GET"])
-async def platform_catalog_lookup_route(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Lookup STAC item by DDH identifiers.
-
-    GET /api/platform/catalog/lookup?dataset_id=X&resource_id=Y&version_id=Z
-
-    Verifies that a STAC item exists for the given DDH identifiers.
-    Returns STAC collection/item IDs and metadata if found.
-    """
-    if guard := _platform_endpoint_guard():
-        return guard
-    from triggers.trigger_platform_catalog import platform_catalog_lookup
-    return await platform_catalog_lookup(req)
-
-
-@app.route(route="platform/catalog/item/{collection_id}/{item_id}", methods=["GET"])
-async def platform_catalog_item_route(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Get full STAC item by collection and item ID.
-
-    GET /api/platform/catalog/item/{collection_id}/{item_id}
-
-    Returns the complete STAC item (GeoJSON Feature) with all metadata.
-    """
-    if guard := _platform_endpoint_guard():
-        return guard
-    from triggers.trigger_platform_catalog import platform_catalog_item
-    return await platform_catalog_item(req)
-
-
-@app.route(route="platform/catalog/assets/{collection_id}/{item_id}", methods=["GET"])
-async def platform_catalog_assets_route(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Get asset URLs with pre-built TiTiler visualization URLs.
-
-    GET /api/platform/catalog/assets/{collection_id}/{item_id}
-
-    Returns asset URLs and TiTiler URLs for visualization.
-    Query param: include_titiler=false to skip TiTiler URLs.
-    """
-    if guard := _platform_endpoint_guard():
-        return guard
-    from triggers.trigger_platform_catalog import platform_catalog_assets
-    return await platform_catalog_assets(req)
-
-
-@app.route(route="platform/catalog/dataset/{dataset_id}", methods=["GET"])
-async def platform_catalog_dataset_route(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    List all STAC items for a DDH dataset.
-
-    GET /api/platform/catalog/dataset/{dataset_id}?limit=100
-
-    Returns all STAC items with the specified platform:dataset_id.
-    """
-    if guard := _platform_endpoint_guard():
-        return guard
-    from triggers.trigger_platform_catalog import platform_catalog_dataset
-    return await platform_catalog_dataset(req)
 
 
 @app.route(route="stac/vector", methods=["POST"])
@@ -2984,288 +2352,34 @@ if STARTUP_STATE.all_passed and _app_mode.listens_to_vector_tasks:
 
 
 # ============================================================================
-# JANITOR TIMER TRIGGERS - System Maintenance (21 NOV 2025)
+# TIMER TRIGGERS BLUEPRINT (23 JAN 2026 - APP_CLEANUP Phase 3)
 # ============================================================================
-# Janitor is a standalone maintenance subsystem (NOT a CoreMachine job).
-# This avoids circular dependency - janitor can't clean itself if stuck.
+# All timer triggers moved to triggers/timers/timer_bp.py blueprint.
 #
-# Timer Schedule Rationale (22 NOV 2025):
-# - Task timeout is 30 min, so checking more frequently is wasteful
-# - All janitors run every 30 min for consistent, predictable behavior
-# - HTTP endpoints available for immediate on-demand runs
+# Includes:
+# - Janitor timers: task_watchdog, job_health, orphan_detector
+# - Geo maintenance: geo_orphan_check, metadata_consistency, geo_integrity_check
+# - Scheduled operations: curated_dataset_scheduler
+# - System monitoring: system_snapshot, log_cleanup, external_service_health
 #
-# Three timers for different maintenance operations:
-# 1. Task Watchdog: Detect stale PROCESSING tasks (Azure Functions timeout)
-# 2. Job Health: Detect jobs with failed tasks, propagate failure
-# 3. Orphan Detector: Find orphaned tasks, zombie jobs, stuck queued jobs
-#
-# Configuration via environment variables:
-# - JANITOR_ENABLED: true/false (default: true)
-# - JANITOR_TASK_TIMEOUT_MINUTES: 30 (Azure Functions max timeout)
-# - JANITOR_JOB_STALE_HOURS: 24 (max reasonable job duration)
-# - JANITOR_QUEUED_TIMEOUT_HOURS: 1 (max time in QUEUED state)
+# Timer Schedule Overview:
+#   - janitor_task_watchdog: Every 5 minutes
+#   - janitor_job_health: :15 and :45 past each hour
+#   - janitor_orphan_detector: Every hour
+#   - geo_orphan_check_timer: Every 6 hours
+#   - metadata_consistency_timer: 03:00, 09:00, 15:00, 21:00 UTC
+#   - geo_integrity_check_timer: 02:00, 08:00, 14:00, 20:00 UTC
+#   - curated_dataset_scheduler: Daily 2 AM UTC
+#   - system_snapshot_timer: Every hour
+#   - log_cleanup_timer: Daily 3 AM UTC
+#   - external_service_health_timer: Every hour
 # ============================================================================
 
-@app.timer_trigger(
-    schedule="0 */5 * * * *",  # Every 5 minutes (15 DEC 2025 - orphan recovery with queue peek)
-    arg_name="timer",
-    run_on_startup=False
-)
-def janitor_task_watchdog(timer: func.TimerRequest) -> None:
-    """
-    Detect and mark stale PROCESSING tasks as FAILED.
-    Also re-queues orphaned QUEUED tasks (message loss recovery).
-
-    Tasks stuck in PROCESSING for > 30 minutes have silently failed
-    (Azure Functions max execution time is 10-30 minutes).
-
-    Tasks stuck in QUEUED for > 5 minutes with NO message in queue
-    are re-queued (defense against message loss). Queue is peeked
-    to verify message is actually missing before re-queueing.
-
-    Schedule: Every 5 minutes - fast detection of orphaned queued tasks
-    """
-    task_watchdog_handler(timer)
+from triggers.timers import timer_bp
+app.register_functions(timer_bp)
 
 
-@app.timer_trigger(
-    schedule="0 15,45 * * * *",  # At :15 and :45 past each hour
-    arg_name="timer",
-    run_on_startup=False
-)
-def janitor_job_health(timer: func.TimerRequest) -> None:
-    """
-    Check job health and propagate task failures.
-
-    Finds PROCESSING jobs with failed tasks and marks them as FAILED.
-    Captures partial results from completed tasks for debugging.
-
-    Schedule: Every 30 minutes, offset from task_watchdog by 15 min
-    This runs AFTER task_watchdog has marked failed tasks, allowing
-    proper failure propagation to job level.
-    """
-    job_health_handler(timer)
-
-
-@app.timer_trigger(
-    schedule="0 0 * * * *",  # Every hour on the hour
-    arg_name="timer",
-    run_on_startup=False
-)
-def janitor_orphan_detector(timer: func.TimerRequest) -> None:
-    """
-    Detect and handle orphaned tasks and zombie jobs.
-
-    Detects:
-    1. Orphaned tasks (parent job doesn't exist)
-    2. Zombie jobs (PROCESSING but all tasks terminal)
-    3. Stuck QUEUED jobs (no tasks created after timeout)
-    4. Ancient stale jobs (PROCESSING > 24 hours)
-
-    Schedule: Every hour - these are edge cases, not time-critical
-    """
-    orphan_detector_handler(timer)
-
-
-@app.timer_trigger(
-    schedule="0 0 */6 * * *",  # Every 6 hours at minute 0
-    arg_name="timer",
-    run_on_startup=False
-)
-def geo_orphan_check_timer(timer: func.TimerRequest) -> None:
-    """
-    Timer trigger: Check for geo schema orphans every 6 hours.
-
-    Detects:
-    1. Orphaned Tables: Tables in geo schema without metadata records
-    2. Orphaned Metadata: Metadata records for non-existent tables
-
-    Detection only - does NOT auto-delete. Logs findings to Application Insights.
-
-    Schedule: Every 6 hours - low overhead monitoring for data integrity
-
-    Handler: triggers/admin/geo_orphan_timer.py (extracted 09 JAN 2026)
-    """
-    from triggers.admin.geo_orphan_timer import geo_orphan_timer_handler
-    geo_orphan_timer_handler.handle(timer)
-
-
-# ============================================================================
-# METADATA CONSISTENCY TIMER (09 JAN 2026 - F7.10)
-# ============================================================================
-# Timer trigger for unified metadata consistency validation.
-# Runs every 6 hours, offset from geo_orphan_check_timer by 3 hours.
-# Tier 1 checks: DB cross-refs + blob HEAD (lightweight, frequent).
-# ============================================================================
-
-@app.timer_trigger(
-    schedule="0 0 3,9,15,21 * * *",  # Every 6 hours at 03:00, 09:00, 15:00, 21:00 UTC
-    arg_name="timer",
-    run_on_startup=False
-)
-def metadata_consistency_timer(timer: func.TimerRequest) -> None:
-    """
-    Timer trigger: Unified metadata consistency check every 6 hours.
-
-    Tier 1 Checks (DB + blob HEAD):
-    - STAC ↔ Metadata cross-reference (vector and raster)
-    - Broken backlinks (metadata → STAC items)
-    - Dataset refs FK integrity
-    - Raster blob existence (HEAD only)
-
-    Detection only - does NOT auto-delete. Logs findings to Application Insights.
-
-    Schedule: Every 6 hours, offset from geo_orphan by 3 hours to spread load.
-
-    Handler: triggers/admin/metadata_consistency_timer.py
-    """
-    from triggers.admin.metadata_consistency_timer import metadata_consistency_timer_handler
-    metadata_consistency_timer_handler.handle(timer)
-
-
-# ============================================================================
-# GEO INTEGRITY TIMER (14 JAN 2026)
-# ============================================================================
-# Timer trigger for geo schema integrity validation.
-# Detects tables with untyped geometry, missing SRID - incompatible with TiPG.
-# Runs every 6 hours, offset from geo_orphan by 2 hours.
-# ============================================================================
-
-@app.timer_trigger(
-    schedule="0 0 2,8,14,20 * * *",  # Every 6 hours at 02:00, 08:00, 14:00, 20:00 UTC
-    arg_name="timer",
-    run_on_startup=False
-)
-def geo_integrity_check_timer(timer: func.TimerRequest) -> None:
-    """
-    Timer trigger: Check geo schema table integrity every 6 hours.
-
-    Detects tables incompatible with TiPG/OGC Features:
-    1. Untyped geometry columns (GEOMETRY without POLYGON, POINT, etc.)
-    2. Missing SRID (srid = 0 or NULL)
-    3. Missing spatial indexes
-    4. Tables not registered in geometry_columns view
-
-    Detection only - does NOT auto-delete. Logs DELETE CANDIDATES for manual action.
-
-    Schedule: Every 6 hours, offset from geo_orphan by 2 hours to spread load.
-
-    Handler: triggers/admin/geo_integrity_timer.py
-    """
-    from triggers.admin.geo_integrity_timer import geo_integrity_timer_handler
-    geo_integrity_timer_handler.handle(timer)
-
-
-# ============================================================================
-# CURATED DATASET SCHEDULER (15 DEC 2025)
-# ============================================================================
-# Daily timer trigger to check for curated datasets that need updating.
-# Runs at 2 AM UTC - datasets checked against their update_schedule.
-# Submits curated_dataset_update jobs for datasets that are due.
-# ============================================================================
-
-@app.timer_trigger(
-    schedule="0 0 2 * * *",  # Daily at 2 AM UTC
-    arg_name="timer",
-    run_on_startup=False
-)
-def curated_dataset_scheduler(timer: func.TimerRequest) -> None:
-    """
-    Timer trigger: Check curated datasets for updates daily at 2 AM.
-
-    Checks all enabled datasets with schedules and submits update jobs
-    for those that are due.
-
-    Schedule: Daily at 2 AM UTC (most datasets update weekly at most)
-    """
-    curated_scheduler_trigger.handle_timer(timer)
-
-
-# ============================================================================
-# SYSTEM SNAPSHOT SCHEDULER (04 JAN 2026)
-# ============================================================================
-# Hourly timer trigger to capture system configuration snapshots.
-# Detects configuration drift in Azure platform settings.
-# Snapshots are also captured at startup and via manual endpoint.
-# ============================================================================
-
-@app.timer_trigger(
-    schedule="0 0 * * * *",  # Every hour on the hour
-    arg_name="timer",
-    run_on_startup=False
-)
-def system_snapshot_timer(timer: func.TimerRequest) -> None:
-    """
-    Timer trigger: Capture system configuration snapshot hourly.
-
-    Captures current system configuration including network/VNet settings,
-    instance info, and config sources. Compares to previous snapshot and
-    logs if configuration drift is detected.
-
-    Schedule: Every hour on the hour (aligns with instance scaling)
-
-    Handler: triggers/admin/system_snapshot_timer.py (extracted 09 JAN 2026)
-    """
-    from triggers.admin.system_snapshot_timer import system_snapshot_timer_handler
-    system_snapshot_timer_handler.handle(timer)
-
-
-@app.timer_trigger(
-    schedule="0 0 3 * * *",  # Daily at 3 AM UTC
-    arg_name="timer",
-    run_on_startup=False
-)
-def log_cleanup_timer(timer: func.TimerRequest) -> None:
-    """
-    Timer trigger: Clean up expired JSONL log files daily.
-
-    Deletes old log files from Azure Blob Storage based on retention settings:
-    - Verbose logs (DEBUG+): 7 days (JSONL_DEBUG_RETENTION_DAYS)
-    - Default logs (WARNING+): 30 days (JSONL_WARNING_RETENTION_DAYS)
-    - Metrics logs: 14 days (JSONL_METRICS_RETENTION_DAYS)
-
-    Schedule: Daily at 3 AM UTC (low traffic period)
-
-    Handler: triggers/admin/log_cleanup_timer.py (created 11 JAN 2026 - F7.12.F)
-    """
-    from triggers.admin.log_cleanup_timer import log_cleanup_timer_handler
-    log_cleanup_timer_handler.handle(timer)
-
-
-# ============================================================================
-# EXTERNAL SERVICE HEALTH TIMER (22 JAN 2026)
-# ============================================================================
-# Hourly timer trigger to check health of registered external geospatial services.
-# Monitors ArcGIS, WMS, WFS, WMTS, OGC API, STAC API, XYZ tiles, etc.
-# Sends notifications for outages/recoveries via App Insights and Service Bus.
-# ============================================================================
-
-@app.timer_trigger(
-    schedule="0 0 * * * *",  # Every hour on the hour
-    arg_name="timer",
-    run_on_startup=False
-)
-def external_service_health_timer(timer: func.TimerRequest) -> None:
-    """
-    Timer trigger: Check health of registered external geospatial services.
-
-    Checks all services where next_check_at <= NOW() AND enabled = true.
-    Updates status, consecutive_failures, and health_history.
-    Sends notifications for status changes (outages and recoveries).
-
-    Schedule: Every hour on the hour
-
-    Handler: triggers/admin/external_service_timer.py (created 22 JAN 2026)
-    """
-    from triggers.admin.external_service_timer import external_service_health_timer_handler
-    external_service_health_timer_handler.handle(timer)
-
-
-# NOTE: Cleanup/janitor routes moved to triggers/admin/admin_janitor.py blueprint (12 JAN 2026)
-# - /api/cleanup/run
-# - /api/cleanup/metadata-health
-# - /api/cleanup/status
-# - /api/cleanup/history
+# NOTE: Cleanup/janitor routes in triggers/admin/admin_janitor.py blueprint (12 JAN 2026)
 
 
 # ============================================================================

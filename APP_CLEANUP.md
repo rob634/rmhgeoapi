@@ -1,23 +1,28 @@
 # APP_CLEANUP.md - function_app.py Refactoring Plan
 
 **Created**: 23 JAN 2026
-**Status**: Planning
+**Updated**: 23 JAN 2026
+**Status**: Phase 1-4 COMPLETE, Phase 5-7 PLANNING
 **Goal**: Reduce function_app.py from ~4,100 lines to a clean entry point
 
 ---
 
 ## Executive Summary
 
-`function_app.py` has grown organically into a 4,100+ line file containing:
-- Azure Functions entry point (legitimate)
-- ~75 inline HTTP route definitions (should be blueprints)
-- 3 Service Bus triggers with ~400 lines of duplicate code
-- ~500 lines of startup validation logic
-- ~180 lines of helper functions
-- 10 timer triggers scattered throughout
+`function_app.py` has grown organically into a 4,100+ line file. After Phase 1-4 completion:
+- **Current size**: ~2,990 lines (reduced from ~4,100)
+- **Remaining work**: Blueprint migration + endpoint cleanup
 
-**Phase 1-4** (this document) focuses on extracting logic that doesn't belong in an entry point.
-**Phase 5** (future) handles the major blueprint migration for HTTP routes.
+### Completed (Phase 1-4)
+- [x] Startup validation → `startup/` module
+- [x] Service Bus handlers → `triggers/service_bus/` module
+- [x] Timer triggers → `triggers/timers/timer_bp.py` blueprint
+- [x] CoreMachine factory → `core/machine_factory.py`
+
+### Remaining (Phase 5-7)
+- [ ] **Phase 5**: Platform Blueprint (PRIORITY - anti-corruption layer)
+- [ ] **Phase 6**: Endpoint Cleanup (delete deprecated, consolidate storage)
+- [ ] **Phase 7**: STAC Admin Restructuring (all stac/ is admin-only)
 
 ---
 
@@ -53,11 +58,11 @@ web_interfaces/h3_sources.py          - H3 sources UI
 
 ---
 
-## Phase 1: Extract Startup Logic Module
+## Phase 1: Extract Startup Logic Module - COMPLETE
 
-**Priority**: HIGH
-**Lines to extract**: ~500
-**Location**: Lines 139-906 in function_app.py
+**Status**: COMPLETE (23 JAN 2026)
+**Lines extracted**: ~230 (Service Bus validation portion)
+**Module created**: `startup/service_bus_validator.py`
 
 ### Problem
 Startup validation was built through trial-and-error debugging. It works but is scattered across 500+ lines in the entry point:
@@ -178,11 +183,11 @@ def run_startup_validation() -> None:
 
 ---
 
-## Phase 2: Extract Service Bus Handler Logic
+## Phase 2: Extract Service Bus Handler Logic - COMPLETE
 
-**Priority**: HIGH
-**Lines to extract**: ~400
-**DRY Violation**: 95% identical code in 3 triggers
+**Status**: COMPLETE (23 JAN 2026)
+**Lines extracted**: ~400
+**Module created**: `triggers/service_bus/` (job_handler.py, task_handler.py, error_handler.py)
 
 ### Problem
 Each Service Bus trigger (lines 3010-3501) contains ~120 lines of nearly identical code:
@@ -509,13 +514,11 @@ Move these functions from function_app.py (lines 3507-3665):
 
 ---
 
-## Phase 3: Extract Timer Triggers to Blueprint
+## Phase 3: Extract Timer Triggers to Blueprint - COMPLETE
 
-**Priority**: MEDIUM
-**Lines to extract**: ~200
-**Question**: Can timer triggers use blueprints?
-
-### Answer: YES!
+**Status**: COMPLETE (23 JAN 2026)
+**Lines extracted**: ~175
+**Module created**: `triggers/timers/timer_bp.py` (10 timers)
 Timer triggers CAN use Azure Functions Blueprint pattern:
 
 ```python
@@ -708,11 +711,11 @@ app.register_functions(timer_bp)
 
 ---
 
-## Phase 4: Extract CoreMachine Initialization and Callbacks
+## Phase 4: Extract CoreMachine Initialization and Callbacks - COMPLETE
 
-**Priority**: MEDIUM
-**Lines to extract**: ~170
-**Location**: Lines 465-642 in function_app.py
+**Status**: COMPLETE (23 JAN 2026)
+**Lines extracted**: ~120
+**Module created**: `core/machine_factory.py`
 
 ### Problem
 CoreMachine initialization and the platform callback (`_global_platform_callback`) are defined inline in function_app.py with ~170 lines of code including:
@@ -888,103 +891,247 @@ core_machine = create_core_machine()
 
 ---
 
-## Phase 5: Blueprint Migration (FUTURE - NOT IN SCOPE)
+## Phase 5: Platform Blueprint - PRIORITY
 
-**Status**: Deferred
-**Lines to extract**: ~2,000+
+**Status**: PLANNING
+**Priority**: HIGH - Anti-corruption layer for external apps (DDH)
+**Lines to extract**: ~400
 
-This phase will migrate the remaining ~75 inline HTTP routes to blueprints:
+### Rationale
+Platform/ is the **anti-corruption layer** that will run as its own gateway application coordinating all job requests from outside apps to our core orchestration. This is the top priority for blueprinting because:
+1. It's the primary external interface
+2. It will eventually be a separate Azure Function App
+3. Clean separation enables independent deployment
 
-| Blueprint | Routes | Priority |
-|-----------|--------|----------|
-| `triggers/platform/platform_bp.py` | ~20 | High |
-| `triggers/stac/stac_bp.py` | ~15 | High |
-| `triggers/raster/raster_bp.py` | ~15 | Medium |
-| `triggers/jobs/jobs_bp.py` | 5 | Medium |
-| `triggers/promote/promote_bp.py` | 5 | Medium |
-| `triggers/curated/curated_bp.py` | 3 | Low |
-| `triggers/ogc/ogc_bp.py` | 8 | Low |
-| `triggers/analysis/analysis_bp.py` | 2 | Low |
-| `triggers/storage/storage_bp.py` | 4 | Low |
-| `triggers/interface/interface_bp.py` | 2 | Low |
+### Current Platform Endpoints (20 total)
 
-**Deferral Reason**: This is a large refactoring effort that can be done incrementally after Phases 1-4 stabilize the codebase.
+| Route | Method | Purpose | Keep? |
+|-------|--------|---------|-------|
+| `/platform/submit` | POST | Submit request from DDH | YES |
+| `/platform/status/{id}` | GET | Get request/job status | YES |
+| `/platform/status` | GET | List all requests | YES |
+| `/platform/jobs/{job_id}/status` | GET | Job status by ID | **DELETE** (deprecated) |
+| `/platform/health` | GET | System readiness | YES |
+| `/platform/failures` | GET | Recent failures | YES |
+| `/platform/lineage/{id}` | GET | Data lineage trace | YES |
+| `/platform/validate` | POST | Pre-flight validation | YES |
+| `/platform/unpublish` | POST | Consolidated unpublish | YES |
+| `/platform/unpublish/vector` | POST | Vector unpublish | **DELETE** (deprecated) |
+| `/platform/unpublish/raster` | POST | Raster unpublish | **DELETE** (deprecated) |
+| `/platform/approve` | POST | Approve dataset | YES |
+| `/platform/revoke` | POST | Revoke approval | YES |
+| `/platform/approvals` | GET | List approvals | YES |
+| `/platform/approvals/{id}` | GET | Get approval | YES |
+| `/platform/approvals/status` | GET | Approval status summary | YES |
+| `/platform/catalog/lookup` | GET | STAC lookup by DDH IDs | YES |
+| `/platform/catalog/item/{c}/{i}` | GET | Get STAC item | YES |
+| `/platform/catalog/assets/{c}/{i}` | GET | Get assets with TiTiler URLs | YES |
+| `/platform/catalog/dataset/{id}` | GET | List items for dataset | YES |
+
+### Blueprint Structure
+```
+triggers/platform/
+├── __init__.py
+├── platform_bp.py           # Blueprint with all 17 endpoints
+├── submit_handler.py        # /platform/submit logic
+├── status_handler.py        # /platform/status/* logic
+├── approval_handler.py      # /platform/approve, /revoke, /approvals/*
+├── catalog_handler.py       # /platform/catalog/* logic
+└── unpublish_handler.py     # /platform/unpublish logic
+```
+
+### Acceptance Criteria
+- [ ] Blueprint created with 17 endpoints (3 deprecated deleted)
+- [ ] All platform/* routes removed from function_app.py (~400 lines)
+- [ ] Conditional registration based on APP_MODE (gateway modes only)
+- [ ] All existing tests pass
 
 ---
 
-## Summary: Estimated Line Reduction
+## Phase 6: Endpoint Cleanup
 
-| Phase | Lines Removed | New Module |
-|-------|---------------|------------|
-| Phase 1: Startup Logic | ~500 | `startup/` |
+**Status**: PLANNING
+**Priority**: MEDIUM
+
+### 6A: Delete Deprecated Endpoints
+
+| Endpoint | Deprecated Date | Replacement |
+|----------|-----------------|-------------|
+| `platform/jobs/{job_id}/status` | 21 JAN 2026 | `/platform/status/{job_id}` |
+| `platform/unpublish/vector` | 21 JAN 2026 | `/platform/unpublish` |
+| `platform/unpublish/raster` | 21 JAN 2026 | `/platform/unpublish` |
+
+### 6B: Delete Duplicate STAC Endpoints
+
+The `/api/collections/*` routes duplicate `/api/stac/collections/*`:
+
+| Delete | Keep |
+|--------|------|
+| `GET /collections` | `GET /stac/collections` |
+| `GET /collections/{id}` | `GET /stac/collections/{id}` |
+| `GET /collections/{id}/items` | `GET /stac/collections/{id}/items` |
+| `GET /search` | (move to stac/search or delete) |
+
+**Lines to delete**: ~170 (lines 1641-1807)
+
+### 6C: Consolidate Storage Endpoints
+
+Merge `containers/*` into `storage/*`:
+
+| Current | New |
+|---------|-----|
+| `GET /containers/{name}/blobs` | `GET /storage/{container}/blobs` |
+| `GET /containers/{name}/blob` | `GET /storage/{container}/blob` |
+| `GET /storage/containers` | Keep |
+| `POST /storage/upload` | Keep |
+
+**Lines affected**: ~50
+
+### Acceptance Criteria
+- [ ] 3 deprecated platform endpoints deleted
+- [ ] 4 duplicate collections/* endpoints deleted
+- [ ] containers/* merged into storage/*
+- [ ] ~220 lines removed
+
+---
+
+## Phase 7: STAC Admin Restructuring
+
+**Status**: PLANNING
+**Priority**: MEDIUM
+
+### Design Decision
+**ALL stac/ endpoints are admin-only** - there is no B2C (business-to-consumer) STAC API. All access is through our Platform layer or internal admin tools.
+
+### Current STAC Endpoints
+
+| Route | Type | Current Location | Action |
+|-------|------|------------------|--------|
+| `stac/` (landing) | API | function_app.py | → `admin_stac_bp` |
+| `stac/conformance` | API | function_app.py | → `admin_stac_bp` |
+| `stac/collections` | API | function_app.py | → `admin_stac_bp` |
+| `stac/collections/{id}` | API | function_app.py | → `admin_stac_bp` |
+| `stac/collections/{id}/items` | API | function_app.py | → `admin_stac_bp` |
+| `stac/collections/{id}/items/{item}` | API | function_app.py | → `admin_stac_bp` |
+| `stac/schema/info` | Admin | function_app.py | → `admin_stac_bp` |
+| `stac/collections/summary` | Admin | function_app.py | → `admin_stac_bp` |
+| `stac/collections/{id}/stats` | Admin | function_app.py | → `admin_stac_bp` |
+| `stac/items/{item_id}` | Admin | function_app.py | → `admin_stac_bp` |
+| `stac/health` | Admin | function_app.py | → `admin_stac_bp` |
+| `stac/vector` | Write | function_app.py | → `admin_stac_bp` |
+| `stac/extract` | Utility | function_app.py | → `admin_stac_bp` |
+| `stac/repair/*` | Admin | admin_stac_bp | Keep |
+| `stac/nuke` | Admin | admin_stac_bp | Keep |
+
+### Solution
+Consolidate ALL stac/* endpoints into the existing `admin_stac_bp` blueprint:
+
+```python
+# triggers/admin/admin_stac.py - EXPANDED
+# Now contains ALL stac/ endpoints (API + admin + write)
+```
+
+### Acceptance Criteria
+- [ ] All 13 inline stac/* endpoints moved to admin_stac_bp
+- [ ] Existing admin_stac_bp endpoints preserved
+- [ ] ~200 lines removed from function_app.py
+
+---
+
+## Summary: Line Reduction Progress
+
+### Completed (Phases 1-4)
+
+| Phase | Lines Removed | Module Created |
+|-------|---------------|----------------|
+| Phase 1: Startup Logic | ~230 | `startup/service_bus_validator.py` |
 | Phase 2: Service Bus Handlers | ~400 | `triggers/service_bus/` |
-| Phase 3: Timer Triggers | ~200 | `triggers/timers/` |
-| Phase 4: CoreMachine Factory | ~170 | `core/machine_factory.py` |
-| **Phases 1-4 Total** | **~1,270** | |
-| Phase 5: Blueprints (future) | ~2,000+ | Various |
+| Phase 3: Timer Triggers | ~175 | `triggers/timers/timer_bp.py` |
+| Phase 4: CoreMachine Factory | ~120 | `core/machine_factory.py` |
+| **Phases 1-4 Total** | **~925** | |
 
-**After Phases 1-4**: function_app.py reduced from ~4,100 to ~2,830 lines
-**After Phase 5**: function_app.py reduced to ~800 lines (pure entry point)
+**Current state**: function_app.py reduced from ~4,100 to ~2,990 lines
+
+### Planned (Phases 5-7)
+
+| Phase | Lines to Remove | Target |
+|-------|-----------------|--------|
+| Phase 5: Platform Blueprint | ~400 | `triggers/platform/platform_bp.py` |
+| Phase 6: Endpoint Cleanup | ~220 | Delete deprecated + duplicates |
+| Phase 7: STAC Admin | ~200 | Expand `admin_stac_bp` |
+| **Phases 5-7 Total** | **~820** | |
+
+**After Phases 5-7**: function_app.py reduced to ~2,170 lines
+
+### Future Blueprint Candidates
+
+| Blueprint | Routes | Priority |
+|-----------|--------|----------|
+| `raster_bp` | 14 raster/* + 3 xarray/* | Medium |
+| `maps_bp` | 8 maps/* | Medium |
+| `features_bp` | 8 features/* (OGC) | Low |
+| `jobs_bp` | 5 jobs/* | Low |
+| `promote_bp` | 5 promote/* | Low |
+
+**After all blueprints**: function_app.py reduced to ~800 lines (pure entry point)
 
 ---
 
 ## Execution Order
 
 ```
-Phase 1: Extract Startup Logic
-    └── Create startup/ module
-    └── Test /api/readyz unchanged
-    └── Commit: "Extract startup validation to dedicated module"
+Phase 1-4: COMPLETE (23 JAN 2026)
+    ├── startup/service_bus_validator.py
+    ├── triggers/service_bus/ (job_handler, task_handler, error_handler)
+    ├── triggers/timers/timer_bp.py
+    └── core/machine_factory.py
 
-Phase 2: Extract Service Bus Handlers
-    └── Create triggers/service_bus/ module
-    └── Test job/task processing unchanged
-    └── Commit: "Extract Service Bus handlers to dedicated module"
+Phase 5: Platform Blueprint (NEXT)
+    ├── Delete 3 deprecated endpoints
+    ├── Create triggers/platform/platform_bp.py
+    ├── Move 17 platform/* endpoints to blueprint
+    ├── Test Platform submission/status flow
+    └── Commit: "Extract Platform layer to dedicated blueprint"
 
-Phase 3: Timer Blueprint
-    └── Create triggers/timers/timer_bp.py
-    └── Register blueprint
-    └── Verify timer schedules
-    └── Commit: "Consolidate timer triggers to blueprint"
+Phase 6: Endpoint Cleanup
+    ├── Delete duplicate collections/* endpoints
+    ├── Consolidate containers/* into storage/*
+    └── Commit: "Remove duplicate and consolidate storage endpoints"
 
-Phase 4: CoreMachine Factory
-    └── Create core/machine_factory.py
-    └── Test approval creation
-    └── Commit: "Extract CoreMachine factory and callbacks"
+Phase 7: STAC Admin Restructuring
+    ├── Move all stac/* endpoints to admin_stac_bp
+    ├── Expand existing admin_stac_bp
+    └── Commit: "Consolidate all STAC endpoints as admin-only"
 
-[PAUSE - Stabilize and verify]
-
-Phase 5: Blueprint Migration (FUTURE)
-    └── Migrate route groups incrementally
-    └── One blueprint per commit for easy rollback
+[FUTURE: Additional blueprint migrations as needed]
 ```
 
 ---
 
 ## Testing Checklist
 
-### Phase 1 Tests
-- [ ] `GET /api/livez` returns 200
-- [ ] `GET /api/readyz` returns validation results
-- [ ] `GET /api/health` shows component status
-- [ ] Startup logs show validation phases
+### Phase 1-4 Tests (COMPLETE)
+- [x] `GET /api/livez` returns 200
+- [x] `GET /api/readyz` returns validation results
+- [x] `GET /api/health` shows component status
+- [x] Job processes through Service Bus queues
+- [x] Timer triggers registered in Azure
+- [x] CoreMachine processes jobs correctly
 
-### Phase 2 Tests
-- [ ] Submit job via `/api/jobs/submit/hello_world`
-- [ ] Job processes through geospatial-jobs queue
-- [ ] Tasks process through raster-tasks queue
-- [ ] Tasks process through vector-tasks queue
-- [ ] Failed tasks marked correctly in database
+### Phase 5 Tests (Platform Blueprint)
+- [ ] `POST /platform/submit` creates request
+- [ ] `GET /platform/status/{id}` returns status
+- [ ] `POST /platform/unpublish` works (consolidated)
+- [ ] Deprecated endpoints return 404
 
-### Phase 3 Tests
-- [ ] Timer functions appear in Azure Portal
-- [ ] `janitor_task_watchdog` runs on schedule
-- [ ] Timer logs appear in Application Insights
+### Phase 6 Tests (Endpoint Cleanup)
+- [ ] `/collections/*` returns 404
+- [ ] `/stac/collections/*` still works
+- [ ] `/storage/{container}/blobs` works (new route)
 
-### Phase 4 Tests
-- [ ] CoreMachine processes jobs correctly
-- [ ] Approval records created for completed jobs
-- [ ] STAC item/collection IDs extracted correctly
+### Phase 7 Tests (STAC Admin)
+- [ ] All stac/* endpoints work via admin_stac_bp
+- [ ] Conditional registration for admin modes only
 
 ---
 

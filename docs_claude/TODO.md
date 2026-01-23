@@ -133,7 +133,7 @@ CREATE INDEX idx_job_events_time ON app.job_events(created_at);
 
 **Added**: 23 JAN 2026
 **Epic**: New - UI Infrastructure
-**Status**: Phase 1 COMPLETE, Phase 2 PENDING
+**Status**: Phase 1 COMPLETE, Phase 2 COMPLETE, Phase 3 PENDING
 **Plan Document**: [UI_MIGRATION.md](/UI_MIGRATION.md)
 
 ### Goal
@@ -162,17 +162,29 @@ Migrate 36 web interface modules (~44,000 lines) from inline Python f-strings in
 
 **Available Macros**: `status_badge`, `card`, `stat_item`, `spinner`, `empty_state`, `error_state`, `modal`, `confirm_dialog`, `data_table`, `collection_card`, `service_status_card`
 
-### Phase 2: System Health Dashboard (TOP PRIORITY) ⬜ PENDING
+### Phase 2: System Health Dashboard (TOP PRIORITY) ✅ COMPLETE (23 JAN 2026)
 
 **Goal**: Migrate health interface as first real page
 
-| Task | Status |
-|------|--------|
-| Review current `health/interface.py` (2,910 lines) | ⬜ Pending |
-| Create `pages/admin/health.html` template | ⬜ Pending |
-| Create `_health_status.html` HTMX partial | ⬜ Pending |
-| Add `/interface/health` route | ⬜ Pending |
-| Test auto-refresh via HTMX | ⬜ Pending |
+| Deliverable | Status | Notes |
+|-------------|--------|-------|
+| `templates/pages/admin/health.html` | ✅ Done | Main health dashboard template |
+| `templates/pages/admin/_health_diagram.html` | ✅ Done | SVG architecture diagram (included partial) |
+| `static/css/health.css` | ✅ Done | Health-specific styles (~450 lines) |
+| `static/js/health.js` | ✅ Done | Health dashboard JavaScript (~600 lines) |
+| `/interface/health` route in docker_service.py | ✅ Done | Dynamic tooltips from config |
+| `formatLabel()` added to common.js | ✅ Done | Snake_case to Title Case utility |
+
+**Features Migrated**:
+- Architecture diagram with status indicators (healthy/warning/unhealthy/unknown)
+- Click diagram components → scrolls to component card
+- Hover tooltips showing resource details from config
+- Environment info section with Function App resources
+- Docker Worker resources section (CPU, memory, auth tokens)
+- Components grid with expandable details
+- Schema summary with table counts
+- Skeleton loading states
+- Auto-refresh capability
 
 ### Phase 3: Unified Collection Browser (NEW) ⬜ PENDING
 

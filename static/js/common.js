@@ -180,6 +180,23 @@
         }
 
         /**
+         * Format a snake_case or camelCase label to Title Case
+         * @param {string} str - Label string (e.g., 'service_bus', 'pgStac')
+         * @returns {string} Formatted label (e.g., 'Service Bus', 'Pg Stac')
+         */
+        function formatLabel(str) {
+            if (!str) return '';
+            return str
+                .replace(/_/g, ' ')
+                .replace(/([A-Z])/g, ' $1')
+                .replace(/\s+/g, ' ')
+                .trim()
+                .split(' ')
+                .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+                .join(' ');
+        }
+
+        /**
          * Format bytes to human-readable size (KB, MB, GB)
          * @param {number} bytes - Size in bytes
          * @param {number} decimals - Number of decimal places

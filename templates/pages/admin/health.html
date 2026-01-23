@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% from "components/macros.html" import status_badge, spinner, error_state %}
+
+{% block title %}System Health{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', path='css/health.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    {# Header #}
+    <header class="dashboard-header">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
+            <div>
+                <h1>System Health Dashboard</h1>
+                <p class="subtitle">Real-time platform health monitoring</p>
+            </div>
+            <div class="header-actions">
+                <button onclick="loadHealth()" class="refresh-button" id="refresh-btn">
+                    Refresh
+                </button>
+                <span id="last-checked" class="last-checked"></span>
+            </div>
+        </div>
+    </header>
+
+    {# Architecture Diagram #}
+    {% include "pages/admin/_health_diagram.html" %}
+
+    {# Overall Status Banner #}
+    <div id="overall-status" class="overall-status loading">
+        <div class="spinner"></div>
+        <div>
+            <span>Loading health status...</span>
+            <div class="loading-hint">Health check may take up to 60 seconds</div>
+        </div>
+    </div>
+
+    {# Error Banner (hidden by default) #}
+    <div id="error-banner" class="error-banner hidden">
+        <strong>Error:</strong> <span id="error-message"></span>
+    </div>
+
+    {# Environment Info #}
+    <div id="environment-info" class="environment-info skeleton-section">
+        <h3>Environment</h3>
+        <div class="env-grid">
+            <div class="env-item skeleton-item">
+                <div class="env-label">Version</div>
+                <div class="env-value"><span class="skeleton-text">Loading...</span></div>
+            </div>
+            <div class="env-item skeleton-item">
+                <div class="env-label">Environment</div>
+                <div class="env-value"><span class="skeleton-text">Loading...</span></div>
+            </div>
+            <div class="env-item skeleton-item">
+                <div class="env-label">Debug Mode</div>
+                <div class="env-value"><span class="skeleton-text">Loading...</span></div>
+            </div>
+            <div class="env-item skeleton-item">
+                <div class="env-label">Hostname</div>
+                <div class="env-value"><span class="skeleton-text">Loading...</span></div>
+            </div>
+        </div>
+    </div>
+
+    {# Components Grid - Skeleton #}
+    <div id="components-grid" class="components-grid">
+        {# Skeleton component cards - will be replaced when data loads #}
+        {% set skeleton_components = [
+            ("Database", "PostgreSQL connection"),
+            ("Service Bus", "Azure Service Bus queues"),
+            ("Storage Containers", "Azure Blob Storage"),
+            ("Imports", "Python dependencies"),
+            ("Jobs", "Job registry"),
+            ("Pgstac", "STAC catalog"),
+            ("Titiler", "Raster tile server"),
+            ("OGC Features", "Vector features API")
+        ] %}
+        {% for name, desc in skeleton_components %}
+        <div class="component-card skeleton-card">
+            <div class="component-header">
+                <div>
+                    <div class="component-name">{{ name }}</div>
+                    <div class="component-description">{{ desc }}</div>
+                </div>
+                <span class="status-badge skeleton-badge">Loading</span>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    {# Schema Summary #}
+    <div id="schema-summary" class="schema-summary skeleton-section">
+        <h3>Database Schemas</h3>
+        <div id="schema-cards" class="schema-cards">
+            {# Skeleton schema cards #}
+            <div class="schema-card skeleton-card">
+                <div class="schema-card-header">
+                    <div class="schema-name"><span class="schema-icon">&#x1F4CA;</span> Summary</div>
+                </div>
+                <div class="schema-stats">
+                    <div class="schema-stat full-width">
+                        <div class="stat-label">Total Tables</div>
+                        <div class="stat-value"><span class="skeleton-text">--</span></div>
+                    </div>
+                </div>
+            </div>
+            <div class="schema-card skeleton-card">
+                <div class="schema-card-header">
+                    <div class="schema-name"><span class="schema-icon">&#x2699;</span> Application</div>
+                    <span class="schema-badge skeleton-badge">Loading</span>
+                </div>
+                <div class="schema-stats">
+                    <div class="schema-stat"><div class="stat-label">Tables</div><div class="stat-value"><span class="skeleton-text">--</span></div></div>
+                    <div class="schema-stat"><div class="stat-label">Rows</div><div class="stat-value"><span class="skeleton-text">--</span></div></div>
+                </div>
+            </div>
+            <div class="schema-card skeleton-card">
+                <div class="schema-card-header">
+                    <div class="schema-name"><span class="schema-icon">&#x1F5FA;</span> PostGIS</div>
+                    <span class="schema-badge skeleton-badge">Loading</span>
+                </div>
+                <div class="schema-stats">
+                    <div class="schema-stat"><div class="stat-label">Tables</div><div class="stat-value"><span class="skeleton-text">--</span></div></div>
+                    <div class="schema-stat"><div class="stat-label">Rows</div><div class="stat-value"><span class="skeleton-text">--</span></div></div>
+                </div>
+            </div>
+            <div class="schema-card skeleton-card">
+                <div class="schema-card-header">
+                    <div class="schema-name"><span class="schema-icon">&#x1F4E6;</span> STAC Catalog</div>
+                    <span class="schema-badge skeleton-badge">Loading</span>
+                </div>
+                <div class="schema-stats">
+                    <div class="schema-stat"><div class="stat-label">Tables</div><div class="stat-value"><span class="skeleton-text">--</span></div></div>
+                    <div class="schema-stat"><div class="stat-label">Rows</div><div class="stat-value"><span class="skeleton-text">--</span></div></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {# Debug Info (if DEBUG_MODE=true) #}
+    <div id="debug-info" class="debug-info hidden"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Configuration injected from server
+    const DOCKER_WORKER_URL = '{{ docker_worker_url | default("", true) }}';
+    const COMPONENT_TOOLTIPS = {{ tooltips | tojson | safe }};
+</script>
+<script src="{{ url_for('static', path='js/health.js') }}"></script>
+{% endblock %}

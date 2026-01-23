@@ -956,6 +956,84 @@ def interface_home(request: Request):
     )
 
 
+@app.get("/interface/health", response_class=HTMLResponse)
+def interface_health(request: Request):
+    """
+    UI Health Dashboard - System health monitoring page.
+
+    Displays architecture diagram, component status, Docker worker resources,
+    and database schema information. Loads health data asynchronously via JS.
+
+    Returns:
+        HTML health dashboard with auto-loading status
+    """
+    import os
+    from templates_utils import render_template
+    from config import get_config, get_app_mode_config
+
+    # Build dynamic tooltips from config
+    tooltips = {}
+    docker_worker_url = ''
+
+    try:
+        config = get_config()
+        app_mode_config = get_app_mode_config()
+        docker_worker_url = app_mode_config.docker_worker_url or ''
+
+        website_hostname = os.environ.get('WEBSITE_HOSTNAME', 'localhost')
+
+        # Service Bus namespace
+        service_bus_ns = config.queues.namespace or ''
+        if not service_bus_ns:
+            conn_str = config.queues.connection_string or ''
+            if 'Endpoint=sb://' in conn_str:
+                service_bus_ns = conn_str.split('Endpoint=sb://')[1].split('/')[0]
+
+        # Database info
+        db_host = config.database.host
+        db_name = config.database.database
+        app_schema = config.database.app_schema
+        geo_schema = config.database.postgis_schema
+        pgstac_schema = config.database.pgstac_schema
+
+        # Storage accounts
+        bronze_account = config.storage.bronze.account_name
+        silver_account = config.storage.silver.account_name
+
+        # Queue names
+        jobs_queue = config.queues.jobs_queue
+        long_queue = config.queues.long_running_tasks_queue
+        docker_enabled = app_mode_config.docker_worker_enabled
+
+        # TiTiler URL
+        titiler_url = config.titiler_base_url.replace('https://', '').replace('http://', '')
+
+        tooltips = {
+            'comp-platform-api': f"{website_hostname}\nEndpoints: /api/platform/*, /api/jobs/*",
+            'comp-orchestrator': f"{website_hostname}\nListens: {jobs_queue}",
+            'comp-job-queues': f"{service_bus_ns}\nQueue: {jobs_queue}",
+            'comp-job-tables': f"{db_host}\nDB: {db_name}\nSchema: {app_schema}.jobs",
+            'comp-task-tables': f"{db_host}\nDB: {db_name}\nSchema: {app_schema}.tasks",
+            'comp-output-tables': f"{db_host}\nDB: {db_name}\nSchemas: {geo_schema}, {pgstac_schema}",
+            'comp-input-storage': f"{bronze_account}\nContainer: rasters",
+            'comp-output-storage': f"{silver_account}\nContainer: cogs",
+            'comp-titiler': f"{titiler_url}\nMode: {config.titiler_mode}",
+            'comp-long-queue': f"{service_bus_ns}\nQueue: {long_queue}\nDocker: {'Enabled' if docker_enabled else 'Disabled'}",
+            'comp-container': f"{docker_worker_url or 'Not configured'}\nQueue: {long_queue}",
+        }
+    except Exception as e:
+        # Tooltips will be empty, but page will still render
+        pass
+
+    return render_template(
+        request,
+        "pages/admin/health.html",
+        nav_active="/interface/health",
+        tooltips=tooltips,
+        docker_worker_url=docker_worker_url
+    )
+
+
 # ============================================================================
 # HEALTH CHECK ENDPOINTS
 # ============================================================================

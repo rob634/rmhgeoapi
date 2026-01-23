@@ -184,7 +184,9 @@ class ExternalServicesInterface(BaseInterface):
                 if svc.last_check_at:
                     from datetime import datetime, timezone
                     now = datetime.now(timezone.utc)
-                    if hasattr(svc.last_check_at, 'tzinfo'):
+                    # Check if datetime is timezone-aware (tzinfo is not None)
+                    # hasattr() always returns True since all datetimes have tzinfo attr
+                    if svc.last_check_at.tzinfo is not None:
                         delta = now - svc.last_check_at
                     else:
                         delta = now - svc.last_check_at.replace(tzinfo=timezone.utc)

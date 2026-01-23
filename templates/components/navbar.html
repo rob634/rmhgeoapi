@@ -105,7 +105,7 @@
 </style>
 
 <nav class="navbar">
-    <a href="/ui/" class="navbar-brand">
+    <a href="/interface/home" class="navbar-brand">
         <span class="navbar-brand-text">rmhgeoapi</span>
         <span class="navbar-version">v{{ version }}</span>
     </a>
@@ -114,20 +114,20 @@
         {# Admin Section #}
         <div class="navbar-section">
             <span class="navbar-section-title">Admin</span>
-            <a href="/ui/admin/health" class="{{ 'active' if nav_active == '/admin/health' else '' }}">Health</a>
+            <a href="/interface/health" class="{{ 'active' if nav_active == '/interface/health' else '' }}">Health</a>
         </div>
 
         {# Browse Section #}
         <div class="navbar-section">
             <span class="navbar-section-title">Browse</span>
-            <a href="/ui/collections" class="{{ 'active' if nav_active == '/collections' else '' }}">Collections</a>
+            <a href="/interface/collections" class="{{ 'active' if nav_active == '/interface/collections' else '' }}">Collections</a>
         </div>
 
         {# Pipeline Section #}
         <div class="navbar-section">
             <span class="navbar-section-title">Pipeline</span>
-            <a href="/ui/jobs" class="{{ 'active' if nav_active == '/jobs' else '' }}">Jobs</a>
-            <a href="/ui/tasks" class="{{ 'active' if nav_active == '/tasks' else '' }}">Tasks</a>
+            <a href="/interface/jobs" class="{{ 'active' if nav_active == '/interface/jobs' else '' }}">Jobs</a>
+            <a href="/interface/tasks" class="{{ 'active' if nav_active == '/interface/tasks' else '' }}">Tasks</a>
         </div>
 
         {# API Links #}

@@ -930,8 +930,17 @@ else:
 # UI ENDPOINTS (Jinja2 Templates)
 # ============================================================================
 
-@app.get("/ui/", response_class=HTMLResponse)
-def ui_home(request: Request):
+from fastapi.responses import RedirectResponse
+
+
+@app.get("/", response_class=RedirectResponse)
+def root_redirect():
+    """Redirect root to interface home."""
+    return RedirectResponse(url="/interface/home", status_code=302)
+
+
+@app.get("/interface/home", response_class=HTMLResponse)
+def interface_home(request: Request):
     """
     UI Home Page - Landing page for Docker worker UI.
 
@@ -943,7 +952,7 @@ def ui_home(request: Request):
     return render_template(
         request,
         "pages/admin/home.html",
-        nav_active="/ui/"
+        nav_active="/interface/home"
     )
 
 

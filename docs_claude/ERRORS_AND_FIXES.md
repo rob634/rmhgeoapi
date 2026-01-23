@@ -422,6 +422,60 @@ az functionapp config appsettings set --name rmhazuregeoapi --resource-group rmh
 
 ---
 
+### DEP-003: Schema rebuild missing ETL tracking tables (vector_etl_tracking)
+
+**Date**: 23 JAN 2026
+**Version**: 0.7.20.x
+**Severity**: Critical (vector ETL pipeline broken)
+
+**Error Message**:
+```
+relation "app.vector_etl_tracking" does not exist
+LINE 2:                     INSERT INTO app.vector_etl_tracking (
+```
+
+**Location**: `triggers/schema_pydantic_deploy.py` → `_deploy_schema()`
+
+**Root Cause**:
+The `_deploy_schema()` method only called `generator.generate_composed_statements()` which generates core app tables (jobs, tasks). It did NOT call:
+- `generate_geo_schema_ddl()` - for geo schema tables
+- `generate_etl_tracking_ddl()` - for ETL tracking tables like `vector_etl_tracking`
+
+The rebuild workflow (`action=rebuild`) uses `pydantic_deploy_trigger` which was incomplete.
+
+**Wrong Code**:
+```python
+composed_statements = generator.generate_composed_statements()  # Only core tables!
+```
+
+**Fixed Code** (23 JAN 2026):
+```python
+# 1. Geo schema (geo.table_catalog) - must come first for FK dependencies
+geo_statements = generator.generate_geo_schema_ddl()
+
+# 2. App core (jobs, tasks, api_requests, etc.)
+app_core_statements = generator.generate_composed_statements()
+
+# 3. ETL tracking (vector_etl_tracking, raster_etl_tracking) - has FK to geo.table_catalog
+etl_statements = generator.generate_etl_tracking_ddl(conn=None, verify_dependencies=False)
+
+# Combine all statements in dependency order
+composed_statements = geo_statements + app_core_statements + etl_statements
+```
+
+**Prevention**:
+- When adding new DDL generation methods to `PydanticToSQL`, ensure they're called in BOTH:
+  - `db_maintenance.py` → `_ensure_tables()`
+  - `schema_pydantic_deploy.py` → `_deploy_schema()`
+- The `ensure` action was correct; only `rebuild` was broken
+
+**Workaround** (before fix deployed):
+```bash
+POST /api/dbadmin/maintenance?action=ensure&confirm=yes
+```
+
+---
+
 ## UI Errors
 
 ### UI-001: HTMX OOB swap fails in table context

@@ -2748,7 +2748,7 @@ def openapi_spec(req: func.HttpRequest) -> func.HttpResponse:
 # ============================================================================
 
 # ============================================================================
-# STARTUP QUEUE VALIDATION (29 DEC 2025, updated 03 JAN 2026 - STARTUP_REFORM.md)
+# STARTUP QUEUE VALIDATION (29 DEC 2025, refactored 23 JAN 2026 - APP_CLEANUP Phase 1)
 # ============================================================================
 # Validate that required Service Bus queues exist BEFORE registering triggers.
 # This catches missing queue errors at deployment time, not 30 seconds later
@@ -2758,224 +2758,23 @@ def openapi_spec(req: func.HttpRequest) -> func.HttpResponse:
 # Service Bus triggers only register if STARTUP_STATE.all_passed is True.
 #
 # Query failures with: GET /api/readyz or /api/health
+#
+# REFACTORED: Logic moved to startup/service_bus_validator.py (APP_CLEANUP Phase 1)
 # ============================================================================
 _startup_logger.info("🔍 STARTUP: Validating Service Bus (DNS + queues)...")
 
-# Build list of required queues based on APP_MODE
-_required_queues = []
-_config = get_config()
+from startup.service_bus_validator import validate_service_bus
+_dns_result, _queue_result = validate_service_bus(_app_mode, get_config())
+STARTUP_STATE.service_bus_dns = _dns_result
+STARTUP_STATE.service_bus_queues = _queue_result
 
-if _app_mode.listens_to_jobs_queue:
-    _required_queues.append({
-        "name": _config.service_bus_jobs_queue,
-        "purpose": "Job orchestration + stage_complete signals",
-        "flag": "listens_to_jobs_queue"
-    })
-
-if _app_mode.listens_to_raster_tasks:
-    _required_queues.append({
-        "name": _config.queues.raster_tasks_queue,
-        "purpose": "Raster tasks (GDAL operations)",
-        "flag": "listens_to_raster_tasks"
-    })
-
-if _app_mode.listens_to_vector_tasks:
-    _required_queues.append({
-        "name": _config.queues.vector_tasks_queue,
-        "purpose": "Vector tasks (DB operations)",
-        "flag": "listens_to_vector_tasks"
-    })
-
-if _app_mode.listens_to_long_running_tasks:
-    _required_queues.append({
-        "name": _config.queues.long_running_tasks_queue,
-        "purpose": "Long-running tasks (Docker worker)",
-        "flag": "listens_to_long_running_tasks"
-    })
-
-# --- SERVICE BUS DNS VALIDATION ---
-_sb_dns_passed = False
-_hostname = None
-_resolved_ips = []
-
-if _required_queues:
-    try:
-        import socket
-        _namespace = _config.service_bus_namespace
-        _hostname = _namespace if "." in _namespace else f"{_namespace}.servicebus.windows.net"
-
-        _startup_logger.info(f"🔍 STARTUP: Checking DNS for Service Bus namespace: {_hostname}")
-
-        try:
-            _dns_results = socket.getaddrinfo(_hostname, 5671, socket.AF_UNSPEC, socket.SOCK_STREAM)
-            _resolved_ips = list(set([addr[4][0] for addr in _dns_results]))
-            _is_private = any(ip.startswith("10.") or ip.startswith("172.") or ip.startswith("192.168.") for ip in _resolved_ips)
-
-            STARTUP_STATE.service_bus_dns = ValidationResult(
-                name="service_bus_dns",
-                passed=True,
-                details={
-                    "hostname": _hostname,
-                    "resolved_ips": _resolved_ips[:3],
-                    "is_private_endpoint": _is_private
-                }
-            )
-            _sb_dns_passed = True
-            _startup_logger.info(f"✅ STARTUP: DNS resolved {_hostname} → {_resolved_ips[:3]}")
-            if _is_private:
-                _startup_logger.info("   ℹ️ Private IP detected - using Private Endpoint or VNet integration")
-
-        except socket.gaierror as _dns_error:
-            # DNS RESOLUTION FAILED - This is a VNet/network issue, NOT a queue issue
-            STARTUP_STATE.service_bus_dns = ValidationResult(
-                name="service_bus_dns",
-                passed=False,
-                error_type="DNS_RESOLUTION_FAILED",
-                error_message=str(_dns_error),
-                details={
-                    "hostname": _hostname,
-                    "likely_causes": [
-                        "SERVICE_BUS_FQDN env var has wrong value",
-                        "VNet DNS configuration issue (ASE/Private Endpoint)",
-                        "Private DNS zone not linked to VNet",
-                        "Network isolation blocking DNS resolution"
-                    ],
-                    "fix": "Check Azure Portal → Service Bus → Networking settings"
-                }
-            )
-            _startup_logger.critical(
-                f"❌ STARTUP: DNS resolution failed for {_hostname}: {_dns_error}"
-            )
-
-    except Exception as _dns_exc:
-        STARTUP_STATE.service_bus_dns = ValidationResult(
-            name="service_bus_dns",
-            passed=False,
-            error_type="DNS_CHECK_EXCEPTION",
-            error_message=str(_dns_exc),
-            details={"exception_type": type(_dns_exc).__name__}
-        )
-        _startup_logger.critical(f"❌ STARTUP: DNS check exception: {_dns_exc}")
+if _dns_result.passed and _queue_result.passed:
+    _startup_logger.info("✅ STARTUP: Service Bus validation passed")
 else:
-    # No queues to validate - mark DNS as passed (not applicable)
-    STARTUP_STATE.service_bus_dns = ValidationResult(
-        name="service_bus_dns",
-        passed=True,
-        details={"message": "No queues configured - DNS check skipped"}
-    )
-    _sb_dns_passed = True
-    _startup_logger.info("⏭️ STARTUP: No queue validation needed (APP_MODE doesn't listen to any queues)")
-
-# --- SERVICE BUS QUEUE VALIDATION ---
-# Only run if DNS passed
-if _sb_dns_passed and _required_queues:
-    try:
-        from infrastructure.service_bus import ServiceBusRepository
-        _sb_repo = ServiceBusRepository()
-        _missing_queues = []
-        _connection_errors = []
-        _validated_queues = []
-
-        for _queue_info in _required_queues:
-            _queue_name = _queue_info["name"]
-            try:
-                if not _sb_repo.queue_exists(_queue_name):
-                    _missing_queues.append(_queue_info)
-                    _startup_logger.warning(f"❌ Queue missing: {_queue_name} ({_queue_info['purpose']})")
-                else:
-                    _validated_queues.append(_queue_name)
-                    _startup_logger.info(f"✅ Queue exists: {_queue_name}")
-
-            except Exception as _qe:
-                _error_str = str(_qe).lower()
-
-                # Classify the error
-                if "unauthorized" in _error_str or "401" in str(_qe) or "403" in str(_qe):
-                    _queue_info["error_type"] = "AUTH_FAILED"
-                    _queue_info["error"] = str(_qe)[:200]
-                    _queue_info["fix"] = "Check managed identity role: Azure Service Bus Data Owner"
-                elif "timeout" in _error_str or "timed out" in _error_str:
-                    _queue_info["error_type"] = "TIMEOUT"
-                    _queue_info["error"] = str(_qe)[:200]
-                    _queue_info["fix"] = "Network connectivity issue - check NSG/firewall rules"
-                elif "socket" in _error_str or "connection" in _error_str:
-                    _queue_info["error_type"] = "CONNECTION_FAILED"
-                    _queue_info["error"] = str(_qe)[:200]
-                    _queue_info["fix"] = "Check VNet service endpoints or private endpoint config"
-                else:
-                    _queue_info["error_type"] = "UNKNOWN"
-                    _queue_info["error"] = str(_qe)[:200]
-                    _queue_info["fix"] = "Check Application Insights for details"
-
-                _connection_errors.append(_queue_info)
-                _startup_logger.warning(
-                    f"❌ Queue connection error: {_queue_name} - {_queue_info['error_type']}"
-                )
-
-        # Store results
-        if _connection_errors or _missing_queues:
-            STARTUP_STATE.service_bus_queues = ValidationResult(
-                name="service_bus_queues",
-                passed=False,
-                error_type="QUEUE_VALIDATION_FAILED",
-                error_message=f"{len(_connection_errors)} connection errors, {len(_missing_queues)} missing queues",
-                details={
-                    "connection_errors": [
-                        {"name": q["name"], "error_type": q["error_type"], "fix": q["fix"]}
-                        for q in _connection_errors
-                    ],
-                    "missing_queues": [q["name"] for q in _missing_queues],
-                    "validated_queues": _validated_queues
-                }
-            )
-            _startup_logger.critical(
-                f"❌ STARTUP: Service Bus queue validation failed - "
-                f"{len(_connection_errors)} errors, {len(_missing_queues)} missing"
-            )
-        else:
-            STARTUP_STATE.service_bus_queues = ValidationResult(
-                name="service_bus_queues",
-                passed=True,
-                details={"validated_queues": _validated_queues}
-            )
-            _startup_logger.info(f"✅ STARTUP: All {len(_required_queues)} required queues validated")
-
-    except ImportError as _ie:
-        STARTUP_STATE.service_bus_queues = ValidationResult(
-            name="service_bus_queues",
-            passed=False,
-            error_type="IMPORT_FAILED",
-            error_message=str(_ie),
-            details={"message": "Could not import ServiceBusRepository"}
-        )
-        _startup_logger.warning(f"⚠️ STARTUP: Could not import ServiceBusRepository: {_ie}")
-
-    except Exception as _e:
-        STARTUP_STATE.service_bus_queues = ValidationResult(
-            name="service_bus_queues",
-            passed=False,
-            error_type="VALIDATION_EXCEPTION",
-            error_message=str(_e),
-            details={"exception_type": type(_e).__name__}
-        )
-        _startup_logger.warning(f"⚠️ STARTUP: Queue validation exception: {_e}")
-
-elif not _sb_dns_passed:
-    # DNS failed - skip queue validation
-    STARTUP_STATE.service_bus_queues = ValidationResult(
-        name="service_bus_queues",
-        passed=False,
-        error_type="SKIPPED",
-        error_message="Skipped due to DNS resolution failure",
-        details={"reason": "DNS must resolve before queue validation can run"}
-    )
-else:
-    # No queues to validate
-    STARTUP_STATE.service_bus_queues = ValidationResult(
-        name="service_bus_queues",
-        passed=True,
-        details={"message": "No queues configured"}
-    )
+    if not _dns_result.passed:
+        _startup_logger.critical(f"❌ STARTUP: Service Bus DNS validation failed: {_dns_result.error_message}")
+    if not _queue_result.passed:
+        _startup_logger.critical(f"❌ STARTUP: Service Bus queue validation failed: {_queue_result.error_message}")
 
 # ============================================================================
 # PHASE 2 COMPLETE: Finalize Startup State
@@ -3085,164 +2884,17 @@ else:
     logger.warning("⏭️ SKIPPING: geospatial-jobs queue trigger (APP_MODE=%s)", _app_mode.mode.value)
 
 if STARTUP_STATE.all_passed and _app_mode.listens_to_jobs_queue:
+    # APP_CLEANUP Phase 2: Handler logic moved to triggers/service_bus/job_handler.py
+    from triggers.service_bus import handle_job_message
+
     @app.service_bus_queue_trigger(
         arg_name="msg",
         queue_name="geospatial-jobs",
         connection="ServiceBusConnection"
     )
     def process_service_bus_job(msg: func.ServiceBusMessage) -> None:
-        """
-        Process job messages from Service Bus using CoreMachine.
-
-        EPOCH 4: Uses CoreMachine universal orchestrator instead of controllers.
-        Works with ALL job types via registry pattern - no job-specific code needed.
-
-        Multi-App Architecture (07 DEC 2025):
-        Handles TWO message types on the jobs queue:
-        1. job_submit (default): New job or stage advancement - creates tasks
-        2. stage_complete: Signal from worker app that a stage finished
-
-        Performance benefits:
-        - No base64 encoding needed (Service Bus handles binary)
-        - Better throughput for high-volume scenarios
-        - Built-in dead letter queue support
-        """
-        # Generate correlation_id for function invocation tracing
-        # Purpose: Log prefix [abc12345] to filter Application Insights logs for this execution
-        # Scope: Local to this function invocation (not propagated to JobQueueMessage.correlation_id)
-        # Usage: Search Application Insights: traces | where message contains '[abc12345]'
-        # Note: This is different from JobQueueMessage.correlation_id (stage advancement tracking)
-        # See: core/schema/queue.py for JobQueueMessage.correlation_id documentation
-        correlation_id = str(uuid.uuid4())[:8]
-        start_time = time.time()
-
-        # GAP-1 FIX (16 DEC 2025): Log Service Bus message metadata IMMEDIATELY
-        # This confirms the trigger fired and provides traceability even if parsing fails
-        logger.info(
-            f"[{correlation_id}] 📥 SERVICE BUS MESSAGE RECEIVED (geospatial-jobs)",
-            extra={
-                'checkpoint': 'MESSAGE_RECEIVED',
-                'correlation_id': correlation_id,
-                'queue_name': 'geospatial-jobs',
-                'message_id': msg.message_id,
-                'sequence_number': msg.sequence_number,
-                'delivery_count': msg.delivery_count,
-                'enqueued_time': msg.enqueued_time_utc.isoformat() if msg.enqueued_time_utc else None,
-                'content_type': msg.content_type,
-                'lock_token': str(msg.lock_token)[:16] if msg.lock_token else None
-            }
-        )
-
-        logger.info(
-            f"[{correlation_id}] 🤖 COREMACHINE JOB TRIGGER (Service Bus)",
-            extra={
-                'checkpoint': 'JOB_TRIGGER_START',
-                'correlation_id': correlation_id,
-                'trigger_type': 'service_bus',
-                'queue_name': 'geospatial-jobs'
-            }
-        )
-
-        try:
-            # Extract message body (no base64 decoding needed for Service Bus)
-            message_body = msg.get_body().decode('utf-8')
-            logger.info(
-                f"[{correlation_id}] 📦 Message size: {len(message_body)} bytes",
-                extra={
-                    'checkpoint': 'JOB_TRIGGER_RECEIVE_MESSAGE',
-                    'correlation_id': correlation_id,
-                    'message_size_bytes': len(message_body)
-                }
-            )
-
-            # Multi-App Architecture (07 DEC 2025): Detect message type
-            # Parse as generic dict first to check message_type
-            message_dict = json.loads(message_body)
-            message_type = message_dict.get('message_type', 'job_submit')
-
-            if message_type == 'stage_complete':
-                # Worker app signaling stage completion
-                logger.info(
-                    f"[{correlation_id}] 📬 Processing stage_complete message from worker",
-                    extra={
-                        'checkpoint': 'JOB_TRIGGER_STAGE_COMPLETE',
-                        'correlation_id': correlation_id,
-                        'job_id': message_dict.get('job_id', 'unknown')[:16],
-                        'completed_stage': message_dict.get('completed_stage'),
-                        'completed_by_app': message_dict.get('completed_by_app', 'unknown')
-                    }
-                )
-                result = core_machine.process_stage_complete_message(message_dict)
-            else:
-                # Standard job message (job_submit or stage advancement)
-                job_message = JobQueueMessage.model_validate_json(message_body)
-                logger.info(
-                    f"[{correlation_id}] ✅ Parsed job: {job_message.job_id[:16]}..., type={job_message.job_type}",
-                    extra={
-                        'checkpoint': 'JOB_TRIGGER_PARSE_SUCCESS',
-                        'correlation_id': correlation_id,
-                        'job_id': job_message.job_id,
-                        'job_type': job_message.job_type,
-                        'stage': job_message.stage
-                    }
-                )
-
-                # Add correlation ID for tracking
-                if job_message.parameters is None:
-                    job_message.parameters = {}
-                job_message.parameters['_correlation_id'] = correlation_id
-                job_message.parameters['_processing_path'] = 'service_bus'
-
-                # EPOCH 4: Process via CoreMachine (universal orchestrator)
-                result = core_machine.process_job_message(job_message)
-
-            elapsed = time.time() - start_time
-            logger.info(f"[{correlation_id}] ✅ CoreMachine processed in {elapsed:.3f}s")
-            logger.info(f"[{correlation_id}] 📊 Result: {result}")
-
-        except Exception as e:
-            elapsed = time.time() - start_time
-            logger.error(f"[{correlation_id}] ❌ EXCEPTION in process_service_bus_job after {elapsed:.3f}s")
-            logger.error(f"[{correlation_id}] 📍 Exception type: {type(e).__name__}")
-            logger.error(f"[{correlation_id}] 📍 Exception message: {e}")
-            logger.error(f"[{correlation_id}] 📍 Full traceback:\n{traceback.format_exc()}")
-
-            # Extract job_id from either job_message or message_dict (stage_complete)
-            job_id = None
-            if 'job_message' in locals() and job_message:
-                job_id = job_message.job_id
-                logger.error(f"[{correlation_id}] 📋 Job ID: {job_message.job_id}")
-                logger.error(f"[{correlation_id}] 📋 Job Type: {job_message.job_type}")
-                logger.error(f"[{correlation_id}] 📋 Stage: {job_message.stage}")
-            elif 'message_dict' in locals() and message_dict:
-                job_id = message_dict.get('job_id')
-                logger.error(f"[{correlation_id}] 📋 Job ID (from stage_complete): {job_id}")
-                logger.error(f"[{correlation_id}] 📋 Message Type: {message_dict.get('message_type')}")
-                logger.error(f"[{correlation_id}] 📋 Completed Stage: {message_dict.get('completed_stage')}")
-
-            # FP1 FIX: Mark job as FAILED in database to prevent stuck jobs
-            if job_id:
-                try:
-                    repos = RepositoryFactory.create_repositories()
-                    job_repo = repos['job_repo']
-
-                    error_msg = f"Job processing exception: {type(e).__name__}: {e}"
-                    job_repo.mark_failed(job_id, error_msg)
-
-                    logger.info(f"[{correlation_id}] ✅ Job {job_id[:16]}... marked as FAILED in database")
-
-                except Exception as cleanup_error:
-                    logger.error(f"[{correlation_id}] ❌ Failed to mark job as FAILED: {cleanup_error}")
-                    logger.error(f"[{correlation_id}] 💀 Job {job_id[:16]}... may be stuck - requires manual cleanup")
-            else:
-                logger.error(f"[{correlation_id}] ⚠️ No job_id available - cannot mark job as FAILED")
-                logger.error(f"[{correlation_id}] 📍 Exception occurred before message parsing")
-
-            # NOTE: Job processing errors are typically critical (workflow creation failures).
-            # Unlike task retries, jobs don't have application-level retry logic.
-            # Log extensively but don't re-raise to avoid Service Bus retries for job messages.
-            logger.warning(f"[{correlation_id}] ⚠️ Function completing (exception logged but not re-raised)")
-            logger.warning(f"[{correlation_id}] ✅ Job failure handling complete")
+        """Process job messages from Service Bus using CoreMachine."""
+        handle_job_message(msg, core_machine)
 
 
 # Raster Tasks Queue Trigger - Raster worker/platform_raster/standalone modes
@@ -3254,149 +2906,17 @@ else:
     logger.warning("⏭️ SKIPPING: raster-tasks queue trigger (APP_MODE=%s)", _app_mode.mode.value)
 
 if STARTUP_STATE.all_passed and _app_mode.listens_to_raster_tasks:
+    # APP_CLEANUP Phase 2: Handler logic moved to triggers/service_bus/task_handler.py
+    from triggers.service_bus import handle_task_message
+
     @app.service_bus_queue_trigger(
         arg_name="msg",
         queue_name="raster-tasks",
         connection="ServiceBusConnection"
     )
     def process_raster_task(msg: func.ServiceBusMessage) -> None:
-        """
-        Process raster task messages from dedicated raster-tasks queue.
-
-        Multi-App Architecture (07 DEC 2025):
-        - Dedicated queue for GDAL/raster operations
-        - Separate Function App can use host.json with maxConcurrentCalls: 2
-        - Memory-intensive operations (2-8GB per task)
-
-        Task types routed here:
-        - handler_raster_validate, handler_raster_create_cog
-        - handler_stac_raster_item, validate_raster, create_cog
-        - extract_stac_metadata, create_tiling_scheme, extract_tile
-        """
-        correlation_id = str(uuid.uuid4())[:8]
-        start_time = time.time()
-
-        # GAP-1 FIX (16 DEC 2025): Log Service Bus message metadata IMMEDIATELY
-        # This confirms the trigger fired and provides traceability even if parsing fails
-        logger.info(
-            f"[{correlation_id}] 📥 SERVICE BUS MESSAGE RECEIVED (raster-tasks)",
-            extra={
-                'checkpoint': 'MESSAGE_RECEIVED',
-                'correlation_id': correlation_id,
-                'queue_name': 'raster-tasks',
-                'message_id': msg.message_id,
-                'sequence_number': msg.sequence_number,
-                'delivery_count': msg.delivery_count,
-                'enqueued_time': msg.enqueued_time_utc.isoformat() if msg.enqueued_time_utc else None,
-                'content_type': msg.content_type,
-                'lock_token': str(msg.lock_token)[:16] if msg.lock_token else None
-            }
-        )
-
-        logger.info(
-            f"[{correlation_id}] 🗺️ RASTER TASK TRIGGER (raster-tasks queue)",
-            extra={
-                'checkpoint': 'RASTER_TASK_TRIGGER_START',
-                'correlation_id': correlation_id,
-                'queue_name': 'raster-tasks'
-            }
-        )
-
-        try:
-            message_body = msg.get_body().decode('utf-8')
-            task_message = TaskQueueMessage.model_validate_json(message_body)
-            logger.info(f"[{correlation_id}] ✅ Parsed raster task: {task_message.task_id}, type={task_message.task_type}")
-
-            if task_message.parameters is None:
-                task_message.parameters = {}
-            task_message.parameters['_correlation_id'] = correlation_id
-            task_message.parameters['_processing_path'] = 'raster-tasks'
-
-            # 16 DEC 2025: PENDING → QUEUED - Confirm message received by trigger
-            # This proves the message was delivered and trigger fired
-            try:
-                from core.models.enums import TaskStatus
-                repos = RepositoryFactory.create_repositories()
-                success = repos['task_repo'].update_task_status_with_validation(
-                    task_message.task_id,
-                    TaskStatus.QUEUED
-                )
-                if success:
-                    logger.info(
-                        f"[{correlation_id}] ✅ PENDING → QUEUED confirmed for {task_message.task_id[:16]}...",
-                        extra={
-                            'checkpoint': 'PENDING_TO_QUEUED',
-                            'task_id': task_message.task_id,
-                            'queue': 'raster-tasks'
-                        }
-                    )
-                else:
-                    # Task may be in unexpected state - log but continue (janitor will handle)
-                    current = repos['task_repo'].get_task_status(task_message.task_id)
-                    logger.warning(
-                        f"[{correlation_id}] ⚠️ PENDING → QUEUED update returned False. "
-                        f"Current status: {current}. Continuing (janitor will recover if needed)."
-                    )
-            except Exception as status_error:
-                logger.error(f"[{correlation_id}] ❌ Failed PENDING → QUEUED update: {status_error}")
-                # Continue processing - fail-safe, janitor will handle orphans after MAX_RETRIES
-
-            result = core_machine.process_task_message(task_message)
-
-            elapsed = time.time() - start_time
-            logger.info(f"[{correlation_id}] ✅ Raster task processed in {elapsed:.3f}s")
-            logger.info(f"[{correlation_id}] 📊 Result: {result}")
-
-            if result.get('stage_complete'):
-                logger.info(f"[{correlation_id}] 🎯 Stage {task_message.stage} complete for job {task_message.parent_job_id[:16]}...")
-
-        except Exception as e:
-            elapsed = time.time() - start_time
-            logger.error(f"[{correlation_id}] ❌ EXCEPTION in process_raster_task after {elapsed:.3f}s")
-            logger.error(f"[{correlation_id}] 📍 Exception type: {type(e).__name__}")
-            logger.error(f"[{correlation_id}] 📍 Exception message: {e}")
-            logger.error(f"[{correlation_id}] 📍 Full traceback:\n{traceback.format_exc()}")
-
-            # SILENT-1 FIX (16 DEC 2025): Mark task/job as FAILED if exception occurs
-            # This handles cases where exception happens BEFORE CoreMachine processes the task
-            task_id = None
-            job_id = None
-
-            if 'task_message' in locals() and task_message:
-                task_id = task_message.task_id
-                job_id = task_message.parent_job_id
-                logger.error(f"[{correlation_id}] 📋 Task ID: {task_message.task_id}")
-                logger.error(f"[{correlation_id}] 📋 Task Type: {task_message.task_type}")
-                logger.error(f"[{correlation_id}] 📋 Job ID: {task_message.parent_job_id}")
-            else:
-                # Try to extract from raw message for logging
-                task_id, job_id = _extract_task_id_from_raw_message(
-                    msg.get_body().decode('utf-8') if msg else '',
-                    correlation_id
-                )
-
-            # Mark task and job as FAILED in database
-            if task_id or job_id:
-                try:
-                    repos = RepositoryFactory.create_repositories()
-                    error_msg = f"Raster task trigger exception: {type(e).__name__}: {e}"
-
-                    if task_id:
-                        repos['task_repo'].mark_task_failed(task_id, error_msg)
-                        logger.info(f"[{correlation_id}] ✅ Task {task_id[:16]}... marked as FAILED")
-
-                    if job_id:
-                        repos['job_repo'].mark_failed(job_id, f"Task {task_id[:16] if task_id else 'unknown'}... failed: {error_msg}")
-                        logger.info(f"[{correlation_id}] ✅ Job {job_id[:16]}... marked as FAILED")
-
-                except Exception as cleanup_error:
-                    logger.error(f"[{correlation_id}] ❌ Failed to mark task/job as FAILED: {cleanup_error}")
-                    logger.error(f"[{correlation_id}] 💀 Task/Job may be stuck - janitor will recover after timeout")
-            else:
-                logger.error(f"[{correlation_id}] ⚠️ No task_id/job_id available - cannot mark as FAILED")
-                logger.error(f"[{correlation_id}] 📍 Exception occurred before message parsing")
-
-            logger.warning(f"[{correlation_id}] ⚠️ Function completing (failure logged and marked in DB)")
+        """Process raster task messages from dedicated raster-tasks queue."""
+        handle_task_message(msg, core_machine, queue_name="raster-tasks")
 
 
 # Vector Tasks Queue Trigger - Vector worker/platform_vector/standalone modes
@@ -3432,313 +2952,35 @@ else:
 logger.info("=" * 70)
 
 if STARTUP_STATE.all_passed and _app_mode.listens_to_vector_tasks:
+    # APP_CLEANUP Phase 2: Handler logic moved to triggers/service_bus/task_handler.py
+    # Note: handle_task_message import already done above for raster trigger
+    if 'handle_task_message' not in dir():
+        from triggers.service_bus import handle_task_message
+
     @app.service_bus_queue_trigger(
         arg_name="msg",
         queue_name="vector-tasks",
         connection="ServiceBusConnection"
     )
     def process_vector_task(msg: func.ServiceBusMessage) -> None:
-        """
-        Process vector task messages from dedicated vector-tasks queue.
-
-        Multi-App Architecture (07 DEC 2025):
-        - Dedicated queue for geopandas/PostGIS operations
-        - Separate Function App can use host.json with maxConcurrentCalls: 32
-        - DB-bound operations (20-200MB per task)
-
-        Task types routed here:
-        - handler_vector_prepare, handler_vector_upload
-        - handler_stac_vector_item, process_vector_prepare
-        - process_vector_upload, vector_create_stac
-        """
-        correlation_id = str(uuid.uuid4())[:8]
-        start_time = time.time()
-
-        # GAP-1 FIX (16 DEC 2025): Log Service Bus message metadata IMMEDIATELY
-        # This confirms the trigger fired and provides traceability even if parsing fails
-        logger.info(
-            f"[{correlation_id}] 📥 SERVICE BUS MESSAGE RECEIVED (vector-tasks)",
-            extra={
-                'checkpoint': 'MESSAGE_RECEIVED',
-                'correlation_id': correlation_id,
-                'queue_name': 'vector-tasks',
-                'message_id': msg.message_id,
-                'sequence_number': msg.sequence_number,
-                'delivery_count': msg.delivery_count,
-                'enqueued_time': msg.enqueued_time_utc.isoformat() if msg.enqueued_time_utc else None,
-                'content_type': msg.content_type,
-                'lock_token': str(msg.lock_token)[:16] if msg.lock_token else None
-            }
-        )
-
-        logger.info(
-            f"[{correlation_id}] 📍 VECTOR TASK TRIGGER (vector-tasks queue)",
-            extra={
-                'checkpoint': 'VECTOR_TASK_TRIGGER_START',
-                'correlation_id': correlation_id,
-                'queue_name': 'vector-tasks'
-            }
-        )
-
-        try:
-            message_body = msg.get_body().decode('utf-8')
-            task_message = TaskQueueMessage.model_validate_json(message_body)
-            logger.info(f"[{correlation_id}] ✅ Parsed vector task: {task_message.task_id}, type={task_message.task_type}")
-
-            if task_message.parameters is None:
-                task_message.parameters = {}
-            task_message.parameters['_correlation_id'] = correlation_id
-            task_message.parameters['_processing_path'] = 'vector-tasks'
-
-            # 16 DEC 2025: PENDING → QUEUED - Confirm message received by trigger
-            # This proves the message was delivered and trigger fired
-            try:
-                from core.models.enums import TaskStatus
-                repos = RepositoryFactory.create_repositories()
-                success = repos['task_repo'].update_task_status_with_validation(
-                    task_message.task_id,
-                    TaskStatus.QUEUED
-                )
-                if success:
-                    logger.info(
-                        f"[{correlation_id}] ✅ PENDING → QUEUED confirmed for {task_message.task_id[:16]}...",
-                        extra={
-                            'checkpoint': 'PENDING_TO_QUEUED',
-                            'task_id': task_message.task_id,
-                            'queue': 'vector-tasks'
-                        }
-                    )
-                else:
-                    # Task may be in unexpected state - log but continue (janitor will handle)
-                    current = repos['task_repo'].get_task_status(task_message.task_id)
-                    logger.warning(
-                        f"[{correlation_id}] ⚠️ PENDING → QUEUED update returned False. "
-                        f"Current status: {current}. Continuing (janitor will recover if needed)."
-                    )
-            except Exception as status_error:
-                logger.error(f"[{correlation_id}] ❌ Failed PENDING → QUEUED update: {status_error}")
-                # Continue processing - fail-safe, janitor will handle orphans after MAX_RETRIES
-
-            result = core_machine.process_task_message(task_message)
-
-            elapsed = time.time() - start_time
-            logger.info(f"[{correlation_id}] ✅ Vector task processed in {elapsed:.3f}s")
-            logger.info(f"[{correlation_id}] 📊 Result: {result}")
-
-            if result.get('stage_complete'):
-                logger.info(f"[{correlation_id}] 🎯 Stage {task_message.stage} complete for job {task_message.parent_job_id[:16]}...")
-
-        except Exception as e:
-            elapsed = time.time() - start_time
-            logger.error(f"[{correlation_id}] ❌ EXCEPTION in process_vector_task after {elapsed:.3f}s")
-            logger.error(f"[{correlation_id}] 📍 Exception type: {type(e).__name__}")
-            logger.error(f"[{correlation_id}] 📍 Exception message: {e}")
-            logger.error(f"[{correlation_id}] 📍 Full traceback:\n{traceback.format_exc()}")
-
-            # SILENT-1 FIX (16 DEC 2025): Mark task/job as FAILED if exception occurs
-            # This handles cases where exception happens BEFORE CoreMachine processes the task
-            task_id = None
-            job_id = None
-
-            if 'task_message' in locals() and task_message:
-                task_id = task_message.task_id
-                job_id = task_message.parent_job_id
-                logger.error(f"[{correlation_id}] 📋 Task ID: {task_message.task_id}")
-                logger.error(f"[{correlation_id}] 📋 Task Type: {task_message.task_type}")
-                logger.error(f"[{correlation_id}] 📋 Job ID: {task_message.parent_job_id}")
-            else:
-                # Try to extract from raw message for logging
-                task_id, job_id = _extract_task_id_from_raw_message(
-                    msg.get_body().decode('utf-8') if msg else '',
-                    correlation_id
-                )
-
-            # Mark task and job as FAILED in database
-            if task_id or job_id:
-                try:
-                    repos = RepositoryFactory.create_repositories()
-                    error_msg = f"Vector task trigger exception: {type(e).__name__}: {e}"
-
-                    if task_id:
-                        repos['task_repo'].mark_task_failed(task_id, error_msg)
-                        logger.info(f"[{correlation_id}] ✅ Task {task_id[:16]}... marked as FAILED")
-
-                    if job_id:
-                        repos['job_repo'].mark_failed(job_id, f"Task {task_id[:16] if task_id else 'unknown'}... failed: {error_msg}")
-                        logger.info(f"[{correlation_id}] ✅ Job {job_id[:16]}... marked as FAILED")
-
-                except Exception as cleanup_error:
-                    logger.error(f"[{correlation_id}] ❌ Failed to mark task/job as FAILED: {cleanup_error}")
-                    logger.error(f"[{correlation_id}] 💀 Task/Job may be stuck - janitor will recover after timeout")
-            else:
-                logger.error(f"[{correlation_id}] ⚠️ No task_id/job_id available - cannot mark as FAILED")
-                logger.error(f"[{correlation_id}] 📍 Exception occurred before message parsing")
-
-            logger.warning(f"[{correlation_id}] ⚠️ Function completing (failure logged and marked in DB)")
+        """Process vector task messages from dedicated vector-tasks queue."""
+        handle_task_message(msg, core_machine, queue_name="vector-tasks")
 
 
 # ============================================================================
 # QUEUE ERROR HANDLING HELPER FUNCTIONS
 # ============================================================================
-
-def _extract_job_id_from_raw_message(message_content: str, correlation_id: str = "unknown") -> Optional[str]:
-    """Try to extract job_id from potentially malformed message.
-
-    Args:
-        message_content: Raw message content that may be malformed
-        correlation_id: Correlation ID for logging
-
-    Returns:
-        job_id if found, None otherwise
-    """
-    logger = LoggerFactory.create_logger(ComponentType.SERVICE, "QueueErrorHandler")
-
-    # Try JSON parsing first
-    try:
-        data = json.loads(message_content)
-        job_id = data.get('job_id')
-        if job_id:
-            logger.info(f"[{correlation_id}] 🔍 Extracted job_id via JSON: {job_id[:16]}...")
-            return job_id
-    except Exception:
-        pass  # Try regex next
-
-    # Try regex as fallback
-    try:
-        match = re.search(r'"job_id"\s*:\s*"([^"]+)"', message_content)
-        if match:
-            job_id = match.group(1)
-            logger.info(f"[{correlation_id}] 🔍 Extracted job_id via regex: {job_id[:16]}...")
-            return job_id
-    except Exception:
-        pass
-
-    logger.warning(f"[{correlation_id}] ⚠️ Could not extract job_id from message")
-    return None
-
-
-def _extract_task_id_from_raw_message(message_content: str, correlation_id: str = "unknown") -> tuple[Optional[str], Optional[str]]:
-    """Try to extract task_id and parent_job_id from potentially malformed message.
-
-    Args:
-        message_content: Raw message content that may be malformed
-        correlation_id: Correlation ID for logging
-
-    Returns:
-        Tuple of (task_id, parent_job_id) if found, (None, None) otherwise
-    """
-    logger = LoggerFactory.create_logger(ComponentType.SERVICE, "QueueErrorHandler")
-    task_id = None
-    parent_job_id = None
-
-    # Try JSON parsing first
-    try:
-        data = json.loads(message_content)
-        task_id = data.get('task_id')
-        parent_job_id = data.get('parent_job_id')
-        if task_id:
-            logger.info(f"[{correlation_id}] 🔍 Extracted task_id via JSON: {task_id}")
-        if parent_job_id:
-            logger.info(f"[{correlation_id}] 🔍 Extracted parent_job_id via JSON: {parent_job_id[:16]}...")
-    except Exception:
-        # Try regex as fallback
-        try:
-            task_match = re.search(r'"task_id"\s*:\s*"([^"]+)"', message_content)
-            if task_match:
-                task_id = task_match.group(1)
-                logger.info(f"[{correlation_id}] 🔍 Extracted task_id via regex: {task_id}")
-
-            job_match = re.search(r'"parent_job_id"\s*:\s*"([^"]+)"', message_content)
-            if job_match:
-                parent_job_id = job_match.group(1)
-                logger.info(f"[{correlation_id}] 🔍 Extracted parent_job_id via regex: {parent_job_id[:16]}...")
-        except Exception:
-            pass
-
-    if not task_id and not parent_job_id:
-        logger.warning(f"[{correlation_id}] ⚠️ Could not extract task_id or parent_job_id from message")
-
-    return task_id, parent_job_id
-
-
-def _mark_job_failed_from_queue_error(job_id: str, error_msg: str, correlation_id: str = "unknown") -> None:
-    """Helper to mark job as failed when queue processing fails.
-
-    Args:
-        job_id: Job ID to mark as failed
-        error_msg: Error message to record
-        correlation_id: Correlation ID for logging
-    """
-    logger = LoggerFactory.create_logger(ComponentType.SERVICE, "QueueErrorHandler")
-
-    try:
-        repos = RepositoryFactory.create_repositories()
-        job_repo = repos['job_repo']
-
-        # Check if job exists and isn't already failed
-        job = job_repo.get_job(job_id)
-        if job and job.status not in [JobStatus.FAILED, JobStatus.COMPLETED]:
-            job_repo.update_job_status_with_validation(
-                job_id=job_id,
-                new_status=JobStatus.FAILED,
-                additional_updates={
-                    'error_details': f"Queue processing error: {error_msg}",
-                    'failed_at': datetime.now(timezone.utc).isoformat(),
-                    'queue_correlation_id': correlation_id
-                }
-            )
-            logger.info(f"[{correlation_id}] 📝 Job {job_id[:16]}... marked as FAILED before poison queue")
-        elif job and job.status == JobStatus.FAILED:
-            logger.info(f"[{correlation_id}] ℹ️ Job {job_id[:16]}... already marked as FAILED")
-        elif job and job.status == JobStatus.COMPLETED:
-            logger.warning(f"[{correlation_id}] ⚠️ Job {job_id[:16]}... is COMPLETED but queue error occurred")
-        else:
-            logger.error(f"[{correlation_id}] ❌ Job {job_id[:16]}... not found in database")
-    except Exception as e:
-        logger.error(f"[{correlation_id}] ❌ Failed to mark job {job_id[:16]}... as failed: {e}")
-
-
-def _mark_task_failed_from_queue_error(task_id: str, parent_job_id: Optional[str], error_msg: str, correlation_id: str = "unknown") -> None:
-    """Helper to mark task as failed when queue processing fails.
-
-    Args:
-        task_id: Task ID to mark as failed
-        parent_job_id: Parent job ID if known
-        error_msg: Error message to record
-        correlation_id: Correlation ID for logging
-    """
-    logger = LoggerFactory.create_logger(ComponentType.SERVICE, "QueueErrorHandler")
-
-    try:
-        repos = RepositoryFactory.create_repositories()
-        task_repo = repos['task_repo']
-
-        # Check if task exists and isn't already failed
-        task = task_repo.get_task(task_id)
-        if task and task.status not in [TaskStatus.FAILED, TaskStatus.COMPLETED]:
-            # Create type-safe update model
-            update = TaskUpdateModel(
-                status=TaskStatus.FAILED,
-                error_details=f"Queue processing error: {error_msg}"
-            )
-            task_repo.update_task(task_id=task_id, updates=update)
-            logger.info(f"[{correlation_id}] 📝 Task {task_id} marked as FAILED before poison queue")
-
-            # Also update parent job if known
-            if parent_job_id:
-                _mark_job_failed_from_queue_error(
-                    parent_job_id,
-                    f"Task {task_id} failed in queue processing",
-                    correlation_id
-                )
-        elif task and task.status == TaskStatus.FAILED:
-            logger.info(f"[{correlation_id}] ℹ️ Task {task_id} already marked as FAILED")
-        elif task and task.status == TaskStatus.COMPLETED:
-            logger.warning(f"[{correlation_id}] ⚠️ Task {task_id} is COMPLETED but queue error occurred")
-        else:
-            logger.error(f"[{correlation_id}] ❌ Task {task_id} not found in database")
-    except Exception as e:
-        logger.error(f"[{correlation_id}] ❌ Failed to mark task {task_id} as failed: {e}")
+# APP_CLEANUP Phase 2 (23 JAN 2026): Helper functions moved to:
+#   triggers/service_bus/error_handler.py
+#
+# Available via import:
+#   from triggers.service_bus import (
+#       extract_job_id_from_raw_message,
+#       extract_task_id_from_raw_message,
+#       mark_job_failed,
+#       mark_task_failed,
+#   )
+# ============================================================================
 
 
 # ============================================================================

@@ -3,7 +3,7 @@
 # ============================================================================
 # STATUS: Trigger layer - POST /api/schema/deploy
 # PURPOSE: Deploy Pydantic-generated schema to PostgreSQL database
-# LAST_REVIEWED: 05 JAN 2026
+# LAST_REVIEWED: 23 JAN 2026
 # REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
 # EXPORTS: PydanticSchemaDeployTrigger, pydantic_schema_deploy_trigger
 # DEPENDENCIES: psycopg, core.schema.sql_generator
@@ -247,10 +247,25 @@ class PydanticSchemaDeployTrigger:
             repo = PostgreSQLRepository()
 
             with repo._get_connection() as conn:
-                # Get composed statements
+                # Get composed statements for ALL schemas (23 JAN 2026 - Fix missing ETL tables)
+                # Must generate in dependency order: geo → app_core → app_etl
                 self.logger.info("📦 Generating composed SQL statements from Pydantic models")
-                composed_statements = generator.generate_composed_statements()
-                self.logger.info(f"📦 Generated {len(composed_statements)} composed statements")
+
+                # 1. Geo schema (geo.table_catalog) - must come first for FK dependencies
+                geo_statements = generator.generate_geo_schema_ddl()
+                self.logger.info(f"📦 Generated {len(geo_statements)} geo schema statements")
+
+                # 2. App core (jobs, tasks, api_requests, etc.)
+                app_core_statements = generator.generate_composed_statements()
+                self.logger.info(f"📦 Generated {len(app_core_statements)} app core statements")
+
+                # 3. ETL tracking (vector_etl_tracking, raster_etl_tracking) - has FK to geo.table_catalog
+                etl_statements = generator.generate_etl_tracking_ddl(conn=None, verify_dependencies=False)
+                self.logger.info(f"📦 Generated {len(etl_statements)} ETL tracking statements")
+
+                # Combine all statements in dependency order
+                composed_statements = geo_statements + app_core_statements + etl_statements
+                self.logger.info(f"📦 Total: {len(composed_statements)} composed statements")
 
                 executed_statements = []
                 errors = []

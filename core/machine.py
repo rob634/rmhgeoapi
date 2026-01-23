@@ -1111,8 +1111,21 @@ class CoreMachine:
                         )
 
                     except Exception as stage_error:
+                        # GAP-2 FIX (23 JAN 2026): Add checkpoint for stage advancement failure
                         # Stage advancement failed - mark job as FAILED
-                        self.logger.error(f"❌ Stage advancement failed: {stage_error}")
+                        self.logger.error(
+                            f"❌ Stage advancement failed: {stage_error}",
+                            extra={
+                                'checkpoint': 'STAGE_ADVANCEMENT_FAILED',
+                                'error_source': 'orchestration',
+                                'task_id': task_message.task_id,
+                                'job_id': task_message.parent_job_id,
+                                'stage': task_message.stage,
+                                'next_stage': task_message.stage + 1,
+                                'error_type': type(stage_error).__name__,
+                                'error_message': str(stage_error)
+                            }
+                        )
                         self.logger.error(f"Traceback: {traceback.format_exc()}")
 
                         error_msg = (
@@ -1289,10 +1302,50 @@ class CoreMachine:
             task_record = self.repos['task_repo'].get_task(task_message.task_id)
 
             if task_record is None:
-                self.logger.error(f"❌ CRITICAL: task_record is NONE for task_id={task_message.task_id}")
-                self.logger.error(f"❌ Cannot retry - task not found in database!")
-            else:
-                self.logger.info(f"📋 Task found: retry_count={task_record.retry_count}, max={config.task_max_retries}")
+                # GAP-4 FIX (23 JAN 2026): Early return with checkpoint when task not found
+                self.logger.error(
+                    f"❌ CRITICAL: task_record is NONE for task_id={task_message.task_id}",
+                    extra={
+                        'checkpoint': 'TASK_NOT_FOUND_FOR_RETRY',
+                        'error_source': 'orchestration',
+                        'task_id': task_message.task_id,
+                        'job_id': task_message.parent_job_id,
+                        'error_details': 'Task not found in database during retry logic'
+                    }
+                )
+                # Mark job as failed since we can't process this task
+                try:
+                    self.state_manager.mark_job_failed(
+                        task_message.parent_job_id,
+                        f"Task {task_message.task_id[:16]}... not found in database during retry logic"
+                    )
+                    self.logger.info(
+                        f"✅ Job marked as FAILED due to missing task",
+                        extra={
+                            'checkpoint': 'JOB_FAILED_TASK_NOT_FOUND',
+                            'job_id': task_message.parent_job_id,
+                            'task_id': task_message.task_id
+                        }
+                    )
+                except Exception as mark_err:
+                    self.logger.error(
+                        f"❌ Also failed to mark job as failed: {mark_err}",
+                        extra={
+                            'checkpoint': 'JOB_FAIL_MARK_ERROR',
+                            'job_id': task_message.parent_job_id,
+                            'error': str(mark_err)
+                        }
+                    )
+
+                return {
+                    'success': False,
+                    'error': 'Task not found in database during retry logic',
+                    'error_type': 'task_not_found',
+                    'task_id': task_message.task_id,
+                    'retryable': False
+                }
+
+            self.logger.info(f"📋 Task found: retry_count={task_record.retry_count}, max={config.task_max_retries}")
 
             if task_record and task_record.retry_count < config.task_max_retries:
                 self.logger.info(
@@ -2100,10 +2153,29 @@ class CoreMachine:
                         status='completed',
                         result=final_result
                     )
-                    self.logger.debug(f"✅ [JOB_COMPLETE] Platform callback completed successfully")
+                    # GAP-7 FIX (23 JAN 2026): Add checkpoint for callback success
+                    self.logger.info(
+                        f"✅ [JOB_COMPLETE] Platform callback completed successfully",
+                        extra={
+                            'checkpoint': 'JOB_COMPLETE_CALLBACK_SUCCESS',
+                            'job_id': job_id,
+                            'job_type': job_type,
+                            'callback_status': 'success'
+                        }
+                    )
                 except Exception as e:
+                    # GAP-7 FIX (23 JAN 2026): Add checkpoint for callback failure
                     # Callback failure should not fail the job
-                    self.logger.warning(f"⚠️ [JOB_COMPLETE] Platform callback failed (non-fatal): {e}")
+                    self.logger.warning(
+                        f"⚠️ [JOB_COMPLETE] Platform callback failed (non-fatal): {e}",
+                        extra={
+                            'checkpoint': 'JOB_COMPLETE_CALLBACK_FAILED',
+                            'job_id': job_id,
+                            'job_type': job_type,
+                            'callback_status': 'failed',
+                            'callback_error': str(e)
+                        }
+                    )
                     self.logger.warning(f"   Job {job_id[:16]} is still marked as completed")
 
             self.logger.info(
@@ -2149,9 +2221,27 @@ class CoreMachine:
                         status='failed',
                         result={'error': error_message}
                     )
+                    # GAP-7 FIX (23 JAN 2026): Add checkpoint for failure callback success
+                    self.logger.info(
+                        f"✅ Job failure callback completed",
+                        extra={
+                            'checkpoint': 'JOB_FAILED_CALLBACK_SUCCESS',
+                            'job_id': job_id,
+                            'callback_status': 'success'
+                        }
+                    )
                 except Exception as e:
+                    # GAP-7 FIX (23 JAN 2026): Add checkpoint for callback failure
                     # Callback failure should not affect failure handling
-                    self.logger.warning(f"⚠️ Job failure callback failed (non-fatal): {e}")
+                    self.logger.warning(
+                        f"⚠️ Job failure callback failed (non-fatal): {e}",
+                        extra={
+                            'checkpoint': 'JOB_FAILED_CALLBACK_FAILED',
+                            'job_id': job_id,
+                            'callback_status': 'failed',
+                            'callback_error': str(e)
+                        }
+                    )
 
         except Exception as e:
             self.logger.error(f"❌ Failed to mark job as FAILED: {e}")

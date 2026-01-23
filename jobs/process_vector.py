@@ -165,9 +165,10 @@ class ProcessVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
         },
         # Vector tile optimization (15 JAN 2026)
         # Creates a _tiles materialized view with subdivided geometries for fast tile generation
+        # DISABLED BY DEFAULT (23 JAN 2026) - Simplification: one PostGIS table only, no views
         'create_tile_view': {
             'type': 'bool',
-            'default': True,
+            'default': False,
             'description': 'Create tile-optimized materialized view ({table}_tiles) with ST_Subdivide for fast vector tile rendering'
         },
         'max_tile_vertices': {

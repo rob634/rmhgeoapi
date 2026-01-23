@@ -197,17 +197,17 @@ class JanitorService:
         Returns:
             Queue name ('raster-tasks', 'vector-tasks', 'long-running-tasks', or 'geospatial-jobs')
         """
-        from config.defaults import TaskRoutingDefaults, QueueRoutingDefaults
+        from config.defaults import TaskRoutingDefaults, QueueDefaults
 
         if task_type in TaskRoutingDefaults.RASTER_TASKS:
-            return QueueRoutingDefaults.RASTER_TASKS_QUEUE
+            return QueueDefaults.RASTER_TASKS_QUEUE
         elif task_type in TaskRoutingDefaults.VECTOR_TASKS:
-            return QueueRoutingDefaults.VECTOR_TASKS_QUEUE
+            return QueueDefaults.VECTOR_TASKS_QUEUE
         elif task_type in TaskRoutingDefaults.LONG_RUNNING_TASKS:
-            return QueueRoutingDefaults.LONG_RUNNING_TASKS_QUEUE
+            return QueueDefaults.LONG_RUNNING_TASKS_QUEUE
         else:
             # Default to jobs queue for unknown types
-            return QueueRoutingDefaults.JOBS_QUEUE
+            return QueueDefaults.JOBS_QUEUE
 
     def _increment_task_retry_count(self, task_id: str) -> bool:
         """

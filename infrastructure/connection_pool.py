@@ -241,6 +241,7 @@ class ConnectionPoolManager:
         schemas = [
             config.database.app_schema,
             config.database.postgis_schema,  # geo schema
+            'public',  # PostGIS extension functions (ST_GeomFromText, etc.)
         ]
 
         # Only add pgstac and h3 if they're configured

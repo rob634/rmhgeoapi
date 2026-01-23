@@ -458,6 +458,12 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Could not import External Services interface: {e}")
 
+try:
+    from .service_preview import interface as _service_preview
+    logger.info("✅ Imported Service Preview interface module")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import Service Preview interface: {e}")
+
 
 # Public API
 __all__ = [

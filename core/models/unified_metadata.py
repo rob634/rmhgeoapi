@@ -1345,15 +1345,24 @@ class RasterMetadata(BaseMetadata):
 
         return collection
 
-    def to_stac_item(self, base_url: str, titiler_base_url: Optional[str] = None) -> Dict[str, Any]:
+    def to_stac_item(
+        self,
+        base_url: str,
+        titiler_base_url: Optional[str] = None,
+        renders: Optional[Dict[str, Dict[str, Any]]] = None
+    ) -> Dict[str, Any]:
         """
         Convert to STAC Item response.
 
         Creates a STAC Item representing this raster dataset with COG assets.
+        Supports STAC Renders Extension for TiTiler visualization parameters.
 
         Args:
             base_url: Base URL for link generation
             titiler_base_url: Optional TiTiler base URL for visualization links
+            renders: Optional dict of render_id → STAC render format for embedding
+                     in the COG asset per STAC Renders Extension
+                     Example: {"default": {"colormap_name": "viridis", "rescale": [[0, 100]]}}
 
         Returns:
             Complete STAC Item dict
@@ -1440,6 +1449,11 @@ class RasterMetadata(BaseMetadata):
         if self.eo_bands:
             if "https://stac-extensions.github.io/eo/v1.1.0/schema.json" not in extensions:
                 extensions.append("https://stac-extensions.github.io/eo/v1.1.0/schema.json")
+        # Add STAC Renders Extension if renders are provided (F2.11 - 22 JAN 2026)
+        if renders:
+            render_ext = "https://stac-extensions.github.io/render/v1.0.0/schema.json"
+            if render_ext not in extensions:
+                extensions.append(render_ext)
 
         collection_id = self.stac_collection_id or self.id
         item_id = self.stac_item_id or self.id
@@ -1494,6 +1508,11 @@ class RasterMetadata(BaseMetadata):
         # Add EO bands to asset
         if self.eo_bands:
             cog_asset["eo:bands"] = self.eo_bands
+
+        # Add STAC Renders Extension (F2.11 - 22 JAN 2026)
+        # Embeds TiTiler visualization parameters per render_id
+        if renders:
+            cog_asset["renders"] = renders
 
         item["assets"]["data"] = cog_asset
 

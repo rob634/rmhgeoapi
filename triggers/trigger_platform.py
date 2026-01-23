@@ -1928,6 +1928,8 @@ def _translate_to_coremachine(
     # - Single raster: process_raster_v2 (with auto-fallback to process_large_raster_v2)
     # - Collection: process_raster_collection_v2
     elif data_type == DataType.RASTER:
+        opts = request.processing_options
+
         # Generate output paths from DDH IDs
         output_folder = platform_cfg.generate_raster_output_folder(
             request.dataset_id,
@@ -1935,19 +1937,23 @@ def _translate_to_coremachine(
             request.version_id
         )
 
-        collection_id = platform_cfg.generate_stac_collection_id(
-            request.dataset_id,
-            request.resource_id,
-            request.version_id
-        )
+        # Collection ID: use override from processing_options if provided (22 JAN 2026)
+        # Otherwise auto-generate from DDH identifiers
+        collection_id = opts.get('collection_id')
+        if not collection_id:
+            collection_id = platform_cfg.generate_stac_collection_id(
+                request.dataset_id,
+                request.resource_id,
+                request.version_id
+            )
+        else:
+            logger.info(f"  Using collection_id override: {collection_id}")
 
         stac_item_id = platform_cfg.generate_stac_item_id(
             request.dataset_id,
             request.resource_id,
             request.version_id
         )
-
-        opts = request.processing_options
 
         # Check if this is a raster collection (multiple files)
         if request.is_raster_collection:
@@ -2059,6 +2065,7 @@ def _translate_single_raster(
         - job_type: 'process_raster_v2' or 'process_raster_docker'
     """
     platform_cfg = cfg.platform
+    opts = request.processing_options
 
     output_folder = platform_cfg.generate_raster_output_folder(
         request.dataset_id,
@@ -2066,19 +2073,23 @@ def _translate_single_raster(
         request.version_id
     )
 
-    collection_id = platform_cfg.generate_stac_collection_id(
-        request.dataset_id,
-        request.resource_id,
-        request.version_id
-    )
+    # Collection ID: use override from processing_options if provided (22 JAN 2026)
+    # Otherwise auto-generate from DDH identifiers
+    collection_id = opts.get('collection_id')
+    if not collection_id:
+        collection_id = platform_cfg.generate_stac_collection_id(
+            request.dataset_id,
+            request.resource_id,
+            request.version_id
+        )
+    else:
+        logger.info(f"  Using collection_id override: {collection_id}")
 
     stac_item_id = platform_cfg.generate_stac_item_id(
         request.dataset_id,
         request.resource_id,
         request.version_id
     )
-
-    opts = request.processing_options
 
     # file_name is guaranteed to be a string by endpoint validation
     file_name = request.file_name
@@ -2157,6 +2168,7 @@ def _translate_raster_collection(
         Tuple of ('process_raster_collection_v2', job_parameters)
     """
     platform_cfg = cfg.platform
+    opts = request.processing_options
 
     output_folder = platform_cfg.generate_raster_output_folder(
         request.dataset_id,
@@ -2164,19 +2176,23 @@ def _translate_raster_collection(
         request.version_id
     )
 
-    collection_id = platform_cfg.generate_stac_collection_id(
-        request.dataset_id,
-        request.resource_id,
-        request.version_id
-    )
+    # Collection ID: use override from processing_options if provided (22 JAN 2026)
+    # Otherwise auto-generate from DDH identifiers
+    collection_id = opts.get('collection_id')
+    if not collection_id:
+        collection_id = platform_cfg.generate_stac_collection_id(
+            request.dataset_id,
+            request.resource_id,
+            request.version_id
+        )
+    else:
+        logger.info(f"  Using collection_id override: {collection_id}")
 
     stac_item_id = platform_cfg.generate_stac_item_id(
         request.dataset_id,
         request.resource_id,
         request.version_id
     )
-
-    opts = request.processing_options
 
     return 'process_raster_collection_v2', {
         # File location (required)

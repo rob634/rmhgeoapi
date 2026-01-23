@@ -12,6 +12,22 @@
 
 - [ ] **Test Approval Workflow** - Submit job, verify approval record created (PENDING), approve via API, verify `app:published=true`
 - [ ] **Test Artifact/Revision Workflow** - Submit job with same dataset_id/resource_id/version_id, verify artifact revision increments
+- [ ] **Test External Service Registry (22 JAN 2026)** - Deploy, run `action=ensure`, then:
+  ```bash
+  # Register a test service
+  curl -X POST "https://rmhazuregeoapi-.../api/jobs/services/register" \
+    -H "Content-Type: application/json" \
+    -d '{"url": "https://services.nationalmap.gov/arcgis/rest/services/wbd/MapServer", "name": "USGS WBD"}'
+
+  # List services
+  curl "https://rmhazuregeoapi-.../api/jobs/services"
+
+  # Force health check
+  curl -X POST "https://rmhazuregeoapi-.../api/jobs/services/{service_id}/check"
+
+  # Get stats
+  curl "https://rmhazuregeoapi-.../api/jobs/services/stats"
+  ```
 
 ---
 

@@ -404,6 +404,13 @@ from xarray_api import get_xarray_triggers
 # OGC Styles API - CartoSym-JSON style storage and multi-format output (18 DEC 2025)
 from ogc_styles import get_styles_triggers
 
+# Raster Render Configs API - TiTiler parameter storage (22 JAN 2026 - F2.11)
+from triggers.trigger_raster_renders import (
+    list_renders, get_render, get_default_render,
+    create_render, update_render, delete_render,
+    set_default_render, create_default_render
+)
+
 # Pipeline Dashboard - Container blob browser (21 NOV 2025) - Read-only UI operations
 from triggers.list_container_blobs import list_container_blobs_handler
 from triggers.get_blob_metadata import get_blob_metadata_handler
@@ -654,6 +661,7 @@ if _app_mode.has_admin_endpoints:
     from triggers.admin.admin_external_db import bp as admin_external_db_bp  # External DB init (21 JAN 2026)
     from triggers.admin.admin_artifacts import bp as admin_artifacts_bp  # Artifact registry (22 JAN 2026)
     from triggers.admin.admin_external_services import bp as admin_external_services_bp  # External service registry (22 JAN 2026)
+    from triggers.admin.admin_data_migration import bp as admin_data_migration_bp  # ADF data migration (22 JAN 2026)
     from web_interfaces.h3_sources import bp as h3_sources_bp
 
     app.register_functions(admin_db_bp)
@@ -666,6 +674,7 @@ if _app_mode.has_admin_endpoints:
     app.register_functions(admin_external_db_bp)  # External DB init (21 JAN 2026)
     app.register_functions(admin_artifacts_bp)  # Artifact registry (22 JAN 2026)
     app.register_functions(admin_external_services_bp)  # External service registry (22 JAN 2026)
+    app.register_functions(admin_data_migration_bp)  # ADF data migration (22 JAN 2026)
     app.register_functions(h3_sources_bp)
     app.register_functions(snapshot_bp)
     logger.info("✅ Admin blueprints registered (APP_MODE=%s)", _app_mode.mode.value)
@@ -854,34 +863,10 @@ def job_delete_route(req: func.HttpRequest) -> func.HttpResponse:
 # - /api/h3/admin/stats
 
 
-# ============================================================================
-# DATA MIGRATION API - Trigger ADF Migration Pipelines (22 JAN 2026)
-# ============================================================================
-# Endpoints:
-#   POST /api/data-migration/trigger - Trigger blob or vector migration
-#   GET  /api/data-migration/status/{run_id} - Check pipeline run status
-#   POST /api/data-migration/cancel/{run_id} - Cancel a running pipeline
-
-from triggers.trigger_data_migration import (
-    handle_data_migration_cancel,
-    handle_data_migration_status,
-    handle_data_migration_trigger,
-)
-
-
-@app.route(route="data-migration/trigger", methods=["POST"])
-def data_migration_trigger(req: func.HttpRequest) -> func.HttpResponse:
-    return handle_data_migration_trigger(req)
-
-
-@app.route(route="data-migration/status/{run_id}", methods=["GET"])
-def data_migration_status(req: func.HttpRequest) -> func.HttpResponse:
-    return handle_data_migration_status(req)
-
-
-@app.route(route="data-migration/cancel/{run_id}", methods=["POST"])
-def data_migration_cancel(req: func.HttpRequest) -> func.HttpResponse:
-    return handle_data_migration_cancel(req)
+# NOTE: Data Migration routes moved to triggers/admin/admin_data_migration.py blueprint (22 JAN 2026)
+# - /api/data-migration/trigger
+# - /api/data-migration/status/{run_id}
+# - /api/data-migration/cancel/{run_id}
 
 
 # ============================================================================
@@ -2177,6 +2162,76 @@ def ogc_styles_list(req: func.HttpRequest) -> func.HttpResponse:
 def ogc_styles_item(req: func.HttpRequest) -> func.HttpResponse:
     """OGC Styles get: GET /api/features/collections/{collection_id}/styles/{style_id}?f=leaflet|mapbox|cartosym"""
     return _styles_item(req)
+
+
+# ============================================================================
+# RASTER RENDER CONFIG ENDPOINTS (22 JAN 2026 - F2.11)
+# ============================================================================
+#
+# TiTiler render configuration storage for raster COG visualization.
+# Source of truth for STAC Renders Extension embedding.
+#
+# Standards:
+#   - STAC Renders Extension: https://github.com/stac-extensions/render
+#   - TiTiler: https://developmentseed.org/titiler
+#
+# Endpoints:
+#   GET    /api/raster/{cog_id}/renders              - List render configs
+#   GET    /api/raster/{cog_id}/renders/default      - Get default render
+#   GET    /api/raster/{cog_id}/renders/{render_id}  - Get specific render
+#   POST   /api/raster/{cog_id}/renders              - Create render config
+#   PUT    /api/raster/{cog_id}/renders/{render_id}  - Update render config
+#   DELETE /api/raster/{cog_id}/renders/{render_id}  - Delete render config
+#   POST   /api/raster/{cog_id}/renders/{render_id}/default - Set as default
+#   POST   /api/raster/{cog_id}/renders/auto-default - Auto-generate default
+
+
+@app.route(route="raster/{cog_id}/renders", methods=["GET"])
+def raster_renders_list(req: func.HttpRequest) -> func.HttpResponse:
+    """List render configs: GET /api/raster/{cog_id}/renders"""
+    return list_renders(req)
+
+
+@app.route(route="raster/{cog_id}/renders/default", methods=["GET"])
+def raster_renders_default(req: func.HttpRequest) -> func.HttpResponse:
+    """Get default render: GET /api/raster/{cog_id}/renders/default"""
+    return get_default_render(req)
+
+
+@app.route(route="raster/{cog_id}/renders/auto-default", methods=["POST"])
+def raster_renders_auto_default(req: func.HttpRequest) -> func.HttpResponse:
+    """Auto-generate default render: POST /api/raster/{cog_id}/renders/auto-default"""
+    return create_default_render(req)
+
+
+@app.route(route="raster/{cog_id}/renders/{render_id}", methods=["GET"])
+def raster_renders_get(req: func.HttpRequest) -> func.HttpResponse:
+    """Get render config: GET /api/raster/{cog_id}/renders/{render_id}"""
+    return get_render(req)
+
+
+@app.route(route="raster/{cog_id}/renders", methods=["POST"])
+def raster_renders_create(req: func.HttpRequest) -> func.HttpResponse:
+    """Create render config: POST /api/raster/{cog_id}/renders"""
+    return create_render(req)
+
+
+@app.route(route="raster/{cog_id}/renders/{render_id}", methods=["PUT"])
+def raster_renders_update(req: func.HttpRequest) -> func.HttpResponse:
+    """Update render config: PUT /api/raster/{cog_id}/renders/{render_id}"""
+    return update_render(req)
+
+
+@app.route(route="raster/{cog_id}/renders/{render_id}", methods=["DELETE"])
+def raster_renders_delete(req: func.HttpRequest) -> func.HttpResponse:
+    """Delete render config: DELETE /api/raster/{cog_id}/renders/{render_id}"""
+    return delete_render(req)
+
+
+@app.route(route="raster/{cog_id}/renders/{render_id}/default", methods=["POST"])
+def raster_renders_set_default(req: func.HttpRequest) -> func.HttpResponse:
+    """Set as default: POST /api/raster/{cog_id}/renders/{render_id}/default"""
+    return set_default_render(req)
 
 
 # ============================================================================

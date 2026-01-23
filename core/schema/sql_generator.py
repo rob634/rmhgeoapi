@@ -89,6 +89,7 @@ from ..models.external_service import ExternalService, ServiceType, ServiceStatu
 # Geo and ETL schema models (21 JAN 2026 - F7.IaC)
 from ..models.geo import GeoTableCatalog, FeatureCollectionStyles  # OGC Styles (22 JAN 2026)
 from ..models.etl_tracking import VectorEtlTracking, RasterEtlTracking, EtlStatus
+from ..models.raster_render_config import RasterRenderConfig  # Render configs (22 JAN 2026 - F2.11)
 
 
 class PydanticToSQL:
@@ -573,6 +574,10 @@ class PydanticToSQL:
         # Generate raster_etl_tracking table (placeholder - no FK dependencies)
         statements.append(self.generate_table_from_model(RasterEtlTracking))
         statements.extend(self.generate_indexes_from_model(RasterEtlTracking))
+
+        # Generate raster_render_configs table (FK → cog_metadata) (22 JAN 2026 - F2.11)
+        statements.append(self.generate_table_from_model(RasterRenderConfig))
+        statements.extend(self.generate_indexes_from_model(RasterRenderConfig))
 
         self.logger.info(f"✅ ETL tracking DDL complete: {len(statements)} statements")
         return statements

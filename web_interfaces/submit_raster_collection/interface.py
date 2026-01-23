@@ -334,12 +334,12 @@ class SubmitRasterCollectionInterface(BaseInterface):
             if processing_options:
                 platform_payload['processing_options'] = processing_options
 
-            # Submit via Platform API internal functions
+            # Submit via Platform API internal functions (22 JAN 2026 - unified to /submit)
             from config import get_config, generate_platform_request_id
             from infrastructure import PlatformRepository
             from core.models import ApiRequest, PlatformRequest
             from triggers.trigger_platform import (
-                _translate_raster_collection,
+                _translate_to_coremachine,
                 _create_and_submit_job
             )
 
@@ -365,8 +365,8 @@ class SubmitRasterCollectionInterface(BaseInterface):
                     'status': 'exists'
                 }, platform_payload)
 
-            # Translate to CoreMachine job parameters (uses platform config for output paths)
-            job_type, job_params = _translate_raster_collection(platform_req, config)
+            # Translate to CoreMachine job parameters (unified path - auto-detects collection)
+            job_type, job_params = _translate_to_coremachine(platform_req, config)
 
             # Create and submit job
             job_id = _create_and_submit_job(job_type, job_params, request_id)
@@ -1595,7 +1595,7 @@ class SubmitRasterCollectionInterface(BaseInterface):
 
             const jsonStr = JSON.stringify(payload, null, 2);
 
-            return `curl -X POST "${{baseUrl}}/api/platform/raster-collection" \\
+            return `curl -X POST "${{baseUrl}}/api/platform/submit" \\
   -H "Content-Type: application/json" \\
   -d '${{jsonStr}}'`;
         }}

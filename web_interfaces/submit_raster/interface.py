@@ -337,15 +337,20 @@ class SubmitRasterInterface(BaseInterface):
             if use_docker == 'on':  # HTML checkbox sends 'on' when checked
                 processing_options['processing_mode'] = 'docker'
 
+            # Overwrite existing data (22 JAN 2026)
+            overwrite = get_param('overwrite')
+            if overwrite == 'true':  # HTML checkbox sends value="true" when checked
+                processing_options['overwrite'] = True
+
             if processing_options:
                 platform_payload['processing_options'] = processing_options
 
-            # Submit via Platform Raster API internal functions
+            # Submit via Platform API internal functions (22 JAN 2026 - unified to /submit)
             from config import get_config, generate_platform_request_id
             from infrastructure import PlatformRepository
             from core.models import ApiRequest, PlatformRequest
             from triggers.trigger_platform import (
-                _translate_single_raster,
+                _translate_to_coremachine,
                 _create_and_submit_job
             )
             config = get_config()
@@ -373,8 +378,8 @@ class SubmitRasterInterface(BaseInterface):
                     'status': 'exists'
                 }, platform_payload)
 
-            # Translate to CoreMachine job parameters (single raster path)
-            job_type, job_params = _translate_single_raster(platform_req, config)
+            # Translate to CoreMachine job parameters (unified path)
+            job_type, job_params = _translate_to_coremachine(platform_req, config)
 
             # Create and submit job
             job_id = _create_and_submit_job(job_type, job_params, request_id)
@@ -735,6 +740,15 @@ class SubmitRasterInterface(BaseInterface):
                                     <input type="text" id="input_crs" name="input_crs"
                                            placeholder="e.g., EPSG:32618">
                                     <span class="field-hint">Override if source CRS is missing or wrong</span>
+                                </div>
+                                <!-- Overwrite Option (22 JAN 2026) -->
+                                <div class="form-group checkbox-group">
+                                    <label>
+                                        <input type="checkbox" id="overwrite" name="overwrite" value="true"
+                                               onchange="updateCurlPreview()">
+                                        Allow overwrite if data exists
+                                    </label>
+                                    <span class="field-hint">If enabled, existing STAC item and COG will be replaced</span>
                                 </div>
                                 <!-- Processing Mode Toggle (19 JAN 2026) -->
                                 <div class="form-group processing-mode-group">
@@ -1661,6 +1675,7 @@ class SubmitRasterInterface(BaseInterface):
             const outputTier = document.getElementById('output_tier').value;
             const inputCrs = document.getElementById('input_crs').value;
             const useDocker = document.getElementById('use_docker').checked;
+            const overwrite = document.getElementById('overwrite').checked;
 
             // Optional metadata
             const serviceName = document.getElementById('service_name').value;
@@ -1706,6 +1721,8 @@ class SubmitRasterInterface(BaseInterface):
             if (collectionId) processingOptions.collection_id = collectionId;
             // Docker processing mode (19 JAN 2026)
             if (useDocker) processingOptions.processing_mode = 'docker';
+            // Overwrite existing data (22 JAN 2026)
+            if (overwrite) processingOptions.overwrite = true;
 
             if (Object.keys(processingOptions).length > 0) {
                 payload.processing_options = processingOptions;
@@ -1713,7 +1730,7 @@ class SubmitRasterInterface(BaseInterface):
 
             const jsonStr = JSON.stringify(payload, null, 2);
 
-            return `curl -X POST "${baseUrl}/api/platform/raster" \\
+            return `curl -X POST "${baseUrl}/api/platform/submit" \\
   -H "Content-Type: application/json" \\
   -d '${jsonStr}'`;
         }
@@ -1743,7 +1760,7 @@ class SubmitRasterInterface(BaseInterface):
         document.addEventListener('DOMContentLoaded', () => {
             const formInputs = ['dataset_id', 'resource_id', 'version_id', 'raster_type',
                                 'output_tier', 'input_crs', 'service_name', 'description',
-                                'access_level', 'tags', 'collection_id', 'use_docker'];
+                                'access_level', 'tags', 'collection_id', 'use_docker', 'overwrite'];
             formInputs.forEach(id => {
                 const el = document.getElementById(id);
                 if (el) {

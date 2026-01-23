@@ -171,6 +171,9 @@ from .etl_tracking import (
     EtlStatus
 )
 
+# Raster render config models (22 JAN 2026 - F2.11)
+from .raster_render_config import RasterRenderConfig
+
 __all__ = [
     # Enums
     'JobStatus',
@@ -280,4 +283,7 @@ __all__ = [
     'VectorEtlTracking',
     'RasterEtlTracking',
     'EtlStatus',
+
+    # Raster render config models (22 JAN 2026 - F2.11)
+    'RasterRenderConfig',
 ]

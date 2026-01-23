@@ -1505,7 +1505,130 @@ az datafactory show \
   --query "{name:name, provisioningState:provisioningState, identity:identity}"
 ```
 
-### 11.2 Grant ADF Access to Resources
+### 11.2 Self-Hosted Integration Runtime (SHIR)
+
+**REQUIRED for VNet environments.** Since QA/UAT resources are on private VNets with no public access, ADF cannot reach them directly. SHIR acts as a bridge.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Microsoft Managed Infrastructure (Public)                      │
+│  ┌─────────────────────┐                                        │
+│  │  Azure Data Factory │ ─── Cannot reach private VNet directly │
+│  └──────────┬──────────┘                                        │
+└─────────────┼───────────────────────────────────────────────────┘
+              │ Outbound connection (SHIR initiates)
+              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Private VNet (rg-geoetl-uat-internal)                          │
+│  ┌─────────────────────┐                                        │
+│  │  Windows VM with    │                                        │
+│  │  SHIR installed     │                                        │
+│  │  (vm-shir-uat)      │                                        │
+│  └──────────┬──────────┘                                        │
+│             │ Private network access                            │
+│             ▼                                                   │
+│  ┌──────────────────┐  ┌──────────────────┐                    │
+│  │ Private Storage  │  │ Private PostgreSQL│                    │
+│  │ (private endpoint)│  │ (VNet integrated) │                    │
+│  └──────────────────┘  └──────────────────┘                    │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### 11.2.1 Create SHIR in ADF
+
+```bash
+# Create self-hosted integration runtime
+az datafactory integration-runtime self-hosted create \
+  --resource-group rg-geoetl-uat-internal \
+  --factory-name adf-geoetl-uat \
+  --integration-runtime-name "SHIR-UAT-Internal"
+
+# Get authentication keys (needed for VM registration)
+az datafactory integration-runtime list-auth-key \
+  --resource-group rg-geoetl-uat-internal \
+  --factory-name adf-geoetl-uat \
+  --integration-runtime-name "SHIR-UAT-Internal"
+
+# Output:
+# {
+#   "authKey1": "IR@abcd1234-...",
+#   "authKey2": "IR@efgh5678-..."
+# }
+```
+
+#### 11.2.2 Provision Windows VM for SHIR
+
+```bash
+# Create Windows Server VM in the same VNet as your resources
+az vm create \
+  --resource-group rg-geoetl-uat-internal \
+  --name vm-shir-uat \
+  --image Win2022Datacenter \
+  --size Standard_D2s_v3 \
+  --vnet-name vnet-geoetl-uat-internal \
+  --subnet snet-shir \
+  --admin-username shiradmin \
+  --admin-password '<SECURE_PASSWORD>' \
+  --public-ip-address ""  # No public IP needed
+
+# VM sizing recommendations:
+# - Standard_D2s_v3 (2 vCPU, 8GB) - Light workloads
+# - Standard_D4s_v3 (4 vCPU, 16GB) - Medium workloads
+# - Standard_D8s_v3 (8 vCPU, 32GB) - Heavy parallel copies
+```
+
+#### 11.2.3 Install SHIR on Windows VM
+
+RDP into the VM and run:
+
+```powershell
+# Download SHIR installer (or use Azure Portal link)
+$shirUrl = "https://www.microsoft.com/download/details.aspx?id=39717"
+# Download latest IntegrationRuntime.msi from Microsoft Download Center
+
+# Install SHIR (silent install)
+msiexec /i IntegrationRuntime.msi /quiet
+
+# Register with ADF using auth key from step 11.2.1
+# Option 1: GUI - Run "Microsoft Integration Runtime Configuration Manager"
+# Option 2: Command line:
+cd "C:\Program Files\Microsoft Integration Runtime\5.0\Shared"
+.\dmgcmd.exe -RegisterNewNode "<AUTH_KEY_1>" "<NODE_NAME>"
+
+# Verify registration
+.\dmgcmd.exe -Status
+```
+
+#### 11.2.4 Verify SHIR Status
+
+```bash
+# Check SHIR status from Azure CLI
+az datafactory integration-runtime show \
+  --resource-group rg-geoetl-uat-internal \
+  --factory-name adf-geoetl-uat \
+  --integration-runtime-name "SHIR-UAT-Internal" \
+  --query "{name:name, state:state, version:version}"
+
+# Expected state: "Online"
+```
+
+#### 11.2.5 SHIR High Availability (Optional)
+
+For production resilience, register multiple nodes:
+
+```bash
+# On second Windows VM, register as additional node using SAME auth key
+# This provides failover if primary node goes down
+
+# Check node status
+az datafactory integration-runtime get-status \
+  --resource-group rg-geoetl-uat-internal \
+  --factory-name adf-geoetl-uat \
+  --integration-runtime-name "SHIR-UAT-Internal" \
+  --query "nodes[].{nodeName:nodeName, status:status, version:version}"
+```
+
+### 11.3 Grant ADF Access to Resources
 
 ADF's system-assigned managed identity needs access to storage and databases:
 
@@ -1531,18 +1654,23 @@ az role assignment create \
   --scope /subscriptions/<SUB_ID>/resourceGroups/rg-geoetl-uat-external/providers/Microsoft.Storage/storageAccounts/stageoetluatexternal
 ```
 
-### 11.3 Create Linked Services
+### 11.4 Create Linked Services
 
-Linked services define connections to data sources and sinks.
+Linked services define connections to data sources and sinks. All linked services reference the SHIR to access private VNet resources.
 
-#### 11.3.1 Internal Silver Storage (Source)
+#### 11.4.1 Internal Silver Storage (Source)
 
 ```bash
-# Create linked service for internal Silver storage using system-assigned MI
+# Create linked service for internal Silver storage
+# connectVia references SHIR to access private endpoint
 cat > /tmp/ls-silver-storage.json << 'EOF'
 {
   "properties": {
     "type": "AzureBlobStorage",
+    "connectVia": {
+      "referenceName": "SHIR-UAT-Internal",
+      "type": "IntegrationRuntimeReference"
+    },
     "typeProperties": {
       "serviceEndpoint": "https://stageoetluatsilver.blob.core.windows.net/",
       "accountKind": "StorageV2"
@@ -1558,14 +1686,18 @@ az datafactory linked-service create \
   --properties @/tmp/ls-silver-storage.json
 ```
 
-#### 11.3.2 External Storage (Sink)
+#### 11.4.2 External Storage (Sink)
 
 ```bash
-# Create linked service for external storage
+# Create linked service for external storage via SHIR
 cat > /tmp/ls-external-storage.json << 'EOF'
 {
   "properties": {
     "type": "AzureBlobStorage",
+    "connectVia": {
+      "referenceName": "SHIR-UAT-Internal",
+      "type": "IntegrationRuntimeReference"
+    },
     "typeProperties": {
       "serviceEndpoint": "https://stageoetluatexternal.blob.core.windows.net/",
       "accountKind": "StorageV2"
@@ -1581,15 +1713,19 @@ az datafactory linked-service create \
   --properties @/tmp/ls-external-storage.json
 ```
 
-#### 11.3.3 Internal PostgreSQL (Source)
+#### 11.4.3 Internal PostgreSQL (Source)
 
 ```bash
-# Create linked service for internal PostgreSQL
+# Create linked service for internal PostgreSQL via SHIR
 # Uses the DB Admin managed identity for read access
 cat > /tmp/ls-internal-postgres.json << 'EOF'
 {
   "properties": {
     "type": "AzurePostgreSql",
+    "connectVia": {
+      "referenceName": "SHIR-UAT-Internal",
+      "type": "IntegrationRuntimeReference"
+    },
     "typeProperties": {
       "server": "pg-geoetl-uat-internal.postgres.database.azure.com",
       "port": 5432,
@@ -1614,14 +1750,18 @@ az datafactory linked-service create \
 # 3. Select the mi-geoetl-uat-internal-db-admin identity
 ```
 
-#### 11.3.4 External PostgreSQL (Sink)
+#### 11.4.4 External PostgreSQL (Sink)
 
 ```bash
-# Create linked service for external PostgreSQL
+# Create linked service for external PostgreSQL via SHIR
 cat > /tmp/ls-external-postgres.json << 'EOF'
 {
   "properties": {
     "type": "AzurePostgreSql",
+    "connectVia": {
+      "referenceName": "SHIR-UAT-Internal",
+      "type": "IntegrationRuntimeReference"
+    },
     "typeProperties": {
       "server": "pg-geoetl-uat-external.postgres.database.azure.com",
       "port": 5432,
@@ -1641,11 +1781,11 @@ az datafactory linked-service create \
   --properties @/tmp/ls-external-postgres.json
 ```
 
-### 11.4 Create Datasets
+### 11.5 Create Datasets
 
 Datasets define the structure of data within linked services.
 
-#### 11.4.1 Silver Storage Dataset (COG Container)
+#### 11.5.1 Silver Storage Dataset (COG Container)
 
 ```bash
 cat > /tmp/ds-silver-cog.json << 'EOF'
@@ -1673,7 +1813,7 @@ az datafactory dataset create \
   --properties @/tmp/ds-silver-cog.json
 ```
 
-#### 11.4.2 External Storage Dataset
+#### 11.5.2 External Storage Dataset
 
 ```bash
 cat > /tmp/ds-external-cog.json << 'EOF'
@@ -1701,9 +1841,9 @@ az datafactory dataset create \
   --properties @/tmp/ds-external-cog.json
 ```
 
-### 11.5 Create Pipelines
+### 11.6 Create Pipelines
 
-#### 11.5.1 Blob Migration Pipeline
+#### 11.6.1 Blob Migration Pipeline
 
 ```bash
 # Create blob copy pipeline with Copy activity
@@ -1754,7 +1894,7 @@ az datafactory pipeline create \
   --pipeline @/tmp/pipeline-blob.json
 ```
 
-#### 11.5.2 Vector Migration Pipeline
+#### 11.6.2 Vector Migration Pipeline
 
 ```bash
 # Create vector/PostgreSQL copy pipeline
@@ -1800,11 +1940,11 @@ az datafactory pipeline create \
   --pipeline @/tmp/pipeline-vector.json
 ```
 
-### 11.6 Configure Function App for ADF Triggering
+### 11.7 Configure Function App for ADF Triggering
 
 The Function App (or Orchestrator) needs permission to trigger ADF pipelines and environment variables to locate the ADF.
 
-#### 11.6.1 Grant Function App ADF Trigger Permission
+#### 11.7.1 Grant Function App ADF Trigger Permission
 
 ```bash
 # Get Function App's system-assigned managed identity
@@ -1828,7 +1968,7 @@ az role assignment list \
   --output table
 ```
 
-#### 11.6.2 Set ADF Environment Variables
+#### 11.7.2 Set ADF Environment Variables
 
 ```bash
 # Configure Function App with ADF connection details
@@ -1848,11 +1988,11 @@ az functionapp restart \
   --name func-orchestrator-uat
 ```
 
-### 11.7 Test ADF API Integration
+### 11.8 Test ADF API Integration
 
 After deploying and configuring, test the data-migration endpoints:
 
-#### 11.7.1 Trigger Blob Pipeline
+#### 11.8.1 Trigger Blob Pipeline
 
 ```bash
 # Trigger blob migration pipeline
@@ -1869,7 +2009,7 @@ curl -X POST "https://func-orchestrator-uat.azurewebsites.net/api/data-migration
 # }
 ```
 
-#### 11.7.2 Check Pipeline Status
+#### 11.8.2 Check Pipeline Status
 
 ```bash
 # Check status of pipeline run
@@ -1881,7 +2021,7 @@ curl "https://func-orchestrator-uat.azurewebsites.net/api/data-migration/status/
 # - activities: detailed activity-level status
 ```
 
-#### 11.7.3 Trigger Vector Pipeline
+#### 11.8.3 Trigger Vector Pipeline
 
 ```bash
 # Trigger vector/PostgreSQL migration pipeline
@@ -1896,14 +2036,14 @@ curl -X POST "https://func-orchestrator-uat.azurewebsites.net/api/data-migration
   }'
 ```
 
-#### 11.7.4 Cancel Running Pipeline
+#### 11.8.4 Cancel Running Pipeline
 
 ```bash
 # Cancel a running pipeline if needed
 curl -X POST "https://func-orchestrator-uat.azurewebsites.net/api/data-migration/cancel/{run_id}"
 ```
 
-### 11.8 ADF Troubleshooting
+### 11.9 ADF Troubleshooting
 
 | Issue | Solution |
 |-------|----------|
@@ -1911,10 +2051,18 @@ curl -X POST "https://func-orchestrator-uat.azurewebsites.net/api/data-migration
 | "Linked service connection failed" | Verify managed identity has access to storage/database |
 | Pipeline stuck in "InProgress" | Check ADF Monitor in Azure Portal for activity errors |
 | "Resource not found" error | Verify ADF_FACTORY_NAME and ADF_RESOURCE_GROUP env vars |
+| SHIR shows "Offline" | RDP to VM, check Windows Service "Microsoft Integration Runtime" is running |
+| SHIR "Limited" state | Check VM resources (CPU/memory), may need larger VM size |
+| "Cannot connect to Integration Runtime" | Verify SHIR VM is on same VNet as resources, check NSG rules |
+| Linked service test fails via SHIR | Verify SHIR VM can reach resource (test with psql/curl from VM) |
+| Pipeline copy slow | Consider SHIR HA (multiple nodes) or larger VM size |
 
-**Self-Hosted Integration Runtime (SHIR)**: Not required if PostgreSQL and Storage have public network access enabled. Only needed for private endpoints or on-premises resources.
+**SHIR Network Requirements:**
+- Outbound HTTPS (443) to Azure (for ADF communication)
+- No inbound rules required (SHIR initiates outbound connection)
+- Access to private endpoints on VNet (storage, PostgreSQL)
 
-### 11.9 ADF Environment Variable Reference
+### 11.10 ADF Environment Variable Reference
 
 | Variable | Description | Example |
 |----------|-------------|---------|

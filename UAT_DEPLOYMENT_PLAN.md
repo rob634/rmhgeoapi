@@ -1483,65 +1483,446 @@ az webapp config container set \
 
 ## Phase 11: Azure Data Factory
 
+Azure Data Factory (ADF) handles data migration between security zones:
+- **Blob Pipeline**: Copies COGs and GeoTIFFs from internal Silver storage to external storage
+- **Vector Pipeline**: Copies PostgreSQL tables from internal to external database
+
+The API endpoints in `/api/data-migration/*` trigger these pipelines programmatically.
+
 ### 11.1 Create Data Factory
 
 ```bash
+# Create Data Factory with system-assigned managed identity
 az datafactory create \
   --resource-group rg-geoetl-uat-internal \
   --factory-name adf-geoetl-uat \
   --location eastus
+
+# Verify creation and get identity info
+az datafactory show \
+  --resource-group rg-geoetl-uat-internal \
+  --factory-name adf-geoetl-uat \
+  --query "{name:name, provisioningState:provisioningState, identity:identity}"
 ```
 
-### 11.2 Assign Managed Identity
+### 11.2 Grant ADF Access to Resources
 
-ADF uses its system-assigned managed identity, but we also assign our user-assigned identity:
-
-```bash
-# Get External DB Admin identity
-EXTERNAL_ADMIN_ID=$(az identity show --resource-group rg-geoetl-uat-external \
-  --name mi-geoetl-uat-external-db-admin --query id -o tsv)
-
-# Note: ADF identity assignment typically done via ARM template or Portal
-# The ADF needs access to:
-# - Internal Silver Storage (read)
-# - External Storage (write)
-# - Internal Database (read pgstac, geo)
-# - External Database (write pgstac, geo)
-```
-
-### 11.3 Create Linked Services
-
-Create linked services for:
-- Internal Silver Storage (source)
-- External Storage (sink)
-- Internal PostgreSQL (source)
-- External PostgreSQL (sink)
-
-### 11.4 Create Pipelines
-
-Create pipelines for:
-1. **Storage Promotion**: Silver → External (COGs, vectors)
-2. **Database Promotion**: pgstac tables, geo tables
-
-### 11.5 Grant ADF Access to Resources
+ADF's system-assigned managed identity needs access to storage and databases:
 
 ```bash
-# ADF System Identity Principal ID
-ADF_PRINCIPAL=$(az datafactory show --resource-group rg-geoetl-uat-internal \
-  --factory-name adf-geoetl-uat --query identity.principalId -o tsv)
+# Get ADF System Identity Principal ID
+ADF_PRINCIPAL=$(az datafactory show \
+  --resource-group rg-geoetl-uat-internal \
+  --factory-name adf-geoetl-uat \
+  --query identity.principalId -o tsv)
 
-# Internal Silver Storage (read)
+echo "ADF Principal ID: $ADF_PRINCIPAL"
+
+# Internal Silver Storage (read COGs for promotion)
 az role assignment create \
   --role "Storage Blob Data Reader" \
   --assignee $ADF_PRINCIPAL \
   --scope /subscriptions/<SUB_ID>/resourceGroups/rg-geoetl-uat-internal/providers/Microsoft.Storage/storageAccounts/stageoetluatsilver
 
-# External Storage (write)
+# External Storage (write promoted COGs)
 az role assignment create \
   --role "Storage Blob Data Contributor" \
   --assignee $ADF_PRINCIPAL \
   --scope /subscriptions/<SUB_ID>/resourceGroups/rg-geoetl-uat-external/providers/Microsoft.Storage/storageAccounts/stageoetluatexternal
 ```
+
+### 11.3 Create Linked Services
+
+Linked services define connections to data sources and sinks.
+
+#### 11.3.1 Internal Silver Storage (Source)
+
+```bash
+# Create linked service for internal Silver storage using system-assigned MI
+cat > /tmp/ls-silver-storage.json << 'EOF'
+{
+  "properties": {
+    "type": "AzureBlobStorage",
+    "typeProperties": {
+      "serviceEndpoint": "https://stageoetluatsilver.blob.core.windows.net/",
+      "accountKind": "StorageV2"
+    }
+  }
+}
+EOF
+
+az datafactory linked-service create \
+  --resource-group rg-geoetl-uat-internal \
+  --factory-name adf-geoetl-uat \
+  --linked-service-name "SilverStorage" \
+  --properties @/tmp/ls-silver-storage.json
+```
+
+#### 11.3.2 External Storage (Sink)
+
+```bash
+# Create linked service for external storage
+cat > /tmp/ls-external-storage.json << 'EOF'
+{
+  "properties": {
+    "type": "AzureBlobStorage",
+    "typeProperties": {
+      "serviceEndpoint": "https://stageoetluatexternal.blob.core.windows.net/",
+      "accountKind": "StorageV2"
+    }
+  }
+}
+EOF
+
+az datafactory linked-service create \
+  --resource-group rg-geoetl-uat-internal \
+  --factory-name adf-geoetl-uat \
+  --linked-service-name "ExternalStorage" \
+  --properties @/tmp/ls-external-storage.json
+```
+
+#### 11.3.3 Internal PostgreSQL (Source)
+
+```bash
+# Create linked service for internal PostgreSQL
+# Uses the DB Admin managed identity for read access
+cat > /tmp/ls-internal-postgres.json << 'EOF'
+{
+  "properties": {
+    "type": "AzurePostgreSql",
+    "typeProperties": {
+      "server": "pg-geoetl-uat-internal.postgres.database.azure.com",
+      "port": 5432,
+      "database": "geoetldb",
+      "username": "mi-geoetl-uat-internal-db-admin",
+      "sslMode": 1,
+      "encryptedCredential": null
+    }
+  }
+}
+EOF
+
+az datafactory linked-service create \
+  --resource-group rg-geoetl-uat-internal \
+  --factory-name adf-geoetl-uat \
+  --linked-service-name "PostgreSQL_Internal" \
+  --properties @/tmp/ls-internal-postgres.json
+
+# Note: For full Managed Identity authentication, configure via Azure Portal:
+# 1. Go to ADF → Manage → Linked Services → PostgreSQL_Internal
+# 2. Set Authentication type to "User-Assigned Managed Identity"
+# 3. Select the mi-geoetl-uat-internal-db-admin identity
+```
+
+#### 11.3.4 External PostgreSQL (Sink)
+
+```bash
+# Create linked service for external PostgreSQL
+cat > /tmp/ls-external-postgres.json << 'EOF'
+{
+  "properties": {
+    "type": "AzurePostgreSql",
+    "typeProperties": {
+      "server": "pg-geoetl-uat-external.postgres.database.azure.com",
+      "port": 5432,
+      "database": "geoetldb",
+      "username": "mi-geoetl-uat-external-db-admin",
+      "sslMode": 1,
+      "encryptedCredential": null
+    }
+  }
+}
+EOF
+
+az datafactory linked-service create \
+  --resource-group rg-geoetl-uat-internal \
+  --factory-name adf-geoetl-uat \
+  --linked-service-name "PostgreSQL_External" \
+  --properties @/tmp/ls-external-postgres.json
+```
+
+### 11.4 Create Datasets
+
+Datasets define the structure of data within linked services.
+
+#### 11.4.1 Silver Storage Dataset (COG Container)
+
+```bash
+cat > /tmp/ds-silver-cog.json << 'EOF'
+{
+  "properties": {
+    "linkedServiceName": {
+      "referenceName": "SilverStorage",
+      "type": "LinkedServiceReference"
+    },
+    "type": "Binary",
+    "typeProperties": {
+      "location": {
+        "type": "AzureBlobStorageLocation",
+        "container": "cog"
+      }
+    }
+  }
+}
+EOF
+
+az datafactory dataset create \
+  --resource-group rg-geoetl-uat-internal \
+  --factory-name adf-geoetl-uat \
+  --dataset-name "SilverCogContainer" \
+  --properties @/tmp/ds-silver-cog.json
+```
+
+#### 11.4.2 External Storage Dataset
+
+```bash
+cat > /tmp/ds-external-cog.json << 'EOF'
+{
+  "properties": {
+    "linkedServiceName": {
+      "referenceName": "ExternalStorage",
+      "type": "LinkedServiceReference"
+    },
+    "type": "Binary",
+    "typeProperties": {
+      "location": {
+        "type": "AzureBlobStorageLocation",
+        "container": "cog"
+      }
+    }
+  }
+}
+EOF
+
+az datafactory dataset create \
+  --resource-group rg-geoetl-uat-internal \
+  --factory-name adf-geoetl-uat \
+  --dataset-name "ExternalCogContainer" \
+  --properties @/tmp/ds-external-cog.json
+```
+
+### 11.5 Create Pipelines
+
+#### 11.5.1 Blob Migration Pipeline
+
+```bash
+# Create blob copy pipeline with Copy activity
+cat > /tmp/pipeline-blob.json << 'EOF'
+{
+  "properties": {
+    "activities": [
+      {
+        "name": "CopyCOGsToExternal",
+        "type": "Copy",
+        "inputs": [
+          {
+            "referenceName": "SilverCogContainer",
+            "type": "DatasetReference"
+          }
+        ],
+        "outputs": [
+          {
+            "referenceName": "ExternalCogContainer",
+            "type": "DatasetReference"
+          }
+        ],
+        "typeProperties": {
+          "source": {
+            "type": "BinarySource",
+            "storeSettings": {
+              "type": "AzureBlobStorageReadSettings",
+              "recursive": true
+            }
+          },
+          "sink": {
+            "type": "BinarySink",
+            "storeSettings": {
+              "type": "AzureBlobStorageWriteSettings"
+            }
+          }
+        }
+      }
+    ]
+  }
+}
+EOF
+
+az datafactory pipeline create \
+  --resource-group rg-geoetl-uat-internal \
+  --factory-name adf-geoetl-uat \
+  --pipeline-name "blob_internal_to_external" \
+  --pipeline @/tmp/pipeline-blob.json
+```
+
+#### 11.5.2 Vector Migration Pipeline
+
+```bash
+# Create vector/PostgreSQL copy pipeline
+cat > /tmp/pipeline-vector.json << 'EOF'
+{
+  "properties": {
+    "activities": [
+      {
+        "name": "CopyVectorTables",
+        "type": "Copy",
+        "inputs": [],
+        "outputs": [],
+        "typeProperties": {
+          "source": {
+            "type": "AzurePostgreSqlSource",
+            "query": "SELECT * FROM geo.vector_data WHERE promoted = false"
+          },
+          "sink": {
+            "type": "AzurePostgreSqlSink",
+            "writeBatchSize": 10000
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "sourceTable": {
+        "type": "string",
+        "defaultValue": "geo.vector_data"
+      },
+      "targetTable": {
+        "type": "string",
+        "defaultValue": "geo.vector_data"
+      }
+    }
+  }
+}
+EOF
+
+az datafactory pipeline create \
+  --resource-group rg-geoetl-uat-internal \
+  --factory-name adf-geoetl-uat \
+  --pipeline-name "Postgresql_internal_to_external" \
+  --pipeline @/tmp/pipeline-vector.json
+```
+
+### 11.6 Configure Function App for ADF Triggering
+
+The Function App (or Orchestrator) needs permission to trigger ADF pipelines and environment variables to locate the ADF.
+
+#### 11.6.1 Grant Function App ADF Trigger Permission
+
+```bash
+# Get Function App's system-assigned managed identity
+FUNC_PRINCIPAL=$(az functionapp identity show \
+  --resource-group rg-geoetl-uat-internal \
+  --name func-orchestrator-uat \
+  --query principalId -o tsv)
+
+echo "Function App Principal ID: $FUNC_PRINCIPAL"
+
+# Grant Data Factory Contributor role on the ADF resource
+az role assignment create \
+  --assignee $FUNC_PRINCIPAL \
+  --role "Data Factory Contributor" \
+  --scope /subscriptions/<SUB_ID>/resourceGroups/rg-geoetl-uat-internal/providers/Microsoft.DataFactory/factories/adf-geoetl-uat
+
+# Verify role assignment
+az role assignment list \
+  --assignee $FUNC_PRINCIPAL \
+  --scope /subscriptions/<SUB_ID>/resourceGroups/rg-geoetl-uat-internal/providers/Microsoft.DataFactory/factories/adf-geoetl-uat \
+  --output table
+```
+
+#### 11.6.2 Set ADF Environment Variables
+
+```bash
+# Configure Function App with ADF connection details
+az functionapp config appsettings set \
+  --resource-group rg-geoetl-uat-internal \
+  --name func-orchestrator-uat \
+  --settings \
+    "ADF_SUBSCRIPTION_ID=<SUB_ID>" \
+    "ADF_RESOURCE_GROUP=rg-geoetl-uat-internal" \
+    "ADF_FACTORY_NAME=adf-geoetl-uat" \
+    "ADF_BLOB_PIPELINE_NAME=blob_internal_to_external" \
+    "ADF_VECTOR_PIPELINE_NAME=Postgresql_internal_to_external"
+
+# Restart to pick up new settings
+az functionapp restart \
+  --resource-group rg-geoetl-uat-internal \
+  --name func-orchestrator-uat
+```
+
+### 11.7 Test ADF API Integration
+
+After deploying and configuring, test the data-migration endpoints:
+
+#### 11.7.1 Trigger Blob Pipeline
+
+```bash
+# Trigger blob migration pipeline
+curl -X POST "https://func-orchestrator-uat.azurewebsites.net/api/data-migration/trigger" \
+  -H "Content-Type: application/json" \
+  -d '{"pipeline_type": "blob"}'
+
+# Response:
+# {
+#   "success": true,
+#   "run_id": "abc12345-...",
+#   "pipeline_name": "blob_internal_to_external",
+#   "monitor_url": "/api/data-migration/status/abc12345-..."
+# }
+```
+
+#### 11.7.2 Check Pipeline Status
+
+```bash
+# Check status of pipeline run
+curl "https://func-orchestrator-uat.azurewebsites.net/api/data-migration/status/{run_id}"
+
+# Response includes:
+# - status: "InProgress", "Succeeded", "Failed"
+# - duration_ms: execution time
+# - activities: detailed activity-level status
+```
+
+#### 11.7.3 Trigger Vector Pipeline
+
+```bash
+# Trigger vector/PostgreSQL migration pipeline
+curl -X POST "https://func-orchestrator-uat.azurewebsites.net/api/data-migration/trigger" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "pipeline_type": "vector",
+    "parameters": {
+      "sourceTable": "geo.admin0_boundaries",
+      "targetTable": "geo.admin0_boundaries"
+    }
+  }'
+```
+
+#### 11.7.4 Cancel Running Pipeline
+
+```bash
+# Cancel a running pipeline if needed
+curl -X POST "https://func-orchestrator-uat.azurewebsites.net/api/data-migration/cancel/{run_id}"
+```
+
+### 11.8 ADF Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| "Authorization failed" when triggering | Grant Function App "Data Factory Contributor" role on ADF |
+| "Linked service connection failed" | Verify managed identity has access to storage/database |
+| Pipeline stuck in "InProgress" | Check ADF Monitor in Azure Portal for activity errors |
+| "Resource not found" error | Verify ADF_FACTORY_NAME and ADF_RESOURCE_GROUP env vars |
+
+**Self-Hosted Integration Runtime (SHIR)**: Not required if PostgreSQL and Storage have public network access enabled. Only needed for private endpoints or on-premises resources.
+
+### 11.9 ADF Environment Variable Reference
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `ADF_SUBSCRIPTION_ID` | Azure subscription ID | `12345678-...` |
+| `ADF_RESOURCE_GROUP` | Resource group containing ADF | `rg-geoetl-uat-internal` |
+| `ADF_FACTORY_NAME` | Data Factory name | `adf-geoetl-uat` |
+| `ADF_BLOB_PIPELINE_NAME` | Blob copy pipeline name | `blob_internal_to_external` |
+| `ADF_VECTOR_PIPELINE_NAME` | Vector copy pipeline name | `Postgresql_internal_to_external` |
 
 ---
 

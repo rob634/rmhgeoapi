@@ -409,4 +409,162 @@ The `/api/test/*` endpoints should be:
 
 ---
 
+## Docker Worker Parallelism Model
+
+**Added**: 23 JAN 2026
+
+This section documents the parallelism architecture of the Docker worker and Azure deployment model.
+
+### Architecture Overview
+
+```
+Azure App Service Plan (ASP-rmhazure)
+│
+├── capacity = 1 (IMPORTANT: Keep at 1 for queue workers)
+│
+└── Docker Container Instance (rmhheavyapi)
+        │
+        ├── Main Process (Python/uvicorn/FastAPI)
+        │       │
+        │       ├── FastAPI endpoints (/health, /handlers, etc.)
+        │       │
+        │       └── BackgroundQueueWorker thread
+        │               │
+        │               └── Polls long-running-tasks queue
+        │                   └── Processes 1 message at a time (max_message_count=1)
+        │
+        └── Handler Execution (during task processing)
+                │
+                └── Can use internal parallelism:
+                    ├── Python multiprocessing
+                    ├── GDAL internal threads
+                    ├── numpy/BLAS parallelism
+                    └── ThreadPoolExecutor for I/O
+```
+
+### Key Concepts
+
+| Aspect | Configuration | Rationale |
+|--------|--------------|-----------|
+| **Azure instances** | 1 (capacity=1) | Prevents competing consumers |
+| **Queue messages** | 1 at a time | Full resources per task |
+| **Internal parallelism** | Allowed | Handlers can spawn threads/processes |
+| **Task isolation** | Complete | No concurrent task interference |
+
+### Why Single Instance?
+
+Docker tasks are designed for **large, memory-intensive operations**:
+- Multi-GB rasters requiring windowed processing
+- H3 pyramid generation with cascade handlers
+- Long-running ETL that exceeds Function App timeouts
+
+Processing one task at a time:
+- **Prevents OOM**: No concurrent large operations fighting for memory
+- **Simplifies checkpointing**: One task's state to track
+- **Predictable resources**: All 7.7GB RAM available for current task
+- **Easier debugging**: Single task execution path
+
+### Resource Allocation
+
+```
+Container Resources (P1v3 tier):
+├── CPU: 2 cores
+├── RAM: 7.7 GB total
+│   ├── System/Python overhead: ~250 MB
+│   ├── Available for task: ~7.4 GB
+│   └── Safe file processing limit: ~2 GB (RASTER_ROUTE_DOCKER_MB threshold)
+└── Storage: Ephemeral /tmp (limited)
+```
+
+### Horizontal Scaling (If Needed)
+
+To process N tasks in parallel, scale the App Service Plan:
+
+```bash
+# Scale to 3 parallel Docker workers
+az appservice plan update --name ASP-rmhazure \
+  --resource-group rmhazure_rg \
+  --number-of-workers 3
+```
+
+**Considerations for multi-instance**:
+- All instances MUST run same Docker image version
+- Each instance processes 1 task → 3 instances = 3 concurrent tasks
+- Requires healthy container startup on all instances
+- Consider session-enabled queues for workload affinity
+- Monitor for competing consumer issues (see PIP-006 in ERRORS_AND_FIXES.md)
+
+### Queue Polling Configuration
+
+From `docker_service.py`:
+
+```python
+class BackgroundQueueWorker:
+    def __init__(self, ...):
+        self.max_wait_time_seconds = 30  # Long poll timeout
+        # ...
+
+    def _process_loop(self):
+        messages = receiver.receive_messages(
+            max_message_count=1,        # One message at a time
+            max_wait_time=30            # Wait up to 30s for message
+        )
+```
+
+### Internal Parallelism Examples
+
+Handlers CAN use internal parallelism for compute-intensive operations:
+
+```python
+# Example: GDAL windowed processing with thread pool
+def process_large_raster(params):
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = [
+            executor.submit(process_window, window)
+            for window in windows
+        ]
+        results = [f.result() for f in futures]
+
+# Example: numpy operations (automatically use BLAS threads)
+import numpy as np
+# numpy will use multiple threads for large array operations
+
+# Example: GDAL internal threading
+# Set GDAL_NUM_THREADS environment variable
+os.environ['GDAL_NUM_THREADS'] = 'ALL_CPUS'
+```
+
+### Monitoring Commands
+
+```bash
+# Check current instance count
+az webapp list-instances --name rmhheavyapi --resource-group rmhazure_rg \
+  --query "[].{name:name, zone:physicalZone}" -o table
+
+# Check App Service Plan capacity
+az appservice plan show --name ASP-rmhazure --resource-group rmhazure_rg \
+  --query "sku.capacity"
+
+# Check Docker worker health
+curl -s https://rmhheavyapi.../health | jq '.background_workers.queue_worker'
+
+# Check queue status
+az servicebus queue show --resource-group rmhazure_rg --namespace-name rmhazure \
+  --name long-running-tasks --query "countDetails"
+```
+
+### Troubleshooting
+
+| Symptom | Likely Cause | Fix |
+|---------|-------------|-----|
+| Messages dead-lettered immediately | Multiple instances competing | Scale to 1 instance |
+| `messages_processed: 0` but queue has messages | Wrong queue name or auth | Check SERVICE_BUS_FQDN |
+| High memory during task | Expected for large rasters | Monitor, don't panic |
+| Task hangs | Handler bug or infinite loop | Check logs, add timeouts |
+
+---
+
 *Created: 23 DEC 2025*
+*Updated: 23 JAN 2026 - Added Docker Worker Parallelism Model*

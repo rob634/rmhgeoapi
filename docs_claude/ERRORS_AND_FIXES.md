@@ -1,6 +1,6 @@
 # ERRORS_AND_FIXES.md - Error Tracking and Resolution Log
 
-**Last Updated**: 21 JAN 2026
+**Last Updated**: 23 JAN 2026
 **Purpose**: Canonical error tracking for pattern analysis and faster troubleshooting
 
 ---
@@ -571,6 +571,75 @@ TypeError: 'NoneType' object does not support item assignment
 **Fix**: Added `sb_message.application_properties = {}` before setting metadata
 
 **Validation**: Stress tested with n=100 tasks, 10% failure rate - all retries worked correctly
+
+---
+
+### PIP-006: Docker Worker Competing Consumers - Messages Immediately Dead-Lettered
+
+**Date**: 23 JAN 2026
+**Version**: 0.7.20.x
+**Severity**: Critical (Docker worker completely non-functional)
+
+**Symptoms**:
+- Messages to `long-running-tasks` queue dead-lettered within 2 seconds of being sent
+- Dead-letter count increasing rapidly (10 delivery attempts in ~2 seconds)
+- Docker worker health shows `messages_processed: 0`
+- Docker worker logs show `receive_messages() returned: 0 message(s)` consistently
+- Active message count stays at 0 even immediately after sending
+
+**Error Investigation**:
+```bash
+# Check queue status - shows messages going straight to dead-letter
+az servicebus queue show --resource-group rmhazure_rg --namespace-name rmhazure \
+  --name long-running-tasks --query "countDetails"
+# Result: activeMessageCount: 0, deadLetterMessageCount: 17 (increasing)
+
+# Check Docker worker instances - found the problem!
+az webapp list-instances --name rmhheavyapi --resource-group rmhazure_rg
+# Result: 2 instances running (cb79aa50... in az2, 0287b48c... in az3)
+```
+
+**Root Cause**:
+The App Service Plan `ASP-rmhazure` had `capacity: 2` (2 workers), causing **two Docker container instances** to compete for the same queue. With both instances polling aggressively and potentially one instance in a bad state (stale code, startup issues), messages were rapidly received and abandoned, hitting `maxDeliveryCount=10` within seconds.
+
+```
+Instance A ──┐
+             ├──► long-running-tasks queue ──► Rapid receive/abandon ──► Dead-letter
+Instance B ──┘
+```
+
+**Fix**:
+```bash
+# Scale App Service Plan to 1 instance
+az appservice plan update --name ASP-rmhazure --resource-group rmhazure_rg --number-of-workers 1
+
+# Restart Docker worker to ensure clean state
+az webapp restart --name rmhheavyapi --resource-group rmhazure_rg
+```
+
+**Verification**:
+```bash
+# Confirm single instance
+az webapp list-instances --name rmhheavyapi --resource-group rmhazure_rg
+# Should show 1 instance
+
+# Submit test job
+curl -X POST "https://rmhazuregeoapi.../api/jobs/submit/process_raster_docker" \
+  -H "Content-Type: application/json" \
+  -d '{"blob_name":"test.tif","container_name":"bronze-fathom","collection_id":"test"}'
+
+# Check Docker worker health
+curl https://rmhheavyapi.../health
+# Should show messages_processed: 1 (or more)
+```
+
+**Prevention**:
+- Docker worker is designed for **single-instance operation** (1 task at a time, all resources dedicated)
+- If horizontal scaling is needed, ensure all instances are healthy and running same code version
+- Monitor `az webapp list-instances` after App Service Plan changes
+- Consider session-enabled queues for multi-instance scenarios
+
+**Related**: See DOCKER_INTEGRATION.md → "Docker Worker Parallelism Model" for architecture details
 
 ---
 

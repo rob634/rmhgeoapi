@@ -647,10 +647,12 @@ class BackgroundQueueWorker:
             try:
                 # Don't pass auto_lock_renewer to receiver - use manual registration instead
                 # This provides explicit control over which messages get lock renewal
+                logger.info(f"[Queue Worker] 🔄 Opening receiver for: {self._queue_name}")
                 with client.get_queue_receiver(
                     queue_name=self._queue_name,
                     max_wait_time=self.max_wait_time_seconds,
                 ) as receiver:
+                    logger.info(f"[Queue Worker] ✅ Receiver opened, calling receive_messages()...")
 
                     self._last_poll_time = datetime.now(timezone.utc)
                     self._last_error = None
@@ -660,8 +662,10 @@ class BackgroundQueueWorker:
                         max_wait_time=self.max_wait_time_seconds
                     )
 
+                    logger.info(f"[Queue Worker] 📨 receive_messages() returned: {len(messages) if messages else 0} message(s)")
+
                     if not messages:
-                        logger.debug("[Queue Worker] No messages received, continuing poll...")
+                        logger.info("[Queue Worker] ⏳ No messages in queue, will poll again...")
                         continue
 
                     for message in messages:

@@ -38,14 +38,19 @@ Verify GDAL installation:
 ENVIRONMENT VARIABLES
 --------------------------------------------------------------------------------
 
-Routing Thresholds (Orchestration Layer):
-    RASTER_ROUTE_LARGE_MB = 500       # Route to tiling pipeline above this size
-    RASTER_ROUTE_DOCKER_MB = 2000     # Route to Docker worker above this size
-    RASTER_ROUTE_REJECT_MB = 50000    # Hard reject threshold
+V0.8 Architecture (24 JAN 2026):
+    ALL raster processing goes to Docker worker. Tiling decision is internal.
+
+ETL Mount Settings:
+    RASTER_USE_ETL_MOUNT = true       # V0.8: Mount is expected (false = degraded)
+    RASTER_ETL_MOUNT_PATH = /mounts/etl-temp  # Azure Files mount path
+
+Tiling Settings:
+    RASTER_TILING_THRESHOLD_MB = 2000 # Files above this produce tiled output
+    RASTER_TILE_TARGET_MB = 400       # Target tile size for large file splitting
     RASTER_COLLECTION_MAX_FILES = 1000  # Max files per collection
 
 Processing Settings (Handler Layer):
-    RASTER_TILE_TARGET_MB = 200       # Target tile size for large file splitting
     RASTER_COG_IN_MEMORY = false      # Use disk-based processing (safer)
     RASTER_COG_COMPRESSION = deflate  # COG compression algorithm
     RASTER_COG_TILE_SIZE = 512        # Internal COG tile size (pixels)

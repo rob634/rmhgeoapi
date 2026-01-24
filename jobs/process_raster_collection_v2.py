@@ -1,24 +1,28 @@
 # ============================================================================
 # PROCESS RASTER COLLECTION V2 JOB
 # ============================================================================
-# STATUS: Jobs - 4-stage multi-tile raster collection pipeline
+# STATUS: Jobs - ARCHIVED (V0.8 - 24 JAN 2026)
 # PURPOSE: Process raster tile collections to COGs + MosaicJSON + STAC
-# LAST_REVIEWED: 04 JAN 2026
-# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# LAST_REVIEWED: 24 JAN 2026
+# ARCHIVED: Function App raster jobs are deprecated
 # ============================================================================
 """
 Process Raster Collection V2 Job.
 
-Multi-tile raster collection processing producing COGs + MosaicJSON + STAC.
+⚠️ ARCHIVED (V0.8 - 24 JAN 2026)
+This job is ARCHIVED and should not be used. It runs on Function App
+which has a 10-minute timeout limit.
 
-Four-stage workflow:
-    1. Validate Tiles: Parallel validation of all tiles
-    2. Create COGs: Parallel COG creation for all tiles
-    3. Create MosaicJSON: Aggregate into virtual mosaic
-    4. Create STAC Collection: Collection-level STAC item
+V0.8 Architecture:
+    - ALL raster processing goes to Docker worker
+    - For collections, use the platform API which routes to Docker
+    - This job will be removed in a future version
+
+This file is kept only to prevent import errors during migration.
+Do NOT use this job for new workflows.
 
 Exports:
-    ProcessRasterCollectionV2Job: Job class for multi-tile raster processing
+    ProcessRasterCollectionV2Job: ARCHIVED - do not use
 """
 
 from typing import Dict, Any, List, Optional
@@ -31,46 +35,46 @@ from jobs.raster_mixin import RasterMixin
 
 class ProcessRasterCollectionV2Job(RasterMixin, RasterWorkflowsBase, JobBaseMixin, JobBase):
     """
-    Multi-tile raster collection processing using JobBaseMixin.
-    Clean slate implementation - no deprecated parameters.
+    Multi-tile raster collection processing - ARCHIVED (V0.8).
 
-    Four-stage workflow:
-    1. validate_tiles: Parallel validation of all tiles (fan-out)
-    2. create_cogs: Parallel COG creation (fan-out)
-    3. create_mosaicjson: Aggregate into MosaicJSON (fan-in)
-    4. create_stac: Create STAC collection (fan-in)
+    ⚠️ ARCHIVED: Do not use this job.
+    This job runs on Function App which has timeout limits.
 
-    Preflight Validation:
-    - Container exists check
-    - All blobs in blob_list exist with size capture (parallel check)
-    - Collection size limit enforced (max files allowed)
-    - Individual raster size threshold enforced (reject large files)
-
-    Size-Based Routing (23 DEC 2025 - env var names updated):
-        Pre-flight validation checks the count and size of each raster in the collection.
-
-        Rejection conditions:
-        1. Collection exceeds RASTER_COLLECTION_MAX_FILES (default: 20 files)
-           → Submit smaller batches
-        2. ANY raster exceeds RASTER_ROUTE_LARGE_MB (default: 1200 MB)
-           → Large raster collection processing requires Docker worker (coming soon)
-
-        Current behavior:
-            Rejects with clear error message - large collection processing
-            requires Docker worker which is not yet implemented.
-
-        Future behavior (when Docker worker is ready):
-            Routes ALL tasks to 'long-running-tasks' queue instead of
-            'raster-tasks' queue. All-or-none routing prevents complexity of
-            splitting tasks between queues for a single job.
-
-        Thresholds configurable via environment variables:
-        - RASTER_COLLECTION_MAX_FILES: Max files in collection (default: 20)
-        - RASTER_ROUTE_LARGE_MB: Max individual file size in MB (default: 1200)
+    V0.8 Architecture (24 JAN 2026):
+        - ALL raster processing goes to Docker worker
+        - Use process_raster_docker for single files
+        - For collections, use platform API which routes appropriately
+        - This job will be removed in a future version
     """
 
     job_type = "process_raster_collection_v2"
-    description = "Process raster tile collection to COGs with MosaicJSON (v2 mixin pattern)"
+    description = "ARCHIVED: Function App raster collection - do not use"
+
+    @classmethod
+    def validate_parameters(cls, params):
+        """Log archived warning - this job should not be used."""
+        import logging
+        import warnings
+        logger = logging.getLogger(__name__)
+
+        # Log archived warning
+        logger.error("=" * 60)
+        logger.error("❌ ARCHIVED: process_raster_collection_v2")
+        logger.error("  This job is ARCHIVED as of V0.8 (24 JAN 2026)")
+        logger.error("  Use process_raster_docker or platform API instead")
+        logger.error("  This job runs on Function App with timeout limits")
+        logger.error("=" * 60)
+
+        # Issue warning
+        warnings.warn(
+            "process_raster_collection_v2 is ARCHIVED. "
+            "Use process_raster_docker or platform API instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+
+        # Call parent validation
+        return super().validate_parameters(params)
 
     stages = [
         {"number": 1, "name": "validate_tiles", "task_type": "raster_validate", "parallelism": "fan_out"},
@@ -104,8 +108,8 @@ class ProcessRasterCollectionV2Job(RasterMixin, RasterWorkflowsBase, JobBaseMixi
             'error': 'Source container does not exist'
         },
         {
-            # Size-aware validator (13 DEC 2025)
-            # Checks: existence, collection count limit, individual size threshold
+            # Size-aware validator
+            # V0.8 (24 JAN 2026): Updated to use RASTER_TILING_THRESHOLD_MB
             'type': 'blob_list_exists_with_max_size',
             'container_param': 'container_name',
             'blob_list_param': 'blob_list',
@@ -114,10 +118,10 @@ class ProcessRasterCollectionV2Job(RasterMixin, RasterWorkflowsBase, JobBaseMixi
             'max_parallel': 10,
             'report_all': True,
             'min_count': 2,
-            # Collection count limit (from env var - 23 DEC 2025)
+            # Collection count limit
             'max_collection_count_env': 'RASTER_COLLECTION_MAX_FILES',
-            # Individual raster size threshold (from env var - 23 DEC 2025)
-            'max_individual_size_mb_env': 'RASTER_ROUTE_LARGE_MB',
+            # V0.8: Use tiling threshold instead of removed RASTER_ROUTE_LARGE_MB
+            'max_individual_size_mb_env': 'RASTER_TILING_THRESHOLD_MB',
             # Error messages
             'error_not_found': 'One or more tiles not found in collection. Verify blob paths.',
             'error_collection_too_large': (
@@ -126,8 +130,7 @@ class ProcessRasterCollectionV2Job(RasterMixin, RasterWorkflowsBase, JobBaseMixi
             ),
             'error_raster_too_large': (
                 'Collection contains raster(s) exceeding {threshold}MB threshold. '
-                'Large raster collection processing requires Docker worker (coming soon). '
-                'For now, process large files individually using process_large_raster_v2.'
+                'Use process_raster_docker instead - it handles large files automatically.'
             )
         }
     ]

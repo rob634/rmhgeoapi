@@ -1,29 +1,30 @@
 # ============================================================================
 # PROCESS RASTER V2 JOB
 # ============================================================================
-# STATUS: Jobs - 3-stage small raster to COG pipeline
-# PURPOSE: Process small rasters (<=1GB) to COG + STAC metadata
-# LAST_REVIEWED: 04 JAN 2026
-# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# STATUS: Jobs - DEPRECATED (V0.8 - 24 JAN 2026)
+# PURPOSE: Process small rasters to COG + STAC metadata (Function App)
+# LAST_REVIEWED: 24 JAN 2026
+# DEPRECATED: Use process_raster_docker instead
 # ============================================================================
 """
-Process Raster V2 - Raster to COG Pipeline.
+Process Raster V2 - Function App Raster Pipeline.
 
-Small file raster processing (<= 1GB) using JobBaseMixin pattern.
+⚠️ DEPRECATED (V0.8 - 24 JAN 2026)
+This job runs on Function App and is deprecated. Use `process_raster_docker`
+instead, which runs on Docker worker and handles all raster sizes.
 
-Three-stage workflow:
-    Stage 1: Validate - CRS detection, bit-depth, raster type classification
-    Stage 2: Create COG - Reproject + COG in single operation
-    Stage 3: Create STAC - Generate STAC metadata and insert to pgstac
+V0.8 Architecture:
+    - ALL raster processing goes to Docker worker
+    - Docker has no timeout limits (Function App has 10-min limit)
+    - process_raster_docker handles both single COG and tiled output
+    - This job is kept for backward compatibility during migration
 
-Features:
-    - Declarative parameter validation via parameters_schema
-    - Pre-flight resource validation (blob exists, size check)
-    - Config integration for defaults (env vars → fallback defaults)
-    - DEM-specific TiTiler visualization URLs
+Migration:
+    OLD: job_type="process_raster_v2"
+    NEW: job_type="process_raster_docker" (same parameters)
 
 Exports:
-    ProcessRasterV2Job: Three-stage raster to COG job
+    ProcessRasterV2Job: DEPRECATED - use ProcessRasterDockerJob
 """
 
 from typing import Dict, Any, List, Optional
@@ -33,17 +34,45 @@ from jobs.mixins import JobBaseMixin
 
 class ProcessRasterV2Job(JobBaseMixin, JobBase):
     """
-    Small file raster processing (<= 1GB) using JobBaseMixin.
-    Clean slate implementation - no deprecated parameters.
+    Function App raster processing - DEPRECATED (V0.8).
 
-    Three-stage workflow:
-    1. Validate: CRS, bit-depth, type detection
-    2. Create COG: Reproject + COG in single operation
-    3. Create STAC: Generate STAC metadata for COG
+    ⚠️ DEPRECATED: Use process_raster_docker instead.
+    This job is kept for backward compatibility during migration.
+
+    V0.8 Architecture (24 JAN 2026):
+        - process_raster_docker is the primary raster workflow
+        - It runs on Docker worker with no timeout limits
+        - This Function App job will be removed in a future version
     """
 
     job_type = "process_raster_v2"
-    description = "Process raster to COG with STAC metadata (mixin pattern)"
+    description = "DEPRECATED: Use process_raster_docker instead"
+
+    @classmethod
+    def validate_parameters(cls, params):
+        """Log deprecation warning before processing."""
+        import logging
+        import warnings
+        logger = logging.getLogger(__name__)
+
+        # Log deprecation warning
+        logger.warning("=" * 60)
+        logger.warning("⚠️ DEPRECATED: process_raster_v2")
+        logger.warning("  This job type is deprecated as of V0.8 (24 JAN 2026)")
+        logger.warning("  Use 'process_raster_docker' instead")
+        logger.warning("  Docker worker has no timeout and handles all sizes")
+        logger.warning("=" * 60)
+
+        # Also issue Python deprecation warning
+        warnings.warn(
+            "process_raster_v2 is deprecated. "
+            "Use process_raster_docker instead - it runs on Docker with no timeout.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+
+        # Call parent validation
+        return super().validate_parameters(params)
 
     stages = [
         {"number": 1, "name": "validate", "task_type": "raster_validate", "parallelism": "single"},
@@ -97,17 +126,16 @@ class ProcessRasterV2Job(JobBaseMixin, JobBase):
         '_skip_validation': {'type': 'bool', 'default': False},
     }
 
-    # Pre-flight resource validation (29 NOV 2025: Added size check, 23 DEC 2025: Renamed env var)
-    # Uses blob_exists_with_size for efficient single API call
-    # Size limits from RASTER_ROUTE_REJECT_MB env var (default: 8GB)
+    # Pre-flight resource validation
+    # V0.8 (24 JAN 2026): Removed size limit - all sizes go to Docker
+    # This validator just checks blob exists and stores size for informational purposes
     resource_validators = [
         {
             'type': 'blob_exists_with_size',
             'container_param': 'container_name',
             'blob_param': 'blob_name',
-            'max_size_env': 'RASTER_ROUTE_REJECT_MB',  # From config/raster_config.py
+            # V0.8: No max_size_env - Docker handles all sizes
             'error_not_found': 'Source raster file does not exist. Verify blob_name and container_name.',
-            'error_too_large': 'Raster file too large for direct processing. Use process_large_raster_v2 for files over size limit.'
         }
     ]
 

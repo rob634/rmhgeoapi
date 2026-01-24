@@ -852,7 +852,7 @@ def validate_blob_list_exists_with_max_size(
         max_collection_count: int - Max files allowed in collection (optional)
         max_collection_count_env: str - Env var for collection limit (e.g., 'RASTER_COLLECTION_MAX_FILES')
         max_individual_size_mb: int - Reject if ANY blob exceeds this (optional)
-        max_individual_size_mb_env: str - Env var for size threshold (e.g., 'RASTER_ROUTE_LARGE_MB')
+        max_individual_size_mb_env: str - Env var for size threshold (e.g., 'RASTER_TILING_THRESHOLD_MB')
         error_not_found: str - Error if blob missing
         error_collection_too_large: str - Error if collection exceeds file count limit
         error_raster_too_large: str - Error if any blob exceeds size threshold
@@ -874,7 +874,7 @@ def validate_blob_list_exists_with_max_size(
                 'container_param': 'container_name',
                 'blob_list_param': 'blob_list',
                 'max_collection_count_env': 'RASTER_COLLECTION_MAX_FILES',
-                'max_individual_size_mb_env': 'RASTER_ROUTE_LARGE_MB',
+                'max_individual_size_mb_env': 'RASTER_TILING_THRESHOLD_MB',
                 'error_collection_too_large': 'Collection exceeds max file count.',
                 'error_raster_too_large': 'Collection contains raster(s) exceeding size threshold.'
             }
@@ -947,6 +947,7 @@ def validate_blob_list_exists_with_max_size(
         return ValidatorResult(valid=False, message=error_msg)
 
     # Get individual size threshold (from config or env var, with fallback to defaults)
+    # V0.8 (24 JAN 2026): Use RASTER_TILING_THRESHOLD_MB instead of removed RASTER_ROUTE_LARGE_MB
     max_individual_size_mb = config.get('max_individual_size_mb')
     max_individual_size_mb_env = config.get('max_individual_size_mb_env')
     if max_individual_size_mb_env:
@@ -956,10 +957,10 @@ def validate_blob_list_exists_with_max_size(
                 max_individual_size_mb = int(env_value)
             except ValueError:
                 logger.warning(f"Invalid {max_individual_size_mb_env} value: {env_value}, using default")
-                max_individual_size_mb = RasterDefaults.RASTER_ROUTE_LARGE_MB
+                max_individual_size_mb = RasterDefaults.RASTER_TILING_THRESHOLD_MB
         else:
             # Env var not set, use default
-            max_individual_size_mb = RasterDefaults.RASTER_ROUTE_LARGE_MB
+            max_individual_size_mb = RasterDefaults.RASTER_TILING_THRESHOLD_MB
 
     # Get zone from config (default: bronze for input validation)
     zone = config.get('zone', 'bronze')

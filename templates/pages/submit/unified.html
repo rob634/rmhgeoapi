@@ -5,7 +5,7 @@
 {% block title %}Submit Data{% endblock %}
 
 {% block head %}
-<link rel="stylesheet" href="{{ url_for('static', path='css/submit.css') }}">
+<link rel="stylesheet" href="/static/css/submit.css">
 {% endblock %}
 
 {% block content %}
@@ -274,5 +274,5 @@
         'zip': { category: 'vector', name: 'ZIP Archive', description: 'Zipped shapefile (must contain .shp, .shx, .dbf)' }
     };
 </script>
-<script src="{{ url_for('static', path='js/submit.js') }}"></script>
+<script src="/static/js/submit.js"></script>
 {% endblock %}

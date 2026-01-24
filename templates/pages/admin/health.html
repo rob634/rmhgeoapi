@@ -4,7 +4,7 @@
 {% block title %}System Health{% endblock %}
 
 {% block head %}
-<link rel="stylesheet" href="{{ url_for('static', path='css/health.css') }}">
+<link rel="stylesheet" href="/static/css/health.css">
 {% endblock %}
 
 {% block content %}
@@ -151,5 +151,5 @@
     const DOCKER_WORKER_URL = '{{ docker_worker_url | default("", true) }}';
     const COMPONENT_TOOLTIPS = {{ tooltips | tojson | safe }};
 </script>
-<script src="{{ url_for('static', path='js/health.js') }}"></script>
+<script src="/static/js/health.js"></script>
 {% endblock %}

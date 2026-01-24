@@ -1,25 +1,28 @@
 # ============================================================================
 # PROCESS LARGE RASTER V2 JOB
 # ============================================================================
-# STATUS: Jobs - 5-stage large raster tiling pipeline
+# STATUS: Jobs - ARCHIVED (V0.8 - 24 JAN 2026)
 # PURPOSE: Process 1-30GB rasters to tiled COG mosaic + MosaicJSON + STAC
-# LAST_REVIEWED: 04 JAN 2026
-# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# LAST_REVIEWED: 24 JAN 2026
+# ARCHIVED: Function App raster jobs are deprecated
 # ============================================================================
 """
 Process Large Raster V2 Job.
 
-Large raster tiling pipeline (1-30 GB files) producing tiled COG mosaic + STAC.
+⚠️ ARCHIVED (V0.8 - 24 JAN 2026)
+This job is ARCHIVED and should not be used. It runs on Function App
+which has a 10-minute timeout limit - unsuitable for large rasters.
 
-Five-stage workflow:
-    1. Generate Tiling Scheme: Calculate tile grid in output CRS
-    2. Extract Tiles: Sequential extraction
-    3. Create COGs: Parallel COG creation for all tiles
-    4. Create MosaicJSON: Aggregate into virtual mosaic
-    5. Create STAC Collection: Collection-level STAC item
+V0.8 Architecture:
+    - ALL raster processing goes to Docker worker
+    - Use process_raster_docker - it handles tiling automatically
+    - Docker has no timeout and uses Azure Files mount for temp storage
+
+This file is kept only to prevent import errors during migration.
+Do NOT use this job for new workflows.
 
 Exports:
-    ProcessLargeRasterV2Job: Job class for large raster processing
+    ProcessLargeRasterV2Job: ARCHIVED - use process_raster_docker
 """
 
 from typing import Dict, Any, List, Optional
@@ -34,40 +37,49 @@ from config.defaults import STACDefaults
 
 class ProcessLargeRasterV2Job(RasterMixin, RasterWorkflowsBase, JobBaseMixin, JobBase):
     """
-    Large raster tiling workflow (1-30 GB files) using JobBaseMixin.
-    Clean slate implementation - no deprecated parameters.
+    Large raster tiling workflow - ARCHIVED (V0.8).
 
-    Five-stage workflow:
-    1. generate_tiling_scheme: Calculate tile grid (single)
-    2. extract_tiles: Sequential tile extraction (single, long-running)
-    3. create_cogs: Parallel COG creation (fan-out)
-    4. create_mosaicjson: Aggregate into MosaicJSON (fan-in)
-    5. create_stac: Create STAC collection (fan-in)
+    ⚠️ ARCHIVED: Do not use this job.
+    This job runs on Function App which has timeout limits.
+    Large rasters WILL timeout on Function App.
 
-    Preflight Validation:
-    - Blob exists with size check (min 100MB, max 30GB)
-    - Files smaller than 100MB should use process_raster_v2
+    V0.8 Architecture (24 JAN 2026):
+        - ALL raster processing goes to Docker worker
+        - Use process_raster_docker - it handles tiling automatically
+        - Files > RASTER_TILING_THRESHOLD_MB produce tiled output
+        - Docker has no timeout and uses Azure Files mount
 
-    Future Enhancement - Docker Worker Routing (13 DEC 2025):
-        The extract_tiles stage (Stage 2) is a long-running, memory-intensive
-        operation that may exceed Azure Functions timeout limits for very large
-        files. When the Docker worker infrastructure is ready:
-
-        - Stage 2 tasks will route to 'long-running-raster-tasks' queue
-        - Docker worker will process without timeout constraints
-        - Size threshold for Docker routing will be higher than collection
-          threshold (~several GB vs 800 MB)
-
-        This is separate from the collection size routing (process_raster_collection_v2):
-        - Single large files use tiling approach here
-        - Collections with large files route all tasks to Docker worker (all-or-none)
-
-        Queue routing will be controlled by adding extract_tiles to
-        TaskRoutingDefaults.LONG_RUNNING_RASTER_TASKS when Docker is ready.
+    This file is kept only to prevent import errors during migration.
     """
 
     job_type = "process_large_raster_v2"
-    description = "Process large raster (1-30 GB) to tiled COG mosaic with STAC (v2 mixin pattern)"
+    description = "ARCHIVED: Use process_raster_docker instead"
+
+    @classmethod
+    def validate_parameters(cls, params):
+        """Log archived warning - this job should not be used."""
+        import logging
+        import warnings
+        logger = logging.getLogger(__name__)
+
+        # Log archived warning
+        logger.error("=" * 60)
+        logger.error("❌ ARCHIVED: process_large_raster_v2")
+        logger.error("  This job is ARCHIVED as of V0.8 (24 JAN 2026)")
+        logger.error("  Use 'process_raster_docker' instead")
+        logger.error("  It handles tiling automatically for large files")
+        logger.error("=" * 60)
+
+        # Issue warning
+        warnings.warn(
+            "process_large_raster_v2 is ARCHIVED. "
+            "Use process_raster_docker instead - it handles tiling automatically.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+
+        # Call parent validation
+        return super().validate_parameters(params)
 
     stages = [
         {"number": 1, "name": "generate_tiling_scheme", "task_type": "raster_generate_tiling_scheme", "parallelism": "single"},

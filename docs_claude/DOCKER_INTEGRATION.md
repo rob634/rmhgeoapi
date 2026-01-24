@@ -472,8 +472,8 @@ Container Resources (P1v3 tier):
 ├── RAM: 7.7 GB total
 │   ├── System/Python overhead: ~250 MB
 │   ├── Available for task: ~7.4 GB
-│   └── Safe file processing limit: ~2 GB (RASTER_ROUTE_DOCKER_MB threshold)
-└── Storage: Ephemeral /tmp (limited)
+│   └── Tiling threshold: 2 GB (RASTER_TILING_THRESHOLD_MB) - produces tiled output above this
+└── Storage: Azure Files mount at /mounts/etl-temp (V0.8 - unlimited capacity)
 ```
 
 ### Horizontal Scaling (If Needed)

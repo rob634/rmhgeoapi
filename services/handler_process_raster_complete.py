@@ -146,10 +146,16 @@ def _process_raster_tiled(
     job_id = params.get('_job_id', 'unknown')
     file_size_mb = params.get('_file_size_mb')
 
+    # Extract docker_context for progress reporting
+    docker_context = params.get('_docker_context')
+
     logger.info("=" * 70)
-    logger.info("PROCESS RASTER - TILED MODE (V0.8)")
-    logger.info(f"Source: {container_name}/{blob_name}")
-    logger.info(f"File size: {file_size_mb:.1f} MB" if file_size_mb else "File size: unknown")
+    logger.info("PROCESS RASTER COMPLETE - TILED MODE (V0.8)")
+    logger.info(f"   Source: {container_name}/{blob_name}")
+    if file_size_mb:
+        logger.info(f"   File size: {file_size_mb:.1f} MB")
+    if task_id:
+        logger.info(f"   Task ID: {task_id[:8]}... (checkpoint enabled)")
     logger.info("=" * 70)
 
     # Initialize checkpoint manager
@@ -175,13 +181,15 @@ def _process_raster_tiled(
 
     try:
         # =====================================================================
-        # PHASE 1: GENERATE TILING SCHEME
+        # PHASE 1: GENERATE TILING SCHEME (0-10%)
         # =====================================================================
         if checkpoint and checkpoint.should_skip(1):
             logger.info("⏭️ PHASE 1: Skipping tiling scheme (checkpoint)")
+            _report_progress(docker_context, 10, 1, 5, "Tiling Scheme", "Skipped (resumed)")
             tiling_result = checkpoint.get_data('tiling_result', {})
         else:
             logger.info("🔄 PHASE 1: Generating tiling scheme...")
+            _report_progress(docker_context, 2, 1, 5, "Tiling Scheme", "Calculating tile grid")
             phase1_start = time.time()
 
             from .tiling_scheme import generate_tiling_scheme
@@ -211,23 +219,27 @@ def _process_raster_tiled(
 
             tiling_result = tiling_response.get('result', {})
             phase1_duration = time.time() - phase1_start
+            tile_count = tiling_result.get('tile_count', 0)
 
             logger.info(f"✅ PHASE 1 complete: {phase1_duration:.2f}s")
-            logger.info(f"   Tile count: {tiling_result.get('tile_count')}")
+            logger.info(f"   Tile count: {tile_count}")
             logger.info(f"   Grid: {tiling_result.get('grid_dimensions')}")
+            _report_progress(docker_context, 10, 1, 5, "Tiling Scheme", f"Complete ({tile_count} tiles)")
 
             if checkpoint:
                 checkpoint.save(phase=1, data={'tiling_result': tiling_result})
 
         # =====================================================================
-        # PHASE 2: EXTRACT TILES
+        # PHASE 2: EXTRACT TILES (10-20%)
         # =====================================================================
         if checkpoint and checkpoint.should_skip(2):
             logger.info("⏭️ PHASE 2: Skipping tile extraction (checkpoint)")
+            _report_progress(docker_context, 20, 2, 5, "Extract Tiles", "Skipped (resumed)")
             extraction_result = checkpoint.get_data('extraction_result', {})
         else:
             tile_count = tiling_result.get('tile_count', 0)
             logger.info(f"🔄 PHASE 2: Extracting {tile_count} tiles...")
+            _report_progress(docker_context, 12, 2, 5, "Extract Tiles", f"Extracting {tile_count} tiles")
             phase2_start = time.time()
 
             from .tiling_extraction import extract_tiles
@@ -258,18 +270,21 @@ def _process_raster_tiled(
 
             extraction_result = extraction_response.get('result', {})
             phase2_duration = time.time() - phase2_start
+            extracted_count = extraction_result.get('tile_count', 0)
 
             logger.info(f"✅ PHASE 2 complete: {phase2_duration:.2f}s")
-            logger.info(f"   Tiles extracted: {extraction_result.get('tile_count')}")
+            logger.info(f"   Tiles extracted: {extracted_count}")
+            _report_progress(docker_context, 20, 2, 5, "Extract Tiles", f"Complete ({extracted_count} tiles)")
 
             if checkpoint:
                 checkpoint.save(phase=2, data={'extraction_result': extraction_result})
 
         # =====================================================================
-        # PHASE 3: CREATE COGS
+        # PHASE 3: CREATE COGS (20-80%)
         # =====================================================================
         if checkpoint and checkpoint.should_skip(3):
             logger.info("⏭️ PHASE 3: Skipping COG creation (checkpoint)")
+            _report_progress(docker_context, 80, 3, 5, "Create COGs", "Skipped (resumed)")
             cog_results = checkpoint.get_data('cog_results', [])
         else:
             tile_blobs = extraction_result.get('tile_blobs', [])
@@ -278,6 +293,7 @@ def _process_raster_tiled(
             raster_metadata = extraction_result.get('raster_metadata', {})
 
             logger.info(f"🔄 PHASE 3: Creating {tile_count} COGs...")
+            _report_progress(docker_context, 22, 3, 5, "Create COGs", f"Processing {tile_count} tiles")
             phase3_start = time.time()
 
             from .raster_cog import create_cog
@@ -299,6 +315,9 @@ def _process_raster_tiled(
             cog_blobs = []
 
             for idx, tile_blob in enumerate(tile_blobs):
+                # Calculate progress: 22% to 78% over all tiles
+                tile_progress = 22 + int((idx / tile_count) * 56)
+                _report_progress(docker_context, tile_progress, 3, 5, "Create COGs", f"Tile {idx+1}/{tile_count}")
                 logger.info(f"   📦 COG {idx+1}/{tile_count}: {tile_blob.split('/')[-1]}")
 
                 # Generate output filename
@@ -347,9 +366,11 @@ def _process_raster_tiled(
                     cog_blobs.append(cog_blob)
 
             phase3_duration = time.time() - phase3_start
+            cog_count = len(cog_blobs)
 
             logger.info(f"✅ PHASE 3 complete: {phase3_duration:.2f}s")
-            logger.info(f"   COGs created: {len(cog_blobs)}")
+            logger.info(f"   COGs created: {cog_count}")
+            _report_progress(docker_context, 80, 3, 5, "Create COGs", f"Complete ({cog_count} COGs)")
 
             if checkpoint:
                 checkpoint.save(phase=3, data={
@@ -364,13 +385,15 @@ def _process_raster_tiled(
             cog_blobs = [r.get('output_blob') or r.get('cog_blob') for r in cog_results if r]
 
         # =====================================================================
-        # PHASE 4: CREATE MOSAICJSON
+        # PHASE 4: CREATE MOSAICJSON (80-90%)
         # =====================================================================
         if checkpoint and checkpoint.should_skip(4):
             logger.info("⏭️ PHASE 4: Skipping MosaicJSON (checkpoint)")
+            _report_progress(docker_context, 90, 4, 5, "MosaicJSON", "Skipped (resumed)")
             mosaicjson_result = checkpoint.get_data('mosaicjson_result', {})
         else:
             logger.info(f"🔄 PHASE 4: Creating MosaicJSON from {len(cog_blobs)} COGs...")
+            _report_progress(docker_context, 82, 4, 5, "MosaicJSON", "Building mosaic index")
             phase4_start = time.time()
 
             from .raster_mosaicjson import create_mosaicjson
@@ -406,21 +429,24 @@ def _process_raster_tiled(
             logger.info(f"✅ PHASE 4 complete: {phase4_duration:.2f}s")
             if mosaicjson_result.get('mosaicjson_blob'):
                 logger.info(f"   MosaicJSON: {mosaicjson_result.get('mosaicjson_blob')}")
+            _report_progress(docker_context, 90, 4, 5, "MosaicJSON", f"Complete ({phase4_duration:.1f}s)")
 
             if checkpoint:
                 checkpoint.save(phase=4, data={'mosaicjson_result': mosaicjson_result})
 
         # =====================================================================
-        # PHASE 5: CREATE STAC COLLECTION
+        # PHASE 5: CREATE STAC COLLECTION (90-100%)
         # =====================================================================
         if checkpoint and checkpoint.should_skip(5):
             logger.info("⏭️ PHASE 5: Skipping STAC (checkpoint)")
+            _report_progress(docker_context, 100, 5, 5, "STAC Registration", "Skipped (resumed)")
             stac_result = checkpoint.get_data('stac_result', {})
         else:
             logger.info("🔄 PHASE 5: Creating STAC collection...")
+            _report_progress(docker_context, 92, 5, 5, "STAC Registration", "Registering with catalog")
             phase5_start = time.time()
 
-            from .raster_stac_collection import create_stac_collection
+            from .stac_collection import create_stac_collection
 
             collection_id = params.get('collection_id')
             blob_stem = Path(blob_name).stem
@@ -457,6 +483,7 @@ def _process_raster_tiled(
             logger.info(f"✅ PHASE 5 complete: {phase5_duration:.2f}s")
             if stac_result.get('collection_id'):
                 logger.info(f"   Collection: {stac_result.get('collection_id')}")
+            _report_progress(docker_context, 100, 5, 5, "STAC Registration", f"Complete ({phase5_duration:.1f}s)")
 
             if checkpoint:
                 checkpoint.save(phase=5, data={'stac_result': stac_result})
@@ -613,15 +640,15 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
     if file_size_mb is not None and file_size_mb > tiling_threshold_mb:
         use_tiling = True
 
-    logger.info("=" * 60)
+    logger.info("=" * 70)
     logger.info("PROCESS RASTER COMPLETE - Docker Handler (V0.8)")
-    logger.info(f"Source: {container_name}/{blob_name}")
+    logger.info(f"   Source: {container_name}/{blob_name}")
     if file_size_mb:
-        logger.info(f"File size: {file_size_mb:.1f} MB (threshold: {tiling_threshold_mb} MB)")
-    logger.info(f"Output mode: {'TILED' if use_tiling else 'SINGLE_COG'}")
+        logger.info(f"   File size: {file_size_mb:.1f} MB (threshold: {tiling_threshold_mb} MB)")
+    logger.info(f"   Output mode: {'TILED' if use_tiling else 'SINGLE_COG'}")
     if task_id:
-        logger.info(f"Task ID: {task_id[:8]}... (checkpoint enabled)")
-    logger.info("=" * 60)
+        logger.info(f"   Task ID: {task_id[:8]}... (checkpoint enabled)")
+    logger.info("=" * 70)
 
     # V0.8: Route to tiled workflow if file exceeds threshold
     if use_tiling:
@@ -638,7 +665,7 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
         # Docker mode: use pre-configured checkpoint from context
         checkpoint = docker_context.checkpoint
         if checkpoint.current_phase > 0:
-            logger.info(f"🔄 Resuming from phase {checkpoint.current_phase} (Docker context)")
+            logger.info(f"🔄 RESUMING from phase {checkpoint.current_phase}")
     elif task_id:
         # Function App mode: create checkpoint manually
         try:
@@ -647,7 +674,7 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             task_repo = RepositoryFactory.create_task_repository()
             checkpoint = CheckpointManager(task_id, task_repo)
             if checkpoint.current_phase > 0:
-                logger.info(f"🔄 Resuming from phase {checkpoint.current_phase}")
+                logger.info(f"🔄 RESUMING from phase {checkpoint.current_phase}")
         except Exception as e:
             logger.warning(f"⚠️ Failed to initialize CheckpointManager: {e}")
             checkpoint = None
@@ -683,7 +710,7 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             validation_result = checkpoint.get_data('validation_result', {})
             source_crs = checkpoint.get_data('source_crs')
             if not source_crs:
-                logger.error("Resume error: No source_crs in checkpoint data")
+                logger.error("❌ Resume error: No source_crs in checkpoint data")
                 return {
                     "success": False,
                     "error": "CHECKPOINT_MISSING_DATA",
@@ -709,7 +736,7 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             validation_response = validate_raster(validation_params)
 
             if not validation_response.get('success'):
-                logger.error(f"Validation failed: {validation_response.get('error')}")
+                logger.error(f"❌ Validation failed: {validation_response.get('error')}")
                 return {
                     "success": False,
                     "error": "VALIDATION_FAILED",
@@ -722,7 +749,7 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             source_crs = validation_result.get('source_crs')
 
             if not source_crs:
-                logger.error("No source_crs in validation results")
+                logger.error("❌ No source_crs in validation results")
                 return {
                     "success": False,
                     "error": "NO_SOURCE_CRS",
@@ -733,8 +760,8 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
 
             phase1_duration = time.time() - phase1_start
             logger.info(f"✅ PHASE 1 complete: {phase1_duration:.2f}s")
-            logger.info(f"  Source CRS: {source_crs}")
-            logger.info(f"  Raster type: {validation_result.get('raster_type', {}).get('detected_type')}")
+            logger.info(f"   Source CRS: {source_crs}")
+            logger.info(f"   Raster type: {validation_result.get('raster_type', {}).get('detected_type')}")
             _report_progress(docker_context, 20, 1, 3, "Validation", f"Complete ({phase1_duration:.1f}s)")
 
             # Save checkpoint after phase 1
@@ -749,14 +776,14 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
 
         # F7.18: Check for graceful shutdown before Phase 2
         if docker_context and docker_context.should_stop():
-            logger.warning("=" * 50)
+            logger.warning("=" * 70)
             logger.warning("🛑 GRACEFUL SHUTDOWN - Handler Interrupted")
-            logger.warning(f"  Task ID: {task_id[:16] if task_id else 'unknown'}...")
-            logger.warning(f"  Phase completed: 1 (validation)")
-            logger.warning(f"  Phase skipped: 2 (COG creation), 3 (STAC)")
-            logger.warning(f"  Source CRS saved: {source_crs}")
-            logger.warning("  Returning interrupted=True for message abandonment")
-            logger.warning("=" * 50)
+            logger.warning(f"   Task ID: {task_id[:16] if task_id else 'unknown'}...")
+            logger.warning(f"   Phase completed: 1 (validation)")
+            logger.warning(f"   Phase skipped: 2 (COG creation), 3 (STAC)")
+            logger.warning(f"   Source CRS saved: {source_crs}")
+            logger.warning("   Returning interrupted=True for message abandonment")
+            logger.warning("=" * 70)
             return {
                 "success": True,
                 "interrupted": True,
@@ -779,7 +806,7 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             cog_blob = checkpoint.get_data('cog_blob')
             cog_container = checkpoint.get_data('cog_container') or config.storage.silver.cogs
             if not cog_blob:
-                logger.error("Resume error: No cog_blob in checkpoint data")
+                logger.error("❌ Resume error: No cog_blob in checkpoint data")
                 return {
                     "success": False,
                     "error": "CHECKPOINT_MISSING_DATA",
@@ -825,7 +852,7 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                 cog_response = create_cog(cog_params)
 
             if not cog_response.get('success'):
-                logger.error(f"COG creation failed: {cog_response.get('error')}")
+                logger.error(f"❌ COG creation failed: {cog_response.get('error')}")
                 return {
                     "success": False,
                     "error": "COG_CREATION_FAILED",
@@ -840,7 +867,7 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             cog_container = cog_result.get('cog_container') or config.storage.silver.cogs
 
             if not cog_blob:
-                logger.error("COG creation did not return output blob path")
+                logger.error("❌ COG creation did not return output blob path")
                 return {
                     "success": False,
                     "error": "NO_COG_OUTPUT",
@@ -853,8 +880,8 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             phase2_duration = time.time() - phase2_start
             cog_size_mb = cog_result.get('size_mb', 0)
             logger.info(f"✅ PHASE 2 complete: {phase2_duration:.2f}s")
-            logger.info(f"  COG blob: {cog_blob}")
-            logger.info(f"  Size: {cog_size_mb} MB")
+            logger.info(f"   COG blob: {cog_blob}")
+            logger.info(f"   Size: {cog_size_mb:.1f} MB")
             _report_progress(
                 docker_context, 80, 2, 3, "COG Creation",
                 f"Complete ({phase2_duration:.1f}s, {cog_size_mb:.1f} MB)"
@@ -885,15 +912,15 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
 
         # F7.18: Check for graceful shutdown before Phase 3
         if docker_context and docker_context.should_stop():
-            logger.warning("=" * 50)
+            logger.warning("=" * 70)
             logger.warning("🛑 GRACEFUL SHUTDOWN - Handler Interrupted")
-            logger.warning(f"  Task ID: {task_id[:16] if task_id else 'unknown'}...")
-            logger.warning(f"  Phase completed: 2 (COG creation)")
-            logger.warning(f"  Phase skipped: 3 (STAC metadata)")
-            logger.warning(f"  COG blob saved: {cog_blob}")
-            logger.warning(f"  COG container: {cog_container}")
-            logger.warning("  Returning interrupted=True for message abandonment")
-            logger.warning("=" * 50)
+            logger.warning(f"   Task ID: {task_id[:16] if task_id else 'unknown'}...")
+            logger.warning(f"   Phase completed: 2 (COG creation)")
+            logger.warning(f"   Phase skipped: 3 (STAC metadata)")
+            logger.warning(f"   COG blob saved: {cog_blob}")
+            logger.warning(f"   COG container: {cog_container}")
+            logger.warning("   Returning interrupted=True for message abandonment")
+            logger.warning("=" * 70)
             return {
                 "success": True,
                 "interrupted": True,
@@ -940,7 +967,7 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
 
             if not stac_response.get('success'):
                 # STAC failure is non-fatal - COG was created successfully
-                logger.warning(f"STAC creation failed (non-fatal): {stac_response.get('error')}")
+                logger.warning(f"⚠️ STAC creation failed (non-fatal): {stac_response.get('error')}")
                 stac_result = {
                     "degraded": True,
                     "error": stac_response.get('error'),
@@ -952,7 +979,7 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             phase3_duration = time.time() - phase3_start
             logger.info(f"✅ PHASE 3 complete: {phase3_duration:.2f}s")
             if stac_result.get('item_id'):
-                logger.info(f"  STAC item: {stac_result.get('item_id')}")
+                logger.info(f"   STAC item: {stac_result.get('item_id')}")
             _report_progress(docker_context, 100, 3, 3, "STAC Registration", f"Complete ({phase3_duration:.1f}s)")
 
             # Save checkpoint after phase 3 (all phases complete)
@@ -984,34 +1011,34 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
         resource_stats["final"] = get_memory_stats() or {}
         resource_stats["peak_memory_overall_mb"] = get_peak_memory_mb()
 
-        logger.info("=" * 60)
-        logger.info("PROCESS RASTER COMPLETE - SUCCESS")
+        logger.info("=" * 70)
+        logger.info("✅ PROCESS RASTER COMPLETE (SINGLE COG) - SUCCESS")
         if resumed_from_phase:
-            logger.info(f"🔄 Resumed from phase {resumed_from_phase} (skipped: {', '.join(phases_skipped)})")
-        logger.info(f"Total duration: {total_duration:.2f}s")
+            logger.info(f"   🔄 Resumed from phase {resumed_from_phase} (skipped: {', '.join(phases_skipped)})")
+        logger.info(f"   Total duration: {total_duration:.2f}s")
         if phase1_duration > 0:
-            logger.info(f"  Validation: {phase1_duration:.2f}s")
+            logger.info(f"   Validation: {phase1_duration:.2f}s")
         if phase2_duration > 0:
-            logger.info(f"  COG creation: {phase2_duration:.2f}s")
+            logger.info(f"   COG creation: {phase2_duration:.2f}s")
         if phase3_duration > 0:
-            logger.info(f"  STAC metadata: {phase3_duration:.2f}s")
+            logger.info(f"   STAC metadata: {phase3_duration:.2f}s")
         # Log resource summary
         if resource_stats.get("peak_memory_mb"):
-            logger.info(f"📊 Peak memory (COG): {resource_stats['peak_memory_mb']} MB")
+            logger.info(f"   📊 Peak memory (COG): {resource_stats['peak_memory_mb']} MB")
         if resource_stats.get("peak_memory_overall_mb"):
-            logger.info(f"📊 Peak memory (overall): {resource_stats['peak_memory_overall_mb']} MB")
-        logger.info("=" * 60)
+            logger.info(f"   📊 Peak memory (overall): {resource_stats['peak_memory_overall_mb']} MB")
+        logger.info("=" * 70)
 
         # =====================================================================
         # ARTIFACT REGISTRY (21 JAN 2026)
         # =====================================================================
         # Create artifact record for lineage tracking with checksum
         artifact_id = None
-        logger.info(f"📦 ARTIFACT DEBUG: Starting artifact creation, params keys: {list(params.keys())}")
-        logger.info(f"📦 ARTIFACT DEBUG: dataset_id={params.get('dataset_id')}, resource_id={params.get('resource_id')}, version_id={params.get('version_id')}")
+        logger.debug(f"📦 ARTIFACT DEBUG: Starting artifact creation, params keys: {list(params.keys())}")
+        logger.debug(f"📦 ARTIFACT DEBUG: dataset_id={params.get('dataset_id')}, resource_id={params.get('resource_id')}, version_id={params.get('version_id')}")
         try:
             from services.artifact_service import ArtifactService
-            logger.info("📦 ARTIFACT DEBUG: ArtifactService imported successfully")
+            logger.debug("📦 ARTIFACT DEBUG: ArtifactService imported successfully")
 
             # Build client_refs from platform parameters
             client_refs = {}
@@ -1022,13 +1049,13 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             if params.get('version_id'):
                 client_refs['version_id'] = params['version_id']
 
-            logger.info(f"📦 ARTIFACT DEBUG: client_refs={client_refs}")
+            logger.debug(f"📦 ARTIFACT DEBUG: client_refs={client_refs}")
 
             # Only create artifact if we have client refs (platform job)
             if client_refs:
-                logger.info(f"📦 ARTIFACT DEBUG: Creating ArtifactService...")
+                logger.debug(f"📦 ARTIFACT DEBUG: Creating ArtifactService...")
                 artifact_service = ArtifactService()
-                logger.info(f"📦 ARTIFACT DEBUG: Calling create_artifact with cog_blob={cog_blob}, cog_container={cog_container}")
+                logger.debug(f"📦 ARTIFACT DEBUG: Calling create_artifact with cog_blob={cog_blob}, cog_container={cog_container}")
                 artifact = artifact_service.create_artifact(
                     storage_account=config.storage.silver.account_name,
                     container=cog_container,
@@ -1053,7 +1080,7 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                 artifact_id = str(artifact.artifact_id)
                 logger.info(f"📦 Artifact created: {artifact_id} (revision {artifact.revision})")
             else:
-                logger.info("📦 ARTIFACT DEBUG: Skipping artifact creation - no client_refs (non-platform job)")
+                logger.debug("📦 ARTIFACT DEBUG: Skipping artifact creation - no client_refs (non-platform job)")
         except Exception as e:
             # Artifact creation is non-fatal - log warning but continue
             import traceback
@@ -1124,18 +1151,18 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
         resource_stats["final"] = get_memory_stats() or {}
         resource_stats["peak_memory_overall_mb"] = get_peak_memory_mb()
 
-        logger.error("=" * 60)
-        logger.error("PROCESS RASTER COMPLETE - FAILED")
-        logger.error(f"Error: {e}")
-        logger.error(f"Duration before failure: {total_duration:.2f}s")
+        logger.error("=" * 70)
+        logger.error("❌ PROCESS RASTER COMPLETE (SINGLE COG) - FAILED")
+        logger.error(f"   Error: {e}")
+        logger.error(f"   Duration before failure: {total_duration:.2f}s")
         if checkpoint_state:
-            logger.error(f"Checkpoint state: phase={checkpoint_state['current_phase']}, keys={checkpoint_state['data_keys']}")
+            logger.error(f"   Checkpoint state: phase={checkpoint_state['current_phase']}, keys={checkpoint_state['data_keys']}")
         # Log resource state at failure
         if resource_stats.get("peak_memory_mb"):
-            logger.error(f"📊 Peak memory (COG): {resource_stats['peak_memory_mb']} MB")
+            logger.error(f"   📊 Peak memory (COG): {resource_stats['peak_memory_mb']} MB")
         if resource_stats.get("peak_memory_overall_mb"):
-            logger.error(f"📊 Peak memory (overall): {resource_stats['peak_memory_overall_mb']} MB")
-        logger.error("=" * 60)
+            logger.error(f"   📊 Peak memory (overall): {resource_stats['peak_memory_overall_mb']} MB")
+        logger.error("=" * 70)
         logger.error(traceback.format_exc())
 
         return {

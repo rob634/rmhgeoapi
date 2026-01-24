@@ -4,7 +4,7 @@
 {% block title %}Collections{% endblock %}
 
 {% block head %}
-<link rel="stylesheet" href="{{ url_for('static', path='css/collections.css') }}">
+<link rel="stylesheet" href="/static/css/collections.css">
 {% endblock %}
 
 {% block content %}
@@ -145,5 +145,5 @@
     const TIPG_URL = '{{ tipg_url | default("", true) }}';
     const TITILER_URL = '{{ titiler_url | default("", true) }}';
 </script>
-<script src="{{ url_for('static', path='js/collections.js') }}"></script>
+<script src="/static/js/collections.js"></script>
 {% endblock %}

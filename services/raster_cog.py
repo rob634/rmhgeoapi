@@ -457,8 +457,27 @@ def create_cog(params: dict) -> dict:
             in_memory = config_obj.raster_cog_in_memory
             logger.info(f"   Using config default in_memory={in_memory}")
 
+        # ETL Mount Override (24 JAN 2026)
+        # When ETL mount is enabled (Docker workers with Azure Files mount),
+        # force in_memory=False and use the mount for GDAL temp files.
+        # This allows processing files larger than container RAM.
+        if config_obj.raster.use_etl_mount:
+            mount_path = config_obj.raster.etl_mount_path
+            logger.info(f"📁 ETL Mount ENABLED: Forcing disk-based processing")
+            in_memory = False  # Always disk-based when mount enabled
+
+            # Configure GDAL to use mount for temp files
+            try:
+                from osgeo import gdal
+                os.environ["CPL_TMPDIR"] = mount_path
+                gdal.SetConfigOption("CPL_TMPDIR", mount_path)
+                logger.info(f"   CPL_TMPDIR set to: {mount_path}")
+            except Exception as e:
+                logger.warning(f"   ⚠️ Could not set CPL_TMPDIR: {e}")
+
         logger.info(f"✅ STEP 3: COG profile configured")
-        logger.info(f"   Processing mode: {'in-memory (RAM)' if in_memory else 'disk-based (/tmp SSD)'}")
+        temp_location = config_obj.raster.etl_mount_path if config_obj.raster.use_etl_mount else "/tmp"
+        logger.info(f"   Processing mode: {'in-memory (RAM)' if in_memory else f'disk-based ({temp_location})'}")
 
         # STEP 4: Open input with MemoryFile and create COG with MemoryFile output
         logger.info("🔄 STEP 4: Opening input raster with MemoryFile...")

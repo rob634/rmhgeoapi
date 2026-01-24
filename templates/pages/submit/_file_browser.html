@@ -1,0 +1,100 @@
+{# ============================================================================
+   FILE BROWSER PARTIAL
+   ============================================================================
+   HTMX partial for browsing blob storage files.
+   Loaded when user selects "Select from Blob Storage" option.
+   ============================================================================ #}
+
+<div class="file-browser">
+    {# Storage Controls #}
+    <div class="browser-controls">
+        <div class="control-row">
+            <div class="control-group">
+                <label>Zone:</label>
+                <div class="zone-badge zone-badge-bronze">BRONZE (Source Data)</div>
+                <input type="hidden" id="browser-zone" value="bronze">
+            </div>
+
+            <div class="control-group">
+                <label for="browser-container">Container:</label>
+                <select id="browser-container"
+                        class="form-select"
+                        hx-get="/interface/submit/partial/containers?zone=bronze"
+                        hx-trigger="load"
+                        hx-target="this"
+                        hx-swap="innerHTML"
+                        hx-indicator="#container-spinner"
+                        onchange="containerChanged()">
+                    <option value="">Loading containers...</option>
+                </select>
+                <span id="container-spinner" class="htmx-indicator spinner-sm"></span>
+            </div>
+        </div>
+
+        <div class="control-row">
+            <div class="control-group flex-grow">
+                <label for="browser-prefix">Path Filter:</label>
+                <input type="text"
+                       id="browser-prefix"
+                       class="form-input"
+                       placeholder="e.g., uploads/2024/">
+            </div>
+
+            <button type="button"
+                    id="load-files-btn"
+                    class="btn btn-primary"
+                    disabled
+                    hx-get="/interface/submit/partial/files"
+                    hx-target="#files-tbody"
+                    hx-trigger="click"
+                    hx-indicator="#files-spinner"
+                    hx-include="#browser-zone, #browser-container, #browser-prefix"
+                    onclick="prepareFileLoad()">
+                Load Files
+            </button>
+        </div>
+    </div>
+
+    {# Files Table #}
+    <div class="files-panel">
+        <div id="files-spinner" class="htmx-indicator loading-overlay">
+            <div class="spinner"></div>
+            <span>Loading files...</span>
+        </div>
+
+        <table class="files-table hidden" id="files-table">
+            <thead>
+                <tr>
+                    <th class="col-name">Name</th>
+                    <th class="col-size">Size</th>
+                    <th class="col-date">Modified</th>
+                    <th class="col-type">Type</th>
+                </tr>
+            </thead>
+            <tbody id="files-tbody">
+                {# File rows inserted by HTMX #}
+            </tbody>
+        </table>
+
+        {# Initial State #}
+        <div id="files-initial-state" class="empty-state">
+            <div class="empty-icon">
+                <svg viewBox="0 0 24 24" width="48" height="48"><path fill="currentColor" d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+            </div>
+            <h3>Select a Container</h3>
+            <p>Choose a container and click "Load Files" to browse</p>
+            <p class="supported-formats">
+                <strong>Supported:</strong> .tif, .tiff, .geojson, .gpkg, .csv, .kml, .shp, .zip
+            </p>
+        </div>
+
+        {# Empty State (shown when no matching files) #}
+        <div id="files-empty-state" class="empty-state hidden">
+            <div class="empty-icon">
+                <svg viewBox="0 0 24 24" width="48" height="48"><path fill="currentColor" d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zM6 20V4h7v5h5v11H6z"/></svg>
+            </div>
+            <h3>No Files Found</h3>
+            <p>No supported geospatial files in this location</p>
+        </div>
+    </div>
+</div>

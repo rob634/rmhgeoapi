@@ -89,6 +89,7 @@ if TYPE_CHECKING:
     from .curated_repository import CuratedUpdateLogRepository as _CuratedUpdateLogRepository
     from .promoted_repository import PromotedDatasetRepository as _PromotedDatasetRepository
     from .approval_repository import ApprovalRepository as _ApprovalRepository
+    from .job_event_repository import JobEventRepository as _JobEventRepository
     from .connection_pool import ConnectionPoolManager as _ConnectionPoolManager
     from .database_initializer import (
         DatabaseInitializer as _DatabaseInitializer,
@@ -206,6 +207,11 @@ def __getattr__(name: str):
         from .approval_repository import ApprovalRepository
         return ApprovalRepository
 
+    # Job Event Tracking (23 JAN 2026 - Execution Timeline)
+    elif name == "JobEventRepository":
+        from .job_event_repository import JobEventRepository
+        return JobEventRepository
+
     # Pipeline Observability (E13)
     elif name == "MetricsRepository":
         from .metrics_repository import MetricsRepository
@@ -301,6 +307,8 @@ __all__ = [
     "CuratedUpdateLogRepository",
     "PromotedDatasetRepository",
     "ApprovalRepository",
+    # Job Event Tracking (23 JAN 2026 - Execution Timeline)
+    "JobEventRepository",
     "MetricsRepository",
     "JobProgressTracker",
     "JobProgressSnapshot",

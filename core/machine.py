@@ -66,6 +66,7 @@ from core.models import (
     TaskResult,
     JobExecutionContext
 )
+from core.models.job_event import JobEventType, JobEventStatus  # Job event tracking (23 JAN 2026)
 from core.schema.queue import JobQueueMessage, TaskQueueMessage, StageCompleteMessage
 from core.schema.updates import TaskUpdateModel
 
@@ -183,6 +184,7 @@ class CoreMachine:
         # Lazy-loaded repository caches (13 NOV 2025 - Part 1 Task 1.1)
         self._repos = None
         self._service_bus_repo = None
+        self._event_repo = None  # Job event repository (23 JAN 2026)
 
         # Logging
         self.logger = LoggerFactory.create_logger(
@@ -237,6 +239,26 @@ class CoreMachine:
             self._service_bus_repo = RepositoryFactory.create_service_bus_repository()
             self.logger.debug("✅ Service Bus repository created (lazy load)")
         return self._service_bus_repo
+
+    @property
+    def event_repo(self):
+        """
+        Lazy-loaded Job Event Repository.
+
+        Used to record execution events for progress tracking and debugging.
+        Events are recorded from both FunctionApp and Docker workers.
+
+        Returns:
+            JobEventRepository instance
+
+        Usage:
+            self.event_repo.record_task_event(job_id, task_id, stage, event_type, ...)
+        """
+        if self._event_repo is None:
+            from infrastructure import JobEventRepository
+            self._event_repo = JobEventRepository()
+            self.logger.debug("✅ Job Event repository created (lazy load)")
+        return self._event_repo
 
     # ========================================================================
     # TASK ROUTING (11 DEC 2025 - No Legacy Fallbacks)
@@ -454,6 +476,21 @@ class CoreMachine:
             JobStatus.PROCESSING
         )
         self.logger.info(f"✅ COREMACHINE STEP 4: Job status updated to PROCESSING")
+
+        # Record STAGE_STARTED event (23 JAN 2026 - Job Event Tracking)
+        try:
+            stage_name = None
+            if hasattr(job_class, 'stages') and job_class.stages and job_message.stage <= len(job_class.stages):
+                stage_name = job_class.stages[job_message.stage - 1].get("name", f"stage_{job_message.stage}")
+            self.event_repo.record_job_event(
+                job_id=job_message.job_id,
+                event_type=JobEventType.STAGE_STARTED,
+                event_status=JobEventStatus.INFO,
+                stage=job_message.stage,
+                event_data={"stage_name": stage_name, "job_type": job_message.job_type}
+            )
+        except Exception as e:
+            self.logger.warning(f"⚠️ Failed to record STAGE_STARTED event: {e}")
 
         # Step 3.1: Update job stage to match message stage (for monitoring/status queries)
         # FIX: 14 NOV 2025 - Job stage field was not advancing even though Stage 2+ tasks were processing
@@ -810,6 +847,20 @@ class CoreMachine:
                         'execution_started_at': execution_start.isoformat()
                     }
                 )
+
+                # Record TASK_STARTED event (23 JAN 2026 - Job Event Tracking)
+                try:
+                    self.event_repo.record_task_event(
+                        job_id=task_message.parent_job_id,
+                        task_id=task_message.task_id,
+                        stage=task_message.stage,
+                        event_type=JobEventType.TASK_STARTED,
+                        event_status=JobEventStatus.INFO,
+                        event_data={"task_type": task_message.task_type, "handler": handler.__name__}
+                    )
+                except Exception as event_err:
+                    self.logger.warning(f"⚠️ Failed to record TASK_STARTED event: {event_err}")
+
             else:
                 # FP2 FIX: Fail-fast if status update fails (don't execute handler)
                 error_msg = (
@@ -1063,6 +1114,24 @@ class CoreMachine:
                     }
                 )
 
+                # Record TASK_COMPLETED event (23 JAN 2026 - Job Event Tracking)
+                try:
+                    self.event_repo.record_task_event(
+                        job_id=task_message.parent_job_id,
+                        task_id=task_message.task_id,
+                        stage=task_message.stage,
+                        event_type=JobEventType.TASK_COMPLETED,
+                        event_status=JobEventStatus.SUCCESS,
+                        duration_ms=result.execution_time_ms,
+                        event_data={
+                            "task_type": task_message.task_type,
+                            "remaining_tasks": completion.remaining_tasks,
+                            "stage_complete": completion.stage_complete
+                        }
+                    )
+                except Exception as event_err:
+                    self.logger.warning(f"⚠️ Failed to record TASK_COMPLETED event: {event_err}")
+
                 # Step 4: Handle stage completion
                 if completion.stage_complete:
                     self.logger.info(
@@ -1250,6 +1319,25 @@ class CoreMachine:
                             'error_type': error_type
                         }
                     )
+
+                    # Record TASK_FAILED event (23 JAN 2026 - Job Event Tracking)
+                    try:
+                        self.event_repo.record_task_event(
+                            job_id=task_message.parent_job_id,
+                            task_id=task_message.task_id,
+                            stage=task_message.stage,
+                            event_type=JobEventType.TASK_FAILED,
+                            event_status=JobEventStatus.FAILURE,
+                            error_message=str(result.error_details)[:1000],
+                            event_data={
+                                "task_type": task_message.task_type,
+                                "error_type": error_type,
+                                "retryable": False
+                            }
+                        )
+                    except Exception as event_err:
+                        self.logger.warning(f"⚠️ Failed to record TASK_FAILED event: {event_err}")
+
                 except Exception as mark_error:
                     self.logger.error(
                         f"❌ Failed to mark task/job as failed: {mark_error}",
@@ -1626,6 +1714,20 @@ class CoreMachine:
                         'queue': queue_name
                     })
 
+                    # Record TASK_QUEUED events for batch (23 JAN 2026 - Job Event Tracking)
+                    try:
+                        for task_def in batch:
+                            self.event_repo.record_task_event(
+                                job_id=job_id,
+                                task_id=task_def.task_id,
+                                stage=stage_number,
+                                event_type=JobEventType.TASK_QUEUED,
+                                event_status=JobEventStatus.INFO,
+                                event_data={"task_type": task_def.task_type, "queue": queue_name}
+                            )
+                    except Exception as event_err:
+                        self.logger.warning(f"⚠️ Failed to record TASK_QUEUED events for batch: {event_err}")
+
                     self.logger.debug(f"✅ Batch {batch_id}: {len(batch)} tasks → {queue_name}")
                     global_task_idx += len(batch)
 
@@ -1698,6 +1800,19 @@ class CoreMachine:
                 queue_message = self._task_definition_to_message(task_def)
                 self.service_bus.send_message(queue_name, queue_message)
 
+                # Record TASK_QUEUED event (23 JAN 2026 - Job Event Tracking)
+                try:
+                    self.event_repo.record_task_event(
+                        job_id=job_id,
+                        task_id=task_def.task_id,
+                        stage=stage_number,
+                        event_type=JobEventType.TASK_QUEUED,
+                        event_status=JobEventStatus.INFO,
+                        event_data={"task_type": task_def.task_type, "queue": queue_name}
+                    )
+                except Exception as event_err:
+                    self.logger.warning(f"⚠️ Failed to record TASK_QUEUED event: {event_err}")
+
                 tasks_queued += 1
 
             except Exception as e:
@@ -1743,6 +1858,18 @@ class CoreMachine:
                 'timestamp': datetime.now(timezone.utc).isoformat()
             }
         )
+
+        # Record STAGE_COMPLETED event (23 JAN 2026 - Job Event Tracking)
+        try:
+            self.event_repo.record_job_event(
+                job_id=job_id,
+                event_type=JobEventType.STAGE_COMPLETED,
+                event_status=JobEventStatus.SUCCESS,
+                stage=completed_stage,
+                event_data={"job_type": job_type}
+            )
+        except Exception as event_err:
+            self.logger.warning(f"⚠️ Failed to record STAGE_COMPLETED event: {event_err}")
 
         # Get workflow to check if we should advance
         # Get workflow class from explicit registry
@@ -2143,6 +2270,22 @@ class CoreMachine:
                 }
             )
 
+            # Record JOB_COMPLETED event (23 JAN 2026 - Job Event Tracking)
+            try:
+                self.event_repo.record_job_event(
+                    job_id=job_id,
+                    event_type=JobEventType.JOB_COMPLETED,
+                    event_status=JobEventStatus.SUCCESS,
+                    event_data={
+                        "job_type": job_type,
+                        "task_count": len(task_results),
+                        "completed_tasks": sum(1 for tr in task_results if tr.status == TaskStatus.COMPLETED),
+                        "result_keys": list(final_result.keys()) if final_result else []
+                    }
+                )
+            except Exception as event_err:
+                self.logger.warning(f"⚠️ Failed to record JOB_COMPLETED event: {event_err}")
+
             # Invoke completion callback if registered (Platform integration - 30 OCT 2025)
             if self.on_job_complete:
                 try:
@@ -2210,6 +2353,17 @@ class CoreMachine:
             self.logger.info(f"🚫 Marking job {job_id[:16]}... as FAILED")
             self.state_manager.update_job_status(job_id, JobStatus.FAILED)
             self.logger.info(f"✅ Job marked as FAILED: {error_message}")
+
+            # Record JOB_FAILED event (23 JAN 2026 - Job Event Tracking)
+            try:
+                self.event_repo.record_job_event(
+                    job_id=job_id,
+                    event_type=JobEventType.JOB_FAILED,
+                    event_status=JobEventStatus.FAILURE,
+                    error_message=error_message[:1000] if error_message else None
+                )
+            except Exception as event_err:
+                self.logger.warning(f"⚠️ Failed to record JOB_FAILED event: {event_err}")
 
             # Invoke completion callback for failures (Platform integration - 30 OCT 2025)
             if self.on_job_complete:

@@ -77,3 +77,4 @@ pillow>=10.0.0
 # Workers Entrance - Direct HTTP endpoint (optional)
 fastapi>=0.104.0
 uvicorn>=0.24.0
+jinja2>=3.1.0  # HTML templates for Docker Worker UI

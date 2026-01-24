@@ -3,24 +3,41 @@
 # ============================================================================
 # STATUS: Services - Consolidated raster handler for Docker worker
 # PURPOSE: Single handler that does validate → COG → STAC in one execution
-# LAST_REVIEWED: 19 JAN 2026
+# LAST_REVIEWED: 24 JAN 2026
 # F7.18: Integrated with Docker Orchestration Framework (graceful shutdown)
 # F7.19: Real-time progress reporting for Workflow Monitor (19 JAN 2026)
 # F7.20: Resource metrics tracking (peak memory, CPU) for capacity planning
+# V0.8: Internal tiling decision based on file size (24 JAN 2026)
 # ============================================================================
 """
 Process Raster Complete - Consolidated Docker Handler.
 
-Combines all three stages of raster processing into a single handler:
+V0.8 Architecture (24 JAN 2026):
+    This handler now handles BOTH single COG and tiled output internally:
+    - Files <= raster_tiling_threshold_mb → Single COG (3 phases)
+    - Files > raster_tiling_threshold_mb → Tiled output (5 phases)
+
+    The tiling decision is made internally based on the file size passed
+    via '_file_size_mb' parameter. This consolidates process_raster_docker
+    and process_large_raster_docker into a single workflow.
+
+Single COG Mode (files <= threshold):
     1. Validation (CRS, type detection)
     2. COG creation (reproject + compress)
     3. STAC metadata (catalog registration)
+
+Tiled Mode (files > threshold):
+    1. Generate tiling scheme
+    2. Extract tiles
+    3. Create COGs for each tile
+    4. Create MosaicJSON
+    5. Create STAC collection
 
 Why Consolidated:
     - Docker has no timeout (unlike 10-min Function App limit)
     - Eliminates stage progression overhead
     - Single atomic operation with rollback on failure
-    - Reuses existing handler logic
+    - One job type for all raster sizes
 
 Docker Orchestration Framework (F7.18 - 16 JAN 2026):
     When running in Docker mode, receives DockerTaskContext via _docker_context:
@@ -28,18 +45,10 @@ Docker Orchestration Framework (F7.18 - 16 JAN 2026):
     - Graceful shutdown support (saves checkpoint on SIGTERM)
     - Progress reporting for visibility
 
-    The handler checks context.should_stop() between phases. If shutdown
-    is requested, it saves the checkpoint and returns with 'interrupted': True.
-    The task will resume from the saved phase when a new container picks it up.
-
 Checkpoint/Resume Support:
     - Phase tracking (skip completed phases on resume)
     - Artifact validation (ensure outputs exist before saving checkpoint)
     - Data persistence (pass results between phases on resume)
-
-    Resume scenario: Docker crashes after Phase 2 (COG created).
-    On restart, CheckpointManager detects phase=2 completed,
-    skips phases 1-2, and continues with Phase 3 (STAC).
 
 Exports:
     process_raster_complete: Consolidated handler function
@@ -66,6 +75,7 @@ def _report_progress(
     docker_context,
     percent: float,
     phase: int,
+    total_phases: int,
     phase_name: str,
     message: str
 ) -> None:
@@ -79,7 +89,8 @@ def _report_progress(
     Args:
         docker_context: DockerTaskContext or None
         percent: Progress percentage (0-100)
-        phase: Current phase number (1, 2, or 3)
+        phase: Current phase number
+        total_phases: Total number of phases in this workflow
         phase_name: Human-readable phase name
         message: Status message to display
     """
@@ -89,23 +100,476 @@ def _report_progress(
     try:
         docker_context.report_progress(
             percent=percent,
-            message=f"Phase {phase}/3: {phase_name} - {message}"
+            message=f"Phase {phase}/{total_phases}: {phase_name} - {message}"
         )
     except Exception as e:
         # Progress reporting is non-critical - log and continue
         logger.debug(f"Progress report failed (non-critical): {e}")
 
 
+# =============================================================================
+# V0.8: TILED WORKFLOW (24 JAN 2026)
+# =============================================================================
+
+def _process_raster_tiled(
+    params: Dict[str, Any],
+    context: Optional[Dict],
+    start_time: float
+) -> Dict[str, Any]:
+    """
+    Process large raster with tiled output.
+
+    V0.8 Architecture (24 JAN 2026):
+        This is the internal tiled workflow, called when file size exceeds
+        raster_tiling_threshold_mb. It produces multiple COG tiles and a MosaicJSON.
+
+    Phases:
+        1. Generate tiling scheme
+        2. Extract tiles
+        3. Create COGs for each tile
+        4. Create MosaicJSON
+        5. Create STAC collection
+
+    This logic is adapted from handler_process_large_raster_complete.py,
+    now unified into the single process_raster_docker workflow.
+    """
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    from config import get_config
+
+    config = get_config()
+
+    blob_name = params.get('blob_name', 'unknown')
+    container_name = params.get('container_name', 'unknown')
+    task_id = params.get('_task_id')
+    job_id = params.get('_job_id', 'unknown')
+    file_size_mb = params.get('_file_size_mb')
+
+    logger.info("=" * 70)
+    logger.info("PROCESS RASTER - TILED MODE (V0.8)")
+    logger.info(f"Source: {container_name}/{blob_name}")
+    logger.info(f"File size: {file_size_mb:.1f} MB" if file_size_mb else "File size: unknown")
+    logger.info("=" * 70)
+
+    # Initialize checkpoint manager
+    checkpoint = None
+    task_repo = None
+    if task_id:
+        try:
+            from infrastructure import CheckpointManager
+            from infrastructure.factory import RepositoryFactory
+            task_repo = RepositoryFactory.create_task_repository()
+            checkpoint = CheckpointManager(task_id, task_repo)
+            if checkpoint.current_phase > 0:
+                logger.info(f"🔄 RESUMING from phase {checkpoint.current_phase}")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to initialize CheckpointManager: {e}")
+
+    # Track results from each phase
+    tiling_result = {}
+    extraction_result = {}
+    cog_results = []
+    mosaicjson_result = {}
+    stac_result = {}
+
+    try:
+        # =====================================================================
+        # PHASE 1: GENERATE TILING SCHEME
+        # =====================================================================
+        if checkpoint and checkpoint.should_skip(1):
+            logger.info("⏭️ PHASE 1: Skipping tiling scheme (checkpoint)")
+            tiling_result = checkpoint.get_data('tiling_result', {})
+        else:
+            logger.info("🔄 PHASE 1: Generating tiling scheme...")
+            phase1_start = time.time()
+
+            from .tiling_scheme import generate_tiling_scheme
+
+            tiling_params = {
+                'container_name': container_name,
+                'blob_name': blob_name,
+                'tile_size': params.get('tile_size'),
+                'overlap': params.get('overlap', 512),
+                'output_container': config.storage.silver.cogs,
+                'band_names': params.get('band_names'),
+                'target_crs': params.get('target_crs') or config.raster.target_crs,
+            }
+
+            tiling_response = generate_tiling_scheme(tiling_params)
+
+            if not tiling_response.get('success'):
+                logger.error(f"❌ Tiling scheme generation failed: {tiling_response.get('error')}")
+                return {
+                    "success": False,
+                    "error": "TILING_SCHEME_FAILED",
+                    "message": tiling_response.get('message', 'Tiling scheme generation failed'),
+                    "phase": 1,
+                    "phase_name": "tiling_scheme",
+                    "output_mode": "tiled",
+                }
+
+            tiling_result = tiling_response.get('result', {})
+            phase1_duration = time.time() - phase1_start
+
+            logger.info(f"✅ PHASE 1 complete: {phase1_duration:.2f}s")
+            logger.info(f"   Tile count: {tiling_result.get('tile_count')}")
+            logger.info(f"   Grid: {tiling_result.get('grid_dimensions')}")
+
+            if checkpoint:
+                checkpoint.save(phase=1, data={'tiling_result': tiling_result})
+
+        # =====================================================================
+        # PHASE 2: EXTRACT TILES
+        # =====================================================================
+        if checkpoint and checkpoint.should_skip(2):
+            logger.info("⏭️ PHASE 2: Skipping tile extraction (checkpoint)")
+            extraction_result = checkpoint.get_data('extraction_result', {})
+        else:
+            tile_count = tiling_result.get('tile_count', 0)
+            logger.info(f"🔄 PHASE 2: Extracting {tile_count} tiles...")
+            phase2_start = time.time()
+
+            from .tiling_extraction import extract_tiles
+
+            extraction_params = {
+                'container_name': container_name,
+                'blob_name': blob_name,
+                'tiling_scheme_blob': tiling_result.get('tiling_scheme_blob'),
+                'tiling_scheme_container': config.storage.silver.cogs,
+                'output_container': config.resolved_intermediate_tiles_container,
+                'job_id': job_id,
+                'band_names': params.get('band_names') or tiling_result.get('raster_metadata', {}).get('used_band_names'),
+            }
+
+            extraction_response = extract_tiles(extraction_params)
+
+            if not extraction_response.get('success'):
+                logger.error(f"❌ Tile extraction failed: {extraction_response.get('error')}")
+                return {
+                    "success": False,
+                    "error": "TILE_EXTRACTION_FAILED",
+                    "message": extraction_response.get('message', 'Tile extraction failed'),
+                    "phase": 2,
+                    "phase_name": "extract_tiles",
+                    "tiling": tiling_result,
+                    "output_mode": "tiled",
+                }
+
+            extraction_result = extraction_response.get('result', {})
+            phase2_duration = time.time() - phase2_start
+
+            logger.info(f"✅ PHASE 2 complete: {phase2_duration:.2f}s")
+            logger.info(f"   Tiles extracted: {extraction_result.get('tile_count')}")
+
+            if checkpoint:
+                checkpoint.save(phase=2, data={'extraction_result': extraction_result})
+
+        # =====================================================================
+        # PHASE 3: CREATE COGS
+        # =====================================================================
+        if checkpoint and checkpoint.should_skip(3):
+            logger.info("⏭️ PHASE 3: Skipping COG creation (checkpoint)")
+            cog_results = checkpoint.get_data('cog_results', [])
+        else:
+            tile_blobs = extraction_result.get('tile_blobs', [])
+            tile_count = len(tile_blobs)
+            source_crs = extraction_result.get('source_crs')
+            raster_metadata = extraction_result.get('raster_metadata', {})
+
+            logger.info(f"🔄 PHASE 3: Creating {tile_count} COGs...")
+            phase3_start = time.time()
+
+            from .raster_cog import create_cog
+
+            # Build raster_type dict from metadata
+            raster_type = {
+                "detected_type": raster_metadata.get("detected_type", "unknown"),
+                "band_count": raster_metadata.get("band_count", 3),
+                "data_type": raster_metadata.get("data_type", "uint8"),
+                "optimal_cog_settings": {}
+            }
+
+            blob_stem = Path(blob_name).stem
+            output_folder = params.get('output_folder')
+            target_crs = params.get('target_crs') or config.raster.target_crs
+            jpeg_quality = params.get('jpeg_quality') or config.raster.cog_jpeg_quality
+
+            cog_results = []
+            cog_blobs = []
+
+            for idx, tile_blob in enumerate(tile_blobs):
+                logger.info(f"   📦 COG {idx+1}/{tile_count}: {tile_blob.split('/')[-1]}")
+
+                # Generate output filename
+                tile_filename = tile_blob.split('/')[-1]
+                output_filename = tile_filename.replace('.tif', '_cog.tif')
+                if output_folder:
+                    output_blob_name = f"{output_folder}/{output_filename}"
+                else:
+                    output_blob_name = output_filename
+
+                cog_params = {
+                    'container_name': config.resolved_intermediate_tiles_container,
+                    'blob_name': tile_blob,
+                    'source_crs': source_crs,
+                    'target_crs': target_crs,
+                    'raster_type': raster_type,
+                    'output_tier': params.get('output_tier', 'analysis'),
+                    'output_blob_name': output_blob_name,
+                    'output_container': config.storage.silver.cogs,
+                    'jpeg_quality': jpeg_quality,
+                    'overview_resampling': config.raster.overview_resampling,
+                    'reproject_resampling': config.raster.reproject_resampling,
+                    'in_memory': False,  # Docker uses disk for large files
+                }
+
+                cog_response = create_cog(cog_params)
+
+                if not cog_response.get('success'):
+                    logger.error(f"❌ COG creation failed for tile {idx+1}: {cog_response.get('error')}")
+                    return {
+                        "success": False,
+                        "error": "COG_CREATION_FAILED",
+                        "message": f"COG creation failed for tile {idx+1}: {cog_response.get('error')}",
+                        "phase": 3,
+                        "phase_name": "create_cogs",
+                        "tile_index": idx,
+                        "tiling": tiling_result,
+                        "extraction": extraction_result,
+                        "output_mode": "tiled",
+                    }
+
+                cog_result = cog_response.get('result', {})
+                cog_results.append(cog_result)
+                cog_blob = cog_result.get('output_blob') or cog_result.get('cog_blob')
+                if cog_blob:
+                    cog_blobs.append(cog_blob)
+
+            phase3_duration = time.time() - phase3_start
+
+            logger.info(f"✅ PHASE 3 complete: {phase3_duration:.2f}s")
+            logger.info(f"   COGs created: {len(cog_blobs)}")
+
+            if checkpoint:
+                checkpoint.save(phase=3, data={
+                    'cog_results': cog_results,
+                    'cog_blobs': cog_blobs,
+                })
+
+        # Get cog_blobs from results if resuming
+        if not cog_results:
+            cog_blobs = checkpoint.get_data('cog_blobs', []) if checkpoint else []
+        else:
+            cog_blobs = [r.get('output_blob') or r.get('cog_blob') for r in cog_results if r]
+
+        # =====================================================================
+        # PHASE 4: CREATE MOSAICJSON
+        # =====================================================================
+        if checkpoint and checkpoint.should_skip(4):
+            logger.info("⏭️ PHASE 4: Skipping MosaicJSON (checkpoint)")
+            mosaicjson_result = checkpoint.get_data('mosaicjson_result', {})
+        else:
+            logger.info(f"🔄 PHASE 4: Creating MosaicJSON from {len(cog_blobs)} COGs...")
+            phase4_start = time.time()
+
+            from .raster_mosaicjson import create_mosaicjson
+
+            # Generate MosaicJSON output path
+            blob_stem = Path(blob_name).stem
+            mosaicjson_blob = f"{blob_stem}_mosaic.json"
+            if params.get('output_folder'):
+                mosaicjson_blob = f"{params['output_folder']}/{mosaicjson_blob}"
+
+            mosaicjson_params = {
+                'cog_blobs': cog_blobs,
+                'cog_container': config.storage.silver.cogs,
+                'output_blob': mosaicjson_blob,
+                'output_container': config.storage.silver.cogs,
+                'name': blob_stem,
+                'description': f"MosaicJSON for {blob_name}",
+            }
+
+            mosaicjson_response = create_mosaicjson(mosaicjson_params)
+
+            if not mosaicjson_response.get('success'):
+                logger.warning(f"⚠️ MosaicJSON creation failed (non-fatal): {mosaicjson_response.get('error')}")
+                mosaicjson_result = {
+                    "degraded": True,
+                    "error": mosaicjson_response.get('error'),
+                }
+            else:
+                mosaicjson_result = mosaicjson_response.get('result', {})
+
+            phase4_duration = time.time() - phase4_start
+
+            logger.info(f"✅ PHASE 4 complete: {phase4_duration:.2f}s")
+            if mosaicjson_result.get('mosaicjson_blob'):
+                logger.info(f"   MosaicJSON: {mosaicjson_result.get('mosaicjson_blob')}")
+
+            if checkpoint:
+                checkpoint.save(phase=4, data={'mosaicjson_result': mosaicjson_result})
+
+        # =====================================================================
+        # PHASE 5: CREATE STAC COLLECTION
+        # =====================================================================
+        if checkpoint and checkpoint.should_skip(5):
+            logger.info("⏭️ PHASE 5: Skipping STAC (checkpoint)")
+            stac_result = checkpoint.get_data('stac_result', {})
+        else:
+            logger.info("🔄 PHASE 5: Creating STAC collection...")
+            phase5_start = time.time()
+
+            from .raster_stac_collection import create_stac_collection
+
+            collection_id = params.get('collection_id')
+            blob_stem = Path(blob_name).stem
+
+            stac_params = {
+                'collection_id': collection_id,
+                'item_id': params.get('item_id') or blob_stem,
+                'cog_blobs': cog_blobs,
+                'cog_container': config.storage.silver.cogs,
+                'mosaicjson_blob': mosaicjson_result.get('mosaicjson_blob'),
+                'mosaicjson_container': config.storage.silver.cogs,
+                'title': f"Large Raster: {blob_stem}",
+                'description': f"Tiled COG mosaic from {blob_name}",
+                # Platform passthrough
+                'dataset_id': params.get('dataset_id'),
+                'resource_id': params.get('resource_id'),
+                'version_id': params.get('version_id'),
+                'access_level': params.get('access_level'),
+            }
+
+            stac_response = create_stac_collection(stac_params)
+
+            if not stac_response.get('success'):
+                logger.warning(f"⚠️ STAC creation failed (non-fatal): {stac_response.get('error')}")
+                stac_result = {
+                    "degraded": True,
+                    "error": stac_response.get('error'),
+                }
+            else:
+                stac_result = stac_response.get('result', {})
+
+            phase5_duration = time.time() - phase5_start
+
+            logger.info(f"✅ PHASE 5 complete: {phase5_duration:.2f}s")
+            if stac_result.get('collection_id'):
+                logger.info(f"   Collection: {stac_result.get('collection_id')}")
+
+            if checkpoint:
+                checkpoint.save(phase=5, data={'stac_result': stac_result})
+
+        # =====================================================================
+        # SUCCESS - TILED OUTPUT
+        # =====================================================================
+        total_duration = time.time() - start_time
+
+        logger.info("=" * 70)
+        logger.info("✅ PROCESS RASTER COMPLETE (TILED) - SUCCESS")
+        logger.info(f"   Total duration: {total_duration:.2f}s ({total_duration/60:.1f} min)")
+        logger.info(f"   Tiles: {tiling_result.get('tile_count', 0)}")
+        logger.info(f"   COGs: {len(cog_blobs)}")
+        if mosaicjson_result.get('mosaicjson_blob'):
+            logger.info(f"   MosaicJSON: {mosaicjson_result.get('mosaicjson_blob')}")
+        if stac_result.get('collection_id'):
+            logger.info(f"   STAC: {stac_result.get('collection_id')}")
+        logger.info("=" * 70)
+
+        # =====================================================================
+        # ARTIFACT REGISTRY (21 JAN 2026)
+        # =====================================================================
+        artifact_id = None
+        try:
+            from services.artifact_service import ArtifactService
+
+            # Build client_refs from platform parameters
+            client_refs = {}
+            if params.get('dataset_id'):
+                client_refs['dataset_id'] = params['dataset_id']
+            if params.get('resource_id'):
+                client_refs['resource_id'] = params['resource_id']
+            if params.get('version_id'):
+                client_refs['version_id'] = params['version_id']
+
+            # Only create artifact if we have client refs (platform job) and MosaicJSON
+            if client_refs and mosaicjson_result.get('mosaicjson_blob'):
+                artifact_service = ArtifactService()
+                artifact = artifact_service.create_artifact(
+                    storage_account=config.storage.silver.account_name,
+                    container=mosaicjson_result.get('mosaicjson_container'),
+                    blob_path=mosaicjson_result.get('mosaicjson_blob'),
+                    client_type='ddh',
+                    client_refs=client_refs,
+                    stac_collection_id=stac_result.get('collection_id'),
+                    stac_item_id=stac_result.get('item_id'),
+                    source_job_id=params.get('_job_id'),
+                    source_task_id=params.get('_task_id'),
+                    content_hash=None,  # MosaicJSON doesn't have checksum yet
+                    size_bytes=None,
+                    content_type='application/json',
+                    blob_version_id=mosaicjson_result.get('blob_version_id'),
+                    metadata={
+                        'tile_count': tiling_result.get('tile_count'),
+                        'cog_count': len(cog_blobs),
+                        'raster_type': 'large_tiled',
+                    },
+                    overwrite=True
+                )
+                artifact_id = str(artifact.artifact_id)
+                logger.info(f"📦 Artifact created: {artifact_id} (revision {artifact.revision})")
+            else:
+                logger.debug("Skipping artifact creation - no client_refs or MosaicJSON")
+        except Exception as e:
+            logger.warning(f"⚠️ Artifact creation failed (non-fatal): {e}")
+
+        return {
+            "success": True,
+            "result": {
+                "output_mode": "tiled",
+                "tiling": tiling_result,
+                "extraction": extraction_result,
+                "cogs": {
+                    "count": len(cog_blobs),
+                    "blobs": cog_blobs,
+                },
+                "mosaicjson": mosaicjson_result,
+                "stac": stac_result,
+                "timing": {
+                    "total_seconds": round(total_duration, 1),
+                    "total_minutes": round(total_duration / 60, 2),
+                },
+                "artifact_id": artifact_id,
+            }
+        }
+
+    except Exception as e:
+        logger.exception(f"❌ PROCESS RASTER (TILED) FAILED: {e}")
+        return {
+            "success": False,
+            "error": "PROCESSING_FAILED",
+            "error_type": type(e).__name__,
+            "message": str(e),
+            "phase": "unknown",
+            "output_mode": "tiled",
+            "tiling": tiling_result,
+            "extraction": extraction_result,
+        }
+
+
 def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = None) -> Dict[str, Any]:
     """
     Complete raster processing in single execution.
 
-    Consolidates validate → COG → STAC into one handler.
-    Designed for Docker worker with no timeout constraints.
+    V0.8 Architecture (24 JAN 2026):
+        This handler decides internally whether to produce single COG or tiled output
+        based on file size vs raster_tiling_threshold_mb config.
 
     Args:
         params: Task parameters with:
             - _task_id: Task ID for checkpoint tracking (optional but recommended)
+            - _file_size_mb: File size in MB (from pre-flight validation)
             - blob_url: Azure blob URL with SAS token
             - blob_name: Source blob path
             - container_name: Source container
@@ -118,30 +582,51 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             - item_id: Optional STAC item ID
             - use_windowed_read: Enable chunked processing for large files
             - chunk_size_mb: Window size for chunked processing
+            - tile_size: (tiled mode) Tile size in pixels
+            - overlap: (tiled mode) Tile overlap in pixels
+            - band_names: (tiled mode) Band mapping for extraction
         context: Optional context (not used in Docker mode)
 
     Returns:
         dict: Combined result with validation, cog, and stac sections
 
-    Resume Behavior:
-        If _task_id is provided and task has existing checkpoint:
-        - Phase 1 (validation): Skipped if checkpoint_phase >= 1
-        - Phase 2 (COG): Skipped if checkpoint_phase >= 2
-        - Phase 3 (STAC): Skipped if checkpoint_phase >= 3
-        Checkpoint data provides inputs for resumed phases.
+    Output Mode:
+        If _file_size_mb <= raster_tiling_threshold_mb (or not provided):
+            Single COG output (3 phases: validate → COG → STAC)
+        If _file_size_mb > raster_tiling_threshold_mb:
+            Tiled output (5 phases: tiling → extract → COGs → MosaicJSON → STAC)
     """
     start_time = time.time()
 
     blob_name = params.get('blob_name', 'unknown')
     container_name = params.get('container_name', 'unknown')
     task_id = params.get('_task_id')
+    job_id = params.get('_job_id', 'unknown')
+    file_size_mb = params.get('_file_size_mb')
+
+    # V0.8: Determine output mode based on file size (24 JAN 2026)
+    from config import get_config
+    config = get_config()
+    tiling_threshold_mb = config.raster.raster_tiling_threshold_mb
+
+    use_tiling = False
+    if file_size_mb is not None and file_size_mb > tiling_threshold_mb:
+        use_tiling = True
 
     logger.info("=" * 60)
-    logger.info("PROCESS RASTER COMPLETE - Docker Handler")
+    logger.info("PROCESS RASTER COMPLETE - Docker Handler (V0.8)")
     logger.info(f"Source: {container_name}/{blob_name}")
+    if file_size_mb:
+        logger.info(f"File size: {file_size_mb:.1f} MB (threshold: {tiling_threshold_mb} MB)")
+    logger.info(f"Output mode: {'TILED' if use_tiling else 'SINGLE_COG'}")
     if task_id:
         logger.info(f"Task ID: {task_id[:8]}... (checkpoint enabled)")
     logger.info("=" * 60)
+
+    # V0.8: Route to tiled workflow if file exceeds threshold
+    if use_tiling:
+        logger.info("📦 Routing to TILED workflow...")
+        return _process_raster_tiled(params, context, start_time)
 
     # Initialize checkpoint manager
     # F7.18: Use DockerTaskContext if available (Docker mode)
@@ -193,7 +678,7 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
         # =====================================================================
         if checkpoint and checkpoint.should_skip(1):
             logger.info("⏭️ PHASE 1: Skipping validation (already completed)")
-            _report_progress(docker_context, 20, 1, "Validation", "Skipped (resumed)")
+            _report_progress(docker_context, 20, 1, 3, "Validation", "Skipped (resumed)")
             # Restore validation result from checkpoint
             validation_result = checkpoint.get_data('validation_result', {})
             source_crs = checkpoint.get_data('source_crs')
@@ -207,7 +692,7 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                 }
         else:
             logger.info("🔄 PHASE 1: Validating raster...")
-            _report_progress(docker_context, 5, 1, "Validation", "Starting validation")
+            _report_progress(docker_context, 5, 1, 3, "Validation", "Starting validation")
             phase1_start = time.time()
 
             from .raster_validation import validate_raster
@@ -250,7 +735,7 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             logger.info(f"✅ PHASE 1 complete: {phase1_duration:.2f}s")
             logger.info(f"  Source CRS: {source_crs}")
             logger.info(f"  Raster type: {validation_result.get('raster_type', {}).get('detected_type')}")
-            _report_progress(docker_context, 20, 1, "Validation", f"Complete ({phase1_duration:.1f}s)")
+            _report_progress(docker_context, 20, 1, 3, "Validation", f"Complete ({phase1_duration:.1f}s)")
 
             # Save checkpoint after phase 1
             if checkpoint:
@@ -288,7 +773,7 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
 
         if checkpoint and checkpoint.should_skip(2):
             logger.info("⏭️ PHASE 2: Skipping COG creation (already completed)")
-            _report_progress(docker_context, 80, 2, "COG Creation", "Skipped (resumed)")
+            _report_progress(docker_context, 80, 2, 3, "COG Creation", "Skipped (resumed)")
             # Restore COG result from checkpoint
             cog_result = checkpoint.get_data('cog_result', {})
             cog_blob = checkpoint.get_data('cog_blob')
@@ -303,7 +788,7 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                 }
         else:
             logger.info("🔄 PHASE 2: Creating COG...")
-            _report_progress(docker_context, 25, 2, "COG Creation", "Starting COG conversion")
+            _report_progress(docker_context, 25, 2, 3, "COG Creation", "Starting COG conversion")
             phase2_start = time.time()
 
             from .raster_cog import create_cog
@@ -371,7 +856,7 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             logger.info(f"  COG blob: {cog_blob}")
             logger.info(f"  Size: {cog_size_mb} MB")
             _report_progress(
-                docker_context, 80, 2, "COG Creation",
+                docker_context, 80, 2, 3, "COG Creation",
                 f"Complete ({phase2_duration:.1f}s, {cog_size_mb:.1f} MB)"
             )
 
@@ -424,12 +909,12 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
         # =====================================================================
         if checkpoint and checkpoint.should_skip(3):
             logger.info("⏭️ PHASE 3: Skipping STAC metadata (already completed)")
-            _report_progress(docker_context, 100, 3, "STAC Registration", "Skipped (resumed)")
+            _report_progress(docker_context, 100, 3, 3, "STAC Registration", "Skipped (resumed)")
             # Restore STAC result from checkpoint
             stac_result = checkpoint.get_data('stac_result', {})
         else:
             logger.info("🔄 PHASE 3: Creating STAC metadata...")
-            _report_progress(docker_context, 85, 3, "STAC Registration", "Registering with catalog")
+            _report_progress(docker_context, 85, 3, 3, "STAC Registration", "Registering with catalog")
             phase3_start = time.time()
 
             from .stac_catalog import extract_stac_metadata
@@ -468,7 +953,7 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             logger.info(f"✅ PHASE 3 complete: {phase3_duration:.2f}s")
             if stac_result.get('item_id'):
                 logger.info(f"  STAC item: {stac_result.get('item_id')}")
-            _report_progress(docker_context, 100, 3, "STAC Registration", f"Complete ({phase3_duration:.1f}s)")
+            _report_progress(docker_context, 100, 3, 3, "STAC Registration", f"Complete ({phase3_duration:.1f}s)")
 
             # Save checkpoint after phase 3 (all phases complete)
             if checkpoint:
@@ -578,6 +1063,8 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
         return {
             "success": True,
             "result": {
+                # V0.8: Output mode indicator (24 JAN 2026)
+                "output_mode": "single_cog",
                 "validation": {
                     "source_crs": source_crs,
                     "raster_type": validation_result.get('raster_type', {}).get('detected_type'),

@@ -397,36 +397,37 @@ ENV_VAR_RULES: Dict[str, EnvVarRule] = {
     ),
 
     # =========================================================================
-    # RASTER PROCESSING CONFIG (12 JAN 2026)
+    # RASTER PROCESSING CONFIG (V0.8 - 24 JAN 2026)
     # =========================================================================
-    "RASTER_ROUTE_LARGE_MB": EnvVarRule(
-        pattern=_POSITIVE_INT,
-        pattern_description="Size threshold in MB for large raster routing",
+    # RASTER_ROUTE_* settings removed in V0.8 - all raster goes to Docker
+    # STAC_DEFAULT_COLLECTION removed (14 JAN 2026) - collection_id now required
+
+    "RASTER_USE_ETL_MOUNT": EnvVarRule(
+        pattern=_BOOLEAN,
+        pattern_description="Enable Azure Files mount for Docker temp files",
         required=False,
-        fix_suggestion="Set size threshold (MB) for routing to large raster pipeline",
-        example="100",
-        default_value="100",
+        fix_suggestion="Set to 'true' to enable mount (expected in V0.8 production)",
+        example="true",
+        default_value="true",
     ),
 
-    "RASTER_ROUTE_DOCKER_MB": EnvVarRule(
+    "RASTER_TILING_THRESHOLD_MB": EnvVarRule(
         pattern=_POSITIVE_INT,
-        pattern_description="Size threshold in MB for Docker raster routing",
+        pattern_description="Size threshold in MB for tiled output vs single COG",
         required=False,
-        fix_suggestion="Set size threshold (MB) for routing to Docker pipeline",
-        example="500",
-        default_value="500",
+        fix_suggestion="Set size threshold (MB) above which files produce tiled output",
+        example="2000",
+        default_value="2000",
     ),
 
-    "RASTER_ROUTE_REJECT_MB": EnvVarRule(
+    "RASTER_TILE_TARGET_MB": EnvVarRule(
         pattern=_POSITIVE_INT,
-        pattern_description="Size threshold in MB for rejecting oversized rasters",
+        pattern_description="Target size in MB per tile when tiling",
         required=False,
-        fix_suggestion="Set max size (MB) before rejection",
-        example="10000",
-        default_value="10000",
+        fix_suggestion="Set target size (MB) per tile",
+        example="400",
+        default_value="400",
     ),
-
-    # STAC_DEFAULT_COLLECTION removed (14 JAN 2026) - collection_id now required for all raster jobs
 
     "RASTER_COG_COMPRESSION": EnvVarRule(
         pattern=re.compile(r"^(LZW|DEFLATE|ZSTD|JPEG|WEBP|NONE)$", re.IGNORECASE),

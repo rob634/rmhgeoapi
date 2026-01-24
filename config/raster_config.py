@@ -121,56 +121,65 @@ class RasterConfig(BaseModel):
 
     Controls COG creation, validation, and processing settings.
 
-    Field Naming Convention (23 DEC 2025):
-        Field names match environment variable names for clarity.
-        No prefix stripping - what you see is what you set.
+    V0.8 Architecture (24 JAN 2026):
+        - ALL raster operations run on Docker worker
+        - ETL mount (Azure Files) is REQUIRED for production
+        - Single workflow (process_raster_docker) handles both single COG and tiled output
+        - Tiling decision is internal based on raster_tiling_threshold_mb
 
-        Routing (orchestration layer - which pipeline/queue):
-            raster_route_large_mb: Route to tiling pipeline
-            raster_route_docker_mb: Route to Docker worker queue
-            raster_route_reject_mb: Hard reject threshold
-
-        Handler (processing layer - how to process):
-            raster_tile_target_mb: Target tile size for extract_tiles
-            cog_in_memory: rio-cogeo in_memory parameter
+    Key Settings:
+        use_etl_mount: Expected True in production (False = degraded state)
+        raster_tiling_threshold_mb: When to produce tiled output vs single COG
+        raster_tile_target_mb: Target size per tile when tiling
     """
 
     # ==========================================================================
-    # ORCHESTRATION LAYER - Routing decisions
+    # V0.8 ETL MOUNT SETTINGS (24 JAN 2026)
     # ==========================================================================
 
-    raster_route_large_mb: int = Field(
-        default=RasterDefaults.RASTER_ROUTE_LARGE_MB,
-        description="File size threshold (MB) for routing to large raster pipeline. "
-                    "Files above this use process_large_raster_v2 (tiling)."
+    use_etl_mount: bool = Field(
+        default=RasterDefaults.USE_ETL_MOUNT,
+        description="""V0.8: Enable Azure Files mount for Docker temp files.
+
+        Expected True in production. False indicates degraded state.
+
+        When True (mount enabled - expected state):
+        - Docker workers use /mounts/etl-temp for GDAL temp files (CPL_TMPDIR)
+        - No size limit for raster processing (mount provides ~100TB)
+        - in_memory always forced to False (disk-based processing)
+        - Tiling decision based on raster_tiling_threshold_mb
+
+        When False (mount disabled - degraded state):
+        - Docker startup logs warning
+        - Limited to smaller files that fit in container temp space
+
+        Docker worker validates mount at startup.
+        """
     )
 
-    raster_route_docker_mb: int = Field(
-        default=RasterDefaults.RASTER_ROUTE_DOCKER_MB,
-        description="File size threshold (MB) for routing to Docker worker queue. "
-                    "Files above this route to long-running-tasks queue."
+    etl_mount_path: str = Field(
+        default=RasterDefaults.ETL_MOUNT_PATH,
+        description="Path where Azure Files is mounted in Docker container"
     )
 
-    raster_route_reject_mb: int = Field(
-        default=RasterDefaults.RASTER_ROUTE_REJECT_MB,
-        description="Maximum allowed file size in MB for raster processing. "
-                    "Files larger than this are rejected at pre-flight validation."
+    # ==========================================================================
+    # TILING SETTINGS (V0.8 - 24 JAN 2026)
+    # ==========================================================================
+
+    raster_tiling_threshold_mb: int = Field(
+        default=RasterDefaults.RASTER_TILING_THRESHOLD_MB,
+        description="File size threshold (MB) for tiled output vs single COG. "
+                    "Files above this produce N tiles, below produces single COG."
+    )
+
+    raster_tile_target_mb: int = Field(
+        default=RasterDefaults.RASTER_TILE_TARGET_MB,
+        description="Target size (MB) per tile when tiling large rasters."
     )
 
     raster_collection_max_files: int = Field(
         default=RasterDefaults.RASTER_COLLECTION_MAX_FILES,
-        description="Max files allowed in a raster collection. "
-                    "Collections larger than this are rejected - submit smaller batches."
-    )
-
-    # ==========================================================================
-    # HANDLER LAYER - Processing decisions
-    # ==========================================================================
-
-    raster_tile_target_mb: int = Field(
-        default=RasterDefaults.RASTER_TILE_TARGET_MB,
-        description="Target uncompressed tile size (MB) for extract_tiles stage. "
-                    "Tiles are sized so Function App workers can COG them without OOM."
+        description="Max files allowed in a raster collection submission."
     )
 
     # Intermediate storage
@@ -267,27 +276,21 @@ class RasterConfig(BaseModel):
     def from_environment(cls):
         """Load from environment variables."""
         return cls(
-            # Routing thresholds (orchestration layer - 23 DEC 2025)
-            raster_route_large_mb=int(os.environ.get(
-                "RASTER_ROUTE_LARGE_MB",
-                str(RasterDefaults.RASTER_ROUTE_LARGE_MB)
+            # V0.8 ETL Mount settings (24 JAN 2026)
+            use_etl_mount=os.environ.get("RASTER_USE_ETL_MOUNT", str(RasterDefaults.USE_ETL_MOUNT).lower()).lower() == "true",
+            etl_mount_path=os.environ.get("RASTER_ETL_MOUNT_PATH", RasterDefaults.ETL_MOUNT_PATH),
+            # V0.8 Tiling settings (24 JAN 2026)
+            raster_tiling_threshold_mb=int(os.environ.get(
+                "RASTER_TILING_THRESHOLD_MB",
+                str(RasterDefaults.RASTER_TILING_THRESHOLD_MB)
             )),
-            raster_route_docker_mb=int(os.environ.get(
-                "RASTER_ROUTE_DOCKER_MB",
-                str(RasterDefaults.RASTER_ROUTE_DOCKER_MB)
-            )),
-            raster_route_reject_mb=int(os.environ.get(
-                "RASTER_ROUTE_REJECT_MB",
-                str(RasterDefaults.RASTER_ROUTE_REJECT_MB)
+            raster_tile_target_mb=int(os.environ.get(
+                "RASTER_TILE_TARGET_MB",
+                str(RasterDefaults.RASTER_TILE_TARGET_MB)
             )),
             raster_collection_max_files=int(os.environ.get(
                 "RASTER_COLLECTION_MAX_FILES",
                 str(RasterDefaults.RASTER_COLLECTION_MAX_FILES)
-            )),
-            # Handler settings (processing layer - 23 DEC 2025)
-            raster_tile_target_mb=int(os.environ.get(
-                "RASTER_TILE_TARGET_MB",
-                str(RasterDefaults.RASTER_TILE_TARGET_MB)
             )),
             # Intermediate storage
             intermediate_tiles_container=os.environ.get("INTERMEDIATE_TILES_CONTAINER"),
@@ -303,6 +306,6 @@ class RasterConfig(BaseModel):
             reproject_resampling=os.environ.get("RASTER_REPROJECT_RESAMPLING", RasterDefaults.REPROJECT_RESAMPLING),
             strict_validation=os.environ.get("RASTER_STRICT_VALIDATION", str(RasterDefaults.STRICT_VALIDATION).lower()).lower() == "true",
             # MosaicJSON
-            mosaicjson_maxzoom=int(os.environ.get("RASTER_MOSAICJSON_MAXZOOM", str(RasterDefaults.MOSAICJSON_MAXZOOM)))
+            mosaicjson_maxzoom=int(os.environ.get("RASTER_MOSAICJSON_MAXZOOM", str(RasterDefaults.MOSAICJSON_MAXZOOM))),
             # stac_default_collection removed (14 JAN 2026) - collection_id required
         )

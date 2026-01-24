@@ -888,6 +888,131 @@ def test_storage_connectivity() -> dict:
 
 
 # ============================================================================
+# ETL MOUNT VALIDATION (24 JAN 2026)
+# ============================================================================
+
+def validate_etl_mount() -> Dict[str, Any]:
+    """
+    Validate ETL mount at startup when RASTER_USE_ETL_MOUNT=true.
+
+    Checks:
+    1. Mount path exists
+    2. Mount is writable
+    3. GDAL can use mount for temp files (CPL_TMPDIR)
+
+    Returns:
+        Dict with validation status and details
+
+    Raises:
+        RuntimeError: If mount is enabled but validation fails (fatal)
+    """
+    import shutil
+
+    from config import get_config
+    config = get_config()
+    raster_config = config.raster
+
+    result = {
+        "mount_enabled": raster_config.use_etl_mount,
+        "mount_path": raster_config.etl_mount_path,
+        "validated": False,
+        "error": None,
+    }
+
+    if not raster_config.use_etl_mount:
+        # V0.8: Mount is expected - warn if disabled
+        result["message"] = "ETL mount disabled - DEGRADED STATE"
+        result["degraded"] = True
+        logger.warning("=" * 60)
+        logger.warning("⚠️ V0.8 WARNING: ETL MOUNT IS DISABLED")
+        logger.warning("=" * 60)
+        logger.warning("  RASTER_USE_ETL_MOUNT=false")
+        logger.warning("  This is a DEGRADED state - mount is expected in production")
+        logger.warning("  Large raster processing may fail due to temp space limits")
+        logger.warning("  Set RASTER_USE_ETL_MOUNT=true and configure Azure Files mount")
+        logger.warning("=" * 60)
+        return result
+
+    mount_path = raster_config.etl_mount_path
+    logger.info(f"📁 ETL Mount: Validating {mount_path}...")
+
+    # Check 1: Mount exists
+    if not os.path.exists(mount_path):
+        error_msg = f"ETL mount path does not exist: {mount_path}"
+        logger.error(f"❌ {error_msg}")
+        result["error"] = error_msg
+        raise RuntimeError(f"STARTUP FAILED: {error_msg}")
+
+    if not os.path.isdir(mount_path):
+        error_msg = f"ETL mount path is not a directory: {mount_path}"
+        logger.error(f"❌ {error_msg}")
+        result["error"] = error_msg
+        raise RuntimeError(f"STARTUP FAILED: {error_msg}")
+
+    result["exists"] = True
+    logger.info(f"  ✓ Mount path exists")
+
+    # Check 2: Mount is writable
+    test_file = f"{mount_path}/.startup-test-{os.getpid()}"
+    try:
+        with open(test_file, "w") as f:
+            f.write(f"startup validation {datetime.now(timezone.utc).isoformat()}")
+        os.remove(test_file)
+        result["writable"] = True
+        logger.info(f"  ✓ Mount is writable")
+    except Exception as e:
+        error_msg = f"ETL mount not writable: {e}"
+        logger.error(f"❌ {error_msg}")
+        result["error"] = error_msg
+        raise RuntimeError(f"STARTUP FAILED: {error_msg}")
+
+    # Check 3: Disk space
+    try:
+        usage = shutil.disk_usage(mount_path)
+        free_gb = usage.free / (1024 ** 3)
+        result["disk_space"] = {
+            "total_gb": round(usage.total / (1024 ** 3), 1),
+            "free_gb": round(free_gb, 1),
+            "percent_free": round((usage.free / usage.total) * 100, 1),
+        }
+        logger.info(f"  ✓ Disk space: {free_gb:.1f} GB free")
+
+        # Warn if low space
+        if free_gb < 50:
+            logger.warning(f"  ⚠️ Low disk space on ETL mount: {free_gb:.1f} GB")
+            result["warning"] = f"Low disk space: {free_gb:.1f} GB"
+    except Exception as e:
+        logger.warning(f"  ⚠️ Could not check disk space: {e}")
+        result["disk_space_error"] = str(e)
+
+    # Check 4: Configure GDAL CPL_TMPDIR
+    try:
+        from osgeo import gdal
+        os.environ["CPL_TMPDIR"] = mount_path
+        gdal.SetConfigOption("CPL_TMPDIR", mount_path)
+        result["cpl_tmpdir_configured"] = True
+        logger.info(f"  ✓ GDAL CPL_TMPDIR configured: {mount_path}")
+    except Exception as e:
+        error_msg = f"Failed to configure GDAL CPL_TMPDIR: {e}"
+        logger.error(f"❌ {error_msg}")
+        result["error"] = error_msg
+        raise RuntimeError(f"STARTUP FAILED: {error_msg}")
+
+    result["validated"] = True
+    result["message"] = "ETL mount validated successfully"
+    logger.info(f"✅ ETL Mount: VALIDATED and ENABLED")
+    logger.info(f"   Mount path: {mount_path}")
+    logger.info(f"   All raster temp files will use this mount")
+    logger.info(f"   in_memory will be forced to False for disk-based processing")
+
+    return result
+
+
+# Global mount validation status (populated at startup)
+_etl_mount_status: Optional[Dict[str, Any]] = None
+
+
+# ============================================================================
 # FASTAPI LIFESPAN
 # ============================================================================
 
@@ -907,6 +1032,16 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing Docker authentication...")
     auth_status = initialize_docker_auth()
     logger.info(f"Auth initialization: {auth_status}")
+
+    # Validate ETL mount if enabled (24 JAN 2026)
+    # This will raise RuntimeError if mount is enabled but validation fails
+    global _etl_mount_status
+    try:
+        _etl_mount_status = validate_etl_mount()
+    except RuntimeError as e:
+        logger.critical(f"🚨 {e}")
+        print(f"STARTUP FAILED: {e}", flush=True)
+        raise
 
     # Start background token refresh
     token_refresh_worker.start()

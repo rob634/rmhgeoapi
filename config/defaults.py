@@ -554,18 +554,16 @@ class RasterDefaults:
 
     Controls COG creation, validation, and MosaicJSON generation.
 
-    Environment Variable Naming Convention (23 DEC 2025):
-        RASTER_ROUTE_*  - Orchestration layer (routing decisions)
-        RASTER_*        - Handler layer (processing decisions)
+    V0.8 Architecture (24 JAN 2026):
+        - ALL raster operations run on Docker worker
+        - ETL mount (Azure Files) is REQUIRED for production
+        - Single workflow (process_raster_docker) handles both single COG and tiled output
+        - Tiling decision is internal based on RASTER_TILING_THRESHOLD_MB
 
-    Routing Thresholds (orchestration - decides which pipeline/queue):
-        - RASTER_ROUTE_LARGE_MB: Route to process_large_raster_v2 (tiling pipeline)
-        - RASTER_ROUTE_DOCKER_MB: Route to Docker worker queue (long-running)
-        - RASTER_ROUTE_REJECT_MB: Hard reject - file too large for any pipeline
-
-    Handler Settings (processing - how to process the file):
-        - RASTER_COG_IN_MEMORY: rio-cogeo in_memory parameter (False = use /tmp)
-        - RASTER_TILE_TARGET_MB: Target uncompressed tile size for extract_tiles
+    Key Settings:
+        - USE_ETL_MOUNT: Expected True in production (False = degraded state)
+        - RASTER_TILING_THRESHOLD_MB: When to produce tiled output vs single COG
+        - RASTER_TILE_TARGET_MB: Target size per tile when tiling
 
     Memory Estimation Multipliers (dtype-aware, 23 DEC 2025):
         - uint8/int8:   2.5x uncompressed size
@@ -575,29 +573,29 @@ class RasterDefaults:
     """
 
     # ==========================================================================
-    # ORCHESTRATION LAYER - Routing decisions (which pipeline/queue)
+    # V0.8 ETL MOUNT SETTINGS (24 JAN 2026)
     # ==========================================================================
+    # Docker workers use Azure Files mount for GDAL temp files.
+    # This allows processing files larger than container RAM without OOM.
+    #
+    # Mount path: /mounts/etl-temp (configured via Azure Portal)
+    # GDAL uses this via CPL_TMPDIR environment variable.
 
-    # Route to large raster pipeline (process_large_raster_v2 with tiling)
-    RASTER_ROUTE_LARGE_MB = 1200  # 1.2 GB - files above this use tiling pipeline
+    USE_ETL_MOUNT = True  # V0.8: Mount is expected (False = degraded state)
+    ETL_MOUNT_PATH = "/mounts/etl-temp"  # Mount path in Docker container
 
-    # Route to Docker worker queue (long-running-tasks)
-    # Files above this threshold route to Docker regardless of pipeline
-    RASTER_ROUTE_DOCKER_MB = 2000  # 2 GB - Docker worker for memory-intensive ops
+    # ==========================================================================
+    # TILING SETTINGS (V0.8 - 24 JAN 2026)
+    # ==========================================================================
+    # Single workflow (process_raster_docker) decides internally:
+    #   - File ≤ threshold → Single COG output
+    #   - File > threshold → N COG tiles (tiled output)
 
-    # Hard reject - file exceeds maximum supported size
-    RASTER_ROUTE_REJECT_MB = 8000  # 8 GB - reject at preflight validation
+    RASTER_TILING_THRESHOLD_MB = 2000  # 2GB - files above this produce tiled output
+    RASTER_TILE_TARGET_MB = 400  # ~400 MB per tile when tiling
 
     # Collection size limit (max files per collection submission)
     RASTER_COLLECTION_MAX_FILES = 20
-
-    # ==========================================================================
-    # HANDLER LAYER - Processing decisions (how to process)
-    # ==========================================================================
-
-    # Target tile size for extract_tiles (uncompressed MB per tile)
-    # Tiles are sized so Function App workers can COG them without OOM
-    RASTER_TILE_TARGET_MB = 400  # ~400 MB uncompressed tiles
 
     # COG creation settings
     COG_COMPRESSION = "deflate"

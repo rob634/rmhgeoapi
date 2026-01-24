@@ -1,35 +1,35 @@
 # ============================================================================
 # PROCESS LARGE RASTER DOCKER JOB
 # ============================================================================
-# STATUS: Jobs - Single-stage large raster tiling pipeline for Docker worker
+# STATUS: Jobs - DEPRECATED (V0.8 - 24 JAN 2026)
 # PURPOSE: Process large rasters (100MB-30GB) in Docker with slice/dice/COG
 # CREATED: 13 JAN 2026 - F7.18 Docker Large Raster Pipeline
+# DEPRECATED: 24 JAN 2026 - Use process_raster_docker instead
 # ============================================================================
 """
-Process Large Raster Docker - Consolidated Single-Stage Job.
+Process Large Raster Docker - DEPRECATED.
 
-Designed for Docker worker where there are no timeout constraints.
-Consolidates all 5 stages of process_large_raster_v2 into a single handler:
-    - Phase 1: Generate tiling scheme
-    - Phase 2: Extract tiles (sequential)
-    - Phase 3: Create COGs (sequential in Docker)
-    - Phase 4: Create MosaicJSON
-    - Phase 5: Create STAC collection
+⚠️ DEPRECATED (V0.8 - 24 JAN 2026)
+This job is deprecated. Use `process_raster_docker` instead, which handles
+both single COG and tiled output internally based on file size.
 
-Why Single Stage:
-    - Docker has no timeout limits (unlike 10-min Function App limit)
-    - No stage progression overhead
-    - Simpler debugging and monitoring
-    - Same CoreMachine contract - just one stage instead of five
-    - Checkpoint/resume support for crash recovery
+V0.8 Architecture:
+    - ALL raster processing goes through process_raster_docker
+    - Tiling decision is made internally based on raster_tiling_threshold_mb
+    - Files > threshold produce tiled output, files <= threshold produce single COG
+    - One job type handles all raster sizes
 
-Target Use Cases:
-    - Large rasters (100MB-30GB) that need tiling
-    - Complex multi-band imagery requiring band selection
-    - Production batch processing of satellite imagery
+This file is kept for backward compatibility during migration period.
+After migration, remove this file and update references.
+
+Migration:
+    OLD: Submit job with job_type="process_large_raster_docker"
+    NEW: Submit job with job_type="process_raster_docker" (same parameters)
+
+The new job will automatically detect large files and produce tiled output.
 
 Exports:
-    ProcessLargeRasterDockerJob: Single-stage Docker large raster job
+    ProcessLargeRasterDockerJob: DEPRECATED - use ProcessRasterDockerJob
 """
 
 from typing import Dict, Any, List, Optional
@@ -40,14 +40,45 @@ from config.defaults import STACDefaults
 
 class ProcessLargeRasterDockerJob(JobBaseMixin, JobBase):
     """
-    Docker large raster processing - single stage, no timeout constraints.
+    Docker large raster processing - DEPRECATED (V0.8).
 
-    Consolidates tiling → extraction → COG → MosaicJSON → STAC into one handler.
-    Uses same parameters as process_large_raster_v2 for compatibility.
+    ⚠️ DEPRECATED: Use process_raster_docker instead.
+    This job is kept for backward compatibility during migration.
+
+    V0.8 Architecture (24 JAN 2026):
+        - process_raster_docker now handles both single COG and tiled output
+        - Tiling decision is automatic based on file size vs threshold
+        - This job will be removed in a future version
     """
 
     job_type = "process_large_raster_docker"
-    description = "Process large raster (100MB-30GB) to tiled COG mosaic (Docker - no timeout)"
+    description = "DEPRECATED: Use process_raster_docker instead (tiling is now automatic)"
+
+    @classmethod
+    def validate_parameters(cls, params):
+        """Log deprecation warning before processing."""
+        import logging
+        import warnings
+        logger = logging.getLogger(__name__)
+
+        # Log deprecation warning
+        logger.warning("=" * 60)
+        logger.warning("⚠️ DEPRECATED: process_large_raster_docker")
+        logger.warning("  This job type is deprecated as of V0.8 (24 JAN 2026)")
+        logger.warning("  Use 'process_raster_docker' instead")
+        logger.warning("  Tiling is now automatic based on file size")
+        logger.warning("=" * 60)
+
+        # Also issue Python deprecation warning
+        warnings.warn(
+            "process_large_raster_docker is deprecated. "
+            "Use process_raster_docker instead - it handles tiling automatically.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+
+        # Call parent validation
+        return super().validate_parameters(params)
 
     # Single stage - handler does everything
     stages = [

@@ -46,7 +46,7 @@ Created: 20 NOV 2025 as part of config.py god object refactoring
 # ============================================================================
 # Semantic versioning follows MAJOR.MINOR.PATCH.BUILD
 # Criteria for advance to 0.8.0: full integration of Docker worker
-__version__ = "0.7.23.1"
+__version__ = "0.7.26"
 
 from typing import Optional
 
@@ -153,15 +153,15 @@ def debug_config() -> dict:
             'public_database': config.public_database.debug_dict() if config.public_database else None,
             'public_database_configured': config.is_public_database_configured(),
 
-            # Raster (field names match env vars - 23 DEC 2025)
+            # Raster (V0.8 - 24 JAN 2026)
             'raster': {
+                'use_etl_mount': config.raster.use_etl_mount,
+                'etl_mount_path': config.raster.etl_mount_path,
+                'raster_tiling_threshold_mb': config.raster.raster_tiling_threshold_mb,
+                'raster_tile_target_mb': config.raster.raster_tile_target_mb,
+                'raster_collection_max_files': config.raster.raster_collection_max_files,
                 'cog_compression': config.raster.cog_compression,
                 'cog_tile_size': config.raster.cog_tile_size,
-                'raster_route_large_mb': config.raster.raster_route_large_mb,
-                'raster_route_docker_mb': config.raster.raster_route_docker_mb,
-                'raster_route_reject_mb': config.raster.raster_route_reject_mb,
-                'raster_collection_max_files': config.raster.raster_collection_max_files,
-                'raster_tile_target_mb': config.raster.raster_tile_target_mb,
             },
 
             # Vector

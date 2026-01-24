@@ -1,0 +1,339 @@
+{# ============================================================================
+   FORM MACROS - Reusable Form Components
+   ============================================================================
+   Import and use these macros in any template:
+
+       {% from "components/form_macros.html" import text_input, select, checkbox %}
+
+       {{ text_input("dataset_id", "Dataset ID", required=True, pattern="[a-z0-9-]+") }}
+       {{ select("raster_type", "Raster Type", options=[("auto", "Auto-detect"), ("dem", "DEM")]) }}
+
+   Available macros:
+       - text_input: Standard text input with label, hint, validation
+       - textarea: Multi-line text input
+       - select: Dropdown select with options
+       - checkbox: Checkbox input
+       - form_group: Generic form group wrapper
+       - form_row: Horizontal form row (2 columns)
+       - form_section: Collapsible form section
+       - file_type_badge: Displays file type with icon
+       - drop_zone: File upload drop zone
+       - selected_file_display: Shows selected file info
+   ============================================================================ #}
+
+
+{# ============================================================================
+   TEXT INPUT
+   ============================================================================
+   Standard text input with label, hint text, and validation.
+
+   Usage:
+       {{ text_input("dataset_id", "Dataset ID", required=True, placeholder="e.g., flood-data") }}
+       {{ text_input("version_id", "Version", value="v1.0", hint="Version identifier") }}
+   ============================================================================ #}
+{% macro text_input(name, label, value="", placeholder="", hint="", required=False, pattern="", title="", readonly=False, id=None) %}
+<div class="form-group {{ 'required' if required else '' }}">
+    <label for="{{ id or name }}">{{ label }}{% if required %} <span class="required-star">*</span>{% endif %}</label>
+    <input type="text"
+           id="{{ id or name }}"
+           name="{{ name }}"
+           value="{{ value }}"
+           placeholder="{{ placeholder }}"
+           {% if pattern %}pattern="{{ pattern }}"{% endif %}
+           {% if title %}title="{{ title }}"{% endif %}
+           {% if required %}required{% endif %}
+           {% if readonly %}readonly{% endif %}
+           class="form-input">
+    {% if hint %}
+    <span class="form-hint">{{ hint }}</span>
+    {% endif %}
+</div>
+{% endmacro %}
+
+
+{# ============================================================================
+   TEXTAREA
+   ============================================================================
+   Multi-line text input.
+
+   Usage:
+       {{ textarea("description", "Description", rows=3, placeholder="Enter description...") }}
+   ============================================================================ #}
+{% macro textarea(name, label, value="", placeholder="", hint="", rows=3, required=False, id=None) %}
+<div class="form-group {{ 'required' if required else '' }}">
+    <label for="{{ id or name }}">{{ label }}{% if required %} <span class="required-star">*</span>{% endif %}</label>
+    <textarea id="{{ id or name }}"
+              name="{{ name }}"
+              placeholder="{{ placeholder }}"
+              rows="{{ rows }}"
+              {% if required %}required{% endif %}
+              class="form-textarea">{{ value }}</textarea>
+    {% if hint %}
+    <span class="form-hint">{{ hint }}</span>
+    {% endif %}
+</div>
+{% endmacro %}
+
+
+{# ============================================================================
+   SELECT
+   ============================================================================
+   Dropdown select with options.
+
+   Usage:
+       {{ select("access_level", "Access Level", options=[
+           ("", "Not specified"),
+           ("public", "PUBLIC"),
+           ("restricted", "Restricted")
+       ], selected="public") }}
+   ============================================================================ #}
+{% macro select(name, label, options, selected="", hint="", required=False, id=None, onchange="") %}
+<div class="form-group {{ 'required' if required else '' }}">
+    <label for="{{ id or name }}">{{ label }}{% if required %} <span class="required-star">*</span>{% endif %}</label>
+    <select id="{{ id or name }}"
+            name="{{ name }}"
+            {% if required %}required{% endif %}
+            {% if onchange %}onchange="{{ onchange }}"{% endif %}
+            class="form-select">
+        {% for value, text in options %}
+        <option value="{{ value }}" {% if value == selected %}selected{% endif %}>{{ text }}</option>
+        {% endfor %}
+    </select>
+    {% if hint %}
+    <span class="form-hint">{{ hint }}</span>
+    {% endif %}
+</div>
+{% endmacro %}
+
+
+{# ============================================================================
+   CHECKBOX
+   ============================================================================
+   Checkbox input with label.
+
+   Usage:
+       {{ checkbox("overwrite", "Allow overwrite if data exists", hint="If enabled, existing data will be replaced") }}
+   ============================================================================ #}
+{% macro checkbox(name, label, checked=False, value="true", hint="", id=None, onchange="") %}
+<div class="form-group checkbox-group">
+    <label class="checkbox-label">
+        <input type="checkbox"
+               id="{{ id or name }}"
+               name="{{ name }}"
+               value="{{ value }}"
+               {% if checked %}checked{% endif %}
+               {% if onchange %}onchange="{{ onchange }}"{% endif %}>
+        <span class="checkbox-text">{{ label }}</span>
+    </label>
+    {% if hint %}
+    <span class="form-hint">{{ hint }}</span>
+    {% endif %}
+</div>
+{% endmacro %}
+
+
+{# ============================================================================
+   FORM ROW
+   ============================================================================
+   Horizontal form row with 2 columns.
+
+   Usage:
+       {% call form_row() %}
+           {{ text_input("resource_id", "Resource ID") }}
+           {{ text_input("version_id", "Version ID") }}
+       {% endcall %}
+   ============================================================================ #}
+{% macro form_row() %}
+<div class="form-row">
+    {{ caller() }}
+</div>
+{% endmacro %}
+
+
+{# ============================================================================
+   FORM SECTION
+   ============================================================================
+   Form section with header. Can be collapsible.
+
+   Usage:
+       {% call form_section("DDH Identifiers", required=True) %}
+           {{ text_input("dataset_id", "Dataset ID") }}
+       {% endcall %}
+   ============================================================================ #}
+{% macro form_section(title, required=False, id=None, collapsed=False) %}
+<div class="form-section {{ 'collapsed' if collapsed else '' }}" {% if id %}id="{{ id }}"{% endif %}>
+    <div class="form-section-header" {% if collapsed %}onclick="toggleSection(this)"{% endif %}>
+        <span class="section-title">{{ title }}</span>
+        {% if required %}<span class="required-badge">Required</span>{% endif %}
+        {% if collapsed %}<span class="collapse-icon"></span>{% endif %}
+    </div>
+    <div class="form-section-content">
+        {{ caller() }}
+    </div>
+</div>
+{% endmacro %}
+
+
+{# ============================================================================
+   FILE TYPE BADGE
+   ============================================================================
+   Displays detected file type with icon and description.
+
+   Usage:
+       {{ file_type_badge("csv", "CSV file with tabular data") }}
+       {{ file_type_badge("geotiff", "GeoTIFF raster image") }}
+   ============================================================================ #}
+{% macro file_type_badge(file_type, description="") %}
+<div class="file-type-badge file-type-{{ file_type|lower }}">
+    <span class="file-type-icon">
+        {% if file_type in ['tif', 'tiff', 'geotiff', 'img', 'jp2'] %}
+        <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M21 5v14H3V5h18m0-2H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-9 8.5c0-.83-.67-1.5-1.5-1.5S9 10.67 9 11.5s.67 1.5 1.5 1.5 1.5-.67 1.5-1.5zm-4 4.5v1h10v-3l-2.5-2.5-2.5 2.5-2.5-2.5L8 16z"/></svg>
+        {% elif file_type in ['csv'] %}
+        <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zM6 20V4h7v5h5v11H6z"/></svg>
+        {% elif file_type in ['geojson', 'json', 'gpkg'] %}
+        <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.94-.49-7-3.85-7-7.93s3.05-7.44 7-7.93v15.86zm2-15.86c1.03.13 2 .45 2.87.93H13v-.93zM13 7h5.24c.25.31.48.65.68 1H13V7zm0 3h6.74c.08.33.15.66.19 1H13v-1zm0 9.93V19h2.87c-.87.48-1.84.8-2.87.93zM18.24 17H13v-1h5.92c-.2.35-.43.69-.68 1zm1.5-3H13v-1h6.93c-.04.34-.11.67-.19 1z"/></svg>
+        {% elif file_type in ['shp', 'zip', 'kml', 'kmz'] %}
+        <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V6h5.17l2 2H20v10z"/></svg>
+        {% else %}
+        <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg>
+        {% endif %}
+    </span>
+    <span class="file-type-name">{{ file_type|upper }}</span>
+    {% if description %}
+    <span class="file-type-description">{{ description }}</span>
+    {% endif %}
+</div>
+{% endmacro %}
+
+
+{# ============================================================================
+   DROP ZONE
+   ============================================================================
+   File upload drop zone for drag-and-drop file selection.
+
+   Usage:
+       {{ drop_zone("file-upload", "Drag and drop a file here", max_size="100 MB") }}
+   ============================================================================ #}
+{% macro drop_zone(id, text="Drag and drop a file here, or click to browse", hint="", max_size="100 MB", accept="") %}
+<div class="drop-zone" id="{{ id }}-zone">
+    <div class="drop-zone-content">
+        <div class="drop-zone-icon">
+            <svg viewBox="0 0 24 24" width="48" height="48"><path fill="currentColor" d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>
+        </div>
+        <p class="drop-zone-text">{{ text }}</p>
+        {% if max_size %}
+        <p class="drop-zone-hint">Maximum file size: {{ max_size }}</p>
+        {% endif %}
+        {% if hint %}
+        <p class="drop-zone-hint">{{ hint }}</p>
+        {% endif %}
+    </div>
+    <input type="file" id="{{ id }}" name="{{ id }}" class="drop-zone-input" {% if accept %}accept="{{ accept }}"{% endif %}>
+</div>
+{% endmacro %}
+
+
+{# ============================================================================
+   SELECTED FILE DISPLAY
+   ============================================================================
+   Shows information about a selected file.
+
+   Usage:
+       {{ selected_file_display("selected-file") }}
+   ============================================================================ #}
+{% macro selected_file_display(id="selected-file") %}
+<div id="{{ id }}" class="selected-file-display hidden">
+    <div class="selected-file-icon">
+        <svg viewBox="0 0 24 24" width="32" height="32"><path fill="currentColor" d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg>
+    </div>
+    <div class="selected-file-info">
+        <span class="selected-file-name"></span>
+        <span class="selected-file-size"></span>
+    </div>
+    <div class="selected-file-type"></div>
+    <button type="button" class="selected-file-clear" onclick="clearFileSelection()">&times;</button>
+</div>
+{% endmacro %}
+
+
+{# ============================================================================
+   FILE SOURCE SELECTOR
+   ============================================================================
+   Toggle between "Select from Blob Storage" and "Upload File".
+
+   Usage:
+       {{ file_source_selector() }}
+   ============================================================================ #}
+{% macro file_source_selector(selected="browse") %}
+<div class="file-source-selector">
+    <div class="source-option {{ 'active' if selected == 'browse' else '' }}"
+         data-source="browse"
+         hx-get="/interface/submit/partial/browser"
+         hx-target="#file-source-content"
+         hx-swap="innerHTML"
+         onclick="setFileSource('browse', this)">
+        <div class="source-icon">
+            <svg viewBox="0 0 24 24" width="24" height="24"><path fill="currentColor" d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+        </div>
+        <div class="source-text">
+            <span class="source-title">Select from Blob Storage</span>
+            <span class="source-description">Browse existing files in Bronze storage</span>
+        </div>
+    </div>
+    <div class="source-divider">OR</div>
+    <div class="source-option {{ 'active' if selected == 'upload' else '' }}"
+         data-source="upload"
+         hx-get="/interface/submit/partial/upload"
+         hx-target="#file-source-content"
+         hx-swap="innerHTML"
+         onclick="setFileSource('upload', this)">
+        <div class="source-icon">
+            <svg viewBox="0 0 24 24" width="24" height="24"><path fill="currentColor" d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>
+        </div>
+        <div class="source-text">
+            <span class="source-title">Upload New File</span>
+            <span class="source-description">Upload from your local machine</span>
+        </div>
+    </div>
+</div>
+{% endmacro %}
+
+
+{# ============================================================================
+   CURL PREVIEW
+   ============================================================================
+   Shows a formatted cURL command preview.
+
+   Usage:
+       {{ curl_preview("curl-preview") }}
+   ============================================================================ #}
+{% macro curl_preview(id="curl-preview") %}
+<div class="curl-section" id="{{ id }}-section">
+    <div class="curl-header">
+        <span class="curl-title">Platform API cURL Command</span>
+        <button type="button" class="btn btn-sm btn-copy" onclick="copyCurl('{{ id }}')">
+            Copy
+        </button>
+    </div>
+    <pre id="{{ id }}" class="curl-code">Fill in required fields to see the cURL command</pre>
+    <p class="curl-hint">Copy this command to use with Postman or terminal</p>
+</div>
+{% endmacro %}
+
+
+{# ============================================================================
+   SUBMIT BUTTON WITH SPINNER
+   ============================================================================
+   Submit button with loading spinner.
+
+   Usage:
+       {{ submit_button("Submit Job", id="submit-btn") }}
+   ============================================================================ #}
+{% macro submit_button(text="Submit", id="submit-btn", disabled=True, icon="") %}
+<div class="form-actions">
+    <button type="submit" id="{{ id }}" class="btn btn-primary btn-lg" {% if disabled %}disabled{% endif %}>
+        {% if icon %}{{ icon }} {% endif %}{{ text }}
+    </button>
+    <span id="{{ id }}-spinner" class="htmx-indicator spinner-inline"></span>
+</div>
+{% endmacro %}

@@ -99,6 +99,12 @@ class ProcessRasterDockerJob(JobBaseMixin, JobBase):
         # Docker-specific options
         'use_windowed_read': {'type': 'bool', 'default': True},  # For giant rasters
         'chunk_size_mb': {'type': 'int', 'default': 256},  # Window size for chunked processing
+
+        # V0.8: Tiling parameters for large files (24 JAN 2026)
+        # These are used if file size exceeds raster_tiling_threshold_mb
+        'tile_size': {'type': 'int', 'default': None},  # None = auto-calculate
+        'overlap': {'type': 'int', 'default': 512, 'min': 0},
+        'band_names': {'type': 'dict', 'default': None},  # e.g., {"5": "Red", "3": "Green", "2": "Blue"}
     }
 
     # Pre-flight validation - blob must exist
@@ -187,12 +193,26 @@ class ProcessRasterDockerJob(JobBaseMixin, JobBase):
                 # Docker-specific
                 'use_windowed_read': job_params.get('use_windowed_read', True),
                 'chunk_size_mb': job_params.get('chunk_size_mb', 256),
+
+                # V0.8: File size for internal tiling decision (24 JAN 2026)
+                # Stored by blob_exists_with_size validator during pre-flight
+                '_file_size_mb': job_params.get('_blob_size_mb'),
+
+                # Tiling parameters (for large files)
+                'tile_size': job_params.get('tile_size'),
+                'overlap': job_params.get('overlap', 512),
+                'band_names': job_params.get('band_names'),
             }
         }]
 
     @staticmethod
     def finalize_job(context) -> Dict[str, Any]:
-        """Create final job summary from the single stage result."""
+        """
+        Create final job summary from the single stage result.
+
+        V0.8 (24 JAN 2026): Handles both single COG and tiled output modes.
+        The output_mode field in the result indicates which format was produced.
+        """
         from core.models import TaskStatus
         from config import get_config
 
@@ -214,58 +234,113 @@ class ProcessRasterDockerJob(JobBaseMixin, JobBase):
         # Unwrap the 'result' key - handlers return {"success": bool, "result": {...}}
         unwrapped = result_data.get('result', {})
 
-        # Extract sub-results from unwrapped data
-        validation = unwrapped.get('validation', {})
-        cog = unwrapped.get('cog', {})
+        # V0.8: Detect output mode (24 JAN 2026)
+        output_mode = unwrapped.get('output_mode', 'single_cog')
+
+        # Common fields
         stac = unwrapped.get('stac', {})
-        resources = unwrapped.get('resources', {})
-        artifact_id = unwrapped.get('artifact_id')  # Artifact registry (21 JAN 2026)
+        artifact_id = unwrapped.get('artifact_id')
 
-        # Generate TiTiler URLs if we have COG info
-        titiler_urls = None
-        share_url = None
-        if cog.get('cog_blob') and cog.get('cog_container'):
-            try:
-                titiler_urls = config.generate_titiler_urls_unified(
-                    mode="cog",
-                    container=cog['cog_container'],
-                    blob_name=cog['cog_blob']
-                )
-                share_url = titiler_urls.get("viewer_url")
-
-                # DEM-specific visualization
-                if validation.get('raster_type') == 'dem' and share_url:
-                    titiler_urls["dem_terrain_viewer"] = f"{share_url}&colormap_name=terrain"
-                    share_url = titiler_urls["dem_terrain_viewer"]
-            except Exception:
-                pass
-
-        # Generate STAC URLs if we have item info
+        # Generate STAC URLs if we have collection info
         stac_urls = None
-        if stac.get('item_id') and stac.get('collection_id'):
+        if stac.get('collection_id'):
             stac_base = config.stac_api_base_url.rstrip('/')
             stac_urls = {
-                "item_url": f"{stac_base}/collections/{stac['collection_id']}/items/{stac['item_id']}",
                 "collection_url": f"{stac_base}/collections/{stac['collection_id']}",
             }
+            if stac.get('item_id'):
+                stac_urls["item_url"] = f"{stac_base}/collections/{stac['collection_id']}/items/{stac['item_id']}"
 
-        return {
-            "job_type": "process_raster_docker",
-            "source_blob": params.get("blob_name"),
-            "source_container": params.get("container_name"),
-            "validation": validation,
-            "cog": cog,
-            "stac": stac,
-            "stac_urls": stac_urls,
-            "titiler_urls": titiler_urls,
-            "share_url": share_url,
-            "artifact_id": artifact_id,  # Artifact registry (21 JAN 2026)
-            "resources": resources,  # F7.20 resource metrics
-            "processing_mode": "docker_single_stage",
-            "stages_completed": 1,
-            "total_tasks_executed": len(task_results),
-            "tasks_by_status": {
-                "completed": sum(1 for t in task_results if t.status == TaskStatus.COMPLETED),
-                "failed": sum(1 for t in task_results if t.status == TaskStatus.FAILED)
+        # V0.8: Format response based on output mode
+        if output_mode == 'tiled':
+            # Tiled output - has mosaicjson, cogs array, tiling info
+            tiling = unwrapped.get('tiling', {})
+            extraction = unwrapped.get('extraction', {})
+            cogs = unwrapped.get('cogs', {})
+            mosaicjson = unwrapped.get('mosaicjson', {})
+            timing = unwrapped.get('timing', {})
+
+            # Generate TiTiler URLs for MosaicJSON
+            titiler_urls = None
+            share_url = None
+            if mosaicjson.get('mosaicjson_blob'):
+                try:
+                    titiler_urls = config.generate_titiler_urls_unified(
+                        mode="mosaicjson",
+                        container=mosaicjson.get('mosaicjson_container'),
+                        blob_name=mosaicjson.get('mosaicjson_blob')
+                    )
+                    share_url = titiler_urls.get("viewer_url")
+                except Exception:
+                    pass
+
+            return {
+                "job_type": "process_raster_docker",
+                "output_mode": "tiled",
+                "source_blob": params.get("blob_name"),
+                "source_container": params.get("container_name"),
+                "file_size_mb": params.get("_blob_size_mb"),
+                "tiling": tiling,
+                "extraction": extraction,
+                "cogs": cogs,
+                "mosaicjson": mosaicjson,
+                "stac": stac,
+                "stac_urls": stac_urls,
+                "titiler_urls": titiler_urls,
+                "share_url": share_url,
+                "artifact_id": artifact_id,
+                "timing": timing,
+                "processing_mode": "docker_tiled",
+                "stages_completed": 1,
+                "total_tasks_executed": len(task_results),
+                "tasks_by_status": {
+                    "completed": sum(1 for t in task_results if t.status == TaskStatus.COMPLETED),
+                    "failed": sum(1 for t in task_results if t.status == TaskStatus.FAILED)
+                }
             }
-        }
+        else:
+            # Single COG output - original behavior
+            validation = unwrapped.get('validation', {})
+            cog = unwrapped.get('cog', {})
+            resources = unwrapped.get('resources', {})
+
+            # Generate TiTiler URLs if we have COG info
+            titiler_urls = None
+            share_url = None
+            if cog.get('cog_blob') and cog.get('cog_container'):
+                try:
+                    titiler_urls = config.generate_titiler_urls_unified(
+                        mode="cog",
+                        container=cog['cog_container'],
+                        blob_name=cog['cog_blob']
+                    )
+                    share_url = titiler_urls.get("viewer_url")
+
+                    # DEM-specific visualization
+                    if validation.get('raster_type') == 'dem' and share_url:
+                        titiler_urls["dem_terrain_viewer"] = f"{share_url}&colormap_name=terrain"
+                        share_url = titiler_urls["dem_terrain_viewer"]
+                except Exception:
+                    pass
+
+            return {
+                "job_type": "process_raster_docker",
+                "output_mode": "single_cog",
+                "source_blob": params.get("blob_name"),
+                "source_container": params.get("container_name"),
+                "validation": validation,
+                "cog": cog,
+                "stac": stac,
+                "stac_urls": stac_urls,
+                "titiler_urls": titiler_urls,
+                "share_url": share_url,
+                "artifact_id": artifact_id,
+                "resources": resources,
+                "processing_mode": "docker_single_stage",
+                "stages_completed": 1,
+                "total_tasks_executed": len(task_results),
+                "tasks_by_status": {
+                    "completed": sum(1 for t in task_results if t.status == TaskStatus.COMPLETED),
+                    "failed": sum(1 for t in task_results if t.status == TaskStatus.FAILED)
+                }
+            }

@@ -103,6 +103,9 @@ class TasksInterface(BaseInterface):
                         <button id="deleteBtn" class="delete-button" onclick="showDeleteModal()">
                             🗑️ Delete Job
                         </button>
+                        <a href="/interface/jobs/{job_id}/events" class="events-button-link" id="eventsLink">
+                            📊 Event Timeline
+                        </a>
                         <a href="/api/interface/pipeline" class="back-button-link">
                             Back to Pipeline
                         </a>
@@ -421,6 +424,27 @@ class TasksInterface(BaseInterface):
 
         .delete-button:hover {
             background: #B91C1C;
+        }
+
+        /* Events Timeline button (23 JAN 2026) */
+        .events-button-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 10px 16px;
+            background: #6366F1;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 13px;
+            text-decoration: none;
+        }
+
+        .events-button-link:hover {
+            background: #4F46E5;
         }
 
         .delete-button:disabled {

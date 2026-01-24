@@ -1,38 +1,33 @@
 # ============================================================================
 # PROCESS LARGE RASTER COMPLETE HANDLER (Docker)
 # ============================================================================
-# STATUS: Services - Consolidated large raster handler for Docker worker
+# STATUS: Services - DEPRECATED (V0.8 - 24 JAN 2026)
 # PURPOSE: Single handler that does tiling → extraction → COG → MosaicJSON → STAC
 # CREATED: 13 JAN 2026 - F7.18 Docker Large Raster Pipeline
+# DEPRECATED: 24 JAN 2026 - Use process_raster_complete instead
 # ============================================================================
 """
-Process Large Raster Complete - Consolidated Docker Handler.
+Process Large Raster Complete - DEPRECATED.
 
-Combines all five stages of large raster processing into a single handler:
-    Phase 1: Generate tiling scheme
-    Phase 2: Extract tiles (sequential)
-    Phase 3: Create COGs for each tile (sequential)
-    Phase 4: Create MosaicJSON
-    Phase 5: Create STAC collection
+⚠️ DEPRECATED (V0.8 - 24 JAN 2026)
+This handler is deprecated. Use `process_raster_complete` instead, which
+handles both single COG and tiled output internally based on file size.
 
-Why Consolidated:
-    - Docker has no timeout (unlike 10-min Function App limit)
-    - Eliminates stage progression overhead
-    - Single atomic operation with checkpoint/resume
-    - Verbose progress logging for monitoring
+V0.8 Architecture:
+    - process_raster_complete now handles both modes
+    - Tiling decision is automatic based on _file_size_mb vs raster_tiling_threshold_mb
+    - This handler is kept for backward compatibility during migration
 
-Progress Tracking:
-    - Task metadata updated after each phase and sub-operation
-    - Enables real-time progress monitoring via task status endpoint
-    - Similar UX to multi-stage Function App job
+The tiling logic has been moved into handler_process_raster_complete.py
+as the internal function _process_raster_tiled().
 
-Checkpoint/Resume Support:
-    - Each phase saved to checkpoint
-    - On crash/restart, resumes from last completed phase
-    - Artifact validation ensures outputs exist before checkpoint
+Migration:
+    - Jobs using process_large_raster_docker will continue to work
+    - New jobs should use process_raster_docker (unified job type)
+    - After migration period, this file will be removed
 
 Exports:
-    process_large_raster_complete: Consolidated handler function
+    process_large_raster_complete: DEPRECATED - still functional
 """
 
 import logging
@@ -48,26 +43,11 @@ def process_large_raster_complete(params: Dict[str, Any], context: Optional[Dict
     """
     Complete large raster processing in single execution.
 
-    Consolidates tiling → extraction → COG → MosaicJSON → STAC into one handler.
-    Designed for Docker worker with no timeout constraints.
+    ⚠️ DEPRECATED (V0.8 - 24 JAN 2026):
+    Use process_raster_complete instead, which handles both single COG
+    and tiled output automatically based on file size.
 
-    Args:
-        params: Task parameters with:
-            - _task_id: Task ID for checkpoint/progress tracking
-            - _job_id: Job ID for folder naming
-            - blob_url: Azure blob URL with SAS token
-            - blob_name: Source blob path
-            - container_name: Source container
-            - target_crs: Target CRS for reprojection
-            - tile_size: Tile size (None = auto-calculate)
-            - overlap: Tile overlap in pixels (default 512)
-            - band_names: Optional band mapping
-            - output_tier: COG tier ('analysis', 'visualization', 'archive')
-            - collection_id: STAC collection
-        context: Optional context (not used in Docker mode)
-
-    Returns:
-        dict: Combined result with all phase results
+    This handler is kept for backward compatibility during migration.
     """
     start_time = time.time()
 
@@ -76,8 +56,16 @@ def process_large_raster_complete(params: Dict[str, Any], context: Optional[Dict
     task_id = params.get('_task_id')
     job_id = params.get('_job_id', 'unknown')
 
+    # V0.8: Log deprecation warning
+    logger.warning("=" * 70)
+    logger.warning("⚠️ DEPRECATED HANDLER: process_large_raster_complete")
+    logger.warning("  This handler is deprecated as of V0.8 (24 JAN 2026)")
+    logger.warning("  Use 'process_raster_complete' instead")
+    logger.warning("  Tiling is now handled automatically based on file size")
+    logger.warning("=" * 70)
+
     logger.info("=" * 70)
-    logger.info("PROCESS LARGE RASTER COMPLETE - Docker Handler (F7.18)")
+    logger.info("PROCESS LARGE RASTER COMPLETE - Docker Handler (DEPRECATED)")
     logger.info(f"Source: {container_name}/{blob_name}")
     logger.info(f"Job ID: {job_id[:16]}...")
     if task_id:

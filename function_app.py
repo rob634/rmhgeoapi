@@ -324,6 +324,7 @@ _app_mode = get_app_mode_config()
 # NOTE: livez is now provided by triggers/probes.py (registered in Phase 1)
 from triggers.submit_job import submit_job_trigger
 from triggers.get_job_status import get_job_status_trigger
+from triggers.get_job_events import get_job_events_trigger  # Job event timeline (23 JAN 2026)
 from triggers.get_job_logs import get_job_logs_trigger
 from triggers.jobs.resubmit import job_resubmit
 from triggers.jobs.delete import job_delete
@@ -616,6 +617,49 @@ def get_job_status(req: func.HttpRequest) -> func.HttpResponse:
     if guard := _jobs_endpoint_guard():
         return guard
     return get_job_status_trigger.handle_request(req)
+
+
+@app.route(route="jobs/{job_id}/events", methods=["GET"])
+def get_job_events(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Job events timeline endpoint (23 JAN 2026).
+
+    Returns execution events for job monitoring and debugging.
+    Events are recorded by CoreMachine for both FunctionApp and Docker workers.
+
+    Query params:
+        - limit: Max events (default 50, max 500)
+        - event_type: Filter by type (e.g., task_completed)
+        - since: ISO timestamp to filter events after
+        - include_task_events: Include task-level events (default true)
+    """
+    if guard := _jobs_endpoint_guard():
+        return guard
+    return get_job_events_trigger.handle_request(req)
+
+
+@app.route(route="jobs/{job_id}/events/latest", methods=["GET"])
+def get_job_events_latest(req: func.HttpRequest) -> func.HttpResponse:
+    """Get the most recent event for a job."""
+    if guard := _jobs_endpoint_guard():
+        return guard
+    return get_job_events_trigger.handle_request(req)
+
+
+@app.route(route="jobs/{job_id}/events/summary", methods=["GET"])
+def get_job_events_summary(req: func.HttpRequest) -> func.HttpResponse:
+    """Get event summary statistics for a job."""
+    if guard := _jobs_endpoint_guard():
+        return guard
+    return get_job_events_trigger.handle_request(req)
+
+
+@app.route(route="jobs/{job_id}/events/failure", methods=["GET"])
+def get_job_events_failure(req: func.HttpRequest) -> func.HttpResponse:
+    """Get failure context (failure event + preceding events) for debugging."""
+    if guard := _jobs_endpoint_guard():
+        return guard
+    return get_job_events_trigger.handle_request(req)
 
 
 @app.route(route="jobs/{job_id}/logs", methods=["GET"])

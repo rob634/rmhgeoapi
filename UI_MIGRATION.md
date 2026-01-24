@@ -548,6 +548,786 @@ def test_status_badge_renders_correctly():
 
 ---
 
+---
+
+## Job Events System - Progress Tracking Implementation
+
+**Created**: 23 JAN 2026
+**Dependencies**: V0.8 Queue Consolidation, CoreMachine
+**Purpose**: Enable real-time job progress visibility for both FunctionApp and Docker workers
+
+### Overview
+
+The `app.job_events` table is designed to capture execution events from both FunctionApp workers and Docker workers. This provides a unified progress tracking system regardless of where tasks execute.
+
+### Architecture Context (from V0.8_PLAN.md)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        JOB EVENTS FLOW                           │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  Platform API                                                    │
+│       │                                                          │
+│       ▼                                                          │
+│  ┌─────────────┐     ┌──────────────────┐                       │
+│  │ Orchestrator│────▶│ geospatial-jobs  │                       │
+│  │             │     │                  │                       │
+│  │  RECORDS:   │     └────────┬─────────┘                       │
+│  │  JOB_CREATED│              │                                  │
+│  │  JOB_STARTED│              ▼                                  │
+│  └─────────────┘     ┌────────────────┐                         │
+│                      │  CoreMachine   │                         │
+│                      │  (Job Router)  │                         │
+│                      │                │                         │
+│                      │  RECORDS:      │                         │
+│                      │  STAGE_STARTED │                         │
+│                      │  TASK_QUEUED   │                         │
+│                      └───────┬────────┘                         │
+│                              │                                   │
+│              ┌───────────────┼───────────────┐                  │
+│              │               │               │                   │
+│              ▼               ▼               ▼                   │
+│     ┌────────────────┐ ┌──────────────┐                         │
+│     │ container-tasks│ │functionapp-  │                         │
+│     │     Queue      │ │tasks Queue   │                         │
+│     └───────┬────────┘ └──────┬───────┘                         │
+│             │                 │                                  │
+│             ▼                 ▼                                  │
+│     ┌────────────────┐ ┌──────────────┐                         │
+│     │ Docker Worker  │ │ FunctionApp  │                         │
+│     │                │ │   Worker     │                         │
+│     │ RECORDS:       │ │              │                         │
+│     │ TASK_STARTED   │ │ RECORDS:     │                         │
+│     │ CHECKPOINT     │ │ TASK_STARTED │                         │
+│     │ TASK_COMPLETED │ │ TASK_COMPLTD │                         │
+│     └────────────────┘ └──────────────┘                         │
+│                                                                  │
+│     ────────────────────────────────────────────────────        │
+│                          ▼                                       │
+│                 ┌─────────────────┐                             │
+│                 │ app.job_events  │  ◄── UNIFIED EVENT LOG      │
+│                 │                 │                             │
+│                 │ All events from │                             │
+│                 │ ALL workers     │                             │
+│                 └─────────────────┘                             │
+│                          │                                       │
+│                          ▼                                       │
+│                 ┌─────────────────┐                             │
+│                 │ Job Monitor UI  │                             │
+│                 │ (Event Timeline)│                             │
+│                 └─────────────────┘                             │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Event Types (from JobEventType enum)
+
+| Category | Event Types | When Recorded |
+|----------|-------------|---------------|
+| **Job Lifecycle** | `job_created`, `job_started`, `job_completed`, `job_failed` | Orchestrator/CoreMachine |
+| **Stage Events** | `stage_started`, `stage_completed`, `stage_advancement_failed` | CoreMachine stage transitions |
+| **Task Events** | `task_queued`, `task_started`, `task_completed`, `task_failed`, `task_retrying` | Task handlers (FunctionApp OR Docker) |
+| **Callbacks** | `callback_started`, `callback_success`, `callback_failed` | Platform API callbacks |
+| **Checkpoints** | `checkpoint`, `status_update` | Within task handlers |
+
+### Table Schema (Already Defined)
+
+```sql
+CREATE TABLE app.job_events (
+    event_id SERIAL PRIMARY KEY,
+    job_id VARCHAR(64) NOT NULL,
+    task_id VARCHAR(64),                    -- NULL for job-level events
+    stage INTEGER,                          -- Stage number
+    event_type VARCHAR(50) NOT NULL,        -- JobEventType enum
+    event_status VARCHAR(20) DEFAULT 'info', -- success/failure/warning/info/pending
+    checkpoint_name VARCHAR(100),           -- For App Insights correlation
+    event_data JSONB DEFAULT '{}',          -- Flexible context
+    error_message VARCHAR(1000),            -- Error details if failure
+    duration_ms INTEGER,                    -- Operation timing
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT fk_job FOREIGN KEY (job_id) REFERENCES app.jobs(job_id)
+);
+
+-- Indexes for efficient queries
+CREATE INDEX idx_job_events_job_id ON app.job_events(job_id);
+CREATE INDEX idx_job_events_job_time ON app.job_events(job_id, created_at DESC);
+CREATE INDEX idx_job_events_task_id ON app.job_events(task_id) WHERE task_id IS NOT NULL;
+CREATE INDEX idx_job_events_event_type ON app.job_events(event_type);
+```
+
+---
+
+### Implementation Phases
+
+#### Phase 4.1: Infrastructure Layer
+
+**Goal**: Create JobEventRepository for consistent event recording
+
+**File**: `infrastructure/job_event_repository.py`
+
+```python
+class JobEventRepository:
+    """
+    Repository for recording and querying job execution events.
+
+    Used by:
+    - CoreMachine (job/stage events)
+    - Task handlers in FunctionApp (task events)
+    - Task handlers in Docker worker (task events)
+    """
+
+    def __init__(self, connection_pool):
+        self.pool = connection_pool
+
+    # =========================================================================
+    # RECORDING METHODS (called during execution)
+    # =========================================================================
+
+    def record_event(self, event: JobEvent) -> int:
+        """
+        Record a single event to the database.
+
+        Returns:
+            event_id of the inserted record
+        """
+        pass
+
+    def record_job_event(
+        self,
+        job_id: str,
+        event_type: JobEventType,
+        event_status: JobEventStatus = JobEventStatus.INFO,
+        event_data: Optional[Dict] = None,
+        error_message: Optional[str] = None
+    ) -> int:
+        """Convenience method for job-level events."""
+        pass
+
+    def record_task_event(
+        self,
+        job_id: str,
+        task_id: str,
+        stage: int,
+        event_type: JobEventType,
+        event_status: JobEventStatus = JobEventStatus.INFO,
+        checkpoint_name: Optional[str] = None,
+        event_data: Optional[Dict] = None,
+        error_message: Optional[str] = None,
+        duration_ms: Optional[int] = None
+    ) -> int:
+        """Convenience method for task-level events."""
+        pass
+
+    # =========================================================================
+    # QUERY METHODS (called by UI)
+    # =========================================================================
+
+    def get_events_for_job(
+        self,
+        job_id: str,
+        limit: int = 100,
+        event_types: Optional[List[JobEventType]] = None,
+        since: Optional[datetime] = None
+    ) -> List[JobEvent]:
+        """Get events for a job, optionally filtered."""
+        pass
+
+    def get_events_for_task(self, task_id: str) -> List[JobEvent]:
+        """Get all events for a specific task."""
+        pass
+
+    def get_latest_event(self, job_id: str) -> Optional[JobEvent]:
+        """Get the most recent event for a job."""
+        pass
+
+    def get_event_counts_by_type(self, job_id: str) -> Dict[str, int]:
+        """Get count of events by type for a job."""
+        pass
+
+    def get_events_timeline(
+        self,
+        job_id: str,
+        limit: int = 50
+    ) -> List[Dict]:
+        """
+        Get events formatted for timeline display.
+
+        Returns list with:
+        - timestamp (formatted)
+        - event_type
+        - event_status
+        - summary (human-readable)
+        - duration_ms (if available)
+        - task_id (if task-level)
+        """
+        pass
+```
+
+**Deliverables**:
+- [ ] `infrastructure/job_event_repository.py` created
+- [ ] Unit tests for repository methods
+- [ ] Export from `infrastructure/__init__.py`
+
+---
+
+#### Phase 4.2: CoreMachine Instrumentation
+
+**Goal**: Record events at key execution points in CoreMachine
+
+**File**: `core/machine.py` (modify existing)
+
+**Instrumentation Points**:
+
+```python
+# In CoreMachine.__init__():
+self.event_repo = JobEventRepository(self.pool)
+
+# In CoreMachine.submit_job():
+def submit_job(self, job_type: str, parameters: dict) -> str:
+    job_id = self._generate_job_id(job_type, parameters)
+
+    # Record job creation
+    self.event_repo.record_job_event(
+        job_id=job_id,
+        event_type=JobEventType.JOB_CREATED,
+        event_data={"job_type": job_type, "parameters": parameters}
+    )
+
+    # ... existing job creation logic ...
+
+    return job_id
+
+# In CoreMachine._advance_to_stage():
+def _advance_to_stage(self, job_id: str, stage: int):
+    self.event_repo.record_job_event(
+        job_id=job_id,
+        event_type=JobEventType.STAGE_STARTED,
+        event_data={"stage": stage, "stage_name": stage_name}
+    )
+
+    # ... existing stage advancement logic ...
+
+# In CoreMachine._queue_task():
+def _queue_task(self, job_id: str, task_id: str, task_type: str, stage: int):
+    self.event_repo.record_task_event(
+        job_id=job_id,
+        task_id=task_id,
+        stage=stage,
+        event_type=JobEventType.TASK_QUEUED,
+        event_data={"task_type": task_type, "queue": target_queue}
+    )
+
+    # ... existing queue logic ...
+
+# In CoreMachine.process_task_message():
+def process_task_message(self, message: dict):
+    task_id = message["task_id"]
+    job_id = message["job_id"]
+    stage = message["stage"]
+
+    # Record task start
+    start_time = time.time()
+    self.event_repo.record_task_event(
+        job_id=job_id,
+        task_id=task_id,
+        stage=stage,
+        event_type=JobEventType.TASK_STARTED
+    )
+
+    try:
+        result = self._execute_handler(...)
+        duration_ms = int((time.time() - start_time) * 1000)
+
+        # Record task completion
+        self.event_repo.record_task_event(
+            job_id=job_id,
+            task_id=task_id,
+            stage=stage,
+            event_type=JobEventType.TASK_COMPLETED,
+            event_status=JobEventStatus.SUCCESS,
+            duration_ms=duration_ms,
+            event_data={"result_summary": self._summarize_result(result)}
+        )
+
+    except Exception as e:
+        duration_ms = int((time.time() - start_time) * 1000)
+
+        # Record task failure
+        self.event_repo.record_task_event(
+            job_id=job_id,
+            task_id=task_id,
+            stage=stage,
+            event_type=JobEventType.TASK_FAILED,
+            event_status=JobEventStatus.FAILURE,
+            error_message=str(e)[:1000],
+            duration_ms=duration_ms
+        )
+        raise
+
+# In CoreMachine._complete_job():
+def _complete_job(self, job_id: str):
+    self.event_repo.record_job_event(
+        job_id=job_id,
+        event_type=JobEventType.JOB_COMPLETED,
+        event_status=JobEventStatus.SUCCESS
+    )
+
+    # ... existing completion logic ...
+```
+
+**Checkpoint Helper** (for use within handlers):
+
+```python
+# In core/machine.py or separate module
+
+def record_checkpoint(
+    job_id: str,
+    task_id: str,
+    stage: int,
+    checkpoint_name: str,
+    data: Optional[Dict] = None
+):
+    """
+    Record a checkpoint event from within a task handler.
+
+    Usage in handler:
+        from core.events import record_checkpoint
+
+        record_checkpoint(
+            job_id, task_id, stage,
+            checkpoint_name="cog_conversion_complete",
+            data={"output_size_mb": 45.2}
+        )
+    """
+    event_repo = get_event_repository()
+    event_repo.record_task_event(
+        job_id=job_id,
+        task_id=task_id,
+        stage=stage,
+        event_type=JobEventType.CHECKPOINT,
+        checkpoint_name=checkpoint_name,
+        event_data=data or {}
+    )
+```
+
+**Deliverables**:
+- [ ] CoreMachine instrumented with event recording
+- [ ] `record_checkpoint()` helper function created
+- [ ] Events recorded for: job_created, job_started, job_completed, job_failed
+- [ ] Events recorded for: stage_started, stage_completed
+- [ ] Events recorded for: task_queued, task_started, task_completed, task_failed
+- [ ] Works identically for FunctionApp and Docker workers
+
+---
+
+#### Phase 4.3: API Endpoints
+
+**Goal**: Expose job events via REST API
+
+**File**: `triggers/http/jobs_events.py` (new) or add to existing jobs router
+
+```python
+@router.get("/api/jobs/{job_id}/events")
+async def get_job_events(
+    job_id: str,
+    limit: int = Query(default=50, le=500),
+    event_type: Optional[str] = None,
+    since: Optional[str] = None
+) -> List[Dict]:
+    """
+    Get events for a job.
+
+    Query params:
+        limit: Max events to return (default 50)
+        event_type: Filter by type (e.g., "task_completed")
+        since: ISO timestamp to get events after
+
+    Returns:
+        List of event objects with timeline formatting
+    """
+    pass
+
+@router.get("/api/jobs/{job_id}/events/latest")
+async def get_latest_event(job_id: str) -> Optional[Dict]:
+    """Get the most recent event for a job."""
+    pass
+
+@router.get("/api/jobs/{job_id}/events/summary")
+async def get_event_summary(job_id: str) -> Dict:
+    """
+    Get event summary for a job.
+
+    Returns:
+        {
+            "total_events": 45,
+            "by_type": {"task_completed": 20, "checkpoint": 15, ...},
+            "by_status": {"success": 35, "info": 10},
+            "first_event": "2026-01-23T10:45:32Z",
+            "last_event": "2026-01-23T10:52:14Z",
+            "total_duration_ms": 402000
+        }
+    """
+    pass
+
+@router.get("/api/tasks/{task_id}/events")
+async def get_task_events(task_id: str) -> List[Dict]:
+    """Get all events for a specific task."""
+    pass
+```
+
+**Deliverables**:
+- [ ] `GET /api/jobs/{job_id}/events` endpoint
+- [ ] `GET /api/jobs/{job_id}/events/latest` endpoint
+- [ ] `GET /api/jobs/{job_id}/events/summary` endpoint
+- [ ] `GET /api/tasks/{task_id}/events` endpoint
+- [ ] OpenAPI documentation for all endpoints
+
+---
+
+#### Phase 4.4: UI Components
+
+**Goal**: Create reusable event timeline component for job monitoring
+
+**Templates**:
+
+1. **Event Timeline Component**: `templates/components/_event_timeline.html`
+
+```jinja2
+{# Event Timeline Component
+
+   Usage:
+       {% include "components/_event_timeline.html" with context %}
+
+   Context:
+       job_id: Job ID for HTMX polling
+       events: Initial events list (optional)
+       auto_refresh: Enable auto-refresh (default: true)
+       refresh_interval: Seconds between refreshes (default: 5)
+#}
+
+<div class="event-timeline"
+     id="event-timeline-{{ job_id[:8] }}"
+     hx-get="/interface/jobs/{{ job_id }}/events"
+     hx-trigger="{{ 'load, every ' ~ (refresh_interval|default(5)) ~ 's' if auto_refresh|default(true) else 'load' }}"
+     hx-swap="innerHTML">
+
+    {% if events %}
+        {% for event in events %}
+            {% include "components/_event_row.html" %}
+        {% endfor %}
+    {% else %}
+        <div class="timeline-loading">
+            <div class="spinner"></div>
+            <span>Loading events...</span>
+        </div>
+    {% endif %}
+</div>
+```
+
+2. **Event Row Component**: `templates/components/_event_row.html`
+
+```jinja2
+{# Single Event Row
+
+   Context:
+       event: Event object with timestamp, event_type, event_status, etc.
+#}
+
+<div class="event-row event-{{ event.event_status }}">
+    <div class="event-indicator">
+        {% if event.event_status == 'success' %}
+            <span class="indicator-dot success"></span>
+        {% elif event.event_status == 'failure' %}
+            <span class="indicator-dot failure"></span>
+        {% elif event.event_status == 'warning' %}
+            <span class="indicator-dot warning"></span>
+        {% else %}
+            <span class="indicator-dot info"></span>
+        {% endif %}
+    </div>
+
+    <div class="event-time">
+        {{ event.created_at | format_time }}
+    </div>
+
+    <div class="event-type">
+        <span class="event-type-badge {{ event.event_type }}">
+            {{ event.event_type | format_event_type }}
+        </span>
+    </div>
+
+    <div class="event-summary">
+        {{ event | format_event_summary }}
+        {% if event.duration_ms %}
+            <span class="event-duration">({{ event.duration_ms }}ms)</span>
+        {% endif %}
+    </div>
+
+    {% if event.task_id %}
+    <div class="event-task">
+        <a href="/interface/tasks/{{ event.task_id }}">
+            {{ event.task_id[:8] }}
+        </a>
+    </div>
+    {% endif %}
+
+    {% if event.event_data %}
+    <button class="event-expand" onclick="toggleEventData('{{ event.event_id }}')">
+        Details
+    </button>
+    <div id="event-data-{{ event.event_id }}" class="event-data hidden">
+        <pre>{{ event.event_data | tojson(indent=2) }}</pre>
+    </div>
+    {% endif %}
+</div>
+```
+
+3. **Failure Context Component**: `templates/components/_failure_context.html`
+
+```jinja2
+{# Failure Context Panel
+
+   Shows last N events before a failure for debugging.
+
+   Context:
+       job_id: Job ID
+       failure_event: The failure event
+       preceding_events: List of events before failure
+#}
+
+<div class="failure-context-panel">
+    <div class="failure-header">
+        <span class="failure-icon">✖</span>
+        <span class="failure-title">
+            {{ failure_event.event_type | format_event_type }} at
+            {{ failure_event.created_at | format_time }}
+        </span>
+    </div>
+
+    {% if failure_event.error_message %}
+    <div class="failure-message">
+        {{ failure_event.error_message }}
+    </div>
+    {% endif %}
+
+    <div class="failure-timeline">
+        <h4>Events Before Failure</h4>
+        {% for event in preceding_events %}
+            {% include "components/_event_row.html" %}
+        {% endfor %}
+    </div>
+
+    <div class="failure-actions">
+        <button onclick="copyErrorDetails('{{ job_id }}')">Copy Error</button>
+        <a href="/interface/jobs/{{ job_id }}/events" class="btn">View All Events</a>
+        {% if failure_event.checkpoint_name %}
+        <a href="https://portal.azure.com/..." target="_blank" class="btn">
+            View in App Insights
+        </a>
+        {% endif %}
+    </div>
+</div>
+```
+
+**CSS**: Add to `static/css/events.css`
+
+```css
+/* Event Timeline Styles */
+.event-timeline {
+    max-height: 400px;
+    overflow-y: auto;
+    border: 1px solid #e9ecef;
+    border-radius: 6px;
+}
+
+.event-row {
+    display: grid;
+    grid-template-columns: 24px 80px 140px 1fr auto auto;
+    gap: 12px;
+    align-items: center;
+    padding: 10px 16px;
+    border-bottom: 1px solid #f0f0f0;
+    font-size: 13px;
+}
+
+.event-row:hover {
+    background: #f8f9fa;
+}
+
+.indicator-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+}
+
+.indicator-dot.success { background: #10B981; }
+.indicator-dot.failure { background: #EF4444; }
+.indicator-dot.warning { background: #F59E0B; }
+.indicator-dot.info { background: #3B82F6; }
+
+.event-time {
+    font-family: 'Courier New', monospace;
+    color: #626F86;
+    font-size: 11px;
+}
+
+.event-type-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.event-type-badge.task_completed { background: #D1FAE5; color: #059669; }
+.event-type-badge.task_failed { background: #FEE2E2; color: #DC2626; }
+.event-type-badge.checkpoint { background: #E0E7FF; color: #4F46E5; }
+.event-type-badge.stage_started { background: #FEF3C7; color: #D97706; }
+
+.event-duration {
+    color: #9CA3AF;
+    font-size: 11px;
+}
+
+/* Failure Context Panel */
+.failure-context-panel {
+    background: #FEF2F2;
+    border: 1px solid #EF4444;
+    border-radius: 6px;
+    padding: 20px;
+    margin: 20px 0;
+}
+
+.failure-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 16px;
+    font-weight: 600;
+    color: #DC2626;
+    margin-bottom: 12px;
+}
+
+.failure-message {
+    background: #1F2937;
+    color: #FCA5A5;
+    padding: 12px 16px;
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    margin-bottom: 16px;
+    overflow-x: auto;
+}
+```
+
+**Deliverables**:
+- [ ] `templates/components/_event_timeline.html` created
+- [ ] `templates/components/_event_row.html` created
+- [ ] `templates/components/_failure_context.html` created
+- [ ] `static/css/events.css` created
+- [ ] HTMX auto-refresh working
+- [ ] Event detail expansion working
+
+---
+
+#### Phase 4.5: Integration with Tasks Interface
+
+**Goal**: Add event timeline to existing task monitoring page
+
+**Modify**: `templates/pages/tasks/detail.html`
+
+```jinja2
+{% extends "base.html" %}
+
+{% block content %}
+<div class="task-monitor">
+    <!-- Existing job summary card -->
+    <div class="job-summary-card">
+        ...
+    </div>
+
+    <!-- Existing workflow diagram -->
+    <div class="workflow-diagram">
+        ...
+    </div>
+
+    <!-- NEW: Event Timeline Panel -->
+    <div class="panel event-timeline-panel">
+        <div class="panel-header">
+            <h3>Event Timeline</h3>
+            <div class="panel-controls">
+                <label class="toggle">
+                    <input type="checkbox" id="auto-refresh-events" checked>
+                    <span>Live</span>
+                </label>
+                <select id="event-filter" onchange="filterEvents(this.value)">
+                    <option value="all">All Events</option>
+                    <option value="job">Job Events</option>
+                    <option value="stage">Stage Events</option>
+                    <option value="task">Task Events</option>
+                    <option value="checkpoint">Checkpoints</option>
+                </select>
+            </div>
+        </div>
+
+        {% include "components/_event_timeline.html" %}
+    </div>
+
+    <!-- Existing task list -->
+    <div class="task-list">
+        ...
+    </div>
+</div>
+{% endblock %}
+```
+
+**Deliverables**:
+- [ ] Event timeline integrated into task monitor page
+- [ ] Filter by event type working
+- [ ] Auto-refresh toggle working
+- [ ] Event timeline updates with job progress
+
+---
+
+### Testing Checklist
+
+#### Repository Tests
+- [ ] `record_event()` inserts correctly
+- [ ] `get_events_for_job()` returns ordered events
+- [ ] `get_events_for_task()` filters by task_id
+- [ ] `get_latest_event()` returns most recent
+- [ ] Pagination works with limit/offset
+
+#### Integration Tests
+- [ ] Submit hello_world job → events recorded
+- [ ] Submit raster_etl job (Docker) → events recorded
+- [ ] Submit vector job (FunctionApp) → events recorded
+- [ ] Job failure → failure event recorded with error_message
+- [ ] Stage transition → stage events recorded
+- [ ] Checkpoint in handler → checkpoint event recorded
+
+#### UI Tests
+- [ ] Event timeline loads on task monitor page
+- [ ] HTMX auto-refresh updates events
+- [ ] Event detail expansion shows event_data
+- [ ] Failure context panel shows on failed jobs
+- [ ] Filter by event type works
+
+---
+
+### Success Criteria
+
+| Metric | Current | Target |
+|--------|---------|--------|
+| Job status visibility | "Processing" | "Stage 2, task xyz (3s ago)" |
+| Failure debugging | Check App Insights | Full timeline in UI |
+| Stalled job detection | Manual check | Alert if no events for 5 min |
+| Cross-worker consistency | Different UIs | Same event timeline |
+
+---
+
 ### Phase 4: Job Pipeline Interfaces (REVIEW REQUIRED)
 
 **Goal**: Migrate job monitoring interfaces after design review

@@ -1207,29 +1207,42 @@ async def platform_validate(req: func.HttpRequest) -> func.HttpResponse:
         estimated_minutes = None
 
         if data_type == 'raster':
+            # ================================================================
+            # V0.8 ARCHITECTURE (24 JAN 2026)
+            # ================================================================
+            # - ALL raster operations go to Docker worker (container-tasks queue)
+            # - Single job: process_raster_docker handles both single COG and tiled output
+            # - ETL mount is EXPECTED in production (False = degraded state)
+            # - Tiling decision based on raster_tiling_threshold_mb
+            # ================================================================
+            import math
             raster_config = config.raster
+            mount_enabled = raster_config.use_etl_mount
+            tiling_threshold_mb = raster_config.raster_tiling_threshold_mb
+            tile_target_mb = raster_config.raster_tile_target_mb
+
+            # All raster goes to Docker
+            processing_mode = "docker"
+            recommended_job_type = "process_raster_docker"
+
+            # Determine output mode (single COG vs tiled)
+            output_mode = "single_cog"
+            estimated_tiles = 1
 
             if file_size_mb is not None:
-                if file_size_mb > raster_config.route_reject_mb:
-                    warnings.append(f"File exceeds maximum size ({raster_config.route_reject_mb}MB)")
-                    recommended_job_type = None
-                elif file_size_mb > raster_config.route_docker_mb:
-                    recommended_job_type = "process_large_raster_v2"
-                    processing_mode = "docker"
-                    estimated_minutes = int(file_size_mb / 50) + 10  # Rough estimate
-                elif file_size_mb > raster_config.route_large_mb:
-                    recommended_job_type = "process_raster_v2"
-                    processing_mode = "function"
-                    estimated_minutes = int(file_size_mb / 100) + 5
-                    warnings.append("File is large - may timeout in Function App")
-                else:
-                    recommended_job_type = "process_raster_v2"
-                    processing_mode = "function"
-                    estimated_minutes = max(2, int(file_size_mb / 100) + 1)
+                if file_size_mb > tiling_threshold_mb:
+                    output_mode = "tiled"
+                    estimated_tiles = math.ceil(file_size_mb / tile_target_mb)
+                    warnings.append(f"Large file ({file_size_mb:.1f}MB) - will produce ~{estimated_tiles} tiles")
+
+                # Estimate processing time (rough: ~50MB/min for Docker)
+                estimated_minutes = max(2, int(file_size_mb / 50) + 2)
             else:
-                recommended_job_type = "process_raster_v2"
-                processing_mode = "function"
-                warnings.append("Could not determine file size - using default job type")
+                warnings.append("Could not determine file size")
+
+            # V0.8: Mount is expected - warn if disabled
+            if not mount_enabled:
+                warnings.append("WARNING: ETL mount disabled - system in degraded state")
 
         elif data_type == 'vector':
             recommended_job_type = "process_vector"
@@ -1239,6 +1252,7 @@ async def platform_validate(req: func.HttpRequest) -> func.HttpResponse:
             else:
                 estimated_minutes = 5
 
+        # V0.8: Include raster-specific output mode info
         result = {
             "valid": file_exists and recommended_job_type is not None,
             "file_exists": file_exists,
@@ -1250,6 +1264,13 @@ async def platform_validate(req: func.HttpRequest) -> func.HttpResponse:
             "warnings": warnings if warnings else None,
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
+
+        # Add raster-specific V0.8 fields
+        if data_type == 'raster':
+            result["etl_mount_enabled"] = config.raster.use_etl_mount
+            result["output_mode"] = output_mode if 'output_mode' in dir() else "single_cog"
+            result["estimated_tiles"] = estimated_tiles if 'estimated_tiles' in dir() else 1
+            result["tiling_threshold_mb"] = config.raster.raster_tiling_threshold_mb
 
         return func.HttpResponse(
             json.dumps(result, indent=2),

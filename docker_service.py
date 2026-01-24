@@ -1806,6 +1806,188 @@ def test_storage():
     return test_storage_connectivity()
 
 
+@app.get("/test/mount")
+def test_mount():
+    """
+    Test Azure Files mount at /mounts/etl-temp.
+
+    Verifies:
+    1. Mount path exists
+    2. Mount is writable (creates/deletes test file)
+    3. Returns disk space available
+    4. GDAL can use mount for temp files (CPL_TMPDIR)
+    5. Rasterio can create/read GeoTIFF on mount
+
+    Returns:
+        Mount status, disk space, and GDAL compatibility info
+    """
+    import shutil
+    import uuid
+
+    mount_path = "/mounts/etl-temp"
+    test_id = uuid.uuid4().hex[:8]
+    test_file = f"{mount_path}/.mount-test-{test_id}"
+    timestamp = datetime.now(timezone.utc).isoformat()
+
+    result = {
+        "timestamp": timestamp,
+        "mount_path": mount_path,
+        "exists": False,
+        "writable": False,
+        "disk_space": None,
+        "gdal_test": None,
+        "error": None,
+    }
+
+    try:
+        # Check if mount exists
+        if os.path.exists(mount_path):
+            result["exists"] = True
+            result["is_directory"] = os.path.isdir(mount_path)
+
+            # Check disk space
+            try:
+                usage = shutil.disk_usage(mount_path)
+                result["disk_space"] = {
+                    "total_gb": round(usage.total / 1e9, 2),
+                    "used_gb": round(usage.used / 1e9, 2),
+                    "free_gb": round(usage.free / 1e9, 2),
+                    "percent_used": round((usage.used / usage.total) * 100, 1),
+                }
+            except Exception as e:
+                result["disk_space"] = {"error": str(e)}
+
+            # Test write capability
+            try:
+                with open(test_file, "w") as f:
+                    f.write(f"mount test {timestamp}")
+                os.remove(test_file)
+                result["writable"] = True
+            except Exception as e:
+                result["writable"] = False
+                result["write_error"] = str(e)
+
+            # List files (up to 10)
+            try:
+                files = os.listdir(mount_path)
+                result["files_count"] = len(files)
+                result["files_sample"] = files[:10] if files else []
+            except Exception as e:
+                result["files_error"] = str(e)
+
+            # GDAL/Rasterio test - create a small GeoTIFF on the mount
+            result["gdal_test"] = test_gdal_on_mount(mount_path, test_id)
+
+        else:
+            result["error"] = f"Mount path does not exist: {mount_path}"
+
+    except Exception as e:
+        result["error"] = str(e)
+
+    # Overall status
+    gdal_ok = result.get("gdal_test", {}).get("success", False)
+    result["status"] = "ok" if (result["exists"] and result["writable"] and gdal_ok) else "error"
+    return result
+
+
+def test_gdal_on_mount(mount_path: str, test_id: str) -> dict:
+    """
+    Test GDAL/Rasterio can use the mount for temp file operations.
+
+    Creates a small test GeoTIFF, verifies it can be read back,
+    and tests CPL_TMPDIR configuration.
+    """
+    import numpy as np
+
+    gdal_result = {
+        "success": False,
+        "gdal_version": None,
+        "rasterio_version": None,
+        "cpl_tmpdir_set": False,
+        "tiff_write": False,
+        "tiff_read": False,
+        "tiff_size_bytes": None,
+        "error": None,
+    }
+
+    test_tiff = f"{mount_path}/.gdal-test-{test_id}.tif"
+
+    try:
+        from osgeo import gdal
+        import rasterio
+        from rasterio.transform import from_bounds
+
+        gdal_result["gdal_version"] = gdal.__version__
+        gdal_result["rasterio_version"] = rasterio.__version__
+
+        # Set CPL_TMPDIR to use mount for GDAL temp files
+        original_tmpdir = os.environ.get("CPL_TMPDIR")
+        os.environ["CPL_TMPDIR"] = mount_path
+        gdal.SetConfigOption("CPL_TMPDIR", mount_path)
+        gdal_result["cpl_tmpdir_set"] = True
+        gdal_result["cpl_tmpdir_value"] = mount_path
+
+        # Create a small test raster (100x100, 3 bands, uint8)
+        width, height = 100, 100
+        data = np.random.randint(0, 255, (3, height, width), dtype=np.uint8)
+        transform = from_bounds(-180, -90, 180, 90, width, height)
+
+        # Write GeoTIFF using rasterio
+        with rasterio.open(
+            test_tiff,
+            "w",
+            driver="GTiff",
+            height=height,
+            width=width,
+            count=3,
+            dtype="uint8",
+            crs="EPSG:4326",
+            transform=transform,
+            compress="deflate",
+        ) as dst:
+            dst.write(data)
+
+        gdal_result["tiff_write"] = True
+        gdal_result["tiff_size_bytes"] = os.path.getsize(test_tiff)
+
+        # Read it back to verify
+        with rasterio.open(test_tiff) as src:
+            read_data = src.read()
+            gdal_result["tiff_read"] = True
+            gdal_result["tiff_shape"] = list(read_data.shape)
+            gdal_result["tiff_crs"] = str(src.crs)
+
+        # Verify data matches
+        if np.array_equal(data, read_data):
+            gdal_result["data_integrity"] = True
+        else:
+            gdal_result["data_integrity"] = False
+
+        gdal_result["success"] = True
+
+    except Exception as e:
+        gdal_result["error"] = str(e)
+
+    finally:
+        # Cleanup test file
+        try:
+            if os.path.exists(test_tiff):
+                os.remove(test_tiff)
+                gdal_result["cleanup"] = True
+        except Exception as cleanup_error:
+            gdal_result["cleanup_error"] = str(cleanup_error)
+
+        # Restore original CPL_TMPDIR
+        if original_tmpdir:
+            os.environ["CPL_TMPDIR"] = original_tmpdir
+            gdal.SetConfigOption("CPL_TMPDIR", original_tmpdir)
+        else:
+            os.environ.pop("CPL_TMPDIR", None)
+            gdal.SetConfigOption("CPL_TMPDIR", None)
+
+    return gdal_result
+
+
 @app.get("/queue/status")
 def get_queue_status():
     """

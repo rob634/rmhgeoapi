@@ -118,6 +118,233 @@ logger = LoggerFactory.create_logger(ComponentType.SERVICE, "docker_context")
 DEFAULT_PULSE_INTERVAL_SECONDS = 60
 
 
+# =============================================================================
+# MEMORY WATCHDOG CONFIGURATION (24 JAN 2026)
+# =============================================================================
+# Monitor memory usage and trigger graceful shutdown before OOM kill.
+# This allows handlers to save state before the kernel kills the process.
+DEFAULT_MEMORY_THRESHOLD_PERCENT = 80  # Trigger shutdown at 80% of limit
+MEMORY_CHECK_INTERVAL_SECONDS = 5      # Check memory every 5 seconds
+
+
+@dataclass
+class MemoryWatchdog:
+    """
+    Monitor memory usage and trigger graceful shutdown before OOM kill.
+
+    When running in Docker, the container has a memory limit set via cgroups.
+    If the process exceeds this limit, the kernel's OOM killer sends SIGKILL
+    which cannot be caught - the process dies immediately with no chance to
+    save state or log errors.
+
+    This watchdog monitors memory usage and triggers graceful shutdown when
+    approaching the limit, giving handlers time to checkpoint and exit cleanly.
+
+    Architecture:
+        MemoryWatchdog runs in background thread
+              │
+              ├── Reads memory limit from cgroups
+              ├── Polls current memory usage every N seconds
+              │
+              └── When usage > threshold:
+                    ├── Sets _oom_triggered = True
+                    ├── Logs critical warning
+                    └── Sets shutdown_event (shared with DockerTaskContext)
+                              │
+                              └── Handler's should_stop() returns True
+                                        │
+                                        └── Handler saves checkpoint and exits
+
+    Usage:
+        watchdog = MemoryWatchdog(
+            threshold_percent=80,
+            shutdown_event=context.shutdown_event
+        )
+        watchdog.start(task_id)
+        # ... handler runs ...
+        watchdog.stop()
+
+    Attributes:
+        threshold_percent: Memory usage % that triggers shutdown (default: 80)
+        check_interval: Seconds between memory checks (default: 5)
+        shutdown_event: Threading event to signal shutdown request
+    """
+
+    threshold_percent: float = DEFAULT_MEMORY_THRESHOLD_PERCENT
+    check_interval: float = MEMORY_CHECK_INTERVAL_SECONDS
+    shutdown_event: Optional[threading.Event] = None
+
+    # Internal state (not passed to __init__)
+    _thread: Optional[threading.Thread] = field(default=None, init=False, repr=False)
+    _stop_event: threading.Event = field(default_factory=threading.Event, init=False, repr=False)
+    _oom_triggered: bool = field(default=False, init=False, repr=False)
+    _memory_limit_bytes: int = field(default=0, init=False, repr=False)
+    _peak_memory_bytes: int = field(default=0, init=False, repr=False)
+    _started: bool = field(default=False, init=False, repr=False)
+    _task_id: str = field(default="", init=False, repr=False)
+
+    def __post_init__(self):
+        """Initialize memory limit from cgroups."""
+        self._memory_limit_bytes = self._get_container_memory_limit()
+
+    def _get_container_memory_limit(self) -> int:
+        """
+        Read container memory limit from cgroups.
+
+        Docker sets memory limits via cgroups. We read from:
+        - cgroups v2: /sys/fs/cgroup/memory.max
+        - cgroups v1: /sys/fs/cgroup/memory/memory.limit_in_bytes
+
+        Returns:
+            Memory limit in bytes, or system total if not in container
+        """
+        # Try cgroups v2 first (modern systems)
+        try:
+            with open('/sys/fs/cgroup/memory.max', 'r') as f:
+                limit = f.read().strip()
+                if limit != 'max':
+                    return int(limit)
+        except (FileNotFoundError, ValueError, PermissionError):
+            pass
+
+        # Try cgroups v1 (older systems)
+        try:
+            with open('/sys/fs/cgroup/memory/memory.limit_in_bytes', 'r') as f:
+                limit = int(f.read().strip())
+                # Very high values indicate no limit
+                if limit < 9223372036854771712:  # Near max int64
+                    return limit
+        except (FileNotFoundError, ValueError, PermissionError):
+            pass
+
+        # Fallback: use system memory (not in container or can't read cgroups)
+        try:
+            import psutil
+            return psutil.virtual_memory().total
+        except ImportError:
+            # Last resort: assume 8GB
+            return 8 * 1024 * 1024 * 1024
+
+    def start(self, task_id: str) -> None:
+        """
+        Start background memory monitoring.
+
+        Args:
+            task_id: Task identifier for logging
+        """
+        if self._started:
+            logger.debug(f"🧠 Memory watchdog already running for {task_id[:8]}...")
+            return
+
+        self._task_id = task_id
+        self._stop_event.clear()
+        self._oom_triggered = False
+
+        self._thread = threading.Thread(
+            target=self._monitor_loop,
+            daemon=True,
+            name=f"memwatch-{task_id[:8]}"
+        )
+        self._thread.start()
+        self._started = True
+
+        logger.info(
+            f"🧠 Memory watchdog started for {task_id[:8]}... "
+            f"(limit={self._memory_limit_bytes / 1e9:.1f}GB, "
+            f"threshold={self.threshold_percent}%, "
+            f"check_interval={self.check_interval}s)"
+        )
+
+    def stop(self) -> None:
+        """Stop memory monitoring."""
+        if not self._started:
+            return
+
+        self._stop_event.set()
+
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=2)
+
+        self._started = False
+
+        logger.info(
+            f"🧠 Memory watchdog stopped for {self._task_id[:8]}... "
+            f"(peak={self._peak_memory_bytes / 1e9:.2f}GB, "
+            f"oom_triggered={self._oom_triggered})"
+        )
+
+    def _monitor_loop(self) -> None:
+        """Background loop checking memory usage."""
+        try:
+            import psutil
+        except ImportError:
+            logger.error("🧠 psutil not available - memory watchdog disabled")
+            return
+
+        task_id_short = self._task_id[:8] if self._task_id else "unknown"
+
+        while not self._stop_event.wait(timeout=self.check_interval):
+            try:
+                # Get current process memory
+                current_bytes = psutil.Process().memory_info().rss
+                self._peak_memory_bytes = max(self._peak_memory_bytes, current_bytes)
+
+                # Calculate usage percentage
+                usage_percent = (current_bytes / self._memory_limit_bytes) * 100
+
+                # Log periodic status at DEBUG level
+                logger.debug(
+                    f"🧠 Memory: {usage_percent:.1f}% "
+                    f"({current_bytes / 1e9:.2f}GB / {self._memory_limit_bytes / 1e9:.1f}GB) "
+                    f"[{task_id_short}...]"
+                )
+
+                # Check threshold
+                if usage_percent >= self.threshold_percent:
+                    self._oom_triggered = True
+
+                    logger.critical(
+                        f"🧠🚨 MEMORY WATCHDOG TRIGGERED for {task_id_short}...! "
+                        f"Usage: {usage_percent:.1f}% "
+                        f"({current_bytes / 1e9:.2f}GB / {self._memory_limit_bytes / 1e9:.1f}GB) "
+                        f"exceeds threshold {self.threshold_percent}% - "
+                        f"REQUESTING GRACEFUL SHUTDOWN to prevent OOM kill"
+                    )
+
+                    # Trigger graceful shutdown via shared event
+                    if self.shutdown_event:
+                        self.shutdown_event.set()
+
+                    # Exit monitoring loop
+                    return
+
+            except Exception as e:
+                # Don't let monitoring errors kill the watchdog
+                logger.warning(f"🧠 Memory check error: {e}")
+
+        logger.debug(f"🧠 Memory watchdog loop ended for {task_id_short}...")
+
+    @property
+    def oom_triggered(self) -> bool:
+        """True if shutdown was triggered by memory pressure."""
+        return self._oom_triggered
+
+    @property
+    def peak_memory_bytes(self) -> int:
+        """Peak memory usage observed during monitoring."""
+        return self._peak_memory_bytes
+
+    @property
+    def memory_limit_bytes(self) -> int:
+        """Container memory limit in bytes."""
+        return self._memory_limit_bytes
+
+    @property
+    def is_running(self) -> bool:
+        """True if watchdog is currently monitoring."""
+        return self._started and self._thread is not None and self._thread.is_alive()
+
+
 @dataclass
 class DockerTaskContext:
     """
@@ -197,6 +424,9 @@ class DockerTaskContext:
     _pulse_stop_event: threading.Event = field(default_factory=threading.Event, init=False, repr=False)
     _pulse_count: int = field(default=0, init=False, repr=False)
     _pulse_started: bool = field(default=False, init=False, repr=False)
+
+    # Memory watchdog state (24 JAN 2026)
+    _memory_watchdog: Optional[MemoryWatchdog] = field(default=None, init=False, repr=False)
 
     def __post_init__(self):
         """Wire shutdown event to checkpoint manager."""
@@ -309,6 +539,100 @@ class DockerTaskContext:
     def is_pulse_running(self) -> bool:
         """Check if pulse thread is currently running."""
         return self._pulse_started and self._pulse_thread is not None and self._pulse_thread.is_alive()
+
+    # =========================================================================
+    # MEMORY WATCHDOG MECHANISM (24 JAN 2026)
+    # =========================================================================
+
+    def start_memory_watchdog(
+        self,
+        threshold_percent: float = DEFAULT_MEMORY_THRESHOLD_PERCENT,
+        check_interval: float = MEMORY_CHECK_INTERVAL_SECONDS
+    ) -> None:
+        """
+        Start memory monitoring to prevent OOM kills.
+
+        The memory watchdog monitors container memory usage and triggers
+        graceful shutdown before hitting the limit. When memory usage
+        exceeds the threshold, shutdown_event is set, causing should_stop()
+        to return True. The handler then has time to save checkpoint and
+        exit cleanly instead of being killed by SIGKILL.
+
+        Args:
+            threshold_percent: Memory usage % that triggers shutdown (default: 80)
+            check_interval: Seconds between memory checks (default: 5)
+
+        Example:
+            context.start_memory_watchdog(threshold_percent=75)
+            for item in items:
+                if context.should_stop():
+                    if context.oom_abort_requested:
+                        logger.warning("Stopping due to memory pressure")
+                    context.checkpoint.save(phase, data)
+                    return {'success': True, 'interrupted': True}
+                process(item)
+        """
+        if self._memory_watchdog is not None and self._memory_watchdog.is_running:
+            logger.debug(f"🧠 Memory watchdog already running for {self.task_id[:8]}...")
+            return
+
+        self._memory_watchdog = MemoryWatchdog(
+            threshold_percent=threshold_percent,
+            check_interval=check_interval,
+            shutdown_event=self.shutdown_event
+        )
+        self._memory_watchdog.start(self.task_id)
+
+    def stop_memory_watchdog(self) -> None:
+        """
+        Stop memory monitoring.
+
+        Called automatically when task completes. Returns memory statistics
+        via logging for observability.
+        """
+        if self._memory_watchdog is not None:
+            self._memory_watchdog.stop()
+
+    @property
+    def oom_abort_requested(self) -> bool:
+        """
+        True if shutdown was triggered by memory pressure (vs SIGTERM).
+
+        Use this to distinguish between:
+        - OOM prevention: Handler exceeded memory threshold
+        - Normal shutdown: SIGTERM from container stop/scale-down
+
+        Example:
+            if context.should_stop():
+                if context.oom_abort_requested:
+                    logger.warning("Memory pressure - saving checkpoint")
+                else:
+                    logger.info("Graceful shutdown requested")
+                context.checkpoint.save(...)
+        """
+        if self._memory_watchdog is not None:
+            return self._memory_watchdog.oom_triggered
+        return False
+
+    @property
+    def memory_watchdog_stats(self) -> Optional[Dict[str, Any]]:
+        """
+        Get memory watchdog statistics.
+
+        Returns:
+            Dict with limit_gb, peak_gb, oom_triggered, is_running
+            or None if watchdog not started
+        """
+        if self._memory_watchdog is None:
+            return None
+
+        return {
+            'limit_gb': self._memory_watchdog.memory_limit_bytes / 1e9,
+            'peak_gb': self._memory_watchdog.peak_memory_bytes / 1e9,
+            'threshold_percent': self._memory_watchdog.threshold_percent,
+            'oom_triggered': self._memory_watchdog.oom_triggered,
+            'is_running': self._memory_watchdog.is_running,
+        }
 
     # =========================================================================
     # SHUTDOWN AWARENESS
@@ -463,6 +787,9 @@ def create_docker_context(
     task_repo: Any,
     auto_start_pulse: bool = True,
     pulse_interval_seconds: Optional[int] = None,
+    enable_memory_watchdog: bool = False,
+    memory_threshold_percent: float = DEFAULT_MEMORY_THRESHOLD_PERCENT,
+    memory_check_interval: float = MEMORY_CHECK_INTERVAL_SECONDS,
 ) -> DockerTaskContext:
     """
     Factory function to create DockerTaskContext with CheckpointManager.
@@ -479,9 +806,12 @@ def create_docker_context(
         task_repo: Task repository for persistence
         auto_start_pulse: Whether to start pulse thread immediately (default: True)
         pulse_interval_seconds: Override pulse interval (default: from env or 60s)
+        enable_memory_watchdog: Start memory monitoring (default: False)
+        memory_threshold_percent: Memory % that triggers shutdown (default: 80)
+        memory_check_interval: Seconds between memory checks (default: 5)
 
     Returns:
-        Fully configured DockerTaskContext with pulse optionally started
+        Fully configured DockerTaskContext with pulse and watchdog optionally started
 
     Example:
         # In BackgroundQueueWorker._process_message()
@@ -492,14 +822,17 @@ def create_docker_context(
             stage=task_message.stage,
             shutdown_event=self._stop_event,
             task_repo=task_repo,
+            enable_memory_watchdog=True,  # Prevent OOM kills
+            memory_threshold_percent=75,   # More conservative threshold
         )
-        # Pulse is already running!
+        # Pulse and memory watchdog are running!
         result = self._core_machine.process_task_message(
             task_message,
             docker_context=context
         )
-        # Stop pulse when done
+        # Stop pulse and watchdog when done
         context.stop_pulse()
+        context.stop_memory_watchdog()
     """
     from infrastructure.checkpoint_manager import CheckpointManager
 
@@ -531,6 +864,13 @@ def create_docker_context(
     if auto_start_pulse:
         context.start_pulse()
 
+    # Start memory watchdog if requested (24 JAN 2026)
+    if enable_memory_watchdog:
+        context.start_memory_watchdog(
+            threshold_percent=memory_threshold_percent,
+            check_interval=memory_check_interval
+        )
+
     return context
 
 
@@ -540,5 +880,8 @@ def create_docker_context(
 
 __all__ = [
     'DockerTaskContext',
+    'MemoryWatchdog',
     'create_docker_context',
+    'DEFAULT_MEMORY_THRESHOLD_PERCENT',
+    'MEMORY_CHECK_INTERVAL_SECONDS',
 ]

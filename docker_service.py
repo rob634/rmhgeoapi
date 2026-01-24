@@ -524,8 +524,10 @@ class BackgroundQueueWorker:
             logger.info(f"  Stage: {task_message.stage}")
             logger.info("=" * 50)
 
-            # Create Docker context with checkpoint, shutdown awareness, and pulse (F7.18, 22 JAN 2026)
-            # Pulse is auto-started by create_docker_context() - updates last_pulse every 60s
+            # Create Docker context with checkpoint, shutdown awareness, pulse, and memory watchdog
+            # (F7.18, 22 JAN 2026; Memory watchdog added 24 JAN 2026)
+            # - Pulse: updates last_pulse every 60s for liveness tracking
+            # - Memory watchdog: triggers graceful shutdown before OOM kill (80% threshold)
             task_repo = RepositoryFactory.create_task_repository()
             docker_context = create_docker_context(
                 task_id=task_message.task_id,
@@ -534,7 +536,9 @@ class BackgroundQueueWorker:
                 stage=task_message.stage,
                 shutdown_event=self._stop_event,
                 task_repo=task_repo,
-                auto_start_pulse=True,  # Start pulse immediately
+                auto_start_pulse=True,           # Start pulse immediately
+                enable_memory_watchdog=True,     # Prevent OOM kills (24 JAN 2026)
+                memory_threshold_percent=80,     # Trigger shutdown at 80% memory usage
             )
 
             # Log checkpoint state if resuming
@@ -552,8 +556,10 @@ class BackgroundQueueWorker:
                     docker_context=docker_context
                 )
             finally:
-                # Always stop pulse when task processing ends (22 JAN 2026)
+                # Always stop pulse and memory watchdog when task processing ends
+                # (22 JAN 2026 - pulse; 24 JAN 2026 - memory watchdog)
                 docker_context.stop_pulse()
+                docker_context.stop_memory_watchdog()
 
             elapsed = time.time() - start_time
 
@@ -561,12 +567,26 @@ class BackgroundQueueWorker:
                 if result.get('interrupted'):
                     # Graceful shutdown - abandon message so another instance can resume
                     # Checkpoint was saved, delivery_count increments, message becomes visible
+                    oom_abort = docker_context.oom_abort_requested
+                    reason = "MEMORY PRESSURE (OOM prevention)" if oom_abort else "graceful shutdown"
+                    emoji = "🧠🛑" if oom_abort else "🛑"
+
                     logger.warning("=" * 50)
-                    logger.warning(f"[Queue] 🛑 TASK INTERRUPTED (graceful shutdown)")
+                    logger.warning(f"[Queue] {emoji} TASK INTERRUPTED ({reason})")
                     logger.warning(f"  Task ID: {task_id[:16]}...")
                     logger.warning(f"  Phase completed: {result.get('phase_completed', '?')}")
                     logger.warning(f"  Elapsed: {elapsed:.2f}s")
                     logger.warning(f"  Pulses sent: {docker_context.pulse_count}")
+
+                    # Log memory stats if available (24 JAN 2026)
+                    mem_stats = docker_context.memory_watchdog_stats
+                    if mem_stats:
+                        logger.warning(
+                            f"  Memory: peak={mem_stats['peak_gb']:.2f}GB / "
+                            f"limit={mem_stats['limit_gb']:.1f}GB "
+                            f"({mem_stats['peak_gb']/mem_stats['limit_gb']*100:.1f}%)"
+                        )
+
                     logger.warning(f"  Action: ABANDONING message for resume by another instance")
                     logger.warning("=" * 50)
                     receiver.abandon_message(message)
@@ -578,6 +598,16 @@ class BackgroundQueueWorker:
                     logger.info(f"  Task ID: {task_id[:16]}...")
                     logger.info(f"  Elapsed: {elapsed:.2f}s")
                     logger.info(f"  Pulses sent: {docker_context.pulse_count}")
+
+                    # Log memory stats if available (24 JAN 2026)
+                    mem_stats = docker_context.memory_watchdog_stats
+                    if mem_stats:
+                        logger.info(
+                            f"  Memory: peak={mem_stats['peak_gb']:.2f}GB / "
+                            f"limit={mem_stats['limit_gb']:.1f}GB "
+                            f"({mem_stats['peak_gb']/mem_stats['limit_gb']*100:.1f}%)"
+                        )
+
                     logger.info(f"  Action: Message COMPLETED (removed from queue)")
                     logger.info("=" * 50)
                     receiver.complete_message(message)
@@ -1072,6 +1102,466 @@ def interface_collections(request: Request):
         tipg_url=tipg_url,
         titiler_url=titiler_url
     )
+
+
+# ============================================================================
+# SUBMIT INTERFACE (Unified Raster + Vector Submission)
+# ============================================================================
+
+@app.get("/interface/submit", response_class=HTMLResponse)
+def interface_submit(request: Request):
+    """
+    Unified Data Submission Interface.
+
+    Combines raster and vector submission with:
+    - File source selection (browse storage or upload)
+    - Automatic file type detection
+    - Type-specific form fields (CSV geometry, raster options)
+    - cURL preview for Platform API
+
+    Returns:
+        HTML submission form
+    """
+    from templates_utils import render_template
+
+    return render_template(
+        request,
+        "pages/submit/unified.html",
+        nav_active="/interface/submit",
+        api_base_url="/api",
+        platform_api_url="/api/platform"
+    )
+
+
+@app.get("/interface/submit/partial/browser", response_class=HTMLResponse)
+def interface_submit_browser_partial(request: Request):
+    """HTMX partial for file browser."""
+    from templates_utils import render_fragment
+
+    return render_fragment(
+        request,
+        "pages/submit/_file_browser.html"
+    )
+
+
+@app.get("/interface/submit/partial/upload", response_class=HTMLResponse)
+def interface_submit_upload_partial(request: Request):
+    """HTMX partial for file upload."""
+    from templates_utils import render_fragment
+
+    return render_fragment(
+        request,
+        "pages/submit/_file_upload.html"
+    )
+
+
+@app.get("/interface/submit/partial/containers", response_class=HTMLResponse)
+def interface_submit_containers(request: Request, zone: str = "bronze"):
+    """
+    HTMX partial for container dropdown options.
+
+    Args:
+        zone: Storage zone (default: bronze)
+
+    Returns:
+        HTML option elements for containers
+    """
+    from infrastructure.blob import BlobRepository
+
+    try:
+        repo = BlobRepository.for_zone(zone)
+        containers = repo.list_containers()
+
+        if not containers:
+            return '<option value="">No containers in zone</option>'
+
+        options = ['<option value="">Select container...</option>']
+        for c in containers:
+            options.append(f'<option value="{c["name"]}">{c["name"]}</option>')
+
+        return '\n'.join(options)
+
+    except Exception as e:
+        return f'<option value="">Error: {str(e)[:50]}</option>'
+
+
+@app.get("/interface/submit/partial/files", response_class=HTMLResponse)
+def interface_submit_files(
+    request: Request,
+    zone: str = "bronze",
+    container: str = "",
+    prefix: str = "",
+    limit: int = 250
+):
+    """
+    HTMX partial for file table rows.
+
+    Filters for supported geospatial extensions (raster + vector).
+
+    Args:
+        zone: Storage zone
+        container: Container name
+        prefix: Path prefix filter
+        limit: Maximum files to return
+
+    Returns:
+        HTML table rows for matching files
+    """
+    from infrastructure.blob import BlobRepository
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    # Supported extensions
+    EXTENSIONS = [
+        '.tif', '.tiff', '.geotiff', '.img', '.jp2', '.ecw', '.vrt', '.nc', '.hdf', '.hdf5',
+        '.csv', '.geojson', '.json', '.gpkg', '.kml', '.kmz', '.shp', '.zip'
+    ]
+
+    RASTER_EXTENSIONS = ['.tif', '.tiff', '.geotiff', '.img', '.jp2', '.ecw', '.vrt', '.nc', '.hdf', '.hdf5']
+
+    if not container:
+        return '<tr><td colspan="4" class="empty-state">Please select a container</td></tr>'
+
+    try:
+        repo = BlobRepository.for_zone(zone)
+        blobs = repo.list_blobs(
+            container=container,
+            prefix=prefix if prefix else "",
+            limit=limit * 2
+        )
+
+        # Filter for supported extensions
+        filtered = []
+        for blob in blobs:
+            name = blob.get('name', '').lower()
+            if any(name.endswith(ext) for ext in EXTENSIONS):
+                filtered.append(blob)
+            if len(filtered) >= limit:
+                break
+
+        if not filtered:
+            return '''
+            <tr>
+                <td colspan="4">
+                    <div class="empty-state" style="margin: 20px 0;">
+                        <h3>No Supported Files Found</h3>
+                        <p>No files with supported geospatial extensions in this location.</p>
+                    </div>
+                </td>
+            </tr>
+            '''
+
+        # Build table rows
+        rows = []
+        eastern = ZoneInfo('America/New_York')
+
+        for blob in filtered:
+            size_mb = blob.get('size', 0) / (1024 * 1024)
+            name = blob.get('name', '')
+            short_name = name.split('/')[-1] if '/' in name else name
+
+            # Format date
+            last_modified = blob.get('last_modified', '')
+            date_str = 'N/A'
+            if last_modified:
+                try:
+                    dt = datetime.fromisoformat(last_modified.replace('Z', '+00:00'))
+                    dt_eastern = dt.astimezone(eastern)
+                    date_str = dt_eastern.strftime('%m/%d/%Y')
+                except Exception:
+                    pass
+
+            # Get extension and type
+            ext = short_name.split('.')[-1].lower() if '.' in short_name else ''
+            is_raster = f'.{ext}' in RASTER_EXTENSIONS
+            type_class = 'file-type-raster' if is_raster else 'file-type-vector'
+
+            # Size class (warning for >1GB)
+            size_class = 'file-size warning' if size_mb > 1024 else 'file-size'
+
+            rows.append(f'''
+            <tr class="file-row"
+                onclick="selectFile('{name}', '{container}', '{zone}', {size_mb:.2f})"
+                data-blob="{name}"
+                data-container="{container}"
+                data-zone="{zone}"
+                data-size="{size_mb:.2f}">
+                <td><div class="file-name" title="{name}">{short_name}</div></td>
+                <td><span class="{size_class}">{size_mb:.2f} MB</span></td>
+                <td><span class="file-date">{date_str}</span></td>
+                <td><span class="file-type-badge {type_class}">{ext.upper()}</span></td>
+            </tr>''')
+
+        # Show table, hide initial state via OOB swap
+        table_trigger = '<div id="files-initial-state" hx-swap-oob="true" class="empty-state hidden"></div>'
+
+        return '\n'.join(rows) + table_trigger
+
+    except Exception as e:
+        return f'''
+        <tr>
+            <td colspan="4">
+                <div class="empty-state" style="margin: 20px 0;">
+                    <h3>Error Loading Files</h3>
+                    <p>{str(e)[:100]}</p>
+                </div>
+            </td>
+        </tr>
+        '''
+
+
+@app.post("/interface/submit/upload")
+async def interface_submit_upload_handler(request: Request):
+    """
+    Handle file upload to blob storage.
+
+    Returns:
+        JSON with blob reference on success
+    """
+    from fastapi.responses import JSONResponse
+    from infrastructure.blob import BlobRepository
+
+    try:
+        form = await request.form()
+        file = form.get('file')
+        container = form.get('container')
+        path = form.get('path', '')
+
+        if not file or not container:
+            return JSONResponse(
+                {"error": "File and container required"},
+                status_code=400
+            )
+
+        # Read file content
+        content = await file.read()
+
+        # Determine blob path
+        blob_name = path if path else file.filename
+
+        # Upload to bronze storage
+        repo = BlobRepository.for_zone('bronze')
+        repo.upload_blob(
+            container=container,
+            blob_name=blob_name,
+            data=content,
+            content_type=file.content_type or 'application/octet-stream'
+        )
+
+        return JSONResponse({
+            "success": True,
+            "blob_name": blob_name,
+            "container": container,
+            "size": len(content)
+        })
+
+    except Exception as e:
+        return JSONResponse(
+            {"error": str(e)},
+            status_code=500
+        )
+
+
+@app.post("/interface/submit/process", response_class=HTMLResponse)
+async def interface_submit_process(request: Request):
+    """
+    Handle form submission - calls Platform API.
+
+    Returns:
+        HTML result fragment
+    """
+    import httpx
+
+    try:
+        form = await request.form()
+        form_dict = dict(form)
+
+        # Determine API endpoint based on data type
+        data_type = form_dict.get('data_type', 'vector')
+        endpoint = '/api/platform/raster' if data_type == 'raster' else '/api/platform/vector'
+
+        # Build request body
+        body = {
+            'dataset_id': form_dict.get('dataset_id'),
+            'resource_id': form_dict.get('resource_id'),
+            'version_id': form_dict.get('version_id', 'v1.0'),
+            'blob_name': form_dict.get('blob_name'),
+            'container_name': form_dict.get('container_name'),
+        }
+
+        # Add optional fields
+        if form_dict.get('service_name'):
+            body['service_name'] = form_dict['service_name']
+        if form_dict.get('description'):
+            body['description'] = form_dict['description']
+        if form_dict.get('access_level'):
+            body['access_level'] = form_dict['access_level']
+        if form_dict.get('tags'):
+            body['tags'] = [t.strip() for t in form_dict['tags'].split(',')]
+        if form_dict.get('overwrite'):
+            body['overwrite'] = True
+
+        # Raster-specific
+        if data_type == 'raster':
+            if form_dict.get('raster_type') and form_dict['raster_type'] != 'auto':
+                body['raster_type'] = form_dict['raster_type']
+            if form_dict.get('output_tier'):
+                body['output_tier'] = form_dict['output_tier']
+            if form_dict.get('input_crs'):
+                body['input_crs'] = form_dict['input_crs']
+            if form_dict.get('raster_collection_id'):
+                body['collection_id'] = form_dict['raster_collection_id']
+            if form_dict.get('use_docker'):
+                body['processing_mode'] = 'docker'
+
+        # Vector CSV-specific
+        if form_dict.get('file_extension') == 'csv':
+            if form_dict.get('lat_column'):
+                body['lat_column'] = form_dict['lat_column']
+            if form_dict.get('lon_column'):
+                body['lon_column'] = form_dict['lon_column']
+            if form_dict.get('wkt_column'):
+                body['wkt_column'] = form_dict['wkt_column']
+
+        # Make request to Platform API
+        base_url = str(request.base_url).rstrip('/')
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{base_url}{endpoint}",
+                json=body,
+                timeout=60.0
+            )
+
+        if response.status_code in [200, 202]:
+            result = response.json()
+            job_id = result.get('job_id', 'unknown')
+            return f'''
+            <div class="submit-result success">
+                <h3>Job Submitted Successfully</h3>
+                <p><strong>Job ID:</strong> {job_id}</p>
+                <p>View job status at: <a href="/interface/jobs/{job_id}">/interface/jobs/{job_id}</a></p>
+            </div>
+            '''
+        else:
+            error = response.text[:200]
+            return f'''
+            <div class="submit-result error">
+                <h3>Submission Failed</h3>
+                <p>Status: {response.status_code}</p>
+                <p>{error}</p>
+            </div>
+            '''
+
+    except Exception as e:
+        return f'''
+        <div class="submit-result error">
+            <h3>Error</h3>
+            <p>{str(e)[:200]}</p>
+        </div>
+        '''
+
+
+# ============================================================================
+# JOB EVENTS INTERFACE (23 JAN 2026 - Execution Timeline)
+# ============================================================================
+
+@app.get("/interface/jobs/{job_id}/events", response_class=HTMLResponse)
+async def interface_job_events(request: Request, job_id: str):
+    """
+    Job events page showing execution timeline.
+
+    Full-page view with event timeline and failure context.
+    """
+    try:
+        from infrastructure import JobEventRepository
+
+        event_repo = JobEventRepository()
+
+        # Get events and failure context
+        events = event_repo.get_events_timeline(job_id, limit=100)
+        failure_context = event_repo.get_failure_context(job_id)
+        summary = event_repo.get_event_summary(job_id)
+
+        return templates.TemplateResponse("pages/jobs/events.html", {
+            "request": request,
+            "version": __version__,
+            "nav_active": "/interface/jobs",
+            "job_id": job_id,
+            "events": events,
+            "failure_context": failure_context,
+            "summary": summary
+        })
+
+    except Exception as e:
+        return HTMLResponse(f"<div class='error'>Error loading events: {str(e)}</div>")
+
+
+@app.get("/interface/jobs/{job_id}/events/partial", response_class=HTMLResponse)
+async def interface_job_events_partial(request: Request, job_id: str, filter: str = None):
+    """
+    HTMX partial - event timeline rows only.
+
+    Used for auto-refresh and filtering without full page reload.
+
+    Query params:
+        filter: Filter type (job, stage, task, failure)
+    """
+    try:
+        from infrastructure import JobEventRepository
+        from core.models.job_event import JobEventType
+
+        event_repo = JobEventRepository()
+        events = event_repo.get_events_timeline(job_id, limit=100)
+
+        # Apply filter if specified
+        if filter == 'job':
+            events = [e for e in events if e['event_type'].startswith('job_')]
+        elif filter == 'stage':
+            events = [e for e in events if e['event_type'].startswith('stage_')]
+        elif filter == 'task':
+            events = [e for e in events if e['task_id'] is not None]
+        elif filter == 'failure':
+            events = [e for e in events if e['event_status'] == 'failure']
+
+        # Render just the rows
+        rows_html = ""
+        for event in events:
+            rows_html += templates.get_template("components/_event_row.html").render(
+                event=event
+            )
+
+        if not events:
+            rows_html = '<div class="timeline-empty">No events found</div>'
+
+        return HTMLResponse(rows_html)
+
+    except Exception as e:
+        return HTMLResponse(f'<div class="timeline-error">Error: {str(e)}</div>')
+
+
+@app.get("/interface/jobs/{job_id}/events/failure", response_class=HTMLResponse)
+async def interface_job_failure_context(request: Request, job_id: str):
+    """
+    HTMX partial - failure context panel.
+
+    Shows the failure event and preceding events for debugging.
+    """
+    try:
+        from infrastructure import JobEventRepository
+
+        event_repo = JobEventRepository()
+        failure_context = event_repo.get_failure_context(job_id)
+
+        return templates.TemplateResponse("components/_failure_context.html", {
+            "request": request,
+            "job_id": job_id,
+            "has_failure": failure_context['has_failure'],
+            "failure_event": failure_context.get('failure_event'),
+            "preceding_events": failure_context.get('preceding_events', [])
+        })
+
+    except Exception as e:
+        return HTMLResponse(f'<div class="failure-error">Error: {str(e)}</div>')
 
 
 # ============================================================================

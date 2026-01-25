@@ -668,8 +668,33 @@ class BackgroundQueueWorker:
         # Create AutoLockRenewer for long-running tasks (up to 2 hours)
         # This prevents competing consumers during lengthy COG processing
         # NOTE: We use MANUAL registration (not auto_lock_renewer param) for explicit control
-        lock_renewer = AutoLockRenewer(max_lock_renewal_duration=7200)  # 2 hours in seconds
-        logger.info("[Queue Worker] AutoLockRenewer initialized (max_duration=2h, manual registration)")
+        #
+        # Lock Renewal Logging (25 JAN 2026):
+        # - on_lock_renew_failure callback logs when renewal fails
+        # - Failure usually means message was already completed/abandoned or network issue
+        lock_renewal_count = [0]  # Mutable counter for closure
+
+        def on_lock_renew_failure(
+            renewable: ServiceBusReceivedMessage,
+            error: Exception
+        ) -> None:
+            """Callback when lock renewal fails."""
+            lock_renewal_count[0] += 1
+            logger.error(
+                f"🔒❌ LOCK RENEWAL FAILED (attempt #{lock_renewal_count[0]}): {error}"
+            )
+            # Log message details if available
+            try:
+                logger.error(f"   Message ID: {renewable.message_id}")
+                logger.error(f"   Lock expiry was: {renewable.locked_until_utc}")
+            except Exception:
+                pass
+
+        lock_renewer = AutoLockRenewer(
+            max_lock_renewal_duration=7200,  # 2 hours in seconds
+            on_lock_renew_failure=on_lock_renew_failure
+        )
+        logger.info("[Queue Worker] AutoLockRenewer initialized (max_duration=2h, manual registration, with failure callback)")
 
         logger.info("[Queue Worker] Entering main polling loop - waiting for messages...")
 
@@ -710,7 +735,19 @@ class BackgroundQueueWorker:
                         # MANUAL lock registration - register AFTER receiving, BEFORE processing
                         # This ensures lock renewal only for messages we're actually processing
                         lock_renewer.register(receiver, message, max_lock_renewal_duration=7200)
-                        logger.info(f"[Queue Worker] 🔒 Lock registered for message (2h renewal)")
+
+                        # Detailed lock logging (25 JAN 2026)
+                        try:
+                            initial_lock_until = message.locked_until_utc
+                            message_id = message.message_id
+                            logger.info(f"[Queue Worker] 🔒 Lock registered for message")
+                            logger.info(f"   Message ID: {message_id}")
+                            logger.info(f"   Initial lock until: {initial_lock_until}")
+                            logger.info(f"   Auto-renewal: up to 2 hours")
+                            logger.info(f"   Lock renewal interval: ~5 mins (Azure SDK default)")
+                        except Exception as e:
+                            logger.info(f"[Queue Worker] 🔒 Lock registered for message (2h renewal)")
+                            logger.debug(f"   Could not get lock details: {e}")
 
                         self._process_message(message, receiver)
 

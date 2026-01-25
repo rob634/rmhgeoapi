@@ -273,29 +273,75 @@ class MemoryWatchdog:
             f"oom_triggered={self._oom_triggered})"
         )
 
+    def _get_container_memory_usage(self) -> int:
+        """
+        Read actual container memory usage from cgroups.
+
+        This is CRITICAL for accurate memory monitoring because:
+        - psutil.Process().rss only captures Python heap allocations
+        - GDAL/rasterio use C memory allocations that don't appear in RSS
+        - Memory-mapped files contribute to cgroup usage but not RSS
+
+        Returns:
+            Actual container memory usage in bytes from cgroups,
+            or fallback to RSS if cgroups not available.
+        """
+        # Try cgroups v2 first (modern systems)
+        try:
+            with open('/sys/fs/cgroup/memory.current', 'r') as f:
+                return int(f.read().strip())
+        except (FileNotFoundError, ValueError, PermissionError):
+            pass
+
+        # Try cgroups v1 (older systems)
+        try:
+            with open('/sys/fs/cgroup/memory/memory.usage_in_bytes', 'r') as f:
+                return int(f.read().strip())
+        except (FileNotFoundError, ValueError, PermissionError):
+            pass
+
+        # Fallback to RSS (less accurate but better than nothing)
+        try:
+            import psutil
+            return psutil.Process().memory_info().rss
+        except ImportError:
+            return 0
+
     def _monitor_loop(self) -> None:
         """Background loop checking memory usage."""
         try:
             import psutil
         except ImportError:
-            logger.error("🧠 psutil not available - memory watchdog disabled")
-            return
+            logger.warning("🧠 psutil not available - limited fallback")
 
         task_id_short = self._task_id[:8] if self._task_id else "unknown"
 
+        # Track whether we're using cgroups or RSS fallback
+        using_cgroups = self._detect_cgroup_version()
+        source = f"cgroups {using_cgroups}" if using_cgroups else "RSS fallback"
+        logger.info(f"🧠 Memory monitoring source: {source}")
+
         while not self._stop_event.wait(timeout=self.check_interval):
             try:
-                # Get current process memory
-                current_bytes = psutil.Process().memory_info().rss
+                # Get actual container memory usage (NOT just Python RSS!)
+                # This captures GDAL C allocations, memory-mapped files, etc.
+                current_bytes = self._get_container_memory_usage()
                 self._peak_memory_bytes = max(self._peak_memory_bytes, current_bytes)
 
                 # Calculate usage percentage
-                usage_percent = (current_bytes / self._memory_limit_bytes) * 100
+                usage_percent = (current_bytes / self._memory_limit_bytes) * 100 if self._memory_limit_bytes > 0 else 0
 
-                # Log periodic status at DEBUG level
-                logger.debug(
+                # Also get Python RSS for comparison (helps debug memory leaks vs C allocations)
+                try:
+                    python_rss = psutil.Process().memory_info().rss if 'psutil' in dir() else 0
+                except Exception:
+                    python_rss = 0
+
+                # Log periodic status at INFO level for visibility during long-running tasks
+                logger.info(
                     f"🧠 Memory: {usage_percent:.1f}% "
                     f"({current_bytes / 1e9:.2f}GB / {self._memory_limit_bytes / 1e9:.1f}GB) "
+                    f"[Python RSS: {python_rss / 1e9:.2f}GB] "
                     f"[{task_id_short}...]"
                 )
 
@@ -305,9 +351,10 @@ class MemoryWatchdog:
 
                     logger.critical(
                         f"🧠🚨 MEMORY WATCHDOG TRIGGERED for {task_id_short}...! "
-                        f"Usage: {usage_percent:.1f}% "
+                        f"Container usage: {usage_percent:.1f}% "
                         f"({current_bytes / 1e9:.2f}GB / {self._memory_limit_bytes / 1e9:.1f}GB) "
                         f"exceeds threshold {self.threshold_percent}% - "
+                        f"Python RSS was only {python_rss / 1e9:.2f}GB (GDAL uses additional C memory) - "
                         f"REQUESTING GRACEFUL SHUTDOWN to prevent OOM kill"
                     )
 
@@ -323,6 +370,14 @@ class MemoryWatchdog:
                 logger.warning(f"🧠 Memory check error: {e}")
 
         logger.debug(f"🧠 Memory watchdog loop ended for {task_id_short}...")
+
+    def _detect_cgroup_version(self) -> Optional[str]:
+        """Detect which cgroup version is available."""
+        if os.path.exists('/sys/fs/cgroup/memory.current'):
+            return 'v2'
+        if os.path.exists('/sys/fs/cgroup/memory/memory.usage_in_bytes'):
+            return 'v1'
+        return None
 
     @property
     def oom_triggered(self) -> bool:
@@ -633,6 +688,65 @@ class DockerTaskContext:
             'oom_triggered': self._memory_watchdog.oom_triggered,
             'is_running': self._memory_watchdog.is_running,
         }
+
+    def log_memory_status(self, checkpoint_name: str = "") -> Dict[str, Any]:
+        """
+        Log current memory status (on-demand, for handler use).
+
+        Use this at key checkpoints in handlers to track memory progression
+        through different phases of processing.
+
+        Args:
+            checkpoint_name: Label for this checkpoint (e.g., "before_cog_translate")
+
+        Returns:
+            Dict with current memory metrics
+
+        Example:
+            context.log_memory_status("before_download")
+            data = download_large_file()
+            context.log_memory_status("after_download")
+        """
+        if self._memory_watchdog is None:
+            logger.warning(f"🧠 Memory status ({checkpoint_name}): watchdog not started")
+            return {}
+
+        current = self._memory_watchdog._get_container_memory_usage()
+        limit = self._memory_watchdog.memory_limit_bytes
+        peak = self._memory_watchdog.peak_memory_bytes
+        usage_pct = (current / limit * 100) if limit > 0 else 0
+        threshold = self._memory_watchdog.threshold_percent
+        headroom = threshold - usage_pct
+
+        # Get Python RSS for comparison
+        try:
+            import psutil
+            python_rss = psutil.Process().memory_info().rss
+        except Exception:
+            python_rss = 0
+
+        metrics = {
+            'checkpoint': checkpoint_name,
+            'current_gb': current / 1e9,
+            'peak_gb': peak / 1e9,
+            'limit_gb': limit / 1e9,
+            'usage_percent': usage_pct,
+            'python_rss_gb': python_rss / 1e9,
+            'threshold_percent': threshold,
+            'headroom_percent': headroom,
+        }
+
+        status_emoji = "🟢" if headroom > 20 else "🟡" if headroom > 10 else "🔴"
+
+        logger.info(
+            f"🧠 {status_emoji} Memory [{checkpoint_name}]: "
+            f"{usage_pct:.1f}% ({current / 1e9:.2f}GB / {limit / 1e9:.1f}GB) "
+            f"[Python: {python_rss / 1e9:.2f}GB] "
+            f"[Peak: {peak / 1e9:.2f}GB] "
+            f"[Headroom: {headroom:.1f}%]"
+        )
+
+        return metrics
 
     # =========================================================================
     # SHUTDOWN AWARENESS

@@ -62,8 +62,8 @@
         <div class="stat-item">
             <span class="stat-label">Duration</span>
             <span class="stat-value">
-                {% if job.completed_at and job.created_at %}
-                    {% set duration = (job.completed_at - job.created_at).total_seconds() %}
+                {% if job.updated_at and job.created_at and job.status|lower == 'completed' %}
+                    {% set duration = (job.updated_at - job.created_at).total_seconds() %}
                     {% if duration > 3600 %}
                         {{ (duration / 3600)|round(1) }}h
                     {% elif duration > 60 %}
@@ -80,7 +80,7 @@
         </div>
         <div class="stat-item">
             <span class="stat-label">Stage</span>
-            <span class="stat-value highlight">{{ job.current_stage or 1 }}/{{ job.total_stages or '?' }}</span>
+            <span class="stat-value highlight">{{ job.stage or 1 }}/{{ job.total_stages or '?' }}</span>
         </div>
         <div class="stat-item">
             <span class="stat-label">Events</span>
@@ -113,14 +113,14 @@
                 <h3 class="section-title">Stage Progress</h3>
                 <div class="stage-list">
                     {% for stage_num, stage_data in stages.items()|sort %}
-                    <div class="stage-item {{ 'current' if stage_num == job.current_stage else '' }} {{ 'completed' if stage_data.completed == stage_data.total else '' }}">
+                    <div class="stage-item {{ 'current' if stage_num == job.stage else '' }} {{ 'completed' if stage_data.completed == stage_data.total else '' }}">
                         <div class="stage-indicator">
                             {% if stage_data.completed == stage_data.total %}
                                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <circle cx="12" cy="12" r="10"></circle>
                                     <polyline points="8 12 11 15 16 9"></polyline>
                                 </svg>
-                            {% elif stage_num == job.current_stage %}
+                            {% elif stage_num == job.stage %}
                                 <span class="stage-dot pulse"></span>
                             {% else %}
                                 <span class="stage-dot"></span>

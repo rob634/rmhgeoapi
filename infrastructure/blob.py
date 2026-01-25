@@ -183,9 +183,9 @@ class IBlobRepository(ABC):
     @abstractmethod
     def stream_mount_to_blob(
         self,
-        mount_path: str,
         container: str,
         blob_path: str,
+        mount_path: str,
         content_type: Optional[str] = None,
         chunk_size_mb: int = 32
     ) -> Dict[str, Any]:
@@ -193,9 +193,9 @@ class IBlobRepository(ABC):
         Stream file from mounted filesystem to blob without loading into memory.
 
         Args:
-            mount_path: Source path on mounted filesystem (must exist)
             container: Destination blob container name
             blob_path: Destination blob path within container
+            mount_path: Source path on mounted filesystem (must exist)
             content_type: MIME type for blob (auto-detected if not specified)
             chunk_size_mb: Streaming chunk size in MB (default: 32)
 
@@ -1158,9 +1158,9 @@ class BlobRepository(IBlobRepository):
     @dec_validate_container
     def stream_mount_to_blob(
         self,
-        mount_path: str,
         container: str,
         blob_path: str,
+        mount_path: str,
         content_type: Optional[str] = None,
         chunk_size_mb: int = 32,
         overwrite_existing: bool = True,
@@ -1177,9 +1177,9 @@ class BlobRepository(IBlobRepository):
         back to blob storage after GDAL disk-based processing.
 
         Args:
-            mount_path: Source path on mounted filesystem (MUST exist)
-            container: Destination blob container name
+            container: Destination blob container name (FIRST for decorator compatibility)
             blob_path: Destination blob path within container
+            mount_path: Source path on mounted filesystem (MUST exist)
             content_type: MIME type for blob (auto-detected if not specified)
             chunk_size_mb: Size of each streaming chunk (default: 32MB)
             overwrite_existing: Whether to overwrite if blob exists (default: True)

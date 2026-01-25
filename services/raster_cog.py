@@ -327,9 +327,9 @@ def _process_cog_disk_based(
         # STEP E: Upload from mounted filesystem to blob (streaming - low memory)
         logger.info(f"🔄 DISK STEP E: Streaming COG from mount to blob...")
         upload_result = silver_repo.stream_mount_to_blob(
-            mount_path=temp_output_path,
             container=output_blob_container,
             blob_path=output_blob_path,
+            mount_path=temp_output_path,
             content_type='image/tiff'
         )
 

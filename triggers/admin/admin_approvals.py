@@ -61,7 +61,7 @@ def list_approvals(req: func.HttpRequest) -> func.HttpResponse:
     try:
         from services.approval_service import ApprovalService
         from core.models import ApprovalStatus
-        from core.models.promoted import Classification
+        from core.models.stac import AccessLevel
 
         service = ApprovalService()
 
@@ -88,11 +88,12 @@ def list_approvals(req: func.HttpRequest) -> func.HttpResponse:
         classification = None
         if classification_str:
             try:
-                classification = Classification(classification_str.lower())
+                # NOTE: RESTRICTED is defined but NOT YET SUPPORTED
+                classification = AccessLevel(classification_str.lower())
             except ValueError:
                 return func.HttpResponse(
                     json.dumps({
-                        'error': f"Invalid classification '{classification_str}'. Must be: ouo, public"
+                        'error': f"Invalid classification '{classification_str}'. Must be: ouo, public (restricted not yet supported)"
                     }),
                     status_code=400,
                     mimetype='application/json'

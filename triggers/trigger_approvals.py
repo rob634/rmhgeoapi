@@ -500,7 +500,7 @@ def platform_approvals_list(req: func.HttpRequest) -> func.HttpResponse:
         # Import service lazily
         from services.approval_service import ApprovalService
         from core.models.approval import ApprovalStatus
-        from core.models.promoted import Classification
+        from core.models.stac import AccessLevel
 
         approval_service = ApprovalService()
 
@@ -523,12 +523,13 @@ def platform_approvals_list(req: func.HttpRequest) -> func.HttpResponse:
         classification_enum = None
         if classification_filter:
             try:
-                classification_enum = Classification(classification_filter.lower())
+                # NOTE: RESTRICTED is defined but NOT YET SUPPORTED
+                classification_enum = AccessLevel(classification_filter.lower())
             except ValueError:
                 return func.HttpResponse(
                     json.dumps({
                         "success": False,
-                        "error": f"Invalid classification: {classification_filter}. Valid values: ouo, public",
+                        "error": f"Invalid classification: {classification_filter}. Valid values: ouo, public (restricted not yet supported)",
                         "error_type": "ValidationError"
                     }),
                     status_code=400,

@@ -27,7 +27,7 @@ from psycopg import sql
 from psycopg.types.json import Jsonb
 
 from util_logger import LoggerFactory, ComponentType
-from core.models import PromotedDataset, Classification
+from core.models import PromotedDataset, AccessLevel
 from .postgresql import PostgreSQLRepository
 
 logger = LoggerFactory.create_logger(ComponentType.REPOSITORY, "PromotedRepository")
@@ -116,7 +116,7 @@ class PromotedDatasetRepository(PostgreSQLRepository):
                         Jsonb(dataset.tags), Jsonb(dataset.viewer_config), dataset.style_id,
                         dataset.in_gallery, dataset.gallery_order,
                         dataset.is_system_reserved, dataset.system_role,
-                        dataset.classification.value if dataset.classification else Classification.PUBLIC.value,
+                        dataset.classification.value if dataset.classification else AccessLevel.PUBLIC.value,
                         now, now
                     )
                 )
@@ -435,12 +435,13 @@ class PromotedDatasetRepository(PostgreSQLRepository):
 
     def _row_to_model(self, row: Dict[str, Any]) -> PromotedDataset:
         """Convert database row to PromotedDataset model."""
-        # Parse classification (24 DEC 2025)
+        # Parse classification (24 DEC 2025, unified 25 JAN 2026 - S4.DM)
+        # NOTE: RESTRICTED is defined but NOT YET SUPPORTED
         classification_value = row.get('classification', 'public')
         try:
-            classification = Classification(classification_value) if classification_value else Classification.PUBLIC
+            classification = AccessLevel(classification_value) if classification_value else AccessLevel.PUBLIC
         except ValueError:
-            classification = Classification.PUBLIC
+            classification = AccessLevel.PUBLIC
 
         return PromotedDataset(
             promoted_id=row['promoted_id'],

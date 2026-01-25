@@ -29,16 +29,26 @@
 ## Raster Job Architecture
 
 ```
-process_raster_v2 (Function App, <1GB)     process_raster_docker (Docker, large files)
-        │                                           │
-        │ Stage 3                                   │ Phase 3
-        ▼                                           ▼
-    ┌─────────────────────────────────────────────────┐
-    │  services/stac_catalog.py:extract_stac_metadata │  ← SINGLE WIRING POINT
-    │      Step 5: Insert STAC item to pgSTAC         │
-    │      Step 5.5: Populate app.cog_metadata (NEW)  │
-    └─────────────────────────────────────────────────┘
+Platform Gateway ──▶ geospatial-jobs ──▶ Orchestrator (CoreMachine)
+                                                │
+                                                ▼
+                                        container-tasks
+                                                │
+                                                ▼
+                                    ┌───────────────────────┐
+                                    │    Docker Worker      │
+                                    │  process_raster_docker│  ← ALL raster ETL
+                                    └───────────┬───────────┘
+                                                │ Phase 3
+                                                ▼
+                        ┌─────────────────────────────────────────────────┐
+                        │  services/stac_catalog.py:extract_stac_metadata │  ← SINGLE WIRING POINT
+                        │      Step 5: Insert STAC item to pgSTAC         │
+                        │      Step 5.5: Populate app.cog_metadata        │
+                        └─────────────────────────────────────────────────┘
 ```
+
+**Note**: As of V0.8, all raster ETL runs on Docker Worker (`process_raster_docker`). The Function App worker handles only lightweight operations.
 
 ---
 
@@ -66,7 +76,7 @@ process_raster_v2 (Function App, <1GB)     process_raster_docker (Docker, large 
 | S7.11.5 | Enable raster rebuild in `rebuild_stac_handlers.py` | Done |
 | S7.11.5a | Query `app.cog_metadata` for raster validation | Done |
 | S7.11.5b | Use `RasterMetadata.to_stac_item()` for rebuild | Done |
-| S7.9.TEST | Test: `process_raster_v2` populates cog_metadata + STAC | NEXT |
+| S7.9.TEST | Test: `process_raster_docker` populates cog_metadata + STAC | NEXT |
 
 ---
 

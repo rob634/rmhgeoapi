@@ -1,6 +1,6 @@
 # Epic Summary - Feature Status
 
-**Last Updated**: 24 JAN 2026
+**Last Updated**: 25 JAN 2026
 
 ---
 
@@ -56,7 +56,7 @@
 |---------|--------|
 | F4.1 Classification Enforcement | 🚧 |
 | F4.2 Approval Workflow | ✅ |
-| F4.3 ADF External Delivery | 📋 |
+| F4.3 ADF External Delivery | 🚧 |
 
 ---
 
@@ -130,6 +130,6 @@
 | Status | Count |
 |--------|-------|
 | ✅ Complete | 32 |
-| 🚧 In Progress | 7 |
-| 📋 Planned | 12 |
+| 🚧 In Progress | 8 |
+| 📋 Planned | 11 |
 | **Total** | **51** |

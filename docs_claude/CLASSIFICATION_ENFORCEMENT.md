@@ -1,10 +1,10 @@
 # Classification Enforcement & ADF Integration (E4)
 
-**Last Updated**: 24 JAN 2026
+**Last Updated**: 25 JAN 2026
 **Epic**: E4 Security Zones / Externalization
-**Goal**: Make `access_level` (OUO/Public/Restricted) mandatory and prepare for ADF integration
+**Goal**: Unify access_level data model and enforce across SQL ↔ Python ↔ Service Bus
 **Context**: Colleague configuring ADF; we need Python side ready with correct parameters
-**Status**: Planned
+**Status**: Phase 0 COMPLETE
 
 ---
 
@@ -15,10 +15,163 @@ Data classification (`access_level`) controls where data can be exported:
 - **OUO** (Official Use Only): Internal only, ADF should reject export requests
 - **RESTRICTED**: Highest restriction, no external access
 
-Currently `access_level` is inconsistently enforced across the codebase. This work makes it:
-1. **Mandatory** at Platform API entry point
-2. **Type-safe** using `AccessLevel` enum throughout
-3. **Fail-fast** in pipeline tasks if somehow missing
+**Current Problem**: Access level is fragmented across the codebase with:
+- Two duplicate enums (`AccessLevel` and `Classification`)
+- SQL ENUM missing RESTRICTED value
+- No type safety at API entry point
+- Plain strings in job parameters and Service Bus messages
+
+This work:
+1. **Unifies** the data model with a single source of truth (Phase 0)
+2. **Makes it mandatory** at Platform API entry point (Phase 1)
+3. **Enforces fail-fast** in pipeline tasks if missing (Phase 2)
+4. **Tests ADF integration** for external delivery (Phase 3)
+
+---
+
+## Phase 0: Data Model Unification
+
+**Goal**: Single `AccessLevel` model as source of truth for Python, SQL, and Service Bus
+
+### Current State Analysis (25 JAN 2026)
+
+| Location | Implementation | Values | Issue |
+|----------|---------------|--------|-------|
+| `core/models/stac.py:57-62` | `AccessLevel(str, Enum)` | public, ouo, restricted | ✅ Complete definition |
+| `core/models/promoted.py:11-14` | `Classification(str, Enum)` | public, ouo | ❌ DUPLICATE, missing restricted |
+| `core/models/platform.py:147-151` | `str` field | "OUO" default | ❌ Not using enum |
+| `core/models/approval.py:5` | imports `Classification` | public, ouo | ❌ Uses wrong enum |
+| `infrastructure/approval_repository.py:49-50` | `approved_schema.sql` | public, ouo | ❌ SQL ENUM missing restricted |
+| `jobs/raster_mixin.py:93-98` | `'type': 'str'` | any string | ❌ No validation |
+| Service Bus messages | JSON string | varies | ❌ No schema enforcement |
+
+### Stories
+
+| Story | Description | Status | Files |
+|-------|-------------|--------|-------|
+| S4.DM.1 | Remove `Classification` enum from promoted.py | ✅ Done | `core/models/promoted.py` |
+| S4.DM.2 | Update `DatasetApproval` to use `AccessLevel` | ✅ Done | `core/models/approval.py` |
+| S4.DM.3 | Add `sql_type_name()` and `sql_create_type()` to `AccessLevel` | ✅ Done | `core/models/stac.py` |
+| S4.DM.4 | SQL ENUM includes 'restricted' (schema rebuild) | ✅ Done | `core/schema/sql_generator.py` |
+| S4.DM.5 | Update approval_repository to use AccessLevel | ✅ Done | `infrastructure/approval_repository.py` |
+| S4.DM.6 | Add `normalize_access_level()` helper for reuse | ✅ Done | `core/models/stac.py` |
+
+### Implementation Details
+
+#### S4.DM.1: Remove Classification Enum
+
+```python
+# core/models/promoted.py - DELETE these lines:
+class Classification(str, Enum):
+    PUBLIC = "public"  # Public - openly accessible
+    OUO = "ouo"        # Official Use Only - restricted access
+```
+
+#### S4.DM.2: Update DatasetApproval
+
+```python
+# core/models/approval.py - Change:
+from core.models.stac import AccessLevel  # Instead of: from .promoted import Classification
+
+class DatasetApproval(BaseModel):
+    classification: AccessLevel = Field(
+        default=AccessLevel.OUO,
+        description="Data classification: public (triggers ADF), ouo, or restricted"
+    )
+```
+
+#### S4.DM.3: Add SQL DDL Generation to AccessLevel
+
+```python
+# core/models/stac.py
+from typing import ClassVar
+
+class AccessLevel(str, Enum):
+    """Data access classification levels - single source of truth."""
+    PUBLIC = "public"
+    OUO = "ouo"
+    RESTRICTED = "restricted"
+
+    # SQL DDL generation
+    __sql_type__: ClassVar[str] = "access_level_enum"
+    __sql_values__: ClassVar[list[str]] = ["public", "ouo", "restricted"]
+
+    @classmethod
+    def sql_create_type(cls) -> str:
+        """Generate CREATE TYPE statement."""
+        values = ", ".join(f"'{v}'" for v in cls.__sql_values__)
+        return f"CREATE TYPE {cls.__sql_type__} AS ENUM ({values});"
+
+    @classmethod
+    def sql_add_value(cls, value: str, after: str | None = None) -> str:
+        """Generate ALTER TYPE to add value."""
+        position = f" AFTER '{after}'" if after else ""
+        return f"ALTER TYPE {cls.__sql_type__} ADD VALUE IF NOT EXISTS '{value}'{position};"
+```
+
+#### S4.DM.4: SQL Migration for RESTRICTED Value
+
+```sql
+-- Run this migration BEFORE deploying new code
+-- Safe: ADD VALUE IF NOT EXISTS is idempotent
+
+-- Check if type exists with correct values
+DO $$
+BEGIN
+    -- Add 'restricted' if not present
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_enum
+        WHERE enumtypid = 'app.access_level_enum'::regtype
+        AND enumlabel = 'restricted'
+    ) THEN
+        ALTER TYPE app.access_level_enum ADD VALUE 'restricted';
+    END IF;
+END $$;
+```
+
+#### S4.DM.6: Reusable Field Definition
+
+```python
+# core/models/stac.py - Add after AccessLevel class:
+from pydantic import field_validator
+
+def access_level_field(default: AccessLevel = AccessLevel.OUO, required: bool = False):
+    """Create a reusable AccessLevel field with case normalization."""
+    return Field(
+        default=default if not required else ...,
+        description="Data classification: public, ouo, or restricted"
+    )
+
+def access_level_validator(field_name: str = 'access_level'):
+    """Create validator that normalizes case-insensitive input."""
+    @field_validator(field_name, mode='before')
+    @classmethod
+    def normalize(cls, v):
+        if isinstance(v, str):
+            try:
+                return AccessLevel(v.lower())
+            except ValueError:
+                raise ValueError(f"Invalid {field_name} '{v}'. Must be: public, ouo, restricted")
+        return v
+    return normalize
+```
+
+### Testing Checklist (Phase 0)
+
+- [ ] `Classification` enum no longer exists in codebase
+- [ ] `AccessLevel` has all 3 values (public, ouo, restricted)
+- [ ] `DatasetApproval.classification` uses `AccessLevel` enum
+- [ ] SQL ENUM `access_level_enum` includes 'restricted' value
+- [ ] Existing approval records with 'public' or 'ouo' still work
+- [ ] `AccessLevel.sql_create_type()` generates valid DDL
+- [ ] Unit tests pass for case normalization (OUO → ouo)
+
+### Migration Order
+
+1. **Run SQL migration first** (add 'restricted' to ENUM)
+2. Deploy code changes (delete Classification, update imports)
+3. Verify approval endpoints still work
+4. Proceed to Phase 1
 
 ---
 

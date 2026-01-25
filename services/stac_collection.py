@@ -2,22 +2,30 @@
 # STAC COLLECTION SERVICE
 # ============================================================================
 # STATUS: Service layer - STAC collection creation for multi-tile rasters
-# PURPOSE: Create STAC collections with MosaicJSON assets for tile datasets
-# LAST_REVIEWED: 04 JAN 2026
-# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# PURPOSE: Create STAC collections with pgSTAC search for tile datasets
+# LAST_REVIEWED: 25 JAN 2026
+# REVIEW_STATUS: V0.8 - MosaicJSON removed, pgSTAC search provides mosaic access
 # EXPORTS: create_stac_collection
 # DEPENDENCIES: pystac, psycopg, azure-storage-blob
 # ============================================================================
 """
 STAC Collection Service.
 
-Creates STAC collections for multi-tile raster datasets with MosaicJSON assets.
+Creates STAC collections for multi-tile raster datasets.
+
+V0.8 Update (25 JAN 2026):
+    MosaicJSON was removed - pgSTAC searches now provide OAuth-only mosaic access.
+    See HISTORY 12 NOV 2025 for rationale (two-tier auth problem).
 
 Key Features:
-    - Collection-level STAC items with MosaicJSON as primary asset
+    - Collection with STAC Items for each COG tile
     - Spatial/temporal extent calculation from constituent tiles
     - PgSTAC collections table integration
-    - Azure Blob Storage URL generation for assets
+    - pgSTAC search registration for TiTiler mosaic visualization
+
+Call Modes:
+    1. Fan-in pattern: receives previous_results from MosaicJSON stage (legacy)
+    2. Direct call: receives cog_blobs/cog_container directly in params (V0.8)
 
 Exports:
     create_stac_collection: Create STAC collection from raster tiles
@@ -53,10 +61,11 @@ def create_stac_collection(
     context: dict = None
 ) -> dict:
     """
-    Create STAC collection (fan_in task handler).
+    Create STAC collection for tiled raster datasets.
 
-    This is a fan_in aggregation task that receives Stage 3 MosaicJSON result
-    via params["previous_results"] from CoreMachine.
+    V0.8 (25 JAN 2026): Supports two call modes:
+        1. Direct call: cog_blobs/cog_container passed directly in params
+        2. Fan-in pattern: previous_results from earlier stage (legacy)
 
     Task Handler Contract:
         - Receives: params (dict), context (dict, optional)
@@ -64,23 +73,33 @@ def create_stac_collection(
 
     Args:
         params: Task parameters containing:
-            - previous_results: List with single Stage 3 MosaicJSON result
-            - collection_id: Collection identifier
-            - stac_item_id: Optional custom STAC collection ID (overrides collection_id)
-            - description: Collection description
-            - license: STAC license (default: "proprietary")
-            - container: Container name (default: config.storage.silver.cogs)
+            Direct call mode (V0.8):
+                - cog_blobs: List of COG blob paths
+                - cog_container: Container where COGs are stored
+                - collection_id: Collection identifier
+                - item_id: Optional STAC item ID
+                - title: Collection title
+                - description: Collection description
+
+            Fan-in mode (legacy):
+                - previous_results: List with MosaicJSON result
+                - collection_id: Collection identifier
+
+            Common:
+                - license: STAC license (default: "proprietary")
+                - dataset_id, resource_id, version_id: Platform passthrough
+                - access_level: Access level for collection
         context: Optional task context (unused)
 
     Returns:
         {
             "success": bool,
             "collection_id": str,
-            "stac_id": str,
-            "pgstac_id": str,
+            "item_id": str,
             "tile_count": int,
             "spatial_extent": [minx, miny, maxx, maxy],
-            "mosaicjson_url": str
+            "search_id": str,
+            "viewer_url": str
         }
 
     Error Return:
@@ -91,6 +110,72 @@ def create_stac_collection(
         }
     """
     try:
+        from config import get_config
+        config = get_config()
+
+        # =====================================================================
+        # V0.8: DIRECT CALL MODE (25 JAN 2026)
+        # Handler passes cog_blobs/cog_container directly - no MosaicJSON
+        # =====================================================================
+        if params.get("cog_blobs") and params.get("cog_container"):
+            logger.info(f"🔄 STAC collection - DIRECT CALL MODE (V0.8, no MosaicJSON)")
+
+            # Extract parameters directly
+            tile_blobs = params.get("cog_blobs", [])
+            cog_container = params.get("cog_container")
+            collection_id = params.get("collection_id")
+            item_id = params.get("item_id")
+            title = params.get("title", f"Tiled Raster: {collection_id}")
+            description = params.get("description", f"Tiled COG collection: {collection_id}")
+            license_val = params.get("license", "proprietary")
+            spatial_extent = params.get("spatial_extent")  # Optional, will be calculated if None
+
+            # Use item_id as collection_id if provided (for single-item collections)
+            final_collection_id = item_id if item_id else collection_id
+
+            if not collection_id:
+                logger.error("❌ [STAC-ERROR] collection_id is required")
+                return {
+                    "success": False,
+                    "error": "collection_id is required",
+                    "error_type": "ValueError"
+                }
+
+            if not tile_blobs:
+                logger.error("❌ [STAC-ERROR] cog_blobs is empty")
+                return {
+                    "success": False,
+                    "error": "cog_blobs cannot be empty",
+                    "error_type": "ValueError"
+                }
+
+            logger.info(f"   Collection: {collection_id}")
+            logger.info(f"   Final ID: {final_collection_id}")
+            logger.info(f"   Tile count: {len(tile_blobs)}")
+            logger.info(f"   COG container: {cog_container}")
+
+            # Call internal implementation WITHOUT MosaicJSON
+            container = params.get("container", config.storage.silver.cogs)
+            result = _create_stac_collection_impl(
+                collection_id=final_collection_id,
+                mosaicjson_blob=None,  # V0.8: No MosaicJSON
+                description=description,
+                tile_blobs=tile_blobs,
+                container=container,
+                cog_container=cog_container,
+                license_val=license_val,
+                spatial_extent=spatial_extent,
+                temporal_extent=None
+            )
+
+            return result
+
+        # =====================================================================
+        # LEGACY: FAN-IN MODE (for backward compatibility)
+        # Receives previous_results from MosaicJSON stage
+        # =====================================================================
+        logger.info(f"🔄 STAC collection - FAN-IN MODE (legacy)")
+
         # Extract parameters from fan_in pattern
         # DATABASE REFERENCE PATTERN (05 JAN 2026): CoreMachine now passes fan_in_source
         # instead of embedding previous_results. Handler queries DB directly.
@@ -110,105 +195,65 @@ def create_stac_collection(
         # FIX (25 NOV 2025): Provide default description to satisfy STAC 1.1.0 validation
         # STAC spec requires description to be a non-empty string, not None
         description = job_parameters.get("collection_description") or params.get("description") or f"Raster collection: {collection_id}"
-        license = params.get("license", "proprietary")
-        # Use config for default container (silver zone for processed data)
-        from config import get_config
-        config = get_config()
+        license_val = params.get("license", "proprietary")
         container = params.get("container", config.storage.silver.cogs)
 
         # Use stac_item_id if provided, otherwise use collection_id
         final_collection_id = stac_item_id if stac_item_id else collection_id
 
-        logger.info(f"🔄 STAC collection task handler invoked (fan_in aggregation)")
         logger.info(f"   Collection: {collection_id}")
         logger.info(f"   Custom STAC ID: {stac_item_id}")
         logger.info(f"   Final ID: {final_collection_id}")
         logger.info(f"   Previous results count: {len(previous_results)}")
 
         # Get MosaicJSON result from Stage 3
-        # CRITICAL (11 NOV 2025): previous_results IS the result_data list already.
-        # CoreMachine extracts task.result_data, so previous_results[0] is the dict directly.
-        # DO NOT access .get("result_data") - that was the bug causing silent failures.
         if not previous_results:
-            logger.error("❌ [STAC-ERROR] No previous_results from Stage 3 MosaicJSON")
+            logger.error("❌ [STAC-ERROR] No previous_results and no direct cog_blobs/cog_container")
             return {
                 "success": False,
-                "error": "No MosaicJSON result from Stage 3",
+                "error": "No previous_results provided. For V0.8 direct mode, pass cog_blobs and cog_container.",
                 "error_type": "ValueError"
             }
 
-        logger.debug(f"🔍 [STAC-DEBUG] previous_results structure check:")
-        logger.debug(f"   Type: {type(previous_results)}")
-        logger.debug(f"   Length: {len(previous_results)}")
-        logger.debug(f"   First item type: {type(previous_results[0]) if previous_results else 'N/A'}")
-        logger.debug(f"   First item keys: {list(previous_results[0].keys()) if previous_results and isinstance(previous_results[0], dict) else 'N/A'}")
-
-        # BUG FIX (11 NOV 2025): Access previous_results[0] directly, NOT .get("result_data")
-        # previous_results IS already the list of result_data dicts from CoreMachine
+        # BUG FIX (11 NOV 2025): Access previous_results[0] directly
         mosaic_result = previous_results[0]
-
-        logger.debug(f"🔍 [STAC-DEBUG] mosaic_result structure:")
-        logger.debug(f"   Type: {type(mosaic_result)}")
-        logger.debug(f"   Keys: {list(mosaic_result.keys()) if isinstance(mosaic_result, dict) else 'N/A'}")
-        logger.debug(f"   success field: {mosaic_result.get('success') if isinstance(mosaic_result, dict) else 'N/A'}")
 
         if not mosaic_result.get("success"):
             error_detail = mosaic_result.get("error", "Unknown error")
             error_type = mosaic_result.get("error_type", "Unknown")
-            logger.error(f"❌ [STAC-ERROR] Stage 3 MosaicJSON creation failed:")
-            logger.error(f"   Error: {error_detail}")
-            logger.error(f"   Type: {error_type}")
+            logger.error(f"❌ [STAC-ERROR] Previous stage failed: {error_detail}")
             return {
                 "success": False,
-                "error": f"Stage 3 MosaicJSON creation failed: {error_detail}",
+                "error": f"Previous stage failed: {error_detail}",
                 "error_type": error_type
             }
-
-        logger.info(f"✅ [STAC-SUCCESS] Stage 3 MosaicJSON result validated")
 
         mosaicjson_blob = mosaic_result.get("mosaicjson_blob")
         spatial_extent = mosaic_result.get("bounds")
         tile_blobs = mosaic_result.get("cog_blobs", [])
-        cog_container = mosaic_result.get("cog_container")  # NEW (11 NOV 2025): COG container for STAC Items
-
-        logger.debug(f"🔍 [STAC-DEBUG] Extracted fields:")
-        logger.debug(f"   mosaicjson_blob: {mosaicjson_blob}")
-        logger.debug(f"   spatial_extent: {spatial_extent}")
-        logger.debug(f"   tile_blobs count: {len(tile_blobs)}")
-        logger.debug(f"   cog_container: {cog_container}")  # NEW (11 NOV 2025)
+        cog_container = mosaic_result.get("cog_container")
 
         if not cog_container:
-            logger.error(f"❌ [STAC-ERROR] No cog_container in Stage 3 result")
-            logger.error(f"   This is required to create STAC Items for COG tiles")
-            logger.error(f"   Available keys: {list(mosaic_result.keys())}")
+            logger.error(f"❌ [STAC-ERROR] No cog_container in previous result")
             return {
                 "success": False,
-                "error": "No cog_container in Stage 3 MosaicJSON result - cannot create STAC Items",
+                "error": "No cog_container in previous result - cannot create STAC Items",
                 "error_type": "ValueError"
             }
 
-        if not mosaicjson_blob:
-            logger.error(f"❌ [STAC-ERROR] No mosaicjson_blob in Stage 3 result")
-            logger.error(f"   Available keys: {list(mosaic_result.keys())}")
-            return {
-                "success": False,
-                "error": "No mosaicjson_blob in Stage 3 result",
-                "error_type": "ValueError"
-            }
-
-        logger.info(f"📊 Extracted MosaicJSON blob: {mosaicjson_blob}")
+        logger.info(f"📊 MosaicJSON blob: {mosaicjson_blob or '(none - V0.8 mode)'}")
         logger.info(f"📊 Tile count: {len(tile_blobs)}")
         logger.info(f"📊 COG container: {cog_container}")
 
-        # Call internal implementation (11 NOV 2025: Added cog_container for orthodox STAC)
+        # Call internal implementation
         result = _create_stac_collection_impl(
-            collection_id=final_collection_id,  # Use final_collection_id (custom or default)
-            mosaicjson_blob=mosaicjson_blob,
+            collection_id=final_collection_id,
+            mosaicjson_blob=mosaicjson_blob,  # May be None in V0.8+
             description=description,
             tile_blobs=tile_blobs,
             container=container,
-            cog_container=cog_container,  # NEW (11 NOV 2025): For creating STAC Items
-            license=license,
+            cog_container=cog_container,
+            license_val=license_val,
             spatial_extent=spatial_extent,
             temporal_extent=None
         )
@@ -226,12 +271,12 @@ def create_stac_collection(
 
 def _create_stac_collection_impl(
     collection_id: str,
-    mosaicjson_blob: str,
+    mosaicjson_blob: Optional[str],
     description: str,
     tile_blobs: List[str],
     container: str,
     cog_container: str,
-    license: str,
+    license_val: str,
     spatial_extent: Optional[List[float]],
     temporal_extent: Optional[List[str]]
 ) -> dict:
@@ -240,19 +285,24 @@ def _create_stac_collection_impl(
 
     Separated from task handler for easier testing and reuse.
 
+    V0.8 UPDATE (25 JAN 2026):
+    - mosaicjson_blob is now Optional - MosaicJSON was deprecated (12 NOV 2025)
+    - Collections now rely on pgSTAC search for mosaic access
+    - MosaicJSON asset only added if mosaicjson_blob is provided (backward compat)
+
     ORTHODOX STAC PATTERN (11 NOV 2025):
     1. Create STAC Items for each COG tile (searchable, with geometry/datetime)
-    2. Create STAC Collection with MosaicJSON asset only
+    2. Create STAC Collection (with optional MosaicJSON asset for legacy)
     3. Items are linked to Collection via collection_id field
 
     Args:
         collection_id: Collection identifier
-        mosaicjson_blob: MosaicJSON blob path
+        mosaicjson_blob: MosaicJSON blob path (optional, deprecated V0.8)
         description: Collection description
         tile_blobs: COG blob paths
-        container: MosaicJSON container (silver-tiles)
+        container: Container for tiles (silver-tiles or silver-cogs)
         cog_container: COG files container (silver-cogs)
-        license: STAC license
+        license_val: STAC license
         spatial_extent: Spatial bounds or None to calculate
         temporal_extent: Temporal range or None for current time
 
@@ -285,7 +335,7 @@ def _create_stac_collection_impl(
         collection = Collection(
             id=collection_id,
             description=description,
-            license=license,
+            license=license_val,
             extent=Extent(
                 spatial=SpatialExtent(bboxes=[spatial_extent]),
                 temporal=TemporalExtent(intervals=[[
@@ -300,20 +350,26 @@ def _create_stac_collection_impl(
             }
         )
 
-        # Add MosaicJSON as primary asset (11 NOV 2025: Use /vsiaz/ path for OAuth compatibility)
-        # Pattern matches service_stac_metadata.py lines 270-314 for OAuth-based TiTiler access
-        mosaicjson_vsiaz = f"/vsiaz/{container}/{mosaicjson_blob}"
-        mosaicjson_url = f"https://{storage_account}.blob.core.windows.net/{container}/{mosaicjson_blob}"  # For reference only
-        collection.add_asset(
-            "mosaicjson",
-            Asset(
-                href=mosaicjson_vsiaz,  # OAuth-compatible /vsiaz/ path (not HTTPS)
-                media_type="application/json",
-                roles=["mosaic", "index"],
-                title="MosaicJSON Dynamic Tiling Index",
-                description="MosaicJSON file for dynamic tile rendering across collection"
+        # V0.8 (25 JAN 2026): MosaicJSON asset is optional
+        # MosaicJSON was deprecated in favor of pgSTAC search for mosaic access
+        # Only add if mosaicjson_blob is provided (backward compatibility)
+        if mosaicjson_blob:
+            # Add MosaicJSON as asset (11 NOV 2025: Use /vsiaz/ path for OAuth compatibility)
+            mosaicjson_vsiaz = f"/vsiaz/{container}/{mosaicjson_blob}"
+            mosaicjson_url = f"https://{storage_account}.blob.core.windows.net/{container}/{mosaicjson_blob}"  # For reference only
+            collection.add_asset(
+                "mosaicjson",
+                Asset(
+                    href=mosaicjson_vsiaz,  # OAuth-compatible /vsiaz/ path (not HTTPS)
+                    media_type="application/json",
+                    roles=["mosaic", "index"],
+                    title="MosaicJSON Dynamic Tiling Index",
+                    description="MosaicJSON file for dynamic tile rendering across collection"
+                )
             )
-        )
+            logger.info(f"   Added MosaicJSON asset: {mosaicjson_blob}")
+        else:
+            logger.info(f"   No MosaicJSON asset (V0.8: use pgSTAC search for mosaic access)")
 
         # Add ISO3 country attribution to collection extra_fields (25 NOV 2025)
         # Uses centralized ISO3AttributionService for geographic metadata

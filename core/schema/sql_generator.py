@@ -78,7 +78,8 @@ from ..models import (
     CuratedUpdateType,
     CuratedUpdateStatus
 )
-from ..models.promoted import PromotedDataset, SystemRole, Classification  # Promoted datasets (23 DEC 2025)
+from ..models.promoted import PromotedDataset, SystemRole  # Promoted datasets (23 DEC 2025)
+from ..models.stac import AccessLevel  # Data classification (25 JAN 2026 - S4.DM unified)
 from ..models.system_snapshot import SystemSnapshotRecord, SnapshotTriggerType  # System snapshots (04 JAN 2026)
 from ..models.external_refs import DatasetRefRecord  # External references (09 JAN 2026 - F7.8)
 from ..models.raster_metadata import CogMetadataRecord  # Raster metadata (09 JAN 2026 - F7.9)
@@ -1548,7 +1549,9 @@ $$""").format(
         composed.extend(self.generate_enum("curated_update_type", CuratedUpdateType))
         composed.extend(self.generate_enum("curated_update_status", CuratedUpdateStatus))
         composed.extend(self.generate_enum("system_role", SystemRole))  # Promoted datasets (23 DEC 2025)
-        composed.extend(self.generate_enum("classification", Classification))
+        # AccessLevel unified from Classification (25 JAN 2026 - S4.DM)
+        # NOTE: RESTRICTED is defined but NOT YET SUPPORTED
+        composed.extend(self.generate_enum("access_level", AccessLevel))
         composed.extend(self.generate_enum("snapshot_trigger_type", SnapshotTriggerType))  # System snapshots (04 JAN 2026)
         composed.extend(self.generate_enum("approval_status", ApprovalStatus))  # Dataset approvals (16 JAN 2026 - F4.AP)
         composed.extend(self.generate_enum("artifact_status", ArtifactStatus))  # Artifact registry (20 JAN 2026)

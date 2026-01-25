@@ -189,11 +189,12 @@ def _default_platform_callback(job_id: str, job_type: str, status: str, result: 
 
         if stac_item_id:
             from services.approval_service import ApprovalService
-            from core.models.promoted import Classification
+            from core.models.stac import AccessLevel
 
             # Extract classification from job parameters (default: OUO)
+            # NOTE: RESTRICTED is not yet supported (future enhancement)
             classification_str = extract_classification(result)
-            classification = Classification.PUBLIC if classification_str == 'public' else Classification.OUO
+            classification = AccessLevel.PUBLIC if classification_str == 'public' else AccessLevel.OUO
 
             approval_service = ApprovalService()
             approval = approval_service.create_approval_for_job(

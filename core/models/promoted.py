@@ -35,6 +35,8 @@ from typing import Dict, Any, Optional, List
 from enum import Enum
 from pydantic import BaseModel, Field, ConfigDict, model_validator
 
+from .stac import AccessLevel
+
 
 class PromotedDatasetType(str, Enum):
     """Type of STAC reference for promoted dataset."""
@@ -54,16 +56,6 @@ class SystemRole(str, Enum):
     # Future roles:
     # ADMIN1_BOUNDARIES = "admin1_boundaries"  # State/province boundaries
     # COASTLINES = "coastlines"                # Coastline reference data
-
-
-class Classification(str, Enum):
-    """
-    Data access classification levels.
-
-    Used to indicate the sensitivity/access level of promoted datasets.
-    """
-    PUBLIC = "public"  # Public - openly accessible
-    OUO = "ouo"        # Official Use Only - restricted access
 
 
 class PromotedDataset(BaseModel):
@@ -185,10 +177,11 @@ class PromotedDataset(BaseModel):
         description="System role identifier (e.g., 'admin0_boundaries'). Enables lookup by role."
     )
 
-    # Classification (23 DEC 2025)
-    classification: Classification = Field(
-        default=Classification.PUBLIC,
-        description="Data access classification (public, ouo)"
+    # Classification (23 DEC 2025, unified 25 JAN 2026 - S4.DM.1)
+    # NOTE: RESTRICTED is defined in AccessLevel but NOT YET SUPPORTED
+    classification: AccessLevel = Field(
+        default=AccessLevel.PUBLIC,
+        description="Data access classification (public, ouo). RESTRICTED not yet supported."
     )
 
     # Audit
@@ -233,9 +226,9 @@ class PromotedDataset(BaseModel):
 
 
 # Module exports
+# NOTE: Classification enum REMOVED (25 JAN 2026) - use AccessLevel from stac.py instead
 __all__ = [
     'PromotedDataset',
     'PromotedDatasetType',
     'SystemRole',
-    'Classification'
 ]

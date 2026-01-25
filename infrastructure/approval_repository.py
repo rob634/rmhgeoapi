@@ -5,7 +5,7 @@
 # PURPOSE: Database operations for app.dataset_approvals table
 # LAST_REVIEWED: 16 JAN 2026
 # EXPORTS: ApprovalRepository
-# DEPENDENCIES: psycopg, core.models.approval
+# DEPENDENCIES: psycopg, core.models.approval, core.models.stac.AccessLevel
 # ============================================================================
 """
 Dataset Approval Repository.
@@ -27,7 +27,7 @@ from psycopg import sql
 
 from util_logger import LoggerFactory, ComponentType
 from core.models import DatasetApproval, ApprovalStatus
-from core.models.promoted import Classification
+from core.models.stac import AccessLevel
 from .postgresql import PostgreSQLRepository
 
 logger = LoggerFactory.create_logger(ComponentType.REPOSITORY, "ApprovalRepository")
@@ -140,7 +140,7 @@ class ApprovalRepository(PostgreSQLRepository):
                     (
                         approval.approval_id,
                         approval.job_id, approval.job_type,
-                        approval.classification.value if approval.classification else Classification.OUO.value,
+                        approval.classification.value if approval.classification else AccessLevel.OUO.value,
                         approval.status.value if approval.status else ApprovalStatus.PENDING.value,
                         approval.stac_item_id, approval.stac_collection_id,
                         approval.reviewer, approval.notes, approval.rejection_reason,
@@ -159,7 +159,7 @@ class ApprovalRepository(PostgreSQLRepository):
         self,
         job_id: str,
         job_type: str,
-        classification: Classification = Classification.OUO,
+        classification: AccessLevel = AccessLevel.OUO,
         stac_item_id: Optional[str] = None,
         stac_collection_id: Optional[str] = None
     ) -> DatasetApproval:
@@ -345,7 +345,7 @@ class ApprovalRepository(PostgreSQLRepository):
         limit: int = 100,
         offset: int = 0,
         status: Optional[ApprovalStatus] = None,
-        classification: Optional[Classification] = None
+        classification: Optional[AccessLevel] = None
     ) -> List[DatasetApproval]:
         """
         List all approvals with optional filters.
@@ -440,7 +440,7 @@ class ApprovalRepository(PostgreSQLRepository):
         # Convert enums to values
         if 'status' in updates and isinstance(updates['status'], ApprovalStatus):
             updates['status'] = updates['status'].value
-        if 'classification' in updates and isinstance(updates['classification'], Classification):
+        if 'classification' in updates and isinstance(updates['classification'], AccessLevel):
             updates['classification'] = updates['classification'].value
 
         # Build SET clause
@@ -678,9 +678,9 @@ class ApprovalRepository(PostgreSQLRepository):
         # Parse classification
         classification_value = row.get('classification', 'ouo')
         try:
-            classification = Classification(classification_value) if classification_value else Classification.OUO
+            classification = AccessLevel(classification_value) if classification_value else AccessLevel.OUO
         except ValueError:
-            classification = Classification.OUO
+            classification = AccessLevel.OUO
 
         # Parse status
         status_value = row.get('status', 'pending')

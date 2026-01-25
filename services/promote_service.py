@@ -30,7 +30,8 @@ import logging
 
 from util_logger import LoggerFactory, ComponentType
 from core.models import PromotedDataset
-from core.models.promoted import SystemRole, Classification
+from core.models.promoted import SystemRole
+from core.models.stac import AccessLevel
 from infrastructure import PromotedDatasetRepository
 from infrastructure.pgstac_repository import PgStacRepository
 from infrastructure.pgstac_bootstrap import get_item_by_id
@@ -209,15 +210,16 @@ class PromoteService:
                     "error": f"System role '{system_role}' is already assigned to '{existing_role.promoted_id}'"
                 }
 
-        # Parse classification (24 DEC 2025)
-        classification_enum = Classification.PUBLIC  # Default
+        # Parse classification (24 DEC 2025, unified 25 JAN 2026 - S4.DM)
+        # NOTE: RESTRICTED is defined but NOT YET SUPPORTED
+        classification_enum = AccessLevel.PUBLIC  # Default
         if classification:
             try:
-                classification_enum = Classification(classification)
+                classification_enum = AccessLevel(classification)
             except ValueError:
                 return {
                     "success": False,
-                    "error": f"Invalid classification '{classification}'. Valid: {[c.value for c in Classification]}"
+                    "error": f"Invalid classification '{classification}'. Valid: {AccessLevel.supported_values()} (restricted not yet supported)"
                 }
 
         # Create new promoted entry

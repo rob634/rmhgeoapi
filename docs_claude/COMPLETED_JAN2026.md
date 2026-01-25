@@ -1,6 +1,6 @@
 # Completed Features - January 2026
 
-**Last Updated**: 24 JAN 2026
+**Last Updated**: 25 JAN 2026
 **Purpose**: Detailed completion summaries for features finished in January 2026
 **Reference**: These are indexed in [TODO.md](./TODO.md)
 
@@ -357,3 +357,76 @@ Must be done before running:
 
 - `GET /api/admin/external/prereqs` - Check DBA prerequisites
 - `POST /api/admin/external/initialize` - Initialize target database
+
+---
+
+## V0.8 MosaicJSON Removal (F7.18.MJ)
+
+**Completed**: 25 JAN 2026
+**Epic**: E7 Pipeline Infrastructure
+**Goal**: Remove deprecated MosaicJSON from Docker raster workflow
+
+### Background
+
+MosaicJSON was documented as "NOT viable" (12 NOV 2025) due to two-tier authentication issues:
+- MosaicJSON requires HTTPS for JSON file + OAuth for COG access
+- Violates Managed Identity-only architecture requirements
+- pgSTAC searches provide OAuth-only mosaic access
+
+Despite being deprecated, MosaicJSON code remained in the Docker worker handler and was causing warnings in job results.
+
+### Changes Made
+
+#### Phase Reduction (5 → 4 phases)
+
+| Before | After |
+|--------|-------|
+| 1. Tiling Scheme | 1. Tiling Scheme |
+| 2. Extract Tiles | 2. Extract Tiles |
+| 3. Create COGs | 3. Create COGs |
+| 4. MosaicJSON | ~~Removed~~ |
+| 5. STAC Collection | 4. STAC Collection |
+
+#### Files Modified
+
+| File | Changes |
+|------|---------|
+| `services/handler_process_raster_complete.py` | Removed Phase 4 (MosaicJSON) ~50 lines, renumbered phases |
+| `jobs/process_raster_docker.py` | Removed mosaicjson from result dict, updated comments |
+| `services/stac_collection.py` | Added V0.8 direct call mode, made mosaicjson_blob optional |
+
+#### STAC Collection Service Updates
+
+Added **two call modes** to `create_stac_collection()`:
+
+1. **Direct Call Mode (V0.8)**: Handler passes `cog_blobs`/`cog_container` directly
+   - No MosaicJSON dependency
+   - Used by Docker handler
+
+2. **Fan-in Mode (Legacy)**: Receives `previous_results` from MosaicJSON stage
+   - Backward compatible for any remaining callers
+   - MosaicJSON asset only added if `mosaicjson_blob` provided
+
+#### Key Code Changes
+
+```python
+# _create_stac_collection_impl signature change
+def _create_stac_collection_impl(
+    collection_id: str,
+    mosaicjson_blob: Optional[str],  # Was: str (required)
+    ...
+)
+
+# MosaicJSON asset now conditional
+if mosaicjson_blob:
+    collection.add_asset("mosaicjson", Asset(...))
+else:
+    logger.info("No MosaicJSON asset (V0.8: use pgSTAC search)")
+```
+
+### Result
+
+- Docker raster jobs no longer produce MosaicJSON warnings
+- Tiled outputs use pgSTAC collection for mosaic access
+- TiTiler URLs generated via pgSTAC search (collection-level) not MosaicJSON
+- Code simplified: ~100 lines removed across 3 files

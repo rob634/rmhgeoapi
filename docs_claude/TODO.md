@@ -1,6 +1,8 @@
 # Working Backlog
+**This file contains high level items only**
+This file references other documents containing implementation details. This is to avoid a 50,000 line TODO.md. This file should not exceed 500 lines.
 
-**Last Updated**: 24 JAN 2026
+**Last Updated**: 25 JAN 2026
 **Source of Truth**: [docs/epics/README.md](/docs/epics/README.md) - Epic/Feature/Story definitions
 **Purpose**: Sprint-level task tracking and delegation (INDEX format)
 
@@ -10,6 +12,7 @@
 
 | Document | Purpose |
 |----------|---------|
+| [RASTER_RESULT_MODELS.md](./RASTER_RESULT_MODELS.md) | **F7.21 Raster result type safety (CRITICAL)** |
 | [COMPLETED_JAN2026.md](./COMPLETED_JAN2026.md) | Completed features (Jan 2026) |
 | [COREMACHINE_GAPS.md](./COREMACHINE_GAPS.md) | CoreMachine gap analysis & job_events |
 | [APPROVAL_WORKFLOW.md](./APPROVAL_WORKFLOW.md) | F4.AP approval system details |
@@ -30,6 +33,30 @@
 ---
 
 ## Active Work
+
+### Raster Result Type Safety (F7.21) - CRITICAL
+**Status**: PLANNED - Implementation plan complete
+**Details**: [RASTER_RESULT_MODELS.md](./RASTER_RESULT_MODELS.md)
+**Priority**: CRITICAL - Blocks reliable checkpoint/resume, prevents silent failures
+
+**Problem**: Docker raster workflow passes complex dicts between database, Python, and Service Bus with NO Pydantic models. Vector workflow has `ProcessVectorStage1Data` - raster has nothing.
+
+| Phase | Description | Status |
+|-------|-------------|--------|
+| **Phase 1** | Core result models (Validation, COG, STAC) | **NEXT** |
+| Phase 2 | Tiling result models | Pending |
+| Phase 3 | Handler final result models | Pending |
+| Phase 4 | Checkpoint data model | Pending |
+
+**Deliverables**:
+- [ ] Create `core/models/raster_results.py` with 10+ Pydantic models
+- [ ] Update `validate_raster()` to return typed result
+- [ ] Update `create_cog()` to return typed result
+- [ ] Update handler to use typed results
+- [ ] Update checkpoint save/load for type safety
+- [ ] Update `finalize_job()` to validate input
+
+---
 
 ### CoreMachine Gap Analysis (E7)
 **Status**: GAPS FIXED - Ready for events table
@@ -84,7 +111,7 @@
 | RasterMetadataRepository | Done |
 | Wire to extract_stac_metadata | Done |
 | Enable raster rebuild | Done |
-| Test: process_raster_v2 populates cog_metadata | NEXT |
+| Test: process_raster_docker populates cog_metadata | NEXT |
 
 ---
 
@@ -105,14 +132,18 @@
 ---
 
 ### Classification Enforcement (E4)
-**Status**: Planned
+**Status**: Phase 0 COMPLETE - Data Model Unification
 **Details**: [CLASSIFICATION_ENFORCEMENT.md](./CLASSIFICATION_ENFORCEMENT.md)
+**Priority**: HIGH - Blocks type-safe approval workflow
 
 | Phase | Description | Status |
 |-------|-------------|--------|
-| Phase 1 | Enforce at Platform Level | Pending |
+| Phase 0 | Data Model Unification (unified to AccessLevel enum) | ✅ Done (25 JAN) |
+| **Phase 1** | **Enforce at Platform Level** | **NEXT** |
 | Phase 2 | Fail-Fast in Pipeline Tasks | Pending |
 | Phase 3 | ADF Integration Testing | Pending |
+
+**Completed (25 JAN)**: Unified `Classification` enum into `AccessLevel` (single source of truth in `core/models/stac.py`). NOTE: RESTRICTED is defined but NOT YET SUPPORTED.
 
 ---
 
@@ -278,6 +309,8 @@ See [TABLE_MAINTENANCE.md](./TABLE_MAINTENANCE.md) for pg_cron setup.
 
 | Date | Item |
 |------|------|
+| 25 JAN 2026 | V0.8 MosaicJSON Removal from Docker Workflow |
+| 25 JAN 2026 | F7.21 Raster Result Models Implementation Plan |
 | 23 JAN 2026 | UI Migration Phases 1-3 |
 | 22 JAN 2026 | Explicit Approval Record Creation |
 | 22 JAN 2026 | Infrastructure as Code DRY Cleanup |

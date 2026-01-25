@@ -104,8 +104,11 @@ from .promoted import (
     PromotedDataset,
     PromotedDatasetType,
     SystemRole,
-    Classification
 )
+
+# AccessLevel enum - single source of truth for data classification (25 JAN 2026 - S4.DM)
+# NOTE: Classification enum REMOVED - use AccessLevel instead
+from .stac import AccessLevel, normalize_access_level
 
 # System snapshot models
 from .system_snapshot import (
@@ -243,7 +246,10 @@ __all__ = [
     'PromotedDataset',
     'PromotedDatasetType',
     'SystemRole',
-    'Classification',
+
+    # Data classification (25 JAN 2026 - S4.DM unified)
+    'AccessLevel',
+    'normalize_access_level',
 
     # System snapshot models
     'SystemSnapshotRecord',

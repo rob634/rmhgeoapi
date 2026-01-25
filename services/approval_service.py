@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 
 from util_logger import LoggerFactory, ComponentType
 from core.models import DatasetApproval, ApprovalStatus
-from core.models.promoted import Classification
+from core.models.stac import AccessLevel
 from infrastructure.approval_repository import ApprovalRepository, generate_approval_id
 
 logger = LoggerFactory.create_logger(ComponentType.SERVICE, "ApprovalService")
@@ -59,7 +59,7 @@ class ApprovalService:
         self,
         job_id: str,
         job_type: str,
-        classification: Classification = Classification.OUO,
+        classification: AccessLevel = AccessLevel.OUO,
         stac_item_id: Optional[str] = None,
         stac_collection_id: Optional[str] = None
     ) -> DatasetApproval:
@@ -112,7 +112,7 @@ class ApprovalService:
     def list_approvals(
         self,
         status: Optional[ApprovalStatus] = None,
-        classification: Optional[Classification] = None,
+        classification: Optional[AccessLevel] = None,
         limit: int = 100,
         offset: int = 0
     ) -> List[DatasetApproval]:
@@ -201,7 +201,7 @@ class ApprovalService:
         adf_run_id = None
         action = 'stac_updated'
 
-        if approval.classification == Classification.PUBLIC:
+        if approval.classification == AccessLevel.PUBLIC:
             adf_result = self._trigger_adf_pipeline(approval)
             if adf_result['success']:
                 adf_run_id = adf_result.get('run_id')
@@ -603,7 +603,8 @@ class ApprovalService:
         Returns:
             Created test approval
         """
-        class_enum = Classification.PUBLIC if classification.lower() == 'public' else Classification.OUO
+        # NOTE: RESTRICTED is defined but NOT YET SUPPORTED
+        class_enum = AccessLevel.PUBLIC if classification.lower() == 'public' else AccessLevel.OUO
 
         return self.create_approval_for_job(
             job_id=job_id,

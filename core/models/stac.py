@@ -36,7 +36,7 @@ Created: 22 DEC 2025
 """
 
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional, List, Union
+from typing import Any, Dict, List, Optional, Union
 from enum import Enum
 from pydantic import BaseModel, Field, ConfigDict, model_validator
 
@@ -55,10 +55,62 @@ STAC_VERSION = "1.0.0"
 # =============================================================================
 
 class AccessLevel(str, Enum):
-    """Data access classification levels."""
+    """
+    Data access classification levels - SINGLE SOURCE OF TRUTH.
+
+    Used across the entire codebase for data classification:
+    - Pydantic models (PlatformRequest, DatasetApproval, PromotedDataset)
+    - SQL ENUMs (app.access_level_enum)
+    - Service Bus messages
+    - STAC item properties (platform:access_level)
+
+    Values:
+        PUBLIC: Data can be exported to external-facing storage (ADF handles this)
+        OUO: Official Use Only - internal access only, no external export
+        RESTRICTED: Highest restriction - no external access (FUTURE ENHANCEMENT)
+
+    NOTE: RESTRICTED is defined for forward compatibility but is NOT YET SUPPORTED.
+          Current system only enforces PUBLIC vs OUO distinction.
+          Do not use RESTRICTED until E4 Phase 3 is complete.
+    """
     PUBLIC = "public"
     OUO = "ouo"  # Official Use Only
-    RESTRICTED = "restricted"
+    RESTRICTED = "restricted"  # NOT YET SUPPORTED - future enhancement
+
+    # -------------------------------------------------------------------------
+    # SQL DDL Generation (S4.DM.3)
+    # -------------------------------------------------------------------------
+    # These class methods generate SQL for schema management.
+    # Since we rebuild schemas in DEV, these are mainly for documentation.
+    # -------------------------------------------------------------------------
+
+    @classmethod
+    def sql_type_name(cls) -> str:
+        """Return the PostgreSQL ENUM type name."""
+        return "access_level_enum"
+
+    @classmethod
+    def sql_create_type(cls, schema: str = "app") -> str:
+        """
+        Generate CREATE TYPE statement for PostgreSQL ENUM.
+
+        Args:
+            schema: Database schema name (default: app)
+
+        Returns:
+            SQL CREATE TYPE statement
+        """
+        values = ", ".join(f"'{v.value}'" for v in cls)
+        return f"CREATE TYPE {schema}.{cls.sql_type_name()} AS ENUM ({values});"
+
+    @classmethod
+    def supported_values(cls) -> list[str]:
+        """
+        Return list of currently supported values.
+
+        NOTE: Excludes RESTRICTED which is not yet supported.
+        """
+        return ["public", "ouo"]  # RESTRICTED excluded until E4 Phase 3
 
 
 class AssetType(str, Enum):
@@ -66,6 +118,40 @@ class AssetType(str, Enum):
     RASTER = "raster"
     VECTOR = "vector"
     MIXED = "mixed"
+
+
+# =============================================================================
+# ACCESS LEVEL FIELD HELPER (S4.DM.6)
+# =============================================================================
+
+def normalize_access_level(value: Any) -> AccessLevel:
+    """
+    Normalize access level input to AccessLevel enum.
+
+    Accepts case-insensitive strings and AccessLevel instances.
+    NOTE: RESTRICTED is accepted but not yet supported in the system.
+
+    Args:
+        value: String or AccessLevel value
+
+    Returns:
+        AccessLevel enum value
+
+    Raises:
+        ValueError: If value is not a valid access level
+    """
+    if isinstance(value, AccessLevel):
+        return value
+    if isinstance(value, str):
+        try:
+            return AccessLevel(value.lower())
+        except ValueError:
+            valid = ", ".join(v.value for v in AccessLevel)
+            raise ValueError(
+                f"Invalid access_level '{value}'. Must be one of: {valid}. "
+                f"NOTE: 'restricted' is not yet supported."
+            )
+    raise ValueError(f"access_level must be string or AccessLevel, got {type(value).__name__}")
 
 
 # =============================================================================
@@ -529,6 +615,9 @@ __all__ = [
     # Enums
     'AccessLevel',
     'AssetType',
+
+    # Helpers
+    'normalize_access_level',
 
     # Namespace models
     'PlatformProperties',

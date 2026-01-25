@@ -5,7 +5,7 @@
 # PURPOSE: Approval records for human review before STAC publication
 # LAST_REVIEWED: 16 JAN 2026
 # EXPORTS: DatasetApproval, ApprovalStatus
-# DEPENDENCIES: pydantic, core.models.promoted.Classification
+# DEPENDENCIES: pydantic, core.models.stac.AccessLevel
 # ============================================================================
 """
 Dataset Approval Models.
@@ -14,9 +14,10 @@ Pydantic models for the dataset approval system. When ETL jobs complete,
 an approval record is created for human review before the dataset is
 marked as "published" in STAC.
 
-Classification determines post-approval action:
+AccessLevel determines post-approval action:
 - OUO (Official Use Only): Update STAC app:published=true
 - PUBLIC: Trigger ADF pipeline for external distribution + update STAC
+- RESTRICTED: NOT YET SUPPORTED (future enhancement)
 
 Tables:
     app.dataset_approvals - Approval records for QA workflow
@@ -33,7 +34,7 @@ from typing import Optional
 from enum import Enum
 from pydantic import BaseModel, Field, ConfigDict
 
-from .promoted import Classification
+from .stac import AccessLevel
 
 
 class ApprovalStatus(str, Enum):
@@ -80,7 +81,7 @@ class DatasetApproval(BaseModel):
             approval_id="apr-abc123",
             job_id="job-xyz789",
             job_type="process_vector",
-            classification=Classification.OUO,
+            classification=AccessLevel.OUO,
             stac_item_id="admin-boundaries-chile-v1",
             stac_collection_id="admin-boundaries"
         )
@@ -114,10 +115,11 @@ class DatasetApproval(BaseModel):
         description="Type of job (process_vector, process_raster_v2, etc.)"
     )
 
-    # Classification determines post-approval action
-    classification: Classification = Field(
-        default=Classification.OUO,
-        description="Data classification: public (triggers ADF) or ouo (STAC only)"
+    # Classification determines post-approval action (unified 25 JAN 2026 - S4.DM.2)
+    # NOTE: RESTRICTED is defined in AccessLevel but NOT YET SUPPORTED
+    classification: AccessLevel = Field(
+        default=AccessLevel.OUO,
+        description="Data classification: public (triggers ADF), ouo (STAC only). RESTRICTED not yet supported."
     )
 
     # Status

@@ -341,6 +341,7 @@ def _process_raster_tiled(
                     'overview_resampling': config.raster.overview_resampling,
                     'reproject_resampling': config.raster.reproject_resampling,
                     'in_memory': False,  # Docker uses disk for large files
+                    '_task_id': task_id,  # Pass task_id for disk-based temp file naming
                 }
 
                 cog_response = create_cog(cog_params)
@@ -832,6 +833,7 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                 'overview_resampling': params.get('overview_resampling') or config.raster.overview_resampling,
                 'reproject_resampling': params.get('reproject_resampling') or config.raster.reproject_resampling,
                 'in_memory': False,  # Docker uses disk for large files
+                '_task_id': task_id,  # Pass task_id for disk-based temp file naming
             }
 
             # F7.20: Track peak memory during COG creation (memory-intensive phase)

@@ -115,6 +115,11 @@ def _get_required_queues(
     """
     Build list of required queues based on APP_MODE configuration.
 
+    V0.8 Architecture (24 JAN 2026):
+    - geospatial-jobs: Job orchestration
+    - functionapp-tasks: FunctionApp worker (lightweight ops)
+    - container-tasks: Docker worker (heavy ops)
+
     Args:
         app_mode_config: AppModeConfig instance
         app_config: AppConfig instance
@@ -131,25 +136,19 @@ def _get_required_queues(
             "flag": "listens_to_jobs_queue"
         })
 
-    if app_mode_config.listens_to_raster_tasks:
+    # V0.8: Use consolidated queue names (24 JAN 2026)
+    if app_mode_config.listens_to_functionapp_tasks:
         required_queues.append({
-            "name": app_config.queues.raster_tasks_queue,
-            "purpose": "Raster tasks (GDAL operations)",
-            "flag": "listens_to_raster_tasks"
+            "name": app_config.queues.functionapp_tasks_queue,
+            "purpose": "FunctionApp tasks (lightweight DB ops)",
+            "flag": "listens_to_functionapp_tasks"
         })
 
-    if app_mode_config.listens_to_vector_tasks:
+    if app_mode_config.listens_to_container_tasks:
         required_queues.append({
-            "name": app_config.queues.vector_tasks_queue,
-            "purpose": "Vector tasks (DB operations)",
-            "flag": "listens_to_vector_tasks"
-        })
-
-    if app_mode_config.listens_to_long_running_tasks:
-        required_queues.append({
-            "name": app_config.queues.long_running_tasks_queue,
-            "purpose": "Long-running tasks (Docker worker)",
-            "flag": "listens_to_long_running_tasks"
+            "name": app_config.queues.container_tasks_queue,
+            "purpose": "Container tasks (Docker worker - heavy ops)",
+            "flag": "listens_to_container_tasks"
         })
 
     return required_queues

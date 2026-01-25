@@ -862,3 +862,214 @@
     border-radius: 3px;
     transition: width 0.3s ease;
 }
+
+/* ========== Component Groups (24 JAN 2026) ========== */
+/* Groups components by source: Function App vs Docker Worker */
+
+.component-group {
+    margin-bottom: 30px;
+}
+
+.component-group-header {
+    background: white;
+    border: 1px solid #e9ecef;
+    border-left: 5px solid #0071BC;
+    border-radius: 3px;
+    padding: 20px 25px;
+    margin-bottom: 15px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 15px;
+}
+
+.component-group-header.healthy {
+    background: linear-gradient(135deg, #F0FDF4 0%, white 100%);
+}
+
+.component-group-header.warning {
+    background: linear-gradient(135deg, #FFFBEB 0%, white 100%);
+}
+
+.component-group-header.unhealthy {
+    background: linear-gradient(135deg, #FEF2F2 0%, white 100%);
+}
+
+.group-title {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.group-icon {
+    font-size: 32px;
+    line-height: 1;
+}
+
+.group-title h3 {
+    color: #053657;
+    font-size: 18px;
+    font-weight: 700;
+    margin: 0;
+}
+
+.group-description {
+    color: #626F86;
+    font-size: 13px;
+    margin: 4px 0 0 0;
+}
+
+.group-stats {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.group-stat {
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.group-stat.total {
+    background: #E8F4FD;
+    color: #0071BC;
+}
+
+.group-stat.healthy {
+    background: #D1FAE5;
+    color: #065F46;
+}
+
+.group-stat.warning {
+    background: #FEF3C7;
+    color: #92400E;
+}
+
+.group-stat.unhealthy {
+    background: #FEE2E2;
+    color: #991B1B;
+}
+
+.group-stat.disabled {
+    background: #F3F4F6;
+    color: #626F86;
+}
+
+.component-group-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 15px;
+}
+
+/* Function App group styling */
+.component-group.function_app .component-group-header {
+    border-left-color: #FFC14D;
+}
+
+.component-group.function_app .group-icon {
+    color: #FFC14D;
+    text-shadow: 0 2px 4px rgba(255, 193, 77, 0.3);
+}
+
+/* Docker Worker group styling */
+.component-group.docker_worker .component-group-header {
+    border-left-color: #0071BC;
+}
+
+.component-group.docker_worker .group-icon {
+    color: #0071BC;
+    text-shadow: 0 2px 4px rgba(0, 113, 188, 0.3);
+}
+
+/* Shared Infrastructure group styling */
+.component-group.shared .component-group-header {
+    border-left-color: #10B981;
+}
+
+.component-group.shared .group-icon {
+    color: #10B981;
+    text-shadow: 0 2px 4px rgba(16, 185, 129, 0.3);
+}
+
+/* Override components-grid when inside a group */
+.component-group .components-grid {
+    margin-bottom: 0;
+}
+
+/* Component card size adjustment for groups */
+.component-group-cards .component-card {
+    min-width: 0;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .component-group-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .group-stats {
+        width: 100%;
+        justify-content: flex-start;
+    }
+
+    .component-group-cards {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Summary banner at top of component groups */
+.component-groups-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 15px;
+    margin-bottom: 25px;
+}
+
+.summary-card {
+    background: white;
+    border: 1px solid #e9ecef;
+    border-radius: 3px;
+    padding: 20px;
+    text-align: center;
+    transition: all 0.2s;
+}
+
+.summary-card:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    transform: translateY(-2px);
+}
+
+.summary-card .summary-icon {
+    font-size: 36px;
+    margin-bottom: 10px;
+}
+
+.summary-card .summary-label {
+    font-size: 12px;
+    color: #626F86;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 5px;
+}
+
+.summary-card .summary-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: #053657;
+}
+
+.summary-card .summary-sub {
+    font-size: 12px;
+    color: #626F86;
+    margin-top: 5px;
+}
+
+.summary-card.healthy { border-left: 4px solid #10B981; }
+.summary-card.warning { border-left: 4px solid #F59E0B; }
+.summary-card.unhealthy { border-left: 4px solid #DC2626; }
+.summary-card.function-app { border-left: 4px solid #FFC14D; }
+.summary-card.docker-worker { border-left: 4px solid #0071BC; }

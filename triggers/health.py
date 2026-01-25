@@ -2006,15 +2006,13 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                 "docker_worker_enabled": app_mode_config.docker_worker_enabled,
                 "queues_listening": {
                     "jobs": app_mode_config.listens_to_jobs_queue,
-                    "raster_tasks": app_mode_config.listens_to_raster_tasks,
-                    "vector_tasks": app_mode_config.listens_to_vector_tasks,
-                    "long_running_tasks": app_mode_config.listens_to_long_running_tasks,
+                    "functionapp_tasks": app_mode_config.listens_to_functionapp_tasks,
+                    "container_tasks": app_mode_config.listens_to_container_tasks,
                 },
                 "queue_names": {
                     "jobs": config.queues.jobs_queue,
-                    "raster_tasks": config.queues.raster_tasks_queue,
-                    "vector_tasks": config.queues.vector_tasks_queue,
-                    "long_running_tasks": config.queues.long_running_tasks_queue,
+                    "functionapp_tasks": config.queues.functionapp_tasks_queue,
+                    "container_tasks": config.queues.container_tasks_queue,
                 },
                 "routing": {
                     "routes_raster_externally": app_mode_config.routes_raster_externally,

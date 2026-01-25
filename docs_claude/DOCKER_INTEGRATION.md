@@ -566,5 +566,211 @@ az servicebus queue show --resource-group rmhazure_rg --namespace-name rmhazure 
 
 ---
 
+## Docker Orchestration Framework (F7.18)
+
+**Added**: 24 JAN 2026
+**Epic**: E7 Pipeline Infrastructure
+**Goal**: Reusable infrastructure for Docker-based long-running jobs with connection pooling, checkpointing, and graceful shutdown
+**Status**: Phases 1-4 COMPLETE, Phase 5 pending
+
+### Existing Infrastructure
+
+| Component | Status | Location |
+|-----------|--------|----------|
+| **CheckpointManager** | EXISTS | `infrastructure/checkpoint_manager.py` |
+| **Task checkpoint fields** | EXISTS | `checkpoint_phase`, `checkpoint_data`, `checkpoint_updated_at` |
+| **Handler pattern** | EXISTS | `services/handler_process_raster_complete.py` |
+| **Connection pooling** | COMPLETE | `infrastructure/connection_pool.py` |
+| **DockerTaskContext** | COMPLETE | `core/docker_context.py` |
+| **Graceful shutdown** | COMPLETE | `docker_service.py` |
+
+### CheckpointManager API
+
+```python
+# infrastructure/checkpoint_manager.py
+checkpoint = CheckpointManager(task_id, task_repo)
+checkpoint.should_skip(phase)      # Check if phase completed
+checkpoint.save(phase, data, validate_artifact)  # Save with artifact validation
+checkpoint.get_data(key, default)  # Retrieve checkpoint data
+checkpoint.is_shutdown_requested() # Check if shutdown signal received
+checkpoint.save_and_stop_if_requested(phase, data)  # Save + check in one call
+```
+
+### Implementation Phases
+
+#### Phase 1: Connection Pool Manager - COMPLETE
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| S7.18.1 | Create `ConnectionPoolManager` class | Done |
+| S7.18.2 | Integrate with `PostgreSQLRepository._get_connection()` | Done |
+| S7.18.3 | Wire token refresh to call `recreate_pool()` | Done |
+| S7.18.4 | Add pool config env vars | Done |
+
+**Environment Variables** (Docker mode only):
+- `DOCKER_DB_POOL_MIN` - Minimum pool connections (default: 2)
+- `DOCKER_DB_POOL_MAX` - Maximum pool connections (default: 10)
+
+#### Phase 2: Checkpoint Integration - COMPLETE
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| S7.18.5 | Task checkpoint schema | Done |
+| S7.18.6 | CheckpointManager class | Done |
+| S7.18.7 | Add `is_shutdown_requested()` method | Done |
+
+**New Methods**:
+- `set_shutdown_event(event)` - Register shutdown event post-init
+- `is_shutdown_requested()` - Check if shutdown signal received
+- `should_stop()` - Alias for is_shutdown_requested()
+- `save_and_stop_if_requested(phase, data)` - Convenience method
+
+#### Phase 3: Docker Task Context - COMPLETE
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| S7.18.8 | Create `DockerTaskContext` dataclass | Done |
+| S7.18.9 | Modify `BackgroundQueueWorker` to create context | Done |
+| S7.18.10 | Pass context to handlers via CoreMachine | Done |
+| S7.18.11 | Add progress reporting to task metadata | Done |
+
+**How Handlers Access Context**:
+```python
+def my_handler(params: Dict) -> Dict:
+    context = params.get('_docker_context')  # DockerTaskContext or None
+    if context:
+        if context.should_stop():
+            context.checkpoint.save(phase, data)
+            return {'success': True, 'interrupted': True}
+        context.report_progress(50, "Halfway done")
+```
+
+#### Phase 4: Graceful Shutdown - COMPLETE
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| S7.18.12 | Create `DockerWorkerLifecycle` class | Done |
+| S7.18.13 | Integrate shutdown event with `BackgroundQueueWorker` | Done |
+| S7.18.14 | Add shutdown status to `/health` endpoint | Done |
+| S7.18.15 | Test graceful shutdown (SIGTERM → checkpoint saved) | Done |
+
+**Graceful Shutdown Flow**:
+1. SIGTERM received → `worker_lifecycle.initiate_shutdown()` called
+2. Shutdown event set → all workers see `should_stop() = True`
+3. In-flight tasks save checkpoint via `DockerTaskContext`
+4. BackgroundQueueWorker abandons queued messages (retry later)
+5. ConnectionPoolManager drains and closes
+6. `/health` returns 503 with `status: "shutting_down"`
+
+#### Phase 5: H3 Bootstrap Docker - PENDING
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| S7.18.16 | Create `bootstrap_h3_docker` job definition | Pending |
+| S7.18.17 | Create `h3_bootstrap_complete` handler | Pending |
+| S7.18.18 | Register job and handler in `__init__.py` | Pending |
+| S7.18.19 | Test: Rwanda bootstrap with checkpoint/resume | Pending |
+| S7.18.20 | Test: Graceful shutdown mid-cascade | Pending |
+
+### Handler Pattern Evolution
+
+```python
+# OLD PATTERN (handler creates checkpoint)
+def process_raster_complete(params: Dict, context: Optional[Dict] = None):
+    task_id = params.get('_task_id')
+    if task_id:
+        checkpoint = CheckpointManager(task_id, task_repo)  # Handler creates
+
+# NEW PATTERN (context provides checkpoint + shutdown awareness)
+def process_raster_complete(params: Dict, context: DockerTaskContext):
+    if context.should_stop():  # Shutdown awareness!
+        return {'interrupted': True, 'resumable': True}
+    if not context.checkpoint.should_skip(1):  # Checkpoint provided
+        result = do_work()
+        context.checkpoint.save(1, data={'result': result})
+```
+
+---
+
+## HTTP-Triggered Docker Worker (F7.15)
+
+**Status**: PLANNED - Alternative to Service Bus polling
+**Prerequisite**: Complete F7.13 Option A first, then implement as configuration option
+
+### Concept
+
+Eliminate Docker→Service Bus connection entirely.
+Function App task worker HTTP-triggers Docker, then exits. Docker tracks its own state.
+
+```
+┌─────────────────┐    ┌──────────────────────┐
+│  Function App   │───▶│  Service Bus Queue   │
+│  (SB Trigger)   │◀───│  long-running-tasks  │
+└────────┬────────┘    └──────────────────────┘
+         │
+         │ 1. HTTP POST /task/start
+         │    {task_id, params, callback_url}
+         │
+         │ 2. Docker returns 202 Accepted immediately
+         ▼
+┌─────────────────┐
+│  Docker Worker  │──── 3. Process task in background
+│  (HTTP only)    │     4. Update task status in PostgreSQL
+└────────┬────────┘     5. Optionally call callback_url when done
+         │
+         │ (Function App is already gone - no timeout issues)
+         ▼
+   Task completion detected by:
+   - Polling task status table
+   - Or callback to Function App HTTP endpoint
+```
+
+### Why This Might Be Better
+
+1. **Simpler Docker auth** - Only needs HTTP endpoint, no Service Bus SDK
+2. **No queue credentials in Docker** - Function App owns all queue logic
+3. **Function App exits immediately** - No timeout concerns
+4. **State in PostgreSQL** - Already have task status table
+
+### Implementation Stories
+
+| Story | Description | Status |
+|-------|-------------|--------|
+| S7.15.1 | Create 2-stage job: `process_raster_docker_http` | Pending |
+| S7.15.2 | Stage 1 handler: `validate_and_trigger_docker` | Pending |
+| S7.15.3 | Docker endpoint: `POST /task/start` | Pending |
+| S7.15.4 | Docker background processing with CoreMachine | Pending |
+| S7.15.5 | Configuration switch: `DOCKER_ORCHESTRATION_MODE` | Pending |
+| S7.15.6 | Test both modes work | Pending |
+
+### Configuration
+
+```bash
+# Option A: Docker polls Service Bus (default)
+DOCKER_ORCHESTRATION_MODE=service_bus
+
+# Option B: Function App HTTP-triggers Docker
+DOCKER_ORCHESTRATION_MODE=http_trigger
+DOCKER_WORKER_URL=https://rmhheavyapi-xxx.azurewebsites.net
+```
+
+### Docker Execution Model Terminology
+
+| Model | Name | Trigger | Job Suffix | Use Case |
+|-------|------|---------|------------|----------|
+| **A** | **Queue-Polled** | Docker polls Service Bus | `*_docker` | Heavy ETL, hours-long |
+| **B** | **Function-Triggered** | FA HTTP → Docker | `*_triggered` | FA as gatekeeper |
+
+**When to Use Which**:
+
+| Scenario | Model |
+|----------|-------|
+| Tasks running hours (large rasters) | Queue-Polled |
+| FA validation before Docker starts | Function-Triggered |
+| Simpler Docker (no Service Bus) | Function-Triggered |
+| High-volume parallel tasks | Queue-Polled |
+
+---
+
 *Created: 23 DEC 2025*
-*Updated: 23 JAN 2026 - Added Docker Worker Parallelism Model*
+*Updated: 24 JAN 2026 - Added Docker Orchestration Framework (F7.18) and HTTP-Triggered Docker (F7.15)*

@@ -327,23 +327,25 @@ class QueueDefaults:
     Note: This is a SERVICE BUS ONLY application.
     Storage Queues are NOT supported.
 
-    Queue Architecture (11 DEC 2025 - No Legacy Fallbacks):
-    - geospatial-jobs: Job orchestration (Platform apps listen)
-    - raster-tasks: Raster task processing (memory-intensive GDAL ops)
-    - vector-tasks: Vector task processing (high-concurrency DB ops)
-    - long-running-raster-tasks: Docker worker processing (13 DEC 2025 placeholder)
+    V0.8 Queue Architecture (24 JAN 2026):
+    - geospatial-jobs: Job orchestration (Platform/Orchestrator apps listen)
+    - container-tasks: Docker worker (ALL heavy operations - GDAL, geopandas, bulk SQL)
+    - functionapp-tasks: FunctionApp worker (lightweight DB ops, inventory)
 
     All task types MUST be explicitly mapped in TaskRoutingDefaults.
     Unmapped task types will raise ContractViolationError (no fallback).
     """
 
     JOBS_QUEUE = "geospatial-jobs"
-    RASTER_TASKS_QUEUE = "raster-tasks"   # Raster-optimized queue
-    VECTOR_TASKS_QUEUE = "vector-tasks"   # Vector-optimized queue
 
-    # Long-running tasks for Docker worker (13 DEC 2025, renamed 22 DEC 2025)
-    # When Docker support is added, large tasks route here (no timeout constraints)
-    LONG_RUNNING_TASKS_QUEUE = "long-running-tasks"
+    # V0.8: New consolidated queues (24 JAN 2026)
+    CONTAINER_TASKS_QUEUE = "container-tasks"      # Docker worker (heavy ops)
+    FUNCTIONAPP_TASKS_QUEUE = "functionapp-tasks"  # FunctionApp worker (lightweight)
+
+    # DEPRECATED: Keep for migration period (remove after V0.8 stabilizes)
+    RASTER_TASKS_QUEUE = "raster-tasks"            # DEPRECATED → use FUNCTIONAPP_TASKS_QUEUE
+    VECTOR_TASKS_QUEUE = "vector-tasks"            # DEPRECATED → use FUNCTIONAPP_TASKS_QUEUE
+    LONG_RUNNING_TASKS_QUEUE = "long-running-tasks"  # DEPRECATED → use CONTAINER_TASKS_QUEUE
 
     # Service outage alerts queue (22 JAN 2026)
     # External service health monitoring sends outage/recovery notifications here
@@ -365,25 +367,41 @@ class AppModeDefaults:
     Controls which queues this app listens to and how tasks are routed.
     Enables single codebase to be deployed in different configurations.
 
-    Architecture (07 DEC 2025, updated 22 DEC 2025):
-    - Centralized orchestration: Platform app handles jobs queue
+    V0.8 Architecture (24 JAN 2026):
+    - 5 clean modes for 3 deployment configurations
+    - Centralized orchestration: Orchestrator handles jobs queue
     - Distributed execution: Workers process task queues
-    - Message-based signaling: Workers send stage_complete to jobs queue
-    - Docker workers: Long-running tasks without Azure Functions timeout constraints
+    - Docker workers: Heavy operations without Azure Functions timeout constraints
+
+    Mode Summary:
+    - standalone: All queues, all HTTP (development only)
+    - platform: HTTP gateway only, sends to jobs queue (external entry point)
+    - orchestrator: Jobs queue + all HTTP (can combine with platform)
+    - worker_functionapp: functionapp-tasks queue (lightweight ops)
+    - worker_docker: container-tasks queue (heavy ops)
     """
 
-    # Valid modes
-    STANDALONE = "standalone"           # All queues, all endpoints (current behavior)
-    PLATFORM_RASTER = "platform_raster" # HTTP + jobs + raster-tasks
-    PLATFORM_VECTOR = "platform_vector" # HTTP + jobs + vector-tasks
-    PLATFORM_ONLY = "platform_only"     # HTTP + jobs only (pure router)
-    WORKER_RASTER = "worker_raster"     # raster-tasks only
-    WORKER_VECTOR = "worker_vector"     # vector-tasks only
-    WORKER_DOCKER = "worker_docker"     # long-running-raster-tasks only (Docker container)
+    # V0.8: Simplified 5 modes (24 JAN 2026)
+    STANDALONE = "standalone"                 # All queues, all endpoints (dev)
+    PLATFORM = "platform"                     # HTTP only, sends to jobs queue
+    ORCHESTRATOR = "orchestrator"             # Jobs queue + all HTTP
+    WORKER_FUNCTIONAPP = "worker_functionapp" # functionapp-tasks queue
+    WORKER_DOCKER = "worker_docker"           # container-tasks queue (Docker)
+
+    # DEPRECATED: Keep for backward compatibility during migration
+    PLATFORM_RASTER = "platform_raster"   # DEPRECATED → use ORCHESTRATOR
+    PLATFORM_VECTOR = "platform_vector"   # DEPRECATED → use ORCHESTRATOR
+    PLATFORM_ONLY = "platform_only"       # DEPRECATED → use ORCHESTRATOR
+    WORKER_RASTER = "worker_raster"       # DEPRECATED → use WORKER_FUNCTIONAPP
+    WORKER_VECTOR = "worker_vector"       # DEPRECATED → use WORKER_FUNCTIONAPP
+    GATEWAY = "gateway"                   # DEPRECATED → use PLATFORM
 
     VALID_MODES = [
-        STANDALONE, PLATFORM_RASTER, PLATFORM_VECTOR,
-        PLATFORM_ONLY, WORKER_RASTER, WORKER_VECTOR, WORKER_DOCKER
+        # V0.8 primary modes
+        STANDALONE, PLATFORM, ORCHESTRATOR, WORKER_FUNCTIONAPP, WORKER_DOCKER,
+        # Deprecated modes (still work during migration)
+        PLATFORM_RASTER, PLATFORM_VECTOR, PLATFORM_ONLY,
+        WORKER_RASTER, WORKER_VECTOR, GATEWAY
     ]
 
     DEFAULT_MODE = STANDALONE
@@ -391,8 +409,8 @@ class AppModeDefaults:
     DEFAULT_APP_NAME = "your-function-app-name"
 
     # Docker worker integration (08 JAN 2026)
-    # When False, standalone mode skips long-running-tasks queue validation
-    # Set to True when a Docker worker is deployed and processing long-running-tasks
+    # When False, standalone mode skips container-tasks queue validation
+    # Set to True when a Docker worker is deployed and processing container-tasks
     DOCKER_WORKER_ENABLED = False
 
 
@@ -404,144 +422,176 @@ class TaskRoutingDefaults:
     """
     Task type to queue category mapping.
 
-    Maps task_type → routing category (raster, vector, long-running).
+    Maps task_type → routing category (docker, functionapp).
     CoreMachine uses this to route tasks to appropriate queues.
 
-    CRITICAL (11 DEC 2025 - No Legacy Fallbacks):
-    ALL task types MUST be explicitly listed here. If a task type is not
-    in RASTER_TASKS, VECTOR_TASKS, or LONG_RUNNING_TASKS,
-    CoreMachine will raise ContractViolationError.
-    This prevents silent misrouting and enforces explicit queue assignment.
+    V0.8 Architecture (24 JAN 2026):
+    ALL task types MUST be explicitly listed in DOCKER_TASKS or FUNCTIONAPP_TASKS.
+    Unmapped task types raise ContractViolationError (no fallback).
 
     Queue Selection Guidelines:
-    - RASTER_TASKS: Memory-intensive GDAL operations (2-8GB RAM, low concurrency)
-    - VECTOR_TASKS: DB-bound or lightweight operations (high concurrency)
-    - LONG_RUNNING_TASKS: Docker worker for large files (no timeout constraints)
+    - DOCKER_TASKS → container-tasks: GDAL, geopandas, bulk SQL (heavy ops)
+    - FUNCTIONAPP_TASKS → functionapp-tasks: DB queries, inventory, STAC ops
     """
 
-    # Long-running tasks → long-running-tasks queue (13 DEC 2025, renamed 22 DEC 2025)
+    # =========================================================================
+    # DOCKER_TASKS → container-tasks queue (V0.8 - 24 JAN 2026)
+    # =========================================================================
+    # All GDAL, geopandas, and heavy pgstac SQL operations.
     # Docker worker tasks - no Azure Functions timeout constraints.
-    # These handlers are designed for Docker worker (rmhheavyapi) execution.
-    LONG_RUNNING_TASKS = [
-        # Docker consolidated raster handler (11 JAN 2026) - F7.13
-        # Validate → COG → STAC in single execution (no stage overhead)
-        "raster_process_complete",
+    DOCKER_TASKS = frozenset([
+        # =====================================================================
+        # CONSOLIDATED RASTER HANDLERS (Docker-only)
+        # =====================================================================
+        "raster_process_complete",        # F7.13: Validate → COG → STAC
+        "raster_process_large_complete",  # F7.18: Tiling pipeline (deprecated)
 
-        # Docker large raster handler (13 JAN 2026) - F7.18
-        # Tiling → Extract → COG → MosaicJSON → STAC (100MB-30GB rasters)
-        "raster_process_large_complete",
+        # =====================================================================
+        # H3 PYRAMID (Docker-only)
+        # =====================================================================
+        "h3_pyramid_complete",            # F7.20: H3 pyramid (post-V0.8)
 
-        # Docker H3 pyramid handler (20 JAN 2026) - F7.20
-        # Base + Cascade + Finalize in single execution (no batch fan-out)
-        "h3_pyramid_complete",
-    ]
-
-    # Raster tasks → raster-tasks queue (memory-intensive, low concurrency)
-    # ORPHANED ENTRIES REMOVED 29 DEC 2025: handler_raster_*, handler_stac_* prefixed
-    # entries did not exist in ALL_HANDLERS - they were never implemented.
-    # Raster handlers renamed (29 DEC 2025)
-    RASTER_TASKS = [
-        # Raster validation and COG creation
+        # =====================================================================
+        # RASTER OPERATIONS (GDAL-dependent)
+        # =====================================================================
         "raster_validate",
         "raster_create_cog",
         "raster_extract_stac_metadata",
-        # STAC raster catalog
         "raster_list_files",
-        # Tiling and extraction
         "raster_generate_tiling_scheme",
         "raster_extract_tiles",
-        # MosaicJSON and STAC collection
         "raster_create_mosaicjson",
         "raster_create_stac_collection",
-        # Fathom ETL (memory-intensive raster operations)
-        # NOTE: Inventory handlers moved to VECTOR_TASKS (database queries)
-        "fathom_band_stack",     # Actual raster: Stack 8 return periods
-        "fathom_spatial_merge",  # Actual raster: Merge tiles band-by-band
-        # H3 Aggregation (memory-intensive rasterstats operations) - 22 DEC 2025
-        "h3_raster_zonal_stats",  # Stage 2: Compute zonal stats (GDAL + rasterstats)
-    ]
 
-    # Vector tasks → vector-tasks queue (high concurrency, DB-bound or lightweight)
-    # ORPHANED ENTRIES REMOVED 29 DEC 2025: handler_vector_*, handler_stac_* prefixed
-    # entries did not exist in ALL_HANDLERS - they were never implemented.
-    VECTOR_TASKS = [
-        # Vector ETL (idempotent)
+        # =====================================================================
+        # FATHOM RASTER OPERATIONS (GDAL)
+        # =====================================================================
+        "fathom_band_stack",              # Stack 8 return periods
+        "fathom_spatial_merge",           # Merge tiles band-by-band
+        "fathom_process_chunk",           # V0.8: Band stack + VRT merge + STAC
+
+        # =====================================================================
+        # H3 RASTER AGGREGATION (rasterstats - memory intensive)
+        # =====================================================================
+        "h3_raster_zonal_stats",          # Compute zonal stats (GDAL + rasterstats)
+
+        # =====================================================================
+        # VECTOR ETL - DOCKER (V0.8 - geopandas + connection pooling)
+        # =====================================================================
+        "vector_docker_complete",         # V0.8: Consolidated vector ETL with checkpoints
+    ])
+
+    # =========================================================================
+    # FUNCTIONAPP_TASKS → functionapp-tasks queue (V0.8 - 24 JAN 2026)
+    # =========================================================================
+    # Lightweight DB operations, inventory, STAC queries.
+    # Runs on FunctionApp worker (with timeout constraints).
+    FUNCTIONAPP_TASKS = frozenset([
+        # =====================================================================
+        # LEGACY VECTOR ETL (FunctionApp - backup/admin only after V0.8)
+        # =====================================================================
         "process_vector_prepare",
         "process_vector_upload",
         "vector_create_stac",
         "vector_extract_stac_metadata",
-        # H3 handlers (DB-bound PostGIS operations), renamed (29 DEC 2025)
-        "h3_create_stac",
-        "h3_native_streaming_postgis",
-        "h3_generate_grid",
-        "h3_cascade_descendants",
-        "h3_finalize_pyramid",
-        # H3 Aggregation handlers (DB-bound) - 22 DEC 2025
-        "h3_inventory_cells",       # Stage 1: Count cells, calculate batches
-        "h3_aggregation_finalize",  # Stage 3: Update registry, verify counts
-        # Container inventory (lightweight blob listing), renamed (29 DEC 2025)
+
+        # =====================================================================
+        # INVENTORY OPERATIONS (blob listing, lightweight)
+        # =====================================================================
         "inventory_container_summary",
         "inventory_list_blobs",
         "inventory_analyze_blob",
         "inventory_aggregate_analysis",
         "inventory_classify_geospatial",
         "inventory_aggregate_geospatial",
-        # Fathom container inventory (lightweight)
+
+        # =====================================================================
+        # FATHOM INVENTORY (DB queries, not raster)
+        # =====================================================================
         "fathom_generate_scan_prefixes",
         "fathom_scan_prefix",
         "fathom_assign_grid_cells",
         "fathom_inventory_summary",
-        # Fathom ETL inventory handlers (database queries, not raster ops)
-        "fathom_tile_inventory",   # Phase 1: Query DB for unprocessed tiles
-        "fathom_grid_inventory",   # Phase 2: Query DB for Phase 1 completed
-        "fathom_stac_register",    # Shared: Create STAC items (DB + HTTP)
-        "fathom_stac_rebuild",     # Rebuild STAC from existing COGs (09 JAN 2026)
-        # Hello world and test handlers (lightweight)
-        "hello_world_greeting",
-        "hello_world_reply",
-        # Unpublish handlers - surgical data removal (12 DEC 2025), renamed (29 DEC 2025)
-        # All unpublish tasks are lightweight (STAC queries, blob deletes, DROP TABLE)
+        "fathom_tile_inventory",
+        "fathom_grid_inventory",
+        "fathom_stac_register",
+        "fathom_stac_rebuild",
+        "fathom_chunk_inventory",
+        "fathom_finalize",
+
+        # =====================================================================
+        # H3 POSTGIS OPERATIONS (DB-bound, not memory intensive)
+        # =====================================================================
+        "h3_create_stac",
+        "h3_native_streaming_postgis",
+        "h3_generate_grid",
+        "h3_cascade_descendants",
+        "h3_finalize_pyramid",
+        "h3_inventory_cells",
+        "h3_aggregation_finalize",
+
+        # =====================================================================
+        # STAC OPERATIONS (pgSTAC queries, lightweight)
+        # =====================================================================
+        "stac_repair_inventory",
+        "stac_repair_item",
+        "stac_rebuild_validate",
+        "stac_rebuild_item",
+
+        # =====================================================================
+        # UNPUBLISH OPERATIONS (STAC queries, blob deletes)
+        # =====================================================================
         "unpublish_inventory_raster",
         "unpublish_inventory_vector",
         "unpublish_delete_blob",
         "unpublish_drop_table",
         "unpublish_delete_stac",
-        # Curated dataset update handlers (15 DEC 2025)
-        # Lightweight: HTTP calls, DB operations, file downloads
+
+        # =====================================================================
+        # CURATED DATASET UPDATES (HTTP, DB, lightweight)
+        # =====================================================================
         "curated_check_source",
         "curated_fetch_data",
         "curated_etl_process",
         "curated_finalize",
-        # NOTE: h3_inventory_cells, h3_aggregation_finalize already listed above (lines 298-299)
-        # NOTE: h3_raster_zonal_stats is in RASTER_TASKS (memory-intensive rasterstats)
-        # STAC Repair handlers (22 DEC 2025)
-        # Lightweight: pgSTAC queries, item updates
-        "stac_repair_inventory",
-        "stac_repair_item",
-        # STAC Rebuild handlers (10 JAN 2026) - F7.11
-        # Lightweight: pgSTAC queries, backlink updates
-        "stac_rebuild_validate",
-        "stac_rebuild_item",
-        # H3 Export handlers (28 DEC 2025)
-        # DB-bound: table creation, pgSTAC queries
+
+        # =====================================================================
+        # H3 EXPORT (DB-bound)
+        # =====================================================================
         "h3_export_validate",
         "h3_export_build",
         "h3_export_register",
-        # Ingest Collection handlers (29 DEC 2025)
-        # Lightweight: blob copy, pgSTAC operations
+
+        # =====================================================================
+        # INGEST COLLECTION (blob copy, pgSTAC)
+        # =====================================================================
         "ingest_inventory",
         "ingest_copy_batch",
         "ingest_register_collection",
         "ingest_register_items",
         "ingest_finalize",
-        # Orphan Blob handlers (14 JAN 2026) - F7.11 STAC Self-Healing
-        # Inventory is lightweight (blob listing, DB queries)
-        # Validate is lightweight (blob existence check)
-        # Register is raster-bound but quick (rio-stac extraction)
+
+        # =====================================================================
+        # ORPHAN BLOB OPERATIONS (blob listing, DB queries)
+        # =====================================================================
         "orphan_blob_inventory",
         "silver_blob_validate",
         "silver_blob_register",
-    ]
+
+        # =====================================================================
+        # TEST HANDLERS
+        # =====================================================================
+        "hello_world_greeting",
+        "hello_world_reply",
+    ])
+
+    # =========================================================================
+    # DEPRECATED: Keep for backward compatibility during migration
+    # =========================================================================
+    # These are aliases pointing to the same tasks for migration period
+    LONG_RUNNING_TASKS = list(DOCKER_TASKS)  # DEPRECATED → use DOCKER_TASKS
+    RASTER_TASKS = []  # DEPRECATED → merged into DOCKER_TASKS
+    VECTOR_TASKS = []  # DEPRECATED → merged into FUNCTIONAPP_TASKS
 
 
 # =============================================================================
@@ -741,6 +791,12 @@ class FathomDefaults:
 
     Phase 1: Band stacking (8M → 1M files, 8× reduction)
     Phase 2: Spatial merge (1M → 60K files with 4×4 grid)
+
+    V0.8 Architecture (24 JAN 2026):
+        - 3-stage hybrid job: Functions (inventory/finalize) + Docker (processing)
+        - VRT-based merge for memory efficiency (~500MB vs 2-5GB peak)
+        - Continent/multi-region parallelism via fan-out to Docker workers
+        - Country-based collections: fathom-flood-{region}
     """
 
     # Source data (Fathom Global Flood Maps v3)
@@ -764,8 +820,59 @@ class FathomDefaults:
     # Return periods (bands in output COGs)
     RETURN_PERIODS = ["1in5", "1in10", "1in20", "1in50", "1in100", "1in200", "1in500", "1in1000"]
 
+    # Short band names for STAC metadata
+    RETURN_PERIOD_NAMES = ["RP5", "RP10", "RP20", "RP50", "RP75", "RP100", "RP250", "RP500"]
+
     # Flood types supported
     FLOOD_TYPES = ["COASTAL_DEFENDED", "COASTAL_UNDEFENDED", "FLUVIAL_DEFENDED", "FLUVIAL_UNDEFENDED", "PLUVIAL_DEFENDED"]
+
+    # =========================================================================
+    # CONTINENT REGION MAPPINGS (V0.8 - 24 JAN 2026)
+    # =========================================================================
+    # Maps continent names to lists of ISO3 country codes for fan-out parallelism.
+    # Used by process_fathom_docker job to expand continent → regions.
+
+    CONTINENT_REGIONS = {
+        'africa': [
+            'dza', 'ago', 'ben', 'bwa', 'bfa', 'bdi', 'cmr', 'cpv', 'caf',
+            'tcd', 'com', 'cog', 'cod', 'dji', 'egy', 'gnq', 'eri', 'swz',
+            'eth', 'gab', 'gmb', 'gha', 'gin', 'gnb', 'civ', 'ken', 'lso',
+            'lbr', 'lby', 'mdg', 'mwi', 'mli', 'mrt', 'mus', 'mar', 'moz',
+            'nam', 'ner', 'nga', 'rwa', 'stp', 'sen', 'syc', 'sle', 'som',
+            'zaf', 'ssd', 'sdn', 'tza', 'tgo', 'tun', 'uga', 'zmb', 'zwe'
+        ],
+        'asia': [
+            'afg', 'arm', 'aze', 'bhr', 'bgd', 'btn', 'brn', 'khm', 'chn',
+            'cyp', 'geo', 'ind', 'idn', 'irn', 'irq', 'isr', 'jpn', 'jor',
+            'kaz', 'kwt', 'kgz', 'lao', 'lbn', 'mys', 'mdv', 'mng', 'mmr',
+            'npl', 'prk', 'omn', 'pak', 'phl', 'qat', 'sau', 'sgp', 'kor',
+            'lka', 'syr', 'twn', 'tjk', 'tha', 'tls', 'tur', 'tkm', 'are',
+            'uzb', 'vnm', 'yem'
+        ],
+        'europe': [
+            'alb', 'and', 'aut', 'blr', 'bel', 'bih', 'bgr', 'hrv', 'cze',
+            'dnk', 'est', 'fin', 'fra', 'deu', 'grc', 'hun', 'isl', 'irl',
+            'ita', 'xkx', 'lva', 'lie', 'ltu', 'lux', 'mlt', 'mda', 'mco',
+            'mne', 'nld', 'mkd', 'nor', 'pol', 'prt', 'rou', 'rus', 'smr',
+            'srb', 'svk', 'svn', 'esp', 'swe', 'che', 'ukr', 'gbr', 'vat'
+        ],
+        'north_america': [
+            'atg', 'bhs', 'brb', 'blz', 'can', 'cri', 'cub', 'dma', 'dom',
+            'slv', 'grd', 'gtm', 'hti', 'hnd', 'jam', 'mex', 'nic', 'pan',
+            'kna', 'lca', 'vct', 'tto', 'usa'
+        ],
+        'south_america': [
+            'arg', 'bol', 'bra', 'chl', 'col', 'ecu', 'guy', 'pry', 'per',
+            'sur', 'ury', 'ven'
+        ],
+        'oceania': [
+            'aus', 'fji', 'kir', 'mhl', 'fsm', 'nru', 'nzl', 'plw', 'png',
+            'wsm', 'slb', 'ton', 'tuv', 'vut'
+        ]
+    }
+
+    # Maximum tiles per chunk before splitting (for adaptive chunking)
+    MAX_TILES_PER_CHUNK = 500
 
 
 # =============================================================================

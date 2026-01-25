@@ -140,6 +140,14 @@ from .handler_process_raster_complete import process_raster_complete
 from .handler_process_large_raster_complete import process_large_raster_complete
 from .handler_h3_pyramid_complete import h3_pyramid_complete
 
+# Docker FATHOM handlers (V0.8 - 3-stage hybrid)
+from .handler_fathom_chunk_inventory import fathom_chunk_inventory
+from .handler_fathom_process_chunk import fathom_process_chunk
+from .handler_fathom_finalize import fathom_finalize
+
+# Docker Vector ETL handler (V0.8 - single stage with checkpoints)
+from .handler_vector_docker_complete import vector_docker_complete
+
 # Ingest Collection handlers
 from .ingest import ALL_HANDLERS as INGEST_HANDLERS
 
@@ -201,10 +209,14 @@ ALL_HANDLERS = {
     "raster_process_large_complete": process_large_raster_complete,
 
     # Vector handlers
+    # Vector handlers (Function App - multi-stage)
     "vector_extract_stac_metadata": extract_vector_stac_metadata,
     "vector_create_stac": create_vector_stac,
     "process_vector_prepare": process_vector_prepare,
     "process_vector_upload": process_vector_upload,
+
+    # Vector handlers (Docker - single stage with checkpoints)
+    "vector_docker_complete": vector_docker_complete,
 
     # H3 handlers (Function App)
     "h3_create_stac": create_h3_stac,
@@ -221,6 +233,11 @@ ALL_HANDLERS = {
 
     # H3 handlers (Docker - single stage)
     "h3_pyramid_complete": h3_pyramid_complete,
+
+    # Fathom ETL (Docker - 3-stage hybrid, V0.8)
+    "fathom_chunk_inventory": fathom_chunk_inventory,
+    "fathom_process_chunk": fathom_process_chunk,
+    "fathom_finalize": fathom_finalize,
 
     # Fathom ETL handlers
     "fathom_tile_inventory": fathom_tile_inventory,
@@ -319,17 +336,17 @@ def validate_task_routing_coverage():
     from config.defaults import TaskRoutingDefaults
 
     all_tasks = set(ALL_HANDLERS.keys())
-    raster_set = set(TaskRoutingDefaults.RASTER_TASKS)
-    vector_set = set(TaskRoutingDefaults.VECTOR_TASKS)
-    long_running_set = set(TaskRoutingDefaults.LONG_RUNNING_TASKS)
+    # V0.8: Consolidated to DOCKER_TASKS and FUNCTIONAPP_TASKS
+    docker_set = set(TaskRoutingDefaults.DOCKER_TASKS)
+    functionapp_set = set(TaskRoutingDefaults.FUNCTIONAPP_TASKS)
 
-    unmapped = all_tasks - raster_set - vector_set - long_running_set
+    unmapped = all_tasks - docker_set - functionapp_set
 
     if unmapped:
         raise ValueError(
             f"FATAL: {len(unmapped)} handler(s) have NO queue routing configured! "
             f"Tasks will fail at runtime. Add to config/defaults.py "
-            f"TaskRoutingDefaults.RASTER_TASKS, VECTOR_TASKS, or LONG_RUNNING_TASKS: {sorted(unmapped)}"
+            f"TaskRoutingDefaults.DOCKER_TASKS or FUNCTIONAPP_TASKS: {sorted(unmapped)}"
         )
 
 

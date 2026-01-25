@@ -195,16 +195,15 @@ class JanitorService:
             task_type: Type of task (e.g., 'validate_raster', 'create_cog')
 
         Returns:
-            Queue name ('raster-tasks', 'vector-tasks', 'long-running-tasks', or 'geospatial-jobs')
+            Queue name ('container-tasks', 'functionapp-tasks', or 'geospatial-jobs')
         """
         from config.defaults import TaskRoutingDefaults, QueueDefaults
 
-        if task_type in TaskRoutingDefaults.RASTER_TASKS:
-            return QueueDefaults.RASTER_TASKS_QUEUE
-        elif task_type in TaskRoutingDefaults.VECTOR_TASKS:
-            return QueueDefaults.VECTOR_TASKS_QUEUE
-        elif task_type in TaskRoutingDefaults.LONG_RUNNING_TASKS:
-            return QueueDefaults.LONG_RUNNING_TASKS_QUEUE
+        # V0.8: Consolidated queue routing
+        if task_type in TaskRoutingDefaults.DOCKER_TASKS:
+            return QueueDefaults.CONTAINER_TASKS_QUEUE
+        elif task_type in TaskRoutingDefaults.FUNCTIONAPP_TASKS:
+            return QueueDefaults.FUNCTIONAPP_TASKS_QUEUE
         else:
             # Default to jobs queue for unknown types
             return QueueDefaults.JOBS_QUEUE
@@ -327,7 +326,7 @@ class JanitorService:
 
             stale_tasks = self.repo.get_stale_processing_tasks(
                 timeout_minutes=self.config.task_timeout_minutes,
-                exclude_task_types=TaskRoutingDefaults.LONG_RUNNING_TASKS
+                exclude_task_types=TaskRoutingDefaults.DOCKER_TASKS
             )
             result.items_scanned += len(stale_tasks)
 
@@ -477,7 +476,7 @@ class JanitorService:
 
             stale_docker_tasks = self.repo.get_stale_docker_tasks(
                 timeout_hours=self.config.docker_task_timeout_hours,
-                docker_task_types=TaskRoutingDefaults.LONG_RUNNING_TASKS
+                docker_task_types=TaskRoutingDefaults.DOCKER_TASKS
             )
             result.items_scanned += len(stale_docker_tasks)
 

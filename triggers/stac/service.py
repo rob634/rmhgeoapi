@@ -1,20 +1,17 @@
 # ============================================================================
 # STAC API SERVICE
 # ============================================================================
-# STATUS: API module service - Business logic for STAC endpoints
+# STATUS: Trigger layer service - Business logic for STAC endpoints
 # PURPOSE: Orchestrate STAC API responses with link generation
-# LAST_REVIEWED: 05 JAN 2026
-# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# CREATED: 24 JAN 2026 (Moved from stac_api/service.py)
 # EXPORTS: STACAPIService
-# DEPENDENCIES: infrastructure.pgstac_bootstrap, stac_api.config
+# DEPENDENCIES: infrastructure.pgstac_bootstrap
 # ============================================================================
 """
-STAC API Service Layer
+STAC API Service Layer.
 
 Business logic for STAC API endpoints.
-Calls infrastructure.stac for database operations.
-
-Updated: 11 NOV 2025 - Added all STAC v1.0.0 endpoints
+Calls infrastructure.pgstac_bootstrap for database operations.
 """
 
 from typing import Dict, Any, Optional
@@ -113,12 +110,10 @@ class STACAPIService:
         Returns:
             Collections object with collections array and links
         """
-        # Import here to avoid circular dependency
         from infrastructure.pgstac_bootstrap import get_all_collections
 
         response = get_all_collections()
 
-        # Add links to response
         if 'collections' in response:
             response['links'] = [
                 {
@@ -167,7 +162,7 @@ class STACAPIService:
                     }
                 ]
 
-                # FIX (25 NOV 2025): Preserve TiTiler links stored in pgstac database
+                # Preserve TiTiler links stored in pgstac database
                 existing_links = coll.get('links', [])
                 standard_rels = {'self', 'items', 'parent', 'root'}
                 custom_links = [link for link in existing_links if link.get('rel') not in standard_rels]
@@ -222,16 +217,12 @@ class STACAPIService:
                 }
             ]
 
-            # FIX (25 NOV 2025): Preserve TiTiler links stored in pgstac database
-            # The collection may have preview/tilejson/tiles links added during creation
-            # Merge standard links with existing links (standard links first, then custom)
+            # Preserve TiTiler links stored in pgstac database
             existing_links = response.get('links', [])
-
-            # Filter out existing standard links (self, items, parent, root) to avoid duplicates
             standard_rels = {'self', 'items', 'parent', 'root'}
             custom_links = [link for link in existing_links if link.get('rel') not in standard_rels]
 
-            # Combine: standard links + custom links (TiTiler preview, tilejson, tiles)
+            # Combine: standard links + custom links
             response['links'] = standard_links + custom_links
 
         return response
@@ -260,8 +251,6 @@ class STACAPIService:
         """
         from infrastructure.pgstac_bootstrap import get_collection_items
 
-        # Note: infrastructure.stac.get_collection_items doesn't support offset pagination
-        # It returns all items up to limit
         response = get_collection_items(
             collection_id=collection_id,
             limit=limit,
@@ -269,8 +258,6 @@ class STACAPIService:
         )
 
         if 'error' not in response:
-            # Build basic STAC-compliant links
-            # Note: pagination next/prev links not supported yet (infrastructure layer limitation)
             links = [
                 {
                     "rel": "self",
@@ -320,7 +307,6 @@ class STACAPIService:
         response = get_item_by_id(item_id, collection_id)
 
         if 'error' not in response:
-            # infrastructure.stac.get_item_by_id returns item directly, not wrapped
             links = [
                 {
                     "rel": "self",
@@ -348,8 +334,7 @@ class STACAPIService:
                 }
             ]
 
-            # Add OGC Features API link for vector items (12 JAN 2026 - F7.9)
-            # Vector items have postgis:table property indicating the OGC collection name
+            # Add OGC Features API link for vector items
             properties = response.get('properties', {})
             postgis_table = properties.get('postgis:table')
             if postgis_table:

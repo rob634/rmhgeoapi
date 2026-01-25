@@ -261,26 +261,30 @@ class CoreMachine:
         return self._event_repo
 
     # ========================================================================
-    # TASK ROUTING (11 DEC 2025 - No Legacy Fallbacks)
+    # TASK ROUTING (V0.8 - 24 JAN 2026 - Consolidated Queues)
     # ========================================================================
 
-    def _get_queue_for_task(self, task_type: str) -> str:
+    def _get_queue_for_task(self, task_type: str, task_params: Optional[dict] = None) -> str:
         """
         Route task to appropriate queue based on task type.
 
-        Uses TaskRoutingDefaults to determine queue category:
-        - RASTER_TASKS → raster_tasks_queue (GDAL operations, low concurrency)
-        - VECTOR_TASKS → vector_tasks_queue (DB operations, high concurrency)
+        V0.8 Architecture (24 JAN 2026):
+        - DOCKER_TASKS → container_tasks_queue (GDAL, geopandas, heavy ops)
+        - FUNCTIONAPP_TASKS → functionapp_tasks_queue (DB queries, lightweight)
 
-        CRITICAL (11 DEC 2025 - No Legacy Fallbacks):
-        All task types MUST be explicitly mapped in TaskRoutingDefaults.
+        Admin Override (V0.8 Phase 7):
+        - If task_params contains '_force_functionapp': True, Docker tasks are
+          routed to functionapp-tasks instead. Used for debugging only.
+
+        CRITICAL: All task types MUST be explicitly mapped in TaskRoutingDefaults.
         Unmapped task types raise ContractViolationError to enforce explicit routing.
 
         Args:
             task_type: The task_type field from TaskDefinition
+            task_params: Optional task parameters (checked for _force_functionapp)
 
         Returns:
-            Queue name string (e.g., "raster-tasks", "vector-tasks")
+            Queue name string (e.g., "container-tasks", "functionapp-tasks")
 
         Raises:
             ContractViolationError: If task_type is not mapped in TaskRoutingDefaults
@@ -290,29 +294,35 @@ class CoreMachine:
             - _individual_queue_tasks() - routes each task
 
         Example:
-            queue = self._get_queue_for_task("handler_raster_create_cog")
-            # Returns: "raster-tasks"
+            queue = self._get_queue_for_task("raster_process_complete")
+            # Returns: "container-tasks"
         """
         from exceptions import ContractViolationError
 
-        # Determine task category - NO FALLBACK
-        if task_type in TaskRoutingDefaults.LONG_RUNNING_TASKS:
-            # Long-running tasks → Docker worker queue (11 JAN 2026)
-            queue_name = self.config.queues.long_running_tasks_queue
-            self.logger.debug(f"📤 Task type '{task_type}' → long-running queue: {queue_name}")
-        elif task_type in TaskRoutingDefaults.RASTER_TASKS:
-            queue_name = self.config.queues.raster_tasks_queue
-            self.logger.debug(f"📤 Task type '{task_type}' → raster queue: {queue_name}")
-        elif task_type in TaskRoutingDefaults.VECTOR_TASKS:
-            queue_name = self.config.queues.vector_tasks_queue
-            self.logger.debug(f"📤 Task type '{task_type}' → vector queue: {queue_name}")
+        # V0.8 Phase 7: Admin override - force Docker tasks to FunctionApp (debug only)
+        force_functionapp = (task_params or {}).get('_force_functionapp', False)
+        if force_functionapp and task_type in TaskRoutingDefaults.DOCKER_TASKS:
+            self.logger.warning(
+                f"⚠️ ADMIN OVERRIDE: Routing '{task_type}' to functionapp-tasks "
+                f"(normally routes to container-tasks). Debug mode only!"
+            )
+            return self.config.queues.functionapp_tasks_queue
+
+        # V0.8: Consolidated routing (24 JAN 2026)
+        if task_type in TaskRoutingDefaults.DOCKER_TASKS:
+            # Docker tasks → container-tasks queue (heavy operations)
+            queue_name = self.config.queues.container_tasks_queue
+            self.logger.debug(f"📤 Task type '{task_type}' → container queue: {queue_name}")
+        elif task_type in TaskRoutingDefaults.FUNCTIONAPP_TASKS:
+            # FunctionApp tasks → functionapp-tasks queue (lightweight)
+            queue_name = self.config.queues.functionapp_tasks_queue
+            self.logger.debug(f"📤 Task type '{task_type}' → functionapp queue: {queue_name}")
         else:
-            # NO FALLBACK - Explicit routing required (11 DEC 2025)
+            # NO FALLBACK - Explicit routing required
             raise ContractViolationError(
                 f"Task type '{task_type}' is not mapped to a queue. "
-                f"Add '{task_type}' to TaskRoutingDefaults.RASTER_TASKS, "
-                f"TaskRoutingDefaults.VECTOR_TASKS, or TaskRoutingDefaults.LONG_RUNNING_TASKS "
-                f"in config/defaults.py"
+                f"Add '{task_type}' to TaskRoutingDefaults.DOCKER_TASKS or "
+                f"TaskRoutingDefaults.FUNCTIONAPP_TASKS in config/defaults.py"
             )
 
         return queue_name
@@ -1481,7 +1491,8 @@ class CoreMachine:
 
                     # Re-queue with delay using Service Bus scheduled delivery
                     # Route to ORIGINAL queue based on task type (11 DEC 2025 - No Legacy Fallbacks)
-                    retry_queue = self._get_queue_for_task(task_message.task_type)
+                    # V0.8 Phase 7: Pass task_params for admin override check
+                    retry_queue = self._get_queue_for_task(task_message.task_type, task_message.parameters)
                     message_id = self.service_bus.send_message_with_delay(
                         retry_queue,
                         task_message,
@@ -1666,9 +1677,10 @@ class CoreMachine:
         failed_batches = []
 
         # Group tasks by target queue (07 DEC 2025 - Multi-App Architecture)
+        # V0.8 Phase 7: Pass task_params for admin override check
         tasks_by_queue: Dict[str, list] = {}
         for task_def in task_defs:
-            queue_name = self._get_queue_for_task(task_def.task_type)
+            queue_name = self._get_queue_for_task(task_def.task_type, task_def.parameters)
             if queue_name not in tasks_by_queue:
                 tasks_by_queue[queue_name] = []
             tasks_by_queue[queue_name].append(task_def)
@@ -1785,7 +1797,8 @@ class CoreMachine:
         for idx, task_def in enumerate(task_defs):
             try:
                 # Route task to appropriate queue based on task_type
-                queue_name = self._get_queue_for_task(task_def.task_type)
+                # V0.8 Phase 7: Pass task_params for admin override check
+                queue_name = self._get_queue_for_task(task_def.task_type, task_def.parameters)
 
                 # Track routing distribution
                 routing_counts[queue_name] = routing_counts.get(queue_name, 0) + 1

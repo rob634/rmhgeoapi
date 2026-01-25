@@ -3,7 +3,7 @@
 # CLAUDE CONTEXT - DOCKER SERVICE (HTTP + Queue Worker)
 # ============================================================================
 # STATUS: Core Component - Docker container with HTTP API and queue processing
-# PURPOSE: Health checks + Service Bus queue polling for long-running tasks
+# PURPOSE: Health checks + Service Bus queue polling for container-tasks (V0.8)
 # LAST_REVIEWED: 16 JAN 2026
 # F7.18: Added DockerWorkerLifecycle, graceful shutdown, shared shutdown event
 # ============================================================================
@@ -25,7 +25,7 @@ HTTP Endpoints:
 
 Background Services:
     - Token refresh thread (PostgreSQL + Storage OAuth every 45 min)
-    - Queue polling thread (polls long-running-tasks queue)
+    - Queue polling thread (polls container-tasks queue)
 
 Usage:
     # Start the server (includes background queue worker)
@@ -446,7 +446,7 @@ class BackgroundQueueWorker:
         if self._config is None:
             from config import get_config
             self._config = get_config()
-            self._queue_name = self._config.queues.long_running_tasks_queue
+            self._queue_name = self._config.queues.container_tasks_queue
 
         if self._core_machine is None:
             from core.machine import CoreMachine
@@ -1046,7 +1046,7 @@ async def lifespan(app: FastAPI):
     # Start background token refresh
     token_refresh_worker.start()
 
-    # Start background queue worker (polls long-running-tasks queue)
+    # Start background queue worker (polls container-tasks queue)
     queue_worker.start()
 
     yield
@@ -1165,9 +1165,9 @@ def interface_health(request: Request):
         bronze_account = config.storage.bronze.account_name
         silver_account = config.storage.silver.account_name
 
-        # Queue names
+        # Queue names (V0.8)
         jobs_queue = config.queues.jobs_queue
-        long_queue = config.queues.long_running_tasks_queue
+        container_queue = config.queues.container_tasks_queue
         docker_enabled = app_mode_config.docker_worker_enabled
 
         # TiTiler URL
@@ -1183,8 +1183,8 @@ def interface_health(request: Request):
             'comp-input-storage': f"{bronze_account}\nContainer: rasters",
             'comp-output-storage': f"{silver_account}\nContainer: cogs",
             'comp-titiler': f"{titiler_url}\nMode: {config.titiler_mode}",
-            'comp-long-queue': f"{service_bus_ns}\nQueue: {long_queue}\nDocker: {'Enabled' if docker_enabled else 'Disabled'}",
-            'comp-container': f"{docker_worker_url or 'Not configured'}\nQueue: {long_queue}",
+            'comp-container-queue': f"{service_bus_ns}\nQueue: {container_queue}\nDocker: {'Enabled' if docker_enabled else 'Disabled'}",
+            'comp-container': f"{docker_worker_url or 'Not configured'}\nQueue: {container_queue}",
         }
     except Exception as e:
         # Tooltips will be empty, but page will still render
@@ -1597,6 +1597,262 @@ async def interface_submit_process(request: Request):
 
 
 # ============================================================================
+# JOB MONITOR INTERFACE (25 JAN 2026 - Job List and Detail)
+# ============================================================================
+
+@app.get("/interface/jobs", response_class=HTMLResponse)
+async def interface_jobs_list(
+    request: Request,
+    status: str = None,
+    hours: int = 24
+):
+    """
+    Job list page showing recent jobs with status and event counts.
+
+    Query params:
+        status: Filter by status (processing, completed, failed)
+        hours: Time range in hours (default 24)
+    """
+    try:
+        from infrastructure import JobRepository, JobEventRepository
+        from core.models import JobStatus
+        from datetime import datetime, timezone, timedelta
+
+        job_repo = JobRepository()
+        event_repo = JobEventRepository()
+
+        # Calculate time cutoff
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+
+        # Get jobs with optional status filter
+        status_filter = None
+        if status:
+            try:
+                status_filter = JobStatus(status.upper())
+            except ValueError:
+                pass  # Invalid status, ignore filter
+
+        all_jobs = job_repo.list_jobs(status_filter=status_filter)
+
+        # Filter by time and limit
+        # Handle both timezone-aware and timezone-naive datetimes
+        def job_in_range(job):
+            if not job.created_at:
+                return False
+            job_time = job.created_at
+            # Make timezone-aware if naive
+            if job_time.tzinfo is None:
+                job_time = job_time.replace(tzinfo=timezone.utc)
+            return job_time >= cutoff
+
+        filtered_jobs = [j for j in all_jobs if job_in_range(j)][:100]
+
+        # Calculate stats
+        stats = {
+            'total': len(filtered_jobs),
+            'processing': sum(1 for j in filtered_jobs if j.status and str(j.status).lower() == 'processing'),
+            'completed': sum(1 for j in filtered_jobs if j.status and str(j.status).lower() == 'completed'),
+            'failed': sum(1 for j in filtered_jobs if j.status and str(j.status).lower() in ('failed', 'completed_with_errors'))
+        }
+
+        # Convert to enriched dictionaries for template
+        jobs = []
+        for job in filtered_jobs:
+            job_dict = {
+                'job_id': job.job_id,
+                'job_type': job.job_type,
+                'status': str(job.status).lower() if job.status else 'unknown',
+                'current_stage': job.stage,
+                'total_stages': job.total_stages,
+                'parameters': job.parameters,
+                'created_at': job.created_at,
+                'completed_at': job.updated_at if str(job.status).lower() == 'completed' else None,
+                'event_count': 0,
+                'has_failure': False,
+                'latest_event': None
+            }
+
+            # Enrich with event data
+            try:
+                summary = event_repo.get_event_summary(job.job_id)
+                job_dict['event_count'] = summary.get('total_events', 0)
+                job_dict['has_failure'] = summary.get('by_status', {}).get('failure', 0) > 0
+
+                latest = event_repo.get_latest_event(job.job_id)
+                if latest:
+                    job_dict['latest_event'] = {
+                        'event_type': latest.event_type.value if hasattr(latest.event_type, 'value') else latest.event_type,
+                        'summary': latest.checkpoint_name or ''
+                    }
+            except Exception:
+                pass  # Keep defaults
+
+            jobs.append(type('Job', (), job_dict)())  # Create simple object with attributes
+
+        return templates.TemplateResponse("pages/jobs/list.html", {
+            "request": request,
+            "version": __version__,
+            "nav_active": "/interface/jobs",
+            "jobs": jobs,
+            "stats": stats,
+            "filters": {"status": status, "hours": hours}
+        })
+
+    except Exception as e:
+        logger.error(f"Error loading job list: {e}")
+        return HTMLResponse(f"<div class='error'>Error loading jobs: {str(e)}</div>")
+
+
+@app.get("/interface/jobs/partial", response_class=HTMLResponse)
+async def interface_jobs_partial(
+    request: Request,
+    status: str = None,
+    hours: int = 24
+):
+    """
+    HTMX partial - job cards only for auto-refresh.
+    """
+    try:
+        from infrastructure import JobRepository, JobEventRepository
+        from core.models import JobStatus
+        from datetime import datetime, timezone, timedelta
+
+        job_repo = JobRepository()
+        event_repo = JobEventRepository()
+
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+
+        # Get jobs with optional status filter
+        status_filter = None
+        if status:
+            try:
+                status_filter = JobStatus(status.upper())
+            except ValueError:
+                pass
+
+        all_jobs = job_repo.list_jobs(status_filter=status_filter)
+
+        # Filter by time and limit
+        # Handle both timezone-aware and timezone-naive datetimes
+        def job_in_range(job):
+            if not job.created_at:
+                return False
+            job_time = job.created_at
+            if job_time.tzinfo is None:
+                job_time = job_time.replace(tzinfo=timezone.utc)
+            return job_time >= cutoff
+
+        jobs = [j for j in all_jobs if job_in_range(j)][:100]
+
+        # Enrich jobs with event data
+        for job in jobs:
+            try:
+                summary = event_repo.get_event_summary(job.job_id)
+                job.event_count = summary.get('total_events', 0)
+                job.has_failure = summary.get('by_status', {}).get('failure', 0) > 0
+
+                latest = event_repo.get_latest_event(job.job_id)
+                if latest:
+                    job.latest_event = {
+                        'event_type': latest.event_type.value if hasattr(latest.event_type, 'value') else latest.event_type,
+                        'summary': latest.checkpoint_name or ''
+                    }
+                else:
+                    job.latest_event = None
+            except Exception:
+                job.event_count = 0
+                job.has_failure = False
+                job.latest_event = None
+
+        # Render just the job cards
+        cards_html = ""
+        for job in jobs:
+            cards_html += templates.get_template("components/_job_card.html").render(job=job)
+
+        if not jobs:
+            cards_html = '''
+            <div class="empty-state">
+                <div class="empty-icon">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                        <line x1="9" y1="9" x2="15" y2="15"></line>
+                        <line x1="15" y1="9" x2="9" y2="15"></line>
+                    </svg>
+                </div>
+                <h3>No Jobs Found</h3>
+                <p>No jobs match your current filters.</p>
+            </div>
+            '''
+
+        return HTMLResponse(cards_html)
+
+    except Exception as e:
+        return HTMLResponse(f'<div class="error">Error: {str(e)}</div>')
+
+
+@app.get("/interface/jobs/{job_id}", response_class=HTMLResponse)
+async def interface_job_detail(request: Request, job_id: str):
+    """
+    Job detail page with stage progress and event timeline.
+    """
+    try:
+        from infrastructure import JobRepository, TaskRepository, JobEventRepository
+
+        job_repo = JobRepository()
+        task_repo = TaskRepository()
+        event_repo = JobEventRepository()
+
+        # Get job
+        job = job_repo.get_job(job_id)
+        if not job:
+            return HTMLResponse(f'''
+            <div class="container">
+                <div class="error-state">
+                    <h2>Job Not Found</h2>
+                    <p>No job found with ID: {job_id[:32]}...</p>
+                    <a href="/interface/jobs" class="btn btn-primary">Back to Job List</a>
+                </div>
+            </div>
+            ''', status_code=404)
+
+        # Get tasks for stage progress
+        tasks = task_repo.get_tasks_for_job(job_id)
+
+        # Group tasks by stage
+        stages = {}
+        for task in tasks:
+            stage = task.stage or 1
+            if stage not in stages:
+                stages[stage] = {"total": 0, "completed": 0, "failed": 0}
+            stages[stage]["total"] += 1
+            if task.status and task.status.lower() == "completed":
+                stages[stage]["completed"] += 1
+            elif task.status and task.status.lower() == "failed":
+                stages[stage]["failed"] += 1
+
+        # Get events
+        events = event_repo.get_events_timeline(job_id, limit=100)
+        summary = event_repo.get_event_summary(job_id)
+        failure_context = event_repo.get_failure_context(job_id)
+
+        return templates.TemplateResponse("pages/jobs/detail.html", {
+            "request": request,
+            "version": __version__,
+            "nav_active": "/interface/jobs",
+            "job": job,
+            "job_id": job_id,
+            "stages": stages,
+            "events": events,
+            "summary": summary,
+            "failure_context": failure_context
+        })
+
+    except Exception as e:
+        logger.error(f"Error loading job detail: {e}")
+        return HTMLResponse(f"<div class='error'>Error loading job: {str(e)}</div>")
+
+
+# ============================================================================
 # JOB EVENTS INTERFACE (23 JAN 2026 - Execution Timeline)
 # ============================================================================
 
@@ -1768,16 +2024,19 @@ def health_check():
     - Storage connectivity
     - Background worker status
 
+    Format matches Function App /api/health for compatibility with health.js UI.
+
     Returns:
-        Detailed health status
+        Detailed health status with components structure
     """
     import platform
     import psutil
 
     from infrastructure.auth import get_token_status
-    from config import get_config
+    from config import get_config, __version__
 
     config = get_config()
+    timestamp = datetime.now(timezone.utc)
 
     # Get token status
     token_status = get_token_status()
@@ -1805,6 +2064,7 @@ def health_check():
     instance = {
         "container_id": os.environ.get("HOSTNAME", "unknown")[:12],
         "website_instance_id": os.environ.get("WEBSITE_INSTANCE_ID", "local")[:8],
+        "instance_id_short": os.environ.get("WEBSITE_INSTANCE_ID", "local")[:8],
         "app_name": os.environ.get("APP_NAME", "docker-worker"),
     }
 
@@ -1840,9 +2100,6 @@ def health_check():
         "critical_threshold_percent": 90,
     }
 
-    # Overall health - unhealthy if DB down or shutdown in progress
-    healthy = db_status.get("connected", False) and not worker_lifecycle.is_shutting_down
-
     # Connection pool stats (F7.18)
     try:
         from infrastructure.connection_pool import ConnectionPoolManager
@@ -1850,21 +2107,331 @@ def health_check():
     except Exception as e:
         pool_stats = {"error": str(e)}
 
-    # Determine status string
-    if worker_lifecycle.is_shutting_down:
-        status = "shutting_down"
+    # ETL mount status (V0.8)
+    etl_mount_info = _etl_mount_status or {}
+
+    # Queue worker status
+    queue_status = queue_worker.get_status()
+    token_refresh_status = token_refresh_worker.get_status()
+
+    # =========================================================================
+    # BUILD COMPONENTS (health.js compatible format)
+    # =========================================================================
+    # Each component needs: status, description, details, checked_at
+    # _source tag indicates grouping: "docker_worker" or "function_app"
+
+    components = {}
+
+    # =========================================================================
+    # DOCKER WORKER CORE COMPONENTS
+    # =========================================================================
+
+    # Runtime component (Container environment - primary Docker Worker component)
+    components["runtime"] = {
+        "status": "healthy",
+        "description": "Docker container runtime environment",
+        "checked_at": timestamp.isoformat(),
+        "_source": "docker_worker",
+        "details": {
+            "hardware": hardware,
+            "instance": instance,
+            "process": process_info,
+            "memory": memory_stats,
+            "capacity": capacity,
+        }
+    }
+
+    # ETL Mount component (V0.8 - critical for large file processing)
+    mount_enabled = etl_mount_info.get("mount_enabled", False)
+    mount_validated = etl_mount_info.get("validated", False)
+    mount_degraded = etl_mount_info.get("degraded", False)
+    if mount_enabled and mount_validated:
+        mount_status = "healthy"
+    elif mount_degraded:
+        mount_status = "warning"
+    elif not mount_enabled:
+        mount_status = "disabled"
+    else:
+        mount_status = "unhealthy"
+
+    components["etl_mount"] = {
+        "status": mount_status,
+        "description": "Azure Files mount for large raster processing",
+        "checked_at": timestamp.isoformat(),
+        "_source": "docker_worker",
+        "details": {
+            "mount_enabled": mount_enabled,
+            "mount_path": etl_mount_info.get("mount_path", "N/A"),
+            "validated": mount_validated,
+            "disk_space": etl_mount_info.get("disk_space"),
+            "message": etl_mount_info.get("message"),
+            "error": etl_mount_info.get("error"),
+        }
+    }
+
+    # Queue Worker component (Service Bus consumer)
+    queue_running = queue_status.get("running", False)
+    components["queue_worker"] = {
+        "status": "healthy" if queue_running else "warning",
+        "description": "Service Bus long-running-tasks consumer",
+        "checked_at": timestamp.isoformat(),
+        "_source": "docker_worker",
+        "details": {
+            "queue_name": queue_status.get("queue_name", "N/A"),
+            "running": queue_running,
+            "messages_processed": queue_status.get("messages_processed", 0),
+            "started_at": queue_status.get("started_at"),
+            "last_poll_time": queue_status.get("last_poll_time"),
+            "last_error": queue_status.get("last_error"),
+            "shutdown_signaled": queue_status.get("shutdown_signaled", False),
+            "uses_shared_shutdown": queue_status.get("uses_shared_shutdown", True),
+        }
+    }
+
+    # Authentication tokens component
+    pg_token = token_status.get("postgres", {})
+    storage_token = token_status.get("storage", {})
+    tokens_healthy = pg_token.get("has_token", False)
+    components["auth_tokens"] = {
+        "status": "healthy" if tokens_healthy else "unhealthy",
+        "description": "OAuth tokens for PostgreSQL and Storage",
+        "checked_at": timestamp.isoformat(),
+        "_source": "docker_worker",
+        "details": {
+            "postgres": {
+                "has_token": pg_token.get("has_token", False),
+                "ttl_minutes": pg_token.get("ttl_minutes"),
+            },
+            "storage": {
+                "has_token": storage_token.get("has_token", False),
+            },
+            "token_refresh_worker": {
+                "running": token_refresh_status.get("running", False),
+                "refresh_count": token_refresh_status.get("refresh_count", 0),
+                "last_refresh": token_refresh_status.get("last_refresh"),
+            },
+        }
+    }
+
+    # Connection pool component
+    pool_has_error = "error" in pool_stats
+    components["connection_pool"] = {
+        "status": "healthy" if not pool_has_error else "warning",
+        "description": "PostgreSQL connection pool (psycopg)",
+        "checked_at": timestamp.isoformat(),
+        "_source": "docker_worker",
+        "details": pool_stats,
+    }
+
+    # Lifecycle component (graceful shutdown status)
+    lifecycle_status = worker_lifecycle.get_status()
+    is_shutting_down = lifecycle_status.get("shutdown_initiated", False)
+    components["lifecycle"] = {
+        "status": "warning" if is_shutting_down else "healthy",
+        "description": "Graceful shutdown and signal handling",
+        "checked_at": timestamp.isoformat(),
+        "_source": "docker_worker",
+        "details": lifecycle_status,
+    }
+
+    # GDAL Configuration component
+    gdal_config = {}
+    try:
+        from osgeo import gdal
+        gdal_config = {
+            "version": gdal.__version__,
+            "cpl_tmpdir": os.environ.get("CPL_TMPDIR", "default"),
+            "gdal_data": os.environ.get("GDAL_DATA", "default"),
+            "proj_lib": os.environ.get("PROJ_LIB", "default"),
+        }
+        gdal_status = "healthy"
+    except Exception as e:
+        gdal_config = {"error": str(e)}
+        gdal_status = "unhealthy"
+
+    components["gdal"] = {
+        "status": gdal_status,
+        "description": "GDAL geospatial library configuration",
+        "checked_at": timestamp.isoformat(),
+        "_source": "docker_worker",
+        "details": gdal_config,
+    }
+
+    # =========================================================================
+    # SHARED INFRASTRUCTURE COMPONENTS (accessed by both apps)
+    # =========================================================================
+
+    # Database component
+    db_connected = db_status.get("connected", False)
+    components["database"] = {
+        "status": "healthy" if db_connected else "unhealthy",
+        "description": "PostgreSQL connection",
+        "checked_at": timestamp.isoformat(),
+        "_source": "function_app",  # Shared but owned by Function App
+        "details": {
+            "host": config.database.host,
+            "database": db_status.get("database", config.database.database),
+            "user": db_status.get("user", "N/A"),
+            "version": db_status.get("version", "N/A"),
+            "managed_identity": config.database.use_managed_identity,
+            "error": db_status.get("error") if not db_connected else None,
+        }
+    }
+
+    # Storage component
+    storage_connected = storage_status.get("connected", False)
+    components["storage_containers"] = {
+        "status": "healthy" if storage_connected else "unhealthy",
+        "description": "Azure Blob Storage (Silver zone)",
+        "checked_at": timestamp.isoformat(),
+        "_source": "function_app",  # Shared but owned by Function App
+        "details": {
+            "account": storage_status.get("account", config.storage.silver.account_name),
+            "containers_accessible": storage_status.get("containers_accessible", False),
+            "error": storage_status.get("error") if not storage_connected else None,
+        }
+    }
+
+    # Service Bus component (shared queue infrastructure)
+    components["service_bus"] = {
+        "status": "healthy" if queue_running else "warning",
+        "description": "Azure Service Bus queues",
+        "checked_at": timestamp.isoformat(),
+        "_source": "function_app",  # Shared but owned by Function App
+        "details": {
+            "namespace": config.queues.namespace,
+            "long_running_queue": queue_status.get("queue_name", "N/A"),
+            "worker_connected": queue_running,
+        }
+    }
+
+    # =========================================================================
+    # ADDITIONAL COMPONENTS (for health.js COMPONENT_MAPPING compatibility)
+    # These are marked as disabled/N/A for Docker Worker context
+    # =========================================================================
+
+    # Jobs component (expected by comp-orchestrator)
+    components["jobs"] = {
+        "status": "disabled",
+        "description": "Job orchestration (Function App only)",
+        "checked_at": timestamp.isoformat(),
+        "_source": "function_app",
+        "details": {
+            "note": "Docker Worker processes tasks, not jobs",
+            "context": "docker_worker",
+        }
+    }
+
+    # Imports component (expected by comp-io-worker, comp-compute-worker)
+    components["imports"] = {
+        "status": "healthy",
+        "description": "Python dependencies loaded",
+        "checked_at": timestamp.isoformat(),
+        "_source": "docker_worker",
+        "details": {
+            "python_version": platform.python_version(),
+            "context": "docker_worker",
+        }
+    }
+
+    # Pgstac component (expected by comp-output-tables)
+    components["pgstac"] = {
+        "status": "healthy" if db_connected else "unhealthy",
+        "description": "STAC catalog (via database)",
+        "checked_at": timestamp.isoformat(),
+        "_source": "function_app",
+        "details": {
+            "note": "Accessed via shared PostgreSQL database",
+            "database_connected": db_connected,
+        }
+    }
+
+    # TiTiler component (expected by comp-titiler)
+    titiler_url = getattr(config, 'titiler_base_url', None) or ''
+    components["titiler"] = {
+        "status": "disabled",
+        "description": "TiTiler-pgstac (external service)",
+        "checked_at": timestamp.isoformat(),
+        "_source": "function_app",
+        "details": {
+            "url": titiler_url,
+            "note": "External raster tile service",
+        }
+    }
+
+    # OGC Features component (expected by comp-ogc-features)
+    components["ogc_features"] = {
+        "status": "disabled",
+        "description": "OGC Features API (Function App only)",
+        "checked_at": timestamp.isoformat(),
+        "_source": "function_app",
+        "details": {
+            "note": "Served by Function App, not Docker Worker",
+        }
+    }
+
+    # Deployment config component (expected by comp-platform-api)
+    components["deployment_config"] = {
+        "status": "healthy",
+        "description": "Docker Worker deployment",
+        "checked_at": timestamp.isoformat(),
+        "_source": "docker_worker",
+        "details": {
+            "hostname": os.environ.get("WEBSITE_HOSTNAME", "docker-worker"),
+            "container_id": os.environ.get("HOSTNAME", "unknown")[:12],
+            "sku": os.environ.get("WEBSITE_SKU", "Container"),
+        }
+    }
+
+    # =========================================================================
+    # OVERALL STATUS
+    # =========================================================================
+    healthy = db_connected and not is_shutting_down
+    if is_shutting_down:
+        status = "unhealthy"
     elif healthy:
         status = "healthy"
     else:
         status = "unhealthy"
 
+    # Build errors list
+    errors = []
+    if not db_connected:
+        errors.append(f"Database: {db_status.get('error', 'Not connected')}")
+    if not storage_connected:
+        errors.append(f"Storage: {storage_status.get('error', 'Not connected')}")
+    if is_shutting_down:
+        errors.append("Worker is shutting down")
+    if mount_degraded:
+        errors.append("ETL mount disabled - degraded state")
+
+    # Environment info (for health.js renderEnvironmentInfo)
+    environment = {
+        "version": __version__,
+        "environment": os.environ.get("ENVIRONMENT", "dev"),
+        "debug_mode": os.environ.get("DEBUG_MODE", "false").lower() == "true",
+        "hostname": os.environ.get("WEBSITE_HOSTNAME", os.environ.get("HOSTNAME", "docker-worker")),
+    }
+
     response = {
         "status": status,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "version": "1.0.0",
-        # Lifecycle status (F7.18 - graceful shutdown)
-        "lifecycle": worker_lifecycle.get_status(),
-        # Runtime environment (matches Function App pattern)
+        "timestamp": timestamp.isoformat(),
+        "errors": errors,
+        "environment": environment,
+        "components": components,
+        # Legacy fields for backward compatibility
+        "version": __version__,
+        "lifecycle": lifecycle_status,
+        "tokens": token_status,
+        "connectivity": {
+            "database": db_status,
+            "storage": storage_status,
+        },
+        "background_workers": {
+            "token_refresh": token_refresh_status,
+            "queue_worker": queue_status,
+        },
+        "connection_pool": pool_stats,
         "runtime": {
             "hardware": hardware,
             "instance": instance,
@@ -1872,27 +2439,10 @@ def health_check():
             "memory": memory_stats,
             "capacity": capacity,
         },
-        "config": {
-            "database_host": config.database.host,
-            "storage_account": config.storage.silver.account_name,
-            "managed_identity": config.database.use_managed_identity,
-            "service_bus_fqdn": config.queues.namespace,
-        },
-        "tokens": token_status,
-        "connectivity": {
-            "database": db_status,
-            "storage": storage_status,
-        },
-        "background_workers": {
-            "token_refresh": token_refresh_worker.get_status(),
-            "queue_worker": queue_worker.get_status(),
-        },
-        # Connection pool stats (F7.18)
-        "connection_pool": pool_stats,
     }
 
     # Return 503 if unhealthy OR shutting down (prevents new traffic during shutdown)
-    if not healthy or worker_lifecycle.is_shutting_down:
+    if not healthy or is_shutting_down:
         return JSONResponse(status_code=503, content=response)
 
     return response
@@ -2324,7 +2874,7 @@ if __name__ == "__main__":
     logger.info("=" * 60)
     logger.info("Background Workers:")
     logger.info("  - Token refresh (every 45 min)")
-    logger.info("  - Queue polling (long-running-tasks)")
+    logger.info("  - Queue polling (container-tasks)")
     logger.info("=" * 60)
 
     uvicorn.run(app, host="0.0.0.0", port=port)

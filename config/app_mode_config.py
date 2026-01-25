@@ -191,26 +191,34 @@ class AppMode(str, Enum):
     - Which HTTP endpoints are exposed
     - How tasks are routed
 
-    Multi-App Architecture (15 JAN 2026):
-    - GATEWAY: Public-facing, HTTP only, sends to jobs queue (no listeners)
-    - ORCHESTRATOR: Internal, listens to jobs queue, admin HTTP only
+    V0.8 Architecture (24 JAN 2026) - 5 Clean Modes:
+    - STANDALONE: All queues, all HTTP (development only)
+    - PLATFORM: HTTP gateway only, sends to jobs queue (external entry point)
+    - ORCHESTRATOR: Jobs queue + all HTTP (can combine with platform)
+    - WORKER_FUNCTIONAPP: functionapp-tasks queue (lightweight ops)
+    - WORKER_DOCKER: container-tasks queue (Docker, heavy ops)
 
-    Docker Worker Mode (22 DEC 2025):
-    - WORKER_DOCKER: Runs in Docker container, listens to long-running-raster-tasks queue
+    Docker Worker Mode:
+    - WORKER_DOCKER: Runs in Docker container, listens to container-tasks queue
     - No Azure Functions timeout constraints (can run hours/days)
     - Uses same CoreMachine.process_task_message() as Function App workers
     - Signals stage_complete to jobs queue when last task completes
     """
 
-    STANDALONE = "standalone"           # All queues, all endpoints (default)
-    GATEWAY = "gateway"                 # HTTP only (platform/*), sends to jobs queue, no listeners
-    ORCHESTRATOR = "orchestrator"       # Jobs queue listener, admin HTTP only (internal)
-    PLATFORM_RASTER = "platform_raster" # HTTP + jobs + raster-tasks
-    PLATFORM_VECTOR = "platform_vector" # HTTP + jobs + vector-tasks
-    PLATFORM_ONLY = "platform_only"     # HTTP + jobs only (pure router)
-    WORKER_RASTER = "worker_raster"     # raster-tasks only
-    WORKER_VECTOR = "worker_vector"     # vector-tasks only
-    WORKER_DOCKER = "worker_docker"     # long-running-raster-tasks only (Docker)
+    # V0.8: Primary modes (24 JAN 2026)
+    STANDALONE = "standalone"                 # All queues, all endpoints (dev)
+    PLATFORM = "platform"                     # HTTP only, sends to jobs queue
+    ORCHESTRATOR = "orchestrator"             # Jobs queue + all HTTP
+    WORKER_FUNCTIONAPP = "worker_functionapp" # functionapp-tasks queue
+    WORKER_DOCKER = "worker_docker"           # container-tasks queue (Docker)
+
+    # DEPRECATED: Keep for backward compatibility during migration
+    GATEWAY = "gateway"                 # DEPRECATED → use PLATFORM
+    PLATFORM_RASTER = "platform_raster" # DEPRECATED → use ORCHESTRATOR
+    PLATFORM_VECTOR = "platform_vector" # DEPRECATED → use ORCHESTRATOR
+    PLATFORM_ONLY = "platform_only"     # DEPRECATED → use ORCHESTRATOR
+    WORKER_RASTER = "worker_raster"     # DEPRECATED → use WORKER_FUNCTIONAPP
+    WORKER_VECTOR = "worker_vector"     # DEPRECATED → use WORKER_FUNCTIONAPP
 
 
 # =============================================================================
@@ -265,7 +273,7 @@ class AppModeConfig(BaseModel):
     )
 
     # =========================================================================
-    # QUEUE LISTENING PROPERTIES
+    # QUEUE LISTENING PROPERTIES (V0.8 - 24 JAN 2026)
     # =========================================================================
 
     @property
@@ -282,8 +290,11 @@ class AppModeConfig(BaseModel):
         """Whether this mode exposes platform/* endpoints (public DDH integration)."""
         return self.mode in [
             AppMode.STANDALONE,
-            AppMode.GATEWAY,          # Gateway's primary purpose
-            AppMode.PLATFORM_ONLY,    # Legacy combined mode
+            AppMode.PLATFORM,         # V0.8: Primary gateway mode
+            AppMode.ORCHESTRATOR,     # V0.8: Combined deployment
+            # DEPRECATED (still work)
+            AppMode.GATEWAY,
+            AppMode.PLATFORM_ONLY,
             AppMode.PLATFORM_RASTER,
             AppMode.PLATFORM_VECTOR,
         ]
@@ -293,8 +304,9 @@ class AppModeConfig(BaseModel):
         """Whether this mode exposes jobs/* endpoints (submit, status, logs)."""
         return self.mode in [
             AppMode.STANDALONE,
-            AppMode.ORCHESTRATOR,     # Internal job management
-            AppMode.PLATFORM_ONLY,    # Legacy combined mode
+            AppMode.ORCHESTRATOR,     # V0.8: Primary orchestration mode
+            # DEPRECATED (still work)
+            AppMode.PLATFORM_ONLY,
             AppMode.PLATFORM_RASTER,
             AppMode.PLATFORM_VECTOR,
         ]
@@ -305,10 +317,12 @@ class AppModeConfig(BaseModel):
         return self.mode in [
             AppMode.STANDALONE,
             AppMode.ORCHESTRATOR,
-            AppMode.PLATFORM_ONLY,    # Legacy
+            AppMode.WORKER_FUNCTIONAPP,  # V0.8: FunctionApp workers may need admin
+            # DEPRECATED (still work)
+            AppMode.PLATFORM_ONLY,
             AppMode.PLATFORM_RASTER,
             AppMode.PLATFORM_VECTOR,
-            AppMode.WORKER_RASTER,    # Workers may need admin for debugging
+            AppMode.WORKER_RASTER,
             AppMode.WORKER_VECTOR,
         ]
 
@@ -317,75 +331,104 @@ class AppModeConfig(BaseModel):
         """Whether this mode processes the jobs queue (orchestration)."""
         return self.mode in [
             AppMode.STANDALONE,
-            AppMode.ORCHESTRATOR,     # Orchestrator listens to jobs queue
+            AppMode.ORCHESTRATOR,     # V0.8: Primary orchestration mode
+            # DEPRECATED (still work)
             AppMode.PLATFORM_RASTER,
             AppMode.PLATFORM_VECTOR,
             AppMode.PLATFORM_ONLY,
-            # GATEWAY NOT included - sends to jobs queue but doesn't listen
+            # PLATFORM/GATEWAY NOT included - sends to jobs queue but doesn't listen
         ]
 
     @property
-    def listens_to_raster_tasks(self) -> bool:
-        """Whether this mode processes raster tasks."""
+    def listens_to_functionapp_tasks(self) -> bool:
+        """
+        Whether this mode processes functionapp-tasks queue.
+
+        V0.8: Replaces listens_to_raster_tasks and listens_to_vector_tasks.
+        """
         return self.mode in [
             AppMode.STANDALONE,
+            AppMode.WORKER_FUNCTIONAPP,  # V0.8: Primary FunctionApp worker mode
+            # DEPRECATED (still work - merged into functionapp-tasks)
             AppMode.PLATFORM_RASTER,
-            AppMode.WORKER_RASTER,
-        ]
-
-    @property
-    def listens_to_vector_tasks(self) -> bool:
-        """Whether this mode processes vector tasks."""
-        return self.mode in [
-            AppMode.STANDALONE,
             AppMode.PLATFORM_VECTOR,
+            AppMode.WORKER_RASTER,
             AppMode.WORKER_VECTOR,
         ]
 
     @property
-    def listens_to_long_running_tasks(self) -> bool:
+    def listens_to_container_tasks(self) -> bool:
         """
-        Whether this mode processes long-running tasks (Docker worker queue).
+        Whether this mode processes container-tasks queue (Docker worker).
 
-        In STANDALONE mode, this is only True if docker_worker_enabled=True.
-        This avoids validating the long-running-tasks queue when no Docker
-        worker is deployed.
+        V0.8: Replaces listens_to_long_running_tasks.
+        In STANDALONE mode, this is only True if docker_worker_enabled=False
+        (meaning no Docker worker is deployed, so standalone handles container tasks).
         """
         if self.mode == AppMode.WORKER_DOCKER:
             # Docker worker always listens to its queue
             return True
-        if self.mode == AppMode.STANDALONE and self.docker_worker_enabled:
-            # Standalone only listens if Docker worker integration is enabled
+        if self.mode == AppMode.STANDALONE and not self.docker_worker_enabled:
+            # Standalone only listens to container-tasks if NO Docker worker is deployed
             return True
         return False
 
+    # DEPRECATED: Keep for backward compatibility during migration
+    @property
+    def listens_to_raster_tasks(self) -> bool:
+        """DEPRECATED: Use listens_to_functionapp_tasks."""
+        return self.listens_to_functionapp_tasks
+
+    @property
+    def listens_to_vector_tasks(self) -> bool:
+        """DEPRECATED: Use listens_to_functionapp_tasks."""
+        return self.listens_to_functionapp_tasks
+
+    @property
+    def listens_to_long_running_tasks(self) -> bool:
+        """DEPRECATED: Use listens_to_container_tasks."""
+        return self.listens_to_container_tasks
+
     # =========================================================================
-    # ROUTING PROPERTIES
+    # ROUTING PROPERTIES (V0.8 - 24 JAN 2026)
     # =========================================================================
 
     @property
-    def routes_raster_externally(self) -> bool:
-        """Whether raster tasks should be routed to external queue (not processed locally)."""
+    def routes_tasks_externally(self) -> bool:
+        """
+        Whether tasks should be routed to external queues (not processed locally).
+
+        V0.8: In Platform/Gateway mode, all tasks route to queues for workers.
+        In Orchestrator mode, tasks route to container-tasks or functionapp-tasks.
+        """
         return self.mode in [
-            AppMode.PLATFORM_VECTOR,
+            AppMode.PLATFORM,         # V0.8: Gateway routes to workers
+            AppMode.ORCHESTRATOR,     # V0.8: Orchestrator routes to workers
+            # DEPRECATED (still work)
+            AppMode.GATEWAY,
             AppMode.PLATFORM_ONLY,
         ]
+
+    # DEPRECATED: Keep for backward compatibility
+    @property
+    def routes_raster_externally(self) -> bool:
+        """DEPRECATED: Use routes_tasks_externally."""
+        return self.routes_tasks_externally
 
     @property
     def routes_vector_externally(self) -> bool:
-        """Whether vector tasks should be routed to external queue (not processed locally)."""
-        return self.mode in [
-            AppMode.PLATFORM_RASTER,
-            AppMode.PLATFORM_ONLY,
-        ]
+        """DEPRECATED: Use routes_tasks_externally."""
+        return self.routes_tasks_externally
 
     @property
     def is_worker_mode(self) -> bool:
         """Whether this is a worker-only mode (no orchestration)."""
         return self.mode in [
+            AppMode.WORKER_FUNCTIONAPP,  # V0.8: FunctionApp worker
+            AppMode.WORKER_DOCKER,       # V0.8: Docker worker
+            # DEPRECATED (still work)
             AppMode.WORKER_RASTER,
             AppMode.WORKER_VECTOR,
-            AppMode.WORKER_DOCKER,
         ]
 
     @property
@@ -393,7 +436,8 @@ class AppModeConfig(BaseModel):
         """Whether this mode handles job orchestration."""
         return self.mode in [
             AppMode.STANDALONE,
-            AppMode.ORCHESTRATOR,     # Orchestrator is a platform mode (processes jobs queue)
+            AppMode.ORCHESTRATOR,     # V0.8: Primary orchestration mode
+            # DEPRECATED (still work)
             AppMode.PLATFORM_RASTER,
             AppMode.PLATFORM_VECTOR,
             AppMode.PLATFORM_ONLY,
@@ -401,8 +445,11 @@ class AppModeConfig(BaseModel):
 
     @property
     def is_gateway_mode(self) -> bool:
-        """Whether this is the Gateway-only mode (public-facing, HTTP only)."""
-        return self.mode == AppMode.GATEWAY
+        """Whether this is the Gateway/Platform mode (public-facing, HTTP only)."""
+        return self.mode in [
+            AppMode.PLATFORM,         # V0.8: Primary gateway mode
+            AppMode.GATEWAY,          # DEPRECATED alias
+        ]
 
     @property
     def is_orchestrator_mode(self) -> bool:
@@ -456,16 +503,20 @@ class AppModeConfig(BaseModel):
                 f"Provided: APP_MODE='{mode_str}'\n"
                 f"Valid modes: {valid_modes}\n"
                 f"\n"
-                f"Mode descriptions:\n"
-                f"  standalone      - All queues, all HTTP endpoints (single app)\n"
-                f"  gateway         - HTTP only (platform/*), sends to jobs queue (public-facing)\n"
-                f"  orchestrator    - Jobs queue listener, admin HTTP only (internal)\n"
-                f"  platform_only   - HTTP + jobs queue only (legacy combined mode)\n"
-                f"  platform_raster - HTTP + jobs + raster-tasks queues\n"
-                f"  platform_vector - HTTP + jobs + vector-tasks queues\n"
-                f"  worker_raster   - raster-tasks queue only (no HTTP)\n"
-                f"  worker_vector   - vector-tasks queue only (no HTTP)\n"
-                f"  worker_docker   - long-running-tasks queue (Docker container)\n"
+                f"V0.8 Primary Modes (24 JAN 2026):\n"
+                f"  standalone         - All queues, all HTTP endpoints (dev only)\n"
+                f"  platform           - HTTP only (platform/*), sends to jobs queue\n"
+                f"  orchestrator       - Jobs queue + all HTTP (combined deployment)\n"
+                f"  worker_functionapp - functionapp-tasks queue (lightweight ops)\n"
+                f"  worker_docker      - container-tasks queue (Docker container)\n"
+                f"\n"
+                f"Deprecated Modes (still work during migration):\n"
+                f"  gateway         - Use 'platform' instead\n"
+                f"  platform_only   - Use 'orchestrator' instead\n"
+                f"  platform_raster - Use 'orchestrator' instead\n"
+                f"  platform_vector - Use 'orchestrator' instead\n"
+                f"  worker_raster   - Use 'worker_functionapp' instead\n"
+                f"  worker_vector   - Use 'worker_functionapp' instead\n"
                 f"\n"
                 f"Fix: Set APP_MODE to one of the valid modes in your environment.\n"
                 f"{'='*80}\n"
@@ -529,9 +580,8 @@ class AppModeConfig(BaseModel):
             "docker_worker_enabled": self.docker_worker_enabled,
             "queues_listening": {
                 "jobs": self.listens_to_jobs_queue,
-                "raster_tasks": self.listens_to_raster_tasks,
-                "vector_tasks": self.listens_to_vector_tasks,
-                "long_running_tasks": self.listens_to_long_running_tasks,
+                "functionapp_tasks": self.listens_to_functionapp_tasks,  # V0.8
+                "container_tasks": self.listens_to_container_tasks,      # V0.8
             },
             "endpoints": {
                 "has_platform": self.has_platform_endpoints,
@@ -539,8 +589,7 @@ class AppModeConfig(BaseModel):
                 "has_admin": self.has_admin_endpoints,
             },
             "routing": {
-                "routes_raster_externally": self.routes_raster_externally,
-                "routes_vector_externally": self.routes_vector_externally,
+                "routes_tasks_externally": self.routes_tasks_externally,  # V0.8
             },
             "role": {
                 "is_gateway": self.is_gateway_mode,

@@ -268,15 +268,15 @@ class JanitorRepository(PostgreSQLRepository):
 
         Args:
             timeout_hours: Hours after which Docker tasks are considered stale
-            docker_task_types: Task types to check (defaults to LONG_RUNNING_TASKS)
+            docker_task_types: Task types to check (defaults to DOCKER_TASKS)
 
         Returns:
             List of stale Docker task dicts
         """
-        # Default to LONG_RUNNING_TASKS from config if not provided
+        # Default to DOCKER_TASKS from config if not provided (V0.8)
         if docker_task_types is None:
             from config.defaults import TaskRoutingDefaults
-            docker_task_types = TaskRoutingDefaults.LONG_RUNNING_TASKS
+            docker_task_types = TaskRoutingDefaults.DOCKER_TASKS
 
         if not docker_task_types:
             logger.debug("[JANITOR] get_stale_docker_tasks: No Docker task types configured")

@@ -1860,8 +1860,10 @@ def _translate_to_coremachine(
     platform_cfg = cfg.platform
 
     # ========================================================================
-    # VECTOR CREATE → process_vector (idempotent DELETE+INSERT pattern)
+    # VECTOR CREATE → vector_docker_etl (V0.8) or process_vector (fallback)
     # ========================================================================
+    # V0.8 (24 JAN 2026): Routes to Docker by default for performance.
+    # Set docker=false in processing_options to use Function App worker.
     if data_type == DataType.VECTOR:
         # Generate PostGIS table name from DDH IDs
         table_name = platform_cfg.generate_vector_table_name(
@@ -1894,7 +1896,18 @@ def _translate_to_coremachine(
                 'wkt_column': opts.get('wkt_column')
             }
 
-        return 'process_vector', {
+        # V0.8: Docker routing parameter (default: true)
+        # Set docker=false to use Function App worker (retained for future size-based routing)
+        use_docker = opts.get('docker', True)
+
+        if use_docker:
+            job_type = 'vector_docker_etl'
+            logger.info(f"[PLATFORM] Routing vector ETL to Docker worker (docker=true)")
+        else:
+            job_type = 'process_vector'
+            logger.info(f"[PLATFORM] Routing vector ETL to Function App (docker=false)")
+
+        return job_type, {
             # File location
             'blob_name': request.file_name,
             'file_extension': file_ext,
@@ -2315,6 +2328,25 @@ def _create_and_submit_job(
             # Store in database
             job_repo = JobRepository()
             job_repo.create_job(job_record)
+
+            # Record JOB_CREATED event (25 JAN 2026 - Job Monitor Interface)
+            try:
+                from infrastructure import JobEventRepository
+                from core.models.job_event import JobEventType, JobEventStatus
+
+                event_repo = JobEventRepository()
+                event_repo.record_job_event(
+                    job_id=job_id,
+                    event_type=JobEventType.JOB_CREATED,
+                    event_status=JobEventStatus.SUCCESS,
+                    event_data={
+                        'job_type': current_job_type,
+                        'total_stages': len(job_class.stages),
+                        'platform_request_id': platform_request_id
+                    }
+                )
+            except Exception as event_err:
+                logger.warning(f"⚠️ Failed to record JOB_CREATED event: {event_err}")
 
             # Submit to Service Bus
             service_bus = ServiceBusRepository()

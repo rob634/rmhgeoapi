@@ -1,19 +1,17 @@
 # ============================================================================
 # STAC API CONFIGURATION
 # ============================================================================
-# STATUS: API module config - Minimal config with auto-detected base URL
+# STATUS: Trigger layer config - STAC catalog metadata and base URL settings
 # PURPOSE: Configuration for STAC catalog metadata and base URL settings
-# LAST_REVIEWED: 05 JAN 2026
-# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# CREATED: 24 JAN 2026 (Moved from stac_api/config.py)
 # EXPORTS: STACAPIConfig, get_stac_config
 # DEPENDENCIES: pydantic
 # ============================================================================
 """
-STAC API Configuration
+STAC API Configuration.
 
 Minimal configuration for STAC API module.
 Auto-detects base URL from requests if not explicitly set.
-
 """
 
 from typing import Optional

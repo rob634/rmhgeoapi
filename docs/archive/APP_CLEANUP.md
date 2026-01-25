@@ -1,8 +1,14 @@
 # APP_CLEANUP.md - function_app.py Refactoring Plan
 
+> **⚠️ ARCHIVED**: 24 JAN 2026
+>
+> Phases 1-4 completed. Phases 5-7 migrated to **V0.8_PLAN.md Section 17**.
+> This document retained for historical reference only.
+
 **Created**: 23 JAN 2026
 **Updated**: 23 JAN 2026
-**Status**: Phase 1-4 COMPLETE, Phase 5-7 PLANNING
+**Archived**: 24 JAN 2026
+**Status**: ARCHIVED - See V0.8_PLAN.md Section 17 for remaining work
 **Goal**: Reduce function_app.py from ~4,100 lines to a clean entry point
 
 ---
@@ -221,9 +227,9 @@ triggers/service_bus/
 └── error_handler.py    # Extracted from function_app.py lines 3507-3665
 ```
 
-### New Pattern
+### New Pattern (V0.8 - 24 JAN 2026)
 ```python
-# function_app.py - AFTER Phase 2
+# function_app.py - AFTER Phase 2 (updated for V0.8 queue consolidation)
 
 from triggers.service_bus import handle_job_message, handle_task_message
 
@@ -237,25 +243,25 @@ if STARTUP_STATE.all_passed and _app_mode.listens_to_jobs_queue:
         """Process job messages using CoreMachine."""
         handle_job_message(msg, core_machine)
 
-if STARTUP_STATE.all_passed and _app_mode.listens_to_raster_tasks:
+if STARTUP_STATE.all_passed and _app_mode.listens_to_functionapp_tasks:
     @app.service_bus_queue_trigger(
         arg_name="msg",
-        queue_name="raster-tasks",
+        queue_name="functionapp-tasks",
         connection="ServiceBusConnection"
     )
-    def process_raster_task(msg: func.ServiceBusMessage) -> None:
-        """Process raster task messages."""
-        handle_task_message(msg, core_machine, queue_name="raster-tasks")
+    def process_functionapp_task(msg: func.ServiceBusMessage) -> None:
+        """Process task messages from functionapp-tasks queue."""
+        handle_task_message(msg, core_machine, queue_name="functionapp-tasks")
 
-if STARTUP_STATE.all_passed and _app_mode.listens_to_vector_tasks:
+if STARTUP_STATE.all_passed and _app_mode.listens_to_container_tasks:
     @app.service_bus_queue_trigger(
         arg_name="msg",
-        queue_name="vector-tasks",
+        queue_name="container-tasks",
         connection="ServiceBusConnection"
     )
-    def process_vector_task(msg: func.ServiceBusMessage) -> None:
-        """Process vector task messages."""
-        handle_task_message(msg, core_machine, queue_name="vector-tasks")
+    def process_container_task(msg: func.ServiceBusMessage) -> None:
+        """Process task messages from container-tasks queue."""
+        handle_task_message(msg, core_machine, queue_name="container-tasks")
 ```
 
 ### Files to Create
@@ -372,13 +378,17 @@ def _handle_job_exception(e: Exception, msg: func.ServiceBusMessage, correlation
         mark_job_failed(job_id, f"{type(e).__name__}: {e}", correlation_id)
 ```
 
-#### `triggers/service_bus/task_handler.py`
+#### `triggers/service_bus/task_handler.py` (V0.8 - 24 JAN 2026)
 ```python
 """
 Task queue message handler.
 
-Handles messages from raster-tasks and vector-tasks queues.
+Handles messages from functionapp-tasks and container-tasks queues.
 Shared logic for both task types with queue-specific logging.
+
+V0.8 Queue Architecture:
+- functionapp-tasks: Lightweight ops (DB, metadata)
+- container-tasks: Heavy ops (raster processing, Docker worker)
 """
 
 import time
@@ -390,7 +400,6 @@ import azure.functions as func
 
 from core.schema.queue import TaskQueueMessage
 from core.models.enums import TaskStatus
-from core.machine import CoreMachine
 from infrastructure import RepositoryFactory
 from util_logger import LoggerFactory, ComponentType
 
@@ -399,7 +408,7 @@ logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "TaskHandler")
 
 def handle_task_message(
     msg: func.ServiceBusMessage,
-    core_machine: CoreMachine,
+    core_machine: Any,
     queue_name: str
 ) -> Dict[str, Any]:
     """
@@ -408,7 +417,7 @@ def handle_task_message(
     Args:
         msg: Service Bus message
         core_machine: CoreMachine instance for processing
-        queue_name: Queue name for logging ("raster-tasks" or "vector-tasks")
+        queue_name: Queue name for logging ("functionapp-tasks" or "container-tasks")
 
     Returns:
         Processing result dict

@@ -338,13 +338,11 @@ from triggers.schema_pydantic_deploy import pydantic_deploy_trigger
 # )
 
 from triggers.analyze_container import analyze_container_trigger
-# NOTE: STAC admin triggers (stac_setup, stac_collections, stac_init, stac_nuke)
-# moved to admin_stac blueprint (12 JAN 2026)
-from triggers.stac_extract import stac_extract_trigger
-from triggers.stac_vector import stac_vector_trigger
+# NOTE: All STAC triggers moved to triggers/stac/stac_bp.py (24 JAN 2026 - V0.8 Phase 17.3)
+# stac_extract_trigger and stac_vector_trigger now called from blueprint
 
-# STAC API v1.0.0 Portable Module (10 NOV 2025)
-from stac_api import get_stac_triggers
+# STAC Blueprint - Unified STAC API & Admin (24 JAN 2026 - V0.8 Phase 17.3)
+# All 19 stac/* endpoints now in triggers/stac/stac_bp.py
 
 # ingest_vector REMOVED (27 NOV 2025) - Platform now uses process_vector
 # test_raster_create excluded by funcignore (30 NOV 2025) - *test* files not deployed
@@ -373,8 +371,7 @@ from triggers.curated.admin import curated_admin_trigger
 # OGC Features API - Standalone module (29 OCT 2025)
 from ogc_features import get_ogc_triggers
 
-# STAC API - Standalone module (11 NOV 2025)
-from stac_api import get_stac_triggers
+# STAC API - Moved to triggers/stac/ blueprint (24 JAN 2026)
 
 # Vector Viewer - Standalone module (13 NOV 2025) - OGC Features API
 from vector_viewer import get_vector_viewer_triggers
@@ -478,7 +475,7 @@ core_machine = create_core_machine(ALL_JOBS, ALL_HANDLERS)
 if _app_mode.has_admin_endpoints:
     from triggers.admin import admin_db_bp, admin_servicebus_bp, snapshot_bp
     from triggers.admin.admin_janitor import bp as admin_janitor_bp
-    from triggers.admin.admin_stac import bp as admin_stac_bp
+    from triggers.stac import stac_bp  # Unified STAC blueprint (24 JAN 2026)
     from triggers.admin.admin_h3 import bp as admin_h3_bp
     from triggers.admin.admin_system import bp as admin_system_bp
     from triggers.admin.admin_approvals import bp as admin_approvals_bp  # Dataset approvals (16 JAN 2026)
@@ -491,7 +488,7 @@ if _app_mode.has_admin_endpoints:
     app.register_functions(admin_db_bp)
     app.register_functions(admin_servicebus_bp)
     app.register_functions(admin_janitor_bp)
-    app.register_functions(admin_stac_bp)
+    app.register_functions(stac_bp)  # Unified STAC blueprint (24 JAN 2026)
     app.register_functions(admin_h3_bp)
     app.register_functions(admin_system_bp)
     app.register_functions(admin_approvals_bp)  # Dataset approvals (16 JAN 2026)
@@ -928,64 +925,19 @@ def discover_delivery_structure(req: func.HttpRequest) -> func.HttpResponse:
 # Can be moved to separate Function App for APIM routing
 # ============================================================================
 
-# Get trigger configurations (contains handler references)
-_stac_triggers = get_stac_triggers()
-_stac_landing = _stac_triggers[0]['handler']
-_stac_conformance = _stac_triggers[1]['handler']
-_stac_collections = _stac_triggers[2]['handler']
-_stac_collection = _stac_triggers[3]['handler']
-_stac_items = _stac_triggers[4]['handler']
-_stac_item = _stac_triggers[5]['handler']
-
 # ============================================================================
-# DEPRECATED OLD STAC ENDPOINTS (13 NOV 2025) - Commented out, replaced by new stac_api module below
-# These were broken (404 errors) - new working endpoints start at line 1492 with /api/stac/ paths
-# TODO: Delete these after confirming new /api/stac/ endpoints work
+# STAC ENDPOINTS - MOVED TO BLUEPRINT (24 JAN 2026 - V0.8 Phase 17.3)
 # ============================================================================
-
-# @app.route(route="stac", methods=["GET"])
-# def stac_api_landing_OLD_DEPRECATED(req: func.HttpRequest) -> func.HttpResponse:
-#     """STAC API landing page: GET /api/stac (DEPRECATED - broken, use new stac_api module)"""
-#     return _stac_landing(req)
-
-
-# @app.route(route="stac/conformance", methods=["GET"])
-# def stac_api_conformance_OLD_DEPRECATED(req: func.HttpRequest) -> func.HttpResponse:
-#     """STAC API conformance: GET /api/stac/conformance (DEPRECATED)"""
-#     return _stac_conformance(req)
-
-
-# @app.route(route="stac/collections", methods=["GET"])
-# def stac_api_collections_list_OLD_DEPRECATED(req: func.HttpRequest) -> func.HttpResponse:
-#     """STAC API collections list: GET /api/stac/collections (DEPRECATED)"""
-#     return _stac_collections(req)
-
-
-# NOTE: STAC admin routes moved to triggers/admin/admin_stac.py blueprint (12 JAN 2026)
-# - /api/stac/setup
-# - /api/stac/nuke
-# - /api/stac/collections/{tier}
-# - /api/stac/init
-
-@app.route(route="stac/extract", methods=["POST"])
-def stac_extract(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Extract STAC metadata from raster blob and insert into PgSTAC.
-
-    POST /api/stac/extract
-
-    Body:
-        {
-            "container": "<bronze-container>",     // Required (use config.storage.bronze)
-            "blob_name": "test/file.tif",          // Required
-            "collection_id": "dev",                // Optional (default: "dev")
-            "insert": true                         // Optional (default: true)
-        }
-
-    Returns:
-        STAC Item metadata and insertion result
-    """
-    return stac_extract_trigger.handle_request(req)
+# All 19 stac/* endpoints consolidated into triggers/stac/stac_bp.py
+# Blueprint registered conditionally above via: app.register_functions(stac_bp)
+#
+# Categories:
+#   STAC API v1.0.0 Core (6): /stac, /stac/conformance, /stac/collections, etc.
+#   Admin - Initialization (3): /stac/init, /stac/collections/{tier}, /stac/nuke
+#   Admin - Repair (3): /stac/repair/test, /stac/repair/inventory, /stac/repair/item
+#   Admin - Catalog Ops (2): /stac/extract, /stac/vector
+#   Admin - Inspection (5): /stac/schema/info, /stac/collections/summary, etc.
+# ============================================================================
 
 
 # ============================================================================
@@ -999,479 +951,10 @@ def stac_extract(req: func.HttpRequest) -> func.HttpResponse:
 
 
 
-@app.route(route="stac/vector", methods=["POST"])
-def stac_vector(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Catalog PostGIS vector table in STAC.
+# NOTE: stac/vector moved to triggers/stac/stac_bp.py (24 JAN 2026)
 
-    POST /api/stac/vector
+# NOTE: pgstac inspection endpoints moved to triggers/stac/stac_bp.py (24 JAN 2026)
 
-    Body:
-        {
-            "schema": "geo",                        // Required - PostgreSQL schema
-            "table_name": "parcels_2025",           // Required - Table name
-            "collection_id": "vectors",             // Optional (default: "vectors")
-            "source_file": "data/parcels.gpkg",     // Optional - Original source file
-            "insert": true,                         // Optional (default: true)
-            "properties": {                         // Optional - Custom properties
-                "jurisdiction": "county"
-            }
-        }
-
-    Returns:
-        STAC Item metadata and insertion result
-    """
-    return stac_vector_trigger.handle_request(req)
-
-
-# ============================================================================
-# PGSTAC INSPECTION ENDPOINTS (2 NOV 2025)
-# ============================================================================
-# Deep inspection endpoints for pgstac schema analysis and statistics
-# All read-only operations for monitoring and troubleshooting
-# ============================================================================
-
-from infrastructure.pgstac_bootstrap import (
-    get_schema_info,
-    get_collection_stats,
-    get_item_by_id,
-    get_health_metrics,
-    get_collections_summary
-)
-
-@app.route(route="stac/schema/info", methods=["GET"])
-def stac_schema_info(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Deep inspection of pgstac schema structure.
-
-    GET /api/stac/schema/info
-
-    Returns:
-        Detailed schema information including:
-        - Tables (with row counts, sizes, indexes)
-        - Functions (first 20)
-        - Roles
-        - Total schema size
-    """
-    try:
-        result = get_schema_info()
-        return func.HttpResponse(
-            json.dumps(result, indent=2, default=str),
-            status_code=200,
-            mimetype="application/json"
-        )
-    except Exception as e:
-        logging.error(f"Error in /stac/schema/info: {e}")
-        return func.HttpResponse(
-            json.dumps({'error': str(e)}),
-            status_code=500,
-            mimetype="application/json"
-        )
-
-
-@app.route(route="stac/collections/summary", methods=["GET"])
-def stac_collections_summary(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Quick summary of all collections with statistics.
-
-    GET /api/stac/collections/summary
-
-    Returns:
-        Summary with total counts and per-collection item counts
-    """
-    try:
-        result = get_collections_summary()
-        return func.HttpResponse(
-            json.dumps(result, indent=2, default=str),
-            status_code=200,
-            mimetype="application/json"
-        )
-    except Exception as e:
-        logging.error(f"Error in /stac/collections/summary: {e}")
-        return func.HttpResponse(
-            json.dumps({'error': str(e)}),
-            status_code=500,
-            mimetype="application/json"
-        )
-
-
-@app.route(route="stac/collections/{collection_id}/stats", methods=["GET"])
-def stac_collection_stats(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Detailed statistics for a specific collection.
-
-    GET /api/stac/collections/{collection_id}/stats
-
-    Path Parameters:
-        collection_id: Collection ID to analyze
-
-    Returns:
-        Collection statistics including:
-        - Item count
-        - Spatial extent (actual bbox from items)
-        - Temporal extent
-        - Asset types and counts
-        - Recent items
-    """
-    try:
-        collection_id = req.route_params.get('collection_id')
-        if not collection_id:
-            return func.HttpResponse(
-                json.dumps({'error': 'collection_id required'}),
-                status_code=400,
-                mimetype="application/json"
-            )
-
-        result = get_collection_stats(collection_id)
-        return func.HttpResponse(
-            json.dumps(result, indent=2, default=str),
-            status_code=200,
-            mimetype="application/json"
-        )
-    except Exception as e:
-        logging.error(f"Error in /stac/collections/{{collection_id}}/stats: {e}")
-        return func.HttpResponse(
-            json.dumps({'error': str(e)}),
-            status_code=500,
-            mimetype="application/json"
-        )
-
-
-@app.route(route="stac/items/{item_id}", methods=["GET"])
-def stac_item_lookup(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Look up a single STAC item by ID.
-
-    GET /api/stac/items/{item_id}?collection_id={optional}
-
-    Path Parameters:
-        item_id: STAC item ID to retrieve
-
-    Query Parameters:
-        collection_id: Optional collection ID to narrow search
-
-    Returns:
-        STAC Item JSON or error if not found
-    """
-    try:
-        item_id = req.route_params.get('item_id')
-        if not item_id:
-            return func.HttpResponse(
-                json.dumps({'error': 'item_id required'}),
-                status_code=400,
-                mimetype="application/json"
-            )
-
-        collection_id = req.params.get('collection_id')
-        result = get_item_by_id(item_id, collection_id)
-
-        return func.HttpResponse(
-            json.dumps(result, indent=2, default=str),
-            status_code=200,
-            mimetype="application/json"
-        )
-    except Exception as e:
-        logging.error(f"Error in /stac/items/{{item_id}}: {e}")
-        return func.HttpResponse(
-            json.dumps({'error': str(e)}),
-            status_code=500,
-            mimetype="application/json"
-        )
-
-
-@app.route(route="stac/health", methods=["GET"])
-def stac_health(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Overall pgstac health check with metrics.
-
-    GET /api/stac/health
-
-    Returns:
-        Health status including:
-        - Status (healthy/warning/error)
-        - Version
-        - Collection/item counts
-        - Database size
-        - Issues detected
-    """
-    try:
-        result = get_health_metrics()
-        return func.HttpResponse(
-            json.dumps(result, indent=2, default=str),
-            status_code=200,
-            mimetype="application/json"
-        )
-    except Exception as e:
-        logging.error(f"Error in /stac/health: {e}")
-        return func.HttpResponse(
-            json.dumps({'error': str(e)}),
-            status_code=500,
-            mimetype="application/json"
-        )
-
-
-# ============================================================================
-# STAC API STANDARD ENDPOINTS (18 OCT 2025)
-# ============================================================================
-# Read-only endpoints following STAC API specification
-# Interoperable with STAC clients (QGIS, pystac-client, etc.)
-# ============================================================================
-
-@app.route(route="collections", methods=["GET"])
-def collections_list(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    List all STAC collections (STAC API standard).
-
-    GET /collections
-
-    STAC API Specification: https://github.com/radiantearth/stac-api-spec
-
-    Returns:
-        JSON with 'collections' array containing all STAC collections
-    """
-    from infrastructure.pgstac_bootstrap import get_all_collections
-
-    try:
-        result = get_all_collections()
-
-        if 'error' in result:
-            return func.HttpResponse(
-                json.dumps(result, indent=2),
-                status_code=500,
-                mimetype="application/json"
-            )
-
-        return func.HttpResponse(
-            json.dumps(result, indent=2),
-            status_code=200,
-            mimetype="application/json"
-        )
-
-    except Exception as e:
-        logging.error(f"Error in /collections endpoint: {e}")
-        return func.HttpResponse(
-            json.dumps({'error': str(e)}),
-            status_code=500,
-            mimetype="application/json"
-        )
-
-
-@app.route(route="collections/{collection_id}", methods=["GET"])
-def collection_detail(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Get single STAC collection (STAC API standard).
-
-    GET /collections/{collection_id}
-
-    Path Parameters:
-        collection_id: Collection identifier (e.g., "system-vectors")
-
-    Returns:
-        STAC Collection object
-    """
-    from infrastructure.pgstac_bootstrap import get_collection
-
-    try:
-        collection_id = req.route_params.get('collection_id')
-
-        if not collection_id:
-            return func.HttpResponse(
-                json.dumps({'error': 'collection_id required'}),
-                status_code=400,
-                mimetype="application/json"
-            )
-
-        result = get_collection(collection_id)
-
-        if 'error' in result:
-            status_code = 404 if result.get('error_type') == 'NotFound' else 500
-            return func.HttpResponse(
-                json.dumps(result, indent=2),
-                status_code=status_code,
-                mimetype="application/json"
-            )
-
-        return func.HttpResponse(
-            json.dumps(result, indent=2),
-            status_code=200,
-            mimetype="application/json"
-        )
-
-    except Exception as e:
-        logging.error(f"Error in /collections/{{collection_id}} endpoint: {e}")
-        return func.HttpResponse(
-            json.dumps({'error': str(e)}),
-            status_code=500,
-            mimetype="application/json"
-        )
-
-
-@app.route(route="collections/{collection_id}/items", methods=["GET"])
-def collection_items(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Get items in a collection (STAC API standard).
-
-    GET /collections/{collection_id}/items
-
-    Path Parameters:
-        collection_id: Collection identifier
-
-    Query Parameters:
-        limit: Max items to return (default 100)
-        bbox: Bounding box as minx,miny,maxx,maxy
-        datetime: Datetime filter (RFC 3339 or interval)
-
-    Returns:
-        STAC ItemCollection (GeoJSON FeatureCollection)
-    """
-    from infrastructure.pgstac_bootstrap import get_collection_items
-
-    try:
-        collection_id = req.route_params.get('collection_id')
-
-        if not collection_id:
-            return func.HttpResponse(
-                json.dumps({'error': 'collection_id required'}),
-                status_code=400,
-                mimetype="application/json"
-            )
-
-        # Parse query parameters
-        limit = int(req.params.get('limit', 100))
-        bbox_str = req.params.get('bbox')
-        datetime_str = req.params.get('datetime')
-
-        bbox = None
-        if bbox_str:
-            try:
-                bbox = [float(x) for x in bbox_str.split(',')]
-                if len(bbox) != 4:
-                    raise ValueError("bbox must have 4 values")
-            except ValueError as e:
-                return func.HttpResponse(
-                    json.dumps({'error': f'Invalid bbox: {e}'}),
-                    status_code=400,
-                    mimetype="application/json"
-                )
-
-        result = get_collection_items(
-            collection_id=collection_id,
-            limit=limit,
-            bbox=bbox,
-            datetime_str=datetime_str
-        )
-
-        if 'error' in result:
-            return func.HttpResponse(
-                json.dumps(result, indent=2),
-                status_code=500,
-                mimetype="application/json"
-            )
-
-        return func.HttpResponse(
-            json.dumps(result, indent=2),
-            status_code=200,
-            mimetype="application/geo+json"  # GeoJSON mimetype
-        )
-
-    except Exception as e:
-        logging.error(f"Error in /collections/{{collection_id}}/items endpoint: {e}")
-        return func.HttpResponse(
-            json.dumps({'error': str(e)}),
-            status_code=500,
-            mimetype="application/json"
-        )
-
-
-@app.route(route="search", methods=["GET", "POST"])
-def stac_search(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Search STAC items across collections (STAC API standard).
-
-    GET/POST /search
-
-    Query Parameters (GET) or Body (POST):
-        collections: Comma-separated collection IDs (GET) or array (POST)
-        bbox: Bounding box as minx,miny,maxx,maxy (GET) or array (POST)
-        datetime: Datetime filter (RFC 3339 or interval)
-        limit: Max items to return (default 100)
-        query: Additional query parameters (POST only)
-
-    Returns:
-        STAC ItemCollection (GeoJSON FeatureCollection)
-    """
-    from infrastructure.pgstac_bootstrap import search_items
-
-    try:
-        # Handle GET and POST differently
-        if req.method == "POST":
-            # POST body with JSON
-            try:
-                body = req.get_json()
-            except ValueError:
-                return func.HttpResponse(
-                    json.dumps({'error': 'Invalid JSON body'}),
-                    status_code=400,
-                    mimetype="application/json"
-                )
-
-            collections = body.get('collections')
-            bbox = body.get('bbox')
-            datetime_str = body.get('datetime')
-            limit = body.get('limit', 100)
-            query = body.get('query')
-
-        else:
-            # GET with query parameters
-            collections_str = req.params.get('collections')
-            collections = collections_str.split(',') if collections_str else None
-
-            bbox_str = req.params.get('bbox')
-            bbox = None
-            if bbox_str:
-                try:
-                    bbox = [float(x) for x in bbox_str.split(',')]
-                    if len(bbox) != 4:
-                        raise ValueError("bbox must have 4 values")
-                except ValueError as e:
-                    return func.HttpResponse(
-                        json.dumps({'error': f'Invalid bbox: {e}'}),
-                        status_code=400,
-                        mimetype="application/json"
-                    )
-
-            datetime_str = req.params.get('datetime')
-            limit = int(req.params.get('limit', 100))
-            query = None  # Query extension only supported in POST
-
-        result = search_items(
-            collections=collections,
-            bbox=bbox,
-            datetime_str=datetime_str,
-            limit=limit,
-            query=query
-        )
-
-        if 'error' in result:
-            return func.HttpResponse(
-                json.dumps(result, indent=2),
-                status_code=500,
-                mimetype="application/json"
-            )
-
-        return func.HttpResponse(
-            json.dumps(result, indent=2),
-            status_code=200,
-            mimetype="application/geo+json"  # GeoJSON mimetype
-        )
-
-    except Exception as e:
-        logging.error(f"Error in /search endpoint: {e}")
-        return func.HttpResponse(
-            json.dumps({'error': str(e)}),
-            status_code=500,
-            mimetype="application/json"
-        )
 
 
 # ============================================================================
@@ -1724,80 +1207,11 @@ def maps_restore(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # ============================================================================
-# STAC API v1.0.0 ENDPOINTS (11 NOV 2025)
+# STAC API v1.0.0 ENDPOINTS - MOVED TO BLUEPRINT (24 JAN 2026 - V0.8 Phase 17.3)
 # ============================================================================
-#
-# STAC (SpatioTemporal Asset Catalog) API for metadata search and discovery.
-# Fully compliant with STAC v1.0.0 specification.
-#
-# Standards Compliance:
-#   - STAC API Core: https://api.stacspec.org/v1.0.0/core
-#   - STAC API Collections: https://api.stacspec.org/v1.0.0/collections
-#   - STAC API Features: https://api.stacspec.org/v1.0.0/ogcapi-features
-#
-# Architecture:
-#   - Standalone stac_api/ module (zero dependencies on main app)
-#   - READ-ONLY: All writes handled by ETL pipeline
-#   - Uses infrastructure/stac.py for database operations
-#   - All endpoints return STAC-compliant JSON with proper links
-#
-# Available Endpoints:
-#   GET  /api/stac_api                                      - Landing page (catalog root)
-#   GET  /api/stac_api/conformance                          - Conformance classes
-#   GET  /api/stac_api/collections                          - Collections list
-#   GET  /api/stac_api/collections/{collection_id}          - Collection detail
-#   GET  /api/stac_api/collections/{collection_id}/items    - Items list (paginated)
-#   GET  /api/stac_api/collections/{collection_id}/items/{item_id} - Item detail
-#
-# Query Parameters:
-#   ?limit=N        - Max items per page (default: 10, max: 1000)
-#   ?offset=N       - Pagination offset (default: 0)
-#   ?bbox=minx,miny,maxx,maxy - Spatial filter (WGS84)
-
-# Get trigger configurations (contains handler references)
-_stac_triggers = get_stac_triggers()
-_stac_landing = _stac_triggers[0]['handler']
-_stac_conformance = _stac_triggers[1]['handler']
-_stac_collections = _stac_triggers[2]['handler']
-_stac_collection = _stac_triggers[3]['handler']
-_stac_items = _stac_triggers[4]['handler']
-_stac_item = _stac_triggers[5]['handler']
-
-
-@app.route(route="stac", methods=["GET"])
-def stac_api_v1_landing(req: func.HttpRequest) -> func.HttpResponse:
-    """STAC API v1.0.0 landing page: GET /api/stac"""
-    return _stac_landing(req)
-
-
-@app.route(route="stac/conformance", methods=["GET"])
-def stac_api_v1_conformance(req: func.HttpRequest) -> func.HttpResponse:
-    """STAC API v1.0.0 conformance: GET /api/stac/conformance"""
-    return _stac_conformance(req)
-
-
-@app.route(route="stac/collections", methods=["GET"])
-def stac_api_v1_collections(req: func.HttpRequest) -> func.HttpResponse:
-    """STAC API v1.0.0 collections list: GET /api/stac/collections"""
-    return _stac_collections(req)
-
-
-@app.route(route="stac/collections/{collection_id}", methods=["GET"])
-def stac_api_v1_collection(req: func.HttpRequest) -> func.HttpResponse:
-    """STAC API v1.0.0 collection detail: GET /api/stac/collections/{collection_id}"""
-    return _stac_collection(req)
-
-
-@app.route(route="stac/collections/{collection_id}/items", methods=["GET"])
-def stac_api_v1_items(req: func.HttpRequest) -> func.HttpResponse:
-    """STAC API v1.0.0 items list: GET /api/stac/collections/{collection_id}/items"""
-    return _stac_items(req)
-
-
-@app.route(route="stac/collections/{collection_id}/items/{item_id}", methods=["GET"])
-def stac_api_v1_item(req: func.HttpRequest) -> func.HttpResponse:
-    """STAC API v1.0.0 item detail: GET /api/stac/collections/{collection_id}/items/{item_id}"""
-    return _stac_item(req)
+# All STAC endpoints consolidated into triggers/stac/stac_bp.py
+# Registered via: app.register_functions(stac_bp)
+# ============================================================================
 
 
 # ============================================================================
@@ -1914,12 +1328,13 @@ def raster_qa_status(req: func.HttpRequest) -> func.HttpResponse:
 # Read-only UI operations - NO JOBS, NO TASKS, NO SERVICE BUS
 # Direct Azure Blob Storage queries for Pipeline Dashboard interface
 
-@app.route(route="containers/{container_name}/blobs", methods=["GET"])
+# V0.8 Phase 17.2: Consolidated to /storage/{container}/... (24 JAN 2026)
+@app.route(route="storage/{container_name}/blobs", methods=["GET"])
 def list_container_blobs(req: func.HttpRequest) -> func.HttpResponse:
     """
     List blobs in a container (read-only UI operation).
 
-    GET /api/containers/{container_name}/blobs?prefix={prefix}&limit={limit}
+    GET /api/storage/{container_name}/blobs?prefix={prefix}&limit={limit}
 
     Path Parameters:
         container_name: Azure Blob Storage container (e.g., 'bronze-rasters')
@@ -1936,12 +1351,12 @@ def list_container_blobs(req: func.HttpRequest) -> func.HttpResponse:
     return list_container_blobs_handler(req)
 
 
-@app.route(route="containers/{container_name}/blob", methods=["GET"])
+@app.route(route="storage/{container_name}/blob", methods=["GET"])
 def get_blob_metadata(req: func.HttpRequest) -> func.HttpResponse:
     """
     Get metadata for a single blob (read-only UI operation).
 
-    GET /api/containers/{container_name}/blob?path=maxar/tile_001.tif
+    GET /api/storage/{container_name}/blob?path=maxar/tile_001.tif
 
     Path Parameters:
         container_name: Azure Blob Storage container (e.g., 'bronze-rasters')
@@ -2148,12 +1563,12 @@ def openapi_spec(req: func.HttpRequest) -> func.HttpResponse:
 # on APP_MODE environment variable. This allows identical code to be deployed
 # to multiple Function Apps with different queue listening configurations.
 #
-# THREE QUEUES ONLY (No Legacy Fallbacks):
+# V0.8 QUEUE ARCHITECTURE (24 JAN 2026):
 # - geospatial-jobs: Job orchestration + stage_complete signals
-# - raster-tasks: Memory-intensive GDAL operations (low concurrency)
-# - vector-tasks: DB-bound and lightweight operations (high concurrency)
+# - functionapp-tasks: Lightweight operations (DB queries, inventory, STAC)
+# - container-tasks: Heavy operations (GDAL, geopandas) - Docker worker handles this
 #
-# All task types MUST be explicitly mapped in TaskRoutingDefaults.
+# All task types MUST be explicitly mapped in TaskRoutingDefaults (DOCKER_TASKS or FUNCTIONAPP_TASKS).
 # Unmapped task types raise ContractViolationError (no fallback queue).
 #
 # See config/app_mode_config.py for mode definitions and queue mappings.
@@ -2274,10 +1689,10 @@ logger.info(f"      has_platform_endpoints: {_app_mode.has_platform_endpoints}")
 logger.info(f"      has_jobs_endpoints: {_app_mode.has_jobs_endpoints}")
 logger.info(f"      has_admin_endpoints: {_app_mode.has_admin_endpoints}")
 logger.info("-" * 70)
-logger.info("   QUEUE LISTENERS:")
+logger.info("   QUEUE LISTENERS (V0.8):")
 logger.info(f"      listens_to_jobs_queue: {_app_mode.listens_to_jobs_queue}")
-logger.info(f"      listens_to_raster_tasks: {_app_mode.listens_to_raster_tasks}")
-logger.info(f"      listens_to_vector_tasks: {_app_mode.listens_to_vector_tasks}")
+logger.info(f"      listens_to_functionapp_tasks: {_app_mode.listens_to_functionapp_tasks}")
+logger.info(f"      listens_to_container_tasks: {_app_mode.listens_to_container_tasks}")
 logger.info("-" * 70)
 
 # CRITICAL: Only register Service Bus triggers if startup validation passed
@@ -2309,74 +1724,90 @@ if STARTUP_STATE.all_passed and _app_mode.listens_to_jobs_queue:
         handle_job_message(msg, core_machine)
 
 
-# Raster Tasks Queue Trigger - Raster worker/platform_raster/standalone modes
-if STARTUP_STATE.all_passed and _app_mode.listens_to_raster_tasks:
-    logger.info("✅ REGISTERING: raster-tasks queue trigger (GDAL/COG operations)")
-elif _app_mode.listens_to_raster_tasks:
-    logger.warning("⏭️ SKIPPING: raster-tasks queue trigger (validation failed)")
-else:
-    logger.warning("⏭️ SKIPPING: raster-tasks queue trigger (APP_MODE=%s)", _app_mode.mode.value)
+# =============================================================================
+# V0.8: CONSOLIDATED TASK QUEUES (24 JAN 2026)
+# =============================================================================
+# - functionapp-tasks: Lightweight operations (DB queries, inventory, STAC)
+# - container-tasks: Heavy operations (GDAL, geopandas) - only in standalone without Docker
+# =============================================================================
 
-if STARTUP_STATE.all_passed and _app_mode.listens_to_raster_tasks:
-    # APP_CLEANUP Phase 2: Handler logic moved to triggers/service_bus/task_handler.py
+# FunctionApp Tasks Queue Trigger - worker_functionapp/standalone modes
+if STARTUP_STATE.all_passed and _app_mode.listens_to_functionapp_tasks:
+    logger.info("✅ REGISTERING: functionapp-tasks queue trigger (lightweight DB ops)")
+elif _app_mode.listens_to_functionapp_tasks:
+    logger.warning("⏭️ SKIPPING: functionapp-tasks queue trigger (validation failed)")
+else:
+    logger.warning("⏭️ SKIPPING: functionapp-tasks queue trigger (APP_MODE=%s)", _app_mode.mode.value)
+
+if STARTUP_STATE.all_passed and _app_mode.listens_to_functionapp_tasks:
     from triggers.service_bus import handle_task_message
 
     @app.service_bus_queue_trigger(
         arg_name="msg",
-        queue_name="raster-tasks",
+        queue_name="functionapp-tasks",
         connection="ServiceBusConnection"
     )
-    def process_raster_task(msg: func.ServiceBusMessage) -> None:
-        """Process raster task messages from dedicated raster-tasks queue."""
-        handle_task_message(msg, core_machine, queue_name="raster-tasks")
+    def process_functionapp_task(msg: func.ServiceBusMessage) -> None:
+        """Process task messages from functionapp-tasks queue (V0.8)."""
+        handle_task_message(msg, core_machine, queue_name="functionapp-tasks")
 
 
-# Vector Tasks Queue Trigger - Vector worker/platform_vector/standalone modes
-if STARTUP_STATE.all_passed and _app_mode.listens_to_vector_tasks:
-    logger.info("✅ REGISTERING: vector-tasks queue trigger (PostGIS/geopandas operations)")
-elif _app_mode.listens_to_vector_tasks:
-    logger.warning("⏭️ SKIPPING: vector-tasks queue trigger (validation failed)")
+# Container Tasks Queue Trigger - Only standalone mode with DOCKER_WORKER_ENABLED=false
+# When Docker worker is deployed, it handles container-tasks, not the Function App
+if STARTUP_STATE.all_passed and _app_mode.listens_to_container_tasks:
+    logger.info("✅ REGISTERING: container-tasks queue trigger (standalone dev mode)")
+elif _app_mode.listens_to_container_tasks:
+    logger.warning("⏭️ SKIPPING: container-tasks queue trigger (validation failed)")
 else:
-    logger.warning("⏭️ SKIPPING: vector-tasks queue trigger (APP_MODE=%s)", _app_mode.mode.value)
+    if _app_mode.docker_worker_enabled:
+        logger.info("⏭️ SKIPPING: container-tasks queue trigger (Docker worker handles this)")
+    else:
+        logger.warning("⏭️ SKIPPING: container-tasks queue trigger (APP_MODE=%s)", _app_mode.mode.value)
 
-# Summary of trigger registration (updated 03 JAN 2026 for STARTUP_REFORM.md)
+if STARTUP_STATE.all_passed and _app_mode.listens_to_container_tasks:
+    if 'handle_task_message' not in dir():
+        from triggers.service_bus import handle_task_message
+
+    @app.service_bus_queue_trigger(
+        arg_name="msg",
+        queue_name="container-tasks",
+        connection="ServiceBusConnection"
+    )
+    def process_container_task(msg: func.ServiceBusMessage) -> None:
+        """Process task messages from container-tasks queue (dev only - no Docker worker)."""
+        handle_task_message(msg, core_machine, queue_name="container-tasks")
+
+
+# Summary of trigger registration (V0.8 - 24 JAN 2026)
 _registered_triggers = []
 if STARTUP_STATE.all_passed and _app_mode.listens_to_jobs_queue:
     _registered_triggers.append("geospatial-jobs")
-if STARTUP_STATE.all_passed and _app_mode.listens_to_raster_tasks:
-    _registered_triggers.append("raster-tasks")
-if STARTUP_STATE.all_passed and _app_mode.listens_to_vector_tasks:
-    _registered_triggers.append("vector-tasks")
+if STARTUP_STATE.all_passed and _app_mode.listens_to_functionapp_tasks:
+    _registered_triggers.append("functionapp-tasks")
+if STARTUP_STATE.all_passed and _app_mode.listens_to_container_tasks:
+    _registered_triggers.append("container-tasks")
+
+# Calculate expected triggers based on mode
+_expected_triggers = sum([
+    _app_mode.listens_to_jobs_queue,
+    _app_mode.listens_to_functionapp_tasks,
+    _app_mode.listens_to_container_tasks,
+])
 
 logger.info("-" * 70)
-logger.info(f"🔌 SERVICE BUS TRIGGER REGISTRATION COMPLETE")
-logger.info(f"   Triggers registered: {len(_registered_triggers)}/3")
+logger.info(f"🔌 SERVICE BUS TRIGGER REGISTRATION COMPLETE (V0.8)")
+logger.info(f"   Triggers registered: {len(_registered_triggers)}/{_expected_triggers}")
 logger.info(f"   Queues: {_registered_triggers}")
 if not STARTUP_STATE.all_passed:
     logger.warning("⚠️ NO TRIGGERS REGISTERED - Startup validation failed")
     logger.warning("   Use GET /api/readyz to see validation errors")
 elif len(_registered_triggers) == 0:
     logger.warning("⚠️ NO TRIGGERS REGISTERED - APP_MODE doesn't listen to any queues")
-elif len(_registered_triggers) < 3:
+elif len(_registered_triggers) < _expected_triggers:
     logger.warning(f"⚠️ Partial trigger registration (APP_MODE={_app_mode.mode.value})")
 else:
-    logger.info("✅ All 3 Service Bus triggers registered (standalone mode)")
+    logger.info(f"✅ All expected triggers registered (APP_MODE={_app_mode.mode.value})")
 logger.info("=" * 70)
-
-if STARTUP_STATE.all_passed and _app_mode.listens_to_vector_tasks:
-    # APP_CLEANUP Phase 2: Handler logic moved to triggers/service_bus/task_handler.py
-    # Note: handle_task_message import already done above for raster trigger
-    if 'handle_task_message' not in dir():
-        from triggers.service_bus import handle_task_message
-
-    @app.service_bus_queue_trigger(
-        arg_name="msg",
-        queue_name="vector-tasks",
-        connection="ServiceBusConnection"
-    )
-    def process_vector_task(msg: func.ServiceBusMessage) -> None:
-        """Process vector task messages from dedicated vector-tasks queue."""
-        handle_task_message(msg, core_machine, queue_name="vector-tasks")
 
 
 # ============================================================================

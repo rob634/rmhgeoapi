@@ -33,6 +33,64 @@ const COMPONENT_MAPPING = {
     'comp-zarr-store': 'zarr_store'
 };
 
+// ============================================================================
+// COMPONENT GROUPING CONFIGURATION
+// ============================================================================
+// Groups components by their source system for organized display
+
+const COMPONENT_GROUPS = {
+    'function_app': {
+        label: 'Function App Services',
+        icon: '&#x26A1;',
+        description: 'Azure Functions orchestration and API services',
+        color: '#FFC14D',
+        components: [
+            'deployment_config',
+            'jobs',
+            'imports',
+            'service_bus',
+            'database',
+            'storage_containers',
+            'pgstac',
+            'titiler',
+            'ogc_features',
+            'duckdb',
+            'app_mode',
+            'startup_validation',
+            'schema_summary',
+            'system_reference_tables',
+            'vault',
+            'network_environment',
+            'database_config',
+            'geotiler'
+        ]
+    },
+    'docker_worker': {
+        label: 'Docker Worker Services',
+        icon: '&#x1F433;',
+        description: 'Container-based heavy processing and queue worker',
+        color: '#0071BC',
+        components: [
+            'runtime',
+            'etl_mount',
+            'auth_tokens',
+            'connection_pool',
+            'lifecycle'
+        ]
+    },
+    'shared': {
+        label: 'Shared Infrastructure',
+        icon: '&#x1F517;',
+        description: 'Resources used by both Function App and Docker Worker',
+        color: '#10B981',
+        components: [
+            'database',
+            'storage_containers',
+            'service_bus'
+        ]
+    }
+};
+
 // Special components that derive status from TiTiler's available_features
 const TITILER_FEATURE_COMPONENTS = {
     'comp-titiler-xarray': 'xarray_zarr',
@@ -366,7 +424,7 @@ async function loadHealth() {
         }
 
         renderIdentityInfo(data);
-        renderComponents(data.components);
+        renderComponents(data.components, dockerHealth);
         updateDiagramStatus(data.components, dockerHealth);
         renderSchemaSummary(data.components);
         renderDebugInfo(data);
@@ -570,7 +628,7 @@ function renderIdentityInfo(data) {
     envInfo.insertAdjacentHTML('afterend', identityHtml);
 }
 
-function renderComponents(components) {
+function renderComponents(components, dockerWorkerComponents = null) {
     const grid = document.getElementById('components-grid');
     grid.querySelectorAll('.skeleton-card').forEach(card => card.remove());
 
@@ -579,20 +637,98 @@ function renderComponents(components) {
         return;
     }
 
-    const sortOrder = { healthy: 0, partial: 1, warning: 2, unhealthy: 3, error: 4, disabled: 5, deprecated: 6 };
-    const sortedComponents = Object.entries(components).sort((a, b) => {
-        const statusA = sortOrder[a[1].status] ?? 99;
-        const statusB = sortOrder[b[1].status] ?? 99;
-        return statusA - statusB;
+    // Merge Docker Worker components if provided separately
+    const allComponents = { ...components };
+    if (dockerWorkerComponents && dockerWorkerComponents.components) {
+        Object.entries(dockerWorkerComponents.components).forEach(([key, value]) => {
+            // Prefix Docker Worker components to avoid collisions
+            allComponents[`docker_${key}`] = {
+                ...value,
+                _source: 'docker_worker'
+            };
+        });
+    }
+
+    // Tag components with their source based on COMPONENT_GROUPS
+    Object.keys(allComponents).forEach(name => {
+        if (!allComponents[name]._source) {
+            if (COMPONENT_GROUPS.docker_worker.components.includes(name) || name.startsWith('docker_')) {
+                allComponents[name]._source = 'docker_worker';
+            } else {
+                allComponents[name]._source = 'function_app';
+            }
+        }
     });
 
-    grid.innerHTML = sortedComponents.map(([name, component]) => {
+    // Group components by source
+    const groupedComponents = {
+        function_app: [],
+        docker_worker: []
+    };
+
+    Object.entries(allComponents).forEach(([name, component]) => {
+        const source = component._source || 'function_app';
+        if (groupedComponents[source]) {
+            groupedComponents[source].push([name, component]);
+        } else {
+            groupedComponents.function_app.push([name, component]);
+        }
+    });
+
+    // Sort within each group
+    const sortOrder = { healthy: 0, partial: 1, warning: 2, unhealthy: 3, error: 4, disabled: 5, deprecated: 6 };
+    Object.keys(groupedComponents).forEach(group => {
+        groupedComponents[group].sort((a, b) => {
+            const statusA = sortOrder[a[1].status] ?? 99;
+            const statusB = sortOrder[b[1].status] ?? 99;
+            return statusA - statusB;
+        });
+    });
+
+    // Render grouped sections
+    let html = '';
+
+    // Function App Section
+    if (groupedComponents.function_app.length > 0) {
+        const faConfig = COMPONENT_GROUPS.function_app;
+        const faStats = getGroupStats(groupedComponents.function_app);
+        html += renderComponentGroup('function_app', faConfig, groupedComponents.function_app, faStats);
+    }
+
+    // Docker Worker Section
+    if (groupedComponents.docker_worker.length > 0) {
+        const dwConfig = COMPONENT_GROUPS.docker_worker;
+        const dwStats = getGroupStats(groupedComponents.docker_worker);
+        html += renderComponentGroup('docker_worker', dwConfig, groupedComponents.docker_worker, dwStats);
+    }
+
+    grid.innerHTML = html;
+}
+
+function getGroupStats(components) {
+    const stats = { total: 0, healthy: 0, warning: 0, unhealthy: 0, disabled: 0 };
+    components.forEach(([name, component]) => {
+        stats.total++;
+        const status = component.status || 'unknown';
+        if (status === 'healthy') stats.healthy++;
+        else if (status === 'warning' || status === 'partial') stats.warning++;
+        else if (status === 'unhealthy' || status === 'error') stats.unhealthy++;
+        else if (status === 'disabled' || status === 'deprecated') stats.disabled++;
+    });
+    return stats;
+}
+
+function renderComponentGroup(groupId, config, components, stats) {
+    const statusClass = stats.unhealthy > 0 ? 'unhealthy' : stats.warning > 0 ? 'warning' : 'healthy';
+
+    const cardsHtml = components.map(([name, component]) => {
         const status = component.status || 'unknown';
         const description = component.description || '';
         const details = component.details || {};
         const checkedAt = component.checked_at;
+        const displayName = name.startsWith('docker_') ? name.replace('docker_', '') : name;
 
-        const linkInfo = COMPONENT_LINKS[name];
+        const linkInfo = COMPONENT_LINKS[name] || COMPONENT_LINKS[displayName];
         let linkHtml = '';
         if (linkInfo) {
             if (linkInfo.disabled) {
@@ -606,7 +742,7 @@ function renderComponents(components) {
             <div class="component-card ${status}" data-component-key="${name}">
                 <div class="component-header" onclick="toggleDetails('${name}')">
                     <div>
-                        <div class="component-name">${formatLabel(name)}</div>
+                        <div class="component-name">${formatLabel(displayName)}</div>
                         ${description ? `<div class="component-description">${description}</div>` : ''}
                         ${linkHtml}
                     </div>
@@ -634,6 +770,30 @@ function renderComponents(components) {
             </div>
         `;
     }).join('');
+
+    return `
+        <div class="component-group ${groupId}" data-group="${groupId}">
+            <div class="component-group-header ${statusClass}" style="border-left-color: ${config.color};">
+                <div class="group-title">
+                    <span class="group-icon">${config.icon}</span>
+                    <div>
+                        <h3>${config.label}</h3>
+                        <p class="group-description">${config.description}</p>
+                    </div>
+                </div>
+                <div class="group-stats">
+                    <span class="group-stat total">${stats.total} components</span>
+                    ${stats.healthy > 0 ? `<span class="group-stat healthy">${stats.healthy} healthy</span>` : ''}
+                    ${stats.warning > 0 ? `<span class="group-stat warning">${stats.warning} warning</span>` : ''}
+                    ${stats.unhealthy > 0 ? `<span class="group-stat unhealthy">${stats.unhealthy} unhealthy</span>` : ''}
+                    ${stats.disabled > 0 ? `<span class="group-stat disabled">${stats.disabled} disabled</span>` : ''}
+                </div>
+            </div>
+            <div class="component-group-cards">
+                ${cardsHtml}
+            </div>
+        </div>
+    `;
 }
 
 function renderDebugInfo(data) {

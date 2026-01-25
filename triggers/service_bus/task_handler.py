@@ -2,18 +2,19 @@
 # SERVICE BUS TASK HANDLER
 # ============================================================================
 # STATUS: Trigger layer - Task queue message processing
-# PURPOSE: Handle messages from raster-tasks and vector-tasks queues
+# PURPOSE: Handle messages from functionapp-tasks and container-tasks queues (V0.8)
 # CREATED: 23 JAN 2026
 # EPIC: APP_CLEANUP - Phase 2 Service Bus Handler Extraction
 # ============================================================================
 """
 Task Queue Message Handler Module.
 
-Handles messages from the raster-tasks and vector-tasks Service Bus queues.
+Handles messages from the functionapp-tasks and container-tasks Service Bus queues.
 Shared logic for both task types with queue-specific logging.
 
-This module extracts the common task processing logic from function_app.py
-to eliminate the 95% duplication between raster and vector task triggers.
+V0.8 Queue Architecture (24 JAN 2026):
+- functionapp-tasks: Lightweight ops (DB, metadata, validation)
+- container-tasks: Heavy ops (raster processing, H3, Docker worker)
 
 Task Processing Flow:
     1. Log message receipt (GAP-1 fix)
@@ -27,11 +28,11 @@ Usage:
 
     @app.service_bus_queue_trigger(
         arg_name="msg",
-        queue_name="raster-tasks",
+        queue_name="functionapp-tasks",
         connection="ServiceBusConnection"
     )
-    def process_raster_task(msg: func.ServiceBusMessage) -> None:
-        handle_task_message(msg, core_machine, queue_name="raster-tasks")
+    def process_functionapp_task(msg: func.ServiceBusMessage) -> None:
+        handle_task_message(msg, core_machine, queue_name="functionapp-tasks")
 """
 
 import time
@@ -57,12 +58,12 @@ def handle_task_message(
     """
     Process a task message from Service Bus.
 
-    Shared handler for both raster-tasks and vector-tasks queues.
+    Shared handler for functionapp-tasks and container-tasks queues.
 
     Args:
         msg: Service Bus message
         core_machine: CoreMachine instance for processing
-        queue_name: Queue name for logging ("raster-tasks" or "vector-tasks")
+        queue_name: Queue name for logging ("functionapp-tasks" or "container-tasks")
 
     Returns:
         Processing result dict with success status and details
@@ -73,9 +74,16 @@ def handle_task_message(
     # GAP-1 FIX: Log Service Bus message metadata IMMEDIATELY
     _log_message_received(msg, correlation_id, queue_name)
 
-    # Determine task type emoji for logging
-    emoji = "" if queue_name == "raster-tasks" else ""
-    task_type_label = "RASTER" if queue_name == "raster-tasks" else "VECTOR"
+    # V0.8: Determine task type emoji and label for logging
+    if queue_name == "functionapp-tasks":
+        emoji = "⚡"
+        task_type_label = "FUNCTIONAPP"
+    elif queue_name == "container-tasks":
+        emoji = "🐳"
+        task_type_label = "CONTAINER"
+    else:
+        emoji = "📋"
+        task_type_label = queue_name.upper()
 
     logger.info(
         f"[{correlation_id}] {emoji} {task_type_label} TASK TRIGGER ({queue_name} queue)",
@@ -92,8 +100,7 @@ def handle_task_message(
         task_message = TaskQueueMessage.model_validate_json(message_body)
 
         logger.info(
-            f"[{correlation_id}] Parsed {task_type_label.lower()} task: "
-            f"{task_message.task_id}, type={task_message.task_type}"
+            f"[{correlation_id}] Parsed task: {task_message.task_id}, type={task_message.task_type}"
         )
 
         # Add correlation tracking
@@ -216,10 +223,8 @@ def _handle_exception(
     """
     from .error_handler import extract_task_id_from_raw_message, mark_task_failed
 
-    task_type_label = "raster" if queue_name == "raster-tasks" else "vector"
-
     elapsed = time.time() - start_time
-    logger.error(f"[{correlation_id}] EXCEPTION in process_{task_type_label}_task after {elapsed:.3f}s")
+    logger.error(f"[{correlation_id}] EXCEPTION in task handler ({queue_name}) after {elapsed:.3f}s")
     logger.error(f"[{correlation_id}] Exception type: {type(e).__name__}")
     logger.error(f"[{correlation_id}] Exception message: {e}")
     logger.error(f"[{correlation_id}] Full traceback:\n{traceback.format_exc()}")

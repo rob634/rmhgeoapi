@@ -33,51 +33,16 @@ from typing import Dict, List, Any, Optional
 from util_logger import LoggerFactory, ComponentType
 from config.defaults import FathomDefaults
 
-# Continent to region mappings
-CONTINENT_REGIONS = {
-    'africa': [
-        'dza', 'ago', 'ben', 'bwa', 'bfa', 'bdi', 'cmr', 'cpv', 'caf',
-        'tcd', 'com', 'cog', 'cod', 'civ', 'dji', 'egy', 'gnq', 'eri',
-        'eth', 'gab', 'gmb', 'gha', 'gin', 'gnb', 'ken', 'lso', 'lbr',
-        'lby', 'mdg', 'mwi', 'mli', 'mrt', 'mus', 'mar', 'moz', 'nam',
-        'ner', 'nga', 'rwa', 'stp', 'sen', 'syc', 'sle', 'som', 'zaf',
-        'ssd', 'sdn', 'swz', 'tza', 'tgo', 'tun', 'uga', 'zmb', 'zwe'
-    ],
-    'asia': [
-        'afg', 'arm', 'aze', 'bhr', 'bgd', 'btn', 'brn', 'khm', 'chn',
-        'cyp', 'geo', 'ind', 'idn', 'irn', 'irq', 'isr', 'jpn', 'jor',
-        'kaz', 'kwt', 'kgz', 'lao', 'lbn', 'mys', 'mdv', 'mng', 'mmr',
-        'npl', 'prk', 'omn', 'pak', 'phl', 'qat', 'sau', 'sgp', 'kor',
-        'lka', 'syr', 'twn', 'tjk', 'tha', 'tls', 'tur', 'tkm', 'are',
-        'uzb', 'vnm', 'yem'
-    ],
-    'europe': [
-        'alb', 'and', 'aut', 'blr', 'bel', 'bih', 'bgr', 'hrv', 'cze',
-        'dnk', 'est', 'fin', 'fra', 'deu', 'grc', 'hun', 'isl', 'irl',
-        'ita', 'xkx', 'lva', 'lie', 'ltu', 'lux', 'mkd', 'mlt', 'mda',
-        'mco', 'mne', 'nld', 'nor', 'pol', 'prt', 'rou', 'rus', 'smr',
-        'srb', 'svk', 'svn', 'esp', 'swe', 'che', 'ukr', 'gbr', 'vat'
-    ],
-    'north_america': [
-        'atg', 'bhs', 'brb', 'blz', 'can', 'cri', 'cub', 'dma', 'dom',
-        'slv', 'grd', 'gtm', 'hti', 'hnd', 'jam', 'mex', 'nic', 'pan',
-        'kna', 'lca', 'vct', 'tto', 'usa'
-    ],
-    'south_america': [
-        'arg', 'bol', 'bra', 'chl', 'col', 'ecu', 'guy', 'pry', 'per',
-        'sur', 'ury', 'ven'
-    ],
-    'oceania': [
-        'aus', 'fji', 'kir', 'mhl', 'fsm', 'nru', 'nzl', 'plw', 'png',
-        'wsm', 'slb', 'ton', 'tuv', 'vut'
-    ]
-}
+# Use continent mappings from FathomDefaults (single source of truth)
+# Includes: africa, asia, europe, north_america, south_america, oceania
+CONTINENT_REGIONS = FathomDefaults.CONTINENT_REGIONS.copy()
 
-# Global = all continents
-CONTINENT_REGIONS['global'] = []
-for regions in CONTINENT_REGIONS.values():
-    if isinstance(regions, list):
-        CONTINENT_REGIONS['global'].extend(regions)
+# Add 'global' = all continents combined
+if 'global' not in CONTINENT_REGIONS:
+    CONTINENT_REGIONS['global'] = []
+    for regions in CONTINENT_REGIONS.values():
+        if isinstance(regions, list):
+            CONTINENT_REGIONS['global'].extend(regions)
 
 
 def fathom_chunk_inventory(params: dict, context: dict = None) -> dict:

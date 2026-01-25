@@ -40,6 +40,7 @@ from .create_h3_base import CreateH3BaseJob
 from .bootstrap_h3_land_grid_pyramid import BootstrapH3LandGridPyramidJob
 from .process_fathom_stack import ProcessFathomStackJob
 from .process_fathom_merge import ProcessFathomMergeJob
+from .process_fathom_docker import ProcessFathomDockerJob
 from .process_vector import ProcessVectorJob
 from .process_raster_v2 import ProcessRasterV2Job
 from .raster_mixin import RasterMixin
@@ -61,6 +62,7 @@ from .process_large_raster_docker import ProcessLargeRasterDockerJob
 from .detect_orphan_blobs import DetectOrphanBlobsJob
 from .register_silver_blobs import RegisterSilverBlobsJob
 from .bootstrap_h3_docker import BootstrapH3DockerJob
+from .vector_docker_etl import VectorDockerETLJob
 
 # Job Registry - add new jobs here
 ALL_JOBS = {
@@ -86,13 +88,19 @@ ALL_JOBS = {
     # H3 Grid (Docker - single stage)
     "bootstrap_h3_docker": BootstrapH3DockerJob,
 
-    # Fathom ETL
+    # Fathom ETL (Function App - multi-stage)
     "process_fathom_stack": ProcessFathomStackJob,
     "process_fathom_merge": ProcessFathomMergeJob,
     "inventory_fathom_container": InventoryFathomContainerJob,
 
-    # Vector ETL
+    # Fathom ETL (Docker - 3-stage hybrid)
+    "process_fathom_docker": ProcessFathomDockerJob,
+
+    # Vector ETL (Function App - multi-stage)
     "process_vector": ProcessVectorJob,
+
+    # Vector ETL (Docker - single stage with checkpoints)
+    "vector_docker_etl": VectorDockerETLJob,
 
     # Raster ETL (Function App - multi-stage)
     "process_raster_v2": ProcessRasterV2Job,

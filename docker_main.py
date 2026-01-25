@@ -3,13 +3,13 @@
 # CLAUDE CONTEXT - DOCKER WORKER ENTRY POINT
 # ============================================================================
 # STATUS: Core Component - Service Bus polling loop for Docker deployment
-# PURPOSE: Process long-running tasks from long-running-tasks queue
+# PURPOSE: Process long-running tasks from container-tasks queue (V0.8)
 # LAST_REVIEWED: 10 JAN 2026
 # ============================================================================
 """
 Docker Worker Entry Point.
 
-Polls the long-running-tasks queue and processes tasks via CoreMachine.
+Polls the container-tasks queue and processes tasks via CoreMachine.
 This replaces function_app.py for Docker deployments.
 
 Key Differences from Azure Functions:
@@ -136,7 +136,7 @@ class DockerWorker:
     """
     Docker Worker for long-running geospatial tasks.
 
-    Polls the long-running-tasks Service Bus queue and processes tasks
+    Polls the container-tasks Service Bus queue and processes tasks
     via CoreMachine, identical to how Azure Functions process tasks.
 
     Key Features:
@@ -168,8 +168,8 @@ class DockerWorker:
         # Service Bus client (lazy init)
         self._sb_client: Optional[ServiceBusClient] = None
 
-        # Configuration
-        self.queue_name = self.config.queues.long_running_tasks_queue
+        # Configuration (V0.8: container-tasks queue)
+        self.queue_name = self.config.queues.container_tasks_queue
         self.app_name = self.app_mode_config.app_name
 
         # Processing settings

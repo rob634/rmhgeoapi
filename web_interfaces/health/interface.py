@@ -206,11 +206,10 @@ class HealthInterface(BaseInterface):
         if titiler_url.startswith('http://'):
             titiler_url = titiler_url[7:]
 
-        # Queue names from config
+        # Queue names from config (V0.8)
         jobs_queue = config.queues.jobs_queue
-        raster_queue = config.queues.raster_tasks_queue
-        vector_queue = config.queues.vector_tasks_queue
-        long_queue = config.queues.long_running_tasks_queue
+        functionapp_queue = config.queues.functionapp_tasks_queue
+        container_queue = config.queues.container_tasks_queue
 
         # Docker worker config
         from config import get_app_mode_config
@@ -231,13 +230,11 @@ class HealthInterface(BaseInterface):
             # Platform API and workers (all same Function App in standalone mode)
             'comp-platform-api': f"{website_hostname}\nEndpoints: /api/platform/*, /api/jobs/*",
             'comp-orchestrator': f"{website_hostname}\nListens: {jobs_queue}",
-            'comp-io-worker': f"{website_hostname}\nListens: {vector_queue}",
-            'comp-compute-worker': f"{website_hostname}\nListens: {raster_queue}",
+            'comp-functionapp-worker': f"{website_hostname}\nListens: {functionapp_queue}",
 
-            # Service Bus queues
+            # Service Bus queues (V0.8: Consolidated to 3 queues)
             'comp-job-queues': f"{service_bus_ns}\nQueue: {jobs_queue}",
-            'comp-parallel-queue': f"{service_bus_ns}\nQueue: {vector_queue}",
-            'comp-compute-queue': f"{service_bus_ns}\nQueue: {raster_queue}",
+            'comp-functionapp-queue': f"{service_bus_ns}\nQueue: {functionapp_queue}",
 
             # Database
             'comp-job-tables': f"{db_host}\nDB: {db_name}\nSchema: {app_schema}.jobs",
@@ -253,8 +250,8 @@ class HealthInterface(BaseInterface):
             'comp-ogc-features': f"{ogc_url}\nOGC API - Features",
 
             # Docker Worker (status fetched from actual Docker app health)
-            'comp-long-queue': f"{service_bus_ns}\nQueue: {long_queue}\nDocker Worker: {'Enabled' if docker_worker_enabled else 'Disabled'}",
-            'comp-container': f"{docker_worker_url or 'Not configured'}\nQueue: {long_queue}\nStatus: {'Enabled' if docker_worker_enabled else 'Disabled (set DOCKER_WORKER_ENABLED=true)'}",
+            'comp-container-queue': f"{service_bus_ns}\nQueue: {container_queue}\nDocker Worker: {'Enabled' if docker_worker_enabled else 'Disabled'}",
+            'comp-container': f"{docker_worker_url or 'Not configured'}\nQueue: {container_queue}\nStatus: {'Enabled' if docker_worker_enabled else 'Disabled (set DOCKER_WORKER_ENABLED=true)'}",
 
             # Zarr/xarray components - TiTiler-xarray uses same TiTiler, Zarr uses same silver account
             'comp-titiler-xarray': f"{titiler_url}\nxarray/Zarr endpoint\nStatus: check available_features.xarray_zarr",

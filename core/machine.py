@@ -2015,18 +2015,16 @@ class CoreMachine:
         """
         Determine if this app should signal stage completion to jobs queue.
 
-        Returns True for worker modes (worker_raster, worker_vector) which
-        process tasks but don't handle stage orchestration locally.
+        Returns True for worker modes which process tasks but don't handle
+        stage orchestration locally - they must signal completion to orchestrator.
 
         Returns False for modes that handle orchestration locally:
-        - standalone: Does everything
-        - platform_*: Handles jobs queue
-
-        Added: 07 DEC 2025 - Multi-App Architecture
+        - STANDALONE: Does everything
+        - ORCHESTRATOR: Handles jobs queue
         """
         return self.app_mode_config.mode in [
-            AppMode.WORKER_RASTER,
-            AppMode.WORKER_VECTOR
+            AppMode.WORKER_FUNCTIONAPP,
+            AppMode.WORKER_DOCKER,
         ]
 
     def _advance_stage(self, job_id: str, job_type: str, next_stage: int):

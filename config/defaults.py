@@ -381,27 +381,15 @@ class AppModeDefaults:
     - worker_docker: container-tasks queue (heavy ops)
     """
 
-    # V0.8: Simplified 5 modes (24 JAN 2026)
+    # V0.8: 5 clean modes (25 JAN 2026)
     STANDALONE = "standalone"                 # All queues, all endpoints (dev)
     PLATFORM = "platform"                     # HTTP only, sends to jobs queue
     ORCHESTRATOR = "orchestrator"             # Jobs queue + all HTTP
     WORKER_FUNCTIONAPP = "worker_functionapp" # functionapp-tasks queue
     WORKER_DOCKER = "worker_docker"           # container-tasks queue (Docker)
 
-    # DEPRECATED: Keep for backward compatibility during migration
-    PLATFORM_RASTER = "platform_raster"   # DEPRECATED → use ORCHESTRATOR
-    PLATFORM_VECTOR = "platform_vector"   # DEPRECATED → use ORCHESTRATOR
-    PLATFORM_ONLY = "platform_only"       # DEPRECATED → use ORCHESTRATOR
-    WORKER_RASTER = "worker_raster"       # DEPRECATED → use WORKER_FUNCTIONAPP
-    WORKER_VECTOR = "worker_vector"       # DEPRECATED → use WORKER_FUNCTIONAPP
-    GATEWAY = "gateway"                   # DEPRECATED → use PLATFORM
-
     VALID_MODES = [
-        # V0.8 primary modes
-        STANDALONE, PLATFORM, ORCHESTRATOR, WORKER_FUNCTIONAPP, WORKER_DOCKER,
-        # Deprecated modes (still work during migration)
-        PLATFORM_RASTER, PLATFORM_VECTOR, PLATFORM_ONLY,
-        WORKER_RASTER, WORKER_VECTOR, GATEWAY
+        STANDALONE, PLATFORM, ORCHESTRATOR, WORKER_FUNCTIONAPP, WORKER_DOCKER
     ]
 
     DEFAULT_MODE = STANDALONE

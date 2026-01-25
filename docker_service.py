@@ -1637,6 +1637,8 @@ async def interface_submit_process(request: Request):
 # JOB MONITOR INTERFACE (25 JAN 2026 - Job List and Detail)
 # ============================================================================
 
+from templates_utils import templates
+
 @app.get("/interface/jobs", response_class=HTMLResponse)
 async def interface_jobs_list(
     request: Request,

@@ -2015,10 +2015,7 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                     "container_tasks": config.queues.container_tasks_queue,
                 },
                 "routing": {
-                    "routes_raster_externally": app_mode_config.routes_raster_externally,
-                    "routes_vector_externally": app_mode_config.routes_vector_externally,
-                    "raster_app_url": app_mode_config.raster_app_url,
-                    "vector_app_url": app_mode_config.vector_app_url
+                    "routes_tasks_externally": app_mode_config.routes_tasks_externally,
                 },
                 "role": {
                     "is_platform": app_mode_config.is_platform_mode,

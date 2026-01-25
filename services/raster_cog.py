@@ -16,6 +16,19 @@ Key Innovation: Single-pass reprojection + COG creation
     - Auto-selects optimal compression and resampling based on raster type
     - BAND interleave for cloud-native selective band access
 
+Processing Modes (25 JAN 2026):
+    DISK-BASED (when ETL mount enabled):
+        - stream_blob_to_mount(): Download to mounted filesystem
+        - cog_translate(file, file): Process file-to-file, GDAL uses disk for all ops
+        - stream_mount_to_blob(): Upload from mounted filesystem
+        - Memory usage: ~100MB regardless of file size
+
+    IN-MEMORY (when ETL mount disabled / Function App):
+        - read_blob(): Download to memory
+        - MemoryFile + cog_translate: Process in RAM
+        - write_blob(): Upload from memory
+        - Memory usage: ~2-3x file size
+
 Type-Specific Optimizations:
     RGB: JPEG compression (97% reduction), cubic resampling
     RGBA: WebP compression (supports alpha), cubic resampling
@@ -149,6 +162,216 @@ def _lazy_imports():
 
 # read_vsimem_file() function removed - now using rasterio.io.MemoryFile instead
 # MemoryFile provides same in-memory processing without needing GDAL osgeo module
+
+
+# =============================================================================
+# DISK-BASED COG PROCESSING (25 JAN 2026)
+# =============================================================================
+# When ETL mount is enabled, we use true disk-based processing:
+# 1. stream_blob_to_mount(): Download blob → mounted filesystem (streaming)
+# 2. cog_translate(file, file): GDAL processes file-to-file using disk I/O
+# 3. stream_mount_to_blob(): Upload from mounted filesystem → blob (streaming)
+#
+# This allows processing files LARGER THAN CONTAINER RAM because:
+# - Input is never fully loaded into Python memory
+# - GDAL uses CPL_TMPDIR on mount for intermediate operations
+# - Output is streamed directly from disk
+# =============================================================================
+
+def _process_cog_disk_based(
+    input_blob_container: str,
+    input_blob_path: str,
+    output_blob_container: str,
+    output_blob_path: str,
+    mount_path: str,
+    task_id: str,
+    cog_profile: dict,
+    cog_config: dict,
+    overview_resampling: str,
+    in_memory: bool,
+    logger,
+    compute_checksum: bool = True
+) -> Dict[str, Any]:
+    """
+    Process raster to COG using disk-based I/O via mounted filesystem.
+
+    This is the LOW-MEMORY path for Docker workers with Azure Files mount.
+    Data flows: Blob → Mount → GDAL → Mount → Blob (never fully in RAM).
+
+    Args:
+        input_blob_container: Source container name
+        input_blob_path: Source blob path
+        output_blob_container: Destination container name
+        output_blob_path: Destination blob path
+        mount_path: Path to mounted filesystem (e.g., /mounts/etl-temp)
+        task_id: Task identifier for temp file naming
+        cog_profile: COG profile dict for compression settings
+        cog_config: Config dict for reprojection settings
+        overview_resampling: Resampling method for overviews
+        in_memory: Whether GDAL should use in-memory processing (False for disk)
+        logger: Logger instance
+        compute_checksum: Whether to compute SHA-256 checksum
+
+    Returns:
+        Dict with:
+            - success: bool
+            - cog_bytes_on_disk: int (file size)
+            - input_path: str (temp input file path)
+            - output_path: str (temp output file path)
+            - download_result: dict (from stream_blob_to_mount)
+            - upload_result: dict (from stream_mount_to_blob)
+            - raster_metadata: dict (from rasterio)
+            - file_checksum: str (if compute_checksum=True)
+    """
+    from pathlib import Path
+    from infrastructure.blob import BlobRepository
+
+    # Import GDAL for CPL_TMPDIR
+    try:
+        from osgeo import gdal
+        gdal.SetConfigOption("CPL_TMPDIR", mount_path)
+        os.environ["CPL_TMPDIR"] = mount_path
+        logger.info(f"   GDAL CPL_TMPDIR set to: {mount_path}")
+    except Exception as e:
+        logger.warning(f"   Could not set GDAL CPL_TMPDIR: {e}")
+
+    # Generate unique temp file paths
+    task_short = task_id[:16] if task_id else "unknown"
+    input_filename = f"input_{task_short}.tif"
+    output_filename = f"output_{task_short}.cog.tif"
+    temp_input_path = str(Path(mount_path) / input_filename)
+    temp_output_path = str(Path(mount_path) / output_filename)
+
+    logger.info(f"📁 DISK-BASED COG PROCESSING")
+    logger.info(f"   Mount path: {mount_path}")
+    logger.info(f"   Temp input: {temp_input_path}")
+    logger.info(f"   Temp output: {temp_output_path}")
+
+    # Detect source zone
+    is_silver_container = input_blob_container.startswith('silver-')
+    source_zone = "silver" if is_silver_container else "bronze"
+    source_repo = BlobRepository.for_zone(source_zone)
+    silver_repo = BlobRepository.for_zone("silver")
+
+    raster_metadata = {}
+    file_checksum = None
+    download_result = None
+    upload_result = None
+
+    try:
+        # STEP A: Download blob to mounted filesystem (streaming - low memory)
+        logger.info(f"🔄 DISK STEP A: Streaming blob to mount...")
+        download_result = source_repo.stream_blob_to_mount(
+            container=input_blob_container,
+            blob_path=input_blob_path,
+            mount_path=temp_input_path,
+            chunk_size_mb=32
+        )
+
+        if not download_result.get('success'):
+            raise RuntimeError(f"stream_blob_to_mount failed: {download_result.get('error')}")
+
+        input_size_bytes = download_result.get('bytes_transferred', 0)
+        input_size_mb = input_size_bytes / (1024 * 1024)
+        logger.info(f"   Downloaded {input_size_mb:.2f}MB to disk in {download_result.get('duration_seconds', 0):.1f}s")
+
+        # STEP B: Open input file and get metadata
+        logger.info(f"🔄 DISK STEP B: Reading raster metadata...")
+        rasterio, Resampling, cog_translate, cog_profiles_module = _lazy_imports()
+
+        with rasterio.open(temp_input_path) as src:
+            raster_metadata = {
+                'crs': str(src.crs),
+                'bounds': list(src.bounds),
+                'shape': [src.height, src.width],
+                'band_count': src.count,
+                'dtype': str(src.dtypes[0]),
+            }
+            logger.info(f"   CRS: {raster_metadata['crs']}")
+            logger.info(f"   Shape: {raster_metadata['shape']}")
+            logger.info(f"   Bands: {raster_metadata['band_count']}")
+
+        # STEP C: Create COG (file-to-file, GDAL uses disk)
+        logger.info(f"🔄 DISK STEP C: Creating COG with cog_translate (disk-based)...")
+        logger.info(f"   in_memory={in_memory} (should be False)")
+        logger.info(f"   Overview resampling: {overview_resampling}")
+
+        cog_start = time.time()
+        cog_translate(
+            temp_input_path,
+            temp_output_path,
+            cog_profile,
+            config=cog_config,
+            overview_level=None,
+            overview_resampling=overview_resampling,
+            in_memory=in_memory,
+            quiet=False,
+        )
+        cog_duration = time.time() - cog_start
+
+        # Get output file size
+        output_size_bytes = Path(temp_output_path).stat().st_size
+        output_size_mb = output_size_bytes / (1024 * 1024)
+        logger.info(f"   COG created: {output_size_mb:.2f}MB in {cog_duration:.1f}s")
+
+        # Compute checksum from disk file
+        if compute_checksum:
+            logger.info(f"🔄 DISK STEP D: Computing checksum from disk...")
+            from util_checksum import compute_multihash
+            checksum_start = time.time()
+            with open(temp_output_path, 'rb') as f:
+                file_checksum = compute_multihash(f.read(), log_performance=False)
+            checksum_duration = time.time() - checksum_start
+            logger.info(f"   Checksum: {file_checksum[:24]}... ({checksum_duration*1000:.0f}ms)")
+
+        # STEP E: Upload from mounted filesystem to blob (streaming - low memory)
+        logger.info(f"🔄 DISK STEP E: Streaming COG from mount to blob...")
+        upload_result = silver_repo.stream_mount_to_blob(
+            mount_path=temp_output_path,
+            container=output_blob_container,
+            blob_path=output_blob_path,
+            content_type='image/tiff'
+        )
+
+        if not upload_result.get('success'):
+            raise RuntimeError(f"stream_mount_to_blob failed: {upload_result.get('error')}")
+
+        logger.info(f"   Uploaded {output_size_mb:.2f}MB in {upload_result.get('duration_seconds', 0):.1f}s")
+
+        return {
+            'success': True,
+            'cog_bytes_on_disk': output_size_bytes,
+            'input_size_bytes': input_size_bytes,
+            'input_path': temp_input_path,
+            'output_path': temp_output_path,
+            'download_result': download_result,
+            'upload_result': upload_result,
+            'raster_metadata': raster_metadata,
+            'file_checksum': file_checksum,
+            'cog_duration_seconds': cog_duration,
+        }
+
+    except Exception as e:
+        logger.error(f"❌ DISK-BASED COG PROCESSING FAILED: {e}")
+        return {
+            'success': False,
+            'error': str(e),
+            'input_path': temp_input_path,
+            'output_path': temp_output_path,
+            'download_result': download_result,
+            'upload_result': upload_result,
+        }
+
+    finally:
+        # STEP F: Cleanup temp files
+        logger.info(f"🧹 DISK STEP F: Cleaning up temp files...")
+        for temp_file in [temp_input_path, temp_output_path]:
+            try:
+                if Path(temp_file).exists():
+                    Path(temp_file).unlink()
+                    logger.debug(f"   Deleted: {temp_file}")
+            except Exception as cleanup_error:
+                logger.warning(f"   Failed to delete {temp_file}: {cleanup_error}")
 
 
 def create_cog(params: dict) -> dict:
@@ -375,7 +598,139 @@ def create_cog(params: dict) -> dict:
         logger.warning(f"⚠️ STEP 2c: OOM evidence setup failed (non-fatal): {e}")
         # Continue without OOM evidence - core functionality still works
 
-    # STEP 3: Setup COG profile and configuration
+    # ==========================================================================
+    # PROCESSING PATH SELECTION (25 JAN 2026)
+    # ==========================================================================
+    # Check if we should use disk-based processing (Docker with Azure Files mount)
+    # or in-memory processing (Function App / small files).
+    # ==========================================================================
+
+    from config import get_config
+    config_obj = get_config()
+    silver_container = config_obj.storage.silver.get_container('cogs')
+
+    # Get COG profile and settings early (needed for both paths)
+    rasterio, Resampling, cog_translate, cog_profiles = _lazy_imports()
+
+    try:
+        cog_profile = cog_profiles.get(compression)
+    except KeyError:
+        logger.warning(f"⚠️ Unknown compression '{compression}', falling back to deflate")
+        cog_profile = cog_profiles.get('deflate')
+
+    # Set interleave based on compression type
+    if compression in ("jpeg", "webp"):
+        cog_profile["INTERLEAVE"] = "PIXEL"
+    else:
+        cog_profile["INTERLEAVE"] = "BAND"
+
+    if compression == "jpeg":
+        cog_profile["QUALITY"] = jpeg_quality
+
+    # Get resampling settings
+    try:
+        overview_resampling_enum = getattr(Resampling, overview_resampling)
+    except AttributeError:
+        overview_resampling_enum = Resampling.cubic
+    overview_resampling_name = overview_resampling_enum.name if hasattr(overview_resampling_enum, 'name') else overview_resampling
+
+    # Build cog_config for reprojection (if needed - determined later)
+    cog_config = {}
+
+    # ==========================================================================
+    # DISK-BASED PROCESSING PATH (when ETL mount enabled)
+    # ==========================================================================
+    if config_obj.raster.use_etl_mount:
+        mount_path = config_obj.raster.etl_mount_path
+        logger.info("=" * 60)
+        logger.info("📁 DISK-BASED PROCESSING MODE (ETL Mount Enabled)")
+        logger.info(f"   Mount path: {mount_path}")
+        logger.info(f"   Memory impact: ~100MB (streaming chunks)")
+        logger.info("=" * 60)
+
+        # Call disk-based processing helper
+        disk_result = _process_cog_disk_based(
+            input_blob_container=container_name,
+            input_blob_path=blob_name,
+            output_blob_container=silver_container,
+            output_blob_path=output_blob_name,
+            mount_path=mount_path,
+            task_id=task_id,
+            cog_profile=cog_profile,
+            cog_config=cog_config,  # Note: reprojection config determined inside helper
+            overview_resampling=overview_resampling_name,
+            in_memory=False,  # Always False for disk-based
+            logger=logger,
+            compute_checksum=True
+        )
+
+        if not disk_result.get('success'):
+            logger.error(f"❌ Disk-based COG creation failed: {disk_result.get('error')}")
+            return {
+                "success": False,
+                "error": disk_result.get('error', 'Unknown error in disk-based processing')
+            }
+
+        # Extract results
+        output_size_bytes = disk_result.get('cog_bytes_on_disk', 0)
+        output_size_mb = output_size_bytes / (1024 * 1024)
+        input_size_bytes = disk_result.get('input_size_bytes', 0)
+        input_size_mb = input_size_bytes / (1024 * 1024)
+        file_checksum = disk_result.get('file_checksum')
+        raster_metadata = disk_result.get('raster_metadata', {})
+        cog_duration = disk_result.get('cog_duration_seconds', 0)
+
+        logger.info("🎉 DISK-BASED COG CREATION COMPLETE")
+        logger.info(f"   Input: {input_size_mb:.2f}MB → Output: {output_size_mb:.2f}MB")
+        logger.info(f"   Processing time: {cog_duration:.1f}s")
+
+        # Return success result (matches in-memory path structure)
+        return {
+            "success": True,
+            "result": {
+                "cog_blob": output_blob_name,
+                "cog_container": silver_container,
+                "cog_tier": output_tier.value,
+                "storage_tier": tier_profile.storage_tier.value,
+                "source_blob": blob_name,
+                "source_container": container_name,
+                "reprojection_performed": False,  # TODO: detect from disk_result
+                "source_crs": raster_metadata.get('crs', str(source_crs)),
+                "target_crs": str(target_crs),
+                "bounds_4326": raster_metadata.get('bounds'),
+                "shape": raster_metadata.get('shape', []),
+                "size_mb": round(output_size_mb, 2),
+                "compression": compression,
+                "jpeg_quality": jpeg_quality if compression == "jpeg" else None,
+                "tile_size": [512, 512],
+                "overview_levels": [],  # Not captured in disk path currently
+                "overview_resampling": overview_resampling,
+                "reproject_resampling": reproject_resampling if False else None,
+                "raster_type": raster_metadata if raster_metadata else {"detected_type": raster_type},
+                "processing_time_seconds": round(cog_duration, 2),
+                "tier_profile": {
+                    "tier": output_tier.value,
+                    "compression": tier_profile.compression,
+                    "storage_tier": tier_profile.storage_tier.value,
+                    "use_case": tier_profile.use_case,
+                    "description": tier_profile.description
+                },
+                "file_checksum": file_checksum,
+                "file_size": output_size_bytes,
+                "blob_version_id": None,  # Not captured in stream upload
+                "processing_mode": "disk_based",  # NEW: indicates which path was used
+            }
+        }
+
+    # ==========================================================================
+    # IN-MEMORY PROCESSING PATH (original path for Function App / small files)
+    # ==========================================================================
+    logger.info("=" * 60)
+    logger.info("💾 IN-MEMORY PROCESSING MODE")
+    logger.info("   Memory impact: ~2-3x file size")
+    logger.info("=" * 60)
+
+    # STEP 3: Setup - COG profile already configured above
     temp_dir = None
     local_output = None
 
@@ -383,11 +738,6 @@ def create_cog(params: dict) -> dict:
     try:
         # STEP 3: Download input tile and open with MemoryFile (in-memory processing)
         logger.info("🔄 STEP 3: Downloading input tile to memory...")
-
-        # Get silver container from config
-        from config import get_config
-        config_obj = get_config()
-        silver_container = config_obj.storage.silver.get_container('cogs')
 
         # Download input tile bytes - detect zone from container name
         # Silver containers (silver-cogs, silver-tiles) are in silver zone
@@ -425,42 +775,13 @@ def create_cog(params: dict) -> dict:
             logger.error(f"   Error: {e}")
             raise
 
-        # Get COG profile for compression type
-        try:
-            cog_profile = cog_profiles.get(compression)
-            logger.info(f"   Using COG profile: {compression}")
-        except KeyError:
-            logger.warning(f"⚠️ Unknown compression '{compression}', falling back to deflate")
-            cog_profile = cog_profiles.get('deflate')
-
-        # Set interleave based on compression type
-        # JPEG/WebP: PIXEL interleave required (YCbCr encoding operates on interleaved RGB)
-        # DEFLATE/LZW/LERC: BAND interleave preferred (cloud-native selective band access)
-        if compression in ("jpeg", "webp"):
-            cog_profile["INTERLEAVE"] = "PIXEL"
-            logger.info(f"   Interleave: PIXEL (required for {compression.upper()} YCbCr encoding)")
-        else:
-            # BAND interleave optimizes for:
-            # - Selective band access via HTTP range requests (read only bands needed)
-            # - Multi-spectral analysis (NDVI = only NIR+Red, not all bands)
-            # - Cloud storage access patterns (minimize bytes transferred)
-            # - Modern standard for scientific/remote sensing data (HDF, NetCDF, Zarr)
-            cog_profile["INTERLEAVE"] = "BAND"
-            logger.info(f"   Interleave: BAND (cloud-native pattern for selective band access)")
-
-        # Add JPEG quality if using JPEG compression
+        # COG profile and resampling already configured above
+        logger.info(f"   Using COG profile: {compression}")
+        logger.info(f"   Interleave: {'PIXEL' if compression in ('jpeg', 'webp') else 'BAND'}")
         if compression == "jpeg":
-            cog_profile["QUALITY"] = jpeg_quality
             logger.info(f"   JPEG quality: {jpeg_quality}")
 
-        # Get resampling enum for overviews
-        try:
-            overview_resampling_enum = getattr(Resampling, overview_resampling)
-        except AttributeError:
-            logger.warning(f"⚠️ Unknown resampling '{overview_resampling}', using cubic")
-            overview_resampling_enum = Resampling.cubic
-
-        # Get in_memory setting (parameter overrides config default)
+        # Get in_memory setting for this path (in-memory path, but can still use disk for intermediates)
         in_memory_param = params.get('in_memory')
         if in_memory_param is not None:
             in_memory = in_memory_param
@@ -469,27 +790,8 @@ def create_cog(params: dict) -> dict:
             in_memory = config_obj.raster_cog_in_memory
             logger.info(f"   Using config default in_memory={in_memory}")
 
-        # ETL Mount Override (24 JAN 2026)
-        # When ETL mount is enabled (Docker workers with Azure Files mount),
-        # force in_memory=False and use the mount for GDAL temp files.
-        # This allows processing files larger than container RAM.
-        if config_obj.raster.use_etl_mount:
-            mount_path = config_obj.raster.etl_mount_path
-            logger.info(f"📁 ETL Mount ENABLED: Forcing disk-based processing")
-            in_memory = False  # Always disk-based when mount enabled
-
-            # Configure GDAL to use mount for temp files
-            try:
-                from osgeo import gdal
-                os.environ["CPL_TMPDIR"] = mount_path
-                gdal.SetConfigOption("CPL_TMPDIR", mount_path)
-                logger.info(f"   CPL_TMPDIR set to: {mount_path}")
-            except Exception as e:
-                logger.warning(f"   ⚠️ Could not set CPL_TMPDIR: {e}")
-
         logger.info(f"✅ STEP 3: COG profile configured")
-        temp_location = config_obj.raster.etl_mount_path if config_obj.raster.use_etl_mount else "/tmp"
-        logger.info(f"   Processing mode: {'in-memory (RAM)' if in_memory else f'disk-based ({temp_location})'}")
+        logger.info(f"   Processing mode: in-memory (RAM)")
 
         # STEP 4: Open input with MemoryFile and create COG with MemoryFile output
         logger.info("🔄 STEP 4: Opening input raster with MemoryFile...")

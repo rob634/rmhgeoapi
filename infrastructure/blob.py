@@ -158,6 +158,52 @@ class IBlobRepository(ABC):
         """Delete a blob"""
         pass
 
+    @abstractmethod
+    def stream_blob_to_mount(
+        self,
+        container: str,
+        blob_path: str,
+        mount_path: str,
+        chunk_size_mb: int = 32
+    ) -> Dict[str, Any]:
+        """
+        Stream blob directly to mounted filesystem without loading into memory.
+
+        Args:
+            container: Source blob container name
+            blob_path: Source blob path within container
+            mount_path: Destination path on mounted filesystem (absolute path)
+            chunk_size_mb: Streaming chunk size in MB (default: 32)
+
+        Returns:
+            Dict with transfer result including bytes_transferred, duration, throughput
+        """
+        pass
+
+    @abstractmethod
+    def stream_mount_to_blob(
+        self,
+        mount_path: str,
+        container: str,
+        blob_path: str,
+        content_type: Optional[str] = None,
+        chunk_size_mb: int = 32
+    ) -> Dict[str, Any]:
+        """
+        Stream file from mounted filesystem to blob without loading into memory.
+
+        Args:
+            mount_path: Source path on mounted filesystem (must exist)
+            container: Destination blob container name
+            blob_path: Destination blob path within container
+            content_type: MIME type for blob (auto-detected if not specified)
+            chunk_size_mb: Streaming chunk size in MB (default: 32)
+
+        Returns:
+            Dict with transfer result including bytes_transferred, duration, throughput
+        """
+        pass
+
 
 # ============================================================================
 # BLOB REPOSITORY IMPLEMENTATION
@@ -947,7 +993,318 @@ class BlobRepository(IBlobRepository):
         except Exception as e:
             logger.error(f"Failed to delete blob: {e}")
             raise
-    
+
+    # =========================================================================
+    # BLOB ↔ MOUNT STREAMING METHODS (25 JAN 2026)
+    # =========================================================================
+    # These methods stream data between Azure Blob Storage and mounted filesystems
+    # (e.g., Azure Files mount at /mounts/etl-temp) without loading entire files
+    # into memory. Essential for processing files larger than available RAM.
+    # =========================================================================
+
+    @dec_validate_container_and_blob
+    def stream_blob_to_mount(
+        self,
+        container: str,
+        blob_path: str,
+        mount_path: str,
+        chunk_size_mb: int = 32,
+        overwrite_existing: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Stream blob directly to mounted filesystem without loading into memory.
+
+        Downloads blob in chunks, writing each chunk directly to disk. This avoids
+        the memory spike that would occur from loading the entire file into RAM.
+        Essential for processing files larger than container memory limit.
+
+        CRITICAL: This is how we get data from blob storage ONTO the mounted
+        filesystem so GDAL can process it with disk-based I/O.
+
+        Args:
+            container: Source blob container name
+            blob_path: Source blob path within container
+            mount_path: Destination path on mounted filesystem (MUST be absolute)
+            chunk_size_mb: Size of each streaming chunk (default: 32MB)
+            overwrite_existing: Whether to overwrite if file exists (default: True)
+
+        Returns:
+            Dict with transfer metrics:
+                - success: bool
+                - operation: "blob_to_mount"
+                - bytes_transferred: int
+                - duration_seconds: float
+                - throughput_mbps: float
+                - chunks_transferred: int
+                - source_uri: str
+                - destination_uri: str
+
+        Raises:
+            ValueError: If mount_path is not absolute or parent doesn't exist
+            FileExistsError: If file exists and overwrite_existing=False
+            ResourceNotFoundError: If blob doesn't exist
+
+        Example:
+            result = blob_repo.stream_blob_to_mount(
+                container="bronze-raster",
+                blob_path="tiles/flood_100yr.tif",
+                mount_path="/mounts/etl-temp/input_abc123.tif"
+            )
+            # File now on disk at /mounts/etl-temp/input_abc123.tif
+            # Memory usage: ~32MB (chunk size), not 1.8GB (file size)
+        """
+        import time
+        from pathlib import Path
+
+        # Validate mount_path
+        mount_path_obj = Path(mount_path)
+        if not mount_path_obj.is_absolute():
+            raise ValueError(f"mount_path must be absolute, got: {mount_path}")
+        if not mount_path_obj.parent.exists():
+            raise ValueError(
+                f"Mount path parent directory does not exist: {mount_path_obj.parent}. "
+                f"Is the filesystem mounted?"
+            )
+        if mount_path_obj.exists() and not overwrite_existing:
+            raise FileExistsError(f"File already exists and overwrite_existing=False: {mount_path}")
+
+        chunk_size_bytes = chunk_size_mb * 1024 * 1024
+        source_uri = f"blob://{container}/{blob_path}"
+        dest_uri = f"file://{mount_path}"
+
+        logger.info(f"📥 STREAM_BLOB_TO_MOUNT starting")
+        logger.info(f"   Source: {source_uri}")
+        logger.info(f"   Destination: {dest_uri}")
+        logger.info(f"   Chunk size: {chunk_size_mb}MB")
+
+        start_time = time.time()
+        bytes_transferred = 0
+        chunks_transferred = 0
+
+        try:
+            container_client = self._get_container_client(container)
+            blob_client = container_client.get_blob_client(blob_path)
+
+            # Get blob size for progress logging
+            props = blob_client.get_blob_properties()
+            blob_size = props.size
+            blob_size_mb = blob_size / (1024 * 1024)
+            logger.info(f"   Blob size: {blob_size_mb:.2f}MB")
+
+            # Stream download to file
+            download_stream = blob_client.download_blob()
+
+            with open(mount_path, 'wb') as f:
+                for chunk in download_stream.chunks():
+                    f.write(chunk)
+                    chunk_len = len(chunk)
+                    bytes_transferred += chunk_len
+                    chunks_transferred += 1
+
+                    # Log progress every ~100MB
+                    if chunks_transferred % max(1, int(100 / chunk_size_mb)) == 0:
+                        pct = (bytes_transferred / blob_size * 100) if blob_size > 0 else 0
+                        logger.info(
+                            f"   Progress: {bytes_transferred / (1024*1024):.1f}MB / "
+                            f"{blob_size_mb:.1f}MB ({pct:.0f}%)"
+                        )
+
+            duration = time.time() - start_time
+            throughput = (bytes_transferred / (1024 * 1024)) / duration if duration > 0 else 0
+
+            logger.info(f"📥 STREAM_BLOB_TO_MOUNT complete")
+            logger.info(f"   Transferred: {bytes_transferred / (1024*1024):.2f}MB in {duration:.1f}s")
+            logger.info(f"   Throughput: {throughput:.1f}MB/s")
+            logger.info(f"   Chunks: {chunks_transferred}")
+
+            return {
+                'success': True,
+                'operation': 'blob_to_mount',
+                'bytes_transferred': bytes_transferred,
+                'duration_seconds': round(duration, 2),
+                'throughput_mbps': round(throughput, 2),
+                'chunks_transferred': chunks_transferred,
+                'chunk_size_mb': chunk_size_mb,
+                'source_uri': source_uri,
+                'destination_uri': dest_uri,
+            }
+
+        except Exception as e:
+            duration = time.time() - start_time
+            logger.error(f"📥❌ STREAM_BLOB_TO_MOUNT failed: {e}")
+            logger.error(f"   Transferred before failure: {bytes_transferred / (1024*1024):.2f}MB")
+
+            # Clean up partial file
+            if mount_path_obj.exists():
+                try:
+                    mount_path_obj.unlink()
+                    logger.info(f"   Cleaned up partial file: {mount_path}")
+                except Exception as cleanup_error:
+                    logger.warning(f"   Failed to clean up partial file: {cleanup_error}")
+
+            return {
+                'success': False,
+                'operation': 'blob_to_mount',
+                'bytes_transferred': bytes_transferred,
+                'duration_seconds': round(duration, 2),
+                'throughput_mbps': 0,
+                'chunks_transferred': chunks_transferred,
+                'chunk_size_mb': chunk_size_mb,
+                'source_uri': source_uri,
+                'destination_uri': dest_uri,
+                'error': str(e),
+            }
+
+    @dec_validate_container
+    def stream_mount_to_blob(
+        self,
+        mount_path: str,
+        container: str,
+        blob_path: str,
+        content_type: Optional[str] = None,
+        chunk_size_mb: int = 32,
+        overwrite_existing: bool = True,
+        metadata: Optional[Dict[str, str]] = None
+    ) -> Dict[str, Any]:
+        """
+        Stream file from mounted filesystem to blob without loading into memory.
+
+        Reads file in chunks, uploading each chunk directly to blob storage.
+        Uses Azure SDK's upload_blob with max_concurrency for efficient streaming.
+        Essential for uploading large processed files (COGs, GeoParquet).
+
+        CRITICAL: This is how we get processed data FROM the mounted filesystem
+        back to blob storage after GDAL disk-based processing.
+
+        Args:
+            mount_path: Source path on mounted filesystem (MUST exist)
+            container: Destination blob container name
+            blob_path: Destination blob path within container
+            content_type: MIME type for blob (auto-detected if not specified)
+            chunk_size_mb: Size of each streaming chunk (default: 32MB)
+            overwrite_existing: Whether to overwrite if blob exists (default: True)
+            metadata: Optional metadata dictionary for the blob
+
+        Returns:
+            Dict with transfer metrics:
+                - success: bool
+                - operation: "mount_to_blob"
+                - bytes_transferred: int
+                - duration_seconds: float
+                - throughput_mbps: float
+                - source_uri: str
+                - destination_uri: str
+                - etag: str (blob etag after upload)
+
+        Raises:
+            FileNotFoundError: If mount_path doesn't exist
+            ValueError: If mount_path is a directory
+
+        Example:
+            result = blob_repo.stream_mount_to_blob(
+                mount_path="/mounts/etl-temp/output_abc123.cog.tif",
+                container="silver-cogs",
+                blob_path="processed/flood_100yr.tif",
+                content_type="image/tiff"
+            )
+            # COG now in blob storage
+            # Memory usage: ~32MB (chunk size), not 1.8GB (file size)
+        """
+        import time
+        from pathlib import Path
+
+        mount_path_obj = Path(mount_path)
+
+        # Validate source file
+        if not mount_path_obj.exists():
+            raise FileNotFoundError(f"Source file does not exist: {mount_path}")
+        if mount_path_obj.is_dir():
+            raise ValueError(f"mount_path must be a file, not a directory: {mount_path}")
+
+        # Auto-detect content type if not specified
+        if content_type is None:
+            ext = mount_path_obj.suffix.lower()
+            content_types = {
+                '.tif': 'image/tiff',
+                '.tiff': 'image/tiff',
+                '.png': 'image/png',
+                '.jpg': 'image/jpeg',
+                '.jpeg': 'image/jpeg',
+                '.json': 'application/json',
+                '.geojson': 'application/geo+json',
+                '.parquet': 'application/vnd.apache.parquet',
+            }
+            content_type = content_types.get(ext, 'application/octet-stream')
+
+        file_size = mount_path_obj.stat().st_size
+        file_size_mb = file_size / (1024 * 1024)
+        chunk_size_bytes = chunk_size_mb * 1024 * 1024
+        source_uri = f"file://{mount_path}"
+        dest_uri = f"blob://{container}/{blob_path}"
+
+        logger.info(f"📤 STREAM_MOUNT_TO_BLOB starting")
+        logger.info(f"   Source: {source_uri}")
+        logger.info(f"   Destination: {dest_uri}")
+        logger.info(f"   File size: {file_size_mb:.2f}MB")
+        logger.info(f"   Chunk size: {chunk_size_mb}MB")
+        logger.info(f"   Content-Type: {content_type}")
+
+        start_time = time.time()
+
+        try:
+            container_client = self._get_container_client(container)
+            blob_client = container_client.get_blob_client(blob_path)
+
+            # Configure content settings
+            content_settings = ContentSettings(content_type=content_type)
+
+            # Stream upload from file - Azure SDK handles chunking internally
+            # max_concurrency controls parallel chunk uploads
+            with open(mount_path, 'rb') as f:
+                result = blob_client.upload_blob(
+                    f,
+                    overwrite=overwrite_existing,
+                    content_settings=content_settings,
+                    metadata=metadata,
+                    max_concurrency=4,  # Parallel chunk uploads
+                    length=file_size,   # Helps with progress tracking
+                )
+
+            duration = time.time() - start_time
+            throughput = (file_size / (1024 * 1024)) / duration if duration > 0 else 0
+
+            logger.info(f"📤 STREAM_MOUNT_TO_BLOB complete")
+            logger.info(f"   Transferred: {file_size_mb:.2f}MB in {duration:.1f}s")
+            logger.info(f"   Throughput: {throughput:.1f}MB/s")
+            logger.info(f"   ETag: {result.get('etag', 'N/A')}")
+
+            return {
+                'success': True,
+                'operation': 'mount_to_blob',
+                'bytes_transferred': file_size,
+                'duration_seconds': round(duration, 2),
+                'throughput_mbps': round(throughput, 2),
+                'source_uri': source_uri,
+                'destination_uri': dest_uri,
+                'etag': result.get('etag'),
+                'content_type': content_type,
+            }
+
+        except Exception as e:
+            duration = time.time() - start_time
+            logger.error(f"📤❌ STREAM_MOUNT_TO_BLOB failed: {e}")
+
+            return {
+                'success': False,
+                'operation': 'mount_to_blob',
+                'bytes_transferred': 0,
+                'duration_seconds': round(duration, 2),
+                'throughput_mbps': 0,
+                'source_uri': source_uri,
+                'destination_uri': dest_uri,
+                'error': str(e),
+            }
+
     @dec_validate_container_and_blob
     def get_blob_properties(self, container: str, blob_path: str) -> Dict[str, Any]:
         """

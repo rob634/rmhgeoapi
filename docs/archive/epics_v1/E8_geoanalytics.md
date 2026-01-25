@@ -1,0 +1,441 @@
+## Epic E8: GeoAnalytics Pipeline 🚧
+
+**Type**: Business
+**Value Statement**: Raw hosted data becomes H3-aggregated, analysis-ready output.
+**Runs On**: E7 (Pipeline Infrastructure)
+**Status**: 🚧 PARTIAL (F8.1-F8.3 ✅, F8.8 ✅, F8.9 ✅, F8.13 🚧)
+**Last Updated**: 08 JAN 2026
+
+**Strategic Context**:
+> E8 is the "transform and export" epic. Data hosted in E9 (FATHOM, CMIP6) gets aggregated to H3
+> hexagons and exported as: (a) gargantuan GeoParquet files (res 2-8, hundreds of columns) for
+> Databricks/DuckDB, or (b) OGC Feature collections for mapping and download.
+
+**Architecture**:
+```
+E9: Large Data             E8: GeoAnalytics              Outputs
+┌─────────────┐           ┌───────────────┐           ┌──────────────────┐
+│ FATHOM COGs │──────────▶│ H3 Zonal      │──────────▶│ GeoParquet       │
+│ CMIP6 Zarr  │           │ Statistics    │           │ (res 2-8, OLAP)  │
+├─────────────┤           ├───────────────┤           ├──────────────────┤
+│ PostGIS     │──────────▶│ H3 Point      │──────────▶│ OGC Features     │
+│ Vectors     │           │ Aggregation   │           │ (API + download) │
+└─────────────┘           └───────────────┘           └──────────────────┘
+```
+
+**Feature Summary**:
+| Feature | Status | Description |
+|---------|--------|-------------|
+| F8.1 | ✅ | H3 Grid Infrastructure |
+| F8.2 | ✅ | Grid Bootstrap System |
+| F8.3 | ✅ | Raster→H3 Aggregation |
+| F8.4 | ⬜ | Vector→H3 Aggregation |
+| F8.5 | 📋 | GeoParquet Export (res 2-8, 100s columns) |
+| F8.6 | 🚧 | Analytics API |
+| F8.7 | 📋 | Building Exposure Analysis (MS/Google footprints) |
+| F8.8 | ✅ | Source Catalog |
+| F8.9 | ✅ | H3 Export to OGC Features (~~E14~~) |
+| F8.10 | 📋 | Analytics Data Browser (~~E11~~) |
+| F8.11 | 📋 | H3 Visualization UI (~~E11~~) |
+| F8.12 | 📋 | Analytics Export UI (~~E11~~) |
+| F8.13 | 📋 | **Rwanda H3 Aggregation** (Priority 2) |
+| F8.14 | 📋 | **SAM Building Deduplication** (DuckDB + PostGIS) |
+
+### Feature F8.1: H3 Grid Infrastructure ✅
+
+**Deliverable**: Normalized H3 schema with cell-country mappings
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S8.1.1 | ✅ | Design normalized schema (cells, cell_admin0, cell_admin1) |
+| S8.1.2 | ✅ | Create stat_registry metadata catalog |
+| S8.1.3 | ✅ | Create zonal_stats table for raster aggregations |
+| S8.1.4 | ✅ | Create point_stats table for vector aggregations |
+| S8.1.5 | ✅ | Create batch_progress table for idempotency |
+| S8.1.6 | ✅ | Implement H3Repository with COPY-based bulk inserts |
+
+**Key Files**: `infrastructure/h3_schema.py`, `infrastructure/h3_repository.py`, `infrastructure/h3_batch_tracking.py`
+
+---
+
+### Feature F8.2: Grid Bootstrap System ✅
+
+**Deliverable**: 3-stage cascade job generating res 2-7 pyramid
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S8.2.1 | ✅ | Create generate_h3_grid handler (base + cascade modes) |
+| S8.2.2 | ✅ | Create cascade_h3_descendants handler (multi-level) |
+| S8.2.3 | ✅ | Create finalize_h3_pyramid handler |
+| S8.2.4 | ✅ | Create bootstrap_h3_land_grid_pyramid job |
+| S8.2.5 | ✅ | Implement batch-level idempotency (resumable jobs) |
+| S8.2.6 | ✅ | Add country/bbox filtering for testing |
+
+**Key Files**: `jobs/bootstrap_h3_land_grid_pyramid.py`, `services/handler_generate_h3_grid.py`, `services/handler_cascade_h3_descendants.py`, `services/handler_finalize_h3_pyramid.py`
+
+**Expected Cell Counts** (land-filtered):
+- Res 2: ~2,000 | Res 3: ~14,000 | Res 4: ~98,000
+- Res 5: ~686,000 | Res 6: ~4.8M | Res 7: ~33.6M
+
+---
+
+### Feature F8.3: Raster→H3 Aggregation ✅ COMPLETE
+
+**Deliverable**: Zonal statistics from COGs to H3 cells
+**Completed**: 27 DEC 2025
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S8.3.1 | ✅ | Create h3_raster_aggregation job definition |
+| S8.3.2 | ✅ | Design 3-stage workflow (inventory → compute → finalize) |
+| S8.3.3 | ✅ | Implement h3_inventory_cells handler |
+| S8.3.4 | ✅ | Implement h3_raster_zonal_stats handler |
+| S8.3.5 | ✅ | Implement h3_aggregation_finalize handler |
+| S8.3.6 | ✅ | Create insert_zonal_stats_batch() repository method |
+| S8.3.7 | ✅ | Add dynamic STAC tile discovery for Planetary Computer (27 DEC) |
+| S8.3.8 | ✅ | Add theme-based zonal_stats partitioning (8 partitions) |
+
+**Key Files**:
+- `jobs/h3_raster_aggregation.py`
+- `services/h3_aggregation/handler_inventory.py`
+- `services/h3_aggregation/handler_raster_zonal.py`
+- `services/h3_aggregation/handler_finalize.py`
+
+**Stats Supported**: mean, sum, min, max, count, std, median
+
+**Source Types Supported**:
+- `azure`: Azure Blob Storage COGs (container + blob_path)
+- `planetary_computer`: Planetary Computer STAC (collection + item_id OR source_id for dynamic discovery)
+- `url`: Direct HTTPS URLs to COGs
+
+---
+
+### Feature F8.4: Vector→H3 Aggregation ⬜ READY
+
+**Deliverable**: Point/polygon counts aggregated to H3 cells
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S8.4.1 | ⬜ | Create h3_vector_aggregation job |
+| S8.4.2 | ⬜ | Implement point-in-polygon handler |
+| S8.4.3 | ⬜ | Implement category grouping |
+| S8.4.4 | ✅ | Create insert_point_stats_batch() repository method |
+
+**Schema Ready**: `h3.point_stats` table exists
+
+---
+
+### Feature F8.5: GeoParquet Export 📋 PLANNED
+
+**Deliverable**: Columnar export for OLAP analytics
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S8.5.1 | 📋 | Design export job parameters |
+| S8.5.2 | 📋 | Implement PostgreSQL → GeoParquet writer |
+| S8.5.3 | 📋 | Add DuckDB/Databricks compatibility |
+| S8.5.4 | 📋 | Create export_h3_stats job |
+
+---
+
+### Feature F8.6: Analytics API 🚧 PARTIAL
+
+**Deliverable**: Query endpoints for H3 statistics
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S8.6.1 | 📋 | GET /api/h3/stats/{dataset_id} |
+| S8.6.2 | ✅ | GET /api/h3/stats?iso3=&resolution= (cell counts) |
+| S8.6.3 | ✅ | GET /api/h3/stats/countries (country list with counts) |
+| S8.6.4 | 📋 | Interactive H3 map interface |
+
+**Key Files**: `web_interfaces/h3_sources/interface.py`
+
+---
+
+### Feature F8.7: Building Flood Exposure Pipeline 📋 PRIORITY 3
+
+**Deliverable**: MS Buildings → FATHOM sample → H3 aggregation (% buildings in flood zones)
+**Test Region**: Rwanda (after H3 bootstrap completes)
+**Initial Scenario**: `fluvial-defended-2020` (baseline)
+**Business Value**: Climate risk exposure analysis for high-profile projects
+
+**Architecture** (08 JAN 2026 design):
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ STAGE 1: Load MS Building Footprints                                │
+│ Input: MS Buildings GeoJSON for Rwanda (~500K buildings)           │
+│ Output: buildings.footprints (id, centroid, h3_index_7, iso3)      │
+└─────────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ STAGE 2: Sample FATHOM at Building Centroids                        │
+│ Input: Building centroids + FATHOM COG (one scenario)              │
+│ Output: buildings.flood_exposure (building_id, depth, is_flooded)  │
+│ Binary: is_flooded = (flood_depth > 0)                             │
+└─────────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ STAGE 3: Aggregate to H3 Level 7                                    │
+│ SQL: GROUP BY h3_index_7                                            │
+│ Output: h3.building_flood_stats                                     │
+│   - total_buildings, flooded_buildings, pct_flooded                │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S8.7.1 | 📋 | Download MS Building Footprints for Rwanda |
+| S8.7.2 | 📋 | Create `buildings` schema (footprints, flood_exposure tables) |
+| S8.7.3 | 📋 | Create `BuildingFloodExposureJob` definition (4-stage) |
+| S8.7.4 | 📋 | Stage 1: `building_load_footprints` handler |
+| S8.7.5 | 📋 | Stage 2: `building_assign_h3` handler |
+| S8.7.6 | 📋 | Stage 3: `building_sample_fathom` handler |
+| S8.7.7 | 📋 | Stage 4: `building_aggregate_h3` handler |
+| S8.7.8 | 📋 | End-to-end test: Rwanda + fluvial-defended-2020 |
+| S8.7.9 | 📋 | Expand to all FATHOM scenarios (39 for Rwanda) |
+
+**Output Schema** (`h3.building_flood_stats`):
+```sql
+CREATE TABLE h3.building_flood_stats (
+    h3_index BIGINT,
+    scenario VARCHAR(100),        -- e.g., 'fluvial-defended-2020'
+    total_buildings INT,
+    flooded_buildings INT,
+    pct_flooded DECIMAL(5,2),     -- 0.00 to 100.00
+    PRIMARY KEY (h3_index, scenario)
+);
+```
+
+**Data Source**: Microsoft Building Footprints (direct download)
+- URL: `https://minedbuildings.z5.web.core.windows.net/global-buildings/dataset-links.csv`
+- Format: GeoJSON with polygon footprints
+
+**Dependencies**:
+- F9.1 ✅ (FATHOM COGs for Rwanda)
+- F8.13 🚧 (H3 cells for Rwanda)
+
+---
+
+### Feature F8.8: Source Catalog ✅ COMPLETE
+
+**Deliverable**: Comprehensive metadata catalog for H3 aggregation data sources
+**Completed**: 27 DEC 2025
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S8.8.1 | ✅ | Create `h3.source_catalog` table schema |
+| S8.8.2 | ✅ | Implement H3SourceRepository with full CRUD |
+| S8.8.3 | ✅ | Create REST API endpoints (GET/POST/PATCH/DELETE /api/h3/sources) |
+| S8.8.4 | ✅ | Support Planetary Computer, Azure Blob, URL, PostGIS source types |
+| S8.8.5 | ✅ | Integrate with h3_raster_zonal_stats for dynamic tile discovery |
+
+**Key Files**:
+- `infrastructure/h3_schema.py` (source_catalog table)
+- `infrastructure/h3_source_repository.py`
+- `web_interfaces/h3_sources/interface.py`
+
+**Source Catalog Fields**:
+- Identity: id, display_name, description
+- Connection: source_type, stac_api_url, collection_id, asset_key
+- Tile pattern: item_id_pattern, tile_size_degrees, tile_naming_convention
+- Raster properties: native_resolution_m, crs, data_type, nodata_value, value_range
+- Aggregation: theme (partition key), recommended_stats, recommended_h3_res_min/max
+- Provenance: source_provider, source_url, source_license, citation
+
+---
+
+### Feature F8.9: H3 Export to OGC Features ✅ (formerly E14)
+
+**Deliverable**: Denormalized, wide-format exports from H3 zonal_stats for mapping and download
+**Completed**: 28 DEC 2025
+**Use Case**: "I want a specific map" or "I want a copy of a specific extract" (NOT for analytics)
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S8.9.1 | ✅ | Create `h3_export_dataset` job definition (3-stage workflow) |
+| S8.9.2 | ✅ | Validate handler (check table doesn't exist or overwrite=true) |
+| S8.9.3 | ✅ | Build handler (join h3.cells with h3.zonal_stats, pivot to wide format) |
+| S8.9.4 | ✅ | Register handler (update export catalog) |
+| S8.9.5 | ✅ | Support multiple geometry options (polygon/centroid) |
+| S8.9.6 | ✅ | Support spatial scope filtering (iso3, bbox, polygon_wkt) |
+
+**Key Files**:
+- `jobs/h3_export_dataset.py`
+- `services/h3_aggregation/handler_export.py`
+
+**Output Table**:
+```sql
+geo.{table_name}
+├── h3_index BIGINT PRIMARY KEY
+├── geom GEOMETRY(Polygon/Point, 4326)
+├── iso3 VARCHAR(3)          -- optional
+├── {dataset_id}_{stat_type} -- pivot columns
+└── ...
+```
+
+**Usage**:
+```bash
+POST /api/jobs/submit/h3_export_dataset
+{
+    "table_name": "rwanda_terrain_res6",
+    "resolution": 6,
+    "iso3": "RWA",
+    "variables": [
+        {"dataset_id": "cop_dem_rwanda_res6", "stat_types": ["mean", "min", "max"]}
+    ],
+    "geometry_type": "polygon",
+    "overwrite": false
+}
+```
+
+---
+
+### Feature F8.10: Analytics Data Browser 📋 (~~E11~~)
+
+**Deliverable**: STAC + Promoted datasets gallery view for analytics exploration
+
+| Story | Status | Description | Backend Dep |
+|-------|--------|-------------|-------------|
+| S8.10.1 | 📋 | STAC collection browser with search | `/api/stac/*` ✅ |
+| S8.10.2 | 📋 | Promoted datasets gallery view | `/api/promote/gallery` ✅ |
+| S8.10.3 | 📋 | Preview thumbnails from TiTiler | TiTiler ✅ |
+| S8.10.4 | 📋 | Click to view on map | TiTiler ✅ |
+
+---
+
+### Feature F8.11: H3 Visualization UI 📋 (~~E11~~)
+
+**Deliverable**: Hexagonal analytics visualization with drill-down (KEY FEATURE)
+
+| Story | Status | Description | Backend Dep |
+|-------|--------|-------------|-------------|
+| S8.11.1 | 📋 | H3 hexagon layer (Mapbox GL + deck.gl) | `/api/h3/stats/*/cells` (F8.6) |
+| S8.11.2 | 📋 | Resolution switcher (zoom mapping) | H3 pyramid ✅ |
+| S8.11.3 | 📋 | Click hexagon → drill to children | H3 schema ✅ |
+| S8.11.4 | 📋 | Choropleth styling by stat value | OGC Styles ✅ |
+| S8.11.5 | 📋 | Country/Admin filter | `/api/h3/stats?iso3=` (F8.6) |
+| S8.11.6 | 📋 | Time slider for temporal stats | xarray service ✅ |
+
+**Blockers**: Requires F8.3 (H3 aggregation handlers) + F8.6 (H3 API)
+
+---
+
+### Feature F8.12: Analytics Export UI 📋 (~~E11~~)
+
+**Deliverable**: Export capabilities for external tools
+
+| Story | Status | Description | Backend Dep |
+|-------|--------|-------------|-------------|
+| S8.12.1 | 📋 | Export H3 stats as GeoParquet | `/api/h3/export` (F8.5) |
+| S8.12.2 | 📋 | DuckDB SQL preview (WASM) | Client-side |
+| S8.12.3 | 📋 | Copy tile URL for other tools | TiTiler URLs ✅ |
+| S8.12.4 | 📋 | STAC item JSON download | `/api/stac/items/*` ✅ |
+
+---
+
+### Feature F8.13: Rwanda H3 Aggregation 🚧 PRIORITY 2
+
+**Deliverable**: H3 aggregation of FATHOM flood data for Rwanda test region
+**Dependency**: E9 F9.1 ✅ (FATHOM merged COGs exist in silver-fathom)
+**Status**: H3 bootstrap running (08 JAN 2026)
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S8.13.1 | 🚧 | Seed Rwanda H3 cells (res 3-7, country-filtered) - **RUNNING** |
+| S8.13.2 | 📋 | Add FATHOM merged COGs to source_catalog |
+| S8.13.3 | 📋 | Run H3 raster aggregation on Rwanda FATHOM |
+| S8.13.4 | 📋 | Verify zonal_stats populated for flood themes |
+| S8.13.5 | 📋 | Test H3 export endpoint with Rwanda data |
+
+**H3 Theme Structure** (flood data):
+```
+themes:
+  flood_risk:
+    - fathom_fluvial_defended_2020_1in100
+    - fathom_fluvial_defended_2050_ssp245_1in100
+    - fathom_pluvial_defended_2020_1in100
+    ...
+```
+
+---
+
+### Feature F8.14: SAM Building Deduplication Pipeline 📋 NEW
+
+**Deliverable**: Deduplicate SAM-extracted building polygons and serve via OGC Features
+**Documentation**: [SAM.md](/SAM.md)
+**Context**: GPU inference runs externally on Azure VM; rmhgeoapi handles post-processing
+**Added**: 07 JAN 2026
+
+**Architecture**:
+```
+GPU VM (External)                    rmhgeoapi (This Feature)
+─────────────────                    ────────────────────────
+SAM inference on COG tiles
+    ↓
+GeoParquet → Blob (bronze)  ──────→  F8.14: Deduplication Job
+                                         ↓
+                                     DuckDB: H3 clustering + ST_Union
+                                         ↓
+                                     PostGIS: geo.buildings_sam
+                                         ↓
+                                     STAC + OGC Features API
+```
+
+| Story | Status | Description |
+|-------|--------|-------------|
+| S8.14.1 | 📋 | Create `deduplicate_building_polygons` job definition |
+| S8.14.2 | 📋 | Stage 1: DuckDB deduplication handler (query blob GeoParquet directly) |
+| S8.14.3 | 📋 | - Add H3 cell index to polygons |
+| S8.14.4 | 📋 | - ST_ClusterDBSCAN or H3-based grouping |
+| S8.14.5 | 📋 | - ST_Union_Agg per cluster |
+| S8.14.6 | 📋 | - Write deduplicated GeoParquet to silver tier |
+| S8.14.7 | 📋 | Stage 2: Ingest to PostGIS (geo.buildings_sam table) |
+| S8.14.8 | 📋 | Stage 3: Create STAC item (postgis:// asset link) |
+| S8.14.9 | 📋 | End-to-end test: Juba SAM output → OGC Features |
+
+**Job Parameters**:
+```json
+{
+    "input_blob": "sam_output/juba/buildings_raw.parquet",
+    "city": "juba",
+    "h3_resolution": 10,
+    "output_table": "buildings_sam_juba",
+    "cluster_distance_m": 0
+}
+```
+
+**DuckDB Deduplication Query** (core logic):
+```sql
+-- Query GeoParquet DIRECTLY from Azure blob storage (no ingestion!)
+SELECT
+    h3_latlng_to_cell(
+        ST_Y(ST_Centroid(geometry)),
+        ST_X(ST_Centroid(geometry)),
+        10  -- H3 resolution 10
+    ) AS h3_cell,
+    ST_Union_Agg(geometry) AS merged_geom,
+    COUNT(*) AS building_count,
+    SUM(area_sqm) AS total_area
+FROM read_parquet('azure://bronze/sam_output/juba_buildings_*.parquet')
+GROUP BY h3_cell;
+```
+
+**Key Technical Points**:
+- DuckDB queries GeoParquet in-place (no download/ingestion step)
+- Disk spillover handles larger-than-memory datasets
+- H3 clustering provides deterministic, reproducible deduplication
+- Output compatible with existing vector pipeline patterns
+
+**Dependencies**:
+- DuckDB infrastructure (✅ exists: `infrastructure/duckdb.py`)
+- H3 extension for DuckDB (✅ exists)
+- Azure extension for DuckDB (✅ exists)
+- Vector → PostGIS pattern (✅ exists: E1)
+
+**Scale-Up Path**: When processing 10+ cities (>5M polygons), consider Databricks + Mosaic.
+
+---
+

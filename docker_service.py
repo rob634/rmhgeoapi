@@ -1690,23 +1690,24 @@ async def interface_jobs_list(
         # Calculate stats
         stats = {
             'total': len(filtered_jobs),
-            'processing': sum(1 for j in filtered_jobs if j.status and str(j.status).lower() == 'processing'),
-            'completed': sum(1 for j in filtered_jobs if j.status and str(j.status).lower() == 'completed'),
-            'failed': sum(1 for j in filtered_jobs if j.status and str(j.status).lower() in ('failed', 'completed_with_errors'))
+            'processing': sum(1 for j in filtered_jobs if j.status and j.status.value.lower() == 'processing'),
+            'completed': sum(1 for j in filtered_jobs if j.status and j.status.value.lower() == 'completed'),
+            'failed': sum(1 for j in filtered_jobs if j.status and j.status.value.lower() in ('failed', 'completed_with_errors'))
         }
 
         # Convert to enriched dictionaries for template
         jobs = []
         for job in filtered_jobs:
+            status_val = job.status.value.lower() if job.status else 'unknown'
             job_dict = {
                 'job_id': job.job_id,
                 'job_type': job.job_type,
-                'status': str(job.status).lower() if job.status else 'unknown',
+                'status': status_val,
                 'current_stage': job.stage,
                 'total_stages': job.total_stages,
                 'parameters': job.parameters,
                 'created_at': job.created_at,
-                'completed_at': job.updated_at if str(job.status).lower() == 'completed' else None,
+                'completed_at': job.updated_at if status_val == 'completed' else None,
                 'event_count': 0,
                 'has_failure': False,
                 'latest_event': None
@@ -1787,15 +1788,16 @@ async def interface_jobs_partial(
         # Convert to enriched dicts for template (Pydantic boundary crossing)
         jobs = []
         for job in filtered_jobs:
+            status_val = job.status.value.lower() if job.status else 'unknown'
             job_dict = {
                 'job_id': job.job_id,
                 'job_type': job.job_type,
-                'status': str(job.status).lower() if job.status else 'unknown',
+                'status': status_val,
                 'current_stage': job.stage,
                 'total_stages': job.total_stages,
                 'parameters': job.parameters,
                 'created_at': job.created_at,
-                'completed_at': job.updated_at if str(job.status).lower() == 'completed' else None,
+                'completed_at': job.updated_at if status_val == 'completed' else None,
                 'event_count': 0,
                 'has_failure': False,
                 'latest_event': None

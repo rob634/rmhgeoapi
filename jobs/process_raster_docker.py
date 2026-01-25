@@ -253,26 +253,17 @@ class ProcessRasterDockerJob(JobBaseMixin, JobBase):
 
         # V0.8: Format response based on output mode
         if output_mode == 'tiled':
-            # Tiled output - has mosaicjson, cogs array, tiling info
+            # Tiled output - COGs array with pgSTAC collection (no MosaicJSON)
+            # NOTE: MosaicJSON removed in V0.8 (25 JAN 2026) - use pgSTAC search for mosaic access
             tiling = unwrapped.get('tiling', {})
             extraction = unwrapped.get('extraction', {})
             cogs = unwrapped.get('cogs', {})
-            mosaicjson = unwrapped.get('mosaicjson', {})
             timing = unwrapped.get('timing', {})
 
-            # Generate TiTiler URLs for MosaicJSON
+            # For tiled output, TiTiler URLs come from pgSTAC search (collection-level)
+            # Individual COG tiles can be accessed via STAC item assets
             titiler_urls = None
             share_url = None
-            if mosaicjson.get('mosaicjson_blob'):
-                try:
-                    titiler_urls = config.generate_titiler_urls_unified(
-                        mode="mosaicjson",
-                        container=mosaicjson.get('mosaicjson_container'),
-                        blob_name=mosaicjson.get('mosaicjson_blob')
-                    )
-                    share_url = titiler_urls.get("viewer_url")
-                except Exception:
-                    pass
 
             return {
                 "job_type": "process_raster_docker",
@@ -283,7 +274,6 @@ class ProcessRasterDockerJob(JobBaseMixin, JobBase):
                 "tiling": tiling,
                 "extraction": extraction,
                 "cogs": cogs,
-                "mosaicjson": mosaicjson,
                 "stac": stac,
                 "stac_urls": stac_urls,
                 "titiler_urls": titiler_urls,

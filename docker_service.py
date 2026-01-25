@@ -1638,6 +1638,7 @@ async def interface_submit_process(request: Request):
 # ============================================================================
 
 from templates_utils import templates
+from config import __version__
 
 @app.get("/interface/jobs", response_class=HTMLResponse)
 async def interface_jobs_list(

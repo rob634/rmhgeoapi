@@ -123,7 +123,7 @@ class JobEventRepository(PostgreSQLRepository):
                 event.created_at or datetime.now(timezone.utc)
             )
 
-            with self.get_connection() as conn:
+            with self._get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(query, params)
                     result = cur.fetchone()
@@ -274,7 +274,7 @@ class JobEventRepository(PostgreSQLRepository):
                 sql.SQL(" AND ").join(sql.SQL(c) for c in conditions)
             )
 
-            with self.get_connection() as conn:
+            with self._get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(query, params)
                     rows = cur.fetchall()
@@ -304,7 +304,7 @@ class JobEventRepository(PostgreSQLRepository):
                 ORDER BY created_at ASC
             """).format(sql.Identifier(self.schema_name))
 
-            with self.get_connection() as conn:
+            with self._get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(query, (task_id,))
                     rows = cur.fetchall()
@@ -331,7 +331,7 @@ class JobEventRepository(PostgreSQLRepository):
                 LIMIT 1
             """).format(sql.Identifier(self.schema_name))
 
-            with self.get_connection() as conn:
+            with self._get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(query, (job_id,))
                     row = cur.fetchone()
@@ -359,7 +359,7 @@ class JobEventRepository(PostgreSQLRepository):
                 ORDER BY count DESC
             """).format(sql.Identifier(self.schema_name))
 
-            with self.get_connection() as conn:
+            with self._get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(query, (job_id,))
                     rows = cur.fetchall()
@@ -393,7 +393,7 @@ class JobEventRepository(PostgreSQLRepository):
                 WHERE job_id = %s
             """).format(sql.Identifier(self.schema_name))
 
-            with self.get_connection() as conn:
+            with self._get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(query, (job_id,))
                     row = cur.fetchone()
@@ -497,7 +497,7 @@ class JobEventRepository(PostgreSQLRepository):
                 LIMIT 1
             """).format(sql.Identifier(self.schema_name))
 
-            with self.get_connection() as conn:
+            with self._get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(query, (job_id,))
                     failure_row = cur.fetchone()

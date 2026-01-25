@@ -1687,7 +1687,7 @@ async def interface_jobs_list(
             except Exception:
                 pass  # Keep defaults
 
-            jobs.append(type('Job', (), job_dict)())  # Create simple object with attributes
+            jobs.append(job_dict)  # Dict works directly in Jinja2 templates
 
         return templates.TemplateResponse("pages/jobs/list.html", {
             "request": request,
@@ -1742,27 +1742,41 @@ async def interface_jobs_partial(
                 job_time = job_time.replace(tzinfo=timezone.utc)
             return job_time >= cutoff
 
-        jobs = [j for j in all_jobs if job_in_range(j)][:100]
+        filtered_jobs = [j for j in all_jobs if job_in_range(j)][:100]
 
-        # Enrich jobs with event data
-        for job in jobs:
+        # Convert to enriched dicts for template (Pydantic boundary crossing)
+        jobs = []
+        for job in filtered_jobs:
+            job_dict = {
+                'job_id': job.job_id,
+                'job_type': job.job_type,
+                'status': str(job.status).lower() if job.status else 'unknown',
+                'current_stage': job.stage,
+                'total_stages': job.total_stages,
+                'parameters': job.parameters,
+                'created_at': job.created_at,
+                'completed_at': job.updated_at if str(job.status).lower() == 'completed' else None,
+                'event_count': 0,
+                'has_failure': False,
+                'latest_event': None
+            }
+
+            # Enrich with event data
             try:
                 summary = event_repo.get_event_summary(job.job_id)
-                job.event_count = summary.get('total_events', 0)
-                job.has_failure = summary.get('by_status', {}).get('failure', 0) > 0
+                job_dict['event_count'] = summary.get('total_events', 0)
+                job_dict['has_failure'] = summary.get('by_status', {}).get('failure', 0) > 0
 
                 latest = event_repo.get_latest_event(job.job_id)
                 if latest:
-                    job.latest_event = {
+                    job_dict['latest_event'] = {
                         'event_type': latest.event_type.value if hasattr(latest.event_type, 'value') else latest.event_type,
                         'summary': latest.checkpoint_name or ''
                     }
-                else:
-                    job.latest_event = None
             except Exception:
-                job.event_count = 0
-                job.has_failure = False
-                job.latest_event = None
+                pass  # Keep defaults
+
+            jobs.append(job_dict)
 
         # Render just the job cards
         cards_html = ""

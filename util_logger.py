@@ -595,6 +595,192 @@ def snapshot_memory_to_task(
 
 
 # ============================================================================
+# I/O THROUGHPUT METRICS - Download/Upload rate tracking (25 JAN 2026)
+# ============================================================================
+# Tracks data transfer rates for capacity planning and performance debugging.
+# Only logs when observability mode is enabled.
+
+def log_io_throughput(
+    logger: logging.Logger,
+    operation: str,
+    bytes_transferred: int,
+    duration_seconds: float,
+    context_id: str = None,
+    source_path: str = None,
+    dest_path: str = None,
+    use_etl_mount: bool = None,
+    mount_path: str = None,
+    **extra_fields
+) -> Optional[Dict[str, Any]]:
+    """
+    Log I/O throughput metrics for data transfer operations.
+
+    Tracks download, upload, and write rates for capacity planning.
+    Only logs when observability mode is enabled (OBSERVABILITY_MODE=true).
+
+    Args:
+        logger: Python logger instance
+        operation: Operation type ('download', 'upload', 'write', 'read', 'cog_create')
+        bytes_transferred: Total bytes transferred
+        duration_seconds: Time taken for the operation
+        context_id: Optional task/job ID for correlation
+        source_path: Source path (container/blob or local path)
+        dest_path: Destination path
+        use_etl_mount: Whether ETL mount is being used (Docker mode)
+        mount_path: Path to ETL mount if used
+        **extra_fields: Additional fields (compression_ratio, tier, etc.)
+
+    Returns:
+        Dict with throughput metrics or None if observability disabled
+
+    Example:
+        # Track blob download
+        start = time.time()
+        data = blob_client.download_blob().readall()
+        duration = time.time() - start
+
+        log_io_throughput(
+            logger, "download",
+            bytes_transferred=len(data),
+            duration_seconds=duration,
+            context_id=task_id,
+            source_path=f"{container}/{blob_name}"
+        )
+
+        # Track COG creation with mount info
+        log_io_throughput(
+            logger, "cog_create",
+            bytes_transferred=output_size_bytes,
+            duration_seconds=cog_duration,
+            context_id=task_id,
+            use_etl_mount=True,
+            mount_path="/mounts/etl-temp",
+            compression_ratio=input_size / output_size
+        )
+    """
+    # Check if observability mode enabled
+    if not _is_observability_enabled():
+        return None
+
+    # Calculate rates
+    size_mb = bytes_transferred / (1024 * 1024)
+    rate_mbps = size_mb / duration_seconds if duration_seconds > 0 else 0
+
+    metrics = {
+        "operation": operation,
+        "bytes": bytes_transferred,
+        "size_mb": round(size_mb, 2),
+        "duration_sec": round(duration_seconds, 2),
+        "rate_mbps": round(rate_mbps, 2),
+        "rate_mbs": round(rate_mbps, 2),  # MB/s alias
+    }
+
+    # Add optional context
+    if context_id:
+        metrics["context_id"] = context_id
+    if source_path:
+        metrics["source"] = source_path
+    if dest_path:
+        metrics["dest"] = dest_path
+
+    # Add ETL mount info (important for Docker debugging)
+    if use_etl_mount is not None:
+        metrics["use_etl_mount"] = use_etl_mount
+    if mount_path:
+        metrics["mount_path"] = mount_path
+
+    # Add extra fields
+    metrics.update(extra_fields)
+
+    # Format log message
+    mount_info = ""
+    if use_etl_mount:
+        mount_info = f" [ETL mount: {mount_path or 'enabled'}]"
+
+    logger.info(
+        f"📊 [IO] {operation.upper()}: {size_mb:.1f} MB in {duration_seconds:.1f}s "
+        f"({rate_mbps:.1f} MB/s){mount_info}",
+        extra={"io_metrics": metrics}
+    )
+
+    return metrics
+
+
+def log_io_throughput_to_task(
+    task_id: str,
+    operation: str,
+    bytes_transferred: int,
+    duration_seconds: float,
+    logger: Optional[logging.Logger] = None,
+    task_repo = None,
+    **extra_fields
+) -> Optional[Dict[str, Any]]:
+    """
+    Log I/O throughput and persist to task metadata.
+
+    Combines logging with task metadata persistence for post-mortem analysis.
+    Updates task.metadata.io_metrics with operation-specific data.
+
+    Args:
+        task_id: Task ID to update
+        operation: Operation type ('download', 'upload', 'cog_create', etc.)
+        bytes_transferred: Total bytes transferred
+        duration_seconds: Time taken for the operation
+        logger: Optional logger for logging
+        task_repo: TaskRepository instance for persistence
+        **extra_fields: Additional fields to include
+
+    Returns:
+        Dict with throughput metrics or None if observability disabled
+    """
+    if not _is_observability_enabled():
+        return None
+
+    # Calculate metrics
+    size_mb = bytes_transferred / (1024 * 1024)
+    rate_mbps = size_mb / duration_seconds if duration_seconds > 0 else 0
+
+    from datetime import datetime, timezone
+
+    metrics = {
+        "operation": operation,
+        "bytes": bytes_transferred,
+        "size_mb": round(size_mb, 2),
+        "duration_sec": round(duration_seconds, 2),
+        "rate_mbps": round(rate_mbps, 2),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        **extra_fields
+    }
+
+    # Log if logger provided
+    if logger:
+        logger.info(
+            f"📊 [IO] {operation.upper()}: {size_mb:.1f} MB in {duration_seconds:.1f}s "
+            f"({rate_mbps:.1f} MB/s)",
+            extra={"io_metrics": metrics, "task_id": task_id}
+        )
+
+    # Persist to task metadata
+    if task_repo and task_id:
+        try:
+            from core.schema.updates import TaskUpdateModel
+
+            task_repo.update_task(
+                task_id=task_id,
+                updates=TaskUpdateModel(),
+                metadata={
+                    f"io_{operation}": metrics
+                },
+                merge=True
+            )
+        except Exception as e:
+            if logger:
+                logger.warning(f"⚠️ Failed to persist IO metrics to task: {e}")
+
+    return metrics
+
+
+# ============================================================================
 # DATABASE UTILIZATION STATS - PostgreSQL performance monitoring (23 DEC 2025)
 # ============================================================================
 # Mirrors memory tracking pattern but for database:

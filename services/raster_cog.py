@@ -29,6 +29,7 @@ Exports:
 
 import sys
 import os
+import time
 import tempfile
 import threading
 from typing import Any, Dict, Optional, Callable
@@ -398,16 +399,27 @@ def create_cog(params: dict) -> dict:
         logger.debug(f"   Using {source_zone} zone for container: {container_name}")
 
         try:
+            download_start = time.time()
             input_blob_bytes = blob_repo.read_blob(
                 container=container_name,
                 blob_path=blob_name
             )
+            download_duration = time.time() - download_start
             input_size_mb = len(input_blob_bytes) / (1024 * 1024)
             logger.info(f"   Downloaded input tile: {input_size_mb:.2f} MB")
 
             # Memory checkpoint 1 (DEBUG_MODE only)
-            from util_logger import log_memory_checkpoint
+            from util_logger import log_memory_checkpoint, log_io_throughput
             log_memory_checkpoint(logger, "After blob download", context_id=task_id, input_size_mb=input_size_mb)
+
+            # I/O throughput tracking (25 JAN 2026)
+            log_io_throughput(
+                logger, "download",
+                bytes_transferred=len(input_blob_bytes),
+                duration_seconds=download_duration,
+                context_id=task_id,
+                source_path=f"{container_name}/{blob_name}"
+            )
         except Exception as e:
             logger.error(f"❌ STEP 3 FAILED: Cannot download input tile from {container_name}/{blob_name}")
             logger.error(f"   Error: {e}")
@@ -589,10 +601,14 @@ def create_cog(params: dict) -> dict:
                     logger.info(f"   Processing time: {elapsed_time:.2f}s")
 
                     # Memory checkpoint 4 (DEBUG_MODE only)
-                    from util_logger import log_memory_checkpoint
+                    from util_logger import log_memory_checkpoint, log_io_throughput
                     log_memory_checkpoint(logger, "After cog_translate",
                                           context_id=task_id,
                                           processing_time_seconds=elapsed_time)
+
+                    # I/O throughput for COG creation (25 JAN 2026)
+                    # Note: output_size not yet known, logged after reading cog_bytes
+                    cog_create_duration = elapsed_time
 
                     # Final snapshot - captures peak memory after cog_translate success
                     if task_repo and task_id:
@@ -632,6 +648,21 @@ def create_cog(params: dict) -> dict:
                         log_memory_checkpoint(logger, "After reading COG bytes",
                                               context_id=task_id,
                                               output_size_mb=output_size_mb)
+
+                        # I/O throughput for COG creation (25 JAN 2026)
+                        # Now we have output size, log COG creation rate
+                        log_io_throughput(
+                            logger, "cog_create",
+                            bytes_transferred=len(cog_bytes),
+                            duration_seconds=cog_create_duration,
+                            context_id=task_id,
+                            source_path=f"{container_name}/{blob_name}",
+                            dest_path=f"{silver_container}/{output_blob_name}",
+                            use_etl_mount=config_obj.raster.use_etl_mount,
+                            mount_path=config_obj.raster.etl_mount_path if config_obj.raster.use_etl_mount else None,
+                            compression=compression,
+                            compression_ratio=round(input_size_mb / output_size_mb, 2) if output_size_mb > 0 else None
+                        )
                     except Exception as e:
                         logger.error(f"❌ STEP 6 FAILED: Cannot read COG from MemoryFile")
                         logger.error(f"   Error: {e}")
@@ -640,6 +671,7 @@ def create_cog(params: dict) -> dict:
                     try:
                         # Upload bytes directly to silver zone (no BytesIO wrapper needed)
                         # compute_checksum=True computes STAC-compliant SHA-256 multihash
+                        upload_start = time.time()
                         silver_repo = BlobRepository.for_zone("silver")  # Output COGs go to silver zone
                         upload_result = silver_repo.write_blob(
                             container=silver_container,
@@ -649,6 +681,7 @@ def create_cog(params: dict) -> dict:
                             overwrite=True,
                             compute_checksum=True
                         )
+                        upload_duration = time.time() - upload_start
                         file_checksum = upload_result.get('file_checksum')
                         checksum_time_ms = upload_result.get('checksum_time_ms', 0)
                         blob_version_id = upload_result.get('blob_version_id')  # None if versioning not enabled
@@ -656,6 +689,16 @@ def create_cog(params: dict) -> dict:
                         logger.info(f"   Checksum: {file_checksum[:20]}... ({checksum_time_ms}ms)")
                         if blob_version_id:
                             logger.info(f"   Blob version ID: {blob_version_id}")
+
+                        # I/O throughput for upload (25 JAN 2026)
+                        log_io_throughput(
+                            logger, "upload",
+                            bytes_transferred=len(cog_bytes),
+                            duration_seconds=upload_duration,
+                            context_id=task_id,
+                            dest_path=f"{silver_container}/{output_blob_name}",
+                            checksum_time_ms=checksum_time_ms
+                        )
                     except Exception as e:
                         logger.error(f"❌ STEP 6 FAILED: Cannot upload COG to blob storage")
                         logger.error(f"   Error: {e}")

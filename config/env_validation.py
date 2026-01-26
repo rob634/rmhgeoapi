@@ -3,7 +3,7 @@
 # ============================================================================
 # STATUS: Configuration - Startup validation with regex patterns
 # PURPOSE: Validate env vars at startup to fail fast with clear error messages
-# LAST_REVIEWED: 08 JAN 2026
+# LAST_REVIEWED: 26 JAN 2026
 # REVIEW_STATUS: New file - part of startup validation enhancement
 # ============================================================================
 """
@@ -309,6 +309,16 @@ ENV_VAR_RULES: Dict[str, EnvVarRule] = {
     # =========================================================================
     # OBSERVABILITY (10 JAN 2026 - F7.12.C Flag Consolidation)
     # =========================================================================
+    "APPLICATIONINSIGHTS_CONNECTION_STRING": EnvVarRule(
+        pattern=re.compile(r"^InstrumentationKey=[a-f0-9-]{36}.*$", re.IGNORECASE),
+        pattern_description="Application Insights connection string (required for Docker telemetry)",
+        required=False,
+        fix_suggestion="Copy connection string from Application Insights resource in Azure Portal",
+        example="InstrumentationKey=00000000-0000-0000-0000-000000000000;IngestionEndpoint=...",
+        default_value=None,
+        warn_on_default=True,  # Warn if telemetry disabled
+    ),
+
     "OBSERVABILITY_MODE": EnvVarRule(
         pattern=_BOOLEAN,
         pattern_description="Boolean value (true/false)",
@@ -396,6 +406,15 @@ ENV_VAR_RULES: Dict[str, EnvVarRule] = {
         default_value="long-running-tasks",
     ),
 
+    "SERVICE_BUS_CONTAINER_TASKS_QUEUE": EnvVarRule(
+        pattern=re.compile(r"^[a-z0-9][a-z0-9-]{0,49}$"),
+        pattern_description="Queue name for Docker container tasks (V0.8 critical)",
+        required=False,
+        fix_suggestion="Set queue name for Docker worker or use default 'container-tasks'",
+        example="container-tasks",
+        default_value="container-tasks",
+    ),
+
     # =========================================================================
     # RASTER PROCESSING CONFIG (V0.8 - 24 JAN 2026)
     # =========================================================================
@@ -479,6 +498,57 @@ ENV_VAR_RULES: Dict[str, EnvVarRule] = {
         fix_suggestion="Set schema name for vector data output",
         example="geo",
         default_value="geo",
+    ),
+
+    # =========================================================================
+    # V0.8 DOCKER WORKER CONFIG (26 JAN 2026)
+    # =========================================================================
+    "RASTER_ETL_MOUNT_PATH": EnvVarRule(
+        pattern=re.compile(r"^(/[a-zA-Z0-9._-]+)+$"),
+        pattern_description="Unix path for Azure Files mount in Docker container",
+        required=False,
+        fix_suggestion="Set to mount path like '/mnt/etl' for Docker worker temp files",
+        example="/mnt/etl",
+        default_value="/mnt/etl",
+    ),
+
+    "SERVICE_BUS_FUNCTIONAPP_TASKS_QUEUE": EnvVarRule(
+        pattern=re.compile(r"^[a-z0-9][a-z0-9-]{0,49}$"),
+        pattern_description="Queue name for Docker worker tasks (lowercase, alphanumeric with hyphens)",
+        required=False,
+        fix_suggestion="Set queue name for Docker worker or use default 'functionapp-tasks'",
+        example="functionapp-tasks",
+        default_value="functionapp-tasks",
+    ),
+
+    # =========================================================================
+    # PLATFORM / CLASSIFICATION CONFIG (26 JAN 2026)
+    # =========================================================================
+    "PLATFORM_DEFAULT_ACCESS_LEVEL": EnvVarRule(
+        pattern=re.compile(r"^(public|internal|restricted|confidential)$", re.IGNORECASE),
+        pattern_description="Default data classification level (public, internal, restricted, confidential)",
+        required=False,
+        fix_suggestion="Set default access level for datasets without explicit classification",
+        example="internal",
+        default_value="internal",
+    ),
+
+    "PLATFORM_WEBHOOK_ENABLED": EnvVarRule(
+        pattern=_BOOLEAN,
+        pattern_description="Boolean value (true/false) to enable DDH webhooks",
+        required=False,
+        fix_suggestion="Set to 'true' to enable webhook notifications to DDH",
+        example="false",
+        default_value="false",
+    ),
+
+    "PLATFORM_PRIMARY_CLIENT": EnvVarRule(
+        pattern=re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]{0,30}$"),
+        pattern_description="Primary client identifier for Platform API",
+        required=False,
+        fix_suggestion="Set to primary client name (e.g., 'ddh' for Data Development Hub)",
+        example="ddh",
+        default_value="ddh",
     ),
 }
 

@@ -546,9 +546,9 @@ function validateForm() {
     // Check required fields
     const datasetId = document.getElementById('dataset_id')?.value?.trim();
     const resourceId = document.getElementById('resource_id')?.value?.trim();
-    const serviceName = document.getElementById('service_name')?.value?.trim();
+    // Note: title is optional - auto-generated from DDH IDs if not provided
 
-    let valid = datasetId && resourceId && serviceName;
+    let valid = datasetId && resourceId;
 
     // Check raster-specific required fields
     if (type?.category === 'raster') {
@@ -571,7 +571,7 @@ function validateForm() {
 // Add input listeners for validation
 document.addEventListener('DOMContentLoaded', () => {
     const formInputs = [
-        'dataset_id', 'resource_id', 'service_name',
+        'dataset_id', 'resource_id', 'title',
         'raster_collection_id', 'lat_column', 'lon_column', 'wkt_column'
     ];
 
@@ -609,7 +609,7 @@ function updateCurlPreview() {
     const datasetId = document.getElementById('dataset_id')?.value?.trim() || '<dataset_id>';
     const resourceId = document.getElementById('resource_id')?.value?.trim() || '<resource_id>';
     const versionId = document.getElementById('version_id')?.value?.trim() || 'v1.0';
-    const serviceName = document.getElementById('service_name')?.value?.trim() || '';
+    const title = document.getElementById('title')?.value?.trim() || '';
     const description = document.getElementById('description')?.value?.trim() || '';
     const overwrite = document.getElementById('overwrite')?.checked || false;
 
@@ -623,7 +623,7 @@ function updateCurlPreview() {
         overwrite: overwrite
     };
 
-    if (serviceName) body.service_name = serviceName;
+    if (title) body.title = title;
     if (description) body.description = description;
 
     // Add type-specific fields

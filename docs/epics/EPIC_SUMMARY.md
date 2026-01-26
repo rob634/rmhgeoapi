@@ -56,7 +56,7 @@
 |---------|--------|
 | F4.1 Classification Enforcement | 🚧 |
 | F4.2 Approval Workflow | ✅ |
-| F4.3 ADF External Delivery | 🚧 |
+| F4.3 ADF External Delivery | 📋 |
 
 ---
 
@@ -116,11 +116,11 @@
 | Feature | Status |
 |---------|--------|
 | F12.1 HTMX Integration | ✅ |
-| F12.2 System Dashboard | 🚧 |
-| F12.3 Pipeline Workflow Hub | 🚧 |
+| F12.2 System Dashboard | ✅ |
+| F12.3 Pipeline Workflow Hub | ✅ |
 | F12.4 API Documentation Hub | ✅ |
-| F12.5 STAC Browser | 🚧 |
-| F12.6 OGC Features Browser | 🚧 |
+| F12.5 STAC Browser | ✅ |
+| F12.6 OGC Features Browser | ✅ |
 | F12.7 Approvals Interface | 📋 |
 
 ---
@@ -129,7 +129,7 @@
 
 | Status | Count |
 |--------|-------|
-| ✅ Complete | 32 |
-| 🚧 In Progress | 8 |
+| ✅ Complete | 36 |
+| 🚧 In Progress | 4 |
 | 📋 Planned | 11 |
 | **Total** | **51** |

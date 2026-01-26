@@ -63,6 +63,15 @@ from util_logger import (
     track_peak_memory_to_task,
 )
 
+# F7.21: Type-safe result models (25 JAN 2026)
+# These are used by validate_raster, create_cog, and extract_stac_metadata
+# Services return model_dump() for backward compatibility
+from core.models.raster_results import (
+    RasterValidationResult,
+    COGCreationResult,
+    STACCreationResult,
+)
+
 logger = logging.getLogger(__name__)
 
 

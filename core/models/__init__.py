@@ -184,6 +184,22 @@ from .etl_tracking import (
 # Raster render config models (22 JAN 2026 - F2.11)
 from .raster_render_config import RasterRenderConfig
 
+# Raster workflow result models (25 JAN 2026 - F7.21)
+from .raster_results import (
+    RasterTypeInfo,
+    COGTierInfo,
+    BitDepthCheck,
+    MemoryEstimation,
+    WarningInfo,
+    RasterValidationData,
+    RasterValidationResult,
+    TierProfileInfo,
+    COGCreationData,
+    COGCreationResult,
+    STACCreationData,
+    STACCreationResult,
+)
+
 __all__ = [
     # Enums
     'JobStatus',
@@ -304,4 +320,18 @@ __all__ = [
 
     # Raster render config models (22 JAN 2026 - F2.11)
     'RasterRenderConfig',
+
+    # Raster workflow result models (25 JAN 2026 - F7.21)
+    'RasterTypeInfo',
+    'COGTierInfo',
+    'BitDepthCheck',
+    'MemoryEstimation',
+    'WarningInfo',
+    'RasterValidationData',
+    'RasterValidationResult',
+    'TierProfileInfo',
+    'COGCreationData',
+    'COGCreationResult',
+    'STACCreationData',
+    'STACCreationResult',
 ]

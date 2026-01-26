@@ -19,6 +19,10 @@ Stage 2: extract_stac_metadata - Extracts STAC metadata and inserts into PgSTAC
 from typing import Any
 from datetime import datetime
 from infrastructure.blob import BlobRepository
+
+# F7.21: Type-safe result models (25 JAN 2026)
+from core.models.raster_results import STACCreationData, STACCreationResult
+
 # NOTE: StacMetadataService import moved inside extract_stac_metadata() to avoid
 # stac-pydantic import at module load time (allows registry to build without STAC deps)
 
@@ -480,20 +484,24 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
             logger.error(f"❌ STAC INSERTION FAILED: {error_msg}")
             logger.error(f"💥 Operation cannot complete without successful pgSTAC insertion")
 
-            return {
-                "success": False,
-                "error": f"Failed to insert STAC item into pgSTAC: {error_msg}",
-                "error_type": "STACInsertionError",
-                "blob_name": blob_name,
-                "container_name": container_name,
-                "collection_id": collection_id,
-                "item_id": item.id,
-                "insert_result": insert_result,
-                "execution_time_seconds": round(duration, 2),
-                "extract_time_seconds": round(extract_duration, 2),
-                "insert_time_seconds": round(insert_duration, 2),
-                "stac_item": item_dict  # Include for debugging
-            }
+            # Use typed result for errors (F7.21)
+            # Include partial data for debugging
+            partial_data = STACCreationData(
+                collection_id=collection_id,
+                item_id=item.id,
+                blob_name=blob_name,
+                execution_time_seconds=round(duration, 2),
+                extract_time_seconds=round(extract_duration, 2),
+                insert_time_seconds=round(insert_duration, 2),
+                stac_item=item_dict
+            )
+            error_result = STACCreationResult(
+                success=False,
+                error=f"Failed to insert STAC item into pgSTAC: {error_msg}",
+                error_type="STACInsertionError",
+                result=partial_data  # Include partial data for debugging
+            )
+            return error_result.model_dump()
 
         # STEP 7: Upsert DDH refs to app.dataset_refs (09 JAN 2026 - F7.8)
         # This links internal dataset_id (COG blob path) to external DDH identifiers
@@ -590,48 +598,50 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
         mode_msg = "degraded mode (JSON only)" if not pgstac_available else "full mode"
         logger.info(f"🎉 SUCCESS: STAC cataloging completed in {duration:.2f}s for {blob_name} [{mode_msg}]")
 
-        return {
-            "success": True,
-            "degraded": not pgstac_available,
-            "warning": "pgSTAC unavailable - JSON fallback is authoritative" if not pgstac_available else None,
-            "result": {
-                "item_id": item.id,
-                "blob_name": blob_name,
-                "collection_id": collection_id,
-                "bbox": bbox,
-                "geometry_type": geometry_type,
-                "bands_count": bands_count,
-                "epsg": epsg,
-                # JSON fallback (always written)
-                "stac_item_json_blob": json_blob_name,
-                "stac_item_json_url": json_blob_url,
-                # pgSTAC status
-                "inserted_to_pgstac": inserted_to_pgstac,
-                "pgstac_available": pgstac_available,
-                "item_skipped": insert_skipped,
-                "skip_reason": insert_result.get('reason') if insert_result and insert_skipped else None,
-                # Timing
-                "execution_time_seconds": round(duration, 2),
-                "extract_time_seconds": round(extract_duration, 2),
-                "insert_time_seconds": round(insert_duration, 2),
-                # Full item for reference
-                "stac_item": item_dict
-            }
-        }
+        # Build typed result using Pydantic models (F7.21)
+        stac_data = STACCreationData(
+            item_id=item.id,
+            blob_name=blob_name,
+            collection_id=collection_id,
+            bbox=bbox,
+            geometry_type=geometry_type,
+            bands_count=bands_count,
+            epsg=epsg,
+            # JSON fallback (always written)
+            stac_item_json_blob=json_blob_name,
+            stac_item_json_url=json_blob_url,
+            # pgSTAC status
+            inserted_to_pgstac=inserted_to_pgstac,
+            pgstac_available=pgstac_available,
+            item_skipped=insert_skipped,
+            skip_reason=insert_result.get('reason') if insert_result and insert_skipped else None,
+            # Timing
+            execution_time_seconds=round(duration, 2),
+            extract_time_seconds=round(extract_duration, 2),
+            insert_time_seconds=round(insert_duration, 2),
+            # Full item for reference
+            stac_item=item_dict
+        )
+
+        result = STACCreationResult(
+            success=True,
+            degraded=not pgstac_available,
+            warning="pgSTAC unavailable - JSON fallback is authoritative" if not pgstac_available else None,
+            result=stac_data
+        )
+        return result.model_dump()
 
     except Exception as e:
-        # FAILURE - return error with context
+        # FAILURE - return error with context using typed result (F7.21)
         duration = (datetime.utcnow() - start_time).total_seconds() if 'start_time' in locals() else 0
         error_msg = str(e) or type(e).__name__
         logger.error(f"💥 COMPLETE FAILURE after {duration:.2f}s: {error_msg}\n{traceback.format_exc()}")
 
-        return {
-            "success": False,
-            "error": error_msg,
-            "error_type": type(e).__name__,
-            "blob_name": params.get("blob_name"),
-            "container_name": params.get("container_name"),
-            "collection_id": params.get("collection_id"),
-            "execution_time_seconds": round(duration, 2),
-            "traceback": traceback.format_exc()
-        }
+        error_result = STACCreationResult(
+            success=False,
+            error=error_msg,
+            error_type=type(e).__name__,
+            message=f"STAC creation failed for {params.get('blob_name')}",
+            traceback=traceback.format_exc()
+        )
+        return error_result.model_dump()

@@ -12,8 +12,9 @@ This file references other documents containing implementation details. This is 
 
 | Document | Purpose |
 |----------|---------|
-| [RASTER_RESULT_MODELS.md](./RASTER_RESULT_MODELS.md) | **F7.21 Raster result type safety (CRITICAL)** |
-| [DOCKER_UI_GAPS.md](./DOCKER_UI_GAPS.md) | **Docker UI gap tracking (V0.8 testing)** |
+| [ENVIRONMENT_VARIABLES.md](./ENVIRONMENT_VARIABLES.md) | **All env vars reference (42 validated)** |
+| [RASTER_RESULT_MODELS.md](./RASTER_RESULT_MODELS.md) | F7.21 Raster result type safety |
+| [DOCKER_UI_GAPS.md](./DOCKER_UI_GAPS.md) | Docker UI gap tracking (V0.8 testing) |
 | [V0.8_TESTING_PLAN.md](./V0.8_TESTING_PLAN.md) | V0.8 comprehensive testing (68 tests) |
 | [COMPLETED_JAN2026.md](./COMPLETED_JAN2026.md) | Completed features (Jan 2026) |
 | [COREMACHINE_GAPS.md](./COREMACHINE_GAPS.md) | CoreMachine gap analysis & job_events |
@@ -37,7 +38,7 @@ This file references other documents containing implementation details. This is 
 ## Active Work
 
 ### Raster Result Type Safety (F7.21) - CRITICAL
-**Status**: PLANNED - Implementation plan complete
+**Status**: ✅ PHASE 1-2 COMPLETE - Core models + service wiring done
 **Details**: [RASTER_RESULT_MODELS.md](./RASTER_RESULT_MODELS.md)
 **Priority**: CRITICAL - Blocks reliable checkpoint/resume, prevents silent failures
 
@@ -45,23 +46,24 @@ This file references other documents containing implementation details. This is 
 
 | Phase | Description | Status |
 |-------|-------------|--------|
-| **Phase 1** | Core result models (Validation, COG, STAC) | **NEXT** |
-| Phase 2 | Tiling result models | Pending |
-| Phase 3 | Handler final result models | Pending |
-| Phase 4 | Checkpoint data model | Pending |
+| Phase 1 | Core result models (Validation, COG, STAC) | ✅ DONE |
+| Phase 2 | Wiring to services (validate, cog, stac) | ✅ DONE |
+| Phase 3 | Tiling result models | Future |
+| Phase 4 | Checkpoint data model | Future |
 
 **Deliverables**:
-- [ ] Create `core/models/raster_results.py` with 10+ Pydantic models
-- [ ] Update `validate_raster()` to return typed result
-- [ ] Update `create_cog()` to return typed result
-- [ ] Update handler to use typed results
-- [ ] Update checkpoint save/load for type safety
-- [ ] Update `finalize_job()` to validate input
+- [x] Create `core/models/raster_results.py` with 12 Pydantic models (25 JAN)
+- [x] Update `validate_raster()` to return typed result (25 JAN)
+- [x] Update `create_cog()` to return typed result (25 JAN)
+- [x] Update `extract_stac_metadata()` to return typed result (25 JAN)
+- [x] Update handler imports for typed results (25 JAN)
+- [ ] Update checkpoint save/load for type safety (Future)
+- [ ] Update `finalize_job()` to validate input (Future)
 
 ---
 
 ### CoreMachine Gap Analysis (E7)
-**Status**: GAPS FIXED - Ready for events table
+**Status**: ✅ COMPLETE - All gaps fixed, events table + UI done
 **Details**: [COREMACHINE_GAPS.md](./COREMACHINE_GAPS.md)
 
 | Story | Status |
@@ -70,26 +72,26 @@ This file references other documents containing implementation details. This is 
 | GAP-4: Handle task_record None | Done |
 | GAP-7: Checkpoint for callback failure | Done |
 | GAP-2: Stage advancement checkpoint | Done |
-| **Story 5: Create app.job_events table** | PENDING |
-| **Story 6: Execution Timeline UI** | PENDING |
+| Story 5: Create app.job_events table | Done |
+| Story 6: Execution Timeline UI | Done |
 
 ---
 
 ### UI Migration to Docker/Jinja2
-**Status**: Phase 2 Core Routes COMPLETE
+**Status**: Phase 3 V0.8 Testing Gaps COMPLETE
 **Details**: [/UI_MIGRATION.md](/UI_MIGRATION.md)
 
 | Phase | Description | Status |
 |-------|-------------|--------|
 | Phase 1 | Foundation (base.html, static files) | Done |
-| Phase 2 | Core Routes (home, health, jobs, tasks, collections, submit) | Done (25 JAN) |
-| Phase 3 | V0.8 Testing Gaps | **IN PROGRESS** |
-| Phases 4+ | Advanced interfaces (viewers, etc.) | Future |
+| Phase 2 | Core Routes (home, health, jobs, tasks, collections, submit) | Done |
+| Phase 3 | V0.8 Testing Gaps (Raster/Vector Viewers, Logs, Queue Status) | Done (25 JAN) |
+| Phases 4+ | Advanced interfaces (submit workflows, etc.) | Future |
 
 ---
 
 ### Docker UI V0.8 Testing Gaps (E12)
-**Status**: IN PROGRESS
+**Status**: ✅ HIGH-PRIORITY GAPS COMPLETE
 **Details**: [DOCKER_UI_GAPS.md](./DOCKER_UI_GAPS.md)
 **Priority**: HIGH - Enables V0.8 UI-based testing
 
@@ -98,16 +100,17 @@ This file references other documents containing implementation details. This is 
 | GAP-01 | Cross-System Health (FA + Docker) | ✅ DONE |
 | GAP-02 | Queue Infrastructure Visibility | ✅ DONE |
 | GAP-03 | Log Viewing | ✅ DONE |
-| **GAP-04** | TiTiler/STAC Viewer Links | **NEXT** |
-| GAP-05 | Standalone Storage Browser | Future |
+| GAP-04 | Raster Curator Interface | ✅ DONE |
+| GAP-04b | Vector Curator Interface | ✅ DONE |
+| **GAP-05** | Standalone Storage Browser | **Future** |
 | GAP-06 | API Response Verification | Future |
 
-**Current Focus**: GAP-04 - Add viewer links for COG outputs and STAC items.
+**Current Focus**: All high-priority gaps complete (GAP-01 through GAP-04b). Remaining gaps are low priority.
 
 ---
 
 ### Dataset Approval System (F4.AP)
-**Status**: Phase 1 COMPLETE, Phase 2 IN PROGRESS
+**Status**: ✅ Phase 2 COMPLETE - UI integration done
 **Details**: [APPROVAL_WORKFLOW.md](./APPROVAL_WORKFLOW.md)
 
 | Story | Status |
@@ -115,7 +118,7 @@ This file references other documents containing implementation details. This is 
 | Core infrastructure (models, repo, service) | Done |
 | HTTP endpoints (`/api/approvals/*`) | Done |
 | Job completion hook | Done (22 JAN) |
-| Viewer UI buttons | Pending |
+| Viewer UI buttons (Raster + Vector Curator) | Done (25 JAN) |
 | ADF integration for public data | Pending |
 
 ---
@@ -183,49 +186,53 @@ This file references other documents containing implementation details. This is 
 
 | Priority | Epic | Feature | Status |
 |:--------:|------|---------|--------|
-| **1** | E7→E2 | RasterMetadata + STAC Self-Healing | CRITICAL |
-| **2** | E8 | H3 Analytics (Rwanda) | H3 bootstrap running |
-| 3 | E8 | Building Flood Exposure | Pending |
+| ~~1~~ | E7 | F7.21 Raster Result Models | ✅ Core complete |
+| **1** | E4 | **Classification Enforcement** | **Phase 1 NEXT** |
+| 2 | E7→E2 | RasterMetadata + STAC Self-Healing | In Progress |
+| 3 | E3 | DDH Platform Integration | In Progress |
 | 4 | E9 | Pre-prepared Raster Ingest | Pending |
-| 5 | E2 | Raster Data as API | In Progress |
-| 6 | E3 | DDH Platform Integration | In Progress |
+| -- | E8 | H3 Analytics / Building Exposure | Backlog |
 
-**Focus**: Rwanda as test region for all analytics pipelines before scaling.
+**Focus**: Classification enforcement is now top priority.
 
 ---
 
 ## Current Sprint Focus
 
-### H3 Analytics on Rwanda (E8)
-**Goal**: H3 aggregation of FATHOM flood data for Rwanda
+### 1. Classification Enforcement (E4) - Phase 1
+See [Active Work](#classification-enforcement-e4) section above.
+
+**Next Actions**:
+1. Enforce `access_level` at Platform API layer
+2. Reject submissions without valid classification
+3. Wire to approval workflow
+
+---
+
+### 2. RasterMetadata + STAC Self-Healing
+Continue testing and validation.
+
+**Next Actions**:
+1. Test raster STAC rebuild job
+2. Validate cog_metadata population
+
+---
+
+### Backlog: H3 Analytics on Rwanda (E8)
+**Status**: DEFERRED - Infrastructure ready, not current priority
 **Dependency**: F9.1 FATHOM merged COGs exist in silver-fathom
 
 | Story | Status |
 |-------|--------|
-| S8.13.1 | Seed Rwanda H3 cells (Stage 3 timeout) |
 | S8.13.1a | Fix H3 finalize timeout (pg_cron) | Done |
-| S8.13.1b | Enable pg_cron extension | Pending |
-| S8.13.1c | Run pg_cron_setup.sql | Pending |
-| S8.13.1d | Re-run H3 bootstrap | Pending |
+| S8.13.1b-d | Enable pg_cron, run setup, re-run bootstrap | Pending |
 | S8.13.2-5 | Add FATHOM to source_catalog, run aggregation | Pending |
-
-See [TABLE_MAINTENANCE.md](./TABLE_MAINTENANCE.md) for pg_cron setup.
 
 ---
 
-### Building Flood Exposure Pipeline (E8)
-**Goal**: Calculate % of buildings in flood risk areas, aggregated to H3 level 7
-**Dependency**: F8.13 (H3 cells for Rwanda), F9.1 FATHOM COGs
+### Backlog: Building Flood Exposure Pipeline (E8)
+**Status**: DEFERRED - Depends on H3 completion
 **Data Source**: Microsoft Building Footprints
-
-| Story | Description | Status |
-|-------|-------------|--------|
-| S8.7.1 | Download MS Building Footprints | Pending |
-| S8.7.2 | Create `buildings` schema | Pending |
-| S8.7.3 | Create job definition (4-stage) | Pending |
-| S8.7.4-7 | Stage handlers | Pending |
-| S8.7.8 | Rwanda + fluvial-defended-2020 test | Pending |
-| S8.7.9 | Expand to all FATHOM scenarios | Pending |
 
 ---
 
@@ -329,6 +336,10 @@ See [TABLE_MAINTENANCE.md](./TABLE_MAINTENANCE.md) for pg_cron setup.
 
 | Date | Item |
 |------|------|
+| 25 JAN 2026 | F7.21 Phase 2: Service wiring (validate, cog, stac return typed results) |
+| 25 JAN 2026 | F7.21 Phase 1: Raster Result Models (12 Pydantic models) |
+| 25 JAN 2026 | GAP-04b Vector Curator Interface (MapLibre + TiPG) |
+| 25 JAN 2026 | CoreMachine job_events table + Execution Timeline UI |
 | 25 JAN 2026 | Docker UI Phase 2 Core Routes (tasks interface added) |
 | 25 JAN 2026 | Docker UI Gap Analysis for V0.8 Testing |
 | 25 JAN 2026 | V0.8 MosaicJSON Removal from Docker Workflow |
@@ -361,7 +372,8 @@ See [TABLE_MAINTENANCE.md](./TABLE_MAINTENANCE.md) for pg_cron setup.
 
 ## Workflow
 
-1. ~~Complete Rwanda FATHOM pipeline (Priority 1)~~ DONE
-2. Run H3 aggregation on FATHOM outputs (Priority 2) - H3 bootstrap running
-3. Building flood exposure pipeline (Priority 3)
-4. Generalize to Pipeline Builder (Future)
+1. ~~Complete Rwanda FATHOM pipeline~~ DONE
+2. **F7.21 Raster Result Models** - Type safety for Docker workflow (CURRENT)
+3. **E4 Classification Enforcement** - Phase 1 Platform layer (NEXT)
+4. RasterMetadata + STAC Self-Healing testing
+5. H3 aggregation / Building exposure (BACKLOG)

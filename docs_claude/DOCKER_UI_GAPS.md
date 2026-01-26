@@ -117,22 +117,72 @@ This document tracks UI gaps identified when comparing the Docker Worker web int
 
 ### GAP-04: TiTiler/STAC Viewer Links
 **Priority**: MEDIUM
-**Status**: ⏳ PENDING
+**Status**: ✅ COMPLETE (25 JAN 2026)
 **Tests Enabled**: RAS-10, RAS-14, VEC-11, VEC-12
 
-**Problem**: Job results don't link to visualization tools.
+**Problem**: Job results don't link to visualization tools. Curators need to inspect raster output data before approval.
 
-**Solution**: Add viewer links to job completion results:
-- [ ] "View in TiTiler" link for COG outputs
-- [ ] "View in STAC Browser" link for STAC items
-- [ ] "View in Map" link for vector outputs
-- [ ] Links in job detail page results section
-- [ ] Links in collections browser item list
+**Solution**: Created standalone Raster Curator interface (`/interface/raster/viewer`) with:
+- [x] Leaflet map with TiTiler tile layers (20% sidebar, 80% map)
+- [x] Collection and item browsing from STAC API
+- [x] Band selection with RGB presets (Natural Color, Infrared, SWIR, etc.)
+- [x] Stretch controls (Auto, 2-98%, 5-95%, Min-Max, Custom)
+- [x] Colormap selection (15+ curated options)
+- [x] Per-band statistics display (min/max/mean/std/percentiles)
+- [x] Point query on map click for pixel values
+- [x] Raster metadata display (dimensions, CRS, data type, nodata)
+- [x] QA Approve/Reject buttons wired to approval workflow
+- [x] Navigation links added to navbar
 
-**Files to Modify**:
-- `templates/pages/jobs/detail.html`
-- `templates/pages/browse/collections.html`
-- `static/css/jobs.css`
+**Implementation**:
+- Added `/interface/raster/viewer` and `/interface/raster/viewer/{collection_id}` routes
+- Added `/api/raster/collections` endpoint
+- Added `/api/raster/stats` endpoint (TiTiler proxy)
+- Added `/api/raster/info` endpoint (TiTiler proxy)
+- Added `/api/raster/point` endpoint (TiTiler proxy)
+
+**Files Created/Modified**:
+- `templates/pages/raster/viewer.html` (new)
+- `static/js/raster-viewer.js` (new)
+- `static/css/raster-viewer.css` (new)
+- `templates/components/navbar.html` (added Raster Viewer link)
+- `docker_service.py` (added raster viewer routes and API endpoints)
+
+---
+
+### GAP-04b: Vector Curator Interface
+**Priority**: MEDIUM
+**Status**: ✅ COMPLETE (25 JAN 2026)
+**Tests Enabled**: VEC-11, VEC-12 (vector data quality review)
+
+**Problem**: Curators need to inspect vector output data before approval, similar to raster viewer.
+
+**Solution**: Created standalone Vector Curator interface (`/interface/vector/viewer`) with:
+- [x] MapLibre GL JS map (20% sidebar, 80% map) - WebGL for smooth rendering
+- [x] MVT (Mapbox Vector Tiles) mode for high-performance rendering of large datasets
+- [x] GeoJSON mode for full attribute access with configurable feature limit
+- [x] Layer mode toggle between MVT and GeoJSON
+- [x] Collection browsing from OGC Features / TiPG
+- [x] Styling controls (fill color, stroke color, opacity, stroke width, point radius)
+- [x] Feature inspection on click with popup and sidebar display
+- [x] Schema/attribute list display
+- [x] Collection metadata display (geometry type, CRS, extent)
+- [x] QA Approve/Reject buttons wired to approval workflow
+- [x] API links (TileJSON, Collection, Items, TiPG Map)
+- [x] Navigation links added to navbar
+
+**Implementation**:
+- Added `/interface/vector/viewer` and `/interface/vector/viewer/{collection_id}` routes
+- Added `/api/vector/collections` endpoint
+- Added `/api/vector/collection/{id}` endpoint
+- Added `/api/vector/features/{id}` endpoint (OGC Features proxy)
+
+**Files Created/Modified**:
+- `templates/pages/vector/viewer.html` (new)
+- `static/js/vector-viewer.js` (new)
+- `static/css/vector-viewer.css` (new)
+- `templates/components/navbar.html` (added Vector Viewer link)
+- `docker_service.py` (added vector viewer routes and API endpoints)
 
 ---
 
@@ -194,10 +244,11 @@ This document tracks UI gaps identified when comparing the Docker Worker web int
 
 | Order | Gap | Effort | Impact | Sprint |
 |-------|-----|--------|--------|--------|
-| 1 | GAP-01: Cross-System Health | Medium | High | Current |
-| 2 | GAP-02: Queue Visibility | Low | High | Current |
-| 3 | GAP-04: Viewer Links | Low | Medium | Next |
-| 4 | GAP-03: Log Viewing | Medium | Medium | Next |
+| 1 | GAP-01: Cross-System Health | Medium | High | ✅ Done |
+| 2 | GAP-02: Queue Visibility | Low | High | ✅ Done |
+| 3 | GAP-03: Log Viewing | Medium | Medium | ✅ Done |
+| 4 | GAP-04: Raster Curator | Medium | High | ✅ Done |
+| 4b | GAP-04b: Vector Curator | Medium | High | ✅ Done |
 | 5 | GAP-05: Storage Browser | Medium | Low | Future |
 | 6 | GAP-06: API Verification | Low | Low | Future |
 | 7 | GAP-07: Test Data Mgmt | Low | Low | Defer |
@@ -211,8 +262,9 @@ This document tracks UI gaps identified when comparing the Docker Worker web int
 | GAP-01 | ✅ | 25 JAN 2026 | Cross-system health with proxy endpoints |
 | GAP-02 | ✅ | 25 JAN 2026 | Queue status + purge with DLQ visibility |
 | GAP-03 | ✅ | 25 JAN 2026 | Standalone log viewer with App Insights |
-| GAP-04 | ⏳ | -- | TiTiler/STAC viewer links - NEXT |
-| GAP-05 | ⏳ | -- | |
+| GAP-04 | ✅ | 25 JAN 2026 | Raster Curator interface with TiTiler integration |
+| GAP-04b | ✅ | 25 JAN 2026 | Vector Curator interface with MapLibre + TiPG |
+| GAP-05 | ⏳ | -- | Standalone Storage Browser |
 | GAP-06 | ⏳ | -- | |
 | GAP-07 | ⏳ | -- | Deferred |
 

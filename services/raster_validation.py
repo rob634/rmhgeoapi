@@ -35,6 +35,16 @@ import sys
 import logging
 from typing import Any, Dict, Optional
 
+# F7.21: Type-safe result models (25 JAN 2026)
+from core.models.raster_results import (
+    RasterTypeInfo,
+    COGTierInfo,
+    BitDepthCheck,
+    MemoryEstimation,
+    RasterValidationData,
+    RasterValidationResult,
+)
+
 logger = logging.getLogger(__name__)
 
 # Lazy imports for Azure environment compatibility
@@ -464,59 +474,77 @@ def validate_raster(params: dict) -> dict:
                 applicable_tiers = ['visualization', 'analysis', 'archive']
                 logger.warning(f"   ⚠️  Using default tiers (detection failed): {applicable_tiers}")
 
-            # STEP 9: Build success result
+            # STEP 9: Build success result using Pydantic models (F7.21)
             try:
-                logger.info("🔄 STEP 9: Building validation result...")
-                result = {
-                    "success": True,
-                    "result": {
-                        "valid": True,
-                        "source_blob": blob_name,
-                        "container_name": container_name,
-                        "source_crs": str(source_crs),
-                        "crs_source": crs_source,
-                        "bounds": list(bounds),
-                        "shape": list(shape),
-                        "band_count": band_count,
-                        "dtype": str(dtype),
-                        "data_type": str(dtype),  # Alias for tier compatibility
-                        "size_mb": params.get('size_mb', 0),
-                        "nodata": nodata,
+                logger.info("🔄 STEP 9: Building validation result with Pydantic models...")
 
-                        # Raster type detection
-                        "raster_type": {
-                            "detected_type": detected_type,
-                            "confidence": type_result.get("confidence", "UNKNOWN"),
-                            "evidence": type_result.get("evidence", []),
-                            "type_source": type_result.get("type_source", "auto_detected"),
-                            "optimal_cog_settings": optimal_settings,
-                            "band_count": band_count,  # For tier detection
-                            "data_type": str(dtype)     # For tier detection
-                        },
+                # Build typed sub-models
+                raster_type_info = RasterTypeInfo(
+                    detected_type=detected_type,
+                    confidence=type_result.get("confidence", "UNKNOWN"),
+                    evidence=type_result.get("evidence", []),
+                    type_source=type_result.get("type_source", "auto_detected"),
+                    optimal_cog_settings=optimal_settings,
+                    band_count=band_count,
+                    data_type=str(dtype)
+                )
 
-                        # COG tier compatibility
-                        "cog_tiers": {
-                            "applicable_tiers": applicable_tiers,
-                            "total_compatible": len(applicable_tiers),
-                            "incompatible_reason": "JPEG requires RGB (3 bands, uint8)" if 'visualization' not in applicable_tiers else None
-                        },
+                cog_tier_info = COGTierInfo(
+                    applicable_tiers=applicable_tiers,
+                    total_compatible=len(applicable_tiers),
+                    incompatible_reason="JPEG requires RGB (3 bands, uint8)" if 'visualization' not in applicable_tiers else None
+                )
 
-                        # Bit-depth analysis
-                        "bit_depth_check": {
-                            "efficient": bit_depth_result.get("efficient", True),
-                            "current_dtype": str(dtype),
-                            "reason": bit_depth_result.get("reason", "Unknown")
-                        },
+                bit_depth_info = BitDepthCheck(
+                    efficient=bit_depth_result.get("efficient", True),
+                    current_dtype=str(dtype),
+                    reason=bit_depth_result.get("reason", "Unknown"),
+                    recommended_dtype=bit_depth_result.get("recommended_dtype"),
+                    potential_savings_percent=bit_depth_result.get("potential_savings_percent")
+                )
 
-                        # Memory footprint estimation (30 NOV 2025)
-                        "memory_estimation": memory_estimation,
+                # Build memory estimation model if available
+                memory_estimation_model = None
+                if memory_estimation and not memory_estimation.get("error"):
+                    memory_estimation_model = MemoryEstimation(
+                        uncompressed_gb=memory_estimation.get("uncompressed_gb"),
+                        estimated_peak_gb=memory_estimation.get("estimated_peak_gb"),
+                        system_ram_gb=memory_estimation.get("system_ram_gb"),
+                        cpu_count=memory_estimation.get("cpu_count"),
+                        safe_threshold_gb=memory_estimation.get("safe_threshold_gb"),
+                        processing_strategy=memory_estimation.get("processing_strategy"),
+                        gdal_config=memory_estimation.get("gdal_config"),
+                        warnings=memory_estimation.get("warnings", [])
+                    )
 
-                        # Warnings
-                        "warnings": warnings
-                    }
-                }
+                # Build the main validation data model
+                validation_data = RasterValidationData(
+                    valid=True,
+                    source_blob=blob_name,
+                    container_name=container_name,
+                    source_crs=str(source_crs),
+                    crs_source=crs_source,
+                    bounds=list(bounds),
+                    shape=list(shape),
+                    band_count=band_count,
+                    dtype=str(dtype),
+                    data_type=str(dtype),
+                    size_mb=params.get('size_mb', 0),
+                    nodata=nodata,
+                    raster_type=raster_type_info,
+                    cog_tiers=cog_tier_info,
+                    bit_depth_check=bit_depth_info,
+                    memory_estimation=memory_estimation_model,
+                    warnings=warnings
+                )
 
-                logger.info(f"✅ STEP 9: Result built successfully")
+                # Build the full result wrapper
+                result = RasterValidationResult(
+                    success=True,
+                    result=validation_data
+                )
+
+                logger.info(f"✅ STEP 9: Result built successfully (Pydantic validated)")
                 logger.info(f"✅ VALIDATION COMPLETE: Type={detected_type}, CRS={source_crs}, Tiers={len(applicable_tiers)}, Warnings={len(warnings)}")
 
                 # Memory checkpoint 3 (DEBUG_MODE only)
@@ -526,7 +554,8 @@ def validate_raster(params: dict) -> dict:
                                       detected_type=detected_type,
                                       warnings_count=len(warnings))
 
-                return result
+                # Return as dict for backward compatibility with existing consumers
+                return result.model_dump()
 
             except Exception as e:
                 logger.error(f"❌ STEP 9 FAILED: Error building result: {e}\n{traceback.format_exc()}")

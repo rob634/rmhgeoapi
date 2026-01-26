@@ -2788,6 +2788,511 @@ async def query_logs(
 
 
 # ============================================================================
+# RASTER VIEWER ENDPOINTS
+# ============================================================================
+
+@app.get("/interface/raster/viewer", response_class=HTMLResponse)
+@app.get("/interface/raster/viewer/{collection_id}", response_class=HTMLResponse)
+def raster_viewer_page(
+    request: Request,
+    collection_id: str = None
+):
+    """
+    Raster Curator interface for reviewing COG outputs.
+
+    Provides a map-based viewer for inspecting raster data with:
+    - Band selection and visualization controls
+    - Statistics display (min/max/mean/percentiles)
+    - Stretch controls (auto, percentile-based, custom)
+    - Point query for pixel values
+    - QA approval workflow integration
+
+    Args:
+        collection_id: Optional STAC collection ID to load
+
+    Returns:
+        HTML page with Leaflet map and sidebar controls
+    """
+    try:
+        from templates_utils import render_template
+        from config import get_config
+
+        config = get_config()
+        titiler_base_url = getattr(config, 'titiler_base_url', None) or ''
+
+        # Get initial bbox from collection if available
+        initial_bbox = None
+        if collection_id:
+            try:
+                from repositories.stac_repository import STACRepository
+                stac_repo = STACRepository()
+                collection = stac_repo.get_collection(collection_id)
+                if collection and 'extent' in collection:
+                    spatial = collection['extent'].get('spatial', {})
+                    bbox = spatial.get('bbox', [[]])[0]
+                    if len(bbox) >= 4:
+                        initial_bbox = bbox
+            except Exception as e:
+                logger.warning(f"Could not fetch collection bbox: {e}")
+
+        return render_template(
+            request,
+            "pages/raster/viewer.html",
+            collection_id=collection_id,
+            titiler_base_url=titiler_base_url,
+            initial_bbox=initial_bbox,
+            nav_active="/interface/raster/viewer"
+        )
+    except Exception as e:
+        logger.error(f"Error loading raster viewer: {e}")
+        return HTMLResponse(f"<div class='error'>Error loading raster viewer: {str(e)}</div>")
+
+
+@app.get("/api/raster/collections")
+async def list_raster_collections():
+    """
+    List all raster collections from STAC catalog.
+
+    Returns collections filtered to those with raster/COG assets.
+
+    Returns:
+        List of collections with id, title, item count
+    """
+    try:
+        from repositories.stac_repository import STACRepository
+
+        stac_repo = STACRepository()
+        collections = stac_repo.get_collections()
+
+        # Filter to raster collections (those with COG assets or raster type)
+        raster_collections = []
+        for col in collections:
+            # Include if it has raster item_type or COG in description
+            item_type = col.get('item_type', '')
+            description = col.get('description', '').lower()
+
+            if 'raster' in item_type.lower() or 'cog' in description or 'raster' in description:
+                raster_collections.append({
+                    'id': col.get('id'),
+                    'title': col.get('title') or col.get('id'),
+                    'description': col.get('description', '')[:100],
+                    'item_count': col.get('item_count', 0)
+                })
+            else:
+                # Include all for now - filter can be refined
+                raster_collections.append({
+                    'id': col.get('id'),
+                    'title': col.get('title') or col.get('id'),
+                    'description': col.get('description', '')[:100],
+                    'item_count': col.get('item_count', 0)
+                })
+
+        return {
+            "status": "success",
+            "count": len(raster_collections),
+            "collections": raster_collections
+        }
+
+    except Exception as e:
+        logger.error(f"Error listing raster collections: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
+        )
+
+
+@app.get("/api/raster/stats")
+async def get_raster_stats(
+    url: str,
+    bidx: str = None
+):
+    """
+    Proxy to TiTiler statistics endpoint.
+
+    Fetches per-band statistics for a COG including:
+    - min, max, mean, std
+    - percentiles (p2, p5, p50, p95, p98)
+    - histogram (optional)
+
+    Args:
+        url: URL of the COG file
+        bidx: Optional band index (e.g., "1" or "1,2,3")
+
+    Returns:
+        Per-band statistics from TiTiler
+    """
+    import httpx
+    from config import get_config
+
+    try:
+        config = get_config()
+        titiler_base_url = getattr(config, 'titiler_base_url', None)
+
+        if not titiler_base_url:
+            return JSONResponse(
+                status_code=503,
+                content={"error": "TiTiler service not configured"}
+            )
+
+        # Build TiTiler statistics URL
+        stats_url = f"{titiler_base_url}/cog/statistics"
+        params = {"url": url}
+        if bidx:
+            params["bidx"] = bidx
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.get(stats_url, params=params)
+
+            if response.status_code != 200:
+                error_text = response.text[:500]
+                logger.error(f"TiTiler stats request failed: {response.status_code} - {error_text}")
+                return JSONResponse(
+                    status_code=response.status_code,
+                    content={"error": f"TiTiler request failed: {error_text}"}
+                )
+
+            stats = response.json()
+
+        return {
+            "status": "success",
+            "url": url,
+            "statistics": stats
+        }
+
+    except httpx.TimeoutException:
+        return JSONResponse(
+            status_code=504,
+            content={"error": "TiTiler request timed out"}
+        )
+    except Exception as e:
+        logger.error(f"Error fetching raster stats: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
+        )
+
+
+@app.get("/api/raster/info")
+async def get_raster_info(url: str):
+    """
+    Proxy to TiTiler info endpoint.
+
+    Fetches COG metadata including:
+    - bounds, CRS, dimensions
+    - band count and names
+    - data type, nodata value
+
+    Args:
+        url: URL of the COG file
+
+    Returns:
+        COG metadata from TiTiler
+    """
+    import httpx
+    from config import get_config
+
+    try:
+        config = get_config()
+        titiler_base_url = getattr(config, 'titiler_base_url', None)
+
+        if not titiler_base_url:
+            return JSONResponse(
+                status_code=503,
+                content={"error": "TiTiler service not configured"}
+            )
+
+        # Build TiTiler info URL
+        info_url = f"{titiler_base_url}/cog/info"
+        params = {"url": url}
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(info_url, params=params)
+
+            if response.status_code != 200:
+                error_text = response.text[:500]
+                logger.error(f"TiTiler info request failed: {response.status_code} - {error_text}")
+                return JSONResponse(
+                    status_code=response.status_code,
+                    content={"error": f"TiTiler request failed: {error_text}"}
+                )
+
+            info = response.json()
+
+        return {
+            "status": "success",
+            "url": url,
+            "info": info
+        }
+
+    except httpx.TimeoutException:
+        return JSONResponse(
+            status_code=504,
+            content={"error": "TiTiler request timed out"}
+        )
+    except Exception as e:
+        logger.error(f"Error fetching raster info: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
+        )
+
+
+@app.get("/api/raster/point")
+async def get_raster_point_value(
+    url: str,
+    lon: float,
+    lat: float
+):
+    """
+    Proxy to TiTiler point query endpoint.
+
+    Fetches pixel values at a specific coordinate.
+
+    Args:
+        url: URL of the COG file
+        lon: Longitude
+        lat: Latitude
+
+    Returns:
+        Pixel values for all bands at the given coordinate
+    """
+    import httpx
+    from config import get_config
+
+    try:
+        config = get_config()
+        titiler_base_url = getattr(config, 'titiler_base_url', None)
+
+        if not titiler_base_url:
+            return JSONResponse(
+                status_code=503,
+                content={"error": "TiTiler service not configured"}
+            )
+
+        # Build TiTiler point URL
+        point_url = f"{titiler_base_url}/cog/point/{lon},{lat}"
+        params = {"url": url}
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(point_url, params=params)
+
+            if response.status_code != 200:
+                error_text = response.text[:500]
+                logger.error(f"TiTiler point request failed: {response.status_code} - {error_text}")
+                return JSONResponse(
+                    status_code=response.status_code,
+                    content={"error": f"TiTiler request failed: {error_text}"}
+                )
+
+            point_data = response.json()
+
+        return {
+            "status": "success",
+            "lon": lon,
+            "lat": lat,
+            "values": point_data.get("values", []),
+            "band_names": point_data.get("band_names", [])
+        }
+
+    except httpx.TimeoutException:
+        return JSONResponse(
+            status_code=504,
+            content={"error": "TiTiler request timed out"}
+        )
+    except Exception as e:
+        logger.error(f"Error fetching point value: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
+        )
+
+
+# ============================================================================
+# VECTOR VIEWER ENDPOINTS
+# ============================================================================
+
+@app.get("/interface/vector/viewer", response_class=HTMLResponse)
+@app.get("/interface/vector/viewer/{collection_id}", response_class=HTMLResponse)
+def vector_viewer_page(
+    request: Request,
+    collection_id: str = None
+):
+    """
+    Vector Curator interface for reviewing vector data outputs.
+
+    Provides a MapLibre-based viewer for inspecting vector data with:
+    - MVT tiles for high-performance rendering
+    - GeoJSON mode for full attribute access
+    - Styling controls (fill, stroke, opacity)
+    - Feature inspection on click
+    - Schema/attribute display
+    - QA approval workflow integration
+
+    Args:
+        collection_id: Optional OGC collection ID to load
+
+    Returns:
+        HTML page with MapLibre map and sidebar controls
+    """
+    try:
+        from templates_utils import render_template
+        from config import get_config
+
+        config = get_config()
+        tipg_base_url = getattr(config, 'tipg_base_url', None) or ''
+
+        # Get initial bbox from collection if available
+        initial_bbox = None
+        if collection_id:
+            try:
+                from ogc_features.service import OGCFeaturesService
+                service = OGCFeaturesService()
+                collection = service.get_collection(collection_id)
+                if collection and 'extent' in collection:
+                    spatial = collection['extent'].get('spatial', {})
+                    bbox = spatial.get('bbox', [[]])[0]
+                    if len(bbox) >= 4:
+                        initial_bbox = bbox
+            except Exception as e:
+                logger.warning(f"Could not fetch collection bbox: {e}")
+
+        return render_template(
+            request,
+            "pages/vector/viewer.html",
+            collection_id=collection_id,
+            tipg_base_url=tipg_base_url,
+            initial_bbox=initial_bbox,
+            nav_active="/interface/vector/viewer"
+        )
+    except Exception as e:
+        logger.error(f"Error loading vector viewer: {e}")
+        return HTMLResponse(f"<div class='error'>Error loading vector viewer: {str(e)}</div>")
+
+
+@app.get("/api/vector/collections")
+async def list_vector_collections():
+    """
+    List all vector collections from OGC Features / TiPG.
+
+    Returns collections with PostGIS geometry tables.
+
+    Returns:
+        List of collections with id, title, feature count
+    """
+    try:
+        from ogc_features.service import OGCFeaturesService
+
+        service = OGCFeaturesService()
+        collections = service.get_collections()
+
+        vector_collections = []
+        for col in collections:
+            vector_collections.append({
+                'id': col.get('id'),
+                'title': col.get('title') or col.get('id'),
+                'description': col.get('description', '')[:100] if col.get('description') else '',
+                'feature_count': col.get('numberMatched') or col.get('context', {}).get('matched')
+            })
+
+        return {
+            "status": "success",
+            "count": len(vector_collections),
+            "collections": vector_collections
+        }
+
+    except Exception as e:
+        logger.error(f"Error listing vector collections: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
+        )
+
+
+@app.get("/api/vector/collection/{collection_id}")
+async def get_vector_collection(collection_id: str):
+    """
+    Get vector collection metadata.
+
+    Args:
+        collection_id: Collection ID (table name)
+
+    Returns:
+        Collection metadata including extent, CRS, schema
+    """
+    try:
+        from ogc_features.service import OGCFeaturesService
+
+        service = OGCFeaturesService()
+        collection = service.get_collection(collection_id)
+
+        if not collection:
+            return JSONResponse(
+                status_code=404,
+                content={"error": f"Collection '{collection_id}' not found"}
+            )
+
+        return {
+            "status": "success",
+            "collection": collection
+        }
+
+    except Exception as e:
+        logger.error(f"Error fetching collection {collection_id}: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
+        )
+
+
+@app.get("/api/vector/features/{collection_id}")
+async def get_vector_features(
+    collection_id: str,
+    limit: int = 100,
+    offset: int = 0,
+    bbox: str = None
+):
+    """
+    Get vector features from a collection.
+
+    Proxy to OGC Features API for GeoJSON retrieval.
+
+    Args:
+        collection_id: Collection ID (table name)
+        limit: Maximum features to return (default 100)
+        offset: Pagination offset
+        bbox: Bounding box filter (minx,miny,maxx,maxy)
+
+    Returns:
+        GeoJSON FeatureCollection
+    """
+    try:
+        from ogc_features.service import OGCFeaturesService
+
+        service = OGCFeaturesService()
+
+        # Parse bbox if provided
+        bbox_list = None
+        if bbox:
+            bbox_list = [float(x) for x in bbox.split(',')]
+
+        features = service.get_features(
+            collection_id=collection_id,
+            limit=limit,
+            offset=offset,
+            bbox=bbox_list
+        )
+
+        return features
+
+    except Exception as e:
+        logger.error(f"Error fetching features from {collection_id}: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
+        )
+
+
+# ============================================================================
 # HEALTH CHECK ENDPOINTS
 # ============================================================================
 

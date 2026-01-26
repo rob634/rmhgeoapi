@@ -1343,7 +1343,11 @@ class ServiceBusRepository(IQueueRepository):
 
         logger.info("🚌 Ensuring all required Service Bus queues exist...")
 
-        # Queue configurations (11 DEC 2025 - No Legacy Fallbacks, 3 queues only)
+        # Queue configurations (V0.8 - 26 JAN 2026)
+        # V0.8 uses 3 queues:
+        # - geospatial-jobs: Job orchestration
+        # - functionapp-tasks: Lightweight ops (DB queries, STAC)
+        # - container-tasks: Heavy ops (GDAL, geopandas) - Docker worker
         queue_configs = [
             {
                 "name": config.service_bus_jobs_queue,  # geospatial-jobs
@@ -1352,16 +1356,16 @@ class ServiceBusRepository(IQueueRepository):
                 "purpose": "Job orchestration and stage_complete signals"
             },
             {
-                "name": config.queues.raster_tasks_queue,  # raster-tasks
-                "lock_duration_minutes": 5,  # Longer lock for GDAL operations
+                "name": config.queues.functionapp_tasks_queue,  # functionapp-tasks
+                "lock_duration_minutes": 2,
                 "max_delivery_count": 1,
-                "purpose": "Raster task processing (memory-intensive GDAL ops)"
+                "purpose": "Lightweight task processing (DB queries, STAC, inventory)"
             },
             {
-                "name": config.queues.vector_tasks_queue,  # vector-tasks
-                "lock_duration_minutes": 2,  # Shorter lock for faster vector ops
+                "name": config.queues.container_tasks_queue,  # container-tasks
+                "lock_duration_minutes": 10,  # Longer lock for heavy GDAL operations
                 "max_delivery_count": 1,
-                "purpose": "Vector task processing (high concurrency)"
+                "purpose": "Heavy task processing (GDAL, geopandas) - Docker worker"
             }
         ]
 

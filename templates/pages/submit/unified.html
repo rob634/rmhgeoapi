@@ -124,9 +124,9 @@
 
                     {# Metadata Section #}
                     {% call form_section("Metadata") %}
-                    {{ text_input("service_name", "Service Name", required=True,
-                                  placeholder="Human-readable dataset name",
-                                  hint="Display name for the dataset") }}
+                    {{ text_input("title", "Title",
+                                  placeholder="Human-readable dataset title",
+                                  hint="Optional - auto-generated from DDH IDs if not provided") }}
 
                     {{ textarea("description", "Description",
                                 placeholder="Full dataset description",

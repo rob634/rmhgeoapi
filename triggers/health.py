@@ -603,13 +603,13 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         """
         Check Azure Service Bus queue health using ServiceBusRepository.
 
-        Updated 03 JAN 2026: Enhanced error tracking and network diagnostics.
+        Updated 26 JAN 2026: V0.8 queue consolidation.
         All queues must be accessible for Service Bus to be healthy.
 
-        Queues checked:
+        Queues checked (V0.8):
         - geospatial-jobs: Job orchestration + stage_complete signals
-        - raster-tasks: Memory-intensive GDAL operations (low concurrency)
-        - vector-tasks: DB-bound and lightweight operations (high concurrency)
+        - functionapp-tasks: Lightweight operations (DB, STAC, inventory)
+        - container-tasks: Heavy operations (GDAL, geopandas) - Docker worker
         """
         def classify_error(error_str: str, exception: Exception) -> dict:
             """Classify Service Bus errors for actionable diagnostics."""
@@ -800,11 +800,11 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                 queue_status["_repository_error"] = classify_error(str(e), e)
                 return queue_status
 
-            # Check all 3 queues
+            # Check all 3 queues (V0.8 - 26 JAN 2026)
             queues_to_check = [
                 {"name": config.service_bus_jobs_queue, "purpose": "Job orchestration + stage_complete signals"},
-                {"name": config.queues.raster_tasks_queue, "purpose": "Raster tasks (GDAL, low concurrency)"},
-                {"name": config.queues.vector_tasks_queue, "purpose": "Vector tasks (DB, high concurrency)"}
+                {"name": config.queues.functionapp_tasks_queue, "purpose": "Lightweight tasks (DB, STAC, inventory)"},
+                {"name": config.queues.container_tasks_queue, "purpose": "Heavy tasks (GDAL, geopandas) - Docker worker"}
             ]
 
             queues_accessible = 0

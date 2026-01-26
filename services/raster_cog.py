@@ -50,6 +50,13 @@ from datetime import datetime, timezone
 
 from exceptions import ContractViolationError
 
+# F7.21: Type-safe result models (25 JAN 2026)
+from core.models.raster_results import (
+    TierProfileInfo,
+    COGCreationData,
+    COGCreationResult,
+)
+
 
 # ============================================================================
 # PULSE WRAPPER - Threading Pattern for Blocking Operations (11 JAN 2026)
@@ -684,43 +691,45 @@ def create_cog(params: dict) -> dict:
         logger.info(f"   Input: {input_size_mb:.2f}MB → Output: {output_size_mb:.2f}MB")
         logger.info(f"   Processing time: {cog_duration:.1f}s")
 
-        # Return success result (matches in-memory path structure)
-        return {
-            "success": True,
-            "result": {
-                "cog_blob": output_blob_name,
-                "cog_container": silver_container,
-                "cog_tier": output_tier.value,
-                "storage_tier": tier_profile.storage_tier.value,
-                "source_blob": blob_name,
-                "source_container": container_name,
-                "reprojection_performed": False,  # TODO: detect from disk_result
-                "source_crs": raster_metadata.get('crs', str(source_crs)),
-                "target_crs": str(target_crs),
-                "bounds_4326": raster_metadata.get('bounds'),
-                "shape": raster_metadata.get('shape', []),
-                "size_mb": round(output_size_mb, 2),
-                "compression": compression,
-                "jpeg_quality": jpeg_quality if compression == "jpeg" else None,
-                "tile_size": [512, 512],
-                "overview_levels": [],  # Not captured in disk path currently
-                "overview_resampling": overview_resampling,
-                "reproject_resampling": reproject_resampling if False else None,
-                "raster_type": raster_metadata if raster_metadata else {"detected_type": raster_type},
-                "processing_time_seconds": round(cog_duration, 2),
-                "tier_profile": {
-                    "tier": output_tier.value,
-                    "compression": tier_profile.compression,
-                    "storage_tier": tier_profile.storage_tier.value,
-                    "use_case": tier_profile.use_case,
-                    "description": tier_profile.description
-                },
-                "file_checksum": file_checksum,
-                "file_size": output_size_bytes,
-                "blob_version_id": None,  # Not captured in stream upload
-                "processing_mode": "disk_based",  # NEW: indicates which path was used
-            }
-        }
+        # Build typed result using Pydantic models (F7.21)
+        tier_profile_info = TierProfileInfo(
+            tier=output_tier.value,
+            compression=tier_profile.compression,
+            storage_tier=tier_profile.storage_tier.value,
+            use_case=tier_profile.use_case,
+            description=tier_profile.description
+        )
+
+        cog_data = COGCreationData(
+            cog_blob=output_blob_name,
+            cog_container=silver_container,
+            cog_tier=output_tier.value,
+            storage_tier=tier_profile.storage_tier.value,
+            source_blob=blob_name,
+            source_container=container_name,
+            reprojection_performed=False,  # TODO: detect from disk_result
+            source_crs=raster_metadata.get('crs', str(source_crs)),
+            target_crs=str(target_crs),
+            bounds_4326=raster_metadata.get('bounds'),
+            shape=raster_metadata.get('shape', []),
+            size_mb=round(output_size_mb, 2),
+            compression=compression,
+            jpeg_quality=jpeg_quality if compression == "jpeg" else None,
+            tile_size=[512, 512],
+            overview_levels=[],  # Not captured in disk path currently
+            overview_resampling=overview_resampling,
+            reproject_resampling=None,
+            raster_type=raster_metadata if raster_metadata else {"detected_type": raster_type},
+            processing_time_seconds=round(cog_duration, 2),
+            tier_profile=tier_profile_info,
+            file_checksum=file_checksum,
+            file_size=output_size_bytes,
+            blob_version_id=None,  # Not captured in stream upload
+            processing_mode="disk_based"
+        )
+
+        result = COGCreationResult(success=True, result=cog_data)
+        return result.model_dump()
 
     # ==========================================================================
     # IN-MEMORY PROCESSING PATH (original path for Function App / small files)
@@ -1015,49 +1024,51 @@ def create_cog(params: dict) -> dict:
 
                     # No STEP 7 needed - MemoryFile context managers handle cleanup automatically.
 
-        # Success result
+        # Build typed result using Pydantic models (F7.21)
         logger.info("🎉 COG creation pipeline completed successfully")
-        return {
-            "success": True,
-            "result": {
-                "cog_blob": output_blob_name,
-                "cog_container": silver_container,
-                "cog_tier": output_tier.value,
-                "storage_tier": tier_profile.storage_tier.value,
-                "source_blob": blob_name,
-                "source_container": container_name,
-                "reprojection_performed": needs_reprojection,
-                "source_crs": str(source_crs),
-                "target_crs": str(target_crs),
-                "bounds_4326": list(output_bounds) if output_crs == target_crs else None,
-                "shape": list(output_shape),
-                "size_mb": round(output_size_mb, 2),
-                "compression": compression,
-                "jpeg_quality": jpeg_quality if compression == "jpeg" else None,
-                "tile_size": [512, 512],  # Default from rio-cogeo
-                "overview_levels": overviews,
-                "overview_resampling": overview_resampling,
-                "reproject_resampling": reproject_resampling if needs_reprojection else None,
-                # Return full raster_type dict for downstream STAC metadata (04 JAN 2026)
-                # Contains: detected_type, band_count, data_type - needed for TiTiler bidx params
-                "raster_type": raster_metadata if raster_metadata else {"detected_type": raster_type},
-                "processing_time_seconds": round(elapsed_time, 2),
-                "tier_profile": {
-                    "tier": output_tier.value,
-                    "compression": tier_profile.compression,
-                    "storage_tier": tier_profile.storage_tier.value,
-                    "use_case": tier_profile.use_case,
-                    "description": tier_profile.description
-                },
-                # STAC file extension compliant checksum (21 JAN 2026)
-                # Format: SHA-256 multihash hex string (e.g., "1220abc123...")
-                "file_checksum": file_checksum,
-                "file_size": len(cog_bytes),
-                # Azure Blob Storage version ID (21 JAN 2026)
-                # Only populated if versioning is enabled on the storage account
-                "blob_version_id": blob_version_id,
-            }
-        }
+
+        tier_profile_info = TierProfileInfo(
+            tier=output_tier.value,
+            compression=tier_profile.compression,
+            storage_tier=tier_profile.storage_tier.value,
+            use_case=tier_profile.use_case,
+            description=tier_profile.description
+        )
+
+        cog_data = COGCreationData(
+            cog_blob=output_blob_name,
+            cog_container=silver_container,
+            cog_tier=output_tier.value,
+            storage_tier=tier_profile.storage_tier.value,
+            source_blob=blob_name,
+            source_container=container_name,
+            reprojection_performed=needs_reprojection,
+            source_crs=str(source_crs),
+            target_crs=str(target_crs),
+            bounds_4326=list(output_bounds) if output_crs == target_crs else None,
+            shape=list(output_shape),
+            size_mb=round(output_size_mb, 2),
+            compression=compression,
+            jpeg_quality=jpeg_quality if compression == "jpeg" else None,
+            tile_size=[512, 512],  # Default from rio-cogeo
+            overview_levels=overviews,
+            overview_resampling=overview_resampling,
+            reproject_resampling=reproject_resampling if needs_reprojection else None,
+            # Return full raster_type dict for downstream STAC metadata (04 JAN 2026)
+            # Contains: detected_type, band_count, data_type - needed for TiTiler bidx params
+            raster_type=raster_metadata if raster_metadata else {"detected_type": raster_type},
+            processing_time_seconds=round(elapsed_time, 2),
+            tier_profile=tier_profile_info,
+            # STAC file extension compliant checksum (21 JAN 2026)
+            file_checksum=file_checksum,
+            file_size=len(cog_bytes),
+            # Azure Blob Storage version ID (21 JAN 2026)
+            blob_version_id=blob_version_id,
+            processing_mode="in_memory"
+        )
+
+        result = COGCreationResult(success=True, result=cog_data)
+        return result.model_dump()
 
     except Exception as e:
         # Catch all errors from STEPs 3-6
@@ -1077,11 +1088,13 @@ def create_cog(params: dict) -> dict:
             error_code = "COG_CREATION_FAILED"
             step_info = "Unknown step"
 
-        return {
-            "success": False,
-            "error": error_code,
-            "message": f"{step_info} failed: {e}",
-            "traceback": traceback.format_exc()
-        }
+        # Use typed result for errors too (F7.21)
+        error_result = COGCreationResult(
+            success=False,
+            error=error_code,
+            message=f"{step_info} failed: {e}",
+            traceback=traceback.format_exc()
+        )
+        return error_result.model_dump()
 
     # No finally block needed - MemoryFile context managers handle all cleanup automatically.

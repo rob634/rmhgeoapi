@@ -94,10 +94,10 @@ Processing Pattern:
        - Each stage creates parallel tasks with parameter validation
        - Job queued to geospatial-jobs queue for asynchronous processing
 
-    2. Queue-Based Task Execution (11 DEC 2025 - No Legacy Fallbacks):
+    2. Queue-Based Task Execution (V0.8 - 26 JAN 2026):
        - geospatial-jobs queue: Job messages and stage_complete signals
-       - raster-tasks queue: Memory-intensive GDAL operations (low concurrency)
-       - vector-tasks queue: DB-bound and lightweight operations (high concurrency)
+       - functionapp-tasks queue: Lightweight operations (DB, STAC, inventory)
+       - container-tasks queue: Heavy operations (GDAL, geopandas) - Docker worker
        - Tasks processed independently with strong typing discipline
        - Last completing task aggregates results into job result_data
        - All task types MUST be mapped in TaskRoutingDefaults (no fallback)

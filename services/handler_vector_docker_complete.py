@@ -99,7 +99,9 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
     file_extension = parameters['file_extension'].lower().lstrip('.')
     table_name = parameters['table_name']
     schema = parameters.get('schema', 'geo')
-    chunk_size = parameters.get('chunk_size', 20000)
+    # PERF FIX (26 JAN 2026): Increased from 20K to 100K for Docker
+    # Docker has more memory than Function Apps, larger chunks = fewer round-trips
+    chunk_size = parameters.get('chunk_size', 100000)
     overwrite = parameters.get('overwrite', False)
 
     logger.info(f"[{job_id[:8]}] Docker Vector ETL starting: {blob_name} -> {schema}.{table_name}")

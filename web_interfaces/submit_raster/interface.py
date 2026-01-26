@@ -754,17 +754,20 @@ class SubmitRasterInterface(BaseInterface):
                                     <label>Processing Mode</label>
                                     <div class="toggle-container">
                                         <label class="toggle-switch">
-                                            <input type="checkbox" id="use_docker" name="use_docker"
+                                            <input type="checkbox" id="use_docker" name="use_docker" checked
                                                    onchange="updateCurlPreview(); updateProcessingModeLabel()">
                                             <span class="toggle-slider"></span>
                                         </label>
-                                        <span id="processing-mode-label" class="toggle-label">
-                                            Function App (default)
+                                        <span id="processing-mode-label" class="toggle-label docker-active">
+                                            Docker Worker (recommended)
                                         </span>
                                     </div>
+                                    <div id="function-app-warning" class="function-app-warning hidden">
+                                        ⚠️ Function App processing has 10-minute timeout and limited memory.
+                                        Use only for small files (&lt;100MB) or quick tests.
+                                    </div>
                                     <span class="field-hint docker-hint">
-                                        Enable Docker for large files, complex projections, or when Function times out.
-                                        Docker worker has longer timeouts and more memory.
+                                        Docker worker is recommended for reliable processing with longer timeouts and more memory.
                                     </span>
                                 </div>
                             </div>
@@ -1441,6 +1444,18 @@ class SubmitRasterInterface(BaseInterface):
             line-height: 1.4;
         }
 
+        .function-app-warning {
+            background: #fef3c7;
+            border: 1px solid #f59e0b;
+            color: #92400e;
+            padding: 10px 12px;
+            border-radius: 4px;
+            margin-top: 8px;
+            font-size: 12px;
+            font-weight: 500;
+            line-height: 1.4;
+        }
+
         /* Prominent cURL Section */
         .curl-section-prominent {
             background: #1e293b;
@@ -1650,12 +1665,16 @@ class SubmitRasterInterface(BaseInterface):
         function updateProcessingModeLabel() {
             const useDocker = document.getElementById('use_docker').checked;
             const label = document.getElementById('processing-mode-label');
+            const warning = document.getElementById('function-app-warning');
+
             if (useDocker) {
-                label.textContent = 'Docker Worker (long-running-tasks queue)';
+                label.textContent = 'Docker Worker (recommended)';
                 label.classList.add('docker-active');
+                warning.classList.add('hidden');
             } else {
-                label.textContent = 'Function App (default)';
+                label.textContent = 'Function App (limited)';
                 label.classList.remove('docker-active');
+                warning.classList.remove('hidden');
             }
         }
 

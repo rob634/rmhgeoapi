@@ -1,0 +1,272 @@
+{% extends "base.html" %}
+
+{% block title %}Raster Viewer - {{ collection_id or 'Select Collection' }}{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<link rel="stylesheet" href="/static/css/raster-viewer.css">
+{% endblock %}
+
+{% block content %}
+<div class="viewer-container">
+    {# Sidebar - 20% width #}
+    <aside class="viewer-sidebar" id="sidebar">
+        {# Header #}
+        <div class="sidebar-header">
+            <h1>Raster Curator</h1>
+            <p class="subtitle">Data Quality Review</p>
+        </div>
+
+        {# Collection Selector (if no collection selected) #}
+        {% if not collection_id %}
+        <div class="sidebar-section">
+            <div class="section-title">Select Collection</div>
+            <div class="section-content">
+                <select id="collection-select" class="form-select" onchange="loadCollection(this.value)">
+                    <option value="">-- Choose a collection --</option>
+                </select>
+                <div id="collection-loading" class="loading-text">Loading collections...</div>
+            </div>
+        </div>
+        {% else %}
+
+        {# Collection Info #}
+        <div class="sidebar-section">
+            <div class="section-title">Collection</div>
+            <div class="section-content">
+                <div class="collection-name">{{ collection_id }}</div>
+                <div class="collection-stats">
+                    <span id="item-count">--</span> items
+                </div>
+                <a href="/interface/raster/viewer" class="btn btn-sm btn-ghost">Change Collection</a>
+            </div>
+        </div>
+
+        {# Items List #}
+        <div class="sidebar-section items-section">
+            <div class="section-title">
+                Items
+                <span class="item-filter-toggle" onclick="toggleItemFilter()">Filter</span>
+            </div>
+            <div id="item-filter" class="item-filter hidden">
+                <input type="text" id="item-search" placeholder="Search items..."
+                       onkeyup="filterItems(this.value)">
+            </div>
+            <div class="items-list" id="items-list">
+                <div class="loading-text">Loading items...</div>
+            </div>
+        </div>
+
+        {# Metadata Panel #}
+        <div class="sidebar-section" id="metadata-section" style="display: none;">
+            <div class="section-title">Raster Metadata</div>
+            <div class="section-content">
+                <div class="metadata-grid" id="metadata-grid">
+                    {# Populated by JS #}
+                </div>
+            </div>
+        </div>
+
+        {# Statistics Panel #}
+        <div class="sidebar-section" id="stats-section" style="display: none;">
+            <div class="section-title">
+                Band Statistics
+                <button class="btn-icon" onclick="refreshStats()" title="Refresh stats">&#x21BB;</button>
+            </div>
+            <div class="section-content">
+                <div id="stats-content">
+                    <div class="loading-text">Select an item to view stats</div>
+                </div>
+            </div>
+        </div>
+
+        {# Visualization Controls #}
+        <div class="sidebar-section" id="viz-section" style="display: none;">
+            <div class="section-title">Visualization</div>
+            <div class="section-content">
+                {# Band Selection #}
+                <div class="control-group">
+                    <label>Bands</label>
+                    <div class="band-controls">
+                        <div class="band-select-group">
+                            <span class="band-label">R</span>
+                            <select id="band-r" class="band-select" onchange="updateVisualization()">
+                                <option value="1">1</option>
+                            </select>
+                        </div>
+                        <div class="band-select-group">
+                            <span class="band-label">G</span>
+                            <select id="band-g" class="band-select" onchange="updateVisualization()">
+                                <option value="2">2</option>
+                            </select>
+                        </div>
+                        <div class="band-select-group">
+                            <span class="band-label">B</span>
+                            <select id="band-b" class="band-select" onchange="updateVisualization()">
+                                <option value="3">3</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="band-presets" id="band-presets">
+                        {# Populated by JS based on band count #}
+                    </div>
+                </div>
+
+                {# Stretch Controls #}
+                <div class="control-group">
+                    <label>Stretch</label>
+                    <div class="stretch-buttons">
+                        <button class="stretch-btn active" data-stretch="auto" onclick="applyStretch('auto')">Auto</button>
+                        <button class="stretch-btn" data-stretch="p2-98" onclick="applyStretch('p2-98')">2-98%</button>
+                        <button class="stretch-btn" data-stretch="p5-95" onclick="applyStretch('p5-95')">5-95%</button>
+                        <button class="stretch-btn" data-stretch="minmax" onclick="applyStretch('minmax')">Min-Max</button>
+                        <button class="stretch-btn" data-stretch="custom" onclick="applyStretch('custom')">Custom</button>
+                    </div>
+                    <div class="custom-stretch hidden" id="custom-stretch">
+                        <div class="stretch-inputs">
+                            <input type="number" id="stretch-min" placeholder="Min" step="any">
+                            <span>to</span>
+                            <input type="number" id="stretch-max" placeholder="Max" step="any">
+                        </div>
+                        <button class="btn btn-sm btn-primary" onclick="applyCustomStretch()">Apply</button>
+                    </div>
+                </div>
+
+                {# Colormap (Single Band) #}
+                <div class="control-group" id="colormap-group">
+                    <label>Colormap <span class="hint">(single band)</span></label>
+                    <select id="colormap-select" class="form-select" onchange="updateVisualization()">
+                        <option value="">None (Grayscale)</option>
+                        <optgroup label="Elevation / Terrain">
+                            <option value="terrain">Terrain</option>
+                            <option value="gist_earth">Earth</option>
+                            <option value="cubehelix">Cubehelix</option>
+                        </optgroup>
+                        <optgroup label="Sequential">
+                            <option value="viridis">Viridis</option>
+                            <option value="plasma">Plasma</option>
+                            <option value="inferno">Inferno</option>
+                            <option value="magma">Magma</option>
+                            <option value="cividis">Cividis</option>
+                        </optgroup>
+                        <optgroup label="Temperature / Intensity">
+                            <option value="hot">Hot</option>
+                            <option value="coolwarm">Cool-Warm</option>
+                            <option value="jet">Jet</option>
+                            <option value="turbo">Turbo</option>
+                        </optgroup>
+                        <optgroup label="Vegetation / NDVI">
+                            <option value="rdylgn">Red-Yellow-Green</option>
+                            <option value="brbg">Brown-Blue-Green</option>
+                            <option value="piyg">Pink-Yellow-Green</option>
+                        </optgroup>
+                        <optgroup label="Water / Ocean">
+                            <option value="blues">Blues</option>
+                            <option value="ocean">Ocean</option>
+                            <option value="deep">Deep</option>
+                        </optgroup>
+                        <optgroup label="Categorical">
+                            <option value="set1">Set1</option>
+                            <option value="tab10">Tab10</option>
+                        </optgroup>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        {# QA Review #}
+        <div class="sidebar-section" id="qa-section" style="display: none;">
+            <div class="section-title">QA Review</div>
+            <div class="section-content">
+                <div class="qa-status">
+                    <span class="qa-label">Status:</span>
+                    <span id="qa-status-badge" class="qa-badge pending">pending</span>
+                </div>
+                <div class="qa-actions">
+                    <button class="btn btn-success" id="btn-approve" onclick="approveItem()">
+                        Approve
+                    </button>
+                    <button class="btn btn-danger" id="btn-reject" onclick="showRejectModal()">
+                        Reject
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        {# Point Query Results #}
+        <div class="sidebar-section" id="query-section" style="display: none;">
+            <div class="section-title">Point Query</div>
+            <div class="section-content">
+                <div class="query-coords" id="query-coords">--</div>
+                <div class="query-values" id="query-values">
+                    Click on map to query pixel values
+                </div>
+            </div>
+        </div>
+
+        {% endif %}
+    </aside>
+
+    {# Map Container - 80% width #}
+    <main class="viewer-map">
+        <div id="map"></div>
+
+        {# Map Status Overlay #}
+        <div class="map-overlay map-status">
+            <span id="map-zoom">Zoom: --</span>
+            <span id="map-coords">--</span>
+        </div>
+
+        {# Loading Overlay #}
+        <div class="map-overlay loading-overlay hidden" id="map-loading">
+            <div class="spinner"></div>
+            <span>Loading tiles...</span>
+        </div>
+
+        {# Layer Info #}
+        <div class="map-overlay layer-info hidden" id="layer-info">
+            <div class="layer-name" id="layer-name">--</div>
+            <div class="layer-details">
+                <span>Bands: <strong id="layer-bands">--</strong></span>
+                <span>Stretch: <strong id="layer-stretch">--</strong></span>
+            </div>
+        </div>
+    </main>
+</div>
+
+{# Reject Modal #}
+<div class="modal hidden" id="reject-modal">
+    <div class="modal-backdrop" onclick="closeRejectModal()"></div>
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Reject Item</h3>
+            <button class="modal-close" onclick="closeRejectModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p>Please provide a reason for rejection:</p>
+            <textarea id="reject-reason" rows="4" placeholder="Enter rejection reason..."></textarea>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-ghost" onclick="closeRejectModal()">Cancel</button>
+            <button class="btn btn-danger" onclick="confirmReject()">Reject</button>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+    // Configuration from server
+    const CONFIG = {
+        collectionId: {{ collection_id | tojson | safe if collection_id else 'null' }},
+        titilerBase: {{ titiler_base_url | tojson | safe if titiler_base_url else '""' }},
+        stacApiBase: '/api/stac',
+        initialBbox: {{ initial_bbox | tojson | safe if initial_bbox else 'null' }}
+    };
+</script>
+<script src="/static/js/raster-viewer.js"></script>
+{% endblock %}

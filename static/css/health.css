@@ -1073,3 +1073,621 @@
 .summary-card.unhealthy { border-left: 4px solid #DC2626; }
 .summary-card.function-app { border-left: 4px solid #FFC14D; }
 .summary-card.docker-worker { border-left: 4px solid #0071BC; }
+
+/* ============================================================================
+   CROSS-SYSTEM HEALTH (GAP-01) - 25 JAN 2026
+   ============================================================================ */
+
+/* System Status Grid - Side by side cards */
+.system-status-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 20px;
+    margin-bottom: 20px;
+}
+
+@media (max-width: 768px) {
+    .system-status-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* System Status Card */
+.system-status-card {
+    background: white;
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    border-left: 4px solid #ccc;
+    transition: all 0.2s;
+}
+
+.system-status-card:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+#docker-status-card {
+    border-left-color: #0071BC;
+}
+
+#fa-status-card {
+    border-left-color: #FFC14D;
+}
+
+.system-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.system-icon {
+    font-size: 24px;
+}
+
+.system-name {
+    font-size: 18px;
+    font-weight: 600;
+    color: #053657;
+    flex: 1;
+}
+
+.system-badge {
+    font-size: 10px;
+    padding: 3px 8px;
+    border-radius: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    background: #E0F2FE;
+    color: #0369A1;
+}
+
+.system-badge.secondary {
+    background: #FEF3C7;
+    color: #D97706;
+}
+
+.system-status {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 16px;
+    font-weight: 600;
+    padding: 10px 0;
+}
+
+.system-status.loading {
+    color: #626F86;
+}
+
+.system-status.healthy {
+    color: #10B981;
+}
+
+.system-status.unhealthy,
+.system-status.unreachable {
+    color: #DC2626;
+}
+
+.system-status.warning {
+    color: #F59E0B;
+}
+
+.system-status .status-icon {
+    font-size: 20px;
+}
+
+.system-url {
+    font-size: 12px;
+    color: #626F86;
+    font-family: 'Courier New', monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Spinner small */
+.spinner-sm {
+    width: 16px;
+    height: 16px;
+    border: 2px solid #e9ecef;
+    border-top-color: #0071BC;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+/* Function App Health Section */
+.fa-health-section {
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    margin-bottom: 20px;
+    overflow: hidden;
+    border-left: 4px solid #FFC14D;
+}
+
+.fa-health-section .section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px 20px;
+    background: linear-gradient(to right, #FFFBEB, white);
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.fa-health-section .section-header:hover {
+    background: linear-gradient(to right, #FEF3C7, #FFFBEB);
+}
+
+.fa-health-section .section-header h3 {
+    margin: 0;
+    font-size: 16px;
+    color: #053657;
+}
+
+.fa-health-section .toggle-icon {
+    color: #626F86;
+    transition: transform 0.2s;
+}
+
+.fa-health-section.collapsed .toggle-icon {
+    transform: rotate(-90deg);
+}
+
+.fa-health-section.collapsed #fa-components-grid {
+    display: none;
+}
+
+.fa-health-section #fa-components-grid {
+    padding: 20px;
+    background: #f8f9fa;
+}
+
+/* FA Component cards inside FA section */
+.fa-health-section .component-card {
+    border-left-color: #FFC14D;
+}
+
+/* Status indicators for cross-system */
+.system-status-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.system-status-indicator .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #ccc;
+}
+
+.system-status-indicator .dot.healthy { background: #10B981; }
+.system-status-indicator .dot.warning { background: #F59E0B; }
+.system-status-indicator .dot.unhealthy { background: #DC2626; }
+.system-status-indicator .dot.unknown { background: #9CA3AF; }
+.system-status-indicator .dot.loading {
+    background: #0071BC;
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+
+/* ============================================================================
+   QUEUE INFRASTRUCTURE (GAP-02) - 25 JAN 2026
+   ============================================================================ */
+
+/* Queue Status Section */
+.queue-status-section {
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    margin-bottom: 20px;
+    overflow: hidden;
+    border-left: 4px solid #0078D4;
+}
+
+.queue-status-section .section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px 20px;
+    background: linear-gradient(to right, #E8F4FD, white);
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.queue-status-section .section-header:hover {
+    background: linear-gradient(to right, #D1E9F9, #E8F4FD);
+}
+
+.queue-status-section .section-header h3 {
+    margin: 0;
+    font-size: 16px;
+    color: #053657;
+}
+
+.queue-status-section .section-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.queue-status-section .toggle-icon {
+    color: #626F86;
+    transition: transform 0.2s;
+}
+
+.queue-status-section.collapsed .toggle-icon {
+    transform: rotate(-90deg);
+}
+
+.queue-status-section.collapsed .queue-content {
+    display: none;
+}
+
+/* Queue Content */
+.queue-content {
+    padding: 20px;
+    background: #f8f9fa;
+}
+
+/* Queue Summary */
+.queue-summary {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px 20px;
+    background: white;
+    border: 1px solid #e9ecef;
+    border-radius: 6px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+    gap: 15px;
+}
+
+.queue-summary.loading {
+    justify-content: flex-start;
+    color: #626F86;
+}
+
+.queue-summary.error {
+    border-color: #DC2626;
+    background: #FEF2F2;
+}
+
+.queue-summary.warning {
+    border-color: #F59E0B;
+    background: #FFFBEB;
+}
+
+.queue-summary.healthy {
+    border-color: #10B981;
+    background: #F0FDF4;
+}
+
+.queue-summary-status {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 600;
+    color: #053657;
+}
+
+.queue-summary-status .status-icon {
+    font-size: 20px;
+}
+
+.queue-summary-stats {
+    display: flex;
+    gap: 20px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.queue-summary-stats .queue-stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 8px 16px;
+    background: #f8f9fa;
+    border-radius: 6px;
+    min-width: 80px;
+}
+
+.queue-summary-stats .queue-stat.active {
+    background: #E8F4FD;
+}
+
+.queue-summary-stats .queue-stat.dlq {
+    background: #F3F4F6;
+}
+
+.queue-summary-stats .queue-stat.dlq.has-messages {
+    background: #FEE2E2;
+}
+
+.queue-summary-stats .queue-stat.namespace {
+    flex-direction: row;
+    gap: 6px;
+    font-size: 12px;
+    color: #626F86;
+}
+
+.queue-summary-stats .stat-value {
+    font-size: 20px;
+    font-weight: 700;
+    color: #053657;
+}
+
+.queue-summary-stats .stat-label {
+    font-size: 11px;
+    color: #626F86;
+    text-transform: uppercase;
+}
+
+.queue-error-detail {
+    font-size: 12px;
+    color: #991B1B;
+    margin-left: 10px;
+}
+
+/* Queue Cards Grid */
+.queue-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 15px;
+}
+
+.no-queues {
+    text-align: center;
+    color: #626F86;
+    padding: 40px;
+    font-size: 14px;
+}
+
+/* Individual Queue Card */
+.queue-card {
+    background: white;
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    padding: 20px;
+    border-left: 4px solid #0078D4;
+    transition: box-shadow 0.2s;
+}
+
+.queue-card:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+.queue-card.healthy {
+    border-left-color: #10B981;
+}
+
+.queue-card.warning {
+    border-left-color: #F59E0B;
+}
+
+.queue-card.error {
+    border-left-color: #DC2626;
+}
+
+.queue-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 10px;
+}
+
+.queue-title {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.queue-icon {
+    font-size: 24px;
+}
+
+.queue-name {
+    font-size: 16px;
+    font-weight: 600;
+    color: #053657;
+}
+
+.queue-real-name {
+    font-size: 11px;
+    color: #626F86;
+    font-family: 'Courier New', monospace;
+}
+
+.queue-status-badge {
+    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-weight: 600;
+}
+
+.queue-status-badge.healthy {
+    background: #D1FAE5;
+    color: #065F46;
+}
+
+.queue-status-badge.warning {
+    background: #FEF3C7;
+    color: #92400E;
+}
+
+.queue-status-badge.error {
+    background: #FEE2E2;
+    color: #991B1B;
+}
+
+.queue-description {
+    font-size: 13px;
+    color: #626F86;
+    margin-bottom: 15px;
+    line-height: 1.4;
+}
+
+/* Queue Stats */
+.queue-stats {
+    display: flex;
+    gap: 15px;
+    margin-bottom: 15px;
+    padding: 12px;
+    background: #f8f9fa;
+    border-radius: 6px;
+}
+
+.queue-stat-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex: 1;
+    text-align: center;
+}
+
+.queue-stat-item .stat-icon {
+    font-size: 16px;
+    margin-bottom: 4px;
+}
+
+.queue-stat-item .stat-value {
+    font-size: 18px;
+    font-weight: 700;
+    color: #053657;
+}
+
+.queue-stat-item .stat-value.has-messages {
+    color: #0071BC;
+}
+
+.queue-stat-item .stat-value.danger {
+    color: #DC2626;
+}
+
+.queue-stat-item .stat-label {
+    font-size: 10px;
+    color: #626F86;
+    text-transform: uppercase;
+}
+
+.queue-stat-item.dlq-warning {
+    background: #FEF2F2;
+    border-radius: 4px;
+    padding: 8px;
+    margin: -8px 0;
+}
+
+/* Queue Footer */
+.queue-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 12px;
+    border-top: 1px solid #e9ecef;
+    font-size: 12px;
+}
+
+.queue-listener {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.listener-label {
+    color: #626F86;
+}
+
+.listener-link {
+    color: #0071BC;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.listener-link:hover {
+    text-decoration: underline;
+}
+
+.listener-name {
+    color: #053657;
+    font-weight: 500;
+}
+
+.queue-last-accessed {
+    color: #626F86;
+}
+
+/* Queue Actions */
+.queue-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #e9ecef;
+}
+
+.queue-actions .btn {
+    flex: 1;
+}
+
+.queue-actions .btn-warning {
+    background: #F59E0B;
+    color: white;
+    border: none;
+}
+
+.queue-actions .btn-warning:hover {
+    background: #D97706;
+}
+
+.queue-actions .btn-danger {
+    background: #DC2626;
+    color: white;
+    border: none;
+}
+
+.queue-actions .btn-danger:hover {
+    background: #B91C1C;
+}
+
+/* Queue Error */
+.queue-error {
+    margin-top: 10px;
+    padding: 10px;
+    background: #FEF2F2;
+    border: 1px solid #FCA5A5;
+    border-radius: 4px;
+    font-size: 12px;
+    color: #991B1B;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .queue-summary {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .queue-summary-stats {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    .queue-cards {
+        grid-template-columns: 1fr;
+    }
+
+    .queue-stats {
+        flex-wrap: wrap;
+    }
+
+    .queue-stat-item {
+        min-width: 80px;
+    }
+}

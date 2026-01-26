@@ -95,14 +95,14 @@ This file references other documents containing implementation details. This is 
 
 | Gap | Description | Status |
 |-----|-------------|--------|
-| **GAP-01** | Cross-System Health (FA + Docker) | **IN PROGRESS** |
-| GAP-02 | Queue Infrastructure Visibility | Pending |
-| GAP-03 | Log Viewing | Pending |
-| GAP-04 | TiTiler/STAC Viewer Links | Pending |
+| GAP-01 | Cross-System Health (FA + Docker) | ✅ DONE |
+| GAP-02 | Queue Infrastructure Visibility | ✅ DONE |
+| GAP-03 | Log Viewing | ✅ DONE |
+| **GAP-04** | TiTiler/STAC Viewer Links | **NEXT** |
 | GAP-05 | Standalone Storage Browser | Future |
 | GAP-06 | API Response Verification | Future |
 
-**Current Focus**: GAP-01 - Health dashboard showing both Docker Worker AND Function App health status.
+**Current Focus**: GAP-04 - Add viewer links for COG outputs and STAC items.
 
 ---
 

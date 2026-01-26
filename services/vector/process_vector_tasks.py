@@ -1,21 +1,26 @@
 # ============================================================================
-# PROCESS VECTOR TASK HANDLERS
+# PROCESS VECTOR TASK HANDLERS (FUNCTION APP WORKFLOW)
 # ============================================================================
 # STATUS: Service layer - Vector ETL workflow handlers
 # PURPOSE: Idempotent vector processing with DELETE+INSERT pattern
-# LAST_REVIEWED: 15 JAN 2026
-# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# LAST_REVIEWED: 26 JAN 2026
+# REVIEW_STATUS: Refactored to use services.vector.core (Option B)
 # EXPORTS: process_vector_prepare, process_vector_upload
-# DEPENDENCIES: geopandas, infrastructure.blob
+# DEPENDENCIES: geopandas, infrastructure.blob, services.vector.core
 # ============================================================================
 """
-Process Vector Task Handlers.
+Process Vector Task Handlers (Function App Workflow).
 
 Idempotent vector ETL workflow handlers using DELETE+INSERT pattern.
+Uses services.vector.core for shared logic with Docker workflow.
+
+NOTE: This is the FUNCTION APP workflow. The file size limit (MAX_FILE_SIZE_MB)
+is enforced HERE because Function Apps have memory constraints. The Docker
+workflow (handler_vector_docker_complete.py) does NOT have this limit.
 
 Stage 1 (process_vector_prepare):
     - Downloads source file from Bronze container
-    - Validates and prepares GeoDataFrame
+    - Validates and prepares GeoDataFrame (via core.py)
     - Creates target table with etl_batch_id column
     - Chunks and pickles data for Stage 2 fan-out
 
@@ -31,12 +36,23 @@ Exports:
 
 from typing import Dict, Any
 import pickle
-import logging
 import traceback
 
 from infrastructure.blob import BlobRepository
 from config import get_config
 from util_logger import LoggerFactory, ComponentType, log_memory_checkpoint
+
+# Import shared core functions (DRY - 26 JAN 2026)
+from .core import (
+    get_converter_map,
+    build_csv_converter_params,
+    validate_and_prepare,
+    apply_column_mapping,
+    filter_reserved_columns,
+    extract_geometry_info,
+    detect_temporal_extent,
+    log_gdf_memory
+)
 
 # Component-specific logger
 logger = LoggerFactory.create_logger(
@@ -44,76 +60,22 @@ logger = LoggerFactory.create_logger(
     "process_vector_tasks"
 )
 
-
-# ============================================================================
-# GAP-009 FIX (16 DEC 2025): Memory Usage Logging Helper
-# ============================================================================
-
-def _log_memory_usage(gdf, label: str, job_id: str) -> float:
-    """
-    Log GeoDataFrame memory usage for debugging OOM issues.
-
-    Args:
-        gdf: GeoDataFrame to measure
-        label: Description of measurement point (e.g., "after_load", "after_validation")
-        job_id: Job ID for log correlation
-
-    Returns:
-        Memory usage in MB
-    """
-    mem_bytes = gdf.memory_usage(deep=True).sum()
-    mem_mb = mem_bytes / (1024 * 1024)
-    logger.info(f"[{job_id[:8]}] 📊 Memory usage ({label}): {mem_mb:.1f}MB ({len(gdf)} rows)")
-    return mem_mb
-
-
-# ============================================================================
-# Column Mapping Helper (24 DEC 2025)
-# ============================================================================
-
-def _apply_column_mapping(gdf, mapping: Dict[str, str], job_id: str):
-    """
-    Apply column renames to GeoDataFrame with validation.
-
-    Validates that all source columns exist before renaming. Provides detailed
-    error message listing missing columns and available columns for debugging.
-
-    Args:
-        gdf: Source GeoDataFrame
-        mapping: {source_column: target_column} rename mapping
-        job_id: Job ID for log correlation
-
-    Returns:
-        GeoDataFrame with renamed columns
-
-    Raises:
-        ValueError: If any source columns in mapping are not found in GeoDataFrame
-    """
-    # Get available columns (exclude geometry column from list)
-    available_cols = [c for c in gdf.columns if c != 'geometry']
-
-    # Check for missing source columns
-    missing = [col for col in mapping.keys() if col not in gdf.columns]
-
-    if missing:
-        raise ValueError(
-            f"Column mapping failed. Source columns not found: {missing}. "
-            f"Available columns in source file: {available_cols}"
-        )
-
-    # Apply renames
-    gdf = gdf.rename(columns=mapping)
-
-    # Log the mapping
-    renamed_pairs = [f"'{src}' → '{tgt}'" for src, tgt in mapping.items()]
-    logger.info(f"[{job_id[:8]}] 🔄 Applied column mapping: {', '.join(renamed_pairs)}")
-
-    return gdf
+# =============================================================================
+# FUNCTION APP FILE SIZE LIMIT
+# =============================================================================
+# Azure Functions have memory limits - large files cause OOM before useful error
+# GeoDataFrames typically expand 3-5x in memory vs source file size
+# B3 Basic: ~1.75GB available, Premium: up to 14GB
+# This limit applies ONLY to Function App workflow - Docker has no limit
+MAX_FILE_SIZE_MB = 2048  # 2GB limit for Function App
 
 
 def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
     """
     Stage 1: Prepare vector data for chunked upload with idempotent table creation.
+
+    NOTE: This is the FUNCTION APP workflow. File size limit (MAX_FILE_SIZE_MB)
+    is enforced here. Use Docker workflow for larger files.
 
     IDEMPOTENCY:
     - Pickle uploads use overwrite=True (safe to re-run)
@@ -149,10 +111,6 @@ def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
             }
         }
     """
-    from .converters import (
-        _convert_csv, _convert_geojson, _convert_geopackage,
-        _convert_kml, _convert_kmz, _convert_shapefile
-    )
     from .postgis_handler import VectorToPostGISHandler
 
     config = get_config()
@@ -166,18 +124,6 @@ def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
     table_name = parameters['table_name']
     schema = parameters.get('schema', 'geo')
     chunk_size = parameters.get('chunk_size')
-    converter_params = parameters.get('converter_params', {}) or {}
-
-    # GAP-008a/008b (15 DEC 2025): Merge top-level CSV geometry params into converter_params
-    # Top-level params take precedence over nested converter_params for discoverability
-    if file_extension == 'csv':
-        if parameters.get('lat_name'):
-            converter_params['lat_name'] = parameters['lat_name']
-        if parameters.get('lon_name'):
-            converter_params['lon_name'] = parameters['lon_name']
-        if parameters.get('wkt_column'):
-            converter_params['wkt_column'] = parameters['wkt_column']
-
     geometry_params = parameters.get('geometry_params', {})
     indexes = parameters.get('indexes', {'spatial': True, 'attributes': [], 'temporal': []})
 
@@ -191,13 +137,11 @@ def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
 
     logger.info(f"[{job_id[:8]}] Stage 1: Preparing vector data from {blob_name}")
 
-    # GAP-007 FIX (15 DEC 2025): Pre-flight file size check
-    # Azure Functions have memory limits - large files cause OOM before useful error
-    # GeoDataFrames typically expand 3-5x in memory vs source file size
-    # B3 Basic: ~1.75GB available, Premium: up to 14GB
-    # Raised to 2GB per user request (15 DEC 2025) - acled_export.csv (1.3GB) needs to work
-    MAX_FILE_SIZE_MB = 2048  # 2GB limit
+    # ==========================================================================
+    # FUNCTION APP FILE SIZE LIMIT (Docker workflow has no limit)
+    # ==========================================================================
     blob_repo = BlobRepository.for_zone("bronze")
+    blob_size_mb = 0.0
 
     try:
         blob_properties = blob_repo.get_blob_properties(container_name, blob_name)
@@ -206,24 +150,24 @@ def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
 
         logger.info(
             f"[{job_id[:8]}] Source file size: {blob_size_mb:.1f}MB "
-            f"(limit: {MAX_FILE_SIZE_MB}MB)"
+            f"(Function App limit: {MAX_FILE_SIZE_MB}MB)"
         )
 
         if blob_size_mb > MAX_FILE_SIZE_MB:
             raise ValueError(
-                f"Source file too large for in-memory processing: {blob_size_mb:.1f}MB. "
+                f"Source file too large for Function App: {blob_size_mb:.1f}MB. "
                 f"Maximum supported: {MAX_FILE_SIZE_MB}MB. "
                 f"GeoDataFrames expand 3-5x in memory vs source file size. "
-                f"Consider splitting the file or using a streaming approach for files > {MAX_FILE_SIZE_MB}MB."
+                f"Use Docker workflow (vector_docker_etl) for larger files."
             )
     except ValueError:
         # Re-raise size errors
         raise
     except Exception as e:
-        # Non-fatal: If we can't get properties, proceed with download and hope for the best
-        logger.warning(f"[{job_id[:8]}] ⚠️ Could not get blob properties (non-fatal): {e}")
+        # Non-fatal: If we can't get properties, proceed with download
+        logger.warning(f"[{job_id[:8]}] Could not get blob properties (non-fatal): {e}")
 
-    # Step 1: Download source file from Bronze zone (08 DEC 2025)
+    # Step 1: Download source file from Bronze zone
     file_data = blob_repo.read_blob_to_stream(container_name, blob_name)
 
     # Memory checkpoint 1: After blob download
@@ -232,131 +176,79 @@ def process_vector_prepare(parameters: Dict[str, Any]) -> Dict[str, Any]:
                           blob_size_mb=round(blob_size_mb, 1),
                           file_extension=file_extension)
 
-    # Step 2: Convert to GeoDataFrame
-    converters = {
-        'csv': _convert_csv,
-        'geojson': _convert_geojson,
-        'json': _convert_geojson,
-        'gpkg': _convert_geopackage,
-        'kml': _convert_kml,
-        'kmz': _convert_kmz,
-        'shp': _convert_shapefile,
-        'zip': _convert_shapefile
-    }
+    # Step 2: Convert to GeoDataFrame using shared converter map
+    converters = get_converter_map()
 
     if file_extension not in converters:
-        raise ValueError(f"Unsupported file extension: '{file_extension}'")
+        supported = list(converters.keys())
+        raise ValueError(
+            f"Unsupported file extension: '{file_extension}'. "
+            f"Supported formats: {supported}"
+        )
+
+    # Build converter params (handles CSV lat/lon/wkt merging)
+    converter_params = parameters.get('converter_params', {}) or {}
+    if file_extension == 'csv':
+        converter_params = build_csv_converter_params(parameters, converter_params)
 
     gdf = converters[file_extension](file_data, **converter_params)
     total_features = len(gdf)
-    logger.info(f"[{job_id[:8]}] Loaded {total_features} features")
 
-    # GAP-009 FIX (16 DEC 2025): Log memory usage after load
-    gdf_mem_mb = _log_memory_usage(gdf, "after_load", job_id)
+    # Capture original CRS before reprojection
+    original_crs = str(gdf.crs) if gdf.crs else "unknown"
+    logger.info(f"[{job_id[:8]}] Loaded {total_features} features (CRS: {original_crs})")
 
-    # Memory checkpoint 2: After GeoDataFrame conversion (PEAK MEMORY - GDF expansion)
+    # Log memory usage after load
+    gdf_mem_mb = log_gdf_memory(gdf, "after_load", job_id)
+
+    # Memory checkpoint 2: After GeoDataFrame conversion
     log_memory_checkpoint(logger, "After GDF conversion",
                           context_id=job_id,
                           feature_count=total_features,
                           gdf_memory_mb=round(gdf_mem_mb, 1))
 
-    # Step 2b: Apply column mapping if specified (24 DEC 2025)
-    # Used for standardizing column names (e.g., ISO_A3 → iso3 for system tables)
+    # Step 2b: Apply column mapping if specified
     column_mapping = parameters.get('column_mapping')
     if column_mapping:
-        gdf = _apply_column_mapping(gdf, column_mapping, job_id)
+        gdf = apply_column_mapping(gdf, column_mapping, job_id)
 
-    # GAP-002 FIX (15 DEC 2025): Validate source file contains features
-    # Empty source files would create empty tables and silently "succeed"
+    # Validate source file contains features
     if total_features == 0:
         raise ValueError(
             f"Source file '{blob_name}' contains 0 features. "
-            f"File may be empty, corrupted, or in wrong format for extension '{file_extension}'. "
-            f"Converter used: {converters[file_extension].__name__}."
+            f"File may be empty, corrupted, or in wrong format for extension '{file_extension}'."
         )
 
-    # Capture original CRS before reprojection (06 DEC 2025)
-    # This is stored in table_metadata for data lineage tracking
-    original_crs = str(gdf.crs) if gdf.crs else "unknown"
-    logger.info(f"[{job_id[:8]}] Original CRS: {original_crs}")
-
     # Step 3: Validate and prepare GeoDataFrame (reprojects to EPSG:4326)
-    handler = VectorToPostGISHandler()
-    validated_gdf = handler.prepare_gdf(gdf, geometry_params=geometry_params)
+    validated_gdf, validation_info, data_warnings = validate_and_prepare(
+        gdf, geometry_params=geometry_params, job_id=job_id
+    )
+    validated_count = validation_info['validated_count']
 
-    # Capture any warnings from prepare_gdf (e.g., out-of-range datetime values)
-    # These will be included in the job result for visibility (30 DEC 2025)
-    data_warnings = handler.last_warnings.copy() if handler.last_warnings else []
-
-    # GAP-009 FIX (16 DEC 2025): Log memory usage after validation
-    validated_mem_mb = _log_memory_usage(validated_gdf, "after_validation", job_id)
+    # Log memory usage after validation
+    validated_mem_mb = log_gdf_memory(validated_gdf, "after_validation", job_id)
 
     # Memory checkpoint 3: After geometry validation and reprojection
     log_memory_checkpoint(logger, "After GDF validation",
                           context_id=job_id,
-                          validated_features=len(validated_gdf),
+                          validated_features=validated_count,
                           gdf_memory_mb=round(validated_mem_mb, 1))
 
-    # GAP-002 FIX (15 DEC 2025): Validate features remain after geometry validation
-    # prepare_gdf can filter out features with invalid/null geometries
-    validated_count = len(validated_gdf)
-    if validated_count == 0:
-        raise ValueError(
-            f"All {total_features} features filtered out during geometry validation. "
-            f"geometry_params: {geometry_params}. "
-            f"Common causes: all NULL geometries, invalid coordinates, CRS reprojection failures. "
-            f"Check source data geometry validity."
-        )
+    # Get geometry metadata
+    geom_info = extract_geometry_info(validated_gdf)
+    geometry_type = geom_info['geometry_type']
 
-    if validated_count < total_features:
-        filtered_count = total_features - validated_count
-        logger.warning(
-            f"[{job_id[:8]}] ⚠️ {filtered_count} features ({filtered_count/total_features*100:.1f}%) "
-            f"filtered out during validation. {validated_count} features remaining."
-        )
-
-    # Get metadata
-    geometry_type = validated_gdf.geometry.iloc[0].geom_type.upper()
-
-    # Check for reserved column names (id, geom, etl_batch_id are created by our schema)
-    reserved_cols = {'id', 'geom', 'geometry', 'etl_batch_id'}
+    # Filter reserved column names using shared function
     all_columns = [c for c in validated_gdf.columns if c != 'geometry']
-    skipped_columns = [c for c in all_columns if c.lower() in reserved_cols]
-    columns = [c for c in all_columns if c.lower() not in reserved_cols]
+    columns, skipped_columns = filter_reserved_columns(all_columns, job_id)
 
-    if skipped_columns:
-        logger.warning(
-            f"[{job_id[:8]}] ⚠️ Source data contains reserved column names that will be skipped: {skipped_columns}. "
-            f"These columns are created by our schema (id=PRIMARY KEY, geom=GEOMETRY, etl_batch_id=IDEMPOTENCY)."
-        )
-
-    # Step 3b: Auto-detect temporal extent if temporal_property specified (09 DEC 2025)
-    temporal_start = None
-    temporal_end = None
-    if temporal_property and temporal_property in validated_gdf.columns:
-        try:
-            import pandas as pd
-            temporal_col = pd.to_datetime(validated_gdf[temporal_property], errors='coerce')
-            valid_dates = temporal_col.dropna()
-            if len(valid_dates) > 0:
-                temporal_start = valid_dates.min().isoformat() + "Z"
-                temporal_end = valid_dates.max().isoformat() + "Z"
-                logger.info(
-                    f"[{job_id[:8]}] Temporal extent detected from '{temporal_property}': "
-                    f"{temporal_start} to {temporal_end}"
-                )
-            else:
-                logger.warning(
-                    f"[{job_id[:8]}] ⚠️ temporal_property '{temporal_property}' found but no valid dates parsed"
-                )
-        except Exception as e:
-            logger.warning(f"[{job_id[:8]}] ⚠️ Failed to parse temporal_property '{temporal_property}': {e}")
-    elif temporal_property:
-        logger.warning(
-            f"[{job_id[:8]}] ⚠️ temporal_property '{temporal_property}' not found in columns: {list(validated_gdf.columns)}"
-        )
+    # Step 3b: Auto-detect temporal extent using shared function
+    temporal_start, temporal_end = detect_temporal_extent(
+        validated_gdf, temporal_property, job_id
+    )
 
     # Step 4: Create table with etl_batch_id column (IDEMPOTENT - IF NOT EXISTS)
+    handler = VectorToPostGISHandler()
     handler.create_table_with_batch_tracking(
         table_name=table_name,
         schema=schema,

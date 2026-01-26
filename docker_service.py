@@ -1227,12 +1227,22 @@ def interface_health(request: Request):
         # Tooltips will be empty, but page will still render
         pass
 
+    # Get Function App URL for cross-system health (GAP-01)
+    function_app_url = ''
+    try:
+        function_app_url = config.platform.etl_app_base_url or ''
+        if function_app_url and not function_app_url.startswith('http'):
+            function_app_url = f'https://{function_app_url}'
+    except Exception:
+        pass
+
     return render_template(
         request,
         "pages/admin/health.html",
         nav_active="/interface/health",
         tooltips=tooltips,
-        docker_worker_url=docker_worker_url
+        docker_worker_url=docker_worker_url,
+        function_app_url=function_app_url
     )
 
 
@@ -2204,6 +2214,577 @@ async def interface_tasks_partial(request: Request, job_id: str):
 
     except Exception as e:
         return HTMLResponse(f'<div class="error">Error loading tasks: {str(e)}</div>')
+
+
+# ============================================================================
+# FUNCTION APP PROXY (GAP-01: Cross-System Health)
+# ============================================================================
+
+@app.get("/api/proxy/fa/health")
+async def proxy_function_app_health():
+    """
+    Proxy endpoint to fetch Function App health status.
+
+    This allows the Docker Worker UI to display Function App health alongside
+    its own health, enabling cross-system visibility from a single dashboard.
+
+    Returns:
+        Function App health JSON or error status
+    """
+    import httpx
+    from config import get_config
+
+    try:
+        config = get_config()
+        fa_url = config.platform.etl_app_base_url
+
+        if not fa_url:
+            return {
+                "status": "unknown",
+                "error": "Function App URL not configured",
+                "_source": "function_app"
+            }
+
+        # Normalize URL
+        if not fa_url.startswith("http"):
+            fa_url = f"https://{fa_url}"
+
+        health_url = f"{fa_url}/api/health"
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(health_url)
+            response.raise_for_status()
+            data = response.json()
+            data["_source"] = "function_app"
+            data["_proxy_url"] = fa_url
+            return data
+
+    except httpx.TimeoutException:
+        return {
+            "status": "unreachable",
+            "error": "Function App health check timed out (30s)",
+            "_source": "function_app"
+        }
+    except httpx.HTTPStatusError as e:
+        return {
+            "status": "unhealthy",
+            "error": f"HTTP {e.response.status_code}: {e.response.text[:200]}",
+            "_source": "function_app"
+        }
+    except Exception as e:
+        logger.warning(f"Function App health proxy failed: {e}")
+        return {
+            "status": "unreachable",
+            "error": str(e),
+            "_source": "function_app"
+        }
+
+
+@app.get("/api/proxy/fa/dbadmin/stats")
+async def proxy_function_app_dbstats():
+    """
+    Proxy endpoint to fetch Function App database stats.
+
+    Returns:
+        Function App database stats JSON or error status
+    """
+    import httpx
+    from config import get_config
+
+    try:
+        config = get_config()
+        fa_url = config.platform.etl_app_base_url
+
+        if not fa_url:
+            return {"error": "Function App URL not configured"}
+
+        if not fa_url.startswith("http"):
+            fa_url = f"https://{fa_url}"
+
+        stats_url = f"{fa_url}/api/dbadmin/stats"
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(stats_url)
+            response.raise_for_status()
+            return response.json()
+
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ============================================================================
+# QUEUE INFRASTRUCTURE VISIBILITY (GAP-02: Queue Status)
+# ============================================================================
+
+@app.get("/api/queues/status")
+async def get_queue_status():
+    """
+    Get Service Bus queue status including message counts and dead-letter counts.
+
+    Returns status for all three V0.8 queues:
+    - geospatial-jobs: Job orchestration (Orchestrator listens)
+    - container-tasks: Docker Worker (heavy operations)
+    - functionapp-tasks: Function App Worker (lightweight operations)
+
+    Each queue includes:
+    - active_message_count: Messages waiting to be processed
+    - dead_letter_message_count: Failed messages in DLQ
+    - scheduled_message_count: Messages scheduled for future delivery
+    - listener: Which system processes this queue
+    - listener_url: URL to the listener interface (placeholder for now)
+
+    Returns:
+        Queue status for all configured queues
+    """
+    from config import get_config
+    from config.defaults import QueueDefaults
+
+    try:
+        config = get_config()
+
+        # Queue configuration with listeners
+        queue_configs = [
+            {
+                "name": QueueDefaults.JOBS_QUEUE,
+                "display_name": "Jobs Queue",
+                "description": "Job orchestration and stage_complete signals",
+                "listener": "Orchestrator (Function App)",
+                "listener_url": "/interface/jobs",
+                "icon": "&#x1F4CB;"
+            },
+            {
+                "name": QueueDefaults.CONTAINER_TASKS_QUEUE,
+                "display_name": "Container Tasks",
+                "description": "Docker worker - heavy operations (GDAL, geopandas)",
+                "listener": "Docker Worker",
+                "listener_url": "/interface/tasks",
+                "icon": "&#x1F433;"
+            },
+            {
+                "name": QueueDefaults.FUNCTIONAPP_TASKS_QUEUE,
+                "display_name": "Function App Tasks",
+                "description": "Function App worker - lightweight DB operations",
+                "listener": "Function App Worker",
+                "listener_url": None,  # FA task interface not available from Docker
+                "icon": "&#x26A1;"
+            },
+        ]
+
+        # Get Service Bus admin client
+        from infrastructure.service_bus import get_service_bus_repository
+        from azure.servicebus.management import ServiceBusAdministrationClient
+        from azure.identity import DefaultAzureCredential
+        from azure.core.exceptions import ResourceNotFoundError
+
+        # Create admin client
+        connection_string = config.service_bus_connection_string
+        namespace = config.service_bus_namespace
+
+        if connection_string:
+            admin_client = ServiceBusAdministrationClient.from_connection_string(connection_string)
+        elif namespace:
+            admin_client = ServiceBusAdministrationClient(
+                fully_qualified_namespace=namespace,
+                credential=DefaultAzureCredential()
+            )
+        else:
+            return {
+                "status": "error",
+                "error": "Service Bus not configured",
+                "queues": []
+            }
+
+        queues = []
+
+        with admin_client:
+            for queue_config in queue_configs:
+                queue_name = queue_config["name"]
+                try:
+                    # Get queue runtime properties (includes message counts)
+                    runtime_props = admin_client.get_queue_runtime_properties(queue_name)
+
+                    queues.append({
+                        "name": queue_name,
+                        "display_name": queue_config["display_name"],
+                        "description": queue_config["description"],
+                        "listener": queue_config["listener"],
+                        "listener_url": queue_config["listener_url"],
+                        "icon": queue_config["icon"],
+                        "status": "healthy",
+                        "active_message_count": runtime_props.active_message_count,
+                        "dead_letter_message_count": runtime_props.dead_letter_message_count,
+                        "scheduled_message_count": runtime_props.scheduled_message_count,
+                        "transfer_message_count": runtime_props.transfer_message_count,
+                        "transfer_dead_letter_message_count": runtime_props.transfer_dead_letter_message_count,
+                        "total_message_count": runtime_props.total_message_count,
+                        "size_in_bytes": runtime_props.size_in_bytes,
+                        "accessed_at": runtime_props.accessed_at.isoformat() if runtime_props.accessed_at else None,
+                        "updated_at": runtime_props.updated_at.isoformat() if runtime_props.updated_at else None,
+                    })
+
+                except ResourceNotFoundError:
+                    queues.append({
+                        "name": queue_name,
+                        "display_name": queue_config["display_name"],
+                        "description": queue_config["description"],
+                        "listener": queue_config["listener"],
+                        "listener_url": queue_config["listener_url"],
+                        "icon": queue_config["icon"],
+                        "status": "not_found",
+                        "error": f"Queue '{queue_name}' does not exist",
+                        "active_message_count": 0,
+                        "dead_letter_message_count": 0,
+                    })
+
+                except Exception as e:
+                    queues.append({
+                        "name": queue_name,
+                        "display_name": queue_config["display_name"],
+                        "description": queue_config["description"],
+                        "listener": queue_config["listener"],
+                        "listener_url": queue_config["listener_url"],
+                        "icon": queue_config["icon"],
+                        "status": "error",
+                        "error": str(e),
+                        "active_message_count": 0,
+                        "dead_letter_message_count": 0,
+                    })
+
+        # Calculate totals
+        total_active = sum(q.get("active_message_count", 0) for q in queues)
+        total_dlq = sum(q.get("dead_letter_message_count", 0) for q in queues)
+        overall_status = "healthy"
+        if any(q.get("status") == "error" for q in queues):
+            overall_status = "error"
+        elif any(q.get("status") == "not_found" for q in queues):
+            overall_status = "warning"
+        elif total_dlq > 0:
+            overall_status = "warning"
+
+        return {
+            "status": overall_status,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "summary": {
+                "total_queues": len(queues),
+                "total_active_messages": total_active,
+                "total_dead_letter_messages": total_dlq,
+            },
+            "queues": queues,
+            "namespace": namespace or "(connection string)",
+        }
+
+    except Exception as e:
+        logger.error(f"Error fetching queue status: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "queues": []
+        }
+
+
+@app.post("/api/queues/{queue_name}/purge")
+async def purge_queue(queue_name: str, confirm: str = None, target: str = "active"):
+    """
+    Purge messages from a Service Bus queue.
+
+    This is a destructive operation - messages are permanently deleted.
+    Requires confirm=yes query parameter.
+
+    Args:
+        queue_name: Name of the queue to purge
+        confirm: Must be "yes" to proceed
+        target: "active" (default), "dlq" (dead-letter), or "all"
+
+    Returns:
+        Result of the purge operation
+    """
+    from config import get_config
+    from infrastructure.service_bus import get_service_bus_repository
+
+    if confirm != "yes":
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "Destructive operation requires confirm=yes",
+                "warning": "This will permanently delete all messages from the queue",
+                "usage": f"POST /api/queues/{queue_name}/purge?confirm=yes&target={target}"
+            }
+        )
+
+    if target not in ("active", "dlq", "all"):
+        return JSONResponse(
+            status_code=400,
+            content={"error": f"Invalid target '{target}'. Must be 'active', 'dlq', or 'all'"}
+        )
+
+    try:
+        config = get_config()
+        sb_repo = get_service_bus_repository()
+
+        result = {
+            "queue_name": queue_name,
+            "target": target,
+            "active_cleared": 0,
+            "dlq_cleared": 0,
+        }
+
+        # Clear active messages
+        if target in ("active", "all"):
+            logger.warning(f"🗑️ Purging active messages from queue: {queue_name}")
+            active_cleared = 0
+            receiver = sb_repo._get_receiver(queue_name)
+            try:
+                with receiver:
+                    while True:
+                        messages = receiver.receive_messages(max_message_count=100, max_wait_time=2)
+                        if not messages:
+                            break
+                        for msg in messages:
+                            receiver.complete_message(msg)
+                            active_cleared += 1
+            except Exception as e:
+                logger.error(f"Error clearing active queue: {e}")
+            result["active_cleared"] = active_cleared
+
+        # Clear dead-letter queue
+        if target in ("dlq", "all"):
+            logger.warning(f"🗑️ Purging DLQ messages from queue: {queue_name}")
+            dlq_cleared = 0
+            # DLQ is accessed via special sub-queue path
+            dlq_name = f"{queue_name}/$deadletterqueue"
+            try:
+                dlq_receiver = sb_repo.client.get_queue_receiver(dlq_name)
+                with dlq_receiver:
+                    while True:
+                        messages = dlq_receiver.receive_messages(max_message_count=100, max_wait_time=2)
+                        if not messages:
+                            break
+                        for msg in messages:
+                            dlq_receiver.complete_message(msg)
+                            dlq_cleared += 1
+            except Exception as e:
+                logger.error(f"Error clearing DLQ: {e}")
+            result["dlq_cleared"] = dlq_cleared
+
+        total_cleared = result["active_cleared"] + result["dlq_cleared"]
+        result["total_cleared"] = total_cleared
+        result["status"] = "success" if total_cleared > 0 else "empty"
+        result["message"] = f"Cleared {total_cleared} messages from {queue_name}"
+
+        logger.warning(
+            f"🗑️ Queue purge complete: {queue_name}, active={result['active_cleared']}, dlq={result['dlq_cleared']}"
+        )
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error purging queue {queue_name}: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e), "queue_name": queue_name}
+        )
+
+
+# ============================================================================
+# APPLICATION INSIGHTS LOGS (GAP-03: Log Viewing)
+# ============================================================================
+
+# Application Insights App ID for rmhazuregeoapi
+# This should match the Function App that logs are sent to
+APP_INSIGHTS_APP_ID = "d3af3d37-cfe3-411f-adef-bc540181cbca"
+
+
+@app.get("/interface/logs", response_class=HTMLResponse)
+async def interface_logs(request: Request, job_id: str = None):
+    """
+    Standalone log viewer page.
+
+    Query params:
+        job_id: Optional - pre-filter logs by job ID
+    """
+    try:
+        from templates_utils import render_template
+
+        return render_template(
+            request,
+            "pages/logs/index.html",
+            job_id=job_id,
+            nav_active="/interface/logs"
+        )
+    except Exception as e:
+        logger.error(f"Error loading logs page: {e}")
+        return HTMLResponse(f"<div class='error'>Error loading logs page: {str(e)}</div>")
+
+
+@app.get("/api/logs/query")
+async def query_logs(
+    time_range: str = "15m",
+    severity: int = 1,
+    source: str = "all",
+    limit: int = 100,
+    job_id: str = None,
+    search: str = None
+):
+    """
+    Query Application Insights logs.
+
+    Uses the Azure Monitor REST API to fetch logs from Application Insights.
+    Requires Azure credentials (DefaultAzureCredential) with access to App Insights.
+
+    Args:
+        time_range: Time range for logs (5m, 15m, 30m, 1h, 3h, 6h, 24h)
+        severity: Minimum severity level (0=Verbose, 1=Info, 2=Warning, 3=Error, 4=Critical)
+        source: Log source (all, traces, requests, exceptions, dependencies)
+        limit: Maximum number of logs to return
+        job_id: Optional job ID to filter by
+        search: Optional text search in messages
+
+    Returns:
+        List of log entries with metadata
+    """
+    import httpx
+    from azure.identity import DefaultAzureCredential
+
+    try:
+        # Validate parameters
+        valid_ranges = {"5m", "15m", "30m", "1h", "3h", "6h", "24h"}
+        if time_range not in valid_ranges:
+            time_range = "15m"
+
+        limit = min(max(limit, 10), 1000)  # Clamp between 10 and 1000
+
+        # Build KQL query
+        if source == "all":
+            table = "union traces, requests, exceptions"
+        else:
+            table = source
+
+        # Base query
+        kql_parts = [
+            table,
+            f"| where timestamp >= ago({time_range})",
+            f"| where severityLevel >= {severity}"
+        ]
+
+        # Add job_id filter
+        if job_id:
+            kql_parts.append(f'| where message contains "{job_id}" or customDimensions contains "{job_id}"')
+
+        # Add text search
+        if search:
+            # Handle OR in search
+            if " OR " in search:
+                terms = [t.strip() for t in search.split(" OR ")]
+                search_clause = " or ".join([f'message contains "{t}"' for t in terms])
+                kql_parts.append(f"| where {search_clause}")
+            else:
+                kql_parts.append(f'| where message contains "{search}"')
+
+        # Order and limit
+        kql_parts.extend([
+            "| order by timestamp desc",
+            f"| take {limit}",
+            "| project timestamp, message, severityLevel, operation_Name, customDimensions, "
+            "itemType, resultCode, duration, success, outerMessage, details"
+        ])
+
+        kql_query = "\n".join(kql_parts)
+        logger.info(f"Executing App Insights query: time_range={time_range}, severity>={severity}, source={source}")
+
+        # Get Azure token for Application Insights API
+        credential = DefaultAzureCredential()
+        token = credential.get_token("https://api.applicationinsights.io/.default")
+
+        # Query Application Insights REST API
+        api_url = f"https://api.applicationinsights.io/v1/apps/{APP_INSIGHTS_APP_ID}/query"
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.get(
+                api_url,
+                params={"query": kql_query},
+                headers={"Authorization": f"Bearer {token.token}"}
+            )
+
+            if response.status_code != 200:
+                error_text = response.text[:500]
+                logger.error(f"App Insights query failed: {response.status_code} - {error_text}")
+                return JSONResponse(
+                    status_code=response.status_code,
+                    content={"error": f"Application Insights query failed: {error_text}"}
+                )
+
+            result = response.json()
+
+        # Parse results
+        logs = []
+        error_count = 0
+        warning_count = 0
+        info_count = 0
+
+        if "tables" in result and result["tables"]:
+            table_data = result["tables"][0]
+            columns = [col["name"] for col in table_data.get("columns", [])]
+            rows = table_data.get("rows", [])
+
+            for row in rows:
+                row_dict = dict(zip(columns, row))
+
+                severity_level = row_dict.get("severityLevel", 1)
+                if severity_level >= 3:
+                    error_count += 1
+                elif severity_level == 2:
+                    warning_count += 1
+                else:
+                    info_count += 1
+
+                # Determine source from itemType
+                item_type = row_dict.get("itemType", "trace")
+                source_map = {
+                    "trace": "traces",
+                    "request": "requests",
+                    "exception": "exceptions",
+                    "dependency": "dependencies"
+                }
+
+                # Parse customDimensions if it's a string
+                custom_dims = row_dict.get("customDimensions")
+                if isinstance(custom_dims, str):
+                    try:
+                        import json
+                        custom_dims = json.loads(custom_dims)
+                    except:
+                        custom_dims = {}
+
+                logs.append({
+                    "timestamp": row_dict.get("timestamp"),
+                    "message": row_dict.get("message") or row_dict.get("outerMessage") or "",
+                    "severity_level": severity_level,
+                    "operation_name": row_dict.get("operation_Name"),
+                    "custom_dimensions": custom_dims or {},
+                    "source": source_map.get(item_type, item_type),
+                    "result_code": row_dict.get("resultCode"),
+                    "duration": row_dict.get("duration"),
+                    "success": row_dict.get("success"),
+                    "details": row_dict.get("details"),
+                })
+
+        return {
+            "status": "success",
+            "total": len(logs),
+            "error_count": error_count,
+            "warning_count": warning_count,
+            "info_count": info_count,
+            "query_time": time_range,
+            "source": "Application Insights",
+            "logs": logs
+        }
+
+    except Exception as e:
+        logger.error(f"Error querying Application Insights: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
+        )
 
 
 # ============================================================================

@@ -28,6 +28,59 @@
     {# Architecture Diagram #}
     {% include "pages/admin/_health_diagram.html" %}
 
+    {# Cross-System Status Overview (GAP-01) #}
+    <div class="system-status-grid" id="system-status-grid">
+        {# Docker Worker Status #}
+        <div class="system-status-card" id="docker-status-card">
+            <div class="system-header">
+                <span class="system-icon">&#x1F433;</span>
+                <span class="system-name">Docker Worker</span>
+                <span class="system-badge">This System</span>
+            </div>
+            <div class="system-status loading" id="docker-overall-status">
+                <div class="spinner-sm"></div>
+                <span>Checking...</span>
+            </div>
+            <div class="system-url" id="docker-url">{{ request.url.scheme }}://{{ request.url.netloc }}</div>
+        </div>
+
+        {# Function App Status #}
+        <div class="system-status-card" id="fa-status-card">
+            <div class="system-header">
+                <span class="system-icon">&#x26A1;</span>
+                <span class="system-name">Function App</span>
+                <span class="system-badge secondary">Primary API</span>
+            </div>
+            <div class="system-status loading" id="fa-overall-status">
+                <div class="spinner-sm"></div>
+                <span>Checking...</span>
+            </div>
+            <div class="system-url" id="fa-url">{{ function_app_url or 'Not configured' }}</div>
+        </div>
+    </div>
+
+    {# Queue Infrastructure Status (GAP-02) #}
+    <div id="queue-status-section" class="queue-status-section">
+        <div class="section-header" onclick="toggleQueueSection()">
+            <h3>&#x1F4E8; Queue Infrastructure</h3>
+            <div class="section-header-actions">
+                <button onclick="event.stopPropagation(); refreshQueueStatus()" class="btn btn-sm btn-secondary" id="queue-refresh-btn">
+                    Refresh
+                </button>
+                <span class="toggle-icon" id="queue-toggle-icon">&#x25BC;</span>
+            </div>
+        </div>
+        <div id="queue-content" class="queue-content">
+            <div id="queue-summary" class="queue-summary loading">
+                <div class="spinner-sm"></div>
+                <span>Loading queue status...</span>
+            </div>
+            <div id="queue-cards" class="queue-cards">
+                {# Queue cards will be rendered by JavaScript #}
+            </div>
+        </div>
+    </div>
+
     {# Overall Status Banner #}
     <div id="overall-status" class="overall-status loading">
         <div class="spinner"></div>
@@ -40,6 +93,17 @@
     {# Error Banner (hidden by default) #}
     <div id="error-banner" class="error-banner hidden">
         <strong>Error:</strong> <span id="error-message"></span>
+    </div>
+
+    {# Function App Health Details (GAP-01) #}
+    <div id="fa-health-section" class="fa-health-section hidden">
+        <div class="section-header" onclick="toggleFaSection()">
+            <h3>&#x26A1; Function App Components</h3>
+            <span class="toggle-icon" id="fa-toggle-icon">&#x25BC;</span>
+        </div>
+        <div id="fa-components-grid" class="components-grid">
+            {# FA components will be rendered by JavaScript #}
+        </div>
     </div>
 
     {# Environment Info #}
@@ -149,6 +213,7 @@
 <script>
     // Configuration injected from server
     const DOCKER_WORKER_URL = '{{ docker_worker_url | default("", true) }}';
+    const FUNCTION_APP_URL = '{{ function_app_url | default("", true) }}';
     const COMPONENT_TOOLTIPS = {{ tooltips | tojson | safe }};
 </script>
 <script src="/static/js/health.js"></script>

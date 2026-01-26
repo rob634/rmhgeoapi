@@ -21,68 +21,97 @@ This document tracks UI gaps identified when comparing the Docker Worker web int
 
 ### GAP-01: Cross-System Health Visibility
 **Priority**: HIGH
-**Status**: 🚧 IN PROGRESS
+**Status**: ✅ COMPLETE (25 JAN 2026)
 **Tests Enabled**: INF-01, INF-02, INF-03, INF-04
 
 **Problem**: Health dashboard only shows Docker Worker health. Many tests require verifying Function App health from the same interface.
 
 **Solution**: Enhance `/interface/health` to show:
-- [ ] Function App health status (fetch from FA /api/health)
-- [ ] Function App database stats
-- [ ] Side-by-side comparison view
-- [ ] Clear labeling of which system each component belongs to
+- [x] Function App health status (fetch from FA /api/health)
+- [x] Function App database stats (via `/api/proxy/fa/dbadmin/stats`)
+- [x] Side-by-side comparison view (system status cards)
+- [x] Clear labeling of which system each component belongs to
 
-**Files to Modify**:
+**Implementation**:
+- Added `/api/proxy/fa/health` endpoint to docker_service.py
+- Added `/api/proxy/fa/dbadmin/stats` endpoint to docker_service.py
+- Updated health.html with system status grid (Docker + FA cards)
+- Updated health.html with FA components section (collapsible)
+- Updated health.js with `fetchFunctionAppHealth()` function
+- Updated health.js with `updateSystemStatusCard()` and `renderFunctionAppComponents()`
+- Added CSS for system status cards and FA section
+
+**Files Modified**:
 - `templates/pages/admin/health.html`
 - `static/js/health.js`
 - `static/css/health.css`
-- `docker_service.py` (add FA proxy endpoint)
+- `docker_service.py`
 
 ---
 
 ### GAP-02: Queue Infrastructure Visibility
 **Priority**: HIGH
-**Status**: ⏳ PENDING
+**Status**: ✅ COMPLETE (25 JAN 2026)
 **Tests Enabled**: INF-05, INF-06, INF-07, INF-08
 
 **Problem**: No UI visibility into Service Bus queue status.
 
 **Solution**: Add queue status panel to health dashboard showing:
-- [ ] Queue names (container-tasks, functionapp-tasks)
-- [ ] Active message count
-- [ ] Dead-letter message count
-- [ ] Listener status (Docker listening, FA listening)
-- [ ] Last message processed timestamp
+- [x] Queue names (geospatial-jobs, container-tasks, functionapp-tasks)
+- [x] Active message count
+- [x] Dead-letter message count
+- [x] Scheduled message count
+- [x] Listener status with links to listener pages
+- [x] Last accessed timestamp
+- [x] Queue purge functionality (active and DLQ) with confirmation
 
-**Files to Modify**:
-- `templates/pages/admin/health.html` (add queue panel)
-- `static/js/health.js` (fetch queue stats)
-- `docker_service.py` (add queue stats endpoint)
+**Implementation**:
+- Added `/api/queues/status` endpoint to docker_service.py
+- Added `/api/queues/{queue_name}/purge` endpoint with confirm=yes requirement
+- Added queue status panel to health.html
+- Added `fetchQueueStatus()`, `renderQueueStatus()`, `renderQueueCard()` to health.js
+- Added `confirmPurgeQueue()`, `purgeQueue()` functions for queue clearing
+- Added comprehensive CSS styling for queue cards
 
-**API Needed**: `/api/queues/status` or enhance `/health` response
+**Files Modified**:
+- `templates/pages/admin/health.html`
+- `static/js/health.js`
+- `static/css/health.css`
+- `docker_service.py`
 
 ---
 
 ### GAP-03: Log Viewing
 **Priority**: MEDIUM
-**Status**: ⏳ PENDING
+**Status**: ✅ COMPLETE (25 JAN 2026)
 **Tests Enabled**: CHK-01, CHK-02, CHK-04, MNT-04
 
 **Problem**: No log viewer in Docker UI. Function App has one in tasks interface.
 
-**Solution**: Add log viewing capability:
-- [ ] Job-specific logs panel on job detail page
-- [ ] Or standalone `/interface/logs` page
-- [ ] Application Insights integration
-- [ ] Filter by level (DEBUG, INFO, WARNING, ERROR)
-- [ ] Filter by job_id, component
+**Solution**: Standalone `/interface/logs` page with:
+- [x] Application Insights integration via Azure REST API
+- [x] Filter by severity level (Verbose, Info, Warning, Error, Critical)
+- [x] Filter by time range (5m, 15m, 30m, 1h, 3h, 6h, 24h)
+- [x] Filter by source (traces, requests, exceptions, dependencies)
+- [x] Filter by job_id
+- [x] Text search in messages
+- [x] Quick filter buttons (Errors, Jobs, Tasks, Service Bus, Database, STAC)
+- [x] Log detail modal with full message and custom dimensions
+- [x] Summary stats (total, errors, warnings, info counts)
+- [x] UUID and task ID highlighting in messages
 
-**Files to Create/Modify**:
-- `templates/pages/jobs/detail.html` (add logs panel)
-- `static/js/jobs.js` (add log fetching)
-- `docker_service.py` (add logs endpoint)
+**Implementation**:
+- Added `/interface/logs` route to docker_service.py
+- Added `/api/logs/query` endpoint using Azure Monitor REST API
+- Created `templates/pages/logs/index.html`
+- Created `static/js/logs.js` with full log viewer functionality
+- Created `static/css/logs.css` with comprehensive styling
 
-**Dependency**: Application Insights query access from Docker worker
+**Files Created/Modified**:
+- `templates/pages/logs/index.html` (new)
+- `static/js/logs.js` (new)
+- `static/css/logs.css` (new)
+- `docker_service.py`
 
 ---
 
@@ -179,10 +208,10 @@ This document tracks UI gaps identified when comparing the Docker Worker web int
 
 | Gap | Status | Completed | Notes |
 |-----|--------|-----------|-------|
-| GAP-01 | 🚧 | -- | Starting 25 JAN |
-| GAP-02 | ⏳ | -- | |
-| GAP-03 | ⏳ | -- | |
-| GAP-04 | ⏳ | -- | |
+| GAP-01 | ✅ | 25 JAN 2026 | Cross-system health with proxy endpoints |
+| GAP-02 | ✅ | 25 JAN 2026 | Queue status + purge with DLQ visibility |
+| GAP-03 | ✅ | 25 JAN 2026 | Standalone log viewer with App Insights |
+| GAP-04 | ⏳ | -- | TiTiler/STAC viewer links - NEXT |
 | GAP-05 | ⏳ | -- | |
 | GAP-06 | ⏳ | -- | |
 | GAP-07 | ⏳ | -- | Deferred |

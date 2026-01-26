@@ -4,9 +4,10 @@
 # STATUS: Service layer - V0.8 Docker-based consolidated vector ETL
 # PURPOSE: Single-handler vector ETL with checkpoint progress tracking
 # CREATED: 24 JAN 2026
-# LAST_REVIEWED: 24 JAN 2026
+# REFACTORED: 26 JAN 2026 - Use shared core.py, fix bugs
+# LAST_REVIEWED: 26 JAN 2026
 # EXPORTS: vector_docker_complete
-# DEPENDENCIES: geopandas, infrastructure.blob, psycopg
+# DEPENDENCIES: geopandas, services.vector.core, infrastructure.blob
 # ============================================================================
 """
 Vector Docker Complete Handler.
@@ -14,6 +15,9 @@ Vector Docker Complete Handler.
 V0.8 consolidated vector ETL handler that replaces the 3-stage Function App
 workflow with a single checkpoint-based handler. Eliminates pickle serialization
 overhead and uses persistent connection pooling.
+
+Refactored 26 JAN 2026 to use shared core.py module, eliminating DRY violations
+with process_vector_tasks.py.
 
 Checkpoint Phases:
     validated      - Source file validated, GeoDataFrame loaded
@@ -24,11 +28,12 @@ Checkpoint Phases:
     complete       - Final result
 
 Benefits:
-    - No pickle serialization (direct memory → DB)
+    - No pickle serialization (direct memory -> DB)
     - Connection pool reuse across all chunks
     - No timeout (Docker long-running process)
     - Large file support via mounted storage
     - Fine-grained checkpoint progress
+    - No file size limit (Docker has more memory + mount)
 
 Exports:
     vector_docker_complete: Main handler function
@@ -97,44 +102,46 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
     chunk_size = parameters.get('chunk_size', 20000)
     overwrite = parameters.get('overwrite', False)
 
-    logger.info(f"[{job_id[:8]}] 🐳 Docker Vector ETL starting: {blob_name} → {schema}.{table_name}")
+    logger.info(f"[{job_id[:8]}] Docker Vector ETL starting: {blob_name} -> {schema}.{table_name}")
 
     # Track checkpoints for resume capability
     checkpoints = []
     checkpoint_data = {}
+    data_warnings = []
 
     def checkpoint(name: str, data: Dict[str, Any]):
         """Record a checkpoint for progress tracking."""
         checkpoints.append(name)
         checkpoint_data[name] = data
-        logger.info(f"[{job_id[:8]}] ✓ Checkpoint: {name}")
+        logger.info(f"[{job_id[:8]}] Checkpoint: {name}")
 
     try:
         # =====================================================================
         # PHASE 1: Load and Validate Source File
         # =====================================================================
-        logger.info(f"[{job_id[:8]}] 📥 Phase 1: Loading and validating source file")
+        logger.info(f"[{job_id[:8]}] Phase 1: Loading and validating source file")
 
-        gdf, validation_result = _load_and_validate_source(
+        gdf, load_info, validation_info, warnings = _load_and_validate_source(
             blob_name=blob_name,
             container_name=container_name,
             file_extension=file_extension,
             parameters=parameters,
             job_id=job_id
         )
+        data_warnings.extend(warnings)
 
         checkpoint("validated", {
             "features": len(gdf),
-            "crs": str(gdf.crs),
-            "geometry_type": validation_result.get('geometry_type'),
-            "columns": list(gdf.columns),
-            "source_crs": validation_result.get('source_crs')
+            "crs": load_info['original_crs'],
+            "geometry_type": validation_info.get('geometry_type'),
+            "columns": load_info['columns'],
+            "file_size_mb": load_info['file_size_mb']
         })
 
         # =====================================================================
         # PHASE 2: Create PostGIS Table and Metadata
         # =====================================================================
-        logger.info(f"[{job_id[:8]}] 🗄️ Phase 2: Creating PostGIS table")
+        logger.info(f"[{job_id[:8]}] Phase 2: Creating PostGIS table")
 
         table_result = _create_table_and_metadata(
             gdf=gdf,
@@ -142,24 +149,24 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
             schema=schema,
             overwrite=overwrite,
             parameters=parameters,
-            validation_result=validation_result,
+            load_info=load_info,
             job_id=job_id
         )
 
         checkpoint("table_created", {
             "table": f"{schema}.{table_name}",
-            "geometry_type": table_result.get('geometry_type'),
-            "srid": table_result.get('srid')
+            "geometry_type": table_result['geometry_type'],
+            "srid": table_result['srid']
         })
 
         # =====================================================================
         # PHASE 2.5: Create Default Style
         # =====================================================================
-        logger.info(f"[{job_id[:8]}] 🎨 Phase 2.5: Creating default style")
+        logger.info(f"[{job_id[:8]}] Phase 2.5: Creating default style")
 
         style_result = _create_default_style(
             table_name=table_name,
-            geometry_type=table_result.get('geometry_type'),
+            geometry_type=table_result['geometry_type'],
             style_params=parameters.get('style'),
             job_id=job_id
         )
@@ -169,7 +176,7 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
         # =====================================================================
         # PHASE 3: Upload Chunks (with per-chunk checkpoints)
         # =====================================================================
-        logger.info(f"[{job_id[:8]}] 📤 Phase 3: Uploading data in chunks")
+        logger.info(f"[{job_id[:8]}] Phase 3: Uploading data in chunks")
 
         upload_result = _upload_chunks_with_checkpoints(
             gdf=gdf,
@@ -183,12 +190,13 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
         # =====================================================================
         # PHASE 4: Create STAC Item
         # =====================================================================
-        logger.info(f"[{job_id[:8]}] 📋 Phase 4: Creating STAC item")
+        logger.info(f"[{job_id[:8]}] Phase 4: Creating STAC item")
 
         stac_result = _create_stac_item(
             table_name=table_name,
             schema=schema,
             parameters=parameters,
+            load_info=load_info,
             job_id=job_id
         )
 
@@ -205,10 +213,10 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
             "elapsed_seconds": round(elapsed, 2)
         })
 
+        rows_per_sec = total_rows / elapsed if elapsed > 0 else 0
         logger.info(
-            f"[{job_id[:8]}] ✅ Docker Vector ETL complete: "
-            f"{total_rows:,} rows in {elapsed:.1f}s "
-            f"({total_rows/elapsed:.0f} rows/sec)" if elapsed > 0 else ""
+            f"[{job_id[:8]}] Docker Vector ETL complete: "
+            f"{total_rows:,} rows in {elapsed:.1f}s ({rows_per_sec:.0f} rows/sec)"
         )
 
         return {
@@ -217,7 +225,7 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
                 "table_name": table_name,
                 "schema": schema,
                 "total_rows": total_rows,
-                "geometry_type": table_result.get('geometry_type'),
+                "geometry_type": table_result['geometry_type'],
                 "srid": table_result.get('srid', 4326),
                 "stac_item_id": stac_result.get('item_id'),
                 "collection_id": stac_result.get('collection_id'),
@@ -226,14 +234,16 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
                 "checkpoint_count": len(checkpoints),
                 "elapsed_seconds": round(elapsed, 2),
                 "execution_mode": "docker",
-                "connection_pooling": True
+                "connection_pooling": True,
+                "data_warnings": data_warnings if data_warnings else None,
+                "vector_tile_urls": table_result.get('vector_tile_urls')
             }
         }
 
     except Exception as e:
         elapsed = time.time() - start_time
         error_msg = f"Vector Docker ETL failed: {type(e).__name__}: {e}"
-        logger.error(f"[{job_id[:8]}] ❌ {error_msg}\n{traceback.format_exc()}")
+        logger.error(f"[{job_id[:8]}] {error_msg}\n{traceback.format_exc()}")
 
         return {
             "success": False,
@@ -258,86 +268,54 @@ def _load_and_validate_source(
     job_id: str
 ) -> tuple:
     """
-    Load source file and validate geometry.
+    Load source file and validate geometry using shared core module.
 
     Returns:
-        Tuple of (GeoDataFrame, validation_result dict)
+        Tuple of (GeoDataFrame, load_info, validation_info, warnings)
     """
-    from infrastructure.blob import BlobRepository
-    from services.vector.converters import (
-        _convert_csv, _convert_geojson, _convert_geopackage,
-        _convert_kml, _convert_kmz, _convert_shapefile
+    from services.vector.core import (
+        load_vector_source,
+        build_csv_converter_params,
+        validate_and_prepare,
+        apply_column_mapping,
+        extract_geometry_info,
+        log_gdf_memory
     )
-    from services.vector.postgis_handler import VectorToPostGISHandler
 
-    config = get_config()
-
-    # Build converter params
+    # Build converter params (handles CSV lat/lon/wkt merging)
     converter_params = parameters.get('converter_params', {}) or {}
     if file_extension == 'csv':
-        if parameters.get('lat_name'):
-            converter_params['lat_name'] = parameters['lat_name']
-        if parameters.get('lon_name'):
-            converter_params['lon_name'] = parameters['lon_name']
-        if parameters.get('wkt_column'):
-            converter_params['wkt_column'] = parameters['wkt_column']
+        converter_params = build_csv_converter_params(parameters, converter_params)
 
-    # Download source file
-    logger.info(f"[{job_id[:8]}] Downloading {blob_name} from {container_name}")
-    blob_repo = BlobRepository.for_zone("bronze")
-    file_bytes = blob_repo.read_blob(container_name, blob_name)
-
-    log_memory_checkpoint(logger, "After file download", context_id=job_id,
-                          file_size_mb=round(len(file_bytes) / (1024 * 1024), 1))
-
-    # Convert to GeoDataFrame based on format
-    converter_map = {
-        'csv': _convert_csv,
-        'geojson': _convert_geojson,
-        'json': _convert_geojson,
-        'gpkg': _convert_geopackage,
-        'kml': _convert_kml,
-        'kmz': _convert_kmz,
-        'shp': _convert_shapefile,
-        'zip': _convert_shapefile
-    }
-
-    converter = converter_map.get(file_extension)
-    if not converter:
-        raise ValueError(f"Unsupported file format: {file_extension}")
-
-    gdf = converter(file_bytes, converter_params)
-    original_crs = str(gdf.crs) if gdf.crs else 'unknown'
-
-    log_memory_checkpoint(logger, "After format conversion", context_id=job_id,
-                          rows=len(gdf), crs=original_crs)
+    # Load file using shared core function
+    gdf, load_info = load_vector_source(
+        blob_name=blob_name,
+        container_name=container_name,
+        file_extension=file_extension,
+        converter_params=converter_params,
+        job_id=job_id
+    )
 
     # Apply column mapping if provided
     column_mapping = parameters.get('column_mapping')
     if column_mapping:
-        from services.vector.process_vector_tasks import _apply_column_mapping
-        gdf = _apply_column_mapping(gdf, column_mapping, job_id)
+        gdf = apply_column_mapping(gdf, column_mapping, job_id)
 
-    # Validate and reproject to EPSG:4326
-    handler = VectorToPostGISHandler()
+    # Validate and prepare using shared core function
     geometry_params = parameters.get('geometry_params', {})
-    validated_gdf = handler.validate_and_prepare_gdf(gdf, geometry_params)
+    validated_gdf, validation_info, warnings = validate_and_prepare(
+        gdf=gdf,
+        geometry_params=geometry_params,
+        job_id=job_id
+    )
 
-    if len(validated_gdf) == 0:
-        raise ValueError("No valid features after geometry validation")
+    # Extract geometry info
+    geom_info = extract_geometry_info(validated_gdf)
+    validation_info['geometry_type'] = geom_info['geometry_type']
 
-    # Get geometry type
-    geom_types = validated_gdf.geometry.geom_type.unique()
-    geometry_type = geom_types[0] if len(geom_types) == 1 else 'GEOMETRY'
+    log_gdf_memory(validated_gdf, "after_validation", job_id)
 
-    log_memory_checkpoint(logger, "After validation", context_id=job_id,
-                          rows=len(validated_gdf), geometry_type=geometry_type)
-
-    return validated_gdf, {
-        'geometry_type': geometry_type,
-        'source_crs': original_crs,
-        'columns': list(validated_gdf.columns)
-    }
+    return validated_gdf, load_info, validation_info, warnings
 
 
 def _create_table_and_metadata(
@@ -346,7 +324,7 @@ def _create_table_and_metadata(
     schema: str,
     overwrite: bool,
     parameters: Dict[str, Any],
-    validation_result: Dict[str, Any],
+    load_info: Dict[str, Any],
     job_id: str
 ) -> Dict[str, Any]:
     """
@@ -356,48 +334,61 @@ def _create_table_and_metadata(
         Dict with table creation result
     """
     from services.vector.postgis_handler import VectorToPostGISHandler
+    from services.vector.core import (
+        extract_geometry_info,
+        detect_temporal_extent,
+        filter_reserved_columns
+    )
 
+    config = get_config()
     handler = VectorToPostGISHandler()
 
-    # Get geometry type
-    geom_types = gdf.geometry.geom_type.unique()
-    geometry_type = geom_types[0].upper() if len(geom_types) == 1 else 'GEOMETRY'
+    # Get geometry info
+    geom_info = extract_geometry_info(gdf)
+    geometry_type = geom_info['geometry_type']
 
-    # Detect temporal extent if temporal_property specified
-    temporal_start = None
-    temporal_end = None
+    # Detect temporal extent
     temporal_property = parameters.get('temporal_property')
+    temporal_start, temporal_end = detect_temporal_extent(gdf, temporal_property, job_id)
 
-    if temporal_property and temporal_property in gdf.columns:
-        try:
-            temporal_col = gdf[temporal_property].dropna()
-            if len(temporal_col) > 0:
-                temporal_start = str(temporal_col.min())
-                temporal_end = str(temporal_col.max())
-                logger.info(f"[{job_id[:8]}] Detected temporal extent: {temporal_start} to {temporal_end}")
-        except Exception as e:
-            logger.warning(f"[{job_id[:8]}] Failed to detect temporal extent: {e}")
+    # Filter reserved columns
+    all_columns = [c for c in gdf.columns if c != 'geometry']
+    columns, skipped_columns = filter_reserved_columns(all_columns, job_id)
 
-    # Create table with IF NOT EXISTS
+    # Create table with batch tracking (idempotent)
     indexes = parameters.get('indexes', {'spatial': True, 'attributes': [], 'temporal': []})
 
-    handler.create_table_if_not_exists(
+    handler.create_table_with_batch_tracking(
         table_name=table_name,
-        gdf=gdf,
         schema=schema,
-        geometry_type=geometry_type,
-        srid=4326,
+        gdf=gdf,
         indexes=indexes
     )
 
+    # Generate vector tile URLs
+    vector_tile_urls = config.generate_vector_tile_urls(table_name, schema)
+
     # Register metadata
+    custom_props = {
+        "vector_tiles": {
+            "tilejson_url": vector_tile_urls.get("tilejson"),
+            "tiles_url": vector_tile_urls.get("tiles"),
+            "viewer_url": vector_tile_urls.get("viewer"),
+            "tipg_map_url": vector_tile_urls.get("tipg_map")
+        },
+        "tipg_collection_id": f"{schema}.{table_name}"
+    }
+
     handler.register_table_metadata(
         table_name=table_name,
         schema=schema,
-        geometry_type=geometry_type,
-        srid=4326,
+        etl_job_id=job_id,
+        source_file=parameters.get('blob_name'),
+        source_format=parameters.get('file_extension'),
+        source_crs=load_info.get('original_crs'),
         feature_count=len(gdf),
-        columns=[c for c in gdf.columns if c != 'geometry'],
+        geometry_type=geometry_type,
+        bbox=tuple(gdf.total_bounds),
         title=parameters.get('title'),
         description=parameters.get('description'),
         attribution=parameters.get('attribution'),
@@ -405,7 +396,8 @@ def _create_table_and_metadata(
         keywords=parameters.get('keywords'),
         temporal_start=temporal_start,
         temporal_end=temporal_end,
-        temporal_property=temporal_property
+        temporal_property=temporal_property,
+        custom_properties=custom_props
     )
 
     logger.info(f"[{job_id[:8]}] Created table {schema}.{table_name} ({geometry_type}, SRID=4326)")
@@ -414,7 +406,8 @@ def _create_table_and_metadata(
         'table_name': table_name,
         'schema': schema,
         'geometry_type': geometry_type,
-        'srid': 4326
+        'srid': 4326,
+        'vector_tile_urls': vector_tile_urls
     }
 
 
@@ -436,12 +429,10 @@ def _create_default_style(
         styles_repo = OGCStylesRepository()
 
         if style_params:
-            # Use custom style params
             fill_color = style_params.get('fill_color', '#3388ff')
             stroke_color = style_params.get('stroke_color', '#2266cc')
             logger.info(f"[{job_id[:8]}] Creating style with custom params: fill={fill_color}, stroke={stroke_color}")
         else:
-            # Use defaults
             fill_color = '#3388ff'
             stroke_color = '#2266cc'
 
@@ -461,7 +452,7 @@ def _create_default_style(
 
     except Exception as e:
         # Style creation is non-fatal
-        logger.warning(f"[{job_id[:8]}] ⚠️ Style creation failed (non-fatal): {e}")
+        logger.warning(f"[{job_id[:8]}] Style creation failed (non-fatal): {e}")
         return {
             'style_id': None,
             'error': str(e),
@@ -485,6 +476,7 @@ def _upload_chunks_with_checkpoints(
     Returns:
         Dict with upload statistics
     """
+    import time
     from services.vector.postgis_handler import VectorToPostGISHandler
 
     handler = VectorToPostGISHandler()
@@ -499,9 +491,9 @@ def _upload_chunks_with_checkpoints(
     chunk_times = []
 
     for i in range(num_chunks):
-        chunk_start = i * chunk_size
-        chunk_end = min((i + 1) * chunk_size, total_features)
-        chunk = gdf.iloc[chunk_start:chunk_end].copy()
+        chunk_start_idx = i * chunk_size
+        chunk_end_idx = min((i + 1) * chunk_size, total_features)
+        chunk = gdf.iloc[chunk_start_idx:chunk_end_idx].copy()
 
         # Deterministic batch_id for idempotency
         batch_id = f"{job_id[:8]}-chunk-{i}"
@@ -538,8 +530,8 @@ def _upload_chunks_with_checkpoints(
 
         # Log progress at milestones
         if progress_pct in [25, 50, 75, 100] or i == num_chunks - 1:
-            avg_time = sum(chunk_times) / len(chunk_times)
-            rows_per_sec = total_rows_inserted / sum(chunk_times) if chunk_times else 0
+            total_time = sum(chunk_times)
+            rows_per_sec = total_rows_inserted / total_time if total_time > 0 else 0
             logger.info(
                 f"[{job_id[:8]}] Progress: {progress_pct}% "
                 f"({total_rows_inserted:,} rows, {rows_per_sec:.0f} rows/sec)"
@@ -563,6 +555,7 @@ def _create_stac_item(
     table_name: str,
     schema: str,
     parameters: Dict[str, Any],
+    load_info: Dict[str, Any],
     job_id: str
 ) -> Dict[str, Any]:
     """
@@ -575,53 +568,42 @@ def _create_stac_item(
         from services.stac_vector_catalog import create_vector_stac
         from config.defaults import STACDefaults
 
-        # Call existing STAC handler
+        # Get collection_id from parameters or use default
+        collection_id = parameters.get('collection_id') or STACDefaults.VECTOR_COLLECTION
+
         stac_params = {
             'schema': schema,
             'table_name': table_name,
-            'collection_id': STACDefaults.VECTOR_COLLECTION,
+            'collection_id': collection_id,
             'source_file': parameters.get('blob_name'),
             'source_format': parameters.get('file_extension'),
-            'job_id': job_id,
-            'geometry_params': parameters.get('geometry_params', {}),
-            # DDH identifiers for artifact tracking
-            'dataset_id': parameters.get('dataset_id'),
-            'resource_id': parameters.get('resource_id'),
-            'version_id': parameters.get('version_id'),
-            'stac_item_id': parameters.get('stac_item_id'),
-            '_platform_job_id': parameters.get('_platform_job_id')
+            'title': parameters.get('title'),
+            'description': parameters.get('description'),
+            'keywords': parameters.get('keywords'),
+            'license': parameters.get('license'),
+            'attribution': parameters.get('attribution')
         }
+
+        # Add platform job ID if available
+        if parameters.get('_platform_job_id'):
+            stac_params['platform_job_id'] = parameters['_platform_job_id']
 
         result = create_vector_stac(stac_params)
 
-        if result.get('success'):
-            stac_data = result.get('result', {})
-            return {
-                'item_id': stac_data.get('stac_id') or stac_data.get('item_id'),
-                'collection_id': stac_data.get('collection_id', STACDefaults.VECTOR_COLLECTION),
-                'inserted_to_pgstac': stac_data.get('inserted_to_pgstac', True),
-                'degraded': stac_data.get('degraded', False)
-            }
-        elif result.get('degraded'):
-            # Graceful degradation - STAC unavailable but data is in PostGIS
-            logger.warning(f"[{job_id[:8]}] STAC registration degraded: {result.get('warning')}")
-            return {
-                'item_id': None,
-                'collection_id': STACDefaults.VECTOR_COLLECTION,
-                'inserted_to_pgstac': False,
-                'degraded': True,
-                'degraded_reason': result.get('warning')
-            }
-        else:
-            raise Exception(result.get('error', 'Unknown STAC error'))
+        logger.info(f"[{job_id[:8]}] STAC item created: {result.get('item_id')}")
+
+        return {
+            'item_id': result.get('item_id'),
+            'collection_id': collection_id,
+            'success': True
+        }
 
     except Exception as e:
-        # STAC creation failure is non-fatal - data is already in PostGIS
-        logger.warning(f"[{job_id[:8]}] ⚠️ STAC creation failed (non-fatal): {e}")
+        # STAC creation failure is logged but non-fatal for table creation
+        logger.error(f"[{job_id[:8]}] STAC creation failed: {e}")
         return {
             'item_id': None,
             'collection_id': None,
-            'inserted_to_pgstac': False,
-            'degraded': True,
+            'success': False,
             'error': str(e)
         }

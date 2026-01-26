@@ -265,6 +265,127 @@ async function fetchDockerWorkerHealth() {
     }
 }
 
+// ============================================================================
+// FUNCTION APP HEALTH (GAP-01: Cross-System Health)
+// ============================================================================
+
+async function fetchFunctionAppHealth() {
+    // Fetch FA health via our proxy endpoint
+    try {
+        const response = await fetch('/api/proxy/fa/health', {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' },
+            signal: AbortSignal.timeout(35000)  // Allow extra time for proxy
+        });
+
+        if (!response.ok) {
+            return {
+                status: 'unhealthy',
+                error: `Proxy returned HTTP ${response.status}`,
+                _source: 'function_app'
+            };
+        }
+
+        const data = await response.json();
+        return data;
+    } catch (err) {
+        return {
+            status: 'unreachable',
+            error: err.message,
+            _source: 'function_app'
+        };
+    }
+}
+
+function updateSystemStatusCard(cardId, statusId, healthData) {
+    const statusEl = document.getElementById(statusId);
+    if (!statusEl) return;
+
+    const status = healthData?.status || 'unknown';
+    let statusIcon = '&#x26AA;';  // Grey circle
+    let statusText = 'Unknown';
+
+    if (status === 'healthy') {
+        statusIcon = '&#x1F7E2;';  // Green circle
+        statusText = 'Healthy';
+    } else if (status === 'unhealthy' || status === 'error') {
+        statusIcon = '&#x1F534;';  // Red circle
+        statusText = 'Unhealthy';
+    } else if (status === 'unreachable') {
+        statusIcon = '&#x1F534;';  // Red circle
+        statusText = 'Unreachable';
+    } else if (status === 'warning') {
+        statusIcon = '&#x1F7E1;';  // Yellow circle
+        statusText = 'Warning';
+    }
+
+    statusEl.className = `system-status ${status}`;
+    statusEl.innerHTML = `
+        <span class="status-icon">${statusIcon}</span>
+        <span>${statusText}</span>
+        ${healthData?.error ? `<span style="font-size: 12px; color: #626F86;">(${healthData.error.substring(0, 50)}...)</span>` : ''}
+    `;
+
+    // Update component count if available
+    if (healthData?.components) {
+        const count = Object.keys(healthData.components).length;
+        statusEl.innerHTML += `<span style="font-size: 12px; margin-left: auto; color: #626F86;">${count} components</span>`;
+    }
+}
+
+function renderFunctionAppComponents(faHealth) {
+    const faSection = document.getElementById('fa-health-section');
+    const faGrid = document.getElementById('fa-components-grid');
+
+    if (!faHealth || faHealth.status === 'unreachable' || !faHealth.components) {
+        faSection.classList.add('hidden');
+        return;
+    }
+
+    faSection.classList.remove('hidden');
+    faGrid.innerHTML = '';
+
+    const components = faHealth.components;
+    const sortOrder = { healthy: 0, partial: 1, warning: 2, unhealthy: 3, error: 4, disabled: 5, deprecated: 6 };
+
+    // Sort components by status (unhealthy first)
+    const sortedComponents = Object.entries(components).sort((a, b) => {
+        const statusA = (a[1].status || 'unknown').toLowerCase();
+        const statusB = (b[1].status || 'unknown').toLowerCase();
+        return (sortOrder[statusA] ?? 10) - (sortOrder[statusB] ?? 10);
+    });
+
+    sortedComponents.forEach(([name, component]) => {
+        const status = component.status || 'unknown';
+        const description = component.description || '';
+
+        let statusBadgeClass = 'status-badge';
+        if (status === 'healthy') statusBadgeClass += ' status-completed';
+        else if (status === 'warning' || status === 'partial') statusBadgeClass += ' status-pending';
+        else if (status === 'unhealthy' || status === 'error') statusBadgeClass += ' status-failed';
+        else statusBadgeClass += ' status-queued';
+
+        const card = document.createElement('div');
+        card.className = 'component-card';
+        card.setAttribute('data-component-key', name);
+        card.innerHTML = `
+            <div class="component-header">
+                <div>
+                    <div class="component-name">${formatLabel(name)}</div>
+                    <div class="component-description">${description}</div>
+                </div>
+                <span class="${statusBadgeClass}">${status}</span>
+            </div>
+        `;
+        faGrid.appendChild(card);
+    });
+}
+
+function toggleFaSection() {
+    const faSection = document.getElementById('fa-health-section');
+    faSection.classList.toggle('collapsed');
+}
+
 function renderDockerWorkerInfo(dockerHealth) {
     if (!dockerHealth) return;
 
@@ -404,7 +525,16 @@ async function loadHealth() {
     });
 
     try {
+        // Fetch Docker Worker health (this system)
         const healthPromise = fetchJSON('/health');
+
+        // Fetch Function App health via proxy (GAP-01)
+        const faHealthPromise = fetchFunctionAppHealth().catch(err => {
+            console.warn('Function App health fetch failed:', err.message);
+            return { status: 'unreachable', error: err.message, _source: 'function_app' };
+        });
+
+        // Fetch external Docker Worker health if configured (legacy behavior)
         let dockerHealthPromise = Promise.resolve(null);
         if (typeof DOCKER_WORKER_URL !== 'undefined' && DOCKER_WORKER_URL) {
             dockerHealthPromise = fetchDockerWorkerHealth().catch(err => {
@@ -413,8 +543,19 @@ async function loadHealth() {
             });
         }
 
-        const [data, dockerHealth] = await Promise.all([healthPromise, dockerHealthPromise]);
+        // Fetch Queue Status (GAP-02)
+        const queueStatusPromise = fetchQueueStatus().catch(err => {
+            console.warn('Queue status fetch failed:', err.message);
+            return { status: 'error', error: err.message, queues: [] };
+        });
+
+        const [data, faHealth, dockerHealth, queueStatus] = await Promise.all([healthPromise, faHealthPromise, dockerHealthPromise, queueStatusPromise]);
         window.dockerWorkerHealth = dockerHealth;
+        window.functionAppHealth = faHealth;
+
+        // Update system status cards (GAP-01)
+        updateSystemStatusCard('docker-status-card', 'docker-overall-status', data);
+        updateSystemStatusCard('fa-status-card', 'fa-overall-status', faHealth);
 
         renderOverallStatus(data);
         renderEnvironmentInfo(data);
@@ -427,6 +568,13 @@ async function loadHealth() {
         renderComponents(data.components, dockerHealth);
         updateDiagramStatus(data.components, dockerHealth);
         renderSchemaSummary(data.components);
+
+        // Render Function App components (GAP-01)
+        renderFunctionAppComponents(faHealth);
+
+        // Render Queue Status (GAP-02)
+        renderQueueStatus(queueStatus);
+
         renderDebugInfo(data);
         updateLastChecked(data.timestamp);
 
@@ -1004,4 +1152,241 @@ function getStatusIcon(status) {
         deprecated: '&#x26AA;'
     };
     return icons[status] || '&#x2753;';
+}
+
+// ============================================================================
+// QUEUE INFRASTRUCTURE (GAP-02)
+// ============================================================================
+
+async function fetchQueueStatus() {
+    try {
+        const response = await fetch('/api/queues/status', {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' },
+            signal: AbortSignal.timeout(30000)
+        });
+
+        if (!response.ok) {
+            return { status: 'error', error: `HTTP ${response.status}`, queues: [] };
+        }
+
+        return await response.json();
+    } catch (err) {
+        return { status: 'error', error: err.message, queues: [] };
+    }
+}
+
+async function refreshQueueStatus() {
+    const refreshBtn = document.getElementById('queue-refresh-btn');
+    const summary = document.getElementById('queue-summary');
+    const cardsContainer = document.getElementById('queue-cards');
+
+    if (refreshBtn) {
+        refreshBtn.disabled = true;
+        refreshBtn.textContent = 'Loading...';
+    }
+
+    summary.className = 'queue-summary loading';
+    summary.innerHTML = '<div class="spinner-sm"></div><span>Loading queue status...</span>';
+
+    try {
+        const data = await fetchQueueStatus();
+        renderQueueStatus(data);
+    } catch (error) {
+        console.error('Error fetching queue status:', error);
+        summary.className = 'queue-summary error';
+        summary.innerHTML = `<span class="status-icon">&#x274C;</span><span>Failed to load queue status: ${error.message}</span>`;
+    } finally {
+        if (refreshBtn) {
+            refreshBtn.disabled = false;
+            refreshBtn.textContent = 'Refresh';
+        }
+    }
+}
+
+function renderQueueStatus(data) {
+    const summary = document.getElementById('queue-summary');
+    const cardsContainer = document.getElementById('queue-cards');
+
+    if (!data || data.status === 'error') {
+        summary.className = 'queue-summary error';
+        summary.innerHTML = `
+            <span class="status-icon">&#x274C;</span>
+            <span>Queue status unavailable</span>
+            <span class="queue-error-detail">${data?.error || 'Unknown error'}</span>
+        `;
+        cardsContainer.innerHTML = '';
+        return;
+    }
+
+    // Render summary
+    const totalActive = data.summary?.total_active_messages || 0;
+    const totalDlq = data.summary?.total_dead_letter_messages || 0;
+
+    let statusIcon = '&#x2705;';
+    let statusClass = 'healthy';
+    let statusText = 'All Queues Healthy';
+
+    if (data.status === 'error') {
+        statusIcon = '&#x274C;';
+        statusClass = 'error';
+        statusText = 'Queue Errors Detected';
+    } else if (data.status === 'warning' || totalDlq > 0) {
+        statusIcon = '&#x26A0;';
+        statusClass = 'warning';
+        statusText = totalDlq > 0 ? `${totalDlq} Dead-Letter Messages` : 'Queue Warnings';
+    }
+
+    summary.className = `queue-summary ${statusClass}`;
+    summary.innerHTML = `
+        <div class="queue-summary-status">
+            <span class="status-icon">${statusIcon}</span>
+            <span>${statusText}</span>
+        </div>
+        <div class="queue-summary-stats">
+            <span class="queue-stat active">
+                <span class="stat-value">${formatNumber(totalActive)}</span>
+                <span class="stat-label">Active</span>
+            </span>
+            <span class="queue-stat dlq ${totalDlq > 0 ? 'has-messages' : ''}">
+                <span class="stat-value">${formatNumber(totalDlq)}</span>
+                <span class="stat-label">Dead-Letter</span>
+            </span>
+            <span class="queue-stat namespace">
+                <span class="stat-label">Namespace:</span>
+                <span class="stat-value">${data.namespace || 'N/A'}</span>
+            </span>
+        </div>
+    `;
+
+    // Render queue cards
+    if (!data.queues || data.queues.length === 0) {
+        cardsContainer.innerHTML = '<div class="no-queues">No queues configured</div>';
+        return;
+    }
+
+    cardsContainer.innerHTML = data.queues.map(queue => renderQueueCard(queue)).join('');
+}
+
+function renderQueueCard(queue) {
+    const status = queue.status || 'unknown';
+    const active = queue.active_message_count || 0;
+    const dlq = queue.dead_letter_message_count || 0;
+    const scheduled = queue.scheduled_message_count || 0;
+
+    let statusClass = 'healthy';
+    let statusBadge = '&#x2705; Healthy';
+    if (status === 'error' || status === 'not_found') {
+        statusClass = 'error';
+        statusBadge = status === 'not_found' ? '&#x26A0; Not Found' : '&#x274C; Error';
+    } else if (dlq > 0) {
+        statusClass = 'warning';
+        statusBadge = '&#x26A0; Has DLQ';
+    }
+
+    const listenerLink = queue.listener_url
+        ? `<a href="${queue.listener_url}" class="listener-link">${queue.listener} &rarr;</a>`
+        : `<span class="listener-name">${queue.listener}</span>`;
+
+    const lastAccessed = queue.accessed_at
+        ? formatDateTime(queue.accessed_at)
+        : 'Never';
+
+    const purgeButtons = `
+        <div class="queue-actions">
+            ${active > 0 ? `<button class="btn btn-sm btn-warning" onclick="confirmPurgeQueue('${queue.name}', 'active', ${active})">Clear Active</button>` : ''}
+            ${dlq > 0 ? `<button class="btn btn-sm btn-danger" onclick="confirmPurgeQueue('${queue.name}', 'dlq', ${dlq})">Clear DLQ</button>` : ''}
+        </div>
+    `;
+
+    return `
+        <div class="queue-card ${statusClass}" data-queue="${queue.name}">
+            <div class="queue-header">
+                <div class="queue-title">
+                    <span class="queue-icon">${queue.icon || '&#x1F4E8;'}</span>
+                    <div>
+                        <div class="queue-name">${queue.display_name}</div>
+                        <div class="queue-real-name">${queue.name}</div>
+                    </div>
+                </div>
+                <span class="queue-status-badge ${statusClass}">${statusBadge}</span>
+            </div>
+            <div class="queue-description">${queue.description}</div>
+            <div class="queue-stats">
+                <div class="queue-stat-item">
+                    <span class="stat-icon">&#x1F4EC;</span>
+                    <span class="stat-value ${active > 0 ? 'has-messages' : ''}">${formatNumber(active)}</span>
+                    <span class="stat-label">Active</span>
+                </div>
+                <div class="queue-stat-item ${dlq > 0 ? 'dlq-warning' : ''}">
+                    <span class="stat-icon">&#x2620;</span>
+                    <span class="stat-value ${dlq > 0 ? 'has-messages danger' : ''}">${formatNumber(dlq)}</span>
+                    <span class="stat-label">Dead Letter</span>
+                </div>
+                <div class="queue-stat-item">
+                    <span class="stat-icon">&#x23F0;</span>
+                    <span class="stat-value">${formatNumber(scheduled)}</span>
+                    <span class="stat-label">Scheduled</span>
+                </div>
+            </div>
+            <div class="queue-footer">
+                <div class="queue-listener">
+                    <span class="listener-label">Listener:</span>
+                    ${listenerLink}
+                </div>
+                <div class="queue-last-accessed">
+                    <span>Last accessed: ${lastAccessed}</span>
+                </div>
+            </div>
+            ${active > 0 || dlq > 0 ? purgeButtons : ''}
+            ${queue.error ? `<div class="queue-error">${queue.error}</div>` : ''}
+        </div>
+    `;
+}
+
+function confirmPurgeQueue(queueName, target, count) {
+    const targetLabel = target === 'dlq' ? 'dead-letter' : 'active';
+    const message = `Are you sure you want to permanently delete ${count} ${targetLabel} message(s) from "${queueName}"?\n\nThis action cannot be undone!`;
+
+    if (confirm(message)) {
+        purgeQueue(queueName, target);
+    }
+}
+
+async function purgeQueue(queueName, target) {
+    try {
+        const response = await fetch(`/api/queues/${queueName}/purge?confirm=yes&target=${target}`, {
+            method: 'POST',
+            headers: { 'Accept': 'application/json' }
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            alert(`Successfully cleared ${result.total_cleared} messages from ${queueName}`);
+            // Refresh queue status
+            refreshQueueStatus();
+        } else {
+            alert(`Failed to purge queue: ${result.error || 'Unknown error'}`);
+        }
+    } catch (error) {
+        console.error('Error purging queue:', error);
+        alert(`Error purging queue: ${error.message}`);
+    }
+}
+
+function toggleQueueSection() {
+    const section = document.getElementById('queue-status-section');
+    const content = document.getElementById('queue-content');
+    const toggleIcon = document.getElementById('queue-toggle-icon');
+
+    section.classList.toggle('collapsed');
+
+    if (section.classList.contains('collapsed')) {
+        content.style.display = 'none';
+        toggleIcon.innerHTML = '&#x25B6;';
+    } else {
+        content.style.display = 'block';
+        toggleIcon.innerHTML = '&#x25BC;';
+    }
 }

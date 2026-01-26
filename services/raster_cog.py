@@ -197,7 +197,9 @@ def _process_cog_disk_based(
     overview_resampling: str,
     in_memory: bool,
     logger,
-    compute_checksum: bool = True
+    compute_checksum: bool = True,
+    target_crs: str = "EPSG:4326",
+    reproject_resampling: str = "cubic"
 ) -> Dict[str, Any]:
     """
     Process raster to COG using disk-based I/O via mounted filesystem.
@@ -213,11 +215,13 @@ def _process_cog_disk_based(
         mount_path: Path to mounted filesystem (e.g., /mounts/etl-temp)
         task_id: Task identifier for temp file naming
         cog_profile: COG profile dict for compression settings
-        cog_config: Config dict for reprojection settings
+        cog_config: Config dict for reprojection settings (will be updated with dst_crs if needed)
         overview_resampling: Resampling method for overviews
         in_memory: Whether GDAL should use in-memory processing (False for disk)
         logger: Logger instance
         compute_checksum: Whether to compute SHA-256 checksum
+        target_crs: Target CRS for reprojection (default: EPSG:4326)
+        reproject_resampling: Resampling method for reprojection (default: cubic)
 
     Returns:
         Dict with:
@@ -229,6 +233,7 @@ def _process_cog_disk_based(
             - upload_result: dict (from stream_mount_to_blob)
             - raster_metadata: dict (from rasterio)
             - file_checksum: str (if compute_checksum=True)
+            - reprojection_performed: bool (whether CRS was reprojected)
     """
     from pathlib import Path
     from infrastructure.blob import BlobRepository
@@ -287,8 +292,9 @@ def _process_cog_disk_based(
         rasterio, Resampling, cog_translate, cog_profiles_module = _lazy_imports()
 
         with rasterio.open(temp_input_path) as src:
+            detected_source_crs = src.crs
             raster_metadata = {
-                'crs': str(src.crs),
+                'crs': str(detected_source_crs),
                 'bounds': list(src.bounds),
                 'shape': [src.height, src.width],
                 'band_count': src.count,
@@ -297,6 +303,20 @@ def _process_cog_disk_based(
             logger.info(f"   CRS: {raster_metadata['crs']}")
             logger.info(f"   Shape: {raster_metadata['shape']}")
             logger.info(f"   Bands: {raster_metadata['band_count']}")
+
+        # STEP B2: Check if reprojection needed (26 JAN 2026 - Bug fix)
+        # Compare source CRS with target CRS to determine if reprojection is required
+        needs_reprojection = (str(detected_source_crs) != str(target_crs))
+        reprojection_performed = False
+
+        if needs_reprojection:
+            logger.info(f"🔄 DISK STEP B2: Reprojection needed: {detected_source_crs} → {target_crs}")
+            cog_config["dst_crs"] = target_crs
+            cog_config["resampling"] = getattr(Resampling, reproject_resampling)
+            logger.info(f"   Reprojection resampling: {reproject_resampling}")
+            reprojection_performed = True
+        else:
+            logger.info(f"   No reprojection needed (already {target_crs})")
 
         # STEP C: Create COG (file-to-file, GDAL uses disk)
         logger.info(f"🔄 DISK STEP C: Creating COG with cog_translate (disk-based)...")
@@ -356,6 +376,8 @@ def _process_cog_disk_based(
             'raster_metadata': raster_metadata,
             'file_checksum': file_checksum,
             'cog_duration_seconds': cog_duration,
+            'reprojection_performed': reprojection_performed,
+            'target_crs': target_crs,
         }
 
     except Exception as e:
@@ -664,11 +686,13 @@ def create_cog(params: dict) -> dict:
             mount_path=mount_path,
             task_id=task_id,
             cog_profile=cog_profile,
-            cog_config=cog_config,  # Note: reprojection config determined inside helper
+            cog_config=cog_config,
             overview_resampling=overview_resampling_name,
             in_memory=False,  # Always False for disk-based
             logger=logger,
-            compute_checksum=True
+            compute_checksum=True,
+            target_crs=target_crs,
+            reproject_resampling=reproject_resampling
         )
 
         if not disk_result.get('success'):
@@ -700,6 +724,9 @@ def create_cog(params: dict) -> dict:
             description=tier_profile.description
         )
 
+        # Get reprojection status from disk_result (26 JAN 2026 - Bug fix)
+        disk_reprojection_performed = disk_result.get('reprojection_performed', False)
+
         cog_data = COGCreationData(
             cog_blob=output_blob_name,
             cog_container=silver_container,
@@ -707,9 +734,9 @@ def create_cog(params: dict) -> dict:
             storage_tier=tier_profile.storage_tier.value,
             source_blob=blob_name,
             source_container=container_name,
-            reprojection_performed=False,  # TODO: detect from disk_result
+            reprojection_performed=disk_reprojection_performed,
             source_crs=raster_metadata.get('crs', str(source_crs)),
-            target_crs=str(target_crs),
+            target_crs=disk_result.get('target_crs', str(target_crs)),
             bounds_4326=raster_metadata.get('bounds'),
             shape=raster_metadata.get('shape', []),
             size_mb=round(output_size_mb, 2),
@@ -718,7 +745,7 @@ def create_cog(params: dict) -> dict:
             tile_size=[512, 512],
             overview_levels=[],  # Not captured in disk path currently
             overview_resampling=overview_resampling,
-            reproject_resampling=None,
+            reproject_resampling=reproject_resampling if disk_reprojection_performed else None,
             raster_type=raster_metadata if raster_metadata else {"detected_type": raster_type},
             processing_time_seconds=round(cog_duration, 2),
             tier_profile=tier_profile_info,

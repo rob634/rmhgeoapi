@@ -702,6 +702,20 @@ class RasterViewerInterface(BaseInterface):
                     cogStats = null;
                 }}
 
+                // Fetch TileJSON for WGS84 bounds (cogInfo.bounds may be in projected CRS)
+                let wgs84Bounds = null;
+                try {{
+                    const tileJsonUrl = `${{TITILER_URL}}/cog/WebMercatorQuad/tilejson.json?url=${{encodeURIComponent(cogUrl)}}`;
+                    const tileJsonResp = await fetch(tileJsonUrl);
+                    if (tileJsonResp.ok) {{
+                        const tileJson = await tileJsonResp.json();
+                        wgs84Bounds = tileJson.bounds;
+                        console.log('TileJSON WGS84 bounds:', wgs84Bounds);
+                    }}
+                }} catch (e) {{
+                    console.warn('Could not fetch TileJSON bounds:', e);
+                }}
+
                 hideSpinner();
 
                 // Display COG info
@@ -721,13 +735,13 @@ class RasterViewerInterface(BaseInterface):
                 // Add tile layer
                 updateTileLayer();
 
-                // Zoom to bounds
-                if (cogInfo.bounds && cogInfo.bounds.length === 4) {{
+                // Zoom to bounds (use WGS84 bounds from TileJSON, not native CRS from cogInfo)
+                if (wgs84Bounds && wgs84Bounds.length === 4) {{
                     const bounds = [
-                        [cogInfo.bounds[1], cogInfo.bounds[0]],  // [south, west]
-                        [cogInfo.bounds[3], cogInfo.bounds[2]]   // [north, east]
+                        [wgs84Bounds[1], wgs84Bounds[0]],  // [south, west] = [miny, minx]
+                        [wgs84Bounds[3], wgs84Bounds[2]]   // [north, east] = [maxy, maxx]
                     ];
-                    console.log('COG bounds:', cogInfo.bounds);
+                    console.log('WGS84 bounds:', wgs84Bounds);
                     console.log('Leaflet bounds:', bounds);
 
                     // Use maxZoom to ensure small rasters zoom in properly
@@ -738,8 +752,8 @@ class RasterViewerInterface(BaseInterface):
                         animate: false
                     }});
                 }} else {{
-                    console.warn('No valid bounds in COG info:', cogInfo.bounds);
-                    setStatus('COG loaded (no bounds available)', 'success');
+                    console.warn('No WGS84 bounds available, cogInfo.bounds:', cogInfo.bounds);
+                    setStatus('COG loaded (could not determine map extent)', 'success');
                 }}
 
                 setStatus('COG loaded successfully', 'success');
@@ -753,28 +767,12 @@ class RasterViewerInterface(BaseInterface):
 
         // Zoom to data extent (manual button)
         function zoomToExtent() {{
-            if (!cogInfo) {{
+            if (!currentCogUrl) {{
                 setStatus('No COG loaded', 'error');
                 return;
             }}
 
-            // Try cogInfo.bounds first
-            if (cogInfo.bounds && cogInfo.bounds.length === 4) {{
-                const bounds = [
-                    [cogInfo.bounds[1], cogInfo.bounds[0]],  // [south, west]
-                    [cogInfo.bounds[3], cogInfo.bounds[2]]   // [north, east]
-                ];
-                console.log('Zooming to bounds:', bounds);
-                map.fitBounds(bounds, {{
-                    padding: [50, 50],
-                    maxZoom: 18,
-                    animate: true
-                }});
-                setStatus('Zoomed to data extent', 'success');
-                return;
-            }}
-
-            // Fallback: try to get bounds from TileJSON
+            // Fetch WGS84 bounds from TileJSON (cogInfo.bounds may be in projected CRS)
             const tileJsonUrl = `${{TITILER_URL}}/cog/WebMercatorQuad/tilejson.json?url=${{encodeURIComponent(currentCogUrl)}}`;
             fetch(tileJsonUrl)
                 .then(resp => resp.json())

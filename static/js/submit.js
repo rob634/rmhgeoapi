@@ -155,9 +155,9 @@ function handleFileSelect(file) {
     const sizeMb = file.size / (1024 * 1024);
     const extension = getFileExtension(file.name);
 
-    // Validate file size (100MB limit for direct upload)
-    if (sizeMb > 100) {
-        showUploadError('File too large. Maximum size is 100 MB.');
+    // Validate file size (1GB limit for direct upload - admin/testing use)
+    if (sizeMb > 1024) {
+        showUploadError('File too large. Maximum size is 1 GB.');
         return;
     }
 

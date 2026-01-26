@@ -155,18 +155,18 @@ This file references other documents containing implementation details. This is 
 ---
 
 ### Classification Enforcement (E4)
-**Status**: Phase 0 COMPLETE - Data Model Unification
+**Status**: Phase 0 + Phase 1 COMPLETE
 **Details**: [CLASSIFICATION_ENFORCEMENT.md](./CLASSIFICATION_ENFORCEMENT.md)
 **Priority**: HIGH - Blocks type-safe approval workflow
 
 | Phase | Description | Status |
 |-------|-------------|--------|
 | Phase 0 | Data Model Unification (unified to AccessLevel enum) | ✅ Done (25 JAN) |
-| **Phase 1** | **Enforce at Platform Level** | **NEXT** |
-| Phase 2 | Fail-Fast in Pipeline Tasks | Pending |
+| Phase 1 | Enforce at Platform Level | ✅ Done (26 JAN) |
+| **Phase 2** | **Fail-Fast in Pipeline Tasks** | **NEXT** |
 | Phase 3 | ADF Integration Testing | Pending |
 
-**Completed (25 JAN)**: Unified `Classification` enum into `AccessLevel` (single source of truth in `core/models/stac.py`). NOTE: RESTRICTED is defined but NOT YET SUPPORTED.
+**Completed (26 JAN)**: Platform API now enforces `access_level` via Pydantic validator. Accepts: "public" (any case), "OUO" or "Official Use Only" (any case). Rejects: "restricted" (future), invalid values. NOTE: RESTRICTED is defined but NOT YET SUPPORTED.
 
 ---
 
@@ -187,25 +187,29 @@ This file references other documents containing implementation details. This is 
 | Priority | Epic | Feature | Status |
 |:--------:|------|---------|--------|
 | ~~1~~ | E7 | F7.21 Raster Result Models | ✅ Core complete |
-| **1** | E4 | **Classification Enforcement** | **Phase 1 NEXT** |
+| ~~1~~ | E4 | Classification Enforcement | ✅ Phase 1 complete |
+| **1** | E4 | **Classification Enforcement Phase 2** | **NEXT** |
 | 2 | E7→E2 | RasterMetadata + STAC Self-Healing | In Progress |
 | 3 | E3 | DDH Platform Integration | In Progress |
 | 4 | E9 | Pre-prepared Raster Ingest | Pending |
 | -- | E8 | H3 Analytics / Building Exposure | Backlog |
 
-**Focus**: Classification enforcement is now top priority.
+**Focus**: Phase 2 (fail-fast in pipeline tasks) is optional for V0.8 - Phase 1 enforcement at API layer is the critical gate.
 
 ---
 
 ## Current Sprint Focus
 
-### 1. Classification Enforcement (E4) - Phase 1
+### 1. Classification Enforcement (E4) - ✅ Phase 1 COMPLETE
 See [Active Work](#classification-enforcement-e4) section above.
 
-**Next Actions**:
-1. Enforce `access_level` at Platform API layer
-2. Reject submissions without valid classification
-3. Wire to approval workflow
+**Completed (26 JAN)**:
+1. ✅ Enforce `access_level` at Platform API layer (Pydantic validator)
+2. ✅ Reject submissions with invalid classification
+3. ✅ Pass validated enum value to CoreMachine jobs
+
+**Phase 2 (Optional for V0.8)**:
+- Fail-fast in pipeline tasks if access_level missing (defense-in-depth)
 
 ---
 
@@ -336,6 +340,7 @@ Continue testing and validation.
 
 | Date | Item |
 |------|------|
+| 26 JAN 2026 | E4 Phase 1: Classification Enforcement at Platform API (Pydantic validator) |
 | 25 JAN 2026 | F7.21 Phase 2: Service wiring (validate, cog, stac return typed results) |
 | 25 JAN 2026 | F7.21 Phase 1: Raster Result Models (12 Pydantic models) |
 | 25 JAN 2026 | GAP-04b Vector Curator Interface (MapLibre + TiPG) |
@@ -373,7 +378,8 @@ Continue testing and validation.
 ## Workflow
 
 1. ~~Complete Rwanda FATHOM pipeline~~ DONE
-2. **F7.21 Raster Result Models** - Type safety for Docker workflow (CURRENT)
-3. **E4 Classification Enforcement** - Phase 1 Platform layer (NEXT)
-4. RasterMetadata + STAC Self-Healing testing
-5. H3 aggregation / Building exposure (BACKLOG)
+2. ~~F7.21 Raster Result Models~~ Type safety for Docker workflow - DONE
+3. ~~E4 Classification Enforcement Phase 1~~ Platform API enforcement - DONE
+4. **V0.8 Finalization** - Docker UI + testing (CURRENT)
+5. RasterMetadata + STAC Self-Healing testing (NEXT)
+6. H3 aggregation / Building exposure (BACKLOG)

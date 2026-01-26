@@ -999,8 +999,10 @@ class StacInterface(BaseInterface):
                 return;
             }
 
-            const endpoint = '/api/platform/unpublish/raster';
+            // 26 JAN 2026: Use consolidated endpoint (deprecated /unpublish/raster route was never registered)
+            const endpoint = '/api/platform/unpublish';
             const payload = {
+                data_type: 'raster',  // Explicit data type for consolidated endpoint
                 collection_id: collectionId,
                 delete_collection: true,
                 dry_run: false

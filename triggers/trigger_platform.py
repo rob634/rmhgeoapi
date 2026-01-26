@@ -1865,12 +1865,22 @@ def _translate_to_coremachine(
     # V0.8 (24 JAN 2026): Routes to Docker by default for performance.
     # Set docker=false in processing_options to use Function App worker.
     if data_type == DataType.VECTOR:
-        # Generate PostGIS table name from DDH IDs
-        table_name = platform_cfg.generate_vector_table_name(
-            request.dataset_id,
-            request.resource_id,
-            request.version_id
-        )
+        # Table name: use override from processing_options if provided (26 JAN 2026)
+        # Otherwise auto-generate from DDH identifiers
+        # This allows human-readable names when DDH IDs are numeric (e.g., "552342_2342345_v2")
+        opts = request.processing_options
+        table_name = opts.get('table_name')
+        if not table_name:
+            table_name = platform_cfg.generate_vector_table_name(
+                request.dataset_id,
+                request.resource_id,
+                request.version_id
+            )
+        else:
+            # Sanitize user-provided table name for PostgreSQL
+            from config.platform_config import _slugify_for_postgres
+            table_name = _slugify_for_postgres(table_name)
+            logger.info(f"  Using table_name override: {table_name}")
 
         # Generate STAC item ID
         stac_item_id = platform_cfg.generate_stac_item_id(
@@ -1888,7 +1898,6 @@ def _translate_to_coremachine(
         # Build converter params if CSV/lon-lat columns specified
         # Note: Use 'lat_name'/'lon_name' keys to match job validator expectations
         converter_params = {}
-        opts = request.processing_options
         if opts.get('lon_column') or opts.get('lat_column') or opts.get('wkt_column'):
             converter_params = {
                 'lon_name': opts.get('lon_column'),
@@ -1927,7 +1936,7 @@ def _translate_to_coremachine(
             'title': request.generated_title,
             'description': request.description,
             'tags': request.tags,
-            'access_level': request.access_level,
+            'access_level': request.access_level.value,  # E4 Phase 1: enum → string
 
             # Processing options
             'converter_params': converter_params,
@@ -1983,7 +1992,7 @@ def _translate_to_coremachine(
                 'collection_id': collection_id,
                 'stac_item_id': stac_item_id,
                 'collection_description': request.description,
-                'access_level': request.access_level,
+                'access_level': request.access_level.value,  # E4 Phase 1: enum → string
 
                 # DDH identifiers (Platform passthrough)
                 'dataset_id': request.dataset_id,
@@ -2035,7 +2044,7 @@ def _translate_to_coremachine(
                 # STAC metadata
                 'collection_id': collection_id,
                 'stac_item_id': stac_item_id,
-                'access_level': request.access_level,
+                'access_level': request.access_level.value,  # E4 Phase 1: enum → string
 
                 # DDH identifiers (Platform passthrough)
                 'dataset_id': request.dataset_id,
@@ -2149,7 +2158,7 @@ def _translate_single_raster(
         # STAC metadata
         'collection_id': collection_id,
         'stac_item_id': stac_item_id,
-        'access_level': request.access_level,
+        'access_level': request.access_level.value,  # E4 Phase 1: enum → string
 
         # DDH identifiers (Platform passthrough)
         'dataset_id': request.dataset_id,
@@ -2219,7 +2228,7 @@ def _translate_raster_collection(
         'collection_id': collection_id,
         'stac_item_id': stac_item_id,
         'collection_description': request.description,
-        'access_level': request.access_level,
+        'access_level': request.access_level.value,  # E4 Phase 1: enum → string
 
         # DDH identifiers (Platform passthrough)
         'dataset_id': request.dataset_id,

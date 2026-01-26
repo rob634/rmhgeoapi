@@ -100,6 +100,9 @@ class RasterViewerInterface(BaseInterface):
         <div id="cog-info-section" class="info-section" style="display: none;">
             <div class="section-header">COG Info</div>
             <div id="cog-info-content"></div>
+            <button onclick="zoomToExtent()" class="btn-zoom-extent" style="margin-top: 10px;">
+                Zoom to Data Extent
+            </button>
         </div>
 
         <!-- Band Selection (hidden until loaded) -->
@@ -532,6 +535,22 @@ class RasterViewerInterface(BaseInterface):
             font-size: 12px;
         }
 
+        .btn-zoom-extent {
+            width: 100%;
+            padding: 8px 12px;
+            background: #48bb78;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 12px;
+        }
+
+        .btn-zoom-extent:hover {
+            background: #38a169;
+        }
+
         /* Spinner */
         .spinner {
             position: fixed;
@@ -703,12 +722,24 @@ class RasterViewerInterface(BaseInterface):
                 updateTileLayer();
 
                 // Zoom to bounds
-                if (cogInfo.bounds) {{
+                if (cogInfo.bounds && cogInfo.bounds.length === 4) {{
                     const bounds = [
-                        [cogInfo.bounds[1], cogInfo.bounds[0]],
-                        [cogInfo.bounds[3], cogInfo.bounds[2]]
+                        [cogInfo.bounds[1], cogInfo.bounds[0]],  // [south, west]
+                        [cogInfo.bounds[3], cogInfo.bounds[2]]   // [north, east]
                     ];
-                    map.fitBounds(bounds, {{ padding: [50, 50] }});
+                    console.log('COG bounds:', cogInfo.bounds);
+                    console.log('Leaflet bounds:', bounds);
+
+                    // Use maxZoom to ensure small rasters zoom in properly
+                    // animate: false ensures immediate zoom without animation glitches
+                    map.fitBounds(bounds, {{
+                        padding: [50, 50],
+                        maxZoom: 18,
+                        animate: false
+                    }});
+                }} else {{
+                    console.warn('No valid bounds in COG info:', cogInfo.bounds);
+                    setStatus('COG loaded (no bounds available)', 'success');
                 }}
 
                 setStatus('COG loaded successfully', 'success');
@@ -718,6 +749,56 @@ class RasterViewerInterface(BaseInterface):
                 console.error('Error loading COG:', error);
                 setStatus(`Error: ${{error.message}}`, 'error');
             }}
+        }}
+
+        // Zoom to data extent (manual button)
+        function zoomToExtent() {{
+            if (!cogInfo) {{
+                setStatus('No COG loaded', 'error');
+                return;
+            }}
+
+            // Try cogInfo.bounds first
+            if (cogInfo.bounds && cogInfo.bounds.length === 4) {{
+                const bounds = [
+                    [cogInfo.bounds[1], cogInfo.bounds[0]],  // [south, west]
+                    [cogInfo.bounds[3], cogInfo.bounds[2]]   // [north, east]
+                ];
+                console.log('Zooming to bounds:', bounds);
+                map.fitBounds(bounds, {{
+                    padding: [50, 50],
+                    maxZoom: 18,
+                    animate: true
+                }});
+                setStatus('Zoomed to data extent', 'success');
+                return;
+            }}
+
+            // Fallback: try to get bounds from TileJSON
+            const tileJsonUrl = `${{TITILER_URL}}/cog/WebMercatorQuad/tilejson.json?url=${{encodeURIComponent(currentCogUrl)}}`;
+            fetch(tileJsonUrl)
+                .then(resp => resp.json())
+                .then(data => {{
+                    if (data.bounds && data.bounds.length === 4) {{
+                        const bounds = [
+                            [data.bounds[1], data.bounds[0]],
+                            [data.bounds[3], data.bounds[2]]
+                        ];
+                        console.log('Zooming to TileJSON bounds:', bounds);
+                        map.fitBounds(bounds, {{
+                            padding: [50, 50],
+                            maxZoom: 18,
+                            animate: true
+                        }});
+                        setStatus('Zoomed to data extent', 'success');
+                    }} else {{
+                        setStatus('No bounds available for this COG', 'error');
+                    }}
+                }})
+                .catch(err => {{
+                    console.error('Failed to get bounds from TileJSON:', err);
+                    setStatus('Could not determine data extent', 'error');
+                }});
         }}
 
         // Display COG info
@@ -899,10 +980,14 @@ class RasterViewerInterface(BaseInterface):
             console.log('Tile URL template:', tileUrl);
 
             // Add new tile layer
+            // minNativeZoom: 0 prevents negative zoom requests when zoomed out far
+            // (tileSize: 512 + zoomOffset: -1 can calculate z=-1 at low view zooms)
             tileLayer = L.tileLayer(tileUrl, {{
                 tileSize: 512,
                 zoomOffset: -1,
-                maxZoom: 22,
+                minNativeZoom: 0,
+                maxNativeZoom: 22,
+                maxZoom: 24,
                 attribution: 'TiTiler'
             }}).addTo(map);
 

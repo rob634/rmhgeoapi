@@ -47,6 +47,8 @@ from datetime import datetime
 from enum import Enum
 import re
 
+from .stac import AccessLevel
+
 
 # ============================================================================
 # ENUMS
@@ -144,11 +146,76 @@ class PlatformRequest(BaseModel):
         max_length=255,
         description="Human-readable title for STAC item (optional - auto-generated from DDH IDs if not provided)"
     )
-    access_level: str = Field(
-        default="OUO",
-        max_length=50,
-        description="Data classification: public, OUO, restricted"
+    # Classification enforcement (E4 Phase 1) - 26 JAN 2026
+    # Accepts: "public" (any case), "OUO" or "Official Use Only" (any case)
+    # Rejects: "restricted" (FUTURE - not yet supported), any other value
+    access_level: AccessLevel = Field(
+        default=AccessLevel.OUO,
+        description="Data classification: 'public' or 'OUO'/'Official Use Only' (case insensitive)"
     )
+
+    @field_validator('access_level', mode='before')
+    @classmethod
+    def normalize_access_level(cls, v):
+        """
+        Normalize and validate access_level input.
+
+        Accepted values (case insensitive):
+        - "public" → AccessLevel.PUBLIC
+        - "ouo" or "official use only" → AccessLevel.OUO
+
+        Rejected:
+        - "restricted" → Not yet supported (future enhancement)
+        - Anything else → Invalid
+
+        Args:
+            v: Input value (string or AccessLevel)
+
+        Returns:
+            AccessLevel enum value
+
+        Raises:
+            ValueError: If input is invalid or restricted
+        """
+        # Already an enum - pass through
+        if isinstance(v, AccessLevel):
+            # FUTURE: Remove this check when RESTRICTED is supported
+            if v == AccessLevel.RESTRICTED:
+                raise ValueError(
+                    "access_level 'restricted' is not yet supported. "
+                    "Use 'public' or 'OUO'. RESTRICTED support planned for future release."
+                )
+            return v
+
+        # Must be string
+        if not isinstance(v, str):
+            raise ValueError(
+                f"access_level must be a string. Got {type(v).__name__}. "
+                "Valid values: 'public', 'OUO', 'Official Use Only'"
+            )
+
+        normalized = v.strip().lower()
+
+        # Check for PUBLIC
+        if normalized == "public":
+            return AccessLevel.PUBLIC
+
+        # Check for OUO (accepts "ouo" or "official use only")
+        if normalized in ("ouo", "official use only"):
+            return AccessLevel.OUO
+
+        # FUTURE: RESTRICTED not yet supported
+        if normalized == "restricted":
+            raise ValueError(
+                "access_level 'restricted' is not yet supported. "
+                "Use 'public' or 'OUO'. RESTRICTED support planned for future release."
+            )
+
+        # Reject invalid values with helpful message
+        raise ValueError(
+            f"Invalid access_level '{v}'. "
+            "Valid values: 'public', 'OUO', 'Official Use Only' (case insensitive)"
+        )
 
     # ========================================================================
     # DDH Optional Metadata
@@ -159,9 +226,13 @@ class PlatformRequest(BaseModel):
     # ========================================================================
     # DDH Processing Options (Optional)
     # ========================================================================
+    # Naming overrides (26 JAN 2026):
+    #   - table_name: Custom PostGIS table name for vectors (slugified for PostgreSQL)
+    #   - collection_id: Custom STAC collection ID for rasters
+    # Other options: crs, nodata_value, overwrite, docker, lon_column, lat_column, etc.
     processing_options: Dict[str, Any] = Field(
         default_factory=dict,
-        description="Processing options (crs, nodata_value, overwrite, etc.)"
+        description="Processing options including table_name (vector) or collection_id (raster) overrides"
     )
 
     # ========================================================================

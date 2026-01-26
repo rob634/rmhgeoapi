@@ -1,6 +1,6 @@
 # Development Best Practices
 
-**Last Updated**: 16 JAN 2026
+**Last Updated**: 26 JAN 2026
 **Purpose**: Accumulated lessons learned and patterns for developers and future Claude instances
 
 ---
@@ -24,6 +24,7 @@
 7. [STAC Patterns](#stac-patterns)
 8. [Testing Patterns](#testing-patterns)
 9. [Common Mistakes](#common-mistakes)
+10. [Architecture Decisions & Spikes](#architecture-decisions--spikes)
 
 ---
 
@@ -503,6 +504,40 @@ curl -X POST ".../api/dbadmin/maintenance?action=ensure&confirm=yes"
 ```
 
 **Why**: `action=rebuild` drops and recreates schemas, destroying all data. Use `ensure` for normal deployments - it only creates missing tables/indexes. Only use `rebuild` for fresh dev/test environments where data loss is acceptable.
+
+---
+
+## Architecture Decisions & Spikes
+
+Documented investigations into alternative approaches. These help future developers understand why we chose certain technologies.
+
+### Vector ETL: Keep GeoPandas (Spike: 26 JAN 2026)
+
+**Question**: Should we replace GeoPandas with lower-level libraries (pyogrio, Shapely, raw Fiona) for the vector ETL pipeline? Could save ~20% memory.
+
+**Investigation**:
+- Analyzed current usage: file I/O, CRS handling, geometry validation, reprojection, chunking
+- Researched alternatives: pyogrio (direct), Shapely + Arrow, raw GDAL bindings
+- Benchmarked memory overhead vs code complexity
+
+**Finding**: GeoPandas already uses pyogrio by default (since v1.0), so we're already getting the I/O performance benefits. The ~20% memory overhead from the DataFrame wrapper is worth keeping because GeoDataFrame provides:
+
+| Benefit | Why It Matters |
+|---------|----------------|
+| **Automatic CRS handling** | `to_crs()` handles edge cases we'd have to code |
+| **Geometry validation** | `is_valid`, `make_valid()` - battle-tested |
+| **Vectorized operations** | `.apply()` is optimized, cleaner than loops |
+| **Ecosystem compatibility** | Works with all geospatial libraries |
+| **Reduced maintenance** | GeoPandas handles GDAL/Shapely version changes |
+
+**Decision**: **Keep GeoPandas**. The 20% memory savings from raw arrays isn't worth the increased code complexity and maintenance burden.
+
+**Future optimizations to consider** (if needed):
+1. Add `use_arrow=True` to `gpd.read_file()` calls (5-10x additional I/O speedup)
+2. PostgreSQL `COPY` with WKB for bulk inserts (bypass Python row iteration)
+3. GeoParquet for checkpoint serialization (faster than pickle)
+
+**Related files**: `services/vector/core.py`, `services/vector/converters.py`, `services/vector/postgis_handler.py`
 
 ---
 

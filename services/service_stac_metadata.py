@@ -276,9 +276,11 @@ class StacMetadataService:
             logger.error(f"   Traceback:\n{traceback.format_exc()}")
             raise ValueError(f"Failed to convert STAC item to dict: {e}")
 
-        # STEP G.0a: Validate bbox values (01 JAN 2026)
+        # STEP G.0a: Validate bbox values (01 JAN 2026, enhanced 26 JAN 2026)
         # rio_stac returns bbox with None values when CRS can't be transformed to WGS84
         # or when geotransform is missing/invalid. Fail early with clear error.
+        # Also validate that bbox is in valid WGS84 range - projected coordinates
+        # (like UTM meters) indicate transformation failed.
         try:
             bbox = item_dict.get('bbox', [])
             if bbox and any(v is None for v in bbox):
@@ -294,6 +296,29 @@ class StacMetadataService:
                     f"Verify the source file has a valid CRS and geotransform. "
                     f"You may need to reprocess with explicit source_crs parameter."
                 )
+
+            # Validate bbox is in WGS84 range (26 JAN 2026)
+            # Valid WGS84: lon [-180, 180], lat [-90, 90]
+            # bbox format: [minx/lon, miny/lat, maxx/lon, maxy/lat]
+            if bbox and len(bbox) >= 4:
+                minx, miny, maxx, maxy = bbox[:4]
+                is_projected = (
+                    abs(minx) > 180 or abs(maxx) > 180 or
+                    abs(miny) > 90 or abs(maxy) > 90
+                )
+                if is_projected:
+                    logger.error(f"❌ Step G.0a FAILED: bbox appears to be in projected coordinates, not WGS84")
+                    logger.error(f"   Blob: {container}/{blob_name}")
+                    logger.error(f"   bbox: {bbox}")
+                    logger.error(f"   Expected range: lon [-180, 180], lat [-90, 90]")
+                    logger.error(f"   This usually means rio-stac failed to transform the CRS to WGS84")
+                    raise ValueError(
+                        f"Cannot create STAC Item: bbox {bbox} appears to be in projected coordinates "
+                        f"(values outside WGS84 range). The raster CRS may not be properly defined. "
+                        f"Expected: lon [-180, 180], lat [-90, 90]. "
+                        f"Check that the source raster has a valid CRS definition."
+                    )
+
             logger.debug(f"   ✅ Step G.0a: bbox validated: {bbox}")
         except ValueError:
             raise  # Re-raise our own ValueError

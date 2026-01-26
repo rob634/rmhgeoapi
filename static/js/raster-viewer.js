@@ -265,37 +265,66 @@ function renderMetadata() {
     `).join('');
 }
 
-async function loadStats() {
+function loadStats() {
+    // Load stats directly from STAC item properties (computed during ETL)
+    // No API call needed - stats are embedded in the item metadata
     const content = document.getElementById('stats-content');
-    content.innerHTML = '<div class="loading-text">Loading statistics...</div>';
 
-    // Get COG URL
-    const cogUrl = getCogUrl();
-    if (!cogUrl) {
-        content.innerHTML = '<div class="loading-text">No data asset found</div>';
+    if (!currentItem) {
+        content.innerHTML = '<div class="loading-text">No item selected</div>';
         return;
     }
 
-    try {
-        const response = await fetch(`/api/raster/stats?url=${encodeURIComponent(cogUrl)}`);
-        const data = await response.json();
+    const props = currentItem.properties || {};
+    const assets = currentItem.assets || {};
+    const dataAsset = assets.data || assets.visual || Object.values(assets)[0] || {};
 
-        if (data.error) {
-            content.innerHTML = `<div class="loading-text">Error: ${data.error}</div>`;
+    // Check for band statistics in STAC data asset
+    // rio-stac stores raster:bands in the asset, not properties
+    // Format: raster:bands array with statistics per band
+    const rasterBands = dataAsset['raster:bands'] || [];
+
+    if (rasterBands.length > 0) {
+        // Use raster:bands extension format
+        currentStats = {
+            bands: rasterBands.map((band, i) => ({
+                band: i + 1,
+                min: band.statistics?.minimum ?? band.min,
+                max: band.statistics?.maximum ?? band.max,
+                mean: band.statistics?.mean ?? band.mean,
+                stddev: band.statistics?.stddev ?? band.stddev,
+                percentile_2: band.statistics?.percentile_2,
+                percentile_98: band.statistics?.percentile_98
+            }))
+        };
+    } else if (props['app:band_stats']) {
+        // Use app:band_stats custom property (legacy format)
+        currentStats = { bands: props['app:band_stats'] };
+    } else {
+        // Fallback: construct from app:rescale if available
+        const rescale = props['app:rescale'];
+        const bandCount = props['app:band_count'] || 1;
+
+        if (rescale) {
+            currentStats = {
+                bands: Array.from({ length: bandCount }, (_, i) => ({
+                    band: i + 1,
+                    min: rescale.min,
+                    max: rescale.max
+                }))
+            };
+        } else {
+            content.innerHTML = '<div class="loading-text">No statistics in metadata</div>';
+            currentStats = null;
             return;
         }
+    }
 
-        currentStats = data;
-        renderStats(data);
+    renderStats(currentStats);
 
-        // If auto-stretch is selected, apply it now
-        if (currentStretch === 'auto' && data.bands) {
-            applyAutoStretch();
-        }
-
-    } catch (error) {
-        console.error('Error loading stats:', error);
-        content.innerHTML = '<div class="loading-text">Error loading statistics</div>';
+    // If auto-stretch is selected, apply it now
+    if (currentStretch === 'auto' && currentStats.bands) {
+        applyAutoStretch();
     }
 }
 
@@ -333,6 +362,8 @@ function renderStats(data) {
 }
 
 function refreshStats() {
+    // Stats come from STAC metadata, so "refresh" just re-renders them
+    // To get fresh stats, the item would need to be re-ingested
     loadStats();
 }
 
@@ -578,6 +609,10 @@ function applyCustomStretch() {
 // TILE LAYER
 // ============================================================================
 
+// Track validation state to avoid repeated checks
+let lastValidatedUrl = null;
+let lastValidationResult = null;
+
 function getCogUrl() {
     if (!currentItem) return null;
     const assets = currentItem.assets || {};
@@ -612,10 +647,101 @@ function buildTileUrl() {
     return `${CONFIG.titilerBase}/cog/tiles/WebMercatorQuad/{z}/{x}/{y}?${params.join('&')}`;
 }
 
-function loadTileLayer() {
+/**
+ * Validate COG URL via TiTiler /cog/info endpoint.
+ * This fails fast if the URL is inaccessible or invalid.
+ * Returns: { valid: true, info: {...} } or { valid: false, error: "message" }
+ */
+async function validateCogUrl(cogUrl) {
+    if (!cogUrl || !CONFIG.titilerBase) {
+        return { valid: false, error: 'Missing COG URL or TiTiler base URL' };
+    }
+
+    // Skip validation if we already checked this URL
+    if (cogUrl === lastValidatedUrl && lastValidationResult) {
+        return lastValidationResult;
+    }
+
+    try {
+        const infoUrl = `${CONFIG.titilerBase}/cog/info?url=${encodeURIComponent(cogUrl)}`;
+        const response = await fetch(infoUrl);
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            let errorMsg = `TiTiler error (${response.status})`;
+
+            // Parse common error patterns
+            if (response.status === 500) {
+                if (errorText.includes('not recognized') || errorText.includes('not a valid')) {
+                    errorMsg = 'File is not a valid Cloud-Optimized GeoTIFF';
+                } else if (errorText.includes('does not exist') || errorText.includes('404')) {
+                    errorMsg = 'File not found in storage';
+                } else if (errorText.includes('permission') || errorText.includes('403')) {
+                    errorMsg = 'Permission denied accessing file';
+                } else {
+                    errorMsg = `TiTiler cannot read file: ${errorText.substring(0, 100)}`;
+                }
+            } else if (response.status === 400) {
+                errorMsg = 'Invalid COG URL format';
+            }
+
+            lastValidatedUrl = cogUrl;
+            lastValidationResult = { valid: false, error: errorMsg };
+            return lastValidationResult;
+        }
+
+        const info = await response.json();
+        lastValidatedUrl = cogUrl;
+        lastValidationResult = { valid: true, info };
+        return lastValidationResult;
+
+    } catch (error) {
+        console.error('COG validation error:', error);
+        lastValidatedUrl = cogUrl;
+        lastValidationResult = {
+            valid: false,
+            error: `Cannot connect to TiTiler: ${error.message}`
+        };
+        return lastValidationResult;
+    }
+}
+
+/**
+ * Show error overlay on map
+ */
+function showMapError(message) {
+    hideMapLoading();
+
+    // Create or update error overlay
+    let errorOverlay = document.getElementById('map-error');
+    if (!errorOverlay) {
+        errorOverlay = document.createElement('div');
+        errorOverlay.id = 'map-error';
+        errorOverlay.className = 'map-overlay map-error';
+        document.querySelector('.viewer-map').appendChild(errorOverlay);
+    }
+
+    errorOverlay.innerHTML = `
+        <div class="error-icon">⚠️</div>
+        <div class="error-title">Failed to Load Raster</div>
+        <div class="error-message">${message}</div>
+        <button class="btn btn-sm btn-ghost" onclick="hideMapError(); loadTileLayer();">Retry</button>
+    `;
+    errorOverlay.classList.remove('hidden');
+}
+
+function hideMapError() {
+    const errorOverlay = document.getElementById('map-error');
+    if (errorOverlay) {
+        errorOverlay.classList.add('hidden');
+    }
+}
+
+async function loadTileLayer() {
     if (!currentItem) return;
 
     showMapLoading();
+    hideMapError();
 
     // Remove existing layer
     if (tileLayer) {
@@ -623,18 +749,36 @@ function loadTileLayer() {
         tileLayer = null;
     }
 
-    const tileUrl = buildTileUrl();
-    if (!tileUrl) {
-        hideMapLoading();
-        console.error('Could not build tile URL');
+    const cogUrl = getCogUrl();
+    if (!cogUrl) {
+        showMapError('No data asset found in STAC item');
         return;
     }
 
+    // Validate COG URL before attempting to load tiles
+    const validation = await validateCogUrl(cogUrl);
+    if (!validation.valid) {
+        showMapError(validation.error);
+        return;
+    }
+
+    const tileUrl = buildTileUrl();
+    if (!tileUrl) {
+        showMapError('Could not build tile URL');
+        return;
+    }
+
+    // Track tile load failures
+    let tileErrorCount = 0;
+    const maxTileErrors = 3;
+
     try {
         tileLayer = L.tileLayer(tileUrl, {
-            maxZoom: 22,
+            minNativeZoom: 0,  // Prevent negative zoom requests
+            maxZoom: 24,
             tileSize: 256,
-            attribution: 'TiTiler'
+            attribution: 'TiTiler',
+            errorTileUrl: '' // Don't show broken image icons
         }).addTo(map);
 
         tileLayer.on('load', () => {
@@ -643,20 +787,53 @@ function loadTileLayer() {
         });
 
         tileLayer.on('tileerror', (error) => {
-            console.error('Tile error:', error);
+            tileErrorCount++;
+            console.error('Tile error:', error.tile?.src || error);
+
+            // If multiple tiles fail, show error
+            if (tileErrorCount >= maxTileErrors) {
+                showMapError('Multiple tile requests failed. The raster may be corrupted or inaccessible.');
+            }
         });
 
         // Zoom to item bounds
         if (currentItem.bbox && currentItem.bbox.length >= 4) {
-            const bounds = [
-                [currentItem.bbox[1], currentItem.bbox[0]],
-                [currentItem.bbox[3], currentItem.bbox[2]]
-            ];
-            map.fitBounds(bounds, { padding: [50, 50] });
+            const [minX, minY, maxX, maxY] = currentItem.bbox;
+
+            // Check if bbox looks like projected coordinates (not WGS84)
+            // WGS84 bounds: x/lon [-180, 180], y/lat [-90, 90]
+            const isProjectedCoords = Math.abs(minX) > 180 || Math.abs(maxX) > 180 ||
+                                      Math.abs(minY) > 90 || Math.abs(maxY) > 90;
+
+            if (isProjectedCoords) {
+                console.warn('STAC bbox appears to be in projected coordinates, not WGS84:', currentItem.bbox);
+                console.warn('Point queries will fail. The raster should be re-ingested with correct CRS handling.');
+
+                // Don't try to fit bounds with invalid coordinates - would break the map view
+                // Just show a warning in the console and let tiles load (TiTiler can still serve them)
+            } else {
+                const bounds = [
+                    [minY, minX],  // [lat, lng] = [miny, minx]
+                    [maxY, maxX]   // [lat, lng] = [maxy, maxx]
+                ];
+                map.fitBounds(bounds, { padding: [50, 50] });
+            }
         }
 
+        // Set a timeout to catch "silent failures" where no tiles load
+        setTimeout(() => {
+            // Check if any tiles have loaded by looking at the layer container
+            const container = tileLayer.getContainer?.();
+            const tilesLoaded = container?.querySelectorAll('img.leaflet-tile-loaded')?.length || 0;
+
+            if (tilesLoaded === 0 && !document.getElementById('map-error')?.classList.contains('hidden') === false) {
+                // No tiles loaded and no error shown yet - this is a silent failure
+                console.warn('No tiles loaded after timeout - possible silent failure');
+            }
+        }, 5000);
+
     } catch (error) {
-        hideMapLoading();
+        showMapError(`Error loading tiles: ${error.message}`);
         console.error('Error loading tile layer:', error);
     }
 }
@@ -686,12 +863,42 @@ function hideMapLoading() {
 // POINT QUERY
 // ============================================================================
 
+/**
+ * Wrap longitude to valid WGS84 range (-180 to 180).
+ * This handles cases where STAC bbox was stored in projected coordinates
+ * and Leaflet returns non-wrapped click coordinates.
+ */
+function wrapLongitude(lng) {
+    // Bring into -180 to 180 range
+    while (lng > 180) lng -= 360;
+    while (lng < -180) lng += 360;
+    return lng;
+}
+
 async function handleMapClick(e) {
     if (!currentItem) return;
 
-    const { lat, lng } = e.latlng;
+    let { lat, lng } = e.latlng;
     const cogUrl = getCogUrl();
     if (!cogUrl) return;
+
+    // Check for projected coordinates (STAC bbox incorrectly stored in native CRS)
+    // Valid WGS84: lng [-180, 180], lat [-90, 90]
+    if (Math.abs(lng) > 180 || Math.abs(lat) > 90) {
+        console.warn(`Coordinates out of WGS84 range: lng=${lng}, lat=${lat}`);
+        console.warn('This usually means the STAC bbox is in projected coordinates instead of WGS84');
+
+        // Check if this looks like projected coordinates (values in meters typically > 1000)
+        if (Math.abs(lng) > 1000 || Math.abs(lat) > 1000) {
+            document.getElementById('query-coords').textContent = `Invalid coordinates`;
+            document.getElementById('query-values').innerHTML =
+                '<div class="loading-text">Error: Raster metadata has incorrect bbox (projected coords instead of WGS84). Re-ingest with correct CRS.</div>';
+            return;
+        }
+
+        // If just slightly out of range, try wrapping longitude
+        lng = wrapLongitude(lng);
+    }
 
     // Show loading in query section
     document.getElementById('query-coords').textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;

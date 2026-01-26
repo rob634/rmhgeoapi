@@ -1,10 +1,10 @@
 # Classification Enforcement & ADF Integration (E4)
 
-**Last Updated**: 25 JAN 2026
+**Last Updated**: 26 JAN 2026
 **Epic**: E4 Security Zones / Externalization
 **Goal**: Unify access_level data model and enforce across SQL ↔ Python ↔ Service Bus
 **Context**: Colleague configuring ADF; we need Python side ready with correct parameters
-**Status**: Phase 0 COMPLETE
+**Status**: Phase 0 + Phase 1 COMPLETE
 
 ---
 
@@ -202,42 +202,54 @@ def access_level_validator(field_name: str = 'access_level'):
 ## Phase 1: Enforce at Platform Level
 
 **Goal**: Reject requests with invalid/missing classification at API entry point
+**Status**: ✅ COMPLETE (26 JAN 2026)
 
 | Story | Description | Status | Files |
 |-------|-------------|--------|-------|
-| S4.CL.1 | Update `PlatformRequest.access_level` to use `AccessLevel` enum | Pending | `core/models/platform.py` |
-| S4.CL.2 | Add Pydantic validator to normalize case (accept "OUO" → store as "ouo") | Pending | `core/models/platform.py` |
-| S4.CL.3 | Make `access_level` required (remove default) OR keep secure default "ouo" | Pending | `core/models/platform.py` |
-| S4.CL.4 | Update `_translate_to_coremachine()` to pass enum value (lowercase string) | Pending | `triggers/trigger_platform.py` |
-| S4.CL.5 | Add validation tests for Platform API rejection of invalid values | Pending | `tests/` |
+| S4.CL.1 | Update `PlatformRequest.access_level` to use `AccessLevel` enum | ✅ Done | `core/models/platform.py` |
+| S4.CL.2 | Add Pydantic validator to normalize case (accept "OUO" → store as "ouo") | ✅ Done | `core/models/platform.py` |
+| S4.CL.3 | Keep secure default "ouo" (OUO is the safe choice) | ✅ Done | `core/models/platform.py` |
+| S4.CL.4 | Update `_translate_to_coremachine()` to pass enum value (lowercase string) | ✅ Done | `triggers/trigger_platform.py` |
+| S4.CL.5 | Add validation tests for Platform API rejection of invalid values | ✅ Done | Inline tests verified |
 
-### Implementation Notes
+### Accepted Values (Case Insensitive)
+
+| Input | Maps To | Notes |
+|-------|---------|-------|
+| `"public"`, `"PUBLIC"`, `"pUbLiC"` | `AccessLevel.PUBLIC` | Any case combination |
+| `"ouo"`, `"OUO"` | `AccessLevel.OUO` | Any case combination |
+| `"official use only"`, `"Official Use Only"` | `AccessLevel.OUO` | Full phrase also accepted |
+
+### Rejected Values
+
+| Input | Error |
+|-------|-------|
+| `"restricted"` | "not yet supported" - FUTURE enhancement |
+| `"official use"` | Invalid (must be full phrase "official use only") |
+| `""` (empty) | Invalid |
+| Any other string | Invalid |
+
+### Implementation (26 JAN 2026)
 
 ```python
-# core/models/platform.py - Change from:
-access_level: str = Field(default="OUO", max_length=50, ...)
+# core/models/platform.py
+from .stac import AccessLevel
 
-# To:
-from core.models.stac import AccessLevel
-
+# Classification enforcement (E4 Phase 1) - 26 JAN 2026
+# Accepts: "public" (any case), "OUO" or "Official Use Only" (any case)
+# Rejects: "restricted" (FUTURE - not yet supported), any other value
 access_level: AccessLevel = Field(
     default=AccessLevel.OUO,
-    description="Data classification: public, ouo, restricted"
+    description="Data classification: 'public' or 'OUO'/'Official Use Only' (case insensitive)"
 )
 
 @field_validator('access_level', mode='before')
 @classmethod
 def normalize_access_level(cls, v):
-    """Accept case-insensitive input, normalize to enum."""
-    if isinstance(v, str):
-        try:
-            return AccessLevel(v.lower())
-        except ValueError:
-            raise ValueError(f"Invalid access_level '{v}'. Must be: public, ouo, restricted")
-    return v
+    # ... validates and normalizes input ...
 ```
 
-**Decision Point**: Keep `default=AccessLevel.OUO` (secure by default) or make truly required (no default). **Recommend keeping default** since OUO is the safe choice.
+**Decision**: Kept `default=AccessLevel.OUO` (secure by default) since OUO is the safe choice for internal data.
 
 ---
 

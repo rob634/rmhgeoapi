@@ -537,6 +537,42 @@
     padding: 15px 25px;
 }
 
+/* Error overlay for failed raster loads */
+.map-error {
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: 30px 40px;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    text-align: center;
+    max-width: 400px;
+}
+
+.map-error .error-icon {
+    font-size: 36px;
+}
+
+.map-error .error-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: #991b1b;
+}
+
+.map-error .error-message {
+    font-size: 13px;
+    color: #b91c1c;
+    line-height: 1.5;
+}
+
+.map-error .btn {
+    margin-top: 8px;
+}
+
 .layer-info {
     top: 15px;
     right: 15px;

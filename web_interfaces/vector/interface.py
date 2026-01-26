@@ -885,8 +885,10 @@ class VectorInterface(BaseInterface):
         async function deleteCollection(collectionId, event) {
             event.stopPropagation();
 
-            const endpoint = '/api/platform/unpublish/vector';
+            // 26 JAN 2026: Use consolidated endpoint (deprecated /unpublish/vector route was never registered)
+            const endpoint = '/api/platform/unpublish';
             const payload = {
+                data_type: 'vector',  // Explicit data type for consolidated endpoint
                 table_name: collectionId,
                 dry_run: false
             };

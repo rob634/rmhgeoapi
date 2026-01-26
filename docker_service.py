@@ -1562,8 +1562,11 @@ async def interface_submit_process(request: Request):
         }
 
         # Add optional fields
-        if form_dict.get('service_name'):
-            body['service_name'] = form_dict['service_name']
+        # Support both 'title' (new) and 'service_name' (legacy) for backward compatibility
+        if form_dict.get('title'):
+            body['title'] = form_dict['title']
+        elif form_dict.get('service_name'):
+            body['title'] = form_dict['service_name']
         if form_dict.get('description'):
             body['description'] = form_dict['description']
         if form_dict.get('access_level'):
@@ -2009,6 +2012,198 @@ async def interface_job_failure_context(request: Request, job_id: str):
 
     except Exception as e:
         return HTMLResponse(f'<div class="failure-error">Error: {str(e)}</div>')
+
+
+# ============================================================================
+# TASKS INTERFACE (25 JAN 2026 - Phase 2 Core Routes)
+# ============================================================================
+
+@app.get("/interface/tasks", response_class=HTMLResponse)
+async def interface_tasks_list(
+    request: Request,
+    job_id: str = None,
+    task_id: str = None
+):
+    """
+    Task monitor page - shows tasks for a specific job.
+
+    Query params:
+        job_id: Job ID to view tasks for
+        task_id: Optional specific task ID to highlight
+    """
+    try:
+        from templates_utils import render_template
+
+        # If no job_id, show the job selector
+        if not job_id:
+            return render_template(
+                request,
+                "pages/tasks/list.html",
+                job_id=None,
+                nav_active="/interface/tasks"
+            )
+
+        from infrastructure import JobRepository, TaskRepository
+
+        job_repo = JobRepository()
+        task_repo = TaskRepository()
+
+        # Get job info
+        job = job_repo.get_job(job_id)
+
+        # Get tasks for the job
+        tasks = task_repo.get_tasks_for_job(job_id)
+
+        # Group tasks by stage
+        tasks_by_stage = {}
+        task_stats = {"pending": 0, "queued": 0, "processing": 0, "completed": 0, "failed": 0}
+
+        for task in tasks:
+            stage = task.stage or 1
+            if stage not in tasks_by_stage:
+                tasks_by_stage[stage] = []
+            tasks_by_stage[stage].append(task)
+
+            # Count by status
+            status = (task.status or "pending").lower()
+            if status in task_stats:
+                task_stats[status] += 1
+
+        return render_template(
+            request,
+            "pages/tasks/list.html",
+            job_id=job_id,
+            job=job,
+            tasks=tasks,
+            tasks_by_stage=tasks_by_stage,
+            task_stats=task_stats,
+            highlight_task_id=task_id,
+            nav_active="/interface/tasks"
+        )
+
+    except Exception as e:
+        logger.error(f"Error loading tasks: {e}")
+        return HTMLResponse(f"<div class='error'>Error loading tasks: {str(e)}</div>")
+
+
+@app.get("/interface/tasks/partial", response_class=HTMLResponse)
+async def interface_tasks_partial(request: Request, job_id: str):
+    """
+    HTMX partial - tasks list for auto-refresh.
+
+    Returns just the stages container content for HTMX swap.
+    """
+    try:
+        from infrastructure import TaskRepository
+
+        task_repo = TaskRepository()
+        tasks = task_repo.get_tasks_for_job(job_id)
+
+        # Group tasks by stage
+        tasks_by_stage = {}
+        for task in tasks:
+            stage = task.stage or 1
+            if stage not in tasks_by_stage:
+                tasks_by_stage[stage] = []
+            tasks_by_stage[stage].append(task)
+
+        # Build HTML for stages (inline for partial response)
+        html_parts = []
+        for stage_num in sorted(tasks_by_stage.keys()):
+            stage_tasks = tasks_by_stage[stage_num]
+            completed_count = sum(1 for t in stage_tasks if t.status and t.status.lower() == 'completed')
+            failed_count = sum(1 for t in stage_tasks if t.status and t.status.lower() == 'failed')
+            processing_count = sum(1 for t in stage_tasks if t.status and t.status.lower() == 'processing')
+
+            # Stage icon
+            if completed_count == len(stage_tasks):
+                icon_html = '''<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--ds-status-completed-fg)" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <polyline points="8 12 11 15 16 9"></polyline>
+                </svg>'''
+            elif processing_count > 0:
+                icon_html = '<span class="stage-dot pulse"></span>'
+            else:
+                icon_html = '<span class="stage-dot"></span>'
+
+            # Build task rows
+            task_rows = []
+            for task in stage_tasks:
+                status = (task.status or 'pending').lower()
+                status_letter = status[0].upper() if status else 'P'
+                duration_str = '--'
+                if hasattr(task, 'duration_ms') and task.duration_ms:
+                    if task.duration_ms > 60000:
+                        duration_str = f"{task.duration_ms / 60000:.1f}m"
+                    elif task.duration_ms > 1000:
+                        duration_str = f"{task.duration_ms / 1000:.1f}s"
+                    else:
+                        duration_str = f"{task.duration_ms}ms"
+                elif status == 'processing':
+                    duration_str = '<span class="processing-indicator">Running...</span>'
+
+                created_str = str(task.created_at)[:19].replace('T', ' ') if task.created_at else 'N/A'
+
+                task_rows.append(f'''
+                <tr class="task-row task-status-{status}" data-task-id="{task.task_id}">
+                    <td class="col-status">
+                        <span class="status-badge status-{status}">
+                            {'<span class="status-dot pulse"></span>' if status == 'processing' else ''}
+                            {status_letter}
+                        </span>
+                    </td>
+                    <td class="col-task-id"><code title="{task.task_id}">{task.task_id[:16]}...</code></td>
+                    <td class="col-type">{(task.task_type or '').replace('_', ' ').title()}</td>
+                    <td class="col-time">{created_str}</td>
+                    <td class="col-duration">{duration_str}</td>
+                    <td class="col-actions">
+                        <button class="btn btn-sm btn-secondary" onclick="toggleTaskDetails('{task.task_id}')">View</button>
+                    </td>
+                </tr>
+                ''')
+
+            failed_str = f'<span class="failed-count">({failed_count} failed)</span>' if failed_count > 0 else ''
+
+            html_parts.append(f'''
+            <div class="stage-section">
+                <div class="stage-header" onclick="toggleStage({stage_num})">
+                    <div class="stage-title">
+                        <span class="stage-icon">{icon_html}</span>
+                        <span>Stage {stage_num}</span>
+                        <span class="stage-task-count">{len(stage_tasks)} tasks</span>
+                    </div>
+                    <div class="stage-progress">
+                        <span class="progress-text">{completed_count}/{len(stage_tasks)}</span>
+                        {failed_str}
+                        <svg class="collapse-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="6 9 12 15 18 9"></polyline>
+                        </svg>
+                    </div>
+                </div>
+                <div class="stage-content" id="stage-{stage_num}-content">
+                    <table class="tasks-table">
+                        <thead>
+                            <tr>
+                                <th class="col-status">Status</th>
+                                <th class="col-task-id">Task ID</th>
+                                <th class="col-type">Type</th>
+                                <th class="col-time">Created</th>
+                                <th class="col-duration">Duration</th>
+                                <th class="col-actions">Details</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {''.join(task_rows)}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            ''')
+
+        return HTMLResponse(''.join(html_parts))
+
+    except Exception as e:
+        return HTMLResponse(f'<div class="error">Error loading tasks: {str(e)}</div>')
 
 
 # ============================================================================

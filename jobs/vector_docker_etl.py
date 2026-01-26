@@ -198,10 +198,10 @@ class VectorDockerETLJob(JobBaseMixin, JobBase):
             'default': None,
             'description': 'Pre-generated STAC item ID'
         },
-        'service_name': {
+        'title': {
             'type': 'str',
             'default': None,
-            'description': 'DDH service name'
+            'description': 'Human-readable title for STAC item metadata'
         },
         'tags': {
             'type': 'list',
@@ -360,7 +360,7 @@ class VectorDockerETLJob(JobBaseMixin, JobBase):
                 'resource_id': job_params.get('resource_id'),
                 'version_id': job_params.get('version_id'),
                 'stac_item_id': job_params.get('stac_item_id'),
-                'service_name': job_params.get('service_name'),
+                'title': job_params.get('title'),
                 'tags': job_params.get('tags'),
                 'access_level': job_params.get('access_level'),
 

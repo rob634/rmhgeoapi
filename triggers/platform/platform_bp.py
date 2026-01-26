@@ -53,7 +53,7 @@ def platform_submit(req: func.HttpRequest) -> func.HttpResponse:
             "version_id": "v1.0",
             "container_name": "bronze-rasters",
             "file_name": "example.tif",
-            "service_name": "Landsat 8 Scene",
+            "title": "Landsat 8 Scene",
             "client_id": "ddh"
         }
 

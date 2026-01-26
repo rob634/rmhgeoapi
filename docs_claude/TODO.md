@@ -13,6 +13,8 @@ This file references other documents containing implementation details. This is 
 | Document | Purpose |
 |----------|---------|
 | [RASTER_RESULT_MODELS.md](./RASTER_RESULT_MODELS.md) | **F7.21 Raster result type safety (CRITICAL)** |
+| [DOCKER_UI_GAPS.md](./DOCKER_UI_GAPS.md) | **Docker UI gap tracking (V0.8 testing)** |
+| [V0.8_TESTING_PLAN.md](./V0.8_TESTING_PLAN.md) | V0.8 comprehensive testing (68 tests) |
 | [COMPLETED_JAN2026.md](./COMPLETED_JAN2026.md) | Completed features (Jan 2026) |
 | [COREMACHINE_GAPS.md](./COREMACHINE_GAPS.md) | CoreMachine gap analysis & job_events |
 | [APPROVAL_WORKFLOW.md](./APPROVAL_WORKFLOW.md) | F4.AP approval system details |
@@ -74,15 +76,33 @@ This file references other documents containing implementation details. This is 
 ---
 
 ### UI Migration to Docker/Jinja2
-**Status**: Phases 1-3 COMPLETE
+**Status**: Phase 2 Core Routes COMPLETE
 **Details**: [/UI_MIGRATION.md](/UI_MIGRATION.md)
 
 | Phase | Description | Status |
 |-------|-------------|--------|
 | Phase 1 | Foundation (base.html, static files) | Done |
-| Phase 2 | Health Dashboard | Done |
-| Phase 3 | Unified Collection Browser | Done |
-| Phases 4-8 | Remaining interfaces | Pending review |
+| Phase 2 | Core Routes (home, health, jobs, tasks, collections, submit) | Done (25 JAN) |
+| Phase 3 | V0.8 Testing Gaps | **IN PROGRESS** |
+| Phases 4+ | Advanced interfaces (viewers, etc.) | Future |
+
+---
+
+### Docker UI V0.8 Testing Gaps (E12)
+**Status**: IN PROGRESS
+**Details**: [DOCKER_UI_GAPS.md](./DOCKER_UI_GAPS.md)
+**Priority**: HIGH - Enables V0.8 UI-based testing
+
+| Gap | Description | Status |
+|-----|-------------|--------|
+| **GAP-01** | Cross-System Health (FA + Docker) | **IN PROGRESS** |
+| GAP-02 | Queue Infrastructure Visibility | Pending |
+| GAP-03 | Log Viewing | Pending |
+| GAP-04 | TiTiler/STAC Viewer Links | Pending |
+| GAP-05 | Standalone Storage Browser | Future |
+| GAP-06 | API Response Verification | Future |
+
+**Current Focus**: GAP-01 - Health dashboard showing both Docker Worker AND Function App health status.
 
 ---
 
@@ -309,6 +329,8 @@ See [TABLE_MAINTENANCE.md](./TABLE_MAINTENANCE.md) for pg_cron setup.
 
 | Date | Item |
 |------|------|
+| 25 JAN 2026 | Docker UI Phase 2 Core Routes (tasks interface added) |
+| 25 JAN 2026 | Docker UI Gap Analysis for V0.8 Testing |
 | 25 JAN 2026 | V0.8 MosaicJSON Removal from Docker Workflow |
 | 25 JAN 2026 | F7.21 Raster Result Models Implementation Plan |
 | 23 JAN 2026 | UI Migration Phases 1-3 |

@@ -137,12 +137,12 @@ class PlatformRequest(BaseModel):
     )
 
     # ========================================================================
-    # DDH Service Metadata (Required)
+    # DDH Service Metadata
     # ========================================================================
-    service_name: str = Field(
-        ...,
+    title: Optional[str] = Field(
+        None,
         max_length=255,
-        description="Human-readable service name (maps to STAC item_id)"
+        description="Human-readable title for STAC item (optional - auto-generated from DDH IDs if not provided)"
     )
     access_level: str = Field(
         default="OUO",
@@ -236,16 +236,30 @@ class PlatformRequest(BaseModel):
     @property
     def stac_item_id(self) -> str:
         """
-        Generate URL-safe STAC item_id from service_name.
+        Generate URL-safe STAC item_id from DDH identifiers.
 
-        Example: "King County Parcels 2024" → "king-county-parcels-2024"
+        Example: "aerial-imagery-2024", "site-alpha", "v1.0" → "aerial-imagery-2024_site-alpha_v1-0"
 
-        Note: Consider using PlatformConfig.generate_stac_item_id() for consistency.
+        Note: Uses PlatformConfig pattern for consistency with generate_stac_item_id().
         """
-        item_id = self.service_name.lower()
+        # Build from DDH identifiers (same pattern as PlatformConfig)
+        item_id = f"{self.dataset_id}_{self.resource_id}_{self.version_id}"
+        item_id = item_id.lower()
         item_id = item_id.replace(' ', '-')
         item_id = re.sub(r'[^a-z0-9\-_]', '', item_id)
         return item_id
+
+    @property
+    def generated_title(self) -> str:
+        """
+        Get title for STAC metadata.
+
+        Returns user-provided title if set, otherwise generates from DDH IDs.
+        Example: "aerial-imagery-2024 / site-alpha v1.0"
+        """
+        if self.title:
+            return self.title
+        return f"{self.dataset_id} / {self.resource_id} {self.version_id}"
 
     @property
     def is_raster_collection(self) -> bool:

@@ -255,8 +255,8 @@ class SubmitVectorInterface(BaseInterface):
             container_name = get_param('container_name')
             file_extension = get_param('file_extension')
 
-            # Optional metadata (service_name now required)
-            service_name = get_param('service_name')
+            # Optional metadata
+            title = get_param('title') or get_param('service_name')  # Support legacy field name
 
             # Validate required fields
             if not dataset_id:
@@ -268,8 +268,6 @@ class SubmitVectorInterface(BaseInterface):
                 version_id = "v1.0"
             if not blob_name:
                 return self._render_submit_error("Missing blob_name. Please select a file.")
-            if not service_name:
-                return self._render_submit_error("Missing service_name. Please enter a human-readable name for the dataset.")
 
             # Build Platform API payload
             platform_payload = {
@@ -282,13 +280,14 @@ class SubmitVectorInterface(BaseInterface):
                 'file_name': blob_name
             }
 
-            # Optional metadata (service_name already extracted above as required)
+            # Optional metadata
             description = get_param('description')
             access_level = get_param('access_level')
             tags = get_param('tags')
 
-            # service_name is now required
-            platform_payload['service_name'] = service_name
+            # title is optional - will be auto-generated from DDH IDs if not provided
+            if title:
+                platform_payload['title'] = title
             if description:
                 platform_payload['description'] = description
             if access_level:
@@ -653,11 +652,11 @@ class SubmitVectorInterface(BaseInterface):
                         <div class="metadata-section-open">
                             <div class="form-group-header">Metadata</div>
                             <div class="metadata-fields">
-                                <div class="form-group required">
-                                    <label for="service_name">Service Name *</label>
-                                    <input type="text" id="service_name" name="service_name" required
-                                           placeholder="Human-readable dataset name">
-                                    <span class="field-hint">Display name for the dataset (required)</span>
+                                <div class="form-group">
+                                    <label for="title">Title</label>
+                                    <input type="text" id="title" name="title"
+                                           placeholder="Human-readable dataset title">
+                                    <span class="field-hint">Display title (auto-generated from DDH IDs if not provided)</span>
                                 </div>
                                 <div class="form-group">
                                     <label for="description">Description</label>
@@ -1393,10 +1392,10 @@ class SubmitVectorInterface(BaseInterface):
             const datasetId = document.getElementById('dataset_id').value;
             const resourceId = document.getElementById('resource_id').value;
             const versionId = document.getElementById('version_id').value;
-            const serviceName = document.getElementById('service_name').value;
 
             const submitBtn = document.getElementById('submit-btn');
-            submitBtn.disabled = !(blobName && datasetId && resourceId && versionId && serviceName);
+            // title is optional - only require DDH identifiers and file selection
+            submitBtn.disabled = !(blobName && datasetId && resourceId && versionId);
         }
 
         // Select a file from the browser
@@ -1483,7 +1482,7 @@ class SubmitVectorInterface(BaseInterface):
             const overwrite = document.getElementById('overwrite').checked;
 
             // Optional metadata
-            const serviceName = document.getElementById('service_name').value;
+            const title = document.getElementById('title').value;
             const description = document.getElementById('description').value;
             const accessLevel = document.getElementById('access_level').value;
             const tags = document.getElementById('tags').value;
@@ -1515,7 +1514,7 @@ class SubmitVectorInterface(BaseInterface):
             };
 
             // Optional metadata
-            if (serviceName) payload.service_name = serviceName;
+            if (title) payload.title = title;
             if (accessLevel) payload.access_level = accessLevel;
             if (description) payload.description = description;
             if (tags) {
@@ -1568,7 +1567,7 @@ class SubmitVectorInterface(BaseInterface):
         // Add event listeners for form changes to update cURL and submit button
         document.addEventListener('DOMContentLoaded', () => {
             const formInputs = ['dataset_id', 'resource_id', 'version_id', 'overwrite',
-                                'service_name', 'description', 'access_level', 'tags',
+                                'title', 'description', 'access_level', 'tags',
                                 'lat_name', 'lon_name', 'wkt_column'];
             formInputs.forEach(id => {
                 const el = document.getElementById(id);

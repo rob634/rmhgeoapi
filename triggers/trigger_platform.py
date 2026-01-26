@@ -215,7 +215,7 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
         "operation": "CREATE",
         "container_name": "bronze-rasters",
         "file_name": "aerial-alpha.tif",
-        "service_name": "Aerial Imagery Site Alpha",
+        "title": "Aerial Imagery Site Alpha",
         "access_level": "OUO",
         "processing_options": {
             "overwrite": false  // Set to true to force reprocessing (21 JAN 2026)
@@ -408,7 +408,7 @@ def platform_raster_submit(req: func.HttpRequest) -> func.HttpResponse:
         "version_id": "v1.0",
         "container_name": "bronze-rasters",
         "file_name": "aerial-alpha.tif",
-        "service_name": "Aerial Imagery Site Alpha",
+        "title": "Aerial Imagery Site Alpha",
         "access_level": "OUO",
         "processing_options": {
             "processing_mode": "docker"  // Optional: "function" (default) or "docker"
@@ -551,7 +551,7 @@ def platform_raster_collection_submit(req: func.HttpRequest) -> func.HttpRespons
         "version_id": "v1.0",
         "container_name": "bronze-rasters",
         "file_name": ["tile1.tif", "tile2.tif", "tile3.tif"],
-        "service_name": "Aerial Tiles Site Alpha",
+        "title": "Aerial Tiles Site Alpha",
         "access_level": "OUO"
     }
 
@@ -1924,7 +1924,7 @@ def _translate_to_coremachine(
 
             # STAC metadata
             'stac_item_id': stac_item_id,
-            'service_name': request.service_name,
+            'title': request.generated_title,
             'description': request.description,
             'tags': request.tags,
             'access_level': request.access_level,

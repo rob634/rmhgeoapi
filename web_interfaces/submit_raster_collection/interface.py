@@ -263,8 +263,8 @@ class SubmitRasterCollectionInterface(BaseInterface):
             collection_id = get_param('collection_id')
             collection_description = get_param('collection_description')
 
-            # Metadata
-            service_name = get_param('service_name')
+            # Metadata (optional)
+            title = get_param('title') or get_param('service_name')  # Support legacy field name
 
             # Validate required fields
             if not dataset_id:
@@ -275,8 +275,6 @@ class SubmitRasterCollectionInterface(BaseInterface):
                 version_id = "v1.0"
             if not blob_list_json:
                 return self._render_submit_error("No files selected. Please select 2-20 raster files.")
-            if not service_name:
-                return self._render_submit_error("Missing service_name. Please enter a human-readable name.")
 
             # Parse blob_list JSON
             try:
@@ -321,10 +319,13 @@ class SubmitRasterCollectionInterface(BaseInterface):
                 'version_id': version_id,
                 'container_name': container_name,
                 'file_name': blob_list,  # List = raster collection
-                'service_name': service_name,
                 # Use collection_description as description (translate uses this for collection_description)
                 'description': collection_description or description,
             }
+
+            # title is optional - will be auto-generated from DDH IDs if not provided
+            if title:
+                platform_payload['title'] = title
 
             # Optional fields
             if access_level:
@@ -648,11 +649,11 @@ class SubmitRasterCollectionInterface(BaseInterface):
                         <div class="metadata-section-open">
                             <div class="form-group-header">Metadata</div>
                             <div class="metadata-fields">
-                                <div class="form-group required">
-                                    <label for="service_name">Service Name *</label>
-                                    <input type="text" id="service_name" name="service_name" required
-                                           placeholder="Human-readable dataset name">
-                                    <span class="field-hint">Display name for the collection (required)</span>
+                                <div class="form-group">
+                                    <label for="title">Title</label>
+                                    <input type="text" id="title" name="title"
+                                           placeholder="Human-readable collection title">
+                                    <span class="field-hint">Display title (auto-generated from DDH IDs if not provided)</span>
                                 </div>
                                 <div class="form-group">
                                     <label for="description">Description</label>
@@ -1496,12 +1497,12 @@ class SubmitRasterCollectionInterface(BaseInterface):
         function updateSubmitButton() {{
             const datasetId = document.getElementById('dataset_id').value;
             const resourceId = document.getElementById('resource_id').value;
-            const serviceName = document.getElementById('service_name').value;
 
             const submitBtn = document.getElementById('submit-btn');
             const isValidCount = selectedFiles.length >= MIN_FILES && selectedFiles.length <= MAX_FILES;
 
-            submitBtn.disabled = !(datasetId && resourceId && serviceName && isValidCount);
+            // title is optional - only require DDH identifiers and file selection
+            submitBtn.disabled = !(datasetId && resourceId && isValidCount);
         }}
 
         // Listen for HTMX events
@@ -1529,7 +1530,7 @@ class SubmitRasterCollectionInterface(BaseInterface):
             const collectionDescription = document.getElementById('collection_description').value;
 
             // Optional metadata
-            const serviceName = document.getElementById('service_name').value;
+            const title = document.getElementById('title').value;
             const description = document.getElementById('description').value;
             const accessLevel = document.getElementById('access_level').value;
             const tags = document.getElementById('tags').value;
@@ -1575,7 +1576,7 @@ class SubmitRasterCollectionInterface(BaseInterface):
             }}
 
             // Optional metadata
-            if (serviceName) payload.service_name = serviceName;
+            if (title) payload.title = title;
             if (collectionDescription) payload.collection_description = collectionDescription;
             if (accessLevel) payload.access_level = accessLevel;
             if (description) payload.description = description;
@@ -1623,7 +1624,7 @@ class SubmitRasterCollectionInterface(BaseInterface):
 
         // Form input listeners - update both submit button and cURL preview
         document.addEventListener('DOMContentLoaded', () => {{
-            const formInputs = ['dataset_id', 'resource_id', 'version_id', 'service_name',
+            const formInputs = ['dataset_id', 'resource_id', 'version_id', 'title',
                                 'collection_id', 'collection_description', 'description',
                                 'access_level', 'tags', 'raster_type', 'output_tier', 'input_crs'];
             formInputs.forEach(id => {{

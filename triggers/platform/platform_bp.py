@@ -395,6 +395,122 @@ async def platform_catalog_dataset_route(req: func.HttpRequest) -> func.HttpResp
 
 
 # ============================================================================
+# DEPRECATED ENDPOINTS - Helpful Migration Messages (27 JAN 2026)
+# ============================================================================
+# These endpoints were consolidated into /api/platform/submit.
+# Instead of silent 404s, we return helpful messages directing users
+# to the correct endpoint. HTTP 410 Gone indicates the resource
+# existed but has been intentionally removed.
+# ============================================================================
+
+import json
+
+@bp.route(route="platform/raster", methods=["POST"])
+def platform_raster_deprecated(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    DEPRECATED: Single raster submission endpoint.
+
+    This endpoint has been consolidated into /api/platform/submit.
+    Returns 410 Gone with migration instructions.
+    """
+    return func.HttpResponse(
+        json.dumps({
+            "success": False,
+            "error": "ENDPOINT_DEPRECATED",
+            "message": "This endpoint has been removed. Use POST /api/platform/submit instead.",
+            "migration": {
+                "old_endpoint": "POST /api/platform/raster",
+                "new_endpoint": "POST /api/platform/submit",
+                "change_required": "Add 'data_type': 'raster' to your request body (auto-detected from file extension if omitted)",
+                "documentation": "https://github.com/rob634/rmhgeoapi/blob/master/docs_claude/HISTORY.md"
+            },
+            "example": {
+                "url": "POST /api/platform/submit",
+                "body": {
+                    "dataset_id": "my-dataset",
+                    "resource_id": "my-resource",
+                    "version_id": "v1",
+                    "container_name": "bronze-rasters",
+                    "file_name": "image.tif"
+                }
+            }
+        }, indent=2),
+        status_code=410,  # Gone
+        headers={"Content-Type": "application/json"}
+    )
+
+
+@bp.route(route="platform/raster-collection", methods=["POST"])
+def platform_raster_collection_deprecated(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    DEPRECATED: Raster collection submission endpoint.
+
+    This endpoint has been consolidated into /api/platform/submit.
+    Returns 410 Gone with migration instructions.
+    """
+    return func.HttpResponse(
+        json.dumps({
+            "success": False,
+            "error": "ENDPOINT_DEPRECATED",
+            "message": "This endpoint has been removed. Use POST /api/platform/submit instead.",
+            "migration": {
+                "old_endpoint": "POST /api/platform/raster-collection",
+                "new_endpoint": "POST /api/platform/submit",
+                "change_required": "Pass file_name as an array for collections",
+                "documentation": "https://github.com/rob634/rmhgeoapi/blob/master/docs_claude/HISTORY.md"
+            },
+            "example": {
+                "url": "POST /api/platform/submit",
+                "body": {
+                    "dataset_id": "my-dataset",
+                    "resource_id": "my-resource",
+                    "version_id": "v1",
+                    "container_name": "bronze-rasters",
+                    "file_name": ["tile_001.tif", "tile_002.tif", "tile_003.tif"]
+                }
+            }
+        }, indent=2),
+        status_code=410,  # Gone
+        headers={"Content-Type": "application/json"}
+    )
+
+
+@bp.route(route="platform/vector", methods=["POST"])
+def platform_vector_deprecated(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    DEPRECATED: Vector submission endpoint.
+
+    This endpoint has been consolidated into /api/platform/submit.
+    Returns 410 Gone with migration instructions.
+    """
+    return func.HttpResponse(
+        json.dumps({
+            "success": False,
+            "error": "ENDPOINT_DEPRECATED",
+            "message": "This endpoint has been removed. Use POST /api/platform/submit instead.",
+            "migration": {
+                "old_endpoint": "POST /api/platform/vector",
+                "new_endpoint": "POST /api/platform/submit",
+                "change_required": "Add 'data_type': 'vector' to your request body (auto-detected from file extension if omitted)",
+                "documentation": "https://github.com/rob634/rmhgeoapi/blob/master/docs_claude/HISTORY.md"
+            },
+            "example": {
+                "url": "POST /api/platform/submit",
+                "body": {
+                    "dataset_id": "my-dataset",
+                    "resource_id": "my-resource",
+                    "version_id": "v1",
+                    "container_name": "bronze-vectors",
+                    "file_name": "parcels.geojson"
+                }
+            }
+        }, indent=2),
+        status_code=410,  # Gone
+        headers={"Content-Type": "application/json"}
+    )
+
+
+# ============================================================================
 # EXPORTS
 # ============================================================================
 

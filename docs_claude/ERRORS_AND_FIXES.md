@@ -882,7 +882,56 @@ if isinstance(item, pystac.Item):
 
 ---
 
-### COD-006: MosaicJSON dead code - UnboundLocalError (BUG-004)
+### COD-006: STAC result contract mismatch (BUG-005)
+
+**Date**: 27 JAN 2026
+**Version**: V0.8 (0.7.33.7)
+**Severity**: STAC collections never created for tiled rasters
+
+**Error Message**:
+No explicit error - job completes but `"stac": {}` in result.
+
+**Location**: `services/stac_collection.py` return statement vs `services/handler_process_raster_complete.py:439`
+
+**Root Cause**:
+Contract mismatch between handler and service. Handler expects Orthodox return pattern `{"success": True, "result": {...}}` but `stac_collection.py` returned data at top level.
+
+**Wrong Code** (stac_collection.py):
+```python
+return {
+    "success": True,
+    "collection_id": collection_id,  # Data at top level
+    "search_id": search_id,
+    ...
+}
+```
+
+**Handler expected**:
+```python
+stac_result = stac_response.get('result', {})  # Looks for 'result' key
+# Gets {} because there's no 'result' key in the response!
+```
+
+**Fixed Code**:
+```python
+return {
+    "success": True,
+    "result": {  # Wrapped in "result" key
+        "collection_id": collection_id,
+        "search_id": search_id,
+        ...
+    }
+}
+```
+
+**Prevention**:
+1. All handler services MUST use Orthodox return pattern: `{"success": True/False, "result": {...}}`
+2. Error returns can omit `result` but success returns MUST include it
+3. Check handler extraction pattern when updating service returns
+
+---
+
+### COD-007: MosaicJSON dead code - UnboundLocalError (BUG-004)
 
 **Date**: 27 JAN 2026
 **Version**: V0.8 (0.7.33.4)

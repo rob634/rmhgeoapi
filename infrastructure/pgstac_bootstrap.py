@@ -1218,11 +1218,11 @@ ORDER BY r.rolname;""")
                 with conn.cursor() as cur:
                     # Query pgstac.collections table
                     cur.execute(
-                        "SELECT EXISTS(SELECT 1 FROM pgstac.collections WHERE id = %s)",
+                        "SELECT EXISTS(SELECT 1 FROM pgstac.collections WHERE id = %s) as exists",
                         (collection_id,)
                     )
                     result = cur.fetchone()
-                    return result[0] if result else False
+                    return result['exists'] if result else False  # dict_row
 
         except Exception as e:
             self.logger.error(f"Error checking collection existence: {e}")

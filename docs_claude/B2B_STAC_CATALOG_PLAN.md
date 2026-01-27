@@ -16,8 +16,8 @@ DDH (Data Hub Dashboard) submits data through Platform API endpoints. After proc
 
 ### Current Flow
 ```
-DDH submits: POST /api/platform/raster
-  ├── DDH provides: dataset_id, resource_id, version_id
+DDH submits: POST /api/platform/submit
+  ├── DDH provides: dataset_id, resource_id, version_id, file_name
   ├── Platform creates: request_id (SHA256 of DDH IDs)
   └── CoreMachine creates: job_id → STAC item (collection_id/item_id)
 
@@ -537,8 +537,8 @@ app.register_functions(platform_catalog_assets)  # GET /api/platform/catalog/ass
 
 ### Integration Tests
 ```bash
-# Submit raster through Platform
-curl -X POST /api/platform/raster -d '{...}'
+# Submit raster through Platform (unified endpoint)
+curl -X POST /api/platform/submit -d '{"dataset_id": "...", "file_name": "image.tif", ...}'
 # Wait for completion
 curl /api/platform/status/{request_id}
 # Lookup via catalog

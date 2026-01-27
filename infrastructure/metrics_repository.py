@@ -151,7 +151,7 @@ class MetricsRepository(PostgreSQLRepository):
             with self._get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(insert_sql, (job_id, metric_type, payload))
-                    row_id = cur.fetchone()[0]
+                    row_id = cur.fetchone()['id']  # dict_row returns dict, not tuple
                 conn.commit()
             return row_id
         except Exception as e:

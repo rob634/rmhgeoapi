@@ -130,7 +130,7 @@ class JobEventRepository(PostgreSQLRepository, IJobEventRepository):
                     cur.execute(query, params)
                     result = cur.fetchone()
                     conn.commit()
-                    event_id = result[0]
+                    event_id = result['event_id']  # dict_row returns dict, not tuple
 
                     logger.debug(
                         f"Recorded event {event_id}: {event_type_value} for job {event.job_id[:16]}..."
@@ -366,7 +366,7 @@ class JobEventRepository(PostgreSQLRepository, IJobEventRepository):
                     cur.execute(query, (job_id,))
                     rows = cur.fetchall()
 
-                    return {row[0]: row[1] for row in rows}
+                    return {row['event_type']: row['count'] for row in rows}  # dict_row
 
     def get_event_summary(self, job_id: str) -> Dict[str, Any]:
         """
@@ -413,15 +413,15 @@ class JobEventRepository(PostgreSQLRepository, IJobEventRepository):
 
                     cur.execute(status_query, (job_id,))
                     status_rows = cur.fetchall()
-                    by_status = {r[0]: r[1] for r in status_rows}
+                    by_status = {r['event_status']: r['count'] for r in status_rows}  # dict_row
 
                     return {
-                        'total_events': row[0] or 0,
+                        'total_events': row['total_events'] or 0,
                         'by_type': by_type,
                         'by_status': by_status,
-                        'first_event': row[1].isoformat() if row[1] else None,
-                        'last_event': row[2].isoformat() if row[2] else None,
-                        'total_duration_ms': row[3] or 0
+                        'first_event': row['first_event'].isoformat() if row['first_event'] else None,
+                        'last_event': row['last_event'].isoformat() if row['last_event'] else None,
+                        'total_duration_ms': row['total_duration_ms'] or 0
                     }
 
     def get_events_timeline(
@@ -539,20 +539,20 @@ class JobEventRepository(PostgreSQLRepository, IJobEventRepository):
     # HELPER METHODS
     # =========================================================================
 
-    def _row_to_event(self, row: tuple) -> JobEvent:
-        """Convert database row to JobEvent object."""
+    def _row_to_event(self, row: Dict[str, Any]) -> JobEvent:
+        """Convert database row (dict from dict_row) to JobEvent object."""
         return JobEvent(
-            event_id=row[0],
-            job_id=row[1],
-            task_id=row[2],
-            stage=row[3],
-            event_type=JobEventType(row[4]) if row[4] else None,
-            event_status=JobEventStatus(row[5]) if row[5] else JobEventStatus.INFO,
-            checkpoint_name=row[6],
-            event_data=row[7] if row[7] else {},
-            error_message=row[8],
-            duration_ms=row[9],
-            created_at=row[10]
+            event_id=row['event_id'],
+            job_id=row['job_id'],
+            task_id=row['task_id'],
+            stage=row['stage'],
+            event_type=JobEventType(row['event_type']) if row['event_type'] else None,
+            event_status=JobEventStatus(row['event_status']) if row['event_status'] else JobEventStatus.INFO,
+            checkpoint_name=row['checkpoint_name'],
+            event_data=row['event_data'] if row['event_data'] else {},
+            error_message=row['error_message'],
+            duration_ms=row['duration_ms'],
+            created_at=row['created_at']
         )
 
     def _format_timestamp(self, ts: Optional[datetime]) -> str:

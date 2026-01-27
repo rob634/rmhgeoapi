@@ -1,6 +1,6 @@
 # ERRORS_AND_FIXES.md - Error Tracking and Resolution Log
 
-**Last Updated**: 23 JAN 2026
+**Last Updated**: 27 JAN 2026
 **Purpose**: Canonical error tracking for pattern analysis and faster troubleshooting
 
 ---
@@ -328,6 +328,64 @@ result = self._execute_query(query, (minutes,))  # Pass integer directly
 - Never use `INTERVAL %s` in psycopg3 queries
 - Always use `make_interval(hours => %s)` or `make_interval(mins => %s)`
 - Search for `INTERVAL %s` pattern when reviewing SQL queries
+
+---
+
+### DB-006: job_events event_id NULL constraint violation (BUG-001)
+
+**Date**: 27 JAN 2026
+**Version**: 0.7.33.x
+**Severity**: Medium (Events not recorded, but jobs complete successfully)
+
+**Error Message**:
+```
+null value in column "event_id" of relation "job_events" violates not-null constraint
+DETAIL: Failing row contains (null, 4950fb4031cd..., STAGE_COMPLETED, ...)
+```
+
+**Location**: `infrastructure/job_event_repository.py` → `record_event()`
+
+**Root Cause**:
+The `PydanticToSQL` generator only detected SERIAL type for fields named exactly `id`. The `JobEvent` model uses `event_id` as primary key, which was generated as `INTEGER PRIMARY KEY` instead of `SERIAL PRIMARY KEY`. Without SERIAL's auto-increment sequence, INSERT without explicit `event_id` value resulted in NULL.
+
+**Detection Pattern**:
+```python
+# PydanticToSQL line 250 (before fix)
+if field_name == "id" and primary_key == ["id"] and is_optional:
+    sql_type_str = "SERIAL"
+# event_id didn't match, so INTEGER was used instead
+```
+
+**Fix Applied** (27 JAN 2026):
+
+1. **Schema Generator Fix** (`core/schema/sql_generator.py`):
+   - Added support for `__sql_serial_columns` metadata
+   - Uses Python name-mangling pattern (`_ClassName__attr`) for proper attribute access
+   - Models can now explicitly declare which columns are SERIAL
+
+2. **Model Metadata** (`core/models/job_event.py`):
+   - Added `__sql_serial_columns: ClassVar[List[str]] = ["event_id"]`
+
+**Fix for Deployed Tables** (First Principles - No Migrations):
+```bash
+# Rebuild schema - recreates job_events with correct SERIAL type
+curl -X POST "https://rmhazuregeoapi-.../api/dbadmin/maintenance?action=rebuild&confirm=yes"
+```
+
+**Note**: JobEvent is already registered in `sql_generator.py` (lines 1567-1613). The `generate_composed_statements()` method includes:
+- Enum generation for `JobEventType` and `JobEventStatus`
+- Table creation for `JobEvent`
+- Index creation for job_events
+
+**Orthodox Compliance** (also added):
+- `IJobEventRepository` interface in `infrastructure/interface_repository.py`
+- `JobEventData` base contract in `core/contracts/__init__.py`
+- Event parameter names in `ParamNames` class
+
+**Prevention**:
+- For auto-increment primary keys not named `id`, add `__sql_serial_columns` metadata
+- Verify DDL output during schema deployment for new tables
+- Test INSERT operations without explicit ID values
 
 ---
 
@@ -821,6 +879,66 @@ if isinstance(item, pystac.Item):
 ```
 
 **Prevention**: Always check return types from external libraries
+
+---
+
+### COD-006: MosaicJSON dead code - UnboundLocalError (BUG-004)
+
+**Date**: 27 JAN 2026
+**Version**: V0.8 (0.7.33.4)
+**Severity**: STAC creation fails for tiled rasters
+
+**Error Message**:
+```
+"cannot access local variable 'mosaicjson_url' where it is not associated with a value"
+```
+
+**Location**: `services/stac_collection.py:628`
+
+**Root Cause**:
+MosaicJSON was deprecated in V0.8, but dead code remained. The `mosaicjson_url` variable was only defined inside the `if mosaicjson_blob:` block (line 359), but was referenced unconditionally in the return dict (line 628). When tiled raster jobs called `_create_stac_collection_impl()` with `mosaicjson_blob=None`, Python raised `UnboundLocalError`.
+
+**Wrong Code**:
+```python
+# Line 356-359: Only defined conditionally
+if mosaicjson_blob:
+    mosaicjson_vsiaz = f"/vsiaz/{container}/{mosaicjson_blob}"
+    mosaicjson_url = f"https://..."  # Only defined if mosaicjson_blob exists
+
+# Line 628: Referenced unconditionally - BUG!
+return {
+    ...
+    "mosaicjson_url": mosaicjson_url,  # UnboundLocalError when mosaicjson_blob is None
+    ...
+}
+```
+
+**Fixed Code**:
+```python
+# Initialize before conditional (V0.8 - BUG-004 fix)
+mosaicjson_url = None  # DEPRECATED - kept for backward compat only
+
+if mosaicjson_blob:
+    mosaicjson_url = f"https://..."
+
+# Removed mosaicjson_url from return dict entirely
+return {
+    ...
+    # V0.8: MosaicJSON REMOVED - pgSTAC search provides mosaic access
+    "search_id": search_id,  # Use search_id for TiTiler-PgSTAC mosaic access
+    ...
+}
+```
+
+**V0.8 Context**:
+- MosaicJSON was deprecated in favor of pgSTAC searches (HISTORY 12 NOV 2025)
+- pgSTAC search provides OAuth-only mosaic access without two-tier auth problems
+- `search_id` is the canonical way to access mosaics via TiTiler-PgSTAC
+
+**Prevention**:
+1. When deprecating a feature, grep for ALL references and clean up dead code
+2. Variable initialization should be done before conditional branches that may define them
+3. Return dict fields should not reference variables that may be undefined
 
 ---
 

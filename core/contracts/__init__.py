@@ -220,8 +220,81 @@ class JobData(BaseModel):
         return v.lower().replace('-', '_')
 
 
+# ============================================================================
+# JOB EVENT DATA CONTRACT (27 JAN 2026 - Orthodox compliance)
+# ============================================================================
+
+class JobEventData(BaseModel):
+    """
+    Base data contract for Job Event representations.
+
+    Defines the ESSENTIAL properties that identify a job event:
+    - Identity: job_id (links to parent job)
+    - Classification: event_type
+    - Context: task_id (if task-level), stage (if relevant)
+
+    Unlike JobData and TaskData, events are NOT passed through queues.
+    Events are append-only facts recorded during execution.
+
+    Specialized boundary:
+    - JobEvent: Adds all recording fields (event_status, event_data, timestamps)
+
+    Example:
+        ```python
+        # Base contract captures essentials:
+        event_data = JobEventData(
+            job_id="abc123def456...",
+            event_type="task_completed"
+        )
+
+        # Specialization adds all fields:
+        event = JobEvent(
+            **event_data.model_dump(),
+            event_status=JobEventStatus.SUCCESS,
+            event_data={"rows_processed": 1000},
+            created_at=datetime.now()
+        )
+        ```
+    """
+
+    # Identity - links to parent job
+    job_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=64,
+        description="Job ID this event belongs to"
+    )
+
+    # Classification
+    event_type: str = Field(
+        ...,
+        min_length=1,
+        max_length=50,
+        description="Type of event (job_created, task_completed, etc.)"
+    )
+
+    # Optional context
+    task_id: str = Field(
+        default=None,
+        max_length=100,
+        description="Task ID if this is a task-level event"
+    )
+
+    stage: int = Field(
+        default=None,
+        ge=1,
+        description="Stage number if relevant to event"
+    )
+
+    model_config = ConfigDict(
+        extra='forbid',
+        json_encoders={datetime: lambda v: v.isoformat()}
+    )
+
+
 # Export all public classes
 __all__ = [
     'TaskData',
     'JobData',
+    'JobEventData',
 ]

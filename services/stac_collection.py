@@ -3,8 +3,8 @@
 # ============================================================================
 # STATUS: Service layer - STAC collection creation for multi-tile rasters
 # PURPOSE: Create STAC collections with pgSTAC search for tile datasets
-# LAST_REVIEWED: 25 JAN 2026
-# REVIEW_STATUS: V0.8 - MosaicJSON removed, pgSTAC search provides mosaic access
+# LAST_REVIEWED: 27 JAN 2026
+# REVIEW_STATUS: V0.8 - MosaicJSON REMOVED (BUG-004), pgSTAC search provides mosaic
 # EXPORTS: create_stac_collection
 # DEPENDENCIES: pystac, psycopg, azure-storage-blob
 # ============================================================================
@@ -13,9 +13,10 @@ STAC Collection Service.
 
 Creates STAC collections for multi-tile raster datasets.
 
-V0.8 Update (25 JAN 2026):
-    MosaicJSON was removed - pgSTAC searches now provide OAuth-only mosaic access.
+V0.8 Update (27 JAN 2026):
+    MosaicJSON was REMOVED - pgSTAC searches now provide OAuth-only mosaic access.
     See HISTORY 12 NOV 2025 for rationale (two-tier auth problem).
+    BUG-004 FIX: mosaicjson_url removed from return dict to prevent UnboundLocalError.
 
 Key Features:
     - Collection with STAC Items for each COG tile
@@ -350,9 +351,10 @@ def _create_stac_collection_impl(
             }
         )
 
-        # V0.8 (25 JAN 2026): MosaicJSON asset is optional
-        # MosaicJSON was deprecated in favor of pgSTAC search for mosaic access
-        # Only add if mosaicjson_blob is provided (backward compatibility)
+        # V0.8 (25 JAN 2026): MosaicJSON REMOVED - pgSTAC search provides mosaic access
+        # Initialize to None - mosaicjson_url removed from return dict (BUG-004 fix)
+        mosaicjson_url = None  # DEPRECATED - kept for backward compat only
+
         if mosaicjson_blob:
             # Add MosaicJSON as asset (11 NOV 2025: Use /vsiaz/ path for OAuth compatibility)
             mosaicjson_vsiaz = f"/vsiaz/{container}/{mosaicjson_blob}"
@@ -625,8 +627,8 @@ def _create_stac_collection_impl(
             "items_created": len(created_items),  # NEW (11 NOV 2025): Orthodox STAC Items
             "items_failed": len(failed_items),    # NEW (11 NOV 2025): Failed Item creation
             "spatial_extent": spatial_extent,
-            "mosaicjson_url": mosaicjson_url,
-            # NEW (12 NOV 2025): pgSTAC search visualization
+            # V0.8 (27 JAN 2026): MosaicJSON REMOVED - pgSTAC search provides mosaic access
+            # search_id is the canonical way to access mosaics via TiTiler-PgSTAC
             "search_id": search_id,
             "viewer_url": viewer_url,
             "tilejson_url": tilejson_url,

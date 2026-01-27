@@ -1894,9 +1894,10 @@ async def interface_job_detail(request: Request, job_id: str):
             if stage not in stages:
                 stages[stage] = {"total": 0, "completed": 0, "failed": 0}
             stages[stage]["total"] += 1
-            if task.status and task.status.lower() == "completed":
+            task_status = (task.status.value if hasattr(task.status, 'value') else str(task.status)).lower() if task.status else ''
+            if task_status == "completed":
                 stages[stage]["completed"] += 1
-            elif task.status and task.status.lower() == "failed":
+            elif task_status == "failed":
                 stages[stage]["failed"] += 1
 
         # Get events
@@ -2074,8 +2075,9 @@ async def interface_tasks_list(
                 tasks_by_stage[stage] = []
             tasks_by_stage[stage].append(task)
 
-            # Count by status
-            status = (task.status or "pending").lower()
+            # Count by status (handle enum or string)
+            raw_status = task.status.value if hasattr(task.status, 'value') else task.status
+            status = (raw_status or "pending").lower()
             if status in task_stats:
                 task_stats[status] += 1
 
@@ -2118,12 +2120,18 @@ async def interface_tasks_partial(request: Request, job_id: str):
             tasks_by_stage[stage].append(task)
 
         # Build HTML for stages (inline for partial response)
+        # Helper to safely get status string from enum or string
+        def get_status_str(status):
+            if status is None:
+                return ''
+            return (status.value if hasattr(status, 'value') else str(status)).lower()
+
         html_parts = []
         for stage_num in sorted(tasks_by_stage.keys()):
             stage_tasks = tasks_by_stage[stage_num]
-            completed_count = sum(1 for t in stage_tasks if t.status and t.status.lower() == 'completed')
-            failed_count = sum(1 for t in stage_tasks if t.status and t.status.lower() == 'failed')
-            processing_count = sum(1 for t in stage_tasks if t.status and t.status.lower() == 'processing')
+            completed_count = sum(1 for t in stage_tasks if get_status_str(t.status) == 'completed')
+            failed_count = sum(1 for t in stage_tasks if get_status_str(t.status) == 'failed')
+            processing_count = sum(1 for t in stage_tasks if get_status_str(t.status) == 'processing')
 
             # Stage icon
             if completed_count == len(stage_tasks):
@@ -2139,7 +2147,7 @@ async def interface_tasks_partial(request: Request, job_id: str):
             # Build task rows
             task_rows = []
             for task in stage_tasks:
-                status = (task.status or 'pending').lower()
+                status = get_status_str(task.status) or 'pending'
                 status_letter = status[0].upper() if status else 'P'
                 duration_str = '--'
                 if hasattr(task, 'duration_ms') and task.duration_ms:

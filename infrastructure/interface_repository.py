@@ -18,6 +18,7 @@ Philosophy: "Define once, enforce everywhere"
 Exports:
     IJobRepository: Job repository interface
     ITaskRepository: Task repository interface
+    IJobEventRepository: Job event repository interface (append-only)
     IQueueRepository: Queue repository interface
     IStageCompletionRepository: Stage completion interface
     IDuckDBRepository: DuckDB repository interface
@@ -70,7 +71,16 @@ class ParamNames:
     # Result parameters
     RESULT_DATA: Final[str] = "result_data"
     ERROR_DETAILS: Final[str] = "error_details"
-    
+
+    # Event parameters (27 JAN 2026 - job_events Orthodox compliance)
+    EVENT_ID: Final[str] = "event_id"
+    EVENT_TYPE: Final[str] = "event_type"
+    EVENT_STATUS: Final[str] = "event_status"
+    CHECKPOINT_NAME: Final[str] = "checkpoint_name"
+    EVENT_DATA: Final[str] = "event_data"
+    DURATION_MS: Final[str] = "duration_ms"
+    ERROR_MESSAGE: Final[str] = "error_message"
+
     # Return value keys
     JOB_UPDATED: Final[str] = "job_updated"
     NEW_STAGE: Final[str] = "new_stage"
@@ -122,25 +132,160 @@ class ITaskRepository(ABC):
     """
     Task repository interface with EXACT method signatures.
     """
-    
+
     @abstractmethod
     def create_task(self, task: TaskRecord) -> bool:
         """Create a new task record"""
         pass
-    
+
     @abstractmethod
     def get_task(self, task_id: str) -> Optional[TaskRecord]:
         """Get task by ID - parameter MUST be named 'task_id'"""
         pass
-    
+
     @abstractmethod
     def update_task(self, task_id: str, updates: TaskUpdateModel) -> bool:
         """Update task - parameter MUST use TaskUpdateModel for type safety"""
         pass
-    
+
     @abstractmethod
     def list_tasks_for_job(self, job_id: str) -> List[TaskRecord]:
         """List all tasks for a job - parameter MUST be named 'job_id'"""
+        pass
+
+
+class IJobEventRepository(ABC):
+    """
+    Job event repository interface - append-only event log.
+
+    Events are IMMUTABLE once recorded (no update methods).
+    This is intentional: events represent historical facts that cannot be changed.
+
+    Recording Methods (called during execution):
+        record_event(event) - Insert single event, return event_id
+        record_job_event(...) - Convenience for job-level events
+        record_task_event(...) - Convenience for task-level events
+
+    Query Methods (called by UI):
+        get_events_for_job(job_id) - Get events with filtering
+        get_events_timeline(job_id) - Formatted for UI display
+
+    Added: 27 JAN 2026 - job_events Orthodox compliance
+    """
+
+    @abstractmethod
+    def record_event(self, event: Any) -> int:
+        """
+        Record single event to the database.
+
+        Args:
+            event: JobEvent model with all fields populated
+
+        Returns:
+            event_id of the inserted record (SERIAL auto-generated)
+        """
+        pass
+
+    @abstractmethod
+    def record_job_event(
+        self,
+        job_id: str,
+        event_type: Any,  # JobEventType enum
+        event_status: Any = None,  # JobEventStatus enum, default INFO
+        stage: Optional[int] = None,
+        checkpoint_name: Optional[str] = None,
+        event_data: Optional[Dict[str, Any]] = None,
+        error_message: Optional[str] = None
+    ) -> int:
+        """
+        Convenience method for recording job-level events.
+
+        Args:
+            job_id: Job ID
+            event_type: Type of event (e.g., JOB_CREATED, STAGE_STARTED)
+            event_status: Outcome status (default: INFO)
+            stage: Stage number if relevant
+            checkpoint_name: App Insights checkpoint for correlation
+            event_data: Additional context data
+            error_message: Error message if failure
+
+        Returns:
+            event_id of the inserted record
+        """
+        pass
+
+    @abstractmethod
+    def record_task_event(
+        self,
+        job_id: str,
+        task_id: str,
+        stage: int,
+        event_type: Any,  # JobEventType enum
+        event_status: Any = None,  # JobEventStatus enum, default INFO
+        checkpoint_name: Optional[str] = None,
+        event_data: Optional[Dict[str, Any]] = None,
+        error_message: Optional[str] = None,
+        duration_ms: Optional[int] = None
+    ) -> int:
+        """
+        Convenience method for recording task-level events.
+
+        Args:
+            job_id: Parent job ID
+            task_id: Task ID
+            stage: Stage number
+            event_type: Type of event (e.g., TASK_STARTED, TASK_COMPLETED)
+            event_status: Outcome status (default: INFO)
+            checkpoint_name: App Insights checkpoint for correlation
+            event_data: Additional context data
+            error_message: Error message if failure
+            duration_ms: Operation duration in milliseconds
+
+        Returns:
+            event_id of the inserted record
+        """
+        pass
+
+    @abstractmethod
+    def get_events_for_job(
+        self,
+        job_id: str,
+        limit: int = 100,
+        event_types: Optional[List[Any]] = None,
+        since: Optional[Any] = None,  # datetime
+        include_task_events: bool = True
+    ) -> List[Any]:
+        """
+        Get events for a job, optionally filtered.
+
+        Args:
+            job_id: Job ID to query
+            limit: Maximum events to return (default 100)
+            event_types: Filter by specific event types
+            since: Only return events after this timestamp
+            include_task_events: Include task-level events (default True)
+
+        Returns:
+            List of JobEvent objects, ordered by created_at DESC
+        """
+        pass
+
+    @abstractmethod
+    def get_events_timeline(
+        self,
+        job_id: str,
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        Get events formatted for timeline display.
+
+        Args:
+            job_id: Job ID to query
+            limit: Maximum events to return
+
+        Returns:
+            List of dicts formatted for UI display
+        """
         pass
 
 

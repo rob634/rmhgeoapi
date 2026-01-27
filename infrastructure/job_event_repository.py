@@ -42,6 +42,7 @@ from typing import Dict, Any, Optional, List
 from psycopg import sql
 
 from infrastructure.postgresql import PostgreSQLRepository
+from infrastructure.interface_repository import IJobEventRepository
 from core.models.job_event import JobEvent, JobEventType, JobEventStatus
 
 # Logger setup
@@ -49,15 +50,16 @@ from util_logger import LoggerFactory, ComponentType
 logger = LoggerFactory.create_logger(ComponentType.REPOSITORY, "job_event")
 
 
-class JobEventRepository(PostgreSQLRepository):
+class JobEventRepository(PostgreSQLRepository, IJobEventRepository):
     """
     Repository for job execution event CRUD operations.
 
+    Implements IJobEventRepository interface (27 JAN 2026 - Orthodox compliance).
     Uses app.job_events table for timeline tracking.
     All queries use psycopg.sql composition for safety.
 
     Table: app.job_events
-        event_id SERIAL PRIMARY KEY       -- Auto-increment
+        event_id SERIAL PRIMARY KEY       -- Auto-increment (BUG-001 fix)
         job_id VARCHAR(64) NOT NULL       -- FK to app.jobs
         task_id VARCHAR(64)               -- NULL for job-level events
         stage INTEGER                     -- Stage number

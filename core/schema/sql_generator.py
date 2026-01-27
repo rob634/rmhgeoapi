@@ -245,9 +245,15 @@ class PydanticToSQL:
                 if type(None) in args:
                     is_optional = True
 
-            # Handle SERIAL type for auto-increment id fields (22 JAN 2026)
-            # If field is named 'id', is Optional[int], and is the primary key, use SERIAL
-            if field_name == "id" and primary_key == ["id"] and is_optional:
+            # Handle SERIAL type for auto-increment fields (22 JAN 2026, updated 27 JAN 2026)
+            # Priority 1: Check for explicit __sql_serial_columns metadata (e.g., event_id)
+            # Priority 2: Auto-detect field named 'id' that is Optional[int] and primary key
+            # Note: Python name-mangles __attr to _ClassName__attr, so check both patterns
+            mangled_name = f'_{model.__name__}__sql_serial_columns'
+            serial_columns = getattr(model, mangled_name, getattr(model, '__sql_serial_columns', []))
+            if field_name in serial_columns:
+                sql_type_str = "SERIAL"
+            elif field_name == "id" and primary_key == ["id"] and is_optional:
                 sql_type_str = "SERIAL"
 
             # Build column definition

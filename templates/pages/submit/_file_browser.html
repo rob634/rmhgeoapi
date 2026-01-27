@@ -12,12 +12,13 @@
             <div class="control-group">
                 <label>Zone:</label>
                 <div class="zone-badge zone-badge-bronze">BRONZE (Source Data)</div>
-                <input type="hidden" id="browser-zone" value="bronze">
+                <input type="hidden" id="browser-zone" name="zone" value="bronze">
             </div>
 
             <div class="control-group">
                 <label for="browser-container">Container:</label>
                 <select id="browser-container"
+                        name="container"
                         class="form-select"
                         hx-get="/interface/submit/partial/containers?zone=bronze"
                         hx-trigger="load"
@@ -36,6 +37,7 @@
                 <label for="browser-prefix">Path Filter:</label>
                 <input type="text"
                        id="browser-prefix"
+                       name="prefix"
                        class="form-input"
                        placeholder="e.g., uploads/2024/">
             </div>

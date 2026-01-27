@@ -115,7 +115,8 @@
         <div class="navbar-section">
             <span class="navbar-section-title">Admin</span>
             <a href="/interface/health" class="{{ 'active' if nav_active == '/interface/health' else '' }}">Health</a>
-            <a href="/interface/logs" class="{{ 'active' if nav_active == '/interface/logs' else '' }}">Logs</a>
+            {# Logs hidden - requires RBAC setup (Monitoring Reader role on App Insights) #}
+            {# <a href="/interface/logs" class="{{ 'active' if nav_active == '/interface/logs' else '' }}">Logs</a> #}
         </div>
 
         {# Browse Section #}

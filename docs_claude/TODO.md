@@ -2,7 +2,7 @@
 **This file contains high level items only**
 This file references other documents containing implementation details. This is to avoid a 50,000 line TODO.md. This file should not exceed 500 lines.
 
-**Last Updated**: 25 JAN 2026
+**Last Updated**: 26 JAN 2026
 **Source of Truth**: [docs/epics/README.md](/docs/epics/README.md) - Epic/Feature/Story definitions
 **Purpose**: Sprint-level task tracking and delegation (INDEX format)
 
@@ -32,6 +32,28 @@ This file references other documents containing implementation details. This is 
 - [ ] **Test Approval Workflow** - Submit job, verify approval record created, approve via API
 - [ ] **Test Artifact/Revision Workflow** - Submit with same DDH identifiers, verify revision increments
 - [ ] **Test External Service Registry** - `/api/jobs/services/register`, list, health check
+
+### Geo Schema Emergency Management (MEDIUM PRIORITY)
+**Status**: PLANNED
+**Priority**: MEDIUM - Testing/DEV enhancement for V0.8 validation
+**Pattern**: NOT for production - emergency override for dev/QA only
+
+**Problem**: When testing fails catastrophically or data is corrupted, there's no quick way to clear all geo tables. Currently must unpublish each table individually via `/api/dbadmin/geo?action=unpublish&table_name={name}&confirm=yes`.
+
+**Proposed Solution**: Add "geo nuke" endpoint similar to STAC nuke pattern.
+
+| Action | Endpoint | Behavior |
+|--------|----------|----------|
+| `nuke_geo` | `POST /api/dbadmin/geo?action=nuke&confirm=yes` | Drop ALL tables in geo schema, truncate vector_metadata |
+
+**Implementation**:
+- Add to `triggers/admin/geo_table_operations.py`
+- Follow STAC nuke pattern in `triggers/admin/stac_nuke.py`
+- Require `confirm=yes` parameter
+- Log warning about destructive action
+- Return list of dropped tables
+
+**Reference**: Existing single-table endpoint works: `POST /api/dbadmin/geo?action=unpublish&table_name={name}&confirm=yes`
 
 ---
 
@@ -135,6 +157,26 @@ This file references other documents containing implementation details. This is 
 | Wire to extract_stac_metadata | Done |
 | Enable raster rebuild | Done |
 | Test: process_raster_docker populates cog_metadata | NEXT |
+
+---
+
+### Job Version Tracking (F7.22)
+**Status**: PLANNED
+**Details**: [V0.8_PLAN.md Section 19](/V0.8_PLAN.md#19-job-version-tracking-f722)
+**Priority**: MEDIUM - Enables audit trail for job processing versions
+
+**Problem**: App version (`__version__`) is not captured in job execution metadata. When debugging or auditing historical jobs, there's no way to know which app version processed the job.
+
+| Phase | Description | Status |
+|-------|-------------|--------|
+| Phase 1 | Capture version at job creation | Pending |
+| Phase 2 | Preserve version history on resubmit | Pending |
+| Phase 3 | Expose metadata in job status API | Pending |
+
+**Files to modify**:
+- `jobs/mixins.py` - Add `app_version` to metadata
+- `triggers/jobs/resubmit.py` - Preserve original version, build history
+- `triggers/get_job_status.py` - Expose metadata in response
 
 ---
 

@@ -103,9 +103,14 @@ class JobEvent(BaseModel):
     to enable debugging of "silent failures" and visualization of
     job execution timelines.
 
-    Auto-generates:
+    Orthodox Compliance (27 JAN 2026):
+        - Base contract: JobEventData in core/contracts/__init__.py
+        - Interface: IJobEventRepository in infrastructure/interface_repository.py
+        - SERIAL metadata: __sql_serial_columns for auto-increment detection
+
+    Auto-generates (via PydanticToSQL with __sql_serial_columns):
         CREATE TABLE app.job_events (
-            event_id SERIAL PRIMARY KEY,
+            event_id SERIAL PRIMARY KEY,  -- Auto-increment via __sql_serial_columns
             job_id VARCHAR(64) NOT NULL,
             task_id VARCHAR(64),
             stage INTEGER,
@@ -118,6 +123,9 @@ class JobEvent(BaseModel):
             created_at TIMESTAMPTZ DEFAULT NOW(),
             CONSTRAINT fk_job FOREIGN KEY (job_id) REFERENCES app.jobs(job_id)
         );
+
+    BUG-001 Fix: Added __sql_serial_columns = ["event_id"] to ensure SERIAL
+    type is generated instead of INTEGER, preventing null constraint violations.
     """
 
     model_config = ConfigDict(
@@ -132,6 +140,7 @@ class JobEvent(BaseModel):
     __sql_table_name: ClassVar[str] = "job_events"
     __sql_schema: ClassVar[str] = "app"
     __sql_primary_key: ClassVar[List[str]] = ["event_id"]
+    __sql_serial_columns: ClassVar[List[str]] = ["event_id"]  # 27 JAN 2026 - BUG-001 fix
     __sql_foreign_keys: ClassVar[Dict[str, str]] = {
         "job_id": "app.jobs(job_id)"
     }

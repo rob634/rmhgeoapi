@@ -199,7 +199,8 @@ def _process_cog_disk_based(
     logger,
     compute_checksum: bool = True,
     target_crs: str = "EPSG:4326",
-    reproject_resampling: str = "cubic"
+    reproject_resampling: str = "cubic",
+    local_source_path: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Process raster to COG using disk-based I/O via mounted filesystem.
@@ -207,9 +208,12 @@ def _process_cog_disk_based(
     This is the LOW-MEMORY path for Docker workers with Azure Files mount.
     Data flows: Blob → Mount → GDAL → Mount → Blob (never fully in RAM).
 
+    V0.8.1 (27 JAN 2026): Added local_source_path for direct local file processing.
+    When provided, skips blob download and uses the local file directly.
+
     Args:
-        input_blob_container: Source container name
-        input_blob_path: Source blob path
+        input_blob_container: Source container name (can be None if local_source_path provided)
+        input_blob_path: Source blob path (can be None if local_source_path provided)
         output_blob_container: Destination container name
         output_blob_path: Destination blob path
         mount_path: Path to mounted filesystem (e.g., /mounts/etl-temp)
@@ -222,6 +226,7 @@ def _process_cog_disk_based(
         compute_checksum: Whether to compute SHA-256 checksum
         target_crs: Target CRS for reprojection (default: EPSG:4326)
         reproject_resampling: Resampling method for reprojection (default: cubic)
+        local_source_path: Optional local file path (skips blob download if provided)
 
     Returns:
         Dict with:
@@ -229,7 +234,7 @@ def _process_cog_disk_based(
             - cog_bytes_on_disk: int (file size)
             - input_path: str (temp input file path)
             - output_path: str (temp output file path)
-            - download_result: dict (from stream_blob_to_mount)
+            - download_result: dict (from stream_blob_to_mount, None if local_source_path used)
             - upload_result: dict (from stream_mount_to_blob)
             - raster_metadata: dict (from rasterio)
             - file_checksum: str (if compute_checksum=True)
@@ -259,10 +264,14 @@ def _process_cog_disk_based(
     logger.info(f"   Temp input: {temp_input_path}")
     logger.info(f"   Temp output: {temp_output_path}")
 
-    # Detect source zone
-    is_silver_container = input_blob_container.startswith('silver-')
-    source_zone = "silver" if is_silver_container else "bronze"
-    source_repo = BlobRepository.for_zone(source_zone)
+    # Detect source zone (not used when local_source_path provided)
+    # V0.8.1: Handle None container_name when using local source
+    if input_blob_container:
+        is_silver_container = input_blob_container.startswith('silver-')
+        source_zone = "silver" if is_silver_container else "bronze"
+        source_repo = BlobRepository.for_zone(source_zone)
+    else:
+        source_repo = None  # Not needed for local source mode
     silver_repo = BlobRepository.for_zone("silver")
 
     raster_metadata = {}
@@ -271,21 +280,31 @@ def _process_cog_disk_based(
     upload_result = None
 
     try:
-        # STEP A: Download blob to mounted filesystem (streaming - low memory)
-        logger.info(f"🔄 DISK STEP A: Streaming blob to mount...")
-        download_result = source_repo.stream_blob_to_mount(
-            container=input_blob_container,
-            blob_path=input_blob_path,
-            mount_path=temp_input_path,
-            chunk_size_mb=32
-        )
+        # STEP A: Get input file (either download from blob or use local source)
+        # V0.8.1: Support local source path for mount-based tiled workflow
+        if local_source_path:
+            logger.info(f"🔄 DISK STEP A: Using local source file (no download)")
+            logger.info(f"   Source: {local_source_path}")
+            temp_input_path = local_source_path  # Use directly, no copy
+            input_size_bytes = os.path.getsize(local_source_path)
+            input_size_mb = input_size_bytes / (1024 * 1024)
+            logger.info(f"   File size: {input_size_mb:.2f}MB")
+            download_result = None  # No download performed
+        else:
+            logger.info(f"🔄 DISK STEP A: Streaming blob to mount...")
+            download_result = source_repo.stream_blob_to_mount(
+                container=input_blob_container,
+                blob_path=input_blob_path,
+                mount_path=temp_input_path,
+                chunk_size_mb=32
+            )
 
-        if not download_result.get('success'):
-            raise RuntimeError(f"stream_blob_to_mount failed: {download_result.get('error')}")
+            if not download_result.get('success'):
+                raise RuntimeError(f"stream_blob_to_mount failed: {download_result.get('error')}")
 
-        input_size_bytes = download_result.get('bytes_transferred', 0)
-        input_size_mb = input_size_bytes / (1024 * 1024)
-        logger.info(f"   Downloaded {input_size_mb:.2f}MB to disk in {download_result.get('duration_seconds', 0):.1f}s")
+            input_size_bytes = download_result.get('bytes_transferred', 0)
+            input_size_mb = input_size_bytes / (1024 * 1024)
+            logger.info(f"   Downloaded {input_size_mb:.2f}MB to disk in {download_result.get('duration_seconds', 0):.1f}s")
 
         # STEP B: Open input file and get metadata
         logger.info(f"🔄 DISK STEP B: Reading raster metadata...")
@@ -432,8 +451,12 @@ def _process_cog_disk_based(
 
     finally:
         # STEP F: Cleanup temp files
+        # V0.8.1: Don't delete input if using local_source_path (caller manages cleanup)
         logger.info(f"🧹 DISK STEP F: Cleaning up temp files...")
-        for temp_file in [temp_input_path, temp_output_path]:
+        files_to_cleanup = [temp_output_path]  # Always cleanup output
+        if not local_source_path:
+            files_to_cleanup.append(temp_input_path)  # Only cleanup input if we downloaded it
+        for temp_file in files_to_cleanup:
             try:
                 if Path(temp_file).exists():
                     Path(temp_file).unlink()
@@ -535,6 +558,9 @@ def create_cog(params: dict) -> dict:
         raster_type = params.get('raster_type', {}).get('detected_type', 'unknown')
         optimal_settings = params.get('raster_type', {}).get('optimal_cog_settings', {})
 
+        # V0.8.1: Support local source path for mount-based workflow
+        local_source_path = params.get('_local_source_path')
+
         # Get COG tier configuration from config
         from config import get_config, CogTier, COG_TIER_PROFILES
         config_obj = get_config()
@@ -580,31 +606,49 @@ def create_cog(params: dict) -> dict:
             logger.info(f"   Added tier suffix to output: {output_blob_name}")
 
         # Validate required parameters
-        if not all([container_name, blob_name, source_crs, output_blob_name]):
-            missing = []
-            if not container_name: missing.append('container_name')
-            if not blob_name: missing.append('blob_name')
-            if not source_crs: missing.append('source_crs')
-            if not output_blob_name: missing.append('output_blob_name')
+        # V0.8.1: container_name and blob_name are optional when _local_source_path is provided
+        if local_source_path:
+            # Local source mode - only need source_crs and output_blob_name
+            if not all([source_crs, output_blob_name]):
+                missing = []
+                if not source_crs: missing.append('source_crs')
+                if not output_blob_name: missing.append('output_blob_name')
+                logger.error(f"❌ STEP 1 FAILED: Missing required parameters: {', '.join(missing)}")
+                return {
+                    "success": False,
+                    "error": "PARAMETER_ERROR",
+                    "message": f"Missing required parameters: {', '.join(missing)}"
+                }
+            logger.info(f"✅ STEP 1: Parameters validated (local source mode)")
+            logger.info(f"   Local source: {local_source_path}")
+            blob_url = None  # Not used in local source mode
+        else:
+            # Standard blob mode - require all parameters
+            if not all([container_name, blob_name, source_crs, output_blob_name]):
+                missing = []
+                if not container_name: missing.append('container_name')
+                if not blob_name: missing.append('blob_name')
+                if not source_crs: missing.append('source_crs')
+                if not output_blob_name: missing.append('output_blob_name')
 
-            logger.error(f"❌ STEP 1 FAILED: Missing required parameters: {', '.join(missing)}")
-            return {
-                "success": False,
-                "error": "PARAMETER_ERROR",
-                "message": f"Missing required parameters: {', '.join(missing)}"
-            }
+                logger.error(f"❌ STEP 1 FAILED: Missing required parameters: {', '.join(missing)}")
+                return {
+                    "success": False,
+                    "error": "PARAMETER_ERROR",
+                    "message": f"Missing required parameters: {', '.join(missing)}"
+                }
 
-        # Generate blob URL with SAS token using managed identity
-        # Detect zone from container name (silver-* containers are in silver zone)
-        logger.info("🔄 Generating SAS URL for input blob using managed identity...")
-        from infrastructure.blob import BlobRepository
-        is_silver_container = container_name.startswith('silver-')
-        source_zone = "silver" if is_silver_container else "bronze"
-        blob_repo = BlobRepository.for_zone(source_zone)
-        blob_url = blob_repo.get_blob_url_with_sas(container_name, blob_name, hours=2)
-        logger.info(f"   ✅ SAS URL generated (valid for 2 hours)")
+            # Generate blob URL with SAS token using managed identity
+            # Detect zone from container name (silver-* containers are in silver zone)
+            logger.info("🔄 Generating SAS URL for input blob using managed identity...")
+            from infrastructure.blob import BlobRepository
+            is_silver_container = container_name.startswith('silver-')
+            source_zone = "silver" if is_silver_container else "bronze"
+            blob_repo = BlobRepository.for_zone(source_zone)
+            blob_url = blob_repo.get_blob_url_with_sas(container_name, blob_name, hours=2)
+            logger.info(f"   ✅ SAS URL generated (valid for 2 hours)")
 
-        logger.info(f"✅ STEP 1: Parameters validated - blob={blob_name}, container={container_name}")
+            logger.info(f"✅ STEP 1: Parameters validated - blob={blob_name}, container={container_name}")
         logger.info(f"   Type: {raster_type}, Tier: {output_tier.value}, Compression: {compression}, CRS: {source_crs} → {target_crs}")
 
     except Exception as e:
@@ -717,6 +761,7 @@ def create_cog(params: dict) -> dict:
         logger.info("=" * 60)
 
         # Call disk-based processing helper
+        # V0.8.1: Pass local_source_path if provided (skips blob download)
         disk_result = _process_cog_disk_based(
             input_blob_container=container_name,
             input_blob_path=blob_name,
@@ -731,7 +776,8 @@ def create_cog(params: dict) -> dict:
             logger=logger,
             compute_checksum=True,
             target_crs=target_crs,
-            reproject_resampling=reproject_resampling
+            reproject_resampling=reproject_resampling,
+            local_source_path=local_source_path
         )
 
         if not disk_result.get('success'):
@@ -766,13 +812,24 @@ def create_cog(params: dict) -> dict:
         # Get reprojection status from disk_result (26 JAN 2026 - Bug fix)
         disk_reprojection_performed = disk_result.get('reprojection_performed', False)
 
+        # BUG-007 FIX (27 JAN 2026): Handle local source mode where blob_name/container_name are None
+        # When _local_source_path is provided, derive source info from the local path
+        if local_source_path and not blob_name:
+            # Extract blob name from local source path (e.g., /mounts/etl-temp/tile_0_0.tif -> tile_0_0.tif)
+            from pathlib import Path as PathLib
+            source_blob_name = PathLib(local_source_path).name
+            source_container_name = "local-mount"  # Marker for local source mode
+        else:
+            source_blob_name = blob_name
+            source_container_name = container_name
+
         cog_data = COGCreationData(
             cog_blob=output_blob_name,
             cog_container=silver_container,
             cog_tier=output_tier.value,
             storage_tier=tier_profile.storage_tier.value,
-            source_blob=blob_name,
-            source_container=container_name,
+            source_blob=source_blob_name,
+            source_container=source_container_name,
             reprojection_performed=disk_reprojection_performed,
             source_crs=raster_metadata.get('crs', str(source_crs)),
             target_crs=disk_result.get('target_crs', str(target_crs)),

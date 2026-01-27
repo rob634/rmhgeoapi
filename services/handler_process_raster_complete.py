@@ -425,6 +425,9 @@ def _process_raster_tiled(
                 'resource_id': params.get('resource_id'),
                 'version_id': params.get('version_id'),
                 'access_level': params.get('access_level'),
+                # BUG-006 FIX (27 JAN 2026): Pass raster_type for TiTiler bidx params
+                # Without this, multi-band tiles get 500 errors from TiTiler
+                'raster_type': raster_type,
             }
 
             stac_response = create_stac_collection(stac_params)
@@ -504,6 +507,568 @@ def _process_raster_tiled(
         }
 
 
+# =============================================================================
+# V0.8.1: MOUNT-BASED TILED WORKFLOW (27 JAN 2026)
+# =============================================================================
+
+def _get_mount_paths(job_id: str, config) -> Dict[str, 'Path']:
+    """
+    Generate standard mount paths for a job.
+
+    Args:
+        job_id: Job identifier (uses first 8 chars for uniqueness)
+        config: AppConfig instance
+
+    Returns:
+        Dict with Path objects for base, source, tiles, cogs directories
+    """
+    from pathlib import Path
+
+    base = Path(config.raster.etl_mount_path) / job_id[:8]
+    return {
+        'base': base,
+        'source': base / 'source',
+        'tiles': base / 'tiles',
+        'cogs': base / 'cogs',
+    }
+
+
+def _check_source_on_mount(mount_paths: Dict, expected_size: int) -> Optional['Path']:
+    """
+    Check if source file exists on mount with correct size (for resume).
+
+    Args:
+        mount_paths: Dict from _get_mount_paths()
+        expected_size: Expected file size in bytes
+
+    Returns:
+        Path to source file if exists and matches size, else None
+    """
+    from pathlib import Path
+
+    source_dir = mount_paths['source']
+    if not source_dir.exists():
+        return None
+
+    files = list(source_dir.glob('*'))
+    if files and files[0].stat().st_size == expected_size:
+        return files[0]
+    return None
+
+
+def _get_completed_cog_indices(job_id: str, blob_repo, container: str) -> set:
+    """
+    Get set of tile indices that have already been uploaded as COGs.
+
+    Used for resume detection in Phase 4.
+
+    Args:
+        job_id: Job identifier
+        blob_repo: BlobRepository instance
+        container: Silver COGs container name
+
+    Returns:
+        Set of tile indices (int) that are already uploaded
+    """
+    import re
+
+    prefix = f"{job_id[:8]}/"
+    try:
+        blobs = blob_repo.list_blobs(container, prefix=prefix)
+        completed = set()
+        for blob in blobs:
+            # Parse tile_0034.tif → 34
+            name = blob.get('name', '').split('/')[-1]
+            match = re.match(r'tile_(\d+)\.tif$', name)
+            if match:
+                completed.add(int(match.group(1)))
+        return completed
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to list existing COGs: {e}")
+        return set()
+
+
+def _cleanup_mount_for_job(job_id: str, mount_base: 'Path') -> None:
+    """
+    Clean up mount directory for a completed job.
+
+    Args:
+        job_id: Job identifier
+        mount_base: Base mount path (e.g., /mounts/etl-temp)
+    """
+    import shutil
+    from pathlib import Path
+
+    job_dir = Path(mount_base) / job_id[:8]
+    if job_dir.exists():
+        try:
+            shutil.rmtree(job_dir)
+            logger.info(f"🧹 Cleaned up mount directory: {job_dir}")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to cleanup mount: {e}")
+
+
+def _process_raster_tiled_mount(
+    params: Dict[str, Any],
+    context: Optional[Dict],
+    start_time: float
+) -> Dict[str, Any]:
+    """
+    Process large raster with tiled output using mount-based I/O.
+
+    V0.8.1 Mount Architecture (27 JAN 2026):
+        Replaces VSI streaming with simpler mount-based approach:
+        1. Download source blob to mount ONCE (survives restart)
+        2. Generate tiling scheme from local file (fast)
+        3. Extract tiles to mount (sequential disk I/O)
+        4. Create COGs and upload with per-tile resumability
+        5. Register STAC collection and cleanup
+
+    Resumability:
+        - Resubmitting failed job resumes from last incomplete tile
+        - Uses blob existence as completion checkpoint
+        - Deterministic output paths: silver-cogs/{job_id[:8]}/tile_{N:04d}.tif
+
+    Phases:
+        1. Download source to mount (0-10%)
+        2. Generate tiling scheme (10-15%)
+        3. Extract tiles to mount (15-25%)
+        4. Create COGs and upload (25-95%) - RESUMABLE PER-TILE
+        5. Register STAC and cleanup (95-100%)
+
+    Args:
+        params: Task parameters with blob_name, container_name, _job_id, etc.
+        context: Optional context (unused)
+        start_time: Start timestamp for timing
+
+    Returns:
+        Dict with success status and results
+    """
+    import os
+    import shutil
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    import rasterio
+    from rasterio.windows import Window
+
+    from config import get_config
+    from infrastructure.blob import BlobRepository
+    from infrastructure.factory import RepositoryFactory
+
+    config = get_config()
+
+    # Extract parameters
+    blob_name = params.get('blob_name', 'unknown')
+    container_name = params.get('container_name', 'unknown')
+    task_id = params.get('_task_id')
+    job_id = params.get('_job_id', 'unknown')
+    file_size_mb = params.get('_file_size_mb')
+    file_size_bytes = int(file_size_mb * 1024 * 1024) if file_size_mb else 0
+    docker_context = params.get('_docker_context')
+
+    logger.info("=" * 70)
+    logger.info("PROCESS RASTER - MOUNT-BASED TILED MODE (V0.8.1)")
+    logger.info(f"   Source: {container_name}/{blob_name}")
+    if file_size_mb:
+        logger.info(f"   File size: {file_size_mb:.1f} MB")
+    logger.info(f"   Job ID: {job_id[:16]}...")
+    logger.info(f"   Mount path: {config.raster.etl_mount_path}")
+    logger.info("=" * 70)
+
+    # Initialize repositories
+    blob_repo = BlobRepository.for_zone("silver")
+    bronze_repo = BlobRepository.for_zone("bronze")
+
+    # Get mount paths
+    mount_paths = _get_mount_paths(job_id, config)
+
+    # Track results
+    tiling_result = {}
+    extraction_result = {}
+    cog_results = []
+    stac_result = {}
+
+    try:
+        # =====================================================================
+        # PHASE 1: DOWNLOAD SOURCE TO MOUNT (0-10%)
+        # =====================================================================
+        source_mount_path = None
+
+        # Resume check: source already on mount?
+        existing_source = _check_source_on_mount(mount_paths, file_size_bytes)
+        if existing_source:
+            logger.info("⏭️ PHASE 1: Source already on mount, skipping download")
+            _report_progress(docker_context, 10, 1, 5, "Download", "Skipped (resume)")
+            source_mount_path = existing_source
+        else:
+            logger.info("🔄 PHASE 1: Downloading source to mount...")
+            _report_progress(docker_context, 2, 1, 5, "Download", f"Streaming {file_size_mb:.0f} MB to mount")
+            phase1_start = time.time()
+
+            # Create mount directories
+            mount_paths['source'].mkdir(parents=True, exist_ok=True)
+            mount_paths['tiles'].mkdir(parents=True, exist_ok=True)
+            mount_paths['cogs'].mkdir(parents=True, exist_ok=True)
+
+            # Determine source filename
+            source_filename = Path(blob_name).name
+            source_mount_path = mount_paths['source'] / source_filename
+
+            # Stream blob to mount
+            download_result = bronze_repo.stream_blob_to_mount(
+                container=container_name,
+                blob_path=blob_name,
+                mount_path=str(source_mount_path),
+                chunk_size_mb=32,
+            )
+
+            if not download_result.get('success'):
+                logger.error(f"❌ Failed to download source: {download_result.get('error')}")
+                return {
+                    "success": False,
+                    "error": "DOWNLOAD_FAILED",
+                    "message": download_result.get('error', 'Failed to download source to mount'),
+                    "phase": 1,
+                    "output_mode": "tiled_mount",
+                }
+
+            phase1_duration = time.time() - phase1_start
+            throughput = download_result.get('throughput_mbps', 0)
+            logger.info(f"✅ PHASE 1 complete: {phase1_duration:.1f}s ({throughput:.1f} MB/s)")
+            _report_progress(docker_context, 10, 1, 5, "Download", f"Complete ({throughput:.1f} MB/s)")
+
+        # =====================================================================
+        # PHASE 2: GENERATE TILING SCHEME (10-15%)
+        # =====================================================================
+        logger.info("🔄 PHASE 2: Generating tiling scheme from local file...")
+        _report_progress(docker_context, 12, 2, 5, "Tiling Scheme", "Analyzing raster")
+        phase2_start = time.time()
+
+        # Read raster metadata from local file
+        with rasterio.open(str(source_mount_path)) as src:
+            source_crs = str(src.crs)
+            raster_width = src.width
+            raster_height = src.height
+            raster_bounds = src.bounds
+            raster_transform = src.transform
+            band_count = src.count
+            dtype = str(src.dtypes[0])
+            block_size = src.block_shapes[0] if src.block_shapes else (256, 256)
+
+        # Calculate tile grid
+        target_tile_mb = config.raster.raster_tile_target_mb
+        # Estimate bytes per pixel (rough: band_count * dtype_bytes)
+        dtype_bytes = 4 if 'float' in dtype or '32' in dtype else 1
+        bytes_per_pixel = band_count * dtype_bytes
+        target_tile_pixels = (target_tile_mb * 1024 * 1024) / bytes_per_pixel
+        tile_size = int(target_tile_pixels ** 0.5)  # Square tiles
+        tile_size = max(tile_size, 1024)  # Minimum 1024 pixels
+
+        # Calculate grid
+        cols = (raster_width + tile_size - 1) // tile_size
+        rows = (raster_height + tile_size - 1) // tile_size
+        tile_count = cols * rows
+
+        # Build tile specs
+        tile_specs = []
+        for row in range(rows):
+            for col in range(cols):
+                tile_index = row * cols + col
+                x_off = col * tile_size
+                y_off = row * tile_size
+                width = min(tile_size, raster_width - x_off)
+                height = min(tile_size, raster_height - y_off)
+
+                tile_specs.append({
+                    'index': tile_index,
+                    'row': row,
+                    'col': col,
+                    'x_off': x_off,
+                    'y_off': y_off,
+                    'width': width,
+                    'height': height,
+                })
+
+        tiling_result = {
+            'tile_count': tile_count,
+            'tile_size': tile_size,
+            'grid_dimensions': f"{cols}x{rows}",
+            'cols': cols,
+            'rows': rows,
+            'tile_specs': tile_specs,
+            'raster_metadata': {
+                'crs': source_crs,
+                'width': raster_width,
+                'height': raster_height,
+                'bounds': list(raster_bounds),
+                'band_count': band_count,
+                'dtype': dtype,
+            }
+        }
+
+        phase2_duration = time.time() - phase2_start
+        logger.info(f"✅ PHASE 2 complete: {phase2_duration:.1f}s")
+        logger.info(f"   Grid: {cols}x{rows} = {tile_count} tiles")
+        logger.info(f"   Tile size: {tile_size}px (~{target_tile_mb}MB target)")
+        _report_progress(docker_context, 15, 2, 5, "Tiling Scheme", f"Complete ({tile_count} tiles)")
+
+        # =====================================================================
+        # PHASE 3: EXTRACT TILES TO MOUNT (15-25%)
+        # =====================================================================
+        logger.info(f"🔄 PHASE 3: Extracting {tile_count} tiles to mount...")
+        _report_progress(docker_context, 17, 3, 5, "Extract Tiles", f"Processing {tile_count} tiles")
+        phase3_start = time.time()
+
+        tile_mount_paths = []
+
+        with rasterio.open(str(source_mount_path)) as src:
+            for idx, tile_spec in enumerate(tile_specs):
+                tile_path = mount_paths['tiles'] / f"tile_{tile_spec['index']:04d}.tif"
+
+                # Skip if tile already exists on mount
+                if tile_path.exists():
+                    tile_mount_paths.append(str(tile_path))
+                    continue
+
+                # Extract window
+                window = Window(
+                    tile_spec['x_off'],
+                    tile_spec['y_off'],
+                    tile_spec['width'],
+                    tile_spec['height']
+                )
+
+                # Read data
+                data = src.read(window=window)
+
+                # Calculate tile transform
+                tile_transform = rasterio.windows.transform(window, src.transform)
+
+                # Write tile
+                profile = src.profile.copy()
+                profile.update(
+                    width=tile_spec['width'],
+                    height=tile_spec['height'],
+                    transform=tile_transform,
+                    driver='GTiff',
+                    compress='LZW',  # Light compression for intermediate tiles
+                )
+
+                with rasterio.open(str(tile_path), 'w', **profile) as dst:
+                    dst.write(data)
+
+                tile_mount_paths.append(str(tile_path))
+
+                # Progress every 10 tiles
+                if (idx + 1) % 10 == 0 or idx == tile_count - 1:
+                    progress = 15 + int((idx / tile_count) * 10)
+                    _report_progress(docker_context, progress, 3, 5, "Extract Tiles", f"Tile {idx+1}/{tile_count}")
+
+        extraction_result = {
+            'tile_count': len(tile_mount_paths),
+            'tile_mount_paths': tile_mount_paths,
+            'source_crs': source_crs,
+        }
+
+        phase3_duration = time.time() - phase3_start
+        logger.info(f"✅ PHASE 3 complete: {phase3_duration:.1f}s")
+        logger.info(f"   Tiles extracted: {len(tile_mount_paths)}")
+        _report_progress(docker_context, 25, 3, 5, "Extract Tiles", f"Complete ({len(tile_mount_paths)} tiles)")
+
+        # =====================================================================
+        # PHASE 4: CREATE COGS AND UPLOAD - RESUMABLE PER-TILE (25-95%)
+        # =====================================================================
+        logger.info(f"🔄 PHASE 4: Creating COGs and uploading...")
+        _report_progress(docker_context, 27, 4, 5, "Create COGs", "Starting")
+        phase4_start = time.time()
+
+        from .raster_cog import create_cog
+
+        # Get already completed COGs for resume
+        cogs_container = config.storage.silver.cogs
+        completed_indices = _get_completed_cog_indices(job_id, blob_repo, cogs_container)
+
+        if completed_indices:
+            logger.info(f"🔄 RESUMING: {len(completed_indices)} COGs already uploaded, skipping...")
+
+        target_crs = params.get('target_crs') or config.raster.target_crs
+        cog_blobs = []
+        skipped_count = 0
+
+        for idx, tile_path in enumerate(tile_mount_paths):
+            # Parse tile index from filename
+            tile_filename = Path(tile_path).name
+            tile_index = int(tile_filename.split('_')[1].split('.')[0])
+
+            # Deterministic output blob name
+            cog_blob_name = f"{job_id[:8]}/tile_{tile_index:04d}.tif"
+
+            # Resume check: skip if COG already uploaded
+            if tile_index in completed_indices:
+                cog_blobs.append(cog_blob_name)
+                skipped_count += 1
+                continue
+
+            # Progress
+            progress = 25 + int((idx / tile_count) * 70)
+            _report_progress(docker_context, progress, 4, 5, "Create COGs", f"Tile {idx+1}/{tile_count}")
+            logger.info(f"   📦 COG {idx+1}/{tile_count}: tile_{tile_index:04d}")
+
+            # Create COG params - use mount path as source
+            cog_params = {
+                'container_name': None,  # Not from blob
+                'blob_name': None,
+                '_local_source_path': tile_path,  # Direct local file
+                'source_crs': source_crs,
+                'target_crs': target_crs,
+                'raster_type': {
+                    'detected_type': 'raster',
+                    'band_count': band_count,
+                    'data_type': dtype,
+                    'optimal_cog_settings': {},
+                },
+                'output_tier': params.get('output_tier', 'analysis'),
+                'output_blob_name': cog_blob_name,
+                'output_container': cogs_container,
+                'jpeg_quality': params.get('jpeg_quality') or config.raster.cog_jpeg_quality,
+                'overview_resampling': config.raster.overview_resampling,
+                'reproject_resampling': config.raster.reproject_resampling,
+                'in_memory': False,
+                '_task_id': task_id,
+            }
+
+            cog_response = create_cog(cog_params)
+
+            if not cog_response.get('success'):
+                logger.error(f"❌ COG creation failed for tile {tile_index}: {cog_response.get('error')}")
+                return {
+                    "success": False,
+                    "error": "COG_CREATION_FAILED",
+                    "message": f"COG creation failed for tile {tile_index}: {cog_response.get('error')}",
+                    "phase": 4,
+                    "tile_index": tile_index,
+                    "tiles_completed": len(cog_blobs),
+                    "tiles_total": tile_count,
+                    "resumable": True,
+                    "output_mode": "tiled_mount",
+                }
+
+            cog_result = cog_response.get('result', {})
+            cog_results.append(cog_result)
+            cog_blobs.append(cog_blob_name)
+
+            # Delete tile from mount after successful COG upload (cleanup as we go)
+            try:
+                Path(tile_path).unlink()
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to delete tile {tile_path}: {e}")
+
+            # Graceful shutdown check
+            if docker_context and docker_context.should_stop():
+                logger.warning(f"🛑 Shutdown requested at tile {idx+1}/{tile_count}")
+                return {
+                    "success": True,
+                    "interrupted": True,
+                    "resumable": True,
+                    "tiles_completed": len(cog_blobs),
+                    "tiles_total": tile_count,
+                    "output_mode": "tiled_mount",
+                }
+
+        phase4_duration = time.time() - phase4_start
+        logger.info(f"✅ PHASE 4 complete: {phase4_duration:.1f}s")
+        logger.info(f"   COGs created: {len(cog_blobs)} (skipped {skipped_count} on resume)")
+        _report_progress(docker_context, 95, 4, 5, "Create COGs", f"Complete ({len(cog_blobs)} COGs)")
+
+        # =====================================================================
+        # PHASE 5: REGISTER STAC AND CLEANUP (95-100%)
+        # =====================================================================
+        logger.info("🔄 PHASE 5: Registering STAC collection...")
+        _report_progress(docker_context, 97, 5, 5, "STAC + Cleanup", "Registering")
+        phase5_start = time.time()
+
+        from .stac_collection import create_stac_collection
+
+        collection_id = params.get('collection_id')
+        blob_stem = Path(blob_name).stem
+
+        stac_params = {
+            'collection_id': collection_id,
+            'item_id': params.get('item_id') or blob_stem,
+            'cog_blobs': cog_blobs,
+            'cog_container': cogs_container,
+            'title': f"Tiled Raster: {blob_stem}",
+            'description': f"Tiled COG collection from {blob_name} (mount-based workflow)",
+            'dataset_id': params.get('dataset_id'),
+            'resource_id': params.get('resource_id'),
+            'version_id': params.get('version_id'),
+            'access_level': params.get('access_level'),
+        }
+
+        stac_response = create_stac_collection(stac_params)
+
+        if not stac_response.get('success'):
+            logger.warning(f"⚠️ STAC creation failed (non-fatal): {stac_response.get('error')}")
+            stac_result = {"degraded": True, "error": stac_response.get('error')}
+        else:
+            stac_result = stac_response.get('result', {})
+
+        # Cleanup mount directory
+        logger.info("🧹 Cleaning up mount...")
+        _cleanup_mount_for_job(job_id, Path(config.raster.etl_mount_path))
+
+        phase5_duration = time.time() - phase5_start
+        logger.info(f"✅ PHASE 5 complete: {phase5_duration:.1f}s")
+        _report_progress(docker_context, 100, 5, 5, "STAC + Cleanup", "Complete")
+
+        # =====================================================================
+        # SUCCESS
+        # =====================================================================
+        total_duration = time.time() - start_time
+
+        logger.info("=" * 70)
+        logger.info("✅ PROCESS RASTER (MOUNT-BASED TILED) - SUCCESS")
+        logger.info(f"   Total duration: {total_duration:.1f}s ({total_duration/60:.1f} min)")
+        logger.info(f"   Tiles: {tile_count}")
+        logger.info(f"   COGs: {len(cog_blobs)}")
+        if stac_result.get('collection_id'):
+            logger.info(f"   STAC: {stac_result.get('collection_id')}")
+        logger.info("=" * 70)
+
+        return {
+            "success": True,
+            "result": {
+                "output_mode": "tiled_mount",
+                "tiling": tiling_result,
+                "extraction": extraction_result,
+                "cogs": {
+                    "count": len(cog_blobs),
+                    "blobs": cog_blobs,
+                },
+                "stac": stac_result,
+                "timing": {
+                    "total_seconds": round(total_duration, 1),
+                    "total_minutes": round(total_duration / 60, 2),
+                },
+            }
+        }
+
+    except Exception as e:
+        logger.exception(f"❌ PROCESS RASTER (MOUNT-BASED TILED) FAILED: {e}")
+        return {
+            "success": False,
+            "error": "PROCESSING_FAILED",
+            "error_type": type(e).__name__,
+            "message": str(e),
+            "phase": "unknown",
+            "output_mode": "tiled_mount",
+            "tiling": tiling_result,
+            "extraction": extraction_result,
+            "resumable": True,
+        }
+
+
 def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = None) -> Dict[str, Any]:
     """
     Complete raster processing in single execution.
@@ -570,9 +1135,14 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
     logger.info("=" * 70)
 
     # V0.8: Route to tiled workflow if file exceeds threshold
+    # V0.8.1: Use mount-based workflow when ETL mount available (27 JAN 2026)
     if use_tiling:
-        logger.info("📦 Routing to TILED workflow...")
-        return _process_raster_tiled(params, context, start_time)
+        if config.raster.use_etl_mount:
+            logger.info("📦 Routing to MOUNT-BASED tiled workflow (V0.8.1)...")
+            return _process_raster_tiled_mount(params, context, start_time)
+        else:
+            logger.info("📦 Routing to VSI-based tiled workflow (fallback)...")
+            return _process_raster_tiled(params, context, start_time)
 
     # Initialize checkpoint manager
     # F7.18: Use DockerTaskContext if available (Docker mode)

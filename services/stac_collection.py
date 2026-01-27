@@ -48,6 +48,7 @@ from util_logger import LoggerFactory, ComponentType
 from config import get_config  # For TiTiler base URL and other config (17 NOV 2025)
 from infrastructure.pgstac_repository import PgStacRepository  # For collection/item operations (Phase 2B: 17 NOV 2025)
 from services.pgstac_search_registration import PgSTACSearchRegistration  # NEW (17 NOV 2025): Direct database registration (Option A)
+from services.stac_metadata_helper import RasterVisualizationMetadata  # BUG-006 (27 JAN 2026): For TiTiler bidx params
 
 
 # Logger
@@ -155,6 +156,11 @@ def create_stac_collection(
             logger.info(f"   Tile count: {len(tile_blobs)}")
             logger.info(f"   COG container: {cog_container}")
 
+            # BUG-006 FIX (27 JAN 2026): Extract raster_type for TiTiler bidx params
+            raster_type = params.get("raster_type")
+            if raster_type:
+                logger.info(f"   Raster type: {raster_type.get('detected_type')}, {raster_type.get('band_count')} bands")
+
             # Call internal implementation WITHOUT MosaicJSON
             container = params.get("container", config.storage.silver.cogs)
             result = _create_stac_collection_impl(
@@ -166,7 +172,8 @@ def create_stac_collection(
                 cog_container=cog_container,
                 license_val=license_val,
                 spatial_extent=spatial_extent,
-                temporal_extent=None
+                temporal_extent=None,
+                raster_type=raster_type  # BUG-006: Pass for TiTiler URLs
             )
 
             return result
@@ -279,7 +286,8 @@ def _create_stac_collection_impl(
     cog_container: str,
     license_val: str,
     spatial_extent: Optional[List[float]],
-    temporal_extent: Optional[List[str]]
+    temporal_extent: Optional[List[str]],
+    raster_type: Optional[Dict[str, Any]] = None  # BUG-006: For TiTiler bidx params
 ) -> dict:
     """
     Internal implementation: Create STAC collection with orthodox STAC Items.
@@ -290,6 +298,10 @@ def _create_stac_collection_impl(
     - mosaicjson_blob is now Optional - MosaicJSON was deprecated (12 NOV 2025)
     - Collections now rely on pgSTAC search for mosaic access
     - MosaicJSON asset only added if mosaicjson_blob is provided (backward compat)
+
+    BUG-006 FIX (27 JAN 2026):
+    - raster_type parameter added to pass band count/dtype to STAC item creation
+    - Without this, TiTiler URLs for multi-band tiles lack bidx params → 500 errors
 
     ORTHODOX STAC PATTERN (11 NOV 2025):
     1. Create STAC Items for each COG tile (searchable, with geometry/datetime)
@@ -306,6 +318,7 @@ def _create_stac_collection_impl(
         license_val: STAC license
         spatial_extent: Spatial bounds or None to calculate
         temporal_extent: Temporal range or None for current time
+        raster_type: Raster type dict with band_count, data_type for TiTiler URLs
 
     Returns:
         Dict with success=True and STAC collection details
@@ -425,6 +438,13 @@ def _create_stac_collection_impl(
         from services.service_stac_metadata import StacMetadataService
         stac_service = StacMetadataService()
 
+        # BUG-006 FIX (27 JAN 2026): Create raster visualization metadata for TiTiler URLs
+        # Without this, multi-band tiles get 500 errors because bidx params are missing
+        raster_meta = None
+        if raster_type:
+            raster_meta = RasterVisualizationMetadata.from_raster_type_params(raster_type)
+            logger.info(f"   Raster metadata: {raster_meta.band_count} bands, rgb_bands={raster_meta.rgb_bands}")
+
         # ORTHODOX STAC (11 NOV 2025): Create STAC Items for each COG tile
         # Items are searchable with geometry, datetime, and properties
         # NOW collection partition exists, so Items can be inserted safely
@@ -442,11 +462,13 @@ def _create_stac_collection_impl(
                 item_id = f"{collection_id}_{tile_name}"
 
                 # Create STAC Item using existing service (reuses process_raster logic)
+                # BUG-006: Pass raster_meta for TiTiler bidx params on multi-band tiles
                 item = stac_service.extract_item_from_blob(
                     container=cog_container,
                     blob_name=tile_blob,
                     collection_id=collection_id,
-                    item_id=item_id
+                    item_id=item_id,
+                    raster_meta=raster_meta  # BUG-006: Enables smart TiTiler URLs
                 )
 
                 # Insert Item into PgSTAC
@@ -618,21 +640,25 @@ def _create_stac_collection_impl(
         # Collection already validated and inserted above (12 NOV 2025)
         # search_id, URLs added if search registration succeeded
 
+        # V0.8 FIX (27 JAN 2026): Return with "result" wrapper to match handler contract
+        # Handler expects: {"success": True, "result": {...}}
+        # Previously returned data at top level, causing stac_response.get('result', {}) = {}
         return {
             "success": True,
-            "collection_id": collection_id,
-            "stac_id": collection.id,
-            "pgstac_id": pgstac_id,
-            "tile_count": len(tile_blobs),
-            "items_created": len(created_items),  # NEW (11 NOV 2025): Orthodox STAC Items
-            "items_failed": len(failed_items),    # NEW (11 NOV 2025): Failed Item creation
-            "spatial_extent": spatial_extent,
-            # V0.8 (27 JAN 2026): MosaicJSON REMOVED - pgSTAC search provides mosaic access
-            # search_id is the canonical way to access mosaics via TiTiler-PgSTAC
-            "search_id": search_id,
-            "viewer_url": viewer_url,
-            "tilejson_url": tilejson_url,
-            "tiles_url": tiles_url
+            "result": {
+                "collection_id": collection_id,
+                "stac_id": collection.id,
+                "pgstac_id": pgstac_id,
+                "tile_count": len(tile_blobs),
+                "items_created": len(created_items),
+                "items_failed": len(failed_items),
+                "spatial_extent": spatial_extent,
+                # V0.8: pgSTAC search provides mosaic access (no MosaicJSON)
+                "search_id": search_id,
+                "viewer_url": viewer_url,
+                "tilejson_url": tilejson_url,
+                "tiles_url": tiles_url
+            }
         }
 
     except Exception as e:

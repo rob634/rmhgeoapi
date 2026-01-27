@@ -311,35 +311,74 @@ def _process_cog_disk_based(
 
         if needs_reprojection:
             logger.info(f"🔄 DISK STEP B2: Reprojection needed: {detected_source_crs} → {target_crs}")
-            cog_config["dst_crs"] = target_crs
-            cog_config["resampling"] = getattr(Resampling, reproject_resampling)
             logger.info(f"   Reprojection resampling: {reproject_resampling}")
             reprojection_performed = True
         else:
             logger.info(f"   No reprojection needed (already {target_crs})")
 
         # STEP C: Create COG (file-to-file, GDAL uses disk)
+        # NOTE: For reprojection, we must use WarpedVRT - passing dst_crs in config
+        # only works when input is a rasterio dataset, not a file path string.
+        # See: https://github.com/cogeotiff/rio-cogeo/discussions/284
         logger.info(f"🔄 DISK STEP C: Creating COG with cog_translate (disk-based)...")
         logger.info(f"   in_memory={in_memory} (should be False)")
         logger.info(f"   Overview resampling: {overview_resampling}")
 
         cog_start = time.time()
-        cog_translate(
-            temp_input_path,
-            temp_output_path,
-            cog_profile,
-            config=cog_config,
-            overview_level=None,
-            overview_resampling=overview_resampling,
-            in_memory=in_memory,
-            quiet=False,
-        )
+
+        if needs_reprojection:
+            # Use WarpedVRT for reprojection (required for file path input)
+            from rasterio.vrt import WarpedVRT
+            logger.info(f"   Using WarpedVRT for reprojection to {target_crs}")
+            with rasterio.open(temp_input_path) as src:
+                vrt_options = {
+                    'crs': target_crs,
+                    'resampling': getattr(Resampling, reproject_resampling),
+                }
+                with WarpedVRT(src, **vrt_options) as vrt:
+                    cog_translate(
+                        vrt,
+                        temp_output_path,
+                        cog_profile,
+                        config=cog_config,
+                        overview_level=None,
+                        overview_resampling=overview_resampling,
+                        in_memory=in_memory,
+                        quiet=False,
+                    )
+        else:
+            # No reprojection - use file path directly
+            cog_translate(
+                temp_input_path,
+                temp_output_path,
+                cog_profile,
+                config=cog_config,
+                overview_level=None,
+                overview_resampling=overview_resampling,
+                in_memory=in_memory,
+                quiet=False,
+            )
+
         cog_duration = time.time() - cog_start
 
         # Get output file size
         output_size_bytes = Path(temp_output_path).stat().st_size
         output_size_mb = output_size_bytes / (1024 * 1024)
         logger.info(f"   COG created: {output_size_mb:.2f}MB in {cog_duration:.1f}s")
+
+        # Update raster_metadata from OUTPUT file (important when reprojection occurred)
+        if reprojection_performed:
+            logger.info(f"🔄 DISK STEP C2: Reading output metadata after reprojection...")
+            with rasterio.open(temp_output_path) as out_src:
+                raster_metadata = {
+                    'crs': str(out_src.crs),
+                    'bounds': list(out_src.bounds),
+                    'shape': [out_src.height, out_src.width],
+                    'band_count': out_src.count,
+                    'dtype': str(out_src.dtypes[0]),
+                }
+                logger.info(f"   Output CRS: {raster_metadata['crs']}")
+                logger.info(f"   Output bounds: {raster_metadata['bounds']}")
 
         # Compute checksum from disk file
         if compute_checksum:

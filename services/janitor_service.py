@@ -326,7 +326,7 @@ class JanitorService:
 
             stale_tasks = self.repo.get_stale_processing_tasks(
                 timeout_minutes=self.config.task_timeout_minutes,
-                exclude_task_types=TaskRoutingDefaults.DOCKER_TASKS
+                exclude_task_types=list(TaskRoutingDefaults.DOCKER_TASKS)  # Convert frozenset to list for psycopg
             )
             result.items_scanned += len(stale_tasks)
 
@@ -476,7 +476,7 @@ class JanitorService:
 
             stale_docker_tasks = self.repo.get_stale_docker_tasks(
                 timeout_hours=self.config.docker_task_timeout_hours,
-                docker_task_types=TaskRoutingDefaults.DOCKER_TASKS
+                docker_task_types=list(TaskRoutingDefaults.DOCKER_TASKS)  # Convert frozenset to list for psycopg
             )
             result.items_scanned += len(stale_docker_tasks)
 

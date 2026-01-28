@@ -276,7 +276,7 @@ class JanitorRepository(PostgreSQLRepository):
         # Default to DOCKER_TASKS from config if not provided (V0.8)
         if docker_task_types is None:
             from config.defaults import TaskRoutingDefaults
-            docker_task_types = TaskRoutingDefaults.DOCKER_TASKS
+            docker_task_types = list(TaskRoutingDefaults.DOCKER_TASKS)  # Convert frozenset to list for psycopg
 
         if not docker_task_types:
             logger.debug("[JANITOR] get_stale_docker_tasks: No Docker task types configured")

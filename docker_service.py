@@ -3149,20 +3149,25 @@ def vector_viewer_page(
         config = get_config()
         tipg_base_url = getattr(config, 'tipg_base_url', None) or ''
 
-        # Get initial bbox from collection if available
+        # Get initial bbox from collection via TiPG
         initial_bbox = None
         if collection_id:
             try:
-                from ogc_features.service import OGCFeaturesService
-                service = OGCFeaturesService()
-                collection = service.get_collection(collection_id)
-                if collection and 'extent' in collection:
-                    spatial = collection['extent'].get('spatial', {})
-                    bbox = spatial.get('bbox', [[]])[0]
-                    if len(bbox) >= 4:
-                        initial_bbox = bbox
+                import httpx
+                # Ensure schema-qualified name for TiPG
+                tipg_collection_id = collection_id if '.' in collection_id else f"geo.{collection_id}"
+                collection_url = f"{tipg_base_url}/collections/{tipg_collection_id}"
+                with httpx.Client(timeout=10.0) as client:
+                    resp = client.get(collection_url)
+                    if resp.status_code == 200:
+                        collection = resp.json()
+                        if 'extent' in collection:
+                            spatial = collection['extent'].get('spatial', {})
+                            bbox = spatial.get('bbox', [[]])[0]
+                            if len(bbox) >= 4:
+                                initial_bbox = bbox
             except Exception as e:
-                logger.warning(f"Could not fetch collection bbox: {e}")
+                logger.warning(f"Could not fetch collection bbox from TiPG: {e}")
 
         return render_template(
             request,
@@ -3180,36 +3185,55 @@ def vector_viewer_page(
 @app.get("/api/vector/collections")
 async def list_vector_collections():
     """
-    List all vector collections from OGC Features / TiPG.
+    List all vector collections from TiPG.
 
-    Returns collections with PostGIS geometry tables.
+    Proxies to TiPG /vector/collections endpoint.
 
     Returns:
         List of collections with id, title, feature count
     """
     try:
-        from ogc_features.service import OGCFeaturesService
+        import httpx
+        from config import get_config
 
-        service = OGCFeaturesService()
-        collections = service.get_collections()
+        config = get_config()
+        tipg_base_url = getattr(config, 'tipg_base_url', '') or ''
 
-        vector_collections = []
-        for col in collections:
-            vector_collections.append({
-                'id': col.get('id'),
-                'title': col.get('title') or col.get('id'),
-                'description': col.get('description', '')[:100] if col.get('description') else '',
-                'feature_count': col.get('numberMatched') or col.get('context', {}).get('matched')
-            })
+        if not tipg_base_url:
+            return JSONResponse(
+                status_code=503,
+                content={"error": "TiPG URL not configured"}
+            )
 
-        return {
-            "status": "success",
-            "count": len(vector_collections),
-            "collections": vector_collections
-        }
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(f"{tipg_base_url}/collections")
+
+            if resp.status_code != 200:
+                return JSONResponse(
+                    status_code=resp.status_code,
+                    content={"error": f"TiPG returned {resp.status_code}"}
+                )
+
+            data = resp.json()
+            collections = data.get('collections', [])
+
+            vector_collections = []
+            for col in collections:
+                vector_collections.append({
+                    'id': col.get('id'),
+                    'title': col.get('title') or col.get('id'),
+                    'description': col.get('description', '')[:100] if col.get('description') else '',
+                    'feature_count': col.get('numberMatched') or col.get('context', {}).get('matched')
+                })
+
+            return {
+                "status": "success",
+                "count": len(vector_collections),
+                "collections": vector_collections
+            }
 
     except Exception as e:
-        logger.error(f"Error listing vector collections: {e}")
+        logger.error(f"Error listing vector collections from TiPG: {e}")
         return JSONResponse(
             status_code=500,
             content={"error": str(e)}
@@ -3219,7 +3243,7 @@ async def list_vector_collections():
 @app.get("/api/vector/collection/{collection_id}")
 async def get_vector_collection(collection_id: str):
     """
-    Get vector collection metadata.
+    Get vector collection metadata from TiPG.
 
     Args:
         collection_id: Collection ID (table name)
@@ -3228,24 +3252,44 @@ async def get_vector_collection(collection_id: str):
         Collection metadata including extent, CRS, schema
     """
     try:
-        from ogc_features.service import OGCFeaturesService
+        import httpx
+        from config import get_config
 
-        service = OGCFeaturesService()
-        collection = service.get_collection(collection_id)
+        config = get_config()
+        tipg_base_url = getattr(config, 'tipg_base_url', '') or ''
 
-        if not collection:
+        if not tipg_base_url:
             return JSONResponse(
-                status_code=404,
-                content={"error": f"Collection '{collection_id}' not found"}
+                status_code=503,
+                content={"error": "TiPG URL not configured"}
             )
 
-        return {
-            "status": "success",
-            "collection": collection
-        }
+        # Ensure schema-qualified name for TiPG
+        tipg_collection_id = collection_id if '.' in collection_id else f"geo.{collection_id}"
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(f"{tipg_base_url}/collections/{tipg_collection_id}")
+
+            if resp.status_code == 404:
+                return JSONResponse(
+                    status_code=404,
+                    content={"error": f"Collection '{collection_id}' not found"}
+                )
+
+            if resp.status_code != 200:
+                return JSONResponse(
+                    status_code=resp.status_code,
+                    content={"error": f"TiPG returned {resp.status_code}"}
+                )
+
+            collection = resp.json()
+            return {
+                "status": "success",
+                "collection": collection
+            }
 
     except Exception as e:
-        logger.error(f"Error fetching collection {collection_id}: {e}")
+        logger.error(f"Error fetching collection {collection_id} from TiPG: {e}")
         return JSONResponse(
             status_code=500,
             content={"error": str(e)}
@@ -3260,9 +3304,9 @@ async def get_vector_features(
     bbox: str = None
 ):
     """
-    Get vector features from a collection.
+    Get vector features from a collection via TiPG.
 
-    Proxy to OGC Features API for GeoJSON retrieval.
+    Proxies to TiPG /collections/{id}/items endpoint.
 
     Args:
         collection_id: Collection ID (table name)
@@ -3274,26 +3318,42 @@ async def get_vector_features(
         GeoJSON FeatureCollection
     """
     try:
-        from ogc_features.service import OGCFeaturesService
+        import httpx
+        from config import get_config
 
-        service = OGCFeaturesService()
+        config = get_config()
+        tipg_base_url = getattr(config, 'tipg_base_url', '') or ''
 
-        # Parse bbox if provided
-        bbox_list = None
+        if not tipg_base_url:
+            return JSONResponse(
+                status_code=503,
+                content={"error": "TiPG URL not configured"}
+            )
+
+        # Ensure schema-qualified name for TiPG
+        tipg_collection_id = collection_id if '.' in collection_id else f"geo.{collection_id}"
+
+        # Build query params
+        params = {"limit": limit, "offset": offset}
         if bbox:
-            bbox_list = [float(x) for x in bbox.split(',')]
+            params["bbox"] = bbox
 
-        features = service.get_features(
-            collection_id=collection_id,
-            limit=limit,
-            offset=offset,
-            bbox=bbox_list
-        )
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.get(
+                f"{tipg_base_url}/collections/{tipg_collection_id}/items",
+                params=params
+            )
 
-        return features
+            if resp.status_code != 200:
+                return JSONResponse(
+                    status_code=resp.status_code,
+                    content={"error": f"TiPG returned {resp.status_code}"}
+                )
+
+            return resp.json()
 
     except Exception as e:
-        logger.error(f"Error fetching features from {collection_id}: {e}")
+        logger.error(f"Error fetching features from {collection_id} via TiPG: {e}")
         return JSONResponse(
             status_code=500,
             content={"error": str(e)}

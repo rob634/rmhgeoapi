@@ -3,8 +3,9 @@
 # ============================================================================
 # STATUS: Service layer - Stage 1 of Big Raster ETL workflow
 # PURPOSE: Generate GeoJSON tiling schemes for large rasters in EPSG:4326
-# LAST_REVIEWED: 04 JAN 2026
+# LAST_REVIEWED: 27 JAN 2026
 # REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# V0.8.2: Row/column tile naming (tile_r{row}_c{col}) for clarity
 # EXPORTS: generate_tiling_scheme
 # DEPENDENCIES: rasterio, shapely
 # ============================================================================
@@ -236,7 +237,7 @@ def generate_tile_windows(
     Returns:
         List of tile definition dicts with:
             - id: Sequential tile ID (0, 1, 2, ...)
-            - tile_id: Semantic tile ID (tile_0_0, tile_0_1, ...)
+            - tile_id: Semantic tile ID (tile_r0_c0, tile_r0_c1, ...)
             - row: Row index
             - col: Column index
             - pixel_window: {col_off, row_off, width, height}
@@ -260,9 +261,10 @@ def generate_tile_windows(
             tile_height = min(tile_size, target_height - row_off)
 
             # Create tile definition
+            # V0.8.2: Row/column naming for clarity (27 JAN 2026)
             tile = {
                 "id": tile_id,
-                "tile_id": f"tile_{row}_{col}",
+                "tile_id": f"tile_r{row}_c{col}",
                 "row": row,
                 "col": col,
                 "pixel_window": {

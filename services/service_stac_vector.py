@@ -242,19 +242,14 @@ class StacVectorService:
             )
         }
 
-        # Build STAC Item links (13 JAN 2026 - E8 TiPG Integration)
-        # - STAC links use the STAC API base URL (Function App)
-        # - OGC Features link uses TiPG (primary endpoint)
-        # - Fallback URL stored in properties
+        # Build STAC Item links (28 JAN 2026 - OGC_STAC_APP_URL removed)
+        # - STAC links use the STAC API base URL (ETL Function App)
+        # - OGC Features link uses TiPG only (no fallback)
         stac_base_url = self.config.stac_api_base_url.rstrip('/')
         tipg_base_url = self.config.tipg_base_url
-        fallback_base_url = self.config.ogc_features_base_url.rstrip('/')
 
-        # Add fallback URL to properties for redundancy
         # TiPG requires schema-qualified table names (14 JAN 2026)
         tipg_collection_id = f"{schema}.{table_name}"
-        # Fallback URL uses just table name (Function App OGC Features API)
-        properties['ogc:fallback_url'] = f"{fallback_base_url}/collections/{table_name}/items"
 
         links = [
             {

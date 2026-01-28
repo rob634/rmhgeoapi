@@ -350,11 +350,7 @@ ENV_VARS_WITH_DEFAULTS: Dict[str, Dict[str, str]] = {
         "description": "OGC API base URL for self-links (set explicitly for consistent URLs)",
         "category": "services",
     },
-    "OGC_STAC_APP_URL": {
-        "default": "(not configured)",
-        "description": "Dedicated OGC/STAC app URL (for multi-app deployments)",
-        "category": "services",
-    },
+    # OGC_STAC_APP_URL removed 28 JAN 2026 - OGC Features now via TiPG at {TITILER_BASE_URL}/vector
 }
 
 

@@ -858,6 +858,11 @@ class PydanticToSQL:
                 sql_type_str = "SERIAL"
                 is_optional = True  # SERIAL is auto-generated, doesn't need NOT NULL
 
+            # Special handling for byte size fields - use BIGINT to support files > 2GB
+            # INTEGER max is ~2.1GB, BIGINT supports up to 9.2 exabytes
+            if field_name in ["size_bytes", "file_size_bytes", "source_size_bytes", "cog_size_bytes"]:
+                sql_type_str = "BIGINT"
+
             # Build column definition using composition
             column_parts = [
                 sql.Identifier(field_name),

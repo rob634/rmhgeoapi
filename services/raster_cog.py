@@ -815,7 +815,7 @@ def create_cog(params: dict) -> dict:
         # BUG-007 FIX (27 JAN 2026): Handle local source mode where blob_name/container_name are None
         # When _local_source_path is provided, derive source info from the local path
         if local_source_path and not blob_name:
-            # Extract blob name from local source path (e.g., /mounts/etl-temp/tile_0_0.tif -> tile_0_0.tif)
+            # Extract blob name from local source path (e.g., /mounts/etl-temp/tile_r0_c0.tif -> tile_r0_c0.tif)
             from pathlib import Path as PathLib
             source_blob_name = PathLib(local_source_path).name
             source_container_name = "local-mount"  # Marker for local source mode

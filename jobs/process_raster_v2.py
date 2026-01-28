@@ -347,7 +347,7 @@ class ProcessRasterV2Job(JobBaseMixin, JobBase):
                     "inserted_to_pgstac": s.get("inserted_to_pgstac", True)
                 }
 
-                # Generate STAC API URLs (uses OGC_STAC_APP_URL from config)
+                # Generate STAC API URLs (uses ETL_APP_URL from config, 28 JAN 2026)
                 # Only when STAC is not in degraded mode
                 if item_id and collection_id:
                     stac_base = config.stac_api_base_url.rstrip('/')

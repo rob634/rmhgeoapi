@@ -211,15 +211,13 @@ class OGCFeaturesService:
 
         if vector_metadata:
             # Use VectorMetadata model for clean conversion
-            # 13 JAN 2026 (E8 TiPG Integration): Use TiPG as primary, Function App as fallback
+            # 28 JAN 2026: TiPG is now the only OGC Features endpoint (OGC_STAC_APP_URL removed)
             from config import get_config
             config = get_config()
             tipg_base_url = config.tipg_base_url
-            fallback_base_url = config.ogc_features_base_url.rstrip('/')
 
             ogc_dict = vector_metadata.to_ogc_collection(
-                tipg_base_url=tipg_base_url,
-                fallback_base_url=fallback_base_url
+                tipg_base_url=tipg_base_url
             )
 
             # Add parent link pointing to TiPG collections listing

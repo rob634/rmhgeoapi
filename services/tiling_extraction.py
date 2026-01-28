@@ -3,8 +3,9 @@
 # ============================================================================
 # STATUS: Service layer - Stage 2 of Big Raster ETL workflow
 # PURPOSE: Extract tiles from large rasters via GDAL VSI for Azure blob storage
-# LAST_REVIEWED: 04 JAN 2026
+# LAST_REVIEWED: 27 JAN 2026
 # REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# V0.8.2: Row/column tile naming (tile_r{row}_c{col}) for clarity
 # EXPORTS: extract_tiles
 # DEPENDENCIES: rasterio, azure-storage-blob
 # ============================================================================
@@ -457,7 +458,7 @@ def extract_tiles(params: dict) -> dict:
                     # 🔍 CHECKPOINT 7d: Blob Upload Operation
                     try:
                         tile_buffer.seek(0)  # Reset buffer position for reading
-                        # Pattern: {job_id[:8]}/tiles/{blob_stem}_tile_0_0.tif
+                        # V0.8.2: Pattern: {job_id[:8]}/tiles/{blob_stem}_tile_r0_c0.tif
                         blob_name_full = f"{output_prefix}{blob_stem}_{tile_id}.tif"
 
                         logger.debug(f"🔍 [CHECKPOINT_TILE_{i}_UPLOAD] Uploading to blob: {blob_name_full}...")

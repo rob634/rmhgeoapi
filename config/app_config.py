@@ -30,8 +30,7 @@ Environment-Specific Settings (this file):
     DEBUG_MODE          = false (set true for verbose diagnostics)
     ENVIRONMENT         = dev|qa|prod
     LOG_LEVEL           = INFO|DEBUG|WARNING|ERROR
-    TITILER_BASE_URL    = TiTiler tile server URL
-    OGC_STAC_APP_URL    = OGC/STAC function app URL
+    TITILER_BASE_URL    = TiTiler tile server URL (TiPG at /vector)
     ETL_APP_URL         = ETL admin function app URL
 
 Verification:
@@ -206,12 +205,11 @@ class AppConfig(BaseModel):
     )
 
     # ========================================================================
-    # API Endpoint Configuration (27 NOV 2025)
+    # API Endpoint Configuration (27 NOV 2025, updated 28 JAN 2026)
     # ========================================================================
     # Environment Variables:
-    #   TITILER_BASE_URL     - TiTiler tile server (raster visualization)
-    #   OGC_STAC_APP_URL     - Dedicated OGC/STAC function app (end-user queries)
-    #   ETL_APP_URL          - ETL/Admin function app (job submission, viewer, admin)
+    #   TITILER_BASE_URL     - TiTiler tile server (raster viz + TiPG at /vector)
+    #   ETL_APP_URL          - ETL/Admin function app (job submission, viewer, admin, STAC API)
     #   TITILER_MODE         - TiTiler deployment mode (vanilla, pgstac, xarray)
     # ========================================================================
 
@@ -220,15 +218,15 @@ class AppConfig(BaseModel):
             "TITILER_BASE_URL",
             AzureDefaults.TITILER_BASE_URL
         ),
-        description="Base URL for TiTiler-PgSTAC tile server (raster visualization)"
+        description="Base URL for TiTiler-PgSTAC tile server (raster visualization, TiPG at /vector)"
     )
 
     # ========================================================================
     # TiPG Configuration (13 JAN 2026 - E8 TiPG Integration)
     # ========================================================================
     # TiPG runs in the same Docker container as TiTiler at the /vector prefix.
-    # This is now the PRIMARY OGC Features endpoint for vector data access.
-    # The Function App OGC Features (/api/features) remains as fallback.
+    # This is the PRIMARY and ONLY OGC Features endpoint for vector data access.
+    # OGC_STAC_APP_URL removed 28 JAN 2026 - all vector queries via TiPG.
     # ========================================================================
 
     @property
@@ -244,20 +242,12 @@ class AppConfig(BaseModel):
         """
         return f"{self.titiler_base_url.rstrip('/')}/vector"
 
-    ogc_features_base_url: str = Field(
-        default_factory=lambda: os.getenv(
-            "OGC_STAC_APP_URL",
-            AzureDefaults.OGC_STAC_APP_URL
-        ) + "/api/features",
-        description="Base URL for OGC API - Features (vector data access) - Dedicated OGC/STAC function app"
-    )
-
     stac_api_base_url: str = Field(
         default_factory=lambda: os.getenv(
-            "OGC_STAC_APP_URL",
-            AzureDefaults.OGC_STAC_APP_URL
+            "ETL_APP_URL",
+            AzureDefaults.ETL_APP_URL
         ) + "/api/stac",
-        description="Base URL for STAC API (metadata catalog) - Currently co-located with OGC Features"
+        description="Base URL for STAC API (metadata catalog) - hosted on ETL Function App"
     )
 
     etl_app_base_url: str = Field(
@@ -625,21 +615,21 @@ class AppConfig(BaseModel):
         """
         Generate OGC API - Features collection URL for vector data.
 
-        Legacy compatibility method - delegates to ogc_features_base_url field.
+        Delegates to TiPG (28 JAN 2026 - OGC_STAC_APP_URL removed).
 
         Args:
             collection_id: Collection name (same as PostGIS table name)
 
         Returns:
-            OGC Features collection URL for querying vector features
+            TiPG OGC Features collection URL for querying vector features
 
         Example:
             >>> config = get_config()
-            >>> url = config.generate_ogc_features_url("config_test_vector")
+            >>> url = config.generate_ogc_features_url("geo.my_vector_table")
             >>> url
-            'https://rmhazuregeoapi-.../api/features/collections/config_test_vector'
+            'https://titiler.../vector/collections/geo.my_vector_table'
         """
-        return f"{self.ogc_features_base_url.rstrip('/')}/collections/{collection_id}"
+        return f"{self.tipg_base_url}/collections/{collection_id}"
 
     def generate_tipg_features_url(self, collection_id: str) -> str:
         """
@@ -670,7 +660,7 @@ class AppConfig(BaseModel):
         Generate interactive vector viewer URL for PostGIS collection.
 
         Uses ETL app (rmhazuregeoapi) for viewer - admin/curation functionality.
-        End-user queries go through rmhogcstac (OGC Features API).
+        End-user queries go through TiPG (OGC Features API).
 
         Args:
             collection_id: Collection name (same as PostGIS table name)

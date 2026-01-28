@@ -529,8 +529,8 @@ def _generate_data_access_urls(
     Generate data access URLs for completed jobs.
 
     Uses config properties to build URLs for the correct services:
-    - OGC Features: OGC_STAC_APP_URL (dedicated OGC/STAC app)
-    - STAC API: OGC_STAC_APP_URL (dedicated OGC/STAC app)
+    - OGC Features: TiPG at {TITILER_BASE_URL}/vector (28 JAN 2026)
+    - STAC API: ETL_APP_URL/api/stac (on ETL Function App)
     - TiTiler: TITILER_BASE_URL (dedicated tile server)
     - Vector Viewer: ETL_APP_URL (admin/ETL app)
 
@@ -546,31 +546,30 @@ def _generate_data_access_urls(
     config = get_config()
 
     # Get service URLs from config (no hardcoded fallbacks - fail-fast design)
-    # ogc_features_base_url = OGC_STAC_APP_URL + "/api/features"
-    ogc_features_base = config.ogc_features_base_url
+    # TiPG provides OGC Features at {TITILER_BASE_URL}/vector (28 JAN 2026)
+    tipg_base = config.tipg_base_url
 
-    # For STAC, we need the app base URL (without /api/stac suffix)
-    # stac_api_base_url includes /api/stac, but STAC endpoints are at /api/collections
-    # So we derive the base from ogc_features_base_url by stripping /api/features
-    ogc_stac_app_base = ogc_features_base.replace("/api/features", "")
-
-    # TiTiler and ETL app URLs
-    titiler_base = config.titiler_base_url
+    # STAC API on ETL Function App
     etl_app_base = config.etl_app_base_url
+
+    # TiTiler for raster tiles
+    titiler_base = config.titiler_base_url
 
     urls = {}
 
-    # Vector job → OGC Features URLs
+    # Vector job → TiPG OGC Features URLs
     if job_type == 'process_vector':
         table_name = job_result.get('table_name')
         if table_name:
+            # TiPG requires schema-qualified names
+            qualified_name = f"geo.{table_name}" if '.' not in table_name else table_name
             urls['postgis'] = {
                 'schema': 'geo',
                 'table': table_name
             }
             urls['ogc_features'] = {
-                'collection': f"{ogc_features_base}/collections/{table_name}",
-                'items': f"{ogc_features_base}/collections/{table_name}/items",
+                'collection': f"{tipg_base}/collections/{qualified_name}",
+                'items': f"{tipg_base}/collections/{qualified_name}/items",
                 'viewer': f"{etl_app_base}/api/vector/viewer?collection={table_name}"
             }
 
@@ -582,9 +581,9 @@ def _generate_data_access_urls(
 
         if collection_id:
             urls['stac'] = {
-                'collection': f"{ogc_stac_app_base}/api/collections/{collection_id}",
-                'items': f"{ogc_stac_app_base}/api/collections/{collection_id}/items",
-                'search': f"{ogc_stac_app_base}/api/search"
+                'collection': f"{etl_app_base}/api/collections/{collection_id}",
+                'items': f"{etl_app_base}/api/collections/{collection_id}/items",
+                'search': f"{etl_app_base}/api/search"
             }
 
         if cog_url:

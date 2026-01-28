@@ -217,14 +217,12 @@ class HealthInterface(BaseInterface):
         docker_worker_enabled = app_mode_config.docker_worker_enabled
         docker_worker_url = app_mode_config.docker_worker_url or ''
 
-        # OGC Features URL - clean up for display
-        ogc_url = config.ogc_features_base_url
-        if ogc_url.startswith('https://'):
-            ogc_url = ogc_url[8:]
-        if ogc_url.startswith('http://'):
-            ogc_url = ogc_url[7:]
-        # Remove /api/features suffix for cleaner display
-        ogc_url = ogc_url.replace('/api/features', '')
+        # TiPG OGC Features URL - clean up for display (28 JAN 2026)
+        tipg_url = config.tipg_base_url
+        if tipg_url.startswith('https://'):
+            tipg_url = tipg_url[8:]
+        if tipg_url.startswith('http://'):
+            tipg_url = tipg_url[7:]
 
         return {
             # Platform API and workers (all same Function App in standalone mode)
@@ -247,7 +245,7 @@ class HealthInterface(BaseInterface):
 
             # External services
             'comp-titiler': f"{titiler_url}\nMode: {config.titiler_mode}",
-            'comp-ogc-features': f"{ogc_url}\nOGC API - Features",
+            'comp-ogc-features': f"{tipg_url}\nTiPG OGC API - Features",
 
             # Docker Worker (status fetched from actual Docker app health)
             'comp-container-queue': f"{service_bus_ns}\nQueue: {container_queue}\nDocker Worker: {'Enabled' if docker_worker_enabled else 'Disabled'}",

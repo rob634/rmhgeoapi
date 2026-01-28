@@ -1913,16 +1913,7 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                 issues.append(f"TiTiler URL using development default")
             env_vars_set['TITILER_BASE_URL'] = bool(os.getenv('TITILER_BASE_URL'))
 
-            # Check OGC/STAC URL
-            ogc_stac_url = os.getenv('OGC_STAC_APP_URL', AzureDefaults.OGC_STAC_APP_URL)
-            if ogc_stac_url == AzureDefaults.OGC_STAC_APP_URL:
-                defaults_detected['ogc_stac_app_url'] = {
-                    'current_value': ogc_stac_url,
-                    'default_value': AzureDefaults.OGC_STAC_APP_URL,
-                    'env_var': 'OGC_STAC_APP_URL'
-                }
-                issues.append(f"OGC/STAC URL using development default")
-            env_vars_set['OGC_STAC_APP_URL'] = bool(os.getenv('OGC_STAC_APP_URL'))
+            # OGC_STAC_APP_URL removed 28 JAN 2026 - OGC Features now served by TiPG at {TITILER_BASE_URL}/vector
 
             # Check ETL App URL
             etl_url = config.etl_app_base_url
@@ -2632,75 +2623,48 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
 
     def _check_ogc_features_health(self) -> Dict[str, Any]:
         """
-        Check OGC Features API health (13 DEC 2025).
+        Check TiPG OGC Features API health (28 JAN 2026 - migrated from OGC_STAC_APP_URL).
 
-        OGC Features can be self-hosted (same app) or external.
-        Checks the /health endpoint of the configured OGC/STAC API URL.
+        TiPG runs in the same Docker container as TiTiler at the /vector prefix.
+        Checks the /vector/collections endpoint to verify TiPG is responding.
 
         Returns:
-            Dict with OGC Features health status including:
-            - health_status: Response from /health endpoint
-            - is_self: Whether pointing to this same app
+            Dict with TiPG health status including:
+            - tipg_url: TiPG base URL
+            - collections_count: Number of vector collections available
+            - overall_status: healthy/unhealthy
         """
-        def check_ogc_features():
+        def check_tipg():
             import requests
             from config import get_config
 
             config = get_config()
-            ogc_url = config.ogc_features_base_url.rstrip('/')
+            tipg_url = config.tipg_base_url.rstrip('/')
 
-            # Check if URL is the placeholder default (not configured)
-            if ogc_url == "https://your-ogc-stac-app-url":
+            # Check if TITILER_BASE_URL is configured (TiPG derives from it)
+            if "your-titiler-webapp-url" in tipg_url:
                 return {
                     "configured": False,
-                    "error": "OGC_STAC_APP_URL not configured (using placeholder default)",
-                    "impact": "OGC Features API reference URL unavailable",
-                    "fix": "Set OGC_STAC_APP_URL environment variable"
+                    "error": "TITILER_BASE_URL not configured (using placeholder default)",
+                    "impact": "TiPG OGC Features API unavailable for vector queries",
+                    "fix": "Set TITILER_BASE_URL environment variable"
                 }
 
-            # Derive app base URL from ogc_features_base_url
-            # ogc_features_base_url may include /api/features path, strip it for health check
-            app_base_url = ogc_url
-            if app_base_url.endswith('/api/features'):
-                app_base_url = app_base_url[:-len('/api/features')]
-
-            # Check if this is self (same app)
-            etl_url = config.etl_app_base_url.rstrip('/')
-            is_self = app_base_url == etl_url
-
-            # If self-hosted, skip HTTP check to avoid recursive timeout
-            # If this health endpoint is responding, OGC Features is also working
-            if is_self:
-                return {
-                    "configured": True,
-                    "features_url": ogc_url,
-                    "app_base_url": app_base_url,
-                    "is_self_hosted": True,
-                    "overall_status": "healthy",
-                    "status_reason": "Self-hosted - if this health check responds, OGC Features is available",
-                    "purpose": "OGC API - Features for vector data queries",
-                    "note": "Skipped HTTP health check to avoid recursive call (same app)"
-                }
-
+            collections_endpoint = f"{tipg_url}/collections"
             health_ok = False
-            health_response = None
+            collections_count = None
             health_error = None
 
-            # Check /api/health endpoint at app root (only for external OGC Features apps)
-            health_endpoint = f"{app_base_url}/api/health"
             try:
-                resp = requests.get(health_endpoint, timeout=15)
+                resp = requests.get(collections_endpoint, timeout=15)
                 health_ok = resp.status_code == 200
-                health_response = {
-                    "status_code": resp.status_code,
-                    "ok": health_ok
-                }
-                # Try to get health response status if JSON
-                try:
-                    body = resp.json()
-                    health_response["status"] = body.get("status", "unknown")
-                except Exception:
-                    pass
+                if health_ok:
+                    try:
+                        body = resp.json()
+                        collections = body.get("collections", [])
+                        collections_count = len(collections)
+                    except Exception:
+                        pass
             except requests.exceptions.Timeout:
                 health_error = "Connection timed out (15s)"
             except requests.exceptions.ConnectionError as e:
@@ -2711,21 +2675,19 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             # Determine status
             if health_ok:
                 overall_status = "healthy"
-                status_reason = "/api/health endpoint responding"
+                status_reason = f"TiPG responding with {collections_count} collections"
             else:
                 overall_status = "unhealthy"
-                status_reason = health_error or "OGC Features API not responding"
+                status_reason = health_error or "TiPG not responding"
 
             result = {
                 "configured": True,
-                "features_url": ogc_url,
-                "app_base_url": app_base_url,
-                "is_self_hosted": False,
-                "health_endpoint": health_endpoint,
-                "health": health_response if health_response else {"error": health_error},
+                "tipg_url": tipg_url,
+                "collections_endpoint": collections_endpoint,
+                "collections_count": collections_count,
                 "overall_status": overall_status,
                 "status_reason": status_reason,
-                "purpose": "OGC API - Features for vector data queries"
+                "purpose": "TiPG OGC API - Features for PostGIS vector queries"
             }
 
             # Add error field for unhealthy status
@@ -2736,8 +2698,8 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
 
         return self.check_component_health(
             "ogc_features",
-            check_ogc_features,
-            description="OGC API - Features for PostGIS vector queries"
+            check_tipg,
+            description="TiPG OGC API - Features for PostGIS vector queries (at TiTiler /vector)"
         )
 
     def _check_docker_worker_health(self) -> Dict[str, Any]:

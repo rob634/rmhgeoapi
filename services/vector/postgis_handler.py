@@ -26,7 +26,7 @@ Dependencies:
     util_logger: Structured logging
 """
 
-from typing import List, Dict, Any, Literal
+from typing import List, Dict, Any, Literal, Optional, Callable
 import logging
 import geopandas as gpd
 import pandas as pd
@@ -34,6 +34,11 @@ import psycopg
 from psycopg import sql
 from config import get_config
 from util_logger import LoggerFactory, ComponentType
+
+
+# Type alias for event callback function
+# Signature: callback(event_name: str, details: dict) -> None
+EventCallback = Callable[[str, Dict[str, Any]], None]
 
 # Component-specific logger for structured logging (Application Insights)
 logger = LoggerFactory.create_logger(
@@ -75,7 +80,12 @@ class VectorToPostGISHandler:
         # Callers can check this after prepare_gdf() to include warnings in job results
         self.last_warnings = []
 
-    def prepare_gdf(self, gdf: gpd.GeoDataFrame, geometry_params: dict = None) -> gpd.GeoDataFrame:
+    def prepare_gdf(
+        self,
+        gdf: gpd.GeoDataFrame,
+        geometry_params: dict = None,
+        event_callback: Optional[EventCallback] = None
+    ) -> gpd.GeoDataFrame:
         """
         Validate, reproject, clean, and optionally process GeoDataFrame geometries.
 
@@ -92,6 +102,9 @@ class VectorToPostGISHandler:
             geometry_params: Optional geometry processing settings:
                 - simplify: dict with tolerance, preserve_topology
                 - quantize: dict with snap_to_grid
+            event_callback: Optional callback for progress events.
+                Signature: callback(event_name: str, details: dict) -> None
+                Used by Docker ETL to emit fine-grained validation events.
 
         Returns:
             Cleaned and validated GeoDataFrame
@@ -99,6 +112,10 @@ class VectorToPostGISHandler:
         Raises:
             ValueError: If GeoDataFrame has no valid geometries
         """
+        # Helper to emit events if callback provided
+        def emit(event_name: str, details: Dict[str, Any]):
+            if event_callback:
+                event_callback(event_name, details)
         # Remove null geometries with detailed diagnostics
         original_count = len(gdf)
         null_mask = gdf.geometry.isna()
@@ -139,6 +156,17 @@ class VectorToPostGISHandler:
             removed = original_count - len(gdf)
             logger.warning(f"   - ⚠️  Removed {removed} null geometries ({removed/original_count*100:.1f}%)")
             logger.info(f"   - ✅ Valid geometries remaining: {len(gdf)}")
+            emit("null_geometry_removal", {
+                "removed": removed,
+                "remaining": len(gdf),
+                "percent_removed": round(removed / original_count * 100, 1)
+            })
+        else:
+            emit("null_geometry_check", {
+                "removed": 0,
+                "total": original_count,
+                "message": "No null geometries found"
+            })
 
         # ========================================================================
         # FIX INVALID GEOMETRIES - Using make_valid() (15 JAN 2026)
@@ -165,6 +193,12 @@ class VectorToPostGISHandler:
                 logger.warning(f"   - {still_invalid} geometries still invalid after make_valid() - may be unfixable")
             else:
                 logger.info(f"   - ✅ All {invalid_count} invalid geometries repaired successfully")
+
+            emit("invalid_geometry_fix", {
+                "fixed": invalid_count - still_invalid,
+                "still_invalid": still_invalid,
+                "total_invalid": invalid_count
+            })
 
         # ========================================================================
         # FORCE 2D GEOMETRIES - Remove Z and M dimensions
@@ -204,6 +238,11 @@ class VectorToPostGISHandler:
             )
 
             logger.info(f"✅ Successfully converted all geometries to 2D and rebuilt GeoDataFrame")
+
+            emit("force_2d", {
+                "dimensions_removed": dims,
+                "features_affected": len(gdf)
+            })
 
         # ========================================================================
         # ANTIMERIDIAN FIX - Split geometries crossing 180° longitude (15 JAN 2026)
@@ -313,6 +352,10 @@ class VectorToPostGISHandler:
         if antimeridian_count > 0:
             gdf['geometry'] = fixed_geoms
             logger.warning(f"🌍 Fixed {antimeridian_count} geometries crossing the antimeridian (180° longitude)")
+            emit("antimeridian_fix", {
+                "fixed": int(antimeridian_count),
+                "total_features": len(gdf)
+            })
         else:
             logger.debug("No antimeridian-crossing geometries detected")
 
@@ -351,6 +394,12 @@ class VectorToPostGISHandler:
         # Log after normalization
         type_counts_after = gdf.geometry.geom_type.value_counts().to_dict()
         logger.info(f"Geometry types after normalization: {type_counts_after}")
+
+        emit("geometry_normalization", {
+            "types_before": type_counts,
+            "types_after": type_counts_after,
+            "features": len(gdf)
+        })
 
         # ========================================================================
         # POLYGON WINDING ORDER - Enforce CCW exterior rings (15 JAN 2026)
@@ -399,6 +448,10 @@ class VectorToPostGISHandler:
             logger.info("🔄 Enforcing polygon winding order (CCW exterior, CW holes) for MVT compatibility")
             gdf['geometry'] = gdf.geometry.apply(orient_polygon)
             logger.info("✅ Polygon winding order normalized")
+            emit("winding_order_fix", {
+                "polygons_reoriented": len(gdf),
+                "geometry_types": list(type_counts_after.keys())
+            })
 
         # ========================================================================
         # VALIDATE POSTGIS GEOMETRY TYPE SUPPORT (12 NOV 2025)
@@ -436,6 +489,12 @@ class VectorToPostGISHandler:
             raise ValueError(error_msg)
 
         logger.info(f"✅ All geometry types supported by PostGIS: {unique_types}")
+
+        emit("postgis_type_validation", {
+            "geometry_types": list(unique_types),
+            "features": len(gdf),
+            "valid": True
+        })
 
         # ========================================================================
         # DATETIME VALIDATION - Sanitize out-of-range timestamps (30 DEC 2025)
@@ -489,14 +548,34 @@ class VectorToPostGISHandler:
 
         if self.last_warnings:
             logger.info(f"📋 {len(self.last_warnings)} datetime warning(s) recorded for job results")
+            emit("datetime_validation", {
+                "warnings": len(self.last_warnings),
+                "columns_checked": len([c for c in gdf.columns if c != 'geometry' and pd.api.types.is_datetime64_any_dtype(gdf[c])])
+            })
 
         # Reproject to EPSG:4326 if needed
+        original_crs = str(gdf.crs) if gdf.crs else None
         if gdf.crs and gdf.crs != "EPSG:4326":
             logger.info(f"Reprojecting from {gdf.crs} to EPSG:4326")
             gdf = gdf.to_crs("EPSG:4326")
+            emit("crs_reprojection", {
+                "from_crs": original_crs,
+                "to_crs": "EPSG:4326",
+                "features": len(gdf)
+            })
         elif not gdf.crs:
             logger.warning("No CRS defined, assuming EPSG:4326")
             gdf = gdf.set_crs("EPSG:4326")
+            emit("crs_assignment", {
+                "assigned_crs": "EPSG:4326",
+                "features": len(gdf),
+                "reason": "No CRS defined in source"
+            })
+        else:
+            emit("crs_verified", {
+                "crs": "EPSG:4326",
+                "features": len(gdf)
+            })
 
         # Clean column names (lowercase, replace spaces/special chars)
         gdf.columns = [
@@ -804,6 +883,12 @@ class VectorToPostGISHandler:
             schema: Schema name
             indexes: Index configuration (spatial, attributes, temporal)
         """
+        # Validate chunk is not empty
+        if len(chunk) == 0:
+            raise ValueError(
+                f"Cannot create table {schema}.{table_name}: chunk is empty (0 rows)"
+            )
+
         # Get geometry type from first feature
         # After normalization, all geometries should be uniform Multi- types
         geom_type = chunk.geometry.iloc[0].geom_type.upper()
@@ -1377,7 +1462,7 @@ class VectorToPostGISHandler:
                         WHERE table_schema = %s AND table_name = %s
                     )
                 """, (schema, table_name))
-                table_exists = cur.fetchone()[0]
+                table_exists = cur.fetchone()['exists']
 
                 if table_exists:
                     if not overwrite:
@@ -1391,6 +1476,12 @@ class VectorToPostGISHandler:
                         schema=sql.Identifier(schema),
                         table=sql.Identifier(table_name)
                     ))
+
+                # Validate GeoDataFrame is not empty
+                if len(gdf) == 0:
+                    raise ValueError(
+                        f"Cannot create table {schema}.{table_name}: GeoDataFrame is empty (0 rows)"
+                    )
 
                 # Detect geometry type from first feature
                 geom_type = gdf.geometry.iloc[0].geom_type.upper()

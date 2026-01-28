@@ -1969,8 +1969,9 @@ def _build_swimlane_data(job, tasks, events) -> dict:
     else:
         ui_status = 'pending'
 
-    # Try to get stage definitions from job type
+    # Try to get stage definitions and validation checkpoints from job type
     stage_definitions = []
+    validation_checkpoints = []  # Expected validation steps for swimlane
     try:
         from jobs import get_job_class
         job_type = job.job_type if hasattr(job, 'job_type') else None
@@ -1978,6 +1979,8 @@ def _build_swimlane_data(job, tasks, events) -> dict:
             job_class = get_job_class(job_type)
             if job_class and hasattr(job_class, 'stages'):
                 stage_definitions = job_class.stages
+            if job_class and hasattr(job_class, 'validation_checkpoints'):
+                validation_checkpoints = job_class.validation_checkpoints
     except Exception:
         pass  # Fall back to inferring from tasks
 
@@ -1992,6 +1995,7 @@ def _build_swimlane_data(job, tasks, events) -> dict:
     # Index events by task_id for quick lookup
     events_by_task = {}
     stage_events = {}  # stage_num -> list of stage-level events
+    checkpoint_events = {}  # stage_num -> list of checkpoint events (validation steps)
     for event in events:
         event_dict = event if isinstance(event, dict) else event.to_dict()
         task_id = event_dict.get('task_id')
@@ -2006,6 +2010,11 @@ def _build_swimlane_data(job, tasks, events) -> dict:
             if stage_num not in stage_events:
                 stage_events[stage_num] = []
             stage_events[stage_num].append(event_dict)
+        elif stage_num and event_type == 'checkpoint':
+            # Checkpoint events (validation steps) - show as pseudo-tasks
+            if stage_num not in checkpoint_events:
+                checkpoint_events[stage_num] = []
+            checkpoint_events[stage_num].append(event_dict)
 
     # Build stages array
     stages = []
@@ -2029,6 +2038,79 @@ def _build_swimlane_data(job, tasks, events) -> dict:
         total_tasks = len(stage_tasks)
 
         task_items = []
+
+        # Add validation checkpoints as pseudo-task chips
+        # Shows expected steps as pending, completed when event is recorded
+        if stage_num == 1 and validation_checkpoints:
+            # Get set of completed checkpoint names from recorded events
+            recorded_checkpoints = checkpoint_events.get(stage_num, [])
+            completed_names = set()
+            for ckpt in recorded_checkpoints:
+                # Match by checkpoint_name which contains the event name
+                ckpt_name = ckpt.get('checkpoint_name', '')
+                # Extract the event name from the label (e.g., "Loaded 1234 features" -> check for "file_loaded")
+                event_data = ckpt.get('event_data', {})
+                # Also store the full checkpoint_name for display
+                completed_names.add(ckpt_name)
+
+            # Build checkpoint items from expected list
+            for i, expected in enumerate(validation_checkpoints):
+                expected_name = expected.get('name', '')
+                expected_label = expected.get('label', expected_name)
+
+                # Check if this checkpoint has been completed
+                # Match by _event_name stored in event_data
+                is_completed = False
+                actual_label = expected_label
+
+                for ckpt in recorded_checkpoints:
+                    event_data = ckpt.get('event_data', {})
+                    recorded_name = event_data.get('_event_name', '')
+
+                    if recorded_name == expected_name:
+                        is_completed = True
+                        # Use the actual label from the recorded event (has dynamic details)
+                        actual_label = ckpt.get('checkpoint_name', expected_label)
+                        break
+
+                # Fallback: check if expected_name is in checkpoint_name
+                if not is_completed:
+                    for completed in completed_names:
+                        if expected_name.replace('_', ' ') in completed.lower():
+                            is_completed = True
+                            break
+
+                expected_label = actual_label
+
+                task_items.append({
+                    'task_id': f"ckpt-{i}",
+                    'label': expected_label,
+                    'status': 'completed' if is_completed else 'pending',
+                    'has_queued': is_completed,
+                    'has_started': is_completed,
+                    'has_completed': is_completed,
+                    'has_failed': False,
+                    'error_message': None,
+                    'is_checkpoint': True
+                })
+        else:
+            # Fallback: show only recorded checkpoints (original behavior)
+            stage_checkpoints = checkpoint_events.get(stage_num, [])
+            for ckpt in stage_checkpoints:
+                ckpt_label = ckpt.get('checkpoint_name', 'Checkpoint')
+                ckpt_status = ckpt.get('event_status', 'success')
+                task_items.append({
+                    'task_id': f"ckpt-{len(task_items)}",
+                    'label': ckpt_label,
+                    'status': 'completed' if ckpt_status == 'success' else ckpt_status,
+                    'has_queued': True,
+                    'has_started': True,
+                    'has_completed': ckpt_status == 'success',
+                    'has_failed': ckpt_status == 'failure',
+                    'error_message': None,
+                    'is_checkpoint': True
+                })
+
         for task in stage_tasks:
             task_id = task.task_id if hasattr(task, 'task_id') else str(task.get('task_id', ''))
             task_status = 'pending'

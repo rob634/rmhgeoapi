@@ -629,6 +629,13 @@ class VectorToPostGISHandler:
 
                 logger.info(f"✅ Simplified: {vertices_before:,} → {vertices_after:,} vertices ({reduction:.1f}% reduction)")
 
+                emit("geometry_simplification", {
+                    "vertices_before": int(vertices_before),
+                    "vertices_after": int(vertices_after),
+                    "reduction_percent": round(reduction, 1),
+                    "tolerance": tolerance
+                })
+
             # Quantization (coordinate precision reduction)
             if geometry_params.get("quantize"):
                 quantize = geometry_params["quantize"]
@@ -644,6 +651,11 @@ class VectorToPostGISHandler:
 
                     logger.info(f"✅ Quantized coordinates to grid: {snap_to_grid}")
 
+                    emit("geometry_quantization", {
+                        "grid_size": snap_to_grid,
+                        "features": len(gdf)
+                    })
+
                 except ImportError:
                     logger.warning("⚠️  Shapely 2.0+ required for quantization - skipping (install: pip install shapely>=2.0)")
 
@@ -652,6 +664,10 @@ class VectorToPostGISHandler:
     def calculate_optimal_chunk_size(self, gdf: gpd.GeoDataFrame) -> int:
         """
         Calculate optimal chunk size based on data characteristics.
+
+        NOTE: This method is optimized for Function App execution where each chunk
+        is pickled to blob storage and processed by a separate function invocation.
+        For Docker with connection pooling, use larger chunk sizes (50K-100K) directly.
 
         Considers:
         - Number of columns (more columns = smaller chunks)
@@ -663,9 +679,14 @@ class VectorToPostGISHandler:
             gdf: GeoDataFrame to analyze
 
         Returns:
-            Optimal chunk size (rows per chunk)
+            Optimal chunk size (rows per chunk), range 100-5000 for Function App
         """
-        # Base chunk size
+        # Defensive check - empty GeoDataFrame returns minimum
+        if len(gdf) == 0:
+            logger.warning("Empty GeoDataFrame passed to calculate_optimal_chunk_size, returning minimum")
+            return 100
+
+        # Base chunk size (conservative for Function App with pickle serialization)
         base_size = 1000
 
         # Factor 1: Column count
@@ -732,7 +753,8 @@ class VectorToPostGISHandler:
         # Calculate optimal chunk size
         optimal_size = int(base_size * col_factor * type_factor * geom_factor)
 
-        # Enforce bounds (minimum 100, maximum 5000)
+        # Enforce bounds for Function App (minimum 100, maximum 5000)
+        # Docker uses 50K-100K chunks directly - see handler_vector_docker_complete.py
         optimal_size = max(100, min(5000, optimal_size))
 
         logger.info(f"Calculated optimal chunk size: {optimal_size} rows")
@@ -744,6 +766,10 @@ class VectorToPostGISHandler:
         """
         Split GeoDataFrame into chunks for parallel upload.
 
+        NOTE: This method is used by Function App workflow where chunks are pickled
+        to blob storage. For Docker with connection pooling, use direct iteration
+        with larger chunk sizes (see handler_vector_docker_complete.py).
+
         If chunk_size not provided, automatically calculates optimal size based on:
         - Column count and types
         - Geometry complexity
@@ -751,12 +777,17 @@ class VectorToPostGISHandler:
 
         Args:
             gdf: GeoDataFrame to split
-            chunk_size: Rows per chunk (default: None, auto-calculate)
+            chunk_size: Rows per chunk (default: None, auto-calculate for Function App)
 
         Returns:
-            List of GeoDataFrame chunks
+            List of GeoDataFrame chunks (empty list if gdf is empty)
         """
-        # Auto-calculate if not provided
+        # Defensive check - empty GeoDataFrame returns empty list
+        if len(gdf) == 0:
+            logger.warning("Empty GeoDataFrame passed to chunk_gdf, returning empty list")
+            return []
+
+        # Auto-calculate if not provided (optimized for Function App)
         if chunk_size is None:
             chunk_size = self.calculate_optimal_chunk_size(gdf)
 

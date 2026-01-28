@@ -181,10 +181,10 @@ class SchemaManager:
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT EXISTS(SELECT 1 FROM information_schema.schemata WHERE schema_name = %s)",
+                    "SELECT EXISTS(SELECT 1 FROM information_schema.schemata WHERE schema_name = %s) as exists",
                     (self.app_schema,)
                 )
-                exists = cur.fetchone()[0]
+                exists = cur.fetchone()['exists']
                 logger.debug(f"🔍 Schema '{self.app_schema}' exists: {exists}")
                 return exists
                 

@@ -73,7 +73,7 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
             - file_extension: File format
             - table_name: Target PostGIS table
             - schema: Target schema (default: geo)
-            - chunk_size: Rows per batch (default: 20000)
+            - chunk_size: Rows per batch (default: 100000 for Docker)
             - ... (see job definition for full list)
         context: Optional task context with checkpoint support
 
@@ -110,12 +110,27 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
     checkpoints = []
     checkpoint_data = {}
     data_warnings = []
+    validation_events = []  # Fine-grained validation events for swimlane
 
     def checkpoint(name: str, data: Dict[str, Any]):
         """Record a checkpoint for progress tracking."""
         checkpoints.append(name)
         checkpoint_data[name] = data
         logger.info(f"[{job_id[:8]}] Checkpoint: {name}")
+
+    def emit_validation_event(event_name: str, details: Dict[str, Any]):
+        """
+        Record a fine-grained validation event for the swimlane UI.
+
+        These events are collected and emitted to the job event system
+        to show detailed progress in the events timeline.
+        """
+        validation_events.append({
+            "event_name": event_name,
+            "details": details,
+            "timestamp": time.time()
+        })
+        logger.info(f"[{job_id[:8]}] Validation: {event_name} - {details}")
 
     try:
         # =====================================================================
@@ -128,7 +143,8 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
             container_name=container_name,
             file_extension=file_extension,
             parameters=parameters,
-            job_id=job_id
+            job_id=job_id,
+            event_callback=emit_validation_event
         )
         data_warnings.extend(warnings)
 
@@ -139,6 +155,9 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
             "columns": load_info['columns'],
             "file_size_mb": load_info['file_size_mb']
         })
+
+        # Record validation events to job_events table for swimlane UI
+        _record_validation_events(job_id, validation_events)
 
         # =====================================================================
         # PHASE 2: Create PostGIS Table and Metadata
@@ -267,10 +286,19 @@ def _load_and_validate_source(
     container_name: str,
     file_extension: str,
     parameters: Dict[str, Any],
-    job_id: str
+    job_id: str,
+    event_callback: Optional[callable] = None
 ) -> tuple:
     """
     Load source file and validate geometry using shared core module.
+
+    Args:
+        blob_name: Source file path in container
+        container_name: Blob container name
+        file_extension: File format
+        parameters: Job parameters
+        job_id: Job ID for logging
+        event_callback: Optional callback for fine-grained validation events
 
     Returns:
         Tuple of (GeoDataFrame, load_info, validation_info, warnings)
@@ -284,10 +312,22 @@ def _load_and_validate_source(
         log_gdf_memory
     )
 
+    # Helper to emit events
+    def emit(event_name: str, details: Dict[str, Any]):
+        if event_callback:
+            event_callback(event_name, details)
+
     # Build converter params (handles CSV lat/lon/wkt merging)
     converter_params = parameters.get('converter_params', {}) or {}
     if file_extension == 'csv':
         converter_params = build_csv_converter_params(parameters, converter_params)
+
+    # Emit file download start event
+    emit("file_download_start", {
+        "blob_name": blob_name,
+        "container": container_name,
+        "format": file_extension
+    })
 
     # Load file using shared core function
     gdf, load_info = load_vector_source(
@@ -298,17 +338,31 @@ def _load_and_validate_source(
         job_id=job_id
     )
 
+    # Emit file loaded event
+    emit("file_loaded", {
+        "features": len(gdf),
+        "file_size_mb": load_info['file_size_mb'],
+        "original_crs": load_info['original_crs'],
+        "columns": len(load_info['columns'])
+    })
+
     # Apply column mapping if provided
     column_mapping = parameters.get('column_mapping')
     if column_mapping:
         gdf = apply_column_mapping(gdf, column_mapping, job_id)
+        emit("column_mapping_applied", {
+            "mappings": len(column_mapping),
+            "columns_renamed": list(column_mapping.keys())
+        })
 
     # Validate and prepare using shared core function
+    # Pass event_callback for fine-grained validation events
     geometry_params = parameters.get('geometry_params', {})
     validated_gdf, validation_info, warnings = validate_and_prepare(
         gdf=gdf,
         geometry_params=geometry_params,
-        job_id=job_id
+        job_id=job_id,
+        event_callback=event_callback
     )
 
     # Extract geometry info
@@ -316,6 +370,14 @@ def _load_and_validate_source(
     validation_info['geometry_type'] = geom_info['geometry_type']
 
     log_gdf_memory(validated_gdf, "after_validation", job_id)
+
+    # Emit validation complete event
+    emit("validation_complete", {
+        "original_features": validation_info['original_count'],
+        "validated_features": validation_info['validated_count'],
+        "filtered_features": validation_info['filtered_count'],
+        "geometry_type": geom_info['geometry_type']
+    })
 
     return validated_gdf, load_info, validation_info, warnings
 
@@ -610,3 +672,94 @@ def _create_stac_item(
             'success': False,
             'error': str(e)
         }
+
+
+def _record_validation_events(job_id: str, validation_events: List[Dict[str, Any]]):
+    """
+    Record fine-grained validation events to job_events table.
+
+    These events populate the swimlane UI with detailed validation steps
+    like null geometry removal, CRS reprojection, geometry fixing, etc.
+
+    Args:
+        job_id: Job ID to associate events with
+        validation_events: List of event dicts from emit_validation_event callback
+    """
+    if not validation_events:
+        return
+
+    try:
+        from infrastructure import JobEventRepository
+        from core.models.job_event import JobEventType, JobEventStatus
+
+        event_repo = JobEventRepository()
+
+        for event in validation_events:
+            event_name = event.get('event_name', 'unknown')
+            details = event.get('details', {})
+
+            # Map validation event names to user-friendly checkpoint names
+            checkpoint_name = _get_checkpoint_label(event_name, details)
+
+            # Store event_name in event_data for swimlane matching
+            event_data_with_name = {**details, '_event_name': event_name}
+
+            event_repo.record_job_event(
+                job_id=job_id,
+                event_type=JobEventType.CHECKPOINT,
+                event_status=JobEventStatus.SUCCESS,
+                stage=1,  # All validation happens in stage 1
+                checkpoint_name=checkpoint_name,
+                event_data=event_data_with_name
+            )
+
+        logger.info(f"[{job_id[:8]}] Recorded {len(validation_events)} validation events")
+
+    except Exception as e:
+        # Non-fatal - don't fail the job if event recording fails
+        logger.warning(f"[{job_id[:8]}] Failed to record validation events: {e}")
+
+
+def _get_checkpoint_label(event_name: str, details: Dict[str, Any]) -> str:
+    """
+    Generate user-friendly checkpoint label for swimlane UI.
+
+    Args:
+        event_name: Internal event name (e.g., 'null_geometry_removal')
+        details: Event details dict
+
+    Returns:
+        Human-readable label for the checkpoint
+    """
+    # Map event names to descriptive labels with dynamic details
+    label_map = {
+        'file_download_start': lambda d: f"Download {d.get('blob_name', 'file').split('/')[-1]}",
+        'file_loaded': lambda d: f"Loaded {d.get('features', 0):,} features ({d.get('file_size_mb', 0)}MB)",
+        'column_mapping_applied': lambda d: f"Rename {d.get('mappings', 0)} columns",
+        'null_geometry_removal': lambda d: f"Remove {d.get('removed', 0)} null geometries",
+        'null_geometry_check': lambda d: "Check null geometries",
+        'invalid_geometry_fix': lambda d: f"Fix {d.get('fixed', 0)} invalid geometries",
+        'force_2d': lambda d: f"Force 2D ({', '.join(d.get('dimensions_removed', []))})",
+        'antimeridian_fix': lambda d: f"Fix {d.get('fixed', 0)} antimeridian crossings",
+        'geometry_normalization': lambda d: f"Normalize to Multi-types",
+        'winding_order_fix': lambda d: "Fix polygon winding order",
+        'postgis_type_validation': lambda d: f"Validate {', '.join(d.get('geometry_types', []))}",
+        'datetime_validation': lambda d: f"Sanitize {d.get('warnings', 0)} datetime values",
+        'crs_reprojection': lambda d: f"Reproject {d.get('from_crs', '?')} → 4326",
+        'crs_assignment': lambda d: "Assign CRS EPSG:4326",
+        'crs_verified': lambda d: "Verify CRS EPSG:4326",
+        'geometry_simplification': lambda d: f"Simplify ({d.get('reduction_percent', 0)}% reduction)",
+        'geometry_quantization': lambda d: f"Quantize (grid={d.get('grid_size', 0)})",
+        'validation_complete': lambda d: f"Validated {d.get('validated_features', 0):,} features",
+    }
+
+    # Get the label generator function
+    label_fn = label_map.get(event_name)
+    if label_fn:
+        try:
+            return label_fn(details)
+        except Exception:
+            pass
+
+    # Fallback: Convert snake_case to Title Case
+    return event_name.replace('_', ' ').title()

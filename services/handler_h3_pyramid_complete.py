@@ -776,9 +776,9 @@ def _verify_pyramid(
         with conn.cursor() as cur:
             for res in sorted(resolutions):
                 cur.execute("""
-                    SELECT COUNT(*) FROM h3.cells WHERE resolution = %s
+                    SELECT COUNT(*) as cnt FROM h3.cells WHERE resolution = %s
                 """, (res,))
-                actual_count = cur.fetchone()[0]
+                actual_count = cur.fetchone()['cnt']
 
                 # Calculate expected (7^(res - base_res) * base_cells)
                 base_res = min(resolutions)

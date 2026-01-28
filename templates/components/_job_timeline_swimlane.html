@@ -130,10 +130,13 @@
             <div class="swimlane-task-flow">
                 {% if stage.tasks %}
                     {% for task in stage.tasks %}
-                    <div class="swimlane-task-chip task-{{ task.status }}"
+                    <div class="swimlane-task-chip task-{{ task.status }}{% if task.is_checkpoint %} checkpoint-chip{% endif %}"
                          title="{{ task.label }}{% if task.error_message %} - {{ task.error_message }}{% endif %}">
                         {# Status icon #}
-                        {% if task.status == 'completed' or task.status == 'complete' %}
+                        {% if task.is_checkpoint %}
+                        {# Checkpoint icon - smaller check #}
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                        {% elif task.status == 'completed' or task.status == 'complete' %}
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
                         {% elif task.status == 'failed' or task.status == 'error' %}
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
@@ -141,12 +144,14 @@
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle></svg>
                         {% endif %}
                         <span class="task-label">{{ task.label }}</span>
-                        {# Micro-dots showing event progression #}
+                        {# Micro-dots showing event progression (skip for checkpoints) #}
+                        {% if not task.is_checkpoint %}
                         <div class="task-micro-dots">
                             <span class="micro-dot{% if task.has_queued %} done{% endif %}" title="Queued"></span>
                             <span class="micro-dot{% if task.has_started %} done{% endif %}" title="Started"></span>
                             <span class="micro-dot{% if task.has_completed %} done{% elif task.has_failed %} failed{% endif %}" title="{% if task.has_failed %}Failed{% else %}Completed{% endif %}"></span>
                         </div>
+                        {% endif %}
                     </div>
                     {% if not loop.last %}
                     <span class="task-arrow">→</span>

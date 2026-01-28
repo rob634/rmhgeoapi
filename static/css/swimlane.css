@@ -352,6 +352,23 @@
     color: white;
 }
 
+/* Checkpoint chips - smaller, lighter styling for validation steps */
+.swimlane-task-chip.checkpoint-chip {
+    padding: 4px 8px;
+    font-size: 10px;
+    border-radius: 10px;
+    opacity: 0.9;
+}
+
+.swimlane-task-chip.checkpoint-chip.task-completed {
+    background: rgba(76, 175, 80, 0.7);
+}
+
+.swimlane-task-chip.checkpoint-chip svg {
+    width: 8px;
+    height: 8px;
+}
+
 /* Micro-dots */
 .task-micro-dots {
     display: flex;

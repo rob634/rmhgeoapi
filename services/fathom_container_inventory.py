@@ -439,12 +439,12 @@ def fathom_assign_grid_cells(params: Dict[str, Any]) -> Dict[str, Any]:
             with conn.cursor() as cur:
                 cur.execute(
                     sql.SQL("""
-                        SELECT COUNT(*) FROM {schema}.etl_source_files
+                        SELECT COUNT(*) as cnt FROM {schema}.etl_source_files
                         WHERE etl_type = 'fathom'
                           AND (source_metadata->>'grid_cell') IS NULL
                     """).format(schema=sql.Identifier("app"))
                 )
-                count = cur.fetchone()[0]
+                count = cur.fetchone()['cnt']
 
         logger.info(f"🔍 DRY RUN - {count} records would be updated")
         return {

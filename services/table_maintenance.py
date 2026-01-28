@@ -91,9 +91,9 @@ def schedule_vacuum_async(
                 cur.execute("""
                     SELECT EXISTS (
                         SELECT 1 FROM pg_extension WHERE extname = 'pg_cron'
-                    )
+                    ) as exists
                 """)
-                pg_cron_available = cur.fetchone()[0]
+                pg_cron_available = cur.fetchone()['exists']
 
                 if not pg_cron_available:
                     logger.warning(
@@ -108,10 +108,10 @@ def schedule_vacuum_async(
 
                 # Schedule job for next minute (fires once then we unschedule)
                 cur.execute(
-                    "SELECT cron.schedule(%s, '* * * * *', %s)",
+                    "SELECT cron.schedule(%s, '* * * * *', %s) as job_id",
                     (job_name, f'VACUUM ANALYZE {table_name}')
                 )
-                job_id = cur.fetchone()[0]
+                job_id = cur.fetchone()['job_id']
 
                 # Immediately unschedule (job is already queued for next minute)
                 cur.execute("SELECT cron.unschedule(%s)", (job_name,))

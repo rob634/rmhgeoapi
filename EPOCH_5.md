@@ -31,10 +31,12 @@
 4. [Current State Analysis](#current-state-analysis)
 5. [Architecture: Dedicated Orchestrator](#architecture-dedicated-orchestrator)
 6. [Workflow Definition Format](#workflow-definition-format)
-7. [The DAG Engine](#the-dag-engine)
-8. [Integration with Workers](#integration-with-workers)
-9. [Implementation Phases](#implementation-phases)
-10. [Code Sketches](#code-sketches)
+7. [Illustration: Why DAGs Matter Even for Linear Workflows](#illustration-why-dags-matter-even-for-linear-workflows)
+8. [The DAG Engine](#the-dag-engine)
+9. [Integration with Workers](#integration-with-workers)
+10. [Code Reuse Assessment](#code-reuse-assessment)
+11. [High-Level Project Plan](#high-level-project-plan)
+12. [Implementation Phases](#implementation-phases)
 
 ---
 
@@ -659,6 +661,288 @@ depends_on:
         - node_b
     - node_c
 ```
+
+---
+
+## Illustration: Why DAGs Matter Even for Linear Workflows
+
+### The process_raster Job
+
+The current `process_raster` job is essentially linear:
+
+```
+validate_input → reproject → cog_translate → update_stac
+```
+
+This is the **simplest possible DAG** - a straight chain. But expressing it explicitly as a DAG still provides major benefits.
+
+### As a YAML Workflow Definition
+
+```yaml
+name: process_raster
+version: 1
+description: |
+  Simple raster processing: validate, reproject to 4326,
+  create COG, register to STAC catalog.
+
+inputs:
+  container_name:
+    type: string
+    required: true
+  file_name:
+    type: string
+    required: true
+  dataset_id:
+    type: string
+    required: true
+
+nodes:
+  START:
+    type: start
+    next: validate_input
+
+  validate_input:
+    type: task
+    handler: raster_validate
+    queue: functionapp-tasks
+    timeout_seconds: 300
+    params:
+      container_name: "{{ inputs.container_name }}"
+      file_name: "{{ inputs.file_name }}"
+      dataset_id: "{{ inputs.dataset_id }}"
+    next: reproject
+
+  reproject:
+    type: task
+    handler: raster_reproject
+    queue: container-tasks
+    timeout_seconds: 3600
+    retry:
+      max_attempts: 3
+      backoff: exponential
+    params:
+      target_crs: "EPSG:4326"
+      source_path: "{{ nodes.validate_input.output.validated_path }}"
+    next: cog_translate
+
+  cog_translate:
+    type: task
+    handler: raster_cog_translate
+    queue: container-tasks
+    timeout_seconds: 7200
+    retry:
+      max_attempts: 3
+      backoff: exponential
+    params:
+      compression: "DEFLATE"
+      tile_size: 512
+      input_path: "{{ nodes.reproject.output.reprojected_path }}"
+    next: update_stac
+
+  update_stac:
+    type: task
+    handler: stac_register_item
+    queue: functionapp-tasks
+    timeout_seconds: 300
+    params:
+      cog_path: "{{ nodes.cog_translate.output.cog_path }}"
+      bbox: "{{ nodes.cog_translate.output.bbox }}"
+      properties: "{{ nodes.validate_input.output.metadata }}"
+    next: END
+
+  END:
+    type: end
+```
+
+### Visual Representation
+
+```
+┌─────────────────┐
+│     START       │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ validate_input  │  ← Function App (lightweight)
+│                 │    Timeout: 5 min
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│    reproject    │  ← Docker Worker (heavy)
+│                 │    Timeout: 60 min, 3 retries
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  cog_translate  │  ← Docker Worker (heavy)
+│                 │    Timeout: 2 hours, 3 retries
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│   update_stac   │  ← Function App (lightweight)
+│                 │    Timeout: 5 min
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│      END        │
+└─────────────────┘
+```
+
+### Benefit 1: Granular Retries (Critical for FATHOM 8TB Dataset)
+
+With the current system, if `cog_translate` fails after 90 minutes of work:
+
+```
+CURRENT (Epoch 4):
+├── Job fails entirely
+├── Must restart from beginning (validate again, reproject again)
+├── 90 minutes of cog_translate work lost
+├── For FATHOM: potentially hours of reprocessing per retry
+└── Manual intervention often required
+```
+
+With DAG:
+
+```
+EPOCH 5:
+├── validate_input: completed ✓ (output stored)
+├── reproject: completed ✓ (output stored)
+├── cog_translate: FAILED ✗
+│   └── Retry 1: starts from cog_translate (not validate!)
+│   └── Uses reproject.output.reprojected_path from database
+├── update_stac: pending (waiting)
+└── 90 minutes preserved, not wasted
+```
+
+**For an 8TB FATHOM dataset**, this means:
+- If tile #47 of 100 fails during COG creation → retry only tile #47
+- If STAC registration fails → retry STAC registration, not the entire pipeline
+- Network blip during upload → retry upload, not reprocessing
+
+### Benefit 2: Explicit Data Flow
+
+The `params_from_node` pattern makes data dependencies explicit:
+
+```yaml
+cog_translate:
+  params:
+    input_path: "{{ nodes.reproject.output.reprojected_path }}"
+    #            ↑ Explicit: "I need this output from reproject"
+```
+
+**Current system**: Data flow is implicit in handler code, hard to trace.
+
+**DAG system**: One glance at YAML shows exactly what each node needs and produces.
+
+### Benefit 3: Independent Timeout/Retry per Node
+
+```yaml
+validate_input:
+  timeout_seconds: 300        # 5 min - should be fast
+  retry: none                 # Validation shouldn't need retries
+
+cog_translate:
+  timeout_seconds: 7200       # 2 hours - large files need time
+  retry:
+    max_attempts: 3           # Transient failures happen
+    backoff: exponential      # Don't hammer on failure
+```
+
+**Current system**: One timeout for entire job, retry logic scattered in code.
+
+### Benefit 4: Easy Extensibility
+
+Adding parallel preview generation becomes trivial:
+
+```yaml
+# BEFORE: Linear chain
+validate → reproject → cog_translate → update_stac
+
+# AFTER: Add preview in parallel (zero changes to existing nodes!)
+nodes:
+  reproject:
+    next: [cog_translate, generate_preview]  # Fan out to both
+
+  generate_preview:           # NEW - runs in parallel with cog_translate
+    type: task
+    handler: raster_thumbnail
+    queue: functionapp-tasks
+    params:
+      source_path: "{{ nodes.reproject.output.reprojected_path }}"
+
+  update_stac:
+    depends_on:
+      all_of: [cog_translate, generate_preview]  # Wait for BOTH
+    params:
+      preview_url: "{{ nodes.generate_preview.output.thumbnail_url }}"
+```
+
+Visual:
+
+```
+         ┌─────────────────┐
+         │ validate_input  │
+         └────────┬────────┘
+                  │
+                  ▼
+         ┌─────────────────┐
+         │    reproject    │
+         └────────┬────────┘
+                  │
+        ┌─────────┴─────────┐
+        │                   │
+        ▼                   ▼
+┌───────────────┐   ┌───────────────┐
+│generate_preview   │ cog_translate │
+│ (Function App)│   │(Docker Worker)│
+└───────┬───────┘   └───────┬───────┘
+        │                   │
+        └─────────┬─────────┘
+                  │
+                  ▼
+         ┌─────────────────┐
+         │   update_stac   │
+         └─────────────────┘
+```
+
+The orchestrator handles the fan-out and fan-in automatically. No code changes in handlers.
+
+### Benefit 5: State Visibility
+
+Every node has independent status in the database:
+
+```sql
+SELECT node_id, status, started_at, completed_at, retry_count
+FROM app.dag_node_states
+WHERE instance_id = 'job-xyz';
+
+ node_id        | status    | started_at          | completed_at        | retry_count
+----------------+-----------+---------------------+---------------------+-------------
+ validate_input | completed | 2026-01-28 10:00:00 | 2026-01-28 10:00:15 | 0
+ reproject      | completed | 2026-01-28 10:00:15 | 2026-01-28 10:15:30 | 0
+ cog_translate  | running   | 2026-01-28 10:15:31 | NULL                | 1
+ update_stac    | pending   | NULL                | NULL                | 0
+```
+
+**Current system**: "Is the job on stage 2 or 3? Did task 5 complete?" - requires detective work.
+
+**DAG system**: Each node's state is independently queryable with full history.
+
+### Summary: Even Linear Workflows Benefit
+
+| Aspect | Current (Epoch 4) | DAG (Epoch 5) |
+|--------|-------------------|---------------|
+| **Retry granularity** | Entire job | Individual node |
+| **State visibility** | Job-level status | Per-node status |
+| **Data flow** | Implicit in code | Explicit in YAML |
+| **Timeouts** | One per job | Per node |
+| **Adding parallelism** | Code rewrite | YAML change |
+| **Failure recovery** | Start over | Resume from failure |
+
+For large datasets like **FATHOM (8TB)**, granular retries alone justify the DAG approach. Hours of processing aren't wasted on transient failures.
 
 ---
 
@@ -1864,3 +2148,4 @@ rmhgeo-orchestrator/
 *Document created: 27 JAN 2026*
 *Revised: 27 JAN 2026 - Reframed as Epoch transition, added dedicated orchestrator as primary architecture, honest assessment of "last task turns out lights" problems*
 *Revised: 27 JAN 2026 - Added code reuse assessment and high-level project plan for parallel development*
+*Revised: 28 JAN 2026 - Added "Illustration: Why DAGs Matter Even for Linear Workflows" section with process_raster example, emphasizing granular retries (critical for FATHOM 8TB) and extensibility*

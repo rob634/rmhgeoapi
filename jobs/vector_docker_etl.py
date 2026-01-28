@@ -74,6 +74,23 @@ class VectorDockerETLJob(JobBaseMixin, JobBase):
         }
     ]
 
+    # Expected validation checkpoints for swimlane UI (28 JAN 2026)
+    # These define the expected sequence of validation steps shown in the timeline.
+    # Each checkpoint is marked as 'pending' until the corresponding event is recorded.
+    validation_checkpoints: List[Dict[str, Any]] = [
+        {"name": "file_download_start", "label": "Download file", "phase": "load"},
+        {"name": "file_loaded", "label": "Parse file", "phase": "load"},
+        {"name": "null_geometry_check", "label": "Check null geometries", "phase": "validate"},
+        {"name": "invalid_geometry_fix", "label": "Fix invalid geometries", "phase": "validate"},
+        {"name": "crs_reprojection", "label": "Reproject CRS", "phase": "validate"},
+        {"name": "geometry_normalization", "label": "Normalize geometry types", "phase": "validate"},
+        {"name": "postgis_type_validation", "label": "Validate PostGIS types", "phase": "validate"},
+        {"name": "validation_complete", "label": "Validation complete", "phase": "validate"},
+        {"name": "table_created", "label": "Create PostGIS table", "phase": "upload"},
+        {"name": "style_created", "label": "Create default style", "phase": "upload"},
+        {"name": "stac_created", "label": "Register STAC item", "phase": "catalog"},
+    ]
+
     # Declarative validation schema
     parameters_schema = {
         # === Source ===

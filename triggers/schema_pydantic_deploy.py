@@ -435,49 +435,49 @@ class PydanticSchemaDeployTrigger:
             with conn.cursor() as cur:
                 # Count tables
                 cur.execute("""
-                    SELECT COUNT(*) 
-                    FROM information_schema.tables 
-                    WHERE table_schema = %s 
+                    SELECT COUNT(*) as cnt
+                    FROM information_schema.tables
+                    WHERE table_schema = %s
                     AND table_type = 'BASE TABLE'
                 """, (self.config.app_schema,))
-                table_count = cur.fetchone()[0]
-                
+                table_count = cur.fetchone()['cnt']
+
                 # Get table names
                 cur.execute("""
-                    SELECT table_name 
-                    FROM information_schema.tables 
-                    WHERE table_schema = %s 
+                    SELECT table_name
+                    FROM information_schema.tables
+                    WHERE table_schema = %s
                     AND table_type = 'BASE TABLE'
                     ORDER BY table_name
                 """, (self.config.app_schema,))
-                table_list = [row[0] for row in cur.fetchall()]
-                
+                table_list = [row['table_name'] for row in cur.fetchall()]
+
                 # Count functions
                 cur.execute("""
-                    SELECT COUNT(*) 
-                    FROM information_schema.routines 
+                    SELECT COUNT(*) as cnt
+                    FROM information_schema.routines
                     WHERE routine_schema = %s
                 """, (self.config.app_schema,))
-                function_count = cur.fetchone()[0]
-                
+                function_count = cur.fetchone()['cnt']
+
                 # Get function names
                 cur.execute("""
-                    SELECT routine_name 
-                    FROM information_schema.routines 
-                    WHERE routine_schema = %s 
+                    SELECT routine_name
+                    FROM information_schema.routines
+                    WHERE routine_schema = %s
                     ORDER BY routine_name
                 """, (self.config.app_schema,))
-                function_list = [row[0] for row in cur.fetchall()]
-                
+                function_list = [row['routine_name'] for row in cur.fetchall()]
+
                 # Count enums
                 cur.execute("""
-                    SELECT COUNT(*) 
-                    FROM pg_type t 
-                    JOIN pg_namespace n ON t.typnamespace = n.oid 
-                    WHERE n.nspname = %s 
+                    SELECT COUNT(*) as cnt
+                    FROM pg_type t
+                    JOIN pg_namespace n ON t.typnamespace = n.oid
+                    WHERE n.nspname = %s
                     AND t.typtype = 'e'
                 """, (self.config.app_schema,))
-                enum_count = cur.fetchone()[0]
+                enum_count = cur.fetchone()['cnt']
                 
                 return {
                     "tables": table_count,

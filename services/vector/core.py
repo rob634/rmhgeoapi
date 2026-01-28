@@ -39,6 +39,9 @@ import pandas as pd
 
 from util_logger import LoggerFactory, ComponentType, log_memory_checkpoint
 
+# Type alias for event callback (matches postgis_handler)
+EventCallback = Callable[[str, Dict[str, Any]], None]
+
 # Component-specific logger
 logger = LoggerFactory.create_logger(
     ComponentType.SERVICE,
@@ -223,7 +226,8 @@ def build_csv_converter_params(
 def validate_and_prepare(
     gdf: gpd.GeoDataFrame,
     geometry_params: Optional[Dict[str, Any]] = None,
-    job_id: str = "unknown"
+    job_id: str = "unknown",
+    event_callback: Optional[EventCallback] = None
 ) -> Tuple[gpd.GeoDataFrame, Dict[str, Any], List[str]]:
     """
     Validate geometries and prepare GeoDataFrame for PostGIS.
@@ -238,6 +242,9 @@ def validate_and_prepare(
         gdf: Input GeoDataFrame
         geometry_params: Geometry validation parameters
         job_id: Job ID for logging
+        event_callback: Optional callback for progress events.
+            Signature: callback(event_name: str, details: dict) -> None
+            Used by Docker ETL to emit fine-grained validation events.
 
     Returns:
         Tuple of (validated_gdf, validation_info, warnings_list)
@@ -251,7 +258,11 @@ def validate_and_prepare(
 
     # Validate and reproject to EPSG:4326
     handler = VectorToPostGISHandler()
-    validated_gdf = handler.prepare_gdf(gdf, geometry_params=geometry_params or {})
+    validated_gdf = handler.prepare_gdf(
+        gdf,
+        geometry_params=geometry_params or {},
+        event_callback=event_callback
+    )
 
     # Capture any warnings from prepare_gdf
     data_warnings = handler.last_warnings.copy() if hasattr(handler, 'last_warnings') and handler.last_warnings else []

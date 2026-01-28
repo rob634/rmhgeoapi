@@ -708,11 +708,12 @@ class StateManager:
                     else "Task execution failed - no result"
                 )
                 self.logger.debug(f"Completing failed task {task_id}: {error_msg[:100]}")
+                # Preserve result_data for failed tasks (contains traceback for debugging)
                 stage_completion = stage_completion_repo.complete_task_and_check_stage(
                     task_id=task_id,
                     job_id=job_id,
                     stage=stage,
-                    result_data={},
+                    result_data=task_result.result_data if task_result else {},
                     error_details=error_msg
                 )
 

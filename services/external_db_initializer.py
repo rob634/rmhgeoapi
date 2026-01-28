@@ -292,9 +292,9 @@ class ExternalDatabaseInitializer:
                     cur.execute("""
                         SELECT EXISTS (
                             SELECT 1 FROM pg_extension WHERE extname = 'postgis'
-                        )
+                        ) as exists
                     """)
-                    has_postgis = cur.fetchone()[0]
+                    has_postgis = cur.fetchone()['exists']
                     prereqs["checks"]["postgis_extension"] = has_postgis
                     if not has_postgis:
                         prereqs["missing"].append("PostGIS extension not installed")
@@ -304,10 +304,10 @@ class ExternalDatabaseInitializer:
                     pgstac_roles = ["pgstac_admin", "pgstac_ingest", "pgstac_read"]
                     for role in pgstac_roles:
                         cur.execute(
-                            "SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = %s)",
+                            "SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = %s) as exists",
                             (role,)
                         )
-                        exists = cur.fetchone()[0]
+                        exists = cur.fetchone()['exists']
                         prereqs["checks"][f"role_{role}"] = exists
                         if not exists:
                             prereqs["missing"].append(f"Role '{role}' does not exist")
@@ -318,9 +318,9 @@ class ExternalDatabaseInitializer:
 
                     # Check 4: Admin has CREATE privilege
                     cur.execute("""
-                        SELECT has_database_privilege(current_user, current_database(), 'CREATE')
+                        SELECT has_database_privilege(current_user, current_database(), 'CREATE') as can_create
                     """)
-                    can_create = cur.fetchone()[0]
+                    can_create = cur.fetchone()['can_create']
                     prereqs["checks"]["create_privilege"] = can_create
                     if not can_create:
                         prereqs["missing"].append("Admin UMI lacks CREATE privilege on database")

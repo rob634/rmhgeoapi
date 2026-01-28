@@ -336,14 +336,30 @@ class SubmitVectorInterface(BaseInterface):
             )
 
             # Check for existing request (idempotent)
+            # If overwrite=true, handle unpublish and reprocess (28 JAN 2026)
             platform_repo = PlatformRepository()
             existing = platform_repo.get_request(request_id)
+            overwrite_enabled = processing_options.get('overwrite', False)
+
             if existing:
-                return self._render_submit_success_platform({
-                    'request_id': request_id,
-                    'job_id': existing.job_id,
-                    'status': 'exists'
-                }, platform_payload)
+                if overwrite_enabled:
+                    # Overwrite mode: unpublish existing and reprocess
+                    logger.info(f"Overwrite enabled: unpublishing existing request {request_id[:16]}")
+                    try:
+                        from triggers.platform.submit import _handle_overwrite_unpublish
+                        _handle_overwrite_unpublish(existing, platform_repo)
+                    except Exception as unpublish_err:
+                        logger.error(f"Failed to unpublish before overwrite: {unpublish_err}")
+                        return self._render_submit_error(
+                            f"Overwrite failed: could not unpublish existing outputs. {unpublish_err}"
+                        )
+                else:
+                    # Normal idempotent behavior: return existing request
+                    return self._render_submit_success_platform({
+                        'request_id': request_id,
+                        'job_id': existing.job_id,
+                        'status': 'exists'
+                    }, platform_payload)
 
             # Translate to CoreMachine job parameters
             job_type, job_params = translate_to_coremachine(platform_req, config)

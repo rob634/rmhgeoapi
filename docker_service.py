@@ -1906,6 +1906,7 @@ async def interface_job_detail(request: Request, job_id: str):
         failure_context = event_repo.get_failure_context(job_id)
 
         # Get orchestrator URL for API links (Function App hosts job/task APIs)
+        from config import get_config
         config = get_config()
         orchestrator_url = getattr(config, 'etl_app_base_url', '') or ''
 
@@ -1949,6 +1950,7 @@ async def interface_job_events(request: Request, job_id: str):
         summary = event_repo.get_event_summary(job_id)
 
         # Get orchestrator URL for API links (Function App hosts job/task APIs)
+        from config import get_config
         config = get_config()
         orchestrator_url = getattr(config, 'etl_app_base_url', '') or ''
 

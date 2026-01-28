@@ -17,7 +17,7 @@
             </div>
             <div class="page-actions">
                 <a href="/interface/home" class="btn btn-secondary">Dashboard</a>
-                <a href="/api/jobs/{{ job_id }}/events" target="_blank" class="btn btn-secondary">
+                <a href="{{ orchestrator_url }}/api/jobs/{{ job_id }}/events" target="_blank" class="btn btn-secondary">
                     View API
                 </a>
             </div>
@@ -80,20 +80,20 @@
             </div>
             {% endif %}
 
-            {# Quick Links #}
+            {# Quick Links - API endpoints on Orchestrator (Function App) #}
             <div class="section-card">
                 <h4 class="section-title">API Endpoints</h4>
                 <div class="quick-links-list">
-                    <a href="/api/jobs/{{ job_id }}/events" target="_blank" class="link-badge">
+                    <a href="{{ orchestrator_url }}/api/jobs/{{ job_id }}/events" target="_blank" class="link-badge">
                         All Events
                     </a>
-                    <a href="/api/jobs/{{ job_id }}/events/summary" target="_blank" class="link-badge">
+                    <a href="{{ orchestrator_url }}/api/jobs/{{ job_id }}/events/summary" target="_blank" class="link-badge">
                         Event Summary
                     </a>
-                    <a href="/api/jobs/{{ job_id }}/events/failure" target="_blank" class="link-badge">
+                    <a href="{{ orchestrator_url }}/api/jobs/{{ job_id }}/events/failure" target="_blank" class="link-badge">
                         Failure Context
                     </a>
-                    <a href="/api/jobs/status/{{ job_id }}" target="_blank" class="link-badge">
+                    <a href="{{ orchestrator_url }}/api/jobs/status/{{ job_id }}" target="_blank" class="link-badge">
                         Job Status
                     </a>
                 </div>

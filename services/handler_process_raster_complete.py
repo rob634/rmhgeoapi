@@ -3,11 +3,12 @@
 # ============================================================================
 # STATUS: Services - Consolidated raster handler for Docker worker
 # PURPOSE: Single handler that does validate → COG → STAC in one execution
-# LAST_REVIEWED: 24 JAN 2026
+# LAST_REVIEWED: 27 JAN 2026
 # F7.18: Integrated with Docker Orchestration Framework (graceful shutdown)
 # F7.19: Real-time progress reporting for Workflow Monitor (19 JAN 2026)
 # F7.20: Resource metrics tracking (peak memory, CPU) for capacity planning
 # V0.8: Internal tiling decision based on file size (24 JAN 2026)
+# V0.8.2: Row/column tile naming + metadata.json for disaster recovery (27 JAN 2026)
 # ============================================================================
 """
 Process Raster Complete - Consolidated Docker Handler.
@@ -28,9 +29,15 @@ Single COG Mode (files <= threshold):
 
 Tiled Mode (files > threshold):
     1. Generate tiling scheme
-    2. Extract tiles
+    2. Extract tiles (tile_r{row}_c{col}.tif naming)
     3. Create COGs for each tile
     4. Create STAC collection (pgSTAC-based, no MosaicJSON)
+    5. Write metadata.json for disaster recovery
+
+V0.8.2 Tile Naming (27 JAN 2026):
+    Tiles use row/column naming: tile_r0_c0.tif, tile_r0_c1.tif, etc.
+    Output folder: silver-cogs/{job_id[:8]}/
+    Metadata file: silver-cogs/{job_id[:8]}/metadata.json
 
 Why Consolidated:
     - Docker has no timeout (unlike 10-min Function App limit)
@@ -55,7 +62,7 @@ Exports:
 
 import logging
 import time
-from typing import Dict, Any, Optional, Callable
+from typing import Dict, Any, Optional, Callable, List
 
 from util_logger import (
     get_memory_stats,
@@ -511,25 +518,63 @@ def _process_raster_tiled(
 # V0.8.1: MOUNT-BASED TILED WORKFLOW (27 JAN 2026)
 # =============================================================================
 
-def _get_mount_paths(job_id: str, config) -> Dict[str, 'Path']:
+def _generate_instance_prefix() -> str:
+    """
+    Generate unique file prefix from Docker instance ID + timestamp.
+
+    This ensures that if multiple Docker instances accidentally pick up the same
+    task (e.g., due to Service Bus lock expiry), they write to different paths
+    on the mounted storage, preventing file conflicts.
+
+    Returns:
+        12-character hex string unique to this processing attempt
+    """
+    import hashlib
+    import os
+    from datetime import datetime, timezone
+
+    # Get instance ID (Docker container ID or hostname)
+    instance_id = os.environ.get('WEBSITE_INSTANCE_ID', '')
+    if not instance_id:
+        instance_id = os.environ.get('HOSTNAME', 'unknown')
+
+    # Combine with high-precision timestamp
+    timestamp = datetime.now(timezone.utc).isoformat()
+    combined = f"{instance_id}_{timestamp}"
+
+    # Hash and truncate for compact unique prefix
+    return hashlib.sha256(combined.encode()).hexdigest()[:12]
+
+
+def _get_mount_paths(job_id: str, config, instance_prefix: Optional[str] = None) -> Dict[str, 'Path']:
     """
     Generate standard mount paths for a job.
 
     Args:
         job_id: Job identifier (uses first 8 chars for uniqueness)
         config: AppConfig instance
+        instance_prefix: Optional unique prefix for this processing instance.
+                        If provided, creates isolated directory to prevent conflicts
+                        when multiple instances process same job.
 
     Returns:
         Dict with Path objects for base, source, tiles, cogs directories
     """
     from pathlib import Path
 
-    base = Path(config.raster.etl_mount_path) / job_id[:8]
+    # Use job_id[:8] + instance_prefix for complete isolation
+    if instance_prefix:
+        dir_name = f"{job_id[:8]}_{instance_prefix}"
+    else:
+        dir_name = job_id[:8]
+
+    base = Path(config.raster.etl_mount_path) / dir_name
     return {
         'base': base,
         'source': base / 'source',
         'tiles': base / 'tiles',
         'cogs': base / 'cogs',
+        'instance_prefix': instance_prefix,  # Store for reference
     }
 
 
@@ -577,35 +622,134 @@ def _get_completed_cog_indices(job_id: str, blob_repo, container: str) -> set:
         blobs = blob_repo.list_blobs(container, prefix=prefix)
         completed = set()
         for blob in blobs:
-            # Parse tile_0034.tif → 34
+            # Parse tile_r{row}_c{col}.tif → (row, col) tuple
             name = blob.get('name', '').split('/')[-1]
-            match = re.match(r'tile_(\d+)\.tif$', name)
+            match = re.match(r'tile_r(\d+)_c(\d+)\.tif$', name)
             if match:
-                completed.add(int(match.group(1)))
+                completed.add((int(match.group(1)), int(match.group(2))))
         return completed
     except Exception as e:
         logger.warning(f"⚠️ Failed to list existing COGs: {e}")
         return set()
 
 
-def _cleanup_mount_for_job(job_id: str, mount_base: 'Path') -> None:
+def _cleanup_mount_for_job(mount_paths: Dict[str, 'Path']) -> None:
     """
     Clean up mount directory for a completed job.
 
     Args:
-        job_id: Job identifier
-        mount_base: Base mount path (e.g., /mounts/etl-temp)
+        mount_paths: Dict from _get_mount_paths() containing 'base' path
     """
     import shutil
-    from pathlib import Path
 
-    job_dir = Path(mount_base) / job_id[:8]
-    if job_dir.exists():
+    job_dir = mount_paths.get('base')
+    if job_dir and job_dir.exists():
         try:
             shutil.rmtree(job_dir)
             logger.info(f"🧹 Cleaned up mount directory: {job_dir}")
         except Exception as e:
             logger.warning(f"⚠️ Failed to cleanup mount: {e}")
+
+
+def _write_tiled_metadata_json(
+    job_id: str,
+    params: Dict[str, Any],
+    tiling_result: Dict[str, Any],
+    cog_blobs: List[str],
+    stac_result: Dict[str, Any],
+    cogs_container: str,
+    blob_repo,
+    config,
+) -> None:
+    """
+    Write metadata JSON to blob storage alongside tiled COGs (27 JAN 2026).
+
+    This provides disaster recovery capability - if STAC database is lost,
+    the metadata.json contains everything needed to understand and rebuild:
+    - Original job parameters (source blob, CRS, etc.)
+    - Tiling scheme (grid dimensions, tile specs)
+    - List of all COG blobs produced
+    - STAC result (collection_id, item_ids, etc.)
+
+    The JSON is written to: {cogs_container}/{job_id[:8]}/metadata.json
+
+    Args:
+        job_id: Job identifier
+        params: Original job parameters
+        tiling_result: Tiling scheme details
+        cog_blobs: List of COG blob names
+        stac_result: STAC creation result
+        cogs_container: Container where COGs are stored
+        blob_repo: Blob repository for upload
+        config: Application configuration
+    """
+    import json
+    from datetime import datetime, timezone
+
+    try:
+        # Build comprehensive metadata
+        metadata = {
+            "_metadata_version": "1.0",
+            "_created_at": datetime.now(timezone.utc).isoformat(),
+            "_purpose": "Disaster recovery - rebuild STAC from this if database is lost",
+
+            # Job identification
+            "job_id": job_id,
+            "job_id_prefix": job_id[:8],
+
+            # Original parameters (sanitized - remove internal fields)
+            "parameters": {
+                k: v for k, v in params.items()
+                if not k.startswith('_') and k not in ['context']
+            },
+
+            # Tiling information
+            "tiling": {
+                "tile_count": tiling_result.get('tile_count'),
+                "tile_size_px": tiling_result.get('tile_size'),
+                "grid_dimensions": tiling_result.get('grid_dimensions'),
+                "cols": tiling_result.get('cols'),
+                "rows": tiling_result.get('rows'),
+                "raster_metadata": tiling_result.get('raster_metadata', {}),
+            },
+
+            # Output COGs
+            "cogs": {
+                "container": cogs_container,
+                "count": len(cog_blobs),
+                "blobs": cog_blobs,
+            },
+
+            # STAC result (the key recovery data)
+            "stac": stac_result,
+
+            # Storage location
+            "storage": {
+                "account": config.storage.silver.account_name,
+                "container": cogs_container,
+                "prefix": f"{job_id[:8]}/",
+            },
+        }
+
+        # Serialize to JSON
+        json_content = json.dumps(metadata, indent=2, default=str)
+
+        # Upload to blob storage
+        metadata_blob_name = f"{job_id[:8]}/metadata.json"
+
+        blob_repo.upload_blob(
+            container_name=cogs_container,
+            blob_name=metadata_blob_name,
+            data=json_content.encode('utf-8'),
+            content_type='application/json',
+            overwrite=True,
+        )
+
+        logger.info(f"📋 Metadata JSON written: {cogs_container}/{metadata_blob_name}")
+
+    except Exception as e:
+        # Non-fatal - log warning but don't fail the job
+        logger.warning(f"⚠️ Failed to write metadata JSON (non-fatal): {e}")
 
 
 def _process_raster_tiled_mount(
@@ -667,12 +811,16 @@ def _process_raster_tiled_mount(
     file_size_bytes = int(file_size_mb * 1024 * 1024) if file_size_mb else 0
     docker_context = params.get('_docker_context')
 
+    # Generate unique instance prefix for mount isolation (V0.8.1 idempotency)
+    instance_prefix = _generate_instance_prefix()
+
     logger.info("=" * 70)
     logger.info("PROCESS RASTER - MOUNT-BASED TILED MODE (V0.8.1)")
     logger.info(f"   Source: {container_name}/{blob_name}")
     if file_size_mb:
         logger.info(f"   File size: {file_size_mb:.1f} MB")
     logger.info(f"   Job ID: {job_id[:16]}...")
+    logger.info(f"   Instance prefix: {instance_prefix}")
     logger.info(f"   Mount path: {config.raster.etl_mount_path}")
     logger.info("=" * 70)
 
@@ -680,8 +828,8 @@ def _process_raster_tiled_mount(
     blob_repo = BlobRepository.for_zone("silver")
     bronze_repo = BlobRepository.for_zone("bronze")
 
-    # Get mount paths
-    mount_paths = _get_mount_paths(job_id, config)
+    # Get mount paths with instance isolation
+    mount_paths = _get_mount_paths(job_id, config, instance_prefix=instance_prefix)
 
     # Track results
     tiling_result = {}
@@ -824,7 +972,8 @@ def _process_raster_tiled_mount(
 
         with rasterio.open(str(source_mount_path)) as src:
             for idx, tile_spec in enumerate(tile_specs):
-                tile_path = mount_paths['tiles'] / f"tile_{tile_spec['index']:04d}.tif"
+                # V0.8.2: Row/column naming for clarity (27 JAN 2026)
+                tile_path = mount_paths['tiles'] / f"tile_r{tile_spec['row']}_c{tile_spec['col']}.tif"
 
                 # Skip if tile already exists on mount
                 if tile_path.exists():
@@ -897,15 +1046,25 @@ def _process_raster_tiled_mount(
         skipped_count = 0
 
         for idx, tile_path in enumerate(tile_mount_paths):
-            # Parse tile index from filename
+            # V0.8.2: Parse row/col from filename (27 JAN 2026)
+            # Format: tile_r{row}_c{col}.tif
             tile_filename = Path(tile_path).name
-            tile_index = int(tile_filename.split('_')[1].split('.')[0])
+            match = re.match(r'tile_r(\d+)_c(\d+)\.tif$', tile_filename)
+            if match:
+                tile_row = int(match.group(1))
+                tile_col = int(match.group(2))
+            else:
+                # Fallback for old format (shouldn't happen with new tiles)
+                logger.warning(f"⚠️ Unexpected tile filename format: {tile_filename}")
+                tile_row = idx // 10  # Approximate
+                tile_col = idx % 10
 
-            # Deterministic output blob name
-            cog_blob_name = f"{job_id[:8]}/tile_{tile_index:04d}.tif"
+            # V0.8.2: Row/column based blob name for clarity
+            cog_blob_name = f"{job_id[:8]}/tile_r{tile_row}_c{tile_col}.tif"
 
             # Resume check: skip if COG already uploaded
-            if tile_index in completed_indices:
+            tile_key = (tile_row, tile_col)
+            if tile_key in completed_indices:
                 cog_blobs.append(cog_blob_name)
                 skipped_count += 1
                 continue
@@ -913,7 +1072,7 @@ def _process_raster_tiled_mount(
             # Progress
             progress = 25 + int((idx / tile_count) * 70)
             _report_progress(docker_context, progress, 4, 5, "Create COGs", f"Tile {idx+1}/{tile_count}")
-            logger.info(f"   📦 COG {idx+1}/{tile_count}: tile_{tile_index:04d}")
+            logger.info(f"   📦 COG {idx+1}/{tile_count}: tile_r{tile_row}_c{tile_col}")
 
             # Create COG params - use mount path as source
             cog_params = {
@@ -941,13 +1100,15 @@ def _process_raster_tiled_mount(
             cog_response = create_cog(cog_params)
 
             if not cog_response.get('success'):
-                logger.error(f"❌ COG creation failed for tile {tile_index}: {cog_response.get('error')}")
+                tile_id = f"r{tile_row}_c{tile_col}"
+                logger.error(f"❌ COG creation failed for tile {tile_id}: {cog_response.get('error')}")
                 return {
                     "success": False,
                     "error": "COG_CREATION_FAILED",
-                    "message": f"COG creation failed for tile {tile_index}: {cog_response.get('error')}",
+                    "message": f"COG creation failed for tile {tile_id}: {cog_response.get('error')}",
                     "phase": 4,
-                    "tile_index": tile_index,
+                    "tile_row": tile_row,
+                    "tile_col": tile_col,
                     "tiles_completed": len(cog_blobs),
                     "tiles_total": tile_count,
                     "resumable": True,
@@ -956,7 +1117,10 @@ def _process_raster_tiled_mount(
 
             cog_result = cog_response.get('result', {})
             cog_results.append(cog_result)
-            cog_blobs.append(cog_blob_name)
+            # Use actual blob name from COG result (may include tier suffix)
+            # V0.8.2: Now uses row/col naming (e.g., tile_r0_c1.tif)
+            actual_cog_blob = cog_result.get('cog_blob') or cog_blob_name
+            cog_blobs.append(actual_cog_blob)
 
             # Delete tile from mount after successful COG upload (cleanup as we go)
             try:
@@ -1014,9 +1178,22 @@ def _process_raster_tiled_mount(
         else:
             stac_result = stac_response.get('result', {})
 
-        # Cleanup mount directory
+        # V0.8.2: Write metadata JSON to blob storage (27 JAN 2026)
+        # This provides disaster recovery if STAC is lost - we can rebuild from this
+        _write_tiled_metadata_json(
+            job_id=job_id,
+            params=params,
+            tiling_result=tiling_result,
+            cog_blobs=cog_blobs,
+            stac_result=stac_result,
+            cogs_container=cogs_container,
+            blob_repo=blob_repo,
+            config=config,
+        )
+
+        # Cleanup mount directory (uses instance-specific path)
         logger.info("🧹 Cleaning up mount...")
-        _cleanup_mount_for_job(job_id, Path(config.raster.etl_mount_path))
+        _cleanup_mount_for_job(mount_paths)
 
         phase5_duration = time.time() - phase5_start
         logger.info(f"✅ PHASE 5 complete: {phase5_duration:.1f}s")

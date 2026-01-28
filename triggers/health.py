@@ -206,6 +206,19 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         app_mode_health = self._check_app_mode()
         health_data["components"]["app_mode"] = app_mode_health
 
+        # Check endpoint registration consistency (27 JAN 2026 - BUG-006 detection)
+        # Validates that endpoints expected for APP_MODE are actually registered
+        endpoint_health = self._check_endpoint_registration()
+        health_data["components"]["endpoint_registration"] = endpoint_health
+        endpoint_details = endpoint_health.get("details", {})
+        if endpoint_details.get("warnings"):
+            health_data["warnings"].extend(endpoint_details["warnings"])
+            # Endpoint registration issues degrade health but don't make unhealthy
+            if health_data["status"] == "healthy":
+                health_data["status"] = "degraded"
+        if endpoint_details.get("issues"):
+            health_data["errors"].extend(endpoint_details["issues"])
+
         # Check runtime environment (07 JAN 2026 - merged hardware + instance_info)
         # Single psutil call for hardware specs, instance ID, process details, memory
         runtime_health = self._check_runtime_environment()
@@ -2022,6 +2035,11 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                     "is_worker": app_mode_config.is_worker_mode,
                     "has_http": app_mode_config.has_http_endpoints
                 },
+                "endpoints_enabled": {
+                    "platform": app_mode_config.has_platform_endpoints,
+                    "admin": app_mode_config.has_admin_endpoints,
+                    "jobs": app_mode_config.has_jobs_endpoints,
+                },
                 "environment_var": {
                     "APP_MODE": os.getenv("APP_MODE", "not_set (defaults to standalone)"),
                     "APP_NAME": os.getenv("APP_NAME", "not_set (defaults to rmhazuregeoapi)"),
@@ -2033,6 +2051,125 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             "app_mode",
             check_app_mode,
             description="Multi-Function App deployment mode and queue routing configuration"
+        )
+
+    def _check_endpoint_registration(self) -> Dict[str, Any]:
+        """
+        Check endpoint registration consistency (27 JAN 2026 - BUG-006 detection).
+
+        Validates that endpoints expected for the current APP_MODE are actually
+        registered and accessible. Detects configuration issues like:
+        - Platform endpoints expected but not registered
+        - Import failures preventing blueprint registration
+        - Mismatched APP_MODE vs actual endpoint availability
+
+        This check helps diagnose 404 errors when endpoints should be available
+        but are disabled due to APP_MODE misconfiguration.
+
+        Returns:
+            Dict with endpoint registration health including warnings
+        """
+        def check_endpoints():
+            from config import get_app_mode_config
+            import sys
+
+            app_mode_config = get_app_mode_config()
+            warnings = []
+            issues = []
+
+            # Define endpoint expectations per mode
+            endpoint_checks = {
+                "platform_endpoints": {
+                    "expected": app_mode_config.has_platform_endpoints,
+                    "description": "/api/platform/* (approve, revoke, approvals, submit)",
+                    "modes_enabled": ["standalone", "platform", "orchestrator"],
+                    "test_modules": [
+                        "triggers.trigger_approvals",
+                        "triggers.platform.platform_bp",
+                    ],
+                },
+                "admin_endpoints": {
+                    "expected": app_mode_config.has_admin_endpoints,
+                    "description": "/api/dbadmin/*, /api/admin/*",
+                    "modes_enabled": ["standalone", "orchestrator", "worker_functionapp"],
+                    "test_modules": [
+                        "triggers.admin.admin_db",
+                        "triggers.admin.admin_system",
+                    ],
+                },
+                "jobs_endpoints": {
+                    "expected": app_mode_config.has_jobs_endpoints,
+                    "description": "/api/jobs/* (submit, status)",
+                    "modes_enabled": ["standalone", "orchestrator"],
+                    "test_modules": [
+                        "triggers.jobs.jobs_bp",
+                    ],
+                },
+            }
+
+            results = {}
+            for endpoint_type, config in endpoint_checks.items():
+                result = {
+                    "expected": config["expected"],
+                    "modes_enabled": config["modes_enabled"],
+                    "description": config["description"],
+                }
+
+                if config["expected"]:
+                    # Verify modules are loaded (would not be loaded if blueprint not registered)
+                    module_results = []
+                    all_loaded = True
+                    for module_path in config["test_modules"]:
+                        is_loaded = module_path in sys.modules
+                        module_results.append({
+                            "module": module_path,
+                            "loaded": is_loaded
+                        })
+                        if not is_loaded:
+                            all_loaded = False
+
+                    result["modules_loaded"] = module_results
+                    result["all_modules_loaded"] = all_loaded
+
+                    if not all_loaded:
+                        # This is a serious issue - endpoints expected but not registered
+                        warning_msg = (
+                            f"{endpoint_type}: Expected endpoints not registered. "
+                            f"Check for import errors in Application Insights. "
+                            f"APP_MODE={app_mode_config.mode.value}"
+                        )
+                        warnings.append(warning_msg)
+                        result["warning"] = warning_msg
+                else:
+                    result["note"] = f"Disabled for APP_MODE={app_mode_config.mode.value}"
+
+                results[endpoint_type] = result
+
+            # Build summary
+            summary = {
+                "app_mode": app_mode_config.mode.value,
+                "endpoints": results,
+            }
+
+            if warnings:
+                summary["warnings"] = warnings
+            if issues:
+                summary["issues"] = issues
+
+            # Provide actionable guidance for common issues
+            if app_mode_config.mode.value in ["worker_functionapp", "worker_docker"]:
+                summary["guidance"] = (
+                    f"APP_MODE={app_mode_config.mode.value} disables platform endpoints. "
+                    "If you need /api/platform/approve or /api/platform/approvals, "
+                    "set APP_MODE=standalone or APP_MODE=orchestrator"
+                )
+
+            return summary
+
+        return self.check_component_health(
+            "endpoint_registration",
+            check_endpoints,
+            description="Validates expected endpoints are registered for current APP_MODE"
         )
 
     # _check_task_routing_coverage() REMOVED (12 DEC 2025)

@@ -46,7 +46,7 @@
                 <a href="/interface/jobs/{{ job.job_id }}/events" class="btn btn-secondary">
                     Full Events
                 </a>
-                <a href="/api/jobs/status/{{ job.job_id }}" target="_blank" class="btn btn-secondary">
+                <a href="{{ orchestrator_url }}/api/jobs/status/{{ job.job_id }}" target="_blank" class="btn btn-secondary">
                     View API
                 </a>
             </div>
@@ -191,20 +191,20 @@
             </div>
             {% endif %}
 
-            {# Quick Links #}
+            {# Quick Links - API endpoints on Orchestrator (Function App) #}
             <div class="section-card">
                 <h3 class="section-title">API Endpoints</h3>
                 <div class="quick-links-list">
-                    <a href="/api/jobs/status/{{ job.job_id }}" target="_blank" class="link-badge">
+                    <a href="{{ orchestrator_url }}/api/jobs/status/{{ job.job_id }}" target="_blank" class="link-badge">
                         Job Status
                     </a>
-                    <a href="/api/jobs/{{ job.job_id }}/events" target="_blank" class="link-badge">
+                    <a href="{{ orchestrator_url }}/api/jobs/{{ job.job_id }}/events" target="_blank" class="link-badge">
                         All Events
                     </a>
-                    <a href="/api/jobs/{{ job.job_id }}/events/summary" target="_blank" class="link-badge">
+                    <a href="{{ orchestrator_url }}/api/jobs/{{ job.job_id }}/events/summary" target="_blank" class="link-badge">
                         Event Summary
                     </a>
-                    <a href="/api/dbadmin/tasks/{{ job.job_id }}" target="_blank" class="link-badge">
+                    <a href="{{ orchestrator_url }}/api/dbadmin/tasks/{{ job.job_id }}" target="_blank" class="link-badge">
                         Task Details
                     </a>
                 </div>
@@ -214,6 +214,9 @@
 </div>
 
 <script>
+// Orchestrator URL for API calls (Function App)
+const ORCHESTRATOR_URL = '{{ orchestrator_url }}';
+
 function toggleSection(header) {
     const card = header.closest('.collapsible');
     card.classList.toggle('collapsed');
@@ -225,7 +228,7 @@ async function resubmitJob(jobId) {
     }
 
     try {
-        const response = await fetch('/api/jobs/resubmit/' + jobId, {
+        const response = await fetch(ORCHESTRATOR_URL + '/api/jobs/resubmit/' + jobId, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'

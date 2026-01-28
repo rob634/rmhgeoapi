@@ -1905,6 +1905,10 @@ async def interface_job_detail(request: Request, job_id: str):
         summary = event_repo.get_event_summary(job_id)
         failure_context = event_repo.get_failure_context(job_id)
 
+        # Get orchestrator URL for API links (Function App hosts job/task APIs)
+        config = get_config()
+        orchestrator_url = getattr(config, 'etl_app_base_url', '') or ''
+
         return templates.TemplateResponse("pages/jobs/detail.html", {
             "request": request,
             "version": __version__,
@@ -1914,7 +1918,8 @@ async def interface_job_detail(request: Request, job_id: str):
             "stages": stages,
             "events": events,
             "summary": summary,
-            "failure_context": failure_context
+            "failure_context": failure_context,
+            "orchestrator_url": orchestrator_url
         })
 
     except Exception as e:
@@ -1943,6 +1948,10 @@ async def interface_job_events(request: Request, job_id: str):
         failure_context = event_repo.get_failure_context(job_id)
         summary = event_repo.get_event_summary(job_id)
 
+        # Get orchestrator URL for API links (Function App hosts job/task APIs)
+        config = get_config()
+        orchestrator_url = getattr(config, 'etl_app_base_url', '') or ''
+
         return templates.TemplateResponse("pages/jobs/events.html", {
             "request": request,
             "version": __version__,
@@ -1950,7 +1959,8 @@ async def interface_job_events(request: Request, job_id: str):
             "job_id": job_id,
             "events": events,
             "failure_context": failure_context,
-            "summary": summary
+            "summary": summary,
+            "orchestrator_url": orchestrator_url
         })
 
     except Exception as e:

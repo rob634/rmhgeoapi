@@ -40,6 +40,7 @@ import json
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 from psycopg import sql
+from psycopg.rows import dict_row
 
 from infrastructure.postgresql import PostgreSQLRepository
 from infrastructure.interface_repository import IJobEventRepository
@@ -126,11 +127,11 @@ class JobEventRepository(PostgreSQLRepository, IJobEventRepository):
             )
 
             with self._get_connection() as conn:
-                with conn.cursor() as cur:
+                with conn.cursor(row_factory=dict_row) as cur:  # Explicit dict_row for pool compatibility
                     cur.execute(query, params)
                     result = cur.fetchone()
                     conn.commit()
-                    event_id = result['event_id']  # dict_row returns dict, not tuple
+                    event_id = result['event_id']
 
                     logger.debug(
                         f"Recorded event {event_id}: {event_type_value} for job {event.job_id[:16]}..."
@@ -277,7 +278,7 @@ class JobEventRepository(PostgreSQLRepository, IJobEventRepository):
             )
 
             with self._get_connection() as conn:
-                with conn.cursor() as cur:
+                with conn.cursor(row_factory=dict_row) as cur:
                     cur.execute(query, params)
                     rows = cur.fetchall()
 
@@ -307,7 +308,7 @@ class JobEventRepository(PostgreSQLRepository, IJobEventRepository):
             """).format(sql.Identifier(self.schema_name))
 
             with self._get_connection() as conn:
-                with conn.cursor() as cur:
+                with conn.cursor(row_factory=dict_row) as cur:
                     cur.execute(query, (task_id,))
                     rows = cur.fetchall()
 
@@ -334,7 +335,7 @@ class JobEventRepository(PostgreSQLRepository, IJobEventRepository):
             """).format(sql.Identifier(self.schema_name))
 
             with self._get_connection() as conn:
-                with conn.cursor() as cur:
+                with conn.cursor(row_factory=dict_row) as cur:
                     cur.execute(query, (job_id,))
                     row = cur.fetchone()
 
@@ -362,7 +363,7 @@ class JobEventRepository(PostgreSQLRepository, IJobEventRepository):
             """).format(sql.Identifier(self.schema_name))
 
             with self._get_connection() as conn:
-                with conn.cursor() as cur:
+                with conn.cursor(row_factory=dict_row) as cur:
                     cur.execute(query, (job_id,))
                     rows = cur.fetchall()
 
@@ -396,7 +397,7 @@ class JobEventRepository(PostgreSQLRepository, IJobEventRepository):
             """).format(sql.Identifier(self.schema_name))
 
             with self._get_connection() as conn:
-                with conn.cursor() as cur:
+                with conn.cursor(row_factory=dict_row) as cur:
                     cur.execute(query, (job_id,))
                     row = cur.fetchone()
 
@@ -500,7 +501,7 @@ class JobEventRepository(PostgreSQLRepository, IJobEventRepository):
             """).format(sql.Identifier(self.schema_name))
 
             with self._get_connection() as conn:
-                with conn.cursor() as cur:
+                with conn.cursor(row_factory=dict_row) as cur:
                     cur.execute(query, (job_id,))
                     failure_row = cur.fetchone()
 

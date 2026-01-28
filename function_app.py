@@ -509,7 +509,12 @@ if _app_mode.has_platform_endpoints:
     app.register_functions(platform_bp)
     logger.info("✅ Platform blueprint registered (APP_MODE=%s)", _app_mode.mode.value)
 else:
-    logger.info("⏭️ SKIPPING platform blueprint (APP_MODE=%s)", _app_mode.mode.value)
+    logger.warning(
+        "⚠️ Platform endpoints DISABLED (APP_MODE=%s). "
+        "/api/platform/* endpoints (approve, approvals, submit) will return 404. "
+        "To enable, set APP_MODE to standalone, platform, or orchestrator.",
+        _app_mode.mode.value
+    )
 
 
 # NOTE: /api/health moved to triggers/admin/admin_system.py blueprint (12 JAN 2026)

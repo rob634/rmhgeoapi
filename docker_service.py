@@ -1929,6 +1929,234 @@ async def interface_job_detail(request: Request, job_id: str):
 
 
 # ============================================================================
+# SWIMLANE DATA BUILDER (27 JAN 2026 - Horizontal Timeline UI)
+# ============================================================================
+
+def _build_swimlane_data(job, tasks, events) -> dict:
+    """
+    Build swimlane data structure for horizontal timeline visualization.
+
+    Combines job definition stages, actual tasks, and events into a structure
+    optimized for the Jinja2 swimlane template.
+
+    Args:
+        job: Job record with job_type
+        tasks: List of task records for the job
+        events: List of event records for the job
+
+    Returns:
+        Dict with:
+            - status: Overall job status (processing/completed/failed)
+            - stages: List of stage dicts with tasks and events
+            - stats: Summary stats (stages completed, tasks completed)
+    """
+    if not job:
+        return {"status": "unknown", "stages": [], "stats": {}}
+
+    # Get job status
+    job_status = "pending"
+    if hasattr(job, 'status'):
+        status_val = job.status.value if hasattr(job.status, 'value') else str(job.status)
+        job_status = status_val.lower()
+
+    # Map status to UI states
+    if job_status in ['completed', 'complete']:
+        ui_status = 'completed'
+    elif job_status in ['failed', 'error']:
+        ui_status = 'failed'
+    elif job_status in ['processing', 'running']:
+        ui_status = 'processing'
+    else:
+        ui_status = 'pending'
+
+    # Try to get stage definitions from job type
+    stage_definitions = []
+    try:
+        from jobs import get_job_class
+        job_type = job.job_type if hasattr(job, 'job_type') else None
+        if job_type:
+            job_class = get_job_class(job_type)
+            if job_class and hasattr(job_class, 'stages'):
+                stage_definitions = job_class.stages
+    except Exception:
+        pass  # Fall back to inferring from tasks
+
+    # Group tasks by stage
+    tasks_by_stage = {}
+    for task in tasks:
+        stage_num = task.stage if hasattr(task, 'stage') and task.stage else 1
+        if stage_num not in tasks_by_stage:
+            tasks_by_stage[stage_num] = []
+        tasks_by_stage[stage_num].append(task)
+
+    # Index events by task_id for quick lookup
+    events_by_task = {}
+    stage_events = {}  # stage_num -> list of stage-level events
+    for event in events:
+        event_dict = event if isinstance(event, dict) else event.to_dict()
+        task_id = event_dict.get('task_id')
+        stage_num = event_dict.get('stage')
+        event_type = event_dict.get('event_type', '')
+
+        if task_id:
+            if task_id not in events_by_task:
+                events_by_task[task_id] = []
+            events_by_task[task_id].append(event_dict)
+        elif stage_num and event_type.startswith('stage_'):
+            if stage_num not in stage_events:
+                stage_events[stage_num] = []
+            stage_events[stage_num].append(event_dict)
+
+    # Build stages array
+    stages = []
+    stage_nums = sorted(set(list(tasks_by_stage.keys()) + [s.get('number', i+1) for i, s in enumerate(stage_definitions)]))
+
+    if not stage_nums:
+        stage_nums = [1]  # Default single stage
+
+    for stage_num in stage_nums:
+        # Get stage definition if available
+        stage_def = next((s for s in stage_definitions if s.get('number') == stage_num), None)
+        stage_name = stage_def.get('name', f'Stage {stage_num}') if stage_def else f'Stage {stage_num}'
+
+        # Get tasks for this stage
+        stage_tasks = tasks_by_stage.get(stage_num, [])
+
+        # Determine stage status
+        stage_status = 'pending'
+        completed_count = 0
+        failed_count = 0
+        total_tasks = len(stage_tasks)
+
+        task_items = []
+        for task in stage_tasks:
+            task_id = task.task_id if hasattr(task, 'task_id') else str(task.get('task_id', ''))
+            task_status = 'pending'
+            if hasattr(task, 'status'):
+                ts = task.status.value if hasattr(task.status, 'value') else str(task.status)
+                task_status = ts.lower()
+            elif isinstance(task, dict) and 'status' in task:
+                task_status = str(task['status']).lower()
+
+            if task_status in ['completed', 'complete']:
+                completed_count += 1
+            elif task_status in ['failed', 'error']:
+                failed_count += 1
+
+            # Get task description for display
+            task_type = ''
+            task_label = task_id[:12] + '...' if len(task_id) > 12 else task_id
+            if hasattr(task, 'task_type'):
+                task_type = task.task_type
+            elif isinstance(task, dict):
+                task_type = task.get('task_type', '')
+
+            # Try to get a meaningful label from parameters
+            params = {}
+            if hasattr(task, 'parameters'):
+                params = task.parameters or {}
+            elif isinstance(task, dict):
+                params = task.get('parameters', {})
+
+            # Generate descriptive label
+            if params:
+                if 'blob_name' in params:
+                    task_label = f"{task_type}: {params['blob_name']}"
+                elif 'tile_row' in params and 'tile_col' in params:
+                    task_label = f"Create tile_r{params['tile_row']}_c{params['tile_col']}.tif"
+                elif 'collection_id' in params:
+                    task_label = f"{task_type}: {params['collection_id']}"
+                else:
+                    task_label = task_type.replace('_', ' ').title() if task_type else task_label
+
+            # Get event states for micro-dots
+            task_events = events_by_task.get(task_id, [])
+            has_queued = any(e.get('event_type') == 'task_queued' for e in task_events)
+            has_started = any(e.get('event_type') == 'task_started' for e in task_events)
+            has_completed = any(e.get('event_type') == 'task_completed' for e in task_events)
+            has_failed = any(e.get('event_type') == 'task_failed' for e in task_events)
+
+            # Get error message if failed
+            error_msg = None
+            if has_failed:
+                fail_event = next((e for e in task_events if e.get('event_type') == 'task_failed'), None)
+                if fail_event:
+                    error_msg = fail_event.get('error_message', 'Unknown error')
+
+            task_items.append({
+                'task_id': task_id,
+                'label': task_label,
+                'status': task_status,
+                'has_queued': has_queued,
+                'has_started': has_started,
+                'has_completed': has_completed,
+                'has_failed': has_failed,
+                'error_message': error_msg
+            })
+
+        # Determine stage status
+        if failed_count > 0:
+            stage_status = 'failed'
+        elif completed_count == total_tasks and total_tasks > 0:
+            stage_status = 'completed'
+        elif completed_count > 0 or any(t['has_started'] for t in task_items):
+            stage_status = 'active'
+
+        # Calculate stage duration from events
+        stage_duration = None
+        s_events = stage_events.get(stage_num, [])
+        start_event = next((e for e in s_events if e.get('event_type') == 'stage_started'), None)
+        end_event = next((e for e in s_events if e.get('event_type') == 'stage_completed'), None)
+        if start_event and end_event:
+            try:
+                from datetime import datetime
+                start_time = start_event.get('created_at')
+                end_time = end_event.get('created_at')
+                if isinstance(start_time, str):
+                    start_time = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+                if isinstance(end_time, str):
+                    end_time = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+                if start_time and end_time:
+                    delta = (end_time - start_time).total_seconds()
+                    if delta < 60:
+                        stage_duration = f"{int(delta)}s"
+                    else:
+                        stage_duration = f"{int(delta // 60)}m {int(delta % 60)}s"
+            except Exception:
+                pass
+
+        stages.append({
+            'number': stage_num,
+            'name': stage_name,
+            'status': stage_status,
+            'duration': stage_duration,
+            'tasks': task_items,
+            'total_tasks': total_tasks,
+            'completed_tasks': completed_count,
+            'failed_tasks': failed_count
+        })
+
+    # Calculate stats
+    total_stages = len(stages)
+    completed_stages = sum(1 for s in stages if s['status'] == 'completed')
+    total_tasks = sum(s['total_tasks'] for s in stages)
+    completed_tasks = sum(s['completed_tasks'] for s in stages)
+    failed_tasks = sum(s['failed_tasks'] for s in stages)
+
+    return {
+        'status': ui_status,
+        'stages': stages,
+        'stats': {
+            'total_stages': total_stages,
+            'completed_stages': completed_stages,
+            'total_tasks': total_tasks,
+            'completed_tasks': completed_tasks,
+            'failed_tasks': failed_tasks
+        }
+    }
+
+
+# ============================================================================
 # JOB EVENTS INTERFACE (23 JAN 2026 - Execution Timeline)
 # ============================================================================
 
@@ -1937,17 +2165,29 @@ async def interface_job_events(request: Request, job_id: str):
     """
     Job events page showing execution timeline.
 
-    Full-page view with event timeline and failure context.
+    Full-page view with horizontal swimlane timeline and failure context.
+    V0.8 UI Update (27 JAN 2026): Horizontal swimlane design.
     """
     try:
-        from infrastructure import JobEventRepository
+        from infrastructure import JobEventRepository, JobRepository, TaskRepository
 
         event_repo = JobEventRepository()
+        job_repo = JobRepository()
+        task_repo = TaskRepository()
+
+        # Get job info for stage definitions
+        job = job_repo.get_job(job_id)
+
+        # Get tasks grouped by stage
+        tasks = task_repo.get_tasks_for_job(job_id) if job else []
 
         # Get events and failure context
-        events = event_repo.get_events_timeline(job_id, limit=100)
+        events = event_repo.get_events_timeline(job_id, limit=200)
         failure_context = event_repo.get_failure_context(job_id)
         summary = event_repo.get_event_summary(job_id)
+
+        # Build swimlane data structure
+        swimlane_data = _build_swimlane_data(job, tasks, events)
 
         # Get orchestrator URL for API links (Function App hosts job/task APIs)
         from config import get_config
@@ -1959,6 +2199,8 @@ async def interface_job_events(request: Request, job_id: str):
             "version": __version__,
             "nav_active": "/interface/jobs",
             "job_id": job_id,
+            "job": job,
+            "swimlane": swimlane_data,
             "events": events,
             "failure_context": failure_context,
             "summary": summary,
@@ -1966,6 +2208,7 @@ async def interface_job_events(request: Request, job_id: str):
         })
 
     except Exception as e:
+        logger.error(f"Error loading events page: {e}")
         return HTMLResponse(f"<div class='error'>Error loading events: {str(e)}</div>")
 
 
@@ -2035,6 +2278,45 @@ async def interface_job_failure_context(request: Request, job_id: str):
 
     except Exception as e:
         return HTMLResponse(f'<div class="failure-error">Error: {str(e)}</div>')
+
+
+@app.get("/interface/jobs/{job_id}/events/swimlane", response_class=HTMLResponse)
+async def interface_job_swimlane_partial(request: Request, job_id: str):
+    """
+    HTMX partial - swimlane timeline only.
+
+    Used for auto-refresh of the horizontal timeline without full page reload.
+    V0.8 UI Update (27 JAN 2026).
+    """
+    try:
+        from infrastructure import JobEventRepository, JobRepository, TaskRepository
+
+        event_repo = JobEventRepository()
+        job_repo = JobRepository()
+        task_repo = TaskRepository()
+
+        # Get job info for stage definitions
+        job = job_repo.get_job(job_id)
+
+        # Get tasks grouped by stage
+        tasks = task_repo.get_tasks_for_job(job_id) if job else []
+
+        # Get events
+        events = event_repo.get_events_timeline(job_id, limit=200)
+
+        # Build swimlane data structure
+        swimlane_data = _build_swimlane_data(job, tasks, events)
+
+        # Render the swimlane component
+        return templates.TemplateResponse("components/_job_timeline_swimlane.html", {
+            "request": request,
+            "job_id": job_id,
+            "job": job,
+            "swimlane": swimlane_data
+        })
+
+    except Exception as e:
+        return HTMLResponse(f'<div class="swimlane-error">Error: {str(e)}</div>')
 
 
 # ============================================================================

@@ -4,6 +4,7 @@
 
 {% block head %}
 <link rel="stylesheet" href="/static/css/events.css">
+<link rel="stylesheet" href="/static/css/swimlane.css">
 {% endblock %}
 
 {% block content %}
@@ -16,54 +17,69 @@
                 <p class="subtitle">Job ID: <code>{{ job_id[:16] }}...</code></p>
             </div>
             <div class="page-actions">
+                <a href="/interface/jobs/{{ job_id }}" class="btn btn-secondary">Job Details</a>
                 <a href="/interface/home" class="btn btn-secondary">Dashboard</a>
-                <a href="{{ orchestrator_url }}/api/jobs/{{ job_id }}/events" target="_blank" class="btn btn-secondary">
-                    View API
-                </a>
             </div>
         </div>
     </div>
 
-    {# Summary Stats - Using design system stats-banner pattern #}
-    {% if summary %}
-    <div class="stats-banner">
-        <div class="stat-item">
-            <span class="stat-label">Total Events</span>
-            <span class="stat-value highlight">{{ summary.total_events }}</span>
-        </div>
-        <div class="stat-item">
-            <span class="stat-label">Successful</span>
-            <span class="stat-value" style="color: var(--ds-status-completed-fg);">{{ summary.by_status.get('success', 0) }}</span>
-        </div>
-        <div class="stat-item">
-            <span class="stat-label">Failures</span>
-            <span class="stat-value" style="color: var(--ds-status-failed-fg);">{{ summary.by_status.get('failure', 0) }}</span>
-        </div>
-        <div class="stat-item">
-            <span class="stat-label">Total Duration</span>
-            <span class="stat-value">{{ (summary.total_duration_ms / 1000)|round(1) }}s</span>
-        </div>
-    </div>
+    {# Horizontal Swimlane Timeline (V0.8 UI - 27 JAN 2026) #}
+    {% if swimlane and swimlane.stages %}
+    {% include "components/_job_timeline_swimlane.html" %}
     {% endif %}
 
     {# Main Content Grid #}
     <div class="events-grid">
-        {# Left Column - Event Timeline #}
+        {# Left Column - Traditional Event List (collapsible) #}
         <div class="events-timeline-column">
-            {% set auto_refresh = true %}
-            {% set refresh_interval = 5 %}
-            {% set max_height = "600px" %}
-            {% include "components/_event_timeline.html" %}
+            <details class="events-details" open>
+                <summary class="events-summary">
+                    <h4>Event Log</h4>
+                    <span class="event-count-badge">{{ summary.total_events if summary else 0 }} events</span>
+                </summary>
+                {% set auto_refresh = true %}
+                {% set refresh_interval = 5 %}
+                {% set max_height = "400px" %}
+                {% include "components/_event_timeline.html" %}
+            </details>
         </div>
 
-        {# Right Column - Failure Context (if any) #}
+        {# Right Column - Failure Context and Stats #}
         <div class="events-context-column">
-            <div class="section-card">
+            {# Failure Analysis (shown first if there's a failure) #}
+            {% if failure_context and failure_context.has_failure %}
+            <div class="section-card section-card-failure">
                 <h3 class="section-title">Failure Analysis</h3>
                 {% with has_failure=failure_context.has_failure, failure_event=failure_context.failure_event, preceding_events=failure_context.preceding_events %}
                     {% include "components/_failure_context.html" %}
                 {% endwith %}
             </div>
+            {% endif %}
+
+            {# Event Stats Summary #}
+            {% if summary %}
+            <div class="section-card">
+                <h4 class="section-title">Event Summary</h4>
+                <div class="event-stats-grid">
+                    <div class="event-stat">
+                        <span class="event-stat-value">{{ summary.total_events }}</span>
+                        <span class="event-stat-label">Total Events</span>
+                    </div>
+                    <div class="event-stat">
+                        <span class="event-stat-value text-success">{{ summary.by_status.get('success', 0) }}</span>
+                        <span class="event-stat-label">Successful</span>
+                    </div>
+                    <div class="event-stat">
+                        <span class="event-stat-value text-danger">{{ summary.by_status.get('failure', 0) }}</span>
+                        <span class="event-stat-label">Failures</span>
+                    </div>
+                    <div class="event-stat">
+                        <span class="event-stat-value">{{ (summary.total_duration_ms / 1000)|round(1) }}s</span>
+                        <span class="event-stat-label">Total Duration</span>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
 
             {# Event Type Breakdown #}
             {% if summary and summary.by_type %}
@@ -128,19 +144,106 @@
     gap: 20px;
 }
 
+/* Collapsible Event Log */
+.events-details {
+    background: white;
+    border: 1px solid var(--ds-gray-light, #e0e0e0);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.events-summary {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    background: var(--ds-bg, #f5f7fa);
+    cursor: pointer;
+    user-select: none;
+}
+
+.events-summary::-webkit-details-marker {
+    display: none;
+}
+
+.events-summary::before {
+    content: '▶';
+    margin-right: 8px;
+    font-size: 10px;
+    transition: transform 0.2s;
+}
+
+.events-details[open] .events-summary::before {
+    transform: rotate(90deg);
+}
+
+.events-summary h4 {
+    margin: 0;
+    font-size: 14px;
+}
+
+.event-count-badge {
+    background: var(--ds-navy, #053657);
+    color: white;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
 /* Section Card - Consistent sidebar cards */
 .section-card {
     background: white;
-    border: 1px solid var(--ds-gray-light);
-    border-left: 4px solid var(--ds-blue-primary);
+    border: 1px solid var(--ds-gray-light, #e0e0e0);
+    border-left: 4px solid var(--ds-blue-primary, #245AAD);
     border-radius: 3px;
     padding: 16px;
     box-shadow: 0 1px 3px rgba(0,0,0,0.1);
 }
 
+.section-card-failure {
+    border-left-color: var(--ds-status-failed-fg, #f44336);
+}
+
 .section-card .section-title {
     margin: 0 0 12px 0;
     padding-bottom: 8px;
+    font-size: 14px;
+}
+
+/* Event Stats Grid */
+.event-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+}
+
+.event-stat {
+    text-align: center;
+    padding: 8px;
+    background: var(--ds-bg, #f5f7fa);
+    border-radius: 4px;
+}
+
+.event-stat-value {
+    display: block;
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--ds-navy, #053657);
+}
+
+.event-stat-value.text-success {
+    color: var(--ds-status-completed-fg, #4CAF50);
+}
+
+.event-stat-value.text-danger {
+    color: var(--ds-status-failed-fg, #f44336);
+}
+
+.event-stat-label {
+    font-size: 10px;
+    color: var(--ds-text-muted, #666);
+    text-transform: uppercase;
 }
 
 /* Event Type Breakdown */
@@ -159,7 +262,7 @@
 
 .type-count {
     font-weight: 700;
-    color: var(--ds-navy);
+    color: var(--ds-navy, #053657);
     font-size: 14px;
 }
 
@@ -201,6 +304,10 @@
 
     .quick-links-list .link-badge {
         flex: 1 1 100%;
+    }
+
+    .event-stats-grid {
+        grid-template-columns: repeat(2, 1fr);
     }
 }
 </style>

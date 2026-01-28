@@ -4,6 +4,7 @@
 # STATUS: Trigger layer - Platform anti-corruption layer for external apps
 # PURPOSE: Centralized platform endpoints using Azure Functions Blueprint
 # CREATED: 23 JAN 2026
+# UPDATED: 27 JAN 2026 - Added handler re-exports after trigger_platform.py split
 # EPIC: APP_CLEANUP - Phase 5 Platform Blueprint
 # ============================================================================
 """
@@ -48,8 +49,29 @@ Usage in function_app.py:
 
 Exports:
     platform_bp: Azure Functions Blueprint with all platform endpoints
+
+Handler Re-exports (27 JAN 2026):
+    platform_request_submit: Generic submit handler
+    platform_raster_submit: Single raster submit handler
+    platform_raster_collection_submit: Collection submit handler
+    platform_unpublish: Consolidated unpublish handler
 """
 
 from .platform_bp import bp as platform_bp
 
-__all__ = ['platform_bp']
+# Re-export handlers (27 JAN 2026 - after trigger_platform.py split)
+from .submit import (
+    platform_request_submit,
+    platform_raster_submit,
+    platform_raster_collection_submit,
+)
+from .unpublish import platform_unpublish
+
+__all__ = [
+    'platform_bp',
+    # Handler re-exports
+    'platform_request_submit',
+    'platform_raster_submit',
+    'platform_raster_collection_submit',
+    'platform_unpublish',
+]

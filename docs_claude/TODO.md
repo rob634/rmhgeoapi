@@ -2,7 +2,7 @@
 **This file contains high level items only**
 This file references other documents containing implementation details. This is to avoid a 50,000 line TODO.md. This file should not exceed 500 lines.
 
-**Last Updated**: 26 JAN 2026
+**Last Updated**: 27 JAN 2026
 **Source of Truth**: [docs/epics/README.md](/docs/epics/README.md) - Epic/Feature/Story definitions
 **Purpose**: Sprint-level task tracking and delegation (INDEX format)
 
@@ -24,6 +24,32 @@ This file references other documents containing implementation details. This is 
 | [DOCKER_INTEGRATION.md](./DOCKER_INTEGRATION.md) | F7.18 framework, F7.15 HTTP-trigger |
 | [/UI_MIGRATION.md](/UI_MIGRATION.md) | UI migration to Jinja2/Docker |
 | [HISTORY.md](./HISTORY.md) | Completed work log |
+| [REFACTOR_TRIGGER_PLATFORM.md](./REFACTOR_TRIGGER_PLATFORM.md) | trigger_platform.py split plan |
+
+---
+
+## Code Legibility / Technical Debt
+
+### Refactor trigger_platform.py (F12.10)
+**Status**: PLANNED
+**Priority**: MEDIUM - Code maintainability
+**Details**: [REFACTOR_TRIGGER_PLATFORM.md](./REFACTOR_TRIGGER_PLATFORM.md)
+
+**Problem**: `triggers/trigger_platform.py` has grown to 2,414 lines with mixed responsibilities (HTTP handlers, translation logic, job submission, deprecated code).
+
+| Phase | Description | Effort |
+|-------|-------------|--------|
+| Phase 0 | Decision: Delete deprecated endpoints | 5 min |
+| Phase 1 | Extract translation/submission to `services/` | 2-3 hrs |
+| Phase 2 | Split HTTP handlers into `triggers/platform/` | 2-3 hrs |
+| Phase 3 | Delete deprecated unpublish endpoints | 30 min |
+| Phase 4 | Response builder pattern (optional) | 1 hr |
+
+**Benefits**:
+- Reduce main file from 2,414 → ~50 lines (re-exports only)
+- Unit testable translation logic in `services/`
+- Remove 375 lines of deprecated code
+- Single-responsibility modules
 
 ---
 

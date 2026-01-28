@@ -136,6 +136,12 @@ function transformStacCollection(col) {
     const bbox = col.extent?.spatial?.bbox?.[0] || null;
     const temporal = col.extent?.temporal?.interval?.[0] || null;
 
+    // Extract viewer URLs from collection links (V0.8 tiled collections have these)
+    const links = col.links || [];
+    const previewLink = links.find(l => l.rel === 'preview');
+    const tilejsonLink = links.find(l => l.rel === 'tilejson');
+    const tilesLink = links.find(l => l.rel === 'tiles');
+
     return {
         id: col.id,
         title: col.title || col.id,
@@ -147,7 +153,11 @@ function transformStacCollection(col) {
         temporal: temporal,
         license: col.license || null,
         keywords: col.keywords || [],
-        links: col.links || [],
+        links: links,
+        // V0.8: Viewer URLs from pgstac search registration
+        viewerUrl: previewLink?.href || null,
+        tilejsonUrl: tilejsonLink?.href || null,
+        tilesUrl: tilesLink?.href || null,
         raw: col
     };
 }
@@ -378,8 +388,8 @@ function renderCollectionCard(col) {
                     <a href="/api/stac/collections/${encodeURIComponent(col.id)}/items" class="btn btn-secondary" target="_blank">
                         Items
                     </a>
-                    ${TITILER_URL ? `
-                    <a href="${TITILER_URL}/collections/${encodeURIComponent(col.id)}/map" class="btn btn-secondary" target="_blank">
+                    ${col.viewerUrl ? `
+                    <a href="${escapeHtml(col.viewerUrl)}" class="btn btn-secondary" target="_blank">
                         Map
                     </a>
                     ` : ''}
@@ -388,7 +398,7 @@ function renderCollectionCard(col) {
                         Features
                     </a>
                     ${TIPG_URL ? `
-                    <a href="${TIPG_URL}/collections/${encodeURIComponent(col.id)}/map" class="btn btn-secondary" target="_blank">
+                    <a href="${TIPG_URL}/collections/${encodeURIComponent(col.id)}/tiles/WebMercatorQuad/map.html" class="btn btn-secondary" target="_blank">
                         Map
                     </a>
                     ` : ''}
@@ -549,8 +559,8 @@ function renderCollectionDetail(col) {
                 <a href="/api/stac/collections/${encodeURIComponent(col.id)}/items" class="btn btn-secondary" target="_blank">
                     View Items
                 </a>
-                ${TITILER_URL ? `
-                <a href="${TITILER_URL}/collections/${encodeURIComponent(col.id)}/map" class="btn btn-primary" target="_blank">
+                ${col.viewerUrl ? `
+                <a href="${escapeHtml(col.viewerUrl)}" class="btn btn-primary" target="_blank">
                     Open Map Viewer
                 </a>
                 ` : ''}
@@ -562,7 +572,7 @@ function renderCollectionDetail(col) {
                     View Features
                 </a>
                 ${TIPG_URL ? `
-                <a href="${TIPG_URL}/collections/${encodeURIComponent(col.id)}/map" class="btn btn-primary" target="_blank">
+                <a href="${TIPG_URL}/collections/${encodeURIComponent(col.id)}/tiles/WebMercatorQuad/map.html" class="btn btn-primary" target="_blank">
                     Open Map Viewer
                 </a>
                 ` : ''}

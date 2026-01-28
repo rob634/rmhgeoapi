@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Job Timeline - All States</title>
+    <style>
+        :root {
+            --pending: #e0e0e0;
+            --pending-text: #888;
+            --active: #2196F3;
+            --active-glow: rgba(33, 150, 243, 0.3);
+            --active-bg: rgba(33, 150, 243, 0.08);
+            --completed: #4CAF50;
+            --completed-bg: rgba(76, 175, 80, 0.08);
+            --failed: #f44336;
+            --failed-bg: rgba(244, 67, 54, 0.08);
+            --bg: #f5f7fa;
+            --card-bg: #ffffff;
+            --text: #333;
+            --text-muted: #666;
+            --border: #e0e0e0;
+            --navy: #053657;
+            --navy-light: #245AAD;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            padding: 20px;
+        }
+
+        .page-title {
+            text-align: center;
+            margin-bottom: 32px;
+            color: var(--navy);
+        }
+
+        .page-title h1 { font-size: 28px; margin-bottom: 8px; }
+        .page-title p { color: var(--text-muted); }
+
+        .examples {
+            display: flex;
+            flex-direction: column;
+            gap: 32px;
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        .example-label {
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+        }
+
+        /* ===== CARD STYLES ===== */
+        .job-card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            overflow: hidden;
+        }
+
+        .header {
+            padding: 16px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header.processing { background: linear-gradient(135deg, var(--navy) 0%, var(--navy-light) 100%); color: white; }
+        .header.completed { background: linear-gradient(135deg, #2E7D32 0%, #4CAF50 100%); color: white; }
+        .header.failed { background: linear-gradient(135deg, #C62828 0%, #f44336 100%); color: white; }
+
+        .header h2 { font-size: 16px; font-weight: 600; }
+        .header .job-id { font-family: monospace; font-size: 10px; opacity: 0.7; margin-top: 2px; }
+
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 16px;
+            font-size: 12px;
+            font-weight: 600;
+            background: rgba(255,255,255,0.2);
+        }
+
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: white;
+        }
+
+        .status-dot.processing { animation: blink 1.5s infinite; }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        /* Progress Section */
+        .progress-section {
+            padding: 16px 24px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .stats {
+            display: flex;
+            gap: 16px;
+        }
+
+        .stat {
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 20px;
+            font-weight: 700;
+        }
+
+        .stat-label {
+            font-size: 10px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+        }
+
+        .stage-track {
+            flex: 1;
+            display: flex;
+            align-items: center;
+        }
+
+        .stage-dot {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: 700;
+            z-index: 2;
+        }
+
+        .stage-dot.completed { background: var(--completed); color: white; }
+        .stage-dot.active { background: var(--active); color: white; box-shadow: 0 0 0 4px var(--active-glow); }
+        .stage-dot.pending { background: var(--pending); color: var(--pending-text); }
+        .stage-dot.failed { background: var(--failed); color: white; }
+
+        .stage-dot svg { width: 14px; height: 14px; }
+
+        .stage-line {
+            flex: 1;
+            height: 3px;
+            margin: 0 -2px;
+            z-index: 1;
+        }
+
+        .stage-line.completed { background: var(--completed); }
+        .stage-line.active { background: linear-gradient(90deg, var(--completed), var(--active)); }
+        .stage-line.pending { background: var(--pending); }
+        .stage-line.failed { background: var(--failed); }
+
+        /* Swimlane */
+        .swimlane { }
+
+        .stage-row {
+            display: flex;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .stage-row:last-child { border-bottom: none; }
+        .stage-row.completed-row { background: var(--completed-bg); }
+        .stage-row.active-row { background: var(--active-bg); }
+        .stage-row.pending-row { background: var(--bg); }
+        .stage-row.failed-row { background: var(--failed-bg); }
+
+        .stage-label {
+            width: 140px;
+            padding: 12px 16px;
+            border-right: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .stage-num {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: 700;
+        }
+
+        .stage-row.completed-row .stage-num { background: var(--completed); color: white; }
+        .stage-row.active-row .stage-num { background: var(--active); color: white; }
+        .stage-row.pending-row .stage-num { background: var(--pending); color: var(--pending-text); }
+        .stage-row.failed-row .stage-num { background: var(--failed); color: white; }
+
+        .stage-name { font-size: 12px; font-weight: 600; }
+        .stage-time { font-size: 10px; color: var(--text-muted); }
+
+        .task-flow {
+            flex: 1;
+            padding: 10px 16px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            overflow-x: auto;
+        }
+
+        .task-chip {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 14px;
+            font-size: 11px;
+            font-weight: 500;
+            white-space: nowrap;
+        }
+
+        .task-chip .task-label {
+            max-width: 140px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .task-chip[title]:hover {
+            cursor: pointer;
+        }
+
+        .task-chip.completed { background: var(--completed); color: white; }
+        .task-chip.active { background: var(--active); color: white; }
+        .task-chip.pending { background: var(--pending); color: var(--pending-text); }
+        .task-chip.failed { background: var(--failed); color: white; }
+
+        .task-chip svg { width: 10px; height: 10px; }
+
+        .micro-dots { display: flex; gap: 2px; margin-left: 2px; }
+        .micro-dot { width: 3px; height: 3px; border-radius: 50%; background: rgba(255,255,255,0.4); }
+        .micro-dot.done { background: rgba(255,255,255,0.9); }
+        .task-chip.pending .micro-dot { background: rgba(0,0,0,0.15); }
+
+        .arrow { color: var(--text-muted); font-size: 12px; opacity: 0.5; }
+
+        .done-badge {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 5px 10px;
+            background: rgba(76, 175, 80, 0.15);
+            color: var(--completed);
+            border-radius: 12px;
+            font-size: 10px;
+            font-weight: 600;
+        }
+
+        .done-badge svg { width: 10px; height: 10px; }
+
+        /* Footer */
+        .footer {
+            padding: 12px 24px;
+            background: var(--bg);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .legend {
+            display: flex;
+            gap: 12px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .legend-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+        }
+
+        .legend-dot.pending { background: var(--pending); }
+        .legend-dot.active { background: var(--active); }
+        .legend-dot.completed { background: var(--completed); }
+        .legend-dot.failed { background: var(--failed); }
+
+        /* Result banner */
+        .result-banner {
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-weight: 600;
+        }
+
+        .result-banner.success {
+            background: var(--completed-bg);
+            color: var(--completed);
+        }
+
+        .result-banner.failure {
+            background: var(--failed-bg);
+            color: var(--failed);
+        }
+
+        .result-banner svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        .result-banner .details {
+            font-weight: 400;
+            font-size: 12px;
+            margin-left: auto;
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+    <div class="page-title">
+        <h1>Job Timeline - State Examples</h1>
+        <p>Processing, Completed, and Failed states</p>
+    </div>
+
+    <div class="examples">
+        <!-- PROCESSING STATE -->
+        <div>
+            <div class="example-label">Processing (In Progress)</div>
+            <div class="job-card">
+                <div class="header processing">
+                    <div>
+                        <h2>Process Large Raster (Docker)</h2>
+                        <div class="job-id">111dc29c71dc996d...</div>
+                    </div>
+                    <div class="status-badge">
+                        <div class="status-dot processing"></div>
+                        Processing
+                    </div>
+                </div>
+                <div class="progress-section">
+                    <div class="stats">
+                        <div class="stat">
+                            <div class="stat-value">2/3</div>
+                            <div class="stat-label">Stages</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value" style="color: var(--active)">5/8</div>
+                            <div class="stat-label">Tasks</div>
+                        </div>
+                    </div>
+                    <div class="stage-track">
+                        <div class="stage-dot completed"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
+                        <div class="stage-line completed"></div>
+                        <div class="stage-dot active">2</div>
+                        <div class="stage-line active"></div>
+                        <div class="stage-dot pending">3</div>
+                        <div class="stage-line pending"></div>
+                        <div class="stage-dot pending"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg></div>
+                    </div>
+                </div>
+                <div class="swimlane">
+                    <div class="stage-row completed-row">
+                        <div class="stage-label">
+                            <div class="stage-num"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
+                            <div><div class="stage-name">Validate</div><div class="stage-time">32s</div></div>
+                        </div>
+                        <div class="task-flow">
+                            <div class="task-chip completed" title="Validate flood_depth.tif"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg><span class="task-label">Validate flood_depth.tif</span><div class="micro-dots"><div class="micro-dot done"></div><div class="micro-dot done"></div><div class="micro-dot done"></div></div></div>
+                            <span class="arrow">→</span>
+                            <div class="done-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>Done</div>
+                        </div>
+                    </div>
+                    <div class="stage-row active-row">
+                        <div class="stage-label">
+                            <div class="stage-num">2</div>
+                            <div><div class="stage-name">COGs</div><div class="stage-time">1m 45s</div></div>
+                        </div>
+                        <div class="task-flow">
+                            <div class="task-chip completed" title="Create tile_r0_c0.tif"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg><span class="task-label">Create tile_r0_c0.tif</span></div>
+                            <span class="arrow">→</span>
+                            <div class="task-chip completed" title="Create tile_r0_c1.tif"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg><span class="task-label">Create tile_r0_c1.tif</span></div>
+                            <span class="arrow">→</span>
+                            <div class="task-chip active" title="Create tile_r1_c0.tif"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle></svg><span class="task-label">Create tile_r1_c0.tif</span></div>
+                            <span class="arrow">→</span>
+                            <div class="task-chip pending" title="Create tile_r1_c1.tif"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle></svg><span class="task-label">Create tile_r1_c1.tif</span></div>
+                        </div>
+                    </div>
+                    <div class="stage-row pending-row">
+                        <div class="stage-label">
+                            <div class="stage-num">3</div>
+                            <div><div class="stage-name">STAC</div><div class="stage-time">--</div></div>
+                        </div>
+                        <div class="task-flow">
+                            <div class="task-chip pending" title="Create STAC items"><span class="task-label">Create STAC items</span></div>
+                            <span class="arrow">→</span>
+                            <div class="task-chip pending" title="Index to pgSTAC"><span class="task-label">Index to pgSTAC</span></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="footer">
+                    <div class="legend">
+                        <div class="legend-item"><div class="legend-dot pending"></div>Pending</div>
+                        <div class="legend-item"><div class="legend-dot active"></div>Active</div>
+                        <div class="legend-item"><div class="legend-dot completed"></div>Done</div>
+                    </div>
+                    <div>Elapsed: 2m 34s</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- COMPLETED STATE -->
+        <div>
+            <div class="example-label">Completed (Success)</div>
+            <div class="job-card">
+                <div class="header completed">
+                    <div>
+                        <h2>Process Large Raster (Docker)</h2>
+                        <div class="job-id">a4ca728a48239e01...</div>
+                    </div>
+                    <div class="status-badge">
+                        <div class="status-dot"></div>
+                        Completed
+                    </div>
+                </div>
+                <div class="progress-section">
+                    <div class="stats">
+                        <div class="stat">
+                            <div class="stat-value" style="color: var(--completed)">3/3</div>
+                            <div class="stat-label">Stages</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value" style="color: var(--completed)">8/8</div>
+                            <div class="stat-label">Tasks</div>
+                        </div>
+                    </div>
+                    <div class="stage-track">
+                        <div class="stage-dot completed"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
+                        <div class="stage-line completed"></div>
+                        <div class="stage-dot completed"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
+                        <div class="stage-line completed"></div>
+                        <div class="stage-dot completed"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
+                        <div class="stage-line completed"></div>
+                        <div class="stage-dot completed"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
+                    </div>
+                </div>
+                <div class="result-banner success">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                        <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                    </svg>
+                    Job completed successfully
+                    <span class="details">Duration: 4m 12s • 8 tasks • 24 events</span>
+                </div>
+                <div class="swimlane">
+                    <div class="stage-row completed-row">
+                        <div class="stage-label">
+                            <div class="stage-num"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
+                            <div><div class="stage-name">Validate</div><div class="stage-time">32s</div></div>
+                        </div>
+                        <div class="task-flow">
+                            <div class="task-chip completed" title="Validate flood_depth.tif"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg><span class="task-label">Validate flood_depth.tif</span></div>
+                            <span class="arrow">→</span>
+                            <div class="done-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>Done</div>
+                        </div>
+                    </div>
+                    <div class="stage-row completed-row">
+                        <div class="stage-label">
+                            <div class="stage-num"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
+                            <div><div class="stage-name">COGs</div><div class="stage-time">2m 48s</div></div>
+                        </div>
+                        <div class="task-flow">
+                            <div class="task-chip completed" title="Create tile_r0_c0.tif"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg><span class="task-label">Create tile_r0_c0.tif</span></div>
+                            <span class="arrow">→</span>
+                            <div class="task-chip completed" title="Create tile_r0_c1.tif"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg><span class="task-label">Create tile_r0_c1.tif</span></div>
+                            <span class="arrow">→</span>
+                            <div class="task-chip completed" title="Create tile_r1_c0.tif"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg><span class="task-label">Create tile_r1_c0.tif</span></div>
+                            <span class="arrow">→</span>
+                            <div class="task-chip completed" title="Create tile_r1_c1.tif"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg><span class="task-label">Create tile_r1_c1.tif</span></div>
+                            <span class="arrow">→</span>
+                            <div class="done-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>Done</div>
+                        </div>
+                    </div>
+                    <div class="stage-row completed-row">
+                        <div class="stage-label">
+                            <div class="stage-num"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
+                            <div><div class="stage-name">STAC</div><div class="stage-time">52s</div></div>
+                        </div>
+                        <div class="task-flow">
+                            <div class="task-chip completed" title="Create STAC items"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg><span class="task-label">Create STAC items</span></div>
+                            <span class="arrow">→</span>
+                            <div class="task-chip completed" title="Index to pgSTAC"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg><span class="task-label">Index to pgSTAC</span></div>
+                            <span class="arrow">→</span>
+                            <div class="done-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>Done</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- FAILED STATE -->
+        <div>
+            <div class="example-label">Failed (Error)</div>
+            <div class="job-card">
+                <div class="header failed">
+                    <div>
+                        <h2>Process Large Raster (Docker)</h2>
+                        <div class="job-id">b2f8c3d4e5a6b7c8...</div>
+                    </div>
+                    <div class="status-badge">
+                        <div class="status-dot"></div>
+                        Failed
+                    </div>
+                </div>
+                <div class="progress-section">
+                    <div class="stats">
+                        <div class="stat">
+                            <div class="stat-value" style="color: var(--failed)">2/3</div>
+                            <div class="stat-label">Stages</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value" style="color: var(--failed)">4/8</div>
+                            <div class="stat-label">Tasks</div>
+                        </div>
+                    </div>
+                    <div class="stage-track">
+                        <div class="stage-dot completed"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
+                        <div class="stage-line completed"></div>
+                        <div class="stage-dot failed"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
+                        <div class="stage-line failed"></div>
+                        <div class="stage-dot pending">3</div>
+                        <div class="stage-line pending"></div>
+                        <div class="stage-dot pending"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg></div>
+                    </div>
+                </div>
+                <div class="result-banner failure">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="15" y1="9" x2="9" y2="15"></line>
+                        <line x1="9" y1="9" x2="15" y2="15"></line>
+                    </svg>
+                    Task failed: COG creation error
+                    <span class="details">GDAL error: Unable to open file</span>
+                </div>
+                <div class="swimlane">
+                    <div class="stage-row completed-row">
+                        <div class="stage-label">
+                            <div class="stage-num"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
+                            <div><div class="stage-name">Validate</div><div class="stage-time">32s</div></div>
+                        </div>
+                        <div class="task-flow">
+                            <div class="task-chip completed" title="Validate flood_depth.tif"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg><span class="task-label">Validate flood_depth.tif</span></div>
+                            <span class="arrow">→</span>
+                            <div class="done-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>Done</div>
+                        </div>
+                    </div>
+                    <div class="stage-row failed-row">
+                        <div class="stage-label">
+                            <div class="stage-num"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
+                            <div><div class="stage-name">COGs</div><div class="stage-time">1m 12s</div></div>
+                        </div>
+                        <div class="task-flow">
+                            <div class="task-chip completed" title="Create tile_r0_c0.tif"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg><span class="task-label">Create tile_r0_c0.tif</span></div>
+                            <span class="arrow">→</span>
+                            <div class="task-chip completed" title="Create tile_r0_c1.tif"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg><span class="task-label">Create tile_r0_c1.tif</span></div>
+                            <span class="arrow">→</span>
+                            <div class="task-chip failed" title="Create tile_r1_c0.tif - GDAL error: Unable to open file"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg><span class="task-label">Create tile_r1_c0.tif</span></div>
+                            <span class="arrow">→</span>
+                            <div class="task-chip pending" title="Create tile_r1_c1.tif (skipped)"><span class="task-label">Create tile_r1_c1.tif</span></div>
+                        </div>
+                    </div>
+                    <div class="stage-row pending-row">
+                        <div class="stage-label">
+                            <div class="stage-num">3</div>
+                            <div><div class="stage-name">STAC</div><div class="stage-time">--</div></div>
+                        </div>
+                        <div class="task-flow">
+                            <div class="task-chip pending" title="Create STAC items (skipped)"><span class="task-label">Create STAC items</span></div>
+                            <span class="arrow">→</span>
+                            <div class="task-chip pending" title="Index to pgSTAC (skipped)"><span class="task-label">Index to pgSTAC</span></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="footer">
+                    <div class="legend">
+                        <div class="legend-item"><div class="legend-dot failed"></div>Failed</div>
+                        <div class="legend-item"><div class="legend-dot completed"></div>Done</div>
+                        <div class="legend-item"><div class="legend-dot pending"></div>Skipped</div>
+                    </div>
+                    <div style="color: var(--failed)">Failed at 1m 44s</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

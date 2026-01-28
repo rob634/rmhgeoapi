@@ -348,10 +348,8 @@ class SubmitRasterInterface(BaseInterface):
             from config import get_config, generate_platform_request_id
             from infrastructure import PlatformRepository
             from core.models import ApiRequest, PlatformRequest
-            from triggers.trigger_platform import (
-                _translate_to_coremachine,
-                _create_and_submit_job
-            )
+            from services.platform_translation import translate_to_coremachine
+            from services.platform_job_submit import create_and_submit_job
             config = get_config()
 
             # Force data_type to raster
@@ -378,10 +376,10 @@ class SubmitRasterInterface(BaseInterface):
                 }, platform_payload)
 
             # Translate to CoreMachine job parameters (unified path)
-            job_type, job_params = _translate_to_coremachine(platform_req, config)
+            job_type, job_params = translate_to_coremachine(platform_req, config)
 
             # Create and submit job
-            job_id = _create_and_submit_job(job_type, job_params, request_id)
+            job_id = create_and_submit_job(job_type, job_params, request_id)
 
             if not job_id:
                 return self._render_submit_error("Failed to create CoreMachine job")

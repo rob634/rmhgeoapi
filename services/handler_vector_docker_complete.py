@@ -364,7 +364,8 @@ def _create_table_and_metadata(
         table_name=table_name,
         schema=schema,
         gdf=gdf,
-        indexes=indexes
+        indexes=indexes,
+        overwrite=overwrite
     )
 
     # Generate vector tile URLs

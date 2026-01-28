@@ -1334,12 +1334,11 @@ class VectorToPostGISHandler:
         table_name: str,
         schema: str,
         gdf: gpd.GeoDataFrame,
-        indexes: dict = None
+        indexes: dict = None,
+        overwrite: bool = False
     ) -> None:
         """
         Create PostGIS table with etl_batch_id column for idempotent chunk tracking.
-
-        IDEMPOTENT: Uses IF NOT EXISTS - safe to call multiple times.
 
         Schema includes:
         - id: SERIAL PRIMARY KEY
@@ -1360,6 +1359,10 @@ class VectorToPostGISHandler:
                 - spatial: bool (default True)
                 - attributes: list of column names
                 - temporal: list of column names for DESC indexes
+            overwrite: If True, drop existing table. If False and table exists, raise error.
+
+        Raises:
+            ValueError: If table exists and overwrite=False
         """
         # Default index config
         if indexes is None:
@@ -1367,6 +1370,28 @@ class VectorToPostGISHandler:
 
         with self._pg_repo._get_connection() as conn:
             with conn.cursor() as cur:
+                # Check if table exists
+                cur.execute("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables
+                        WHERE table_schema = %s AND table_name = %s
+                    )
+                """, (schema, table_name))
+                table_exists = cur.fetchone()[0]
+
+                if table_exists:
+                    if not overwrite:
+                        raise ValueError(
+                            f"Table {schema}.{table_name} already exists. "
+                            f"To replace it, specify overwrite=true"
+                        )
+                    # Drop existing table (overwrite=true)
+                    logger.info(f"🗑️ Dropping existing table {schema}.{table_name} (overwrite=true)")
+                    cur.execute(sql.SQL("DROP TABLE {schema}.{table}").format(
+                        schema=sql.Identifier(schema),
+                        table=sql.Identifier(table_name)
+                    ))
+
                 # Detect geometry type from first feature
                 geom_type = gdf.geometry.iloc[0].geom_type.upper()
 

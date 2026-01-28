@@ -1,0 +1,507 @@
+/* ============================================================================
+   JOB TIMELINE SWIMLANE STYLES
+   ============================================================================
+   V0.8 UI Update (27 JAN 2026)
+   Horizontal swimlane visualization for job execution timeline.
+   ============================================================================ */
+
+/* CSS Variables for swimlane */
+:root {
+    --swimlane-pending: #e0e0e0;
+    --swimlane-pending-text: #888;
+    --swimlane-active: #2196F3;
+    --swimlane-active-glow: rgba(33, 150, 243, 0.3);
+    --swimlane-active-bg: rgba(33, 150, 243, 0.08);
+    --swimlane-completed: #4CAF50;
+    --swimlane-completed-bg: rgba(76, 175, 80, 0.08);
+    --swimlane-failed: #f44336;
+    --swimlane-failed-bg: rgba(244, 67, 54, 0.08);
+}
+
+/* Container */
+.swimlane-container {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    overflow: hidden;
+    margin-bottom: 20px;
+}
+
+/* Header */
+.swimlane-header {
+    padding: 16px 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    color: white;
+}
+
+.swimlane-header-pending {
+    background: linear-gradient(135deg, #666 0%, #888 100%);
+}
+
+.swimlane-header-processing {
+    background: linear-gradient(135deg, var(--ds-navy, #053657) 0%, var(--ds-blue-primary, #245AAD) 100%);
+}
+
+.swimlane-header-completed {
+    background: linear-gradient(135deg, #2E7D32 0%, #4CAF50 100%);
+}
+
+.swimlane-header-failed {
+    background: linear-gradient(135deg, #C62828 0%, #f44336 100%);
+}
+
+.swimlane-title h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.swimlane-job-id {
+    font-family: monospace;
+    font-size: 10px;
+    opacity: 0.7;
+    display: block;
+    margin-top: 2px;
+}
+
+.swimlane-status-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 16px;
+    font-size: 12px;
+    font-weight: 600;
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.swimlane-status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: white;
+}
+
+.swimlane-status-dot.pulse {
+    animation: swimlane-pulse 1.5s infinite;
+}
+
+@keyframes swimlane-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+
+/* Progress section */
+.swimlane-progress {
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--ds-gray-light, #e0e0e0);
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
+
+.swimlane-stats {
+    display: flex;
+    gap: 16px;
+}
+
+.swimlane-stat {
+    text-align: center;
+}
+
+.swimlane-stat-value {
+    font-size: 20px;
+    font-weight: 700;
+    display: block;
+}
+
+.swimlane-stat-value.text-completed { color: var(--swimlane-completed); }
+.swimlane-stat-value.text-failed { color: var(--swimlane-failed); }
+.swimlane-stat-value.text-active { color: var(--swimlane-active); }
+
+.swimlane-stat-label {
+    font-size: 10px;
+    color: var(--ds-text-muted, #666);
+    text-transform: uppercase;
+}
+
+/* Stage track (progress dots) */
+.swimlane-stage-track {
+    flex: 1;
+    display: flex;
+    align-items: center;
+}
+
+.swimlane-stage-dot {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    z-index: 2;
+    flex-shrink: 0;
+}
+
+.swimlane-stage-dot svg {
+    width: 14px;
+    height: 14px;
+}
+
+.swimlane-stage-dot.stage-completed {
+    background: var(--swimlane-completed);
+    color: white;
+}
+
+.swimlane-stage-dot.stage-active {
+    background: var(--swimlane-active);
+    color: white;
+    box-shadow: 0 0 0 4px var(--swimlane-active-glow);
+}
+
+.swimlane-stage-dot.stage-pending {
+    background: var(--swimlane-pending);
+    color: var(--swimlane-pending-text);
+}
+
+.swimlane-stage-dot.stage-failed {
+    background: var(--swimlane-failed);
+    color: white;
+}
+
+.swimlane-stage-line {
+    flex: 1;
+    height: 3px;
+    margin: 0 -2px;
+    z-index: 1;
+    min-width: 20px;
+}
+
+.stage-line-completed { background: var(--swimlane-completed); }
+.stage-line-active { background: linear-gradient(90deg, var(--swimlane-completed), var(--swimlane-active)); }
+.stage-line-pending { background: var(--swimlane-pending); }
+.stage-line-failed { background: var(--swimlane-failed); }
+
+/* Result banner */
+.swimlane-result-banner {
+    padding: 12px 24px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.swimlane-result-banner svg {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+}
+
+.swimlane-result-banner.result-success {
+    background: var(--swimlane-completed-bg);
+    color: var(--swimlane-completed);
+}
+
+.swimlane-result-banner.result-failure {
+    background: var(--swimlane-failed-bg);
+    color: var(--swimlane-failed);
+}
+
+.result-details {
+    font-weight: 400;
+    font-size: 12px;
+    margin-left: auto;
+    opacity: 0.8;
+}
+
+/* Swimlane body (rows) */
+.swimlane-body {
+    /* No extra styling needed */
+}
+
+/* Swimlane row */
+.swimlane-row {
+    display: flex;
+    border-bottom: 1px solid var(--ds-gray-light, #e0e0e0);
+}
+
+.swimlane-row:last-child {
+    border-bottom: none;
+}
+
+.swimlane-row-completed { background: var(--swimlane-completed-bg); }
+.swimlane-row-active { background: var(--swimlane-active-bg); }
+.swimlane-row-pending { background: var(--ds-bg, #f5f7fa); }
+.swimlane-row-failed { background: var(--swimlane-failed-bg); }
+
+/* Row label */
+.swimlane-row-label {
+    width: 160px;
+    min-width: 160px;
+    padding: 12px 16px;
+    border-right: 1px solid var(--ds-gray-light, #e0e0e0);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.swimlane-row-num {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.swimlane-row-num svg {
+    width: 12px;
+    height: 12px;
+}
+
+.swimlane-row-num.stage-completed { background: var(--swimlane-completed); color: white; }
+.swimlane-row-num.stage-active { background: var(--swimlane-active); color: white; }
+.swimlane-row-num.stage-pending { background: var(--swimlane-pending); color: var(--swimlane-pending-text); }
+.swimlane-row-num.stage-failed { background: var(--swimlane-failed); color: white; }
+
+.swimlane-row-info {
+    display: flex;
+    flex-direction: column;
+}
+
+.swimlane-row-name {
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.swimlane-row-time {
+    font-size: 10px;
+    color: var(--ds-text-muted, #666);
+}
+
+/* Task flow */
+.swimlane-task-flow {
+    flex: 1;
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    overflow-x: auto;
+}
+
+.swimlane-no-tasks {
+    color: var(--ds-text-muted, #666);
+    font-size: 12px;
+    font-style: italic;
+}
+
+/* Task chip */
+.swimlane-task-chip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 14px;
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+    cursor: default;
+}
+
+.swimlane-task-chip svg {
+    width: 10px;
+    height: 10px;
+    flex-shrink: 0;
+}
+
+.swimlane-task-chip .task-label {
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.swimlane-task-chip.task-completed,
+.swimlane-task-chip.task-complete {
+    background: var(--swimlane-completed);
+    color: white;
+}
+
+.swimlane-task-chip.task-processing,
+.swimlane-task-chip.task-running {
+    background: var(--swimlane-active);
+    color: white;
+}
+
+.swimlane-task-chip.task-pending,
+.swimlane-task-chip.task-queued {
+    background: var(--swimlane-pending);
+    color: var(--swimlane-pending-text);
+}
+
+.swimlane-task-chip.task-failed,
+.swimlane-task-chip.task-error {
+    background: var(--swimlane-failed);
+    color: white;
+}
+
+/* Micro-dots */
+.task-micro-dots {
+    display: flex;
+    gap: 2px;
+    margin-left: 4px;
+}
+
+.micro-dot {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.3);
+}
+
+.micro-dot.done {
+    background: rgba(255, 255, 255, 0.9);
+}
+
+.micro-dot.failed {
+    background: #ff6b6b;
+}
+
+.task-pending .micro-dot,
+.task-queued .micro-dot {
+    background: rgba(0, 0, 0, 0.15);
+}
+
+.task-pending .micro-dot.done,
+.task-queued .micro-dot.done {
+    background: rgba(0, 0, 0, 0.4);
+}
+
+/* Task arrow */
+.task-arrow {
+    color: var(--ds-text-muted, #666);
+    font-size: 14px;
+    opacity: 0.5;
+}
+
+/* Done badge */
+.swimlane-done-badge {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 10px;
+    background: rgba(76, 175, 80, 0.15);
+    color: var(--swimlane-completed);
+    border-radius: 12px;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+.swimlane-done-badge svg {
+    width: 10px;
+    height: 10px;
+}
+
+/* Footer */
+.swimlane-footer {
+    padding: 12px 24px;
+    background: var(--ds-bg, #f5f7fa);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    color: var(--ds-text-muted, #666);
+}
+
+.swimlane-legend {
+    display: flex;
+    gap: 12px;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.legend-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+}
+
+.legend-dot.pending { background: var(--swimlane-pending); }
+.legend-dot.active { background: var(--swimlane-active); }
+.legend-dot.completed { background: var(--swimlane-completed); }
+.legend-dot.failed { background: var(--swimlane-failed); }
+
+.swimlane-micro-legend {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.micro-label {
+    margin-right: 4px;
+}
+
+.micro-dot-label {
+    font-weight: 700;
+    color: var(--ds-navy, #053657);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .swimlane-row-label {
+        width: 120px;
+        min-width: 120px;
+    }
+
+    .swimlane-task-chip .task-label {
+        max-width: 100px;
+    }
+
+    .swimlane-footer {
+        flex-direction: column;
+        gap: 8px;
+        align-items: flex-start;
+    }
+}
+
+@media (max-width: 480px) {
+    .swimlane-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+    }
+
+    .swimlane-progress {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .swimlane-stats {
+        justify-content: space-around;
+    }
+
+    .swimlane-row {
+        flex-direction: column;
+    }
+
+    .swimlane-row-label {
+        width: 100%;
+        border-right: none;
+        border-bottom: 1px solid var(--ds-gray-light, #e0e0e0);
+    }
+
+    .swimlane-task-flow {
+        flex-wrap: wrap;
+    }
+}

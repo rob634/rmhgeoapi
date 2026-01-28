@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Job Timeline - Swimlane Design Mockup</title>
+    <style>
+        :root {
+            --pending: #e0e0e0;
+            --pending-text: #888;
+            --active: #2196F3;
+            --active-bg: rgba(33, 150, 243, 0.1);
+            --completed: #4CAF50;
+            --completed-bg: rgba(76, 175, 80, 0.1);
+            --failed: #f44336;
+            --failed-bg: rgba(244, 67, 54, 0.1);
+            --bg: #f5f7fa;
+            --card-bg: #ffffff;
+            --text: #333;
+            --text-muted: #666;
+            --border: #e0e0e0;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        /* Header */
+        .header {
+            background: linear-gradient(135deg, #053657 0%, #245AAD 100%);
+            color: white;
+            padding: 20px 24px;
+            border-radius: 12px 12px 0 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            font-size: 20px;
+            font-weight: 600;
+        }
+
+        .status-pill {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            background: rgba(255,255,255,0.15);
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #4CAF50;
+        }
+
+        .status-dot.processing {
+            background: #90CAF9;
+            animation: blink 1s infinite;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        /* Progress Bar */
+        .progress-header {
+            background: var(--card-bg);
+            padding: 16px 24px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 24px;
+        }
+
+        .progress-track {
+            flex: 1;
+            height: 8px;
+            background: var(--pending);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--completed) 0%, var(--completed) 60%, var(--active) 60%, var(--active) 70%, var(--pending) 70%);
+            width: 70%;
+            border-radius: 4px;
+            transition: width 0.5s ease;
+        }
+
+        .progress-text {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text);
+            min-width: 100px;
+            text-align: right;
+        }
+
+        /* Swimlane Container */
+        .swimlane-container {
+            background: var(--card-bg);
+            border-radius: 0 0 12px 12px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        /* Stage Row (Swimlane) */
+        .stage-row {
+            display: flex;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .stage-row:last-child {
+            border-bottom: none;
+        }
+
+        .stage-row.completed {
+            background: var(--completed-bg);
+        }
+
+        .stage-row.active {
+            background: var(--active-bg);
+        }
+
+        .stage-row.pending {
+            opacity: 0.7;
+        }
+
+        /* Stage Label */
+        .stage-label {
+            width: 180px;
+            padding: 20px;
+            border-right: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-shrink: 0;
+        }
+
+        .stage-number {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 14px;
+        }
+
+        .stage-row.completed .stage-number {
+            background: var(--completed);
+            color: white;
+        }
+
+        .stage-row.active .stage-number {
+            background: var(--active);
+            color: white;
+            animation: pulse 2s infinite;
+        }
+
+        .stage-row.pending .stage-number {
+            background: var(--pending);
+            color: var(--pending-text);
+        }
+
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(33, 150, 243, 0.4); }
+            50% { box-shadow: 0 0 0 8px rgba(33, 150, 243, 0); }
+        }
+
+        .stage-info {
+            flex: 1;
+        }
+
+        .stage-name {
+            font-weight: 600;
+            font-size: 14px;
+            margin-bottom: 2px;
+        }
+
+        .stage-time {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        /* Task Flow */
+        .task-flow {
+            flex: 1;
+            padding: 16px 20px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            overflow-x: auto;
+        }
+
+        /* Task Chip */
+        .task-chip {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 14px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 500;
+            white-space: nowrap;
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+
+        .task-chip:hover {
+            transform: scale(1.02);
+        }
+
+        .task-chip.completed {
+            background: var(--completed);
+            color: white;
+        }
+
+        .task-chip.active {
+            background: var(--active);
+            color: white;
+            animation: chipPulse 2s infinite;
+        }
+
+        .task-chip.pending {
+            background: var(--pending);
+            color: var(--pending-text);
+        }
+
+        .task-chip.failed {
+            background: var(--failed);
+            color: white;
+        }
+
+        @keyframes chipPulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(33, 150, 243, 0.4); }
+            50% { box-shadow: 0 0 0 4px rgba(33, 150, 243, 0.2); }
+        }
+
+        .task-chip svg {
+            width: 14px;
+            height: 14px;
+        }
+
+        /* Arrow between tasks */
+        .task-arrow {
+            color: var(--text-muted);
+            font-size: 18px;
+        }
+
+        /* Event Micro-dots inside chips */
+        .micro-dots {
+            display: flex;
+            gap: 2px;
+            margin-left: 4px;
+        }
+
+        .micro-dot {
+            width: 4px;
+            height: 4px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.5);
+        }
+
+        .micro-dot.done {
+            background: rgba(255,255,255,0.9);
+        }
+
+        /* Stage Complete Indicator */
+        .stage-complete {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: var(--completed);
+            font-size: 13px;
+            font-weight: 600;
+            padding: 8px 14px;
+            background: rgba(76, 175, 80, 0.1);
+            border-radius: 20px;
+        }
+
+        /* Final Summary Row */
+        .summary-row {
+            background: linear-gradient(135deg, #053657 0%, #245AAD 100%);
+            color: white;
+            padding: 20px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .summary-stats {
+            display: flex;
+            gap: 32px;
+        }
+
+        .stat {
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: 700;
+        }
+
+        .stat-label {
+            font-size: 11px;
+            opacity: 0.8;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* Expandable Details */
+        .expand-trigger {
+            padding: 12px 24px;
+            background: var(--bg);
+            border-top: 1px solid var(--border);
+            font-size: 13px;
+            color: var(--text-muted);
+            cursor: pointer;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .expand-trigger:hover {
+            background: #eee;
+        }
+
+        /* Alternative: Icon-only compact view */
+        .compact-view {
+            margin-top: 24px;
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        .compact-view h3 {
+            font-size: 14px;
+            color: var(--text-muted);
+            margin-bottom: 16px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .icon-flow {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            flex-wrap: wrap;
+        }
+
+        .icon-node {
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+            cursor: pointer;
+            position: relative;
+        }
+
+        .icon-node:hover {
+            transform: scale(1.1);
+        }
+
+        .icon-node.completed {
+            background: var(--completed);
+            color: white;
+        }
+
+        .icon-node.active {
+            background: var(--active);
+            color: white;
+            animation: iconPulse 2s infinite;
+        }
+
+        .icon-node.pending {
+            background: var(--pending);
+            color: var(--pending-text);
+        }
+
+        .icon-node.failed {
+            background: var(--failed);
+            color: white;
+        }
+
+        @keyframes iconPulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(33, 150, 243, 0.4); }
+            50% { box-shadow: 0 0 0 6px rgba(33, 150, 243, 0.1); }
+        }
+
+        .icon-node svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        .icon-connector {
+            width: 20px;
+            height: 2px;
+            background: var(--border);
+        }
+
+        .icon-connector.done {
+            background: var(--completed);
+        }
+
+        .stage-divider {
+            width: 2px;
+            height: 30px;
+            background: var(--border);
+            margin: 0 8px;
+        }
+
+        /* Tooltip */
+        .icon-node .tooltip {
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 6px 10px;
+            background: var(--text);
+            color: white;
+            font-size: 11px;
+            border-radius: 4px;
+            white-space: nowrap;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s ease;
+            margin-bottom: 6px;
+        }
+
+        .icon-node:hover .tooltip {
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>Process Large Raster (Docker)</h1>
+            <div class="status-pill">
+                <div class="status-dot processing"></div>
+                Stage 2 of 3
+            </div>
+        </div>
+
+        <!-- Progress Bar -->
+        <div class="progress-header">
+            <div class="progress-track">
+                <div class="progress-fill"></div>
+            </div>
+            <div class="progress-text">5/8 tasks</div>
+        </div>
+
+        <!-- Swimlane Container -->
+        <div class="swimlane-container">
+            <!-- Stage 1: Completed -->
+            <div class="stage-row completed">
+                <div class="stage-label">
+                    <div class="stage-number">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                        </svg>
+                    </div>
+                    <div class="stage-info">
+                        <div class="stage-name">Validate</div>
+                        <div class="stage-time">32 seconds</div>
+                    </div>
+                </div>
+                <div class="task-flow">
+                    <div class="task-chip completed">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                        </svg>
+                        Validate Raster
+                        <div class="micro-dots">
+                            <div class="micro-dot done"></div>
+                            <div class="micro-dot done"></div>
+                            <div class="micro-dot done"></div>
+                        </div>
+                    </div>
+                    <span class="task-arrow">→</span>
+                    <div class="stage-complete">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                        </svg>
+                        Stage Complete
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stage 2: Active -->
+            <div class="stage-row active">
+                <div class="stage-label">
+                    <div class="stage-number">2</div>
+                    <div class="stage-info">
+                        <div class="stage-name">Create COGs</div>
+                        <div class="stage-time">1m 45s...</div>
+                    </div>
+                </div>
+                <div class="task-flow">
+                    <div class="task-chip completed">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                        </svg>
+                        Tile r0_c0
+                        <div class="micro-dots">
+                            <div class="micro-dot done"></div>
+                            <div class="micro-dot done"></div>
+                            <div class="micro-dot done"></div>
+                        </div>
+                    </div>
+                    <span class="task-arrow">→</span>
+                    <div class="task-chip completed">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                        </svg>
+                        Tile r0_c1
+                        <div class="micro-dots">
+                            <div class="micro-dot done"></div>
+                            <div class="micro-dot done"></div>
+                            <div class="micro-dot done"></div>
+                        </div>
+                    </div>
+                    <span class="task-arrow">→</span>
+                    <div class="task-chip active">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <polyline points="12 6 12 12 16 14"></polyline>
+                        </svg>
+                        Tile r1_c0
+                        <div class="micro-dots">
+                            <div class="micro-dot done"></div>
+                            <div class="micro-dot done"></div>
+                            <div class="micro-dot"></div>
+                        </div>
+                    </div>
+                    <span class="task-arrow">→</span>
+                    <div class="task-chip pending">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"></circle>
+                        </svg>
+                        Tile r1_c1
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stage 3: Pending -->
+            <div class="stage-row pending">
+                <div class="stage-label">
+                    <div class="stage-number">3</div>
+                    <div class="stage-info">
+                        <div class="stage-name">Register STAC</div>
+                        <div class="stage-time">Waiting...</div>
+                    </div>
+                </div>
+                <div class="task-flow">
+                    <div class="task-chip pending">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"></circle>
+                        </svg>
+                        Create Items
+                    </div>
+                    <span class="task-arrow">→</span>
+                    <div class="task-chip pending">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"></circle>
+                        </svg>
+                        Insert pgSTAC
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Summary Row -->
+        <div class="summary-row">
+            <div class="summary-stats">
+                <div class="stat">
+                    <div class="stat-value">2m 34s</div>
+                    <div class="stat-label">Elapsed</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">~1m</div>
+                    <div class="stat-label">Remaining</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">12</div>
+                    <div class="stat-label">Events</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Expand for details -->
+        <div class="expand-trigger">
+            <span>Show detailed event log</span>
+            <span>▼</span>
+        </div>
+
+        <!-- Alternative: Super Compact Icon View -->
+        <div class="compact-view">
+            <h3>Alternative: Icon-Only Timeline</h3>
+            <div class="icon-flow">
+                <!-- Stage 1 -->
+                <div class="icon-node completed">
+                    <span class="tooltip">Job Created</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                    </svg>
+                </div>
+                <div class="icon-connector done"></div>
+                <div class="icon-node completed">
+                    <span class="tooltip">Validate Raster ✓</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                </div>
+
+                <div class="stage-divider"></div>
+
+                <!-- Stage 2 -->
+                <div class="icon-node completed">
+                    <span class="tooltip">Tile r0_c0 ✓</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                    </svg>
+                </div>
+                <div class="icon-connector done"></div>
+                <div class="icon-node completed">
+                    <span class="tooltip">Tile r0_c1 ✓</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                    </svg>
+                </div>
+                <div class="icon-connector done"></div>
+                <div class="icon-node active">
+                    <span class="tooltip">Tile r1_c0 (75%)</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <polyline points="12 6 12 12 16 14"></polyline>
+                    </svg>
+                </div>
+                <div class="icon-connector"></div>
+                <div class="icon-node pending">
+                    <span class="tooltip">Tile r1_c1</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                    </svg>
+                </div>
+
+                <div class="stage-divider"></div>
+
+                <!-- Stage 3 -->
+                <div class="icon-node pending">
+                    <span class="tooltip">Create STAC Items</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="17 8 12 3 7 8"></polyline>
+                        <line x1="12" y1="3" x2="12" y2="15"></line>
+                    </svg>
+                </div>
+                <div class="icon-connector"></div>
+                <div class="icon-node pending">
+                    <span class="tooltip">Insert to pgSTAC</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+                        <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path>
+                        <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+                    </svg>
+                </div>
+                <div class="icon-connector"></div>
+                <div class="icon-node pending">
+                    <span class="tooltip">Job Complete</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                        <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                    </svg>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

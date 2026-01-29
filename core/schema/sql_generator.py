@@ -84,6 +84,8 @@ from ..models.system_snapshot import SystemSnapshotRecord, SnapshotTriggerType  
 from ..models.external_refs import DatasetRefRecord  # External references (09 JAN 2026 - F7.8)
 from ..models.raster_metadata import CogMetadataRecord  # Raster metadata (09 JAN 2026 - F7.9)
 from ..models.approval import DatasetApproval, ApprovalStatus  # Dataset approvals (16 JAN 2026 - F4.AP)
+from ..models.asset import GeospatialAsset, AssetRevision, ApprovalState, ClearanceState, ProcessingStatus  # Geospatial assets (29 JAN 2026 - V0.8)
+from ..models.platform_registry import Platform, DDH_PLATFORM  # Platform registry (29 JAN 2026 - V0.8)
 from ..models.artifact import Artifact, ArtifactStatus  # Artifact registry (20 JAN 2026)
 from ..models.external_service import ExternalService, ServiceType, ServiceStatus  # External service registry (22 JAN 2026)
 from ..models.job_event import JobEvent, JobEventType, JobEventStatus  # Job event tracking (23 JAN 2026)
@@ -1492,6 +1494,145 @@ $$""").format(
             sql.Identifier("update_updated_at_column")
         ))
 
+        # 6. upsert_geospatial_asset function (V0.8 Entity Architecture - 29 JAN 2026)
+        # Uses advisory locks to serialize concurrent requests for the same asset
+        body_upsert_asset = """
+DECLARE
+    v_existing RECORD;
+BEGIN
+    -- Acquire advisory lock for this asset_id (serialize concurrent requests)
+    PERFORM pg_advisory_xact_lock(hashtext(p_asset_id));
+
+    -- Check for existing record (excluding soft-deleted)
+    SELECT * INTO v_existing
+    FROM {schema}.geospatial_assets
+    WHERE asset_id = p_asset_id
+      AND deleted_at IS NULL;
+
+    IF v_existing IS NULL THEN
+        -- Check if soft-deleted version exists
+        SELECT * INTO v_existing
+        FROM {schema}.geospatial_assets
+        WHERE asset_id = p_asset_id
+          AND deleted_at IS NOT NULL;
+
+        IF v_existing IS NOT NULL THEN
+            -- Reactivate soft-deleted asset
+            UPDATE {schema}.geospatial_assets SET
+                deleted_at = NULL,
+                deleted_by = NULL,
+                revision = v_existing.revision + 1,
+                current_job_id = NULL,
+                approval_state = 'pending_review'::{schema}.approval_state,
+                clearance_state = 'uncleared'::{schema}.clearance_state,
+                reviewer = NULL,
+                reviewed_at = NULL,
+                rejection_reason = NULL,
+                adf_run_id = NULL,
+                cleared_at = NULL,
+                cleared_by = NULL,
+                made_public_at = NULL,
+                made_public_by = NULL,
+                table_name = p_table_name,
+                blob_path = p_blob_path,
+                updated_at = NOW()
+            WHERE asset_id = p_asset_id;
+
+            RETURN QUERY SELECT 'reactivated'::VARCHAR(20), v_existing.revision + 1, NULL::TEXT;
+        ELSE
+            -- Create new asset
+            INSERT INTO {schema}.geospatial_assets (
+                asset_id, dataset_id, resource_id, version_id,
+                data_type, stac_item_id, stac_collection_id,
+                table_name, blob_path,
+                revision, approval_state, clearance_state
+            ) VALUES (
+                p_asset_id, p_dataset_id, p_resource_id, p_version_id,
+                p_data_type, p_stac_item_id, p_stac_collection_id,
+                p_table_name, p_blob_path,
+                1, 'pending_review'::{schema}.approval_state, 'uncleared'::{schema}.clearance_state
+            );
+            RETURN QUERY SELECT 'created'::VARCHAR(20), 1, NULL::TEXT;
+        END IF;
+
+    ELSIF p_overwrite THEN
+        -- Log current revision to history (only if current_job_id exists)
+        IF v_existing.current_job_id IS NOT NULL THEN
+            INSERT INTO {schema}.asset_revisions (
+                revision_id, asset_id, revision, job_id, content_hash,
+                approval_state_at_supersession, clearance_state_at_supersession,
+                reviewer_at_supersession, created_at, superseded_at
+            ) VALUES (
+                gen_random_uuid(),
+                v_existing.asset_id,
+                v_existing.revision,
+                v_existing.current_job_id,
+                v_existing.content_hash,
+                v_existing.approval_state,
+                v_existing.clearance_state,
+                v_existing.reviewer,
+                v_existing.created_at,
+                NOW()
+            );
+        END IF;
+
+        -- Update to new revision
+        UPDATE {schema}.geospatial_assets SET
+            revision = revision + 1,
+            current_job_id = NULL,
+            content_hash = NULL,
+            approval_state = 'pending_review'::{schema}.approval_state,
+            clearance_state = 'uncleared'::{schema}.clearance_state,
+            reviewer = NULL,
+            reviewed_at = NULL,
+            rejection_reason = NULL,
+            adf_run_id = NULL,
+            cleared_at = NULL,
+            cleared_by = NULL,
+            made_public_at = NULL,
+            made_public_by = NULL,
+            table_name = COALESCE(p_table_name, table_name),
+            blob_path = COALESCE(p_blob_path, blob_path),
+            updated_at = NOW()
+        WHERE asset_id = p_asset_id;
+
+        RETURN QUERY SELECT 'updated'::VARCHAR(20), v_existing.revision + 1, NULL::TEXT;
+
+    ELSE
+        -- Exists and no overwrite requested
+        RETURN QUERY SELECT 'exists'::VARCHAR(20), v_existing.revision,
+            'Asset exists. Use overwrite=true to replace.'::TEXT;
+    END IF;
+END;
+""".format(schema=self.schema_name)
+
+        functions.append(sql.SQL("""
+CREATE OR REPLACE FUNCTION {}.{}(
+    p_asset_id VARCHAR(64),
+    p_dataset_id VARCHAR(255),
+    p_resource_id VARCHAR(255),
+    p_version_id VARCHAR(100),
+    p_data_type VARCHAR(20),
+    p_stac_item_id VARCHAR(200),
+    p_stac_collection_id VARCHAR(200),
+    p_table_name VARCHAR(63) DEFAULT NULL,
+    p_blob_path VARCHAR(500) DEFAULT NULL,
+    p_overwrite BOOLEAN DEFAULT FALSE
+)
+RETURNS TABLE (
+    operation VARCHAR(20),
+    new_revision INTEGER,
+    error_message TEXT
+)
+LANGUAGE plpgsql
+AS $$
+{}
+$$""").format(
+            sql.Identifier(self.schema_name),
+            sql.Identifier("upsert_geospatial_asset"),
+            sql.SQL(body_upsert_asset)
+        ))
+
         return functions
         
     def generate_triggers_composed(self) -> List[sql.Composed]:
@@ -1513,7 +1654,47 @@ $$""").format(
 
         self.logger.debug(f"✅ Generated {len(triggers)} trigger statements")
         return triggers
-    
+
+    def generate_seed_data(self) -> List[sql.Composed]:
+        """
+        Generate seed data INSERT statements.
+
+        V0.8 (29 JAN 2026): Seeds DDH platform for Platform Registry.
+        Uses ON CONFLICT DO NOTHING for idempotent execution.
+
+        Returns:
+            List of composed INSERT statements
+        """
+        self.logger.debug("🌱 Generating seed data")
+        seeds = []
+
+        # Seed DDH platform (V0.8 - 29 JAN 2026)
+        # Uses ON CONFLICT DO NOTHING for safe re-execution
+        seeds.append(sql.SQL("""
+INSERT INTO {schema}.{table} (
+    platform_id, display_name, description, required_refs, optional_refs, is_active
+) VALUES (
+    {platform_id},
+    {display_name},
+    {description},
+    {required_refs}::jsonb,
+    {optional_refs}::jsonb,
+    {is_active}
+) ON CONFLICT (platform_id) DO NOTHING
+""").format(
+            schema=sql.Identifier(self.schema_name),
+            table=sql.Identifier("platforms"),
+            platform_id=sql.Literal(DDH_PLATFORM.platform_id),
+            display_name=sql.Literal(DDH_PLATFORM.display_name),
+            description=sql.Literal(DDH_PLATFORM.description),
+            required_refs=sql.Literal(str(DDH_PLATFORM.required_refs).replace("'", '"')),
+            optional_refs=sql.Literal(str(DDH_PLATFORM.optional_refs).replace("'", '"')),
+            is_active=sql.Literal(DDH_PLATFORM.is_active)
+        ))
+
+        self.logger.debug(f"✅ Generated {len(seeds)} seed data statements")
+        return seeds
+
     # REMOVED: generate_triggers() - replaced by generate_triggers_composed()
     # Following "No Backward Compatibility" philosophy
     # This method used string concatenation which is unsafe
@@ -1571,6 +1752,9 @@ $$""").format(
         composed.extend(self.generate_enum("map_type", MapType))  # Map states (23 JAN 2026)
         composed.extend(self.generate_enum("job_event_type", JobEventType))  # Job event tracking (23 JAN 2026)
         composed.extend(self.generate_enum("job_event_status", JobEventStatus))  # Job event tracking (23 JAN 2026)
+        composed.extend(self.generate_enum("approval_state", ApprovalState))  # Geospatial assets (29 JAN 2026 - V0.8)
+        composed.extend(self.generate_enum("clearance_state", ClearanceState))  # Geospatial assets (29 JAN 2026 - V0.8)
+        composed.extend(self.generate_enum("processing_status", ProcessingStatus))  # DAG Orchestration (29 JAN 2026 - V0.8)
 
         # For tables, indexes, functions, and triggers, we still need string format
         # because they are complex multi-line statements
@@ -1596,6 +1780,9 @@ $$""").format(
         composed.append(self.generate_table_from_model(MapState))  # Map states (23 JAN 2026)
         composed.append(self.generate_table_from_model(MapStateSnapshot))  # Map state snapshots (23 JAN 2026)
         composed.append(self.generate_table_from_model(JobEvent))  # Job event tracking (23 JAN 2026)
+        composed.append(self.generate_table_from_model(Platform))  # Platform registry (29 JAN 2026 - V0.8) - before assets (FK)
+        composed.append(self.generate_table_from_model(GeospatialAsset))  # Geospatial assets (29 JAN 2026 - V0.8)
+        composed.append(self.generate_table_from_model(AssetRevision))  # Asset revisions (29 JAN 2026 - V0.8)
 
         # Indexes - now using composed SQL
         composed.extend(self.generate_indexes_composed("jobs", JobRecord))
@@ -1616,13 +1803,19 @@ $$""").format(
         composed.extend(self.generate_indexes_from_model(MapState))  # Map states (23 JAN 2026)
         composed.extend(self.generate_indexes_from_model(MapStateSnapshot))  # Map state snapshots (23 JAN 2026)
         composed.extend(self.generate_indexes_from_model(JobEvent))  # Job event tracking (23 JAN 2026)
+        composed.extend(self.generate_indexes_from_model(Platform))  # Platform registry (29 JAN 2026 - V0.8)
+        composed.extend(self.generate_indexes_from_model(GeospatialAsset))  # Geospatial assets (29 JAN 2026 - V0.8)
+        composed.extend(self.generate_indexes_from_model(AssetRevision))  # Asset revisions (29 JAN 2026 - V0.8)
 
         # Functions - already sql.Composed objects
         composed.extend(self.generate_static_functions())
             
         # Triggers - now using composed SQL
         composed.extend(self.generate_triggers_composed())
-        
+
+        # Seed data - Platform Registry (V0.8 - 29 JAN 2026)
+        composed.extend(self.generate_seed_data())
+
         self.logger.info(f"✅ SQL composition complete: {len(composed)} statements ready")
         self.logger.info(f"   - Schema & search_path: 2")
         self.logger.info(f"   - ENUMs: 2")  

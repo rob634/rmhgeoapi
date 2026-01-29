@@ -57,6 +57,9 @@ from services.platform_response import (
     unpublish_accepted,
 )
 
+# V0.8 Entity Architecture - Asset Service (29 JAN 2026)
+from services.asset_service import AssetService
+
 
 # ============================================================================
 # CONSOLIDATED UNPUBLISH ENDPOINT (21 JAN 2026)
@@ -134,6 +137,33 @@ def platform_unpublish(req: func.HttpRequest) -> func.HttpResponse:
             )
 
         logger.info(f"Unpublish: data_type={data_type}, dry_run={dry_run}, params={resolved_params}")
+
+        # =====================================================================
+        # V0.8: Soft delete GeospatialAsset (29 JAN 2026)
+        # =====================================================================
+        # Mark asset as deleted BEFORE submitting unpublish job.
+        # This ensures the asset is marked as deleted even if unpublish job fails.
+        # =====================================================================
+        asset_deleted = False
+        asset_id = None
+        if original_request and not dry_run:
+            try:
+                asset_service = AssetService()
+                # Find asset by DDH identity
+                asset = asset_service.get_asset_by_identity(
+                    dataset_id=original_request.dataset_id,
+                    resource_id=original_request.resource_id,
+                    version_id=original_request.version_id
+                )
+                if asset and asset.is_active():
+                    deleted_by = req_body.get('deleted_by', 'platform_unpublish')
+                    asset = asset_service.soft_delete(asset.asset_id, deleted_by)
+                    asset_deleted = True
+                    asset_id = asset.asset_id
+                    logger.info(f"Soft deleted GeospatialAsset {asset.asset_id[:16]}")
+            except Exception as asset_err:
+                # Non-fatal: continue with unpublish even if asset update fails
+                logger.warning(f"Failed to soft delete asset (non-fatal): {asset_err}")
 
         # Delegate to appropriate handler based on data type
         if data_type == "vector":

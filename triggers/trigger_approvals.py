@@ -18,7 +18,13 @@ HTTP endpoints for the dataset approval workflow:
 These are synchronous operations (no async jobs) since they're simple
 state changes to approval records and STAC properties.
 
+V0.8 Entity Architecture (29 JAN 2026):
+- Approval now requires clearance_level (ouo or public)
+- Updates both DatasetApproval (legacy) and GeospatialAsset (new)
+- clearance_level determines access zone (internal vs external)
+
 Created: 17 JAN 2026
+Updated: 29 JAN 2026 - V0.8 Entity Architecture
 """
 
 import json
@@ -27,6 +33,9 @@ import azure.functions as func
 from util_logger import LoggerFactory, ComponentType
 
 logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "ApprovalTriggers")
+
+# V0.8 Entity Architecture imports (29 JAN 2026)
+from core.models.asset import ClearanceState
 
 
 def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
@@ -40,29 +49,37 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
 
     Request Body:
     {
-        "approval_id": "apr-abc123...",  // Required: Approval ID to approve
-        "reviewer": "user@example.com",   // Required: Who is approving
-        "notes": "Looks good"             // Optional: Review notes
+        "approval_id": "apr-abc123...",    // Required: Approval ID to approve
+        "reviewer": "user@example.com",     // Required: Who is approving
+        "clearance_level": "ouo",           // Required (V0.8): "ouo" or "public"
+        "notes": "Looks good"               // Optional: Review notes
     }
 
     Alternative - by STAC item:
     {
-        "stac_item_id": "my-dataset-v1",  // Find approval by STAC item
+        "stac_item_id": "my-dataset-v1",   // Find approval by STAC item
         "reviewer": "user@example.com",
+        "clearance_level": "ouo",
         "notes": "Approved via STAC lookup"
     }
 
     Alternative - by job ID:
     {
-        "job_id": "abc123...",            // Find approval by job ID
-        "reviewer": "user@example.com"
+        "job_id": "abc123...",             // Find approval by job ID
+        "reviewer": "user@example.com",
+        "clearance_level": "public"        // Will trigger ADF export
     }
 
     Alternative - by Platform request ID (21 JAN 2026):
     {
-        "request_id": "a3f2c1b8...",      // Find approval by Platform request ID
-        "reviewer": "user@example.com"
+        "request_id": "a3f2c1b8...",       // Find approval by Platform request ID
+        "reviewer": "user@example.com",
+        "clearance_level": "ouo"
     }
+
+    Clearance Levels (V0.8):
+    - "ouo": Official Use Only - internal access, no external export
+    - "public": Public access - triggers ADF pipeline for external zone export
 
     Response (success):
     {
@@ -93,6 +110,7 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
         request_id = req_body.get('request_id')  # Platform request ID (21 JAN 2026)
         reviewer = req_body.get('reviewer')
         notes = req_body.get('notes')
+        clearance_level_str = req_body.get('clearance_level')  # V0.8: Required (29 JAN 2026)
 
         # Validate reviewer is provided
         if not reviewer:
@@ -100,6 +118,42 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
                 json.dumps({
                     "success": False,
                     "error": "reviewer is required",
+                    "error_type": "ValidationError"
+                }),
+                status_code=400,
+                headers={"Content-Type": "application/json"}
+            )
+
+        # V0.8: Validate clearance_level is provided (29 JAN 2026)
+        if not clearance_level_str:
+            return func.HttpResponse(
+                json.dumps({
+                    "success": False,
+                    "error": "clearance_level is required (V0.8). Must be 'ouo' or 'public'",
+                    "error_type": "ValidationError"
+                }),
+                status_code=400,
+                headers={"Content-Type": "application/json"}
+            )
+
+        # Parse clearance level
+        try:
+            clearance_level = ClearanceState(clearance_level_str.lower())
+            if clearance_level == ClearanceState.UNCLEARED:
+                return func.HttpResponse(
+                    json.dumps({
+                        "success": False,
+                        "error": "clearance_level must be 'ouo' or 'public', not 'uncleared'",
+                        "error_type": "ValidationError"
+                    }),
+                    status_code=400,
+                    headers={"Content-Type": "application/json"}
+                )
+        except ValueError:
+            return func.HttpResponse(
+                json.dumps({
+                    "success": False,
+                    "error": f"Invalid clearance_level: '{clearance_level_str}'. Must be 'ouo' or 'public'",
                     "error_type": "ValidationError"
                 }),
                 status_code=400,
@@ -180,31 +234,15 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
                     headers={"Content-Type": "application/json"}
                 )
 
-        # Perform approval
-        logger.info(f"Approving {approval_id} by {reviewer}")
+        # Perform approval (legacy DatasetApproval)
+        logger.info(f"Approving {approval_id} by {reviewer} with clearance={clearance_level.value}")
         result = approval_service.approve(
             approval_id=approval_id,
             reviewer=reviewer,
             notes=notes
         )
 
-        if result.get('success'):
-            approval_data = result.get('approval')
-            return func.HttpResponse(
-                json.dumps({
-                    "success": True,
-                    "approval_id": approval_id,
-                    "status": "approved",
-                    "action": result.get('action', 'stac_updated'),
-                    "adf_run_id": result.get('adf_run_id'),
-                    "stac_updated": result.get('stac_updated', False),
-                    "classification": approval_data.classification.value if approval_data else None,
-                    "message": "Dataset approved successfully"
-                }),
-                status_code=200,
-                headers={"Content-Type": "application/json"}
-            )
-        else:
+        if not result.get('success'):
             return func.HttpResponse(
                 json.dumps({
                     "success": False,
@@ -214,6 +252,68 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
                 status_code=400,
                 headers={"Content-Type": "application/json"}
             )
+
+        approval_data = result.get('approval')
+        adf_run_id = result.get('adf_run_id')
+
+        # =====================================================================
+        # V0.8: Also update GeospatialAsset (29 JAN 2026)
+        # =====================================================================
+        asset_updated = False
+        asset_id = None
+        clearance_warning = None
+        try:
+            from services.asset_service import AssetService, AssetNotFoundError, AssetStateError
+            asset_service = AssetService()
+
+            # Find asset by job_id (from approval record)
+            if approval_data and approval_data.job_id:
+                asset = asset_service.get_asset_by_job(approval_data.job_id)
+                if asset:
+                    try:
+                        asset, clearance_warning = asset_service.approve(
+                            asset_id=asset.asset_id,
+                            reviewer=reviewer,
+                            clearance_level=clearance_level,
+                            adf_run_id=adf_run_id
+                        )
+                        asset_updated = True
+                        asset_id = asset.asset_id
+                        logger.info(f"Updated GeospatialAsset {asset.asset_id[:16]} to clearance={clearance_level.value}")
+                        if clearance_warning:
+                            logger.warning(f"Clearance change warning: {clearance_warning}")
+                    except AssetStateError as state_err:
+                        # Asset is rejected - log but don't fail
+                        logger.warning(f"Asset state error (non-fatal): {state_err}")
+                else:
+                    logger.debug(f"No GeospatialAsset found for job {approval_data.job_id[:16]} (pre-V0.8 job)")
+        except Exception as asset_err:
+            # Non-fatal: legacy approval succeeded, asset update is optional
+            logger.warning(f"Failed to update GeospatialAsset (non-fatal): {asset_err}")
+
+        response_data = {
+            "success": True,
+            "approval_id": approval_id,
+            "status": "approved",
+            "action": result.get('action', 'stac_updated'),
+            "adf_run_id": adf_run_id,
+            "stac_updated": result.get('stac_updated', False),
+            "classification": approval_data.classification.value if approval_data else None,
+            "clearance_level": clearance_level.value,  # V0.8
+            "asset_id": asset_id,  # V0.8
+            "asset_updated": asset_updated,  # V0.8
+            "message": "Dataset approved successfully"
+        }
+        # Add warning if clearance was downgraded (e.g., public -> ouo)
+        if clearance_warning:
+            response_data["warning"] = clearance_warning
+            response_data["action_required"] = "manual_external_cleanup"
+
+        return func.HttpResponse(
+            json.dumps(response_data),
+            status_code=200,
+            headers={"Content-Type": "application/json"}
+        )
 
     except json.JSONDecodeError:
         return func.HttpResponse(
@@ -238,6 +338,259 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
+def platform_reject(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    HTTP trigger to reject a pending dataset.
+
+    POST /api/platform/reject
+
+    Rejects a pending dataset that is not suitable for publication.
+    This is for datasets that fail review (unlike revoke, which is for
+    already-approved datasets that need to be unpublished).
+
+    V0.8 Entity Architecture (29 JAN 2026):
+    - Updates both DatasetApproval (legacy) and GeospatialAsset (new)
+    - Asset moves from pending_review → rejected state
+
+    Request Body:
+    {
+        "approval_id": "apr-abc123...",       // Required: Approval ID to reject
+        "reviewer": "user@example.com",       // Required: Who is rejecting
+        "reason": "Data quality issue found"  // Required: Reason for rejection
+    }
+
+    Alternative - by STAC item:
+    {
+        "stac_item_id": "my-dataset-v1",
+        "reviewer": "user@example.com",
+        "reason": "Missing required metadata"
+    }
+
+    Alternative - by job ID:
+    {
+        "job_id": "abc123...",
+        "reviewer": "admin@example.com",
+        "reason": "Invalid CRS"
+    }
+
+    Alternative - by Platform request ID:
+    {
+        "request_id": "a3f2c1b8...",
+        "reviewer": "admin@example.com",
+        "reason": "Failed validation checks"
+    }
+
+    Response (success):
+    {
+        "success": true,
+        "approval_id": "apr-abc123...",
+        "status": "rejected",
+        "asset_id": "...",
+        "asset_updated": true,
+        "message": "Dataset rejected"
+    }
+
+    Response (error):
+    {
+        "success": false,
+        "error": "Cannot reject: status is 'approved', expected 'pending'",
+        "error_type": "InvalidStatusTransition"
+    }
+    """
+    logger.info("Platform reject endpoint called")
+
+    try:
+        req_body = req.get_json()
+
+        # Extract parameters
+        approval_id = req_body.get('approval_id')
+        stac_item_id = req_body.get('stac_item_id')
+        job_id = req_body.get('job_id')
+        request_id = req_body.get('request_id')
+        reviewer = req_body.get('reviewer')
+        reason = req_body.get('reason')
+
+        # Validate required fields
+        if not reviewer:
+            return func.HttpResponse(
+                json.dumps({
+                    "success": False,
+                    "error": "reviewer is required",
+                    "error_type": "ValidationError"
+                }),
+                status_code=400,
+                headers={"Content-Type": "application/json"}
+            )
+
+        if not reason or not reason.strip():
+            return func.HttpResponse(
+                json.dumps({
+                    "success": False,
+                    "error": "reason is required for audit trail",
+                    "error_type": "ValidationError"
+                }),
+                status_code=400,
+                headers={"Content-Type": "application/json"}
+            )
+
+        # Import service lazily
+        from services.approval_service import ApprovalService
+        approval_service = ApprovalService()
+
+        # Resolve approval_id from various inputs
+        if not approval_id:
+            if stac_item_id:
+                approval = approval_service.get_approval_for_stac_item(stac_item_id)
+                if approval:
+                    approval_id = approval.approval_id
+                else:
+                    return func.HttpResponse(
+                        json.dumps({
+                            "success": False,
+                            "error": f"No approval found for STAC item: {stac_item_id}",
+                            "error_type": "NotFound"
+                        }),
+                        status_code=404,
+                        headers={"Content-Type": "application/json"}
+                    )
+            elif job_id:
+                approval = approval_service.get_approval_for_job(job_id)
+                if approval:
+                    approval_id = approval.approval_id
+                else:
+                    return func.HttpResponse(
+                        json.dumps({
+                            "success": False,
+                            "error": f"No approval found for job: {job_id}",
+                            "error_type": "NotFound"
+                        }),
+                        status_code=404,
+                        headers={"Content-Type": "application/json"}
+                    )
+            elif request_id:
+                from infrastructure import PlatformRepository
+                platform_repo = PlatformRepository()
+                platform_request = platform_repo.get_request(request_id)
+                if not platform_request:
+                    return func.HttpResponse(
+                        json.dumps({
+                            "success": False,
+                            "error": f"No platform request found: {request_id}",
+                            "error_type": "NotFound"
+                        }),
+                        status_code=404,
+                        headers={"Content-Type": "application/json"}
+                    )
+                approval = approval_service.get_approval_for_job(platform_request.job_id)
+                if approval:
+                    approval_id = approval.approval_id
+                else:
+                    return func.HttpResponse(
+                        json.dumps({
+                            "success": False,
+                            "error": f"No approval found for request: {request_id} (job: {platform_request.job_id})",
+                            "error_type": "NotFound"
+                        }),
+                        status_code=404,
+                        headers={"Content-Type": "application/json"}
+                    )
+            else:
+                return func.HttpResponse(
+                    json.dumps({
+                        "success": False,
+                        "error": "Must provide approval_id, stac_item_id, job_id, or request_id",
+                        "error_type": "ValidationError"
+                    }),
+                    status_code=400,
+                    headers={"Content-Type": "application/json"}
+                )
+
+        # Perform rejection on legacy DatasetApproval
+        logger.info(f"Rejecting {approval_id} by {reviewer}. Reason: {reason}")
+        result = approval_service.reject(
+            approval_id=approval_id,
+            reviewer=reviewer,
+            reason=reason
+        )
+
+        if not result.get('success'):
+            return func.HttpResponse(
+                json.dumps({
+                    "success": False,
+                    "error": result.get('error'),
+                    "error_type": "RejectionFailed"
+                }),
+                status_code=400,
+                headers={"Content-Type": "application/json"}
+            )
+
+        approval_data = result.get('approval')
+
+        # =====================================================================
+        # V0.8: Also update GeospatialAsset (29 JAN 2026)
+        # =====================================================================
+        asset_updated = False
+        asset_id = None
+        try:
+            from services.asset_service import AssetService, AssetNotFoundError, AssetStateError
+            asset_service = AssetService()
+
+            # Find asset by job_id (from approval record)
+            if approval_data and approval_data.job_id:
+                asset = asset_service.get_asset_by_job(approval_data.job_id)
+                if asset:
+                    try:
+                        asset = asset_service.reject(
+                            asset_id=asset.asset_id,
+                            reviewer=reviewer,
+                            reason=reason
+                        )
+                        asset_updated = True
+                        asset_id = asset.asset_id
+                        logger.info(f"Rejected GeospatialAsset {asset.asset_id[:16]}")
+                    except AssetStateError as state_err:
+                        logger.warning(f"Asset state mismatch (non-fatal): {state_err}")
+                else:
+                    logger.debug(f"No GeospatialAsset found for job {approval_data.job_id[:16]} (pre-V0.8 job)")
+        except Exception as asset_err:
+            logger.warning(f"Failed to update GeospatialAsset (non-fatal): {asset_err}")
+
+        return func.HttpResponse(
+            json.dumps({
+                "success": True,
+                "approval_id": approval_id,
+                "status": "rejected",
+                "asset_id": asset_id,
+                "asset_updated": asset_updated,
+                "message": "Dataset rejected"
+            }),
+            status_code=200,
+            headers={"Content-Type": "application/json"}
+        )
+
+    except json.JSONDecodeError:
+        return func.HttpResponse(
+            json.dumps({
+                "success": False,
+                "error": "Invalid JSON in request body",
+                "error_type": "ValidationError"
+            }),
+            status_code=400,
+            headers={"Content-Type": "application/json"}
+        )
+    except Exception as e:
+        logger.error(f"Platform reject failed: {e}", exc_info=True)
+        return func.HttpResponse(
+            json.dumps({
+                "success": False,
+                "error": str(e),
+                "error_type": type(e).__name__
+            }),
+            status_code=500,
+            headers={"Content-Type": "application/json"}
+        )
+
+
 def platform_revoke(req: func.HttpRequest) -> func.HttpResponse:
     """
     HTTP trigger to revoke an approved dataset (unapprove).
@@ -247,6 +600,9 @@ def platform_revoke(req: func.HttpRequest) -> func.HttpResponse:
     Revokes an approved dataset. This is an audit-logged operation for
     when approved data needs to be unpublished or removed. Updates
     STAC item with revocation properties.
+
+    V0.8 Entity Architecture (29 JAN 2026):
+    - Also soft-deletes the GeospatialAsset
 
     IMPORTANT: This is a necessary but undesirable workflow. All revocations
     are logged with full audit trail.
@@ -285,6 +641,8 @@ def platform_revoke(req: func.HttpRequest) -> func.HttpResponse:
         "approval_id": "apr-abc123...",
         "status": "revoked",
         "stac_updated": true,
+        "asset_id": "...",
+        "asset_deleted": true,
         "warning": "Approved dataset has been revoked - this action is logged for audit",
         "message": "Approval revoked successfully"
     }
@@ -406,7 +764,7 @@ def platform_revoke(req: func.HttpRequest) -> func.HttpResponse:
                     headers={"Content-Type": "application/json"}
                 )
 
-        # Perform revocation
+        # Perform revocation on legacy DatasetApproval
         logger.warning(f"AUDIT: Revoking approval {approval_id} by {revoker}. Reason: {reason}")
         result = approval_service.revoke(
             approval_id=approval_id,
@@ -415,12 +773,41 @@ def platform_revoke(req: func.HttpRequest) -> func.HttpResponse:
         )
 
         if result.get('success'):
+            approval_data = result.get('approval')
+
+            # =====================================================================
+            # V0.8: Also soft-delete GeospatialAsset (29 JAN 2026)
+            # =====================================================================
+            asset_deleted = False
+            asset_id = None
+            try:
+                from services.asset_service import AssetService, AssetNotFoundError
+                asset_service = AssetService()
+
+                # Find asset by job_id (from approval record)
+                if approval_data and approval_data.job_id:
+                    asset = asset_service.get_asset_by_job(approval_data.job_id)
+                    if asset:
+                        asset_service.soft_delete(
+                            asset_id=asset.asset_id,
+                            deleted_by=revoker
+                        )
+                        asset_deleted = True
+                        asset_id = asset.asset_id
+                        logger.info(f"Soft-deleted GeospatialAsset {asset.asset_id[:16]} on revocation")
+                    else:
+                        logger.debug(f"No GeospatialAsset found for job (pre-V0.8 job)")
+            except Exception as asset_err:
+                logger.warning(f"Failed to soft-delete GeospatialAsset (non-fatal): {asset_err}")
+
             return func.HttpResponse(
                 json.dumps({
                     "success": True,
                     "approval_id": approval_id,
                     "status": "revoked",
                     "stac_updated": result.get('stac_updated', False),
+                    "asset_id": asset_id,
+                    "asset_deleted": asset_deleted,
                     "warning": result.get('warning'),
                     "message": "Approval revoked successfully"
                 }),
@@ -830,6 +1217,7 @@ def platform_approvals_status(req: func.HttpRequest) -> func.HttpResponse:
 # Module exports
 __all__ = [
     'platform_approve',
+    'platform_reject',
     'platform_revoke',
     'platform_approvals_list',
     'platform_approval_get',

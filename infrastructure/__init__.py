@@ -90,6 +90,9 @@ if TYPE_CHECKING:
     from .promoted_repository import PromotedDatasetRepository as _PromotedDatasetRepository
     from .approval_repository import ApprovalRepository as _ApprovalRepository
     from .job_event_repository import JobEventRepository as _JobEventRepository
+    from .asset_repository import GeospatialAssetRepository as _GeospatialAssetRepository
+    from .revision_repository import AssetRevisionRepository as _AssetRevisionRepository
+    from .platform_registry_repository import PlatformRegistryRepository as _PlatformRegistryRepository
     from .connection_pool import ConnectionPoolManager as _ConnectionPoolManager
     from .database_initializer import (
         DatabaseInitializer as _DatabaseInitializer,
@@ -212,6 +215,17 @@ def __getattr__(name: str):
         from .job_event_repository import JobEventRepository
         return JobEventRepository
 
+    # Geospatial Asset Entity (29 JAN 2026 - V0.8 Entity Architecture)
+    elif name == "GeospatialAssetRepository":
+        from .asset_repository import GeospatialAssetRepository
+        return GeospatialAssetRepository
+    elif name == "AssetRevisionRepository":
+        from .revision_repository import AssetRevisionRepository
+        return AssetRevisionRepository
+    elif name == "PlatformRegistryRepository":
+        from .platform_registry_repository import PlatformRegistryRepository
+        return PlatformRegistryRepository
+
     # Pipeline Observability (E13)
     elif name == "MetricsRepository":
         from .metrics_repository import MetricsRepository
@@ -309,6 +323,10 @@ __all__ = [
     "ApprovalRepository",
     # Job Event Tracking (23 JAN 2026 - Execution Timeline)
     "JobEventRepository",
+    # Geospatial Asset Entity (29 JAN 2026 - V0.8 Entity Architecture)
+    "GeospatialAssetRepository",
+    "AssetRevisionRepository",
+    "PlatformRegistryRepository",
     "MetricsRepository",
     "JobProgressTracker",
     "JobProgressSnapshot",

@@ -184,7 +184,12 @@ def _default_platform_callback(job_id: str, job_type: str, status: str, result: 
 
     This callback is invoked by CoreMachine when jobs complete.
     Handles:
-    1. Approval record creation for dataset-producing jobs (28 JAN 2026)
+    1. GeospatialAsset update (V0.8 - 29 JAN 2026)
+    2. Approval record creation for dataset-producing jobs (28 JAN 2026)
+
+    V0.8 Entity Architecture (29 JAN 2026):
+    - Updates GeospatialAsset with table_name/blob_path from result
+    - Asset was created on request receipt, now updated with outputs
 
     Approval Philosophy:
     - job_id is the source of truth (not STAC)
@@ -203,6 +208,51 @@ def _default_platform_callback(job_id: str, job_type: str, status: str, result: 
     # Skip if job failed - no approval needed for failed jobs
     if status != 'completed':
         return
+
+    # =========================================================================
+    # V0.8: Update GeospatialAsset with job outputs (29 JAN 2026)
+    # =========================================================================
+    # Asset was created on request receipt with minimal data.
+    # Now update with actual outputs (table_name, blob_path, etc.)
+    # =========================================================================
+    try:
+        from infrastructure import GeospatialAssetRepository
+
+        asset_repo = GeospatialAssetRepository()
+        asset = asset_repo.get_by_job_id(job_id)
+
+        if asset:
+            # Extract output info from result
+            updates = {}
+
+            # Vector: table_name from result
+            table_name = result.get('table_name')
+            if table_name:
+                updates['table_name'] = table_name
+
+            # Raster: blob_path from result
+            cog_url = result.get('cog_url') or result.get('output_blob_name')
+            if cog_url:
+                updates['blob_path'] = cog_url
+
+            # STAC IDs if available
+            stac_item_id = extract_stac_item_id(result)
+            if stac_item_id:
+                updates['stac_item_id'] = stac_item_id
+
+            stac_collection_id = extract_stac_collection_id(result)
+            if stac_collection_id:
+                updates['stac_collection_id'] = stac_collection_id
+
+            if updates:
+                asset_repo.update(asset.asset_id, updates)
+                logger.info(f"[ASSET] Updated asset {asset.asset_id[:12]}... with outputs: {list(updates.keys())}")
+        else:
+            logger.debug(f"[ASSET] No asset found for job {job_id[:8]}... (pre-V0.8 job)")
+
+    except Exception as e:
+        # Non-fatal: asset update failure should not affect job completion
+        logger.warning(f"[ASSET] Failed to update asset for job {job_id[:8]}... (non-fatal): {e}")
 
     # Skip job types that don't produce datasets requiring approval
     if job_type not in APPROVAL_REQUIRED_JOB_TYPES:

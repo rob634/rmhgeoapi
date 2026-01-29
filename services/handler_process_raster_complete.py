@@ -1602,6 +1602,21 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             logger.info("📦 Computing source checksum (for artifact tracking)...")
             source_checksum = _compute_source_checksum(container_name, blob_name)
             logger.info(f"   Source checksum: {source_checksum[:24]}...")
+
+            # =====================================================================
+            # V0.8: Link Job to GeospatialAsset (29 JAN 2026)
+            # =====================================================================
+            asset_id = params.get('asset_id')
+            if asset_id:
+                try:
+                    from services.asset_service import AssetService
+                    asset_service = AssetService()
+                    asset_service.link_job_to_asset(asset_id, job_id, source_checksum)
+                    logger.info(f"   Linked to asset {asset_id[:16]}")
+                except Exception as link_err:
+                    logger.warning(f"   Failed to link job to asset (non-fatal): {link_err}")
+            else:
+                logger.debug(f"   No asset_id in parameters (pre-V0.8 job)")
         except Exception as e:
             logger.warning(f"Source checksum computation failed (non-fatal): {e}")
             source_checksum = None

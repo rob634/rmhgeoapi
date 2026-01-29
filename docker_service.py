@@ -432,6 +432,11 @@ class BackgroundQueueWorker:
         self._last_error: Optional[str] = None
         self._started_at: Optional[datetime] = None
 
+        # Initialization failure tracking (29 JAN 2026)
+        # If init fails (e.g., no Service Bus config), the worker is broken
+        self._init_failed = False
+        self._init_error: Optional[str] = None
+
         # Lazy-load config to avoid import issues at module load time
         self._config = None
         self._queue_name = None
@@ -660,8 +665,21 @@ class BackgroundQueueWorker:
         try:
             client = self._get_sb_client()
         except Exception as e:
-            self._last_error = str(e)
-            logger.error(f"[Queue Worker] Failed to connect: {e}")
+            error_msg = str(e)
+            self._last_error = error_msg
+            self._init_failed = True
+            self._init_error = error_msg
+            logger.error("=" * 60)
+            logger.error("🚨 QUEUE WORKER INITIALIZATION FAILED")
+            logger.error("=" * 60)
+            logger.error(f"  Error: {error_msg}")
+            logger.error("")
+            logger.error("  This worker CANNOT process tasks!")
+            logger.error("  /readyz will report NOT READY")
+            logger.error("")
+            logger.error("  To fix: Configure Service Bus connection")
+            logger.error("  Set SERVICE_BUS_FQDN (preferred) or ServiceBusConnection")
+            logger.error("=" * 60)
             self._is_running = False
             return
 
@@ -829,7 +847,19 @@ class BackgroundQueueWorker:
             "last_error": self._last_error,
             "uses_shared_shutdown": self._uses_shared_event,
             "shutdown_signaled": self._stop_event.is_set(),
+            # Initialization failure tracking (29 JAN 2026)
+            "init_failed": self._init_failed,
+            "init_error": self._init_error,
         }
+
+    def is_healthy(self) -> bool:
+        """
+        Check if queue worker is healthy and able to process tasks.
+
+        Returns:
+            True if worker is running and not in failed init state
+        """
+        return self._is_running and not self._init_failed
 
 
 # Global instances with shared shutdown event (F7.18)
@@ -940,8 +970,10 @@ def validate_etl_mount() -> Dict[str, Any]:
     Returns:
         Dict with validation status and details
 
-    Raises:
-        RuntimeError: If mount is enabled but validation fails (fatal)
+    Note:
+        This function NEVER raises exceptions. Mount failures result in
+        degraded state, not startup failure. The app continues running
+        with reduced capability (smaller file processing only).
     """
     import shutil
 
@@ -953,38 +985,56 @@ def validate_etl_mount() -> Dict[str, Any]:
         "mount_enabled": raster_config.use_etl_mount,
         "mount_path": raster_config.etl_mount_path,
         "validated": False,
+        "degraded": False,
         "error": None,
+        "original_setting": raster_config.use_etl_mount,  # Track what was requested
     }
 
     if not raster_config.use_etl_mount:
-        # V0.8: Mount is expected - warn if disabled
-        result["message"] = "ETL mount disabled - DEGRADED STATE"
+        # User explicitly disabled mount - this is intentional degraded state
+        result["message"] = "ETL mount explicitly disabled via RASTER_USE_ETL_MOUNT=false"
         result["degraded"] = True
         logger.warning("=" * 60)
-        logger.warning("⚠️ V0.8 WARNING: ETL MOUNT IS DISABLED")
+        logger.warning("⚠️ ETL MOUNT DISABLED (explicit setting)")
         logger.warning("=" * 60)
         logger.warning("  RASTER_USE_ETL_MOUNT=false")
-        logger.warning("  This is a DEGRADED state - mount is expected in production")
         logger.warning("  Large raster processing may fail due to temp space limits")
         logger.warning("  Set RASTER_USE_ETL_MOUNT=true and configure Azure Files mount")
         logger.warning("=" * 60)
         return result
 
+    # Mount was requested (use_etl_mount=true) - validate it
     mount_path = raster_config.etl_mount_path
     logger.info(f"📁 ETL Mount: Validating {mount_path}...")
 
+    # Helper to handle validation failure - sets degraded state instead of raising
+    def _set_degraded(error_msg: str) -> Dict[str, Any]:
+        """Set degraded state when mount validation fails."""
+        result["error"] = error_msg
+        result["degraded"] = True
+        result["message"] = f"Mount requested but unavailable - running in DEGRADED mode: {error_msg}"
+        logger.error("=" * 60)
+        logger.error("⚠️ ETL MOUNT VALIDATION FAILED - DEGRADED MODE")
+        logger.error("=" * 60)
+        logger.error(f"  Requested: RASTER_USE_ETL_MOUNT=true")
+        logger.error(f"  Mount path: {mount_path}")
+        logger.error(f"  Error: {error_msg}")
+        logger.error("")
+        logger.error("  App will continue with REDUCED CAPABILITY:")
+        logger.error("  - Large raster files may fail processing")
+        logger.error("  - GDAL temp files will use container's limited /tmp space")
+        logger.error("")
+        logger.error("  To fix: Configure Azure Files mount at the expected path")
+        logger.error("  Or set RASTER_USE_ETL_MOUNT=false to suppress this warning")
+        logger.error("=" * 60)
+        return result
+
     # Check 1: Mount exists
     if not os.path.exists(mount_path):
-        error_msg = f"ETL mount path does not exist: {mount_path}"
-        logger.error(f"❌ {error_msg}")
-        result["error"] = error_msg
-        raise RuntimeError(f"STARTUP FAILED: {error_msg}")
+        return _set_degraded(f"Mount path does not exist: {mount_path}")
 
     if not os.path.isdir(mount_path):
-        error_msg = f"ETL mount path is not a directory: {mount_path}"
-        logger.error(f"❌ {error_msg}")
-        result["error"] = error_msg
-        raise RuntimeError(f"STARTUP FAILED: {error_msg}")
+        return _set_degraded(f"Mount path is not a directory: {mount_path}")
 
     result["exists"] = True
     logger.info(f"  ✓ Mount path exists")
@@ -998,10 +1048,7 @@ def validate_etl_mount() -> Dict[str, Any]:
         result["writable"] = True
         logger.info(f"  ✓ Mount is writable")
     except Exception as e:
-        error_msg = f"ETL mount not writable: {e}"
-        logger.error(f"❌ {error_msg}")
-        result["error"] = error_msg
-        raise RuntimeError(f"STARTUP FAILED: {error_msg}")
+        return _set_degraded(f"Mount not writable: {e}")
 
     # Check 3: Disk space
     try:
@@ -1014,7 +1061,7 @@ def validate_etl_mount() -> Dict[str, Any]:
         }
         logger.info(f"  ✓ Disk space: {free_gb:.1f} GB free")
 
-        # Warn if low space
+        # Warn if low space (but don't degrade)
         if free_gb < 50:
             logger.warning(f"  ⚠️ Low disk space on ETL mount: {free_gb:.1f} GB")
             result["warning"] = f"Low disk space: {free_gb:.1f} GB"
@@ -1030,10 +1077,7 @@ def validate_etl_mount() -> Dict[str, Any]:
         result["cpl_tmpdir_configured"] = True
         logger.info(f"  ✓ GDAL CPL_TMPDIR configured: {mount_path}")
     except Exception as e:
-        error_msg = f"Failed to configure GDAL CPL_TMPDIR: {e}"
-        logger.error(f"❌ {error_msg}")
-        result["error"] = error_msg
-        raise RuntimeError(f"STARTUP FAILED: {error_msg}")
+        return _set_degraded(f"Failed to configure GDAL CPL_TMPDIR: {e}")
 
     result["validated"] = True
     result["message"] = "ETL mount validated successfully"
@@ -1071,14 +1115,11 @@ async def lifespan(app: FastAPI):
     logger.info(f"Auth initialization: {auth_status}")
 
     # Validate ETL mount if enabled (24 JAN 2026)
-    # This will raise RuntimeError if mount is enabled but validation fails
+    # Mount validation NEVER fails startup - it sets degraded state instead
     global _etl_mount_status
-    try:
-        _etl_mount_status = validate_etl_mount()
-    except RuntimeError as e:
-        logger.critical(f"🚨 {e}")
-        print(f"STARTUP FAILED: {e}", flush=True)
-        raise
+    _etl_mount_status = validate_etl_mount()
+    if _etl_mount_status.get("degraded"):
+        logger.warning(f"⚠️ ETL mount in degraded state: {_etl_mount_status.get('message')}")
 
     # Start background token refresh
     token_refresh_worker.start()
@@ -3759,8 +3800,14 @@ def readiness_probe():
     """
     Kubernetes readiness probe.
 
-    Returns 200 if the container can serve traffic.
-    Checks that we have valid tokens and can reach dependencies.
+    Returns 200 if the container can serve traffic (process tasks).
+    Checks:
+    1. Queue worker is running and healthy (CRITICAL - can't process without it)
+    2. PostgreSQL token is available
+    3. Storage token is available (optional)
+
+    A broken queue worker = broken app (can't do its job).
+    Mount degraded = reduced capability but still ready.
 
     Returns:
         Readiness status with component checks
@@ -3768,28 +3815,55 @@ def readiness_probe():
     from infrastructure.auth import get_token_status
 
     token_status = get_token_status()
+    queue_status = queue_worker.get_status()
 
     # Check if tokens are valid
     postgres_ready = token_status.get("postgres", {}).get("has_token", False)
     storage_ready = token_status.get("storage", {}).get("has_token", False)
 
-    # Overall readiness
-    ready = postgres_ready  # Storage is optional
+    # Check queue worker health (29 JAN 2026)
+    # A broken queue worker means we can't process any tasks
+    queue_worker_healthy = queue_worker.is_healthy()
+    queue_init_failed = queue_status.get("init_failed", False)
+
+    # Overall readiness: need postgres token AND working queue worker
+    ready = postgres_ready and queue_worker_healthy
+
+    # Build detailed status
+    status_detail = {
+        "postgres_token": postgres_ready,
+        "storage_token": storage_ready,
+        "queue_worker_running": queue_status.get("running", False),
+        "queue_worker_healthy": queue_worker_healthy,
+    }
+
+    # Add error details if not ready
+    if queue_init_failed:
+        status_detail["queue_init_error"] = queue_status.get("init_error")
 
     if not ready:
+        # Determine primary failure reason for status message
+        reasons = []
+        if not postgres_ready:
+            reasons.append("no PostgreSQL token")
+        if not queue_worker_healthy:
+            if queue_init_failed:
+                reasons.append(f"queue worker init failed: {queue_status.get('init_error', 'unknown')}")
+            else:
+                reasons.append("queue worker not running")
+
         return JSONResponse(
             status_code=503,
             content={
                 "status": "not_ready",
-                "postgres_token": postgres_ready,
-                "storage_token": storage_ready,
+                "reason": "; ".join(reasons),
+                **status_detail,
             }
         )
 
     return {
         "status": "ready",
-        "postgres_token": postgres_ready,
-        "storage_token": storage_ready,
+        **status_detail,
     }
 
 
@@ -3951,15 +4025,27 @@ def health_check():
     }
 
     # Queue Worker component (Service Bus consumer)
+    # Init failure = UNHEALTHY (broken app), not running = WARNING
     queue_running = queue_status.get("running", False)
+    queue_init_failed = queue_status.get("init_failed", False)
+    if queue_init_failed:
+        queue_worker_status = "unhealthy"  # Broken - can't process tasks
+    elif queue_running:
+        queue_worker_status = "healthy"
+    else:
+        queue_worker_status = "warning"  # Not running yet but may start
+
     components["queue_worker"] = {
-        "status": "healthy" if queue_running else "warning",
+        "status": queue_worker_status,
         "description": "Service Bus long-running-tasks consumer",
         "checked_at": timestamp.isoformat(),
         "_source": "docker_worker",
         "details": {
             "queue_name": queue_status.get("queue_name", "N/A"),
             "running": queue_running,
+            "healthy": queue_worker.is_healthy(),
+            "init_failed": queue_init_failed,
+            "init_error": queue_status.get("init_error"),
             "messages_processed": queue_status.get("messages_processed", 0),
             "started_at": queue_status.get("started_at"),
             "last_poll_time": queue_status.get("last_poll_time"),
@@ -4167,8 +4253,12 @@ def health_check():
     # =========================================================================
     # OVERALL STATUS
     # =========================================================================
-    healthy = db_connected and not is_shutting_down
+    # Queue worker init failure = UNHEALTHY (can't do its job)
+    # Mount degraded = WARNING (reduced capability, not broken)
+    healthy = db_connected and not is_shutting_down and not queue_init_failed
     if is_shutting_down:
+        status = "unhealthy"
+    elif queue_init_failed:
         status = "unhealthy"
     elif healthy:
         status = "healthy"
@@ -4183,8 +4273,10 @@ def health_check():
         errors.append(f"Storage: {storage_status.get('error', 'Not connected')}")
     if is_shutting_down:
         errors.append("Worker is shutting down")
+    if queue_init_failed:
+        errors.append(f"Queue worker init failed: {queue_status.get('init_error', 'Unknown error')}")
     if mount_degraded:
-        errors.append("ETL mount disabled - degraded state")
+        errors.append(f"ETL mount degraded: {etl_mount_info.get('error', 'mount unavailable')}")
 
     # Environment info (for health.js renderEnvironmentInfo)
     environment = {

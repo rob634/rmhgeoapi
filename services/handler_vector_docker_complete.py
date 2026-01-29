@@ -106,6 +106,32 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
 
     logger.info(f"[{job_id[:8]}] Docker Vector ETL starting: {blob_name} -> {schema}.{table_name}")
 
+    # =========================================================================
+    # V0.8: Link Job to GeospatialAsset (29 JAN 2026)
+    # =========================================================================
+    asset_id = parameters.get('asset_id')
+    if asset_id:
+        try:
+            from services.asset_service import AssetService
+            asset_service = AssetService()
+            # Compute content hash for change detection (optional)
+            content_hash = None
+            try:
+                from util_checksum import compute_multihash
+                from infrastructure.blob import BlobRepository
+                blob_repo = BlobRepository.for_zone('bronze')
+                source_bytes = blob_repo.read_blob(container_name, blob_name)
+                content_hash = compute_multihash(source_bytes, log_performance=True)
+            except Exception as hash_err:
+                logger.warning(f"[{job_id[:8]}] Could not compute content hash: {hash_err}")
+
+            asset_service.link_job_to_asset(asset_id, job_id, content_hash)
+            logger.info(f"[{job_id[:8]}] Linked to asset {asset_id[:16]}")
+        except Exception as link_err:
+            logger.warning(f"[{job_id[:8]}] Failed to link job to asset (non-fatal): {link_err}")
+    else:
+        logger.debug(f"[{job_id[:8]}] No asset_id in parameters (pre-V0.8 job)")
+
     # Track checkpoints for resume capability
     checkpoints = []
     checkpoint_data = {}

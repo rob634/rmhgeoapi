@@ -44,6 +44,7 @@ import azure.functions as func
 
 # Import infrastructure
 from infrastructure import PlatformRepository, JobRepository, TaskRepository, PostgreSQLRepository, RepositoryFactory
+from infrastructure import GeospatialAssetRepository  # V0.8 Entity Architecture (29 JAN 2026)
 from config import get_config
 
 # Configure logging
@@ -111,10 +112,12 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
         if lookup_id:
             # ================================================================
             # Single request lookup with auto-detect ID type (21 JAN 2026)
-            # First try as request_id, then as job_id
+            # Updated 29 JAN 2026: Also supports asset_id lookup (V0.8)
+            # First try as request_id, then as job_id, then as asset_id
             # ================================================================
             platform_request = platform_repo.get_request(lookup_id)
             lookup_type = "request_id"
+            asset_info = None  # V0.8: Track asset info for response
 
             if not platform_request:
                 # Try as job_id (reverse lookup)
@@ -122,11 +125,29 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
                 lookup_type = "job_id"
 
             if not platform_request:
+                # V0.8: Try as asset_id (29 JAN 2026)
+                try:
+                    asset_repo = GeospatialAssetRepository()
+                    asset = asset_repo.get_active_by_id(lookup_id)
+                    if asset and asset.current_job_id:
+                        # Found asset with linked job - get platform request via job
+                        platform_request = platform_repo.get_request_by_job(asset.current_job_id)
+                        lookup_type = "asset_id"
+                        asset_info = {
+                            "asset_id": asset.asset_id,
+                            "revision": asset.revision,
+                            "approval_state": asset.approval_state.value if hasattr(asset.approval_state, 'value') else str(asset.approval_state),
+                            "clearance_state": asset.clearance_state.value if hasattr(asset.clearance_state, 'value') else str(asset.clearance_state),
+                        }
+                except Exception as asset_err:
+                    logger.debug(f"Asset lookup failed (non-fatal): {asset_err}")
+
+            if not platform_request:
                 return func.HttpResponse(
                     json.dumps({
                         "success": False,
                         "error": f"No Platform request found for ID: {lookup_id}",
-                        "hint": "ID can be either a request_id or job_id"
+                        "hint": "ID can be a request_id, job_id, or asset_id"
                     }),
                     status_code=404,
                     headers={"Content-Type": "application/json"}
@@ -173,12 +194,30 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
                 # Task summary (09 DEC 2025)
                 "task_summary": task_summary,
 
+                # V0.8: Asset info if available (29 JAN 2026)
+                "asset": asset_info,
+
                 # Helpful URLs
                 "urls": {
                     "job_status": f"/api/jobs/status/{platform_request.job_id}",
                     "job_tasks": f"/api/dbadmin/tasks/{platform_request.job_id}"
                 }
             }
+
+            # V0.8: Fetch asset info if not already populated (29 JAN 2026)
+            if not asset_info:
+                try:
+                    asset_repo = GeospatialAssetRepository()
+                    asset = asset_repo.get_by_job_id(platform_request.job_id)
+                    if asset:
+                        result["asset"] = {
+                            "asset_id": asset.asset_id,
+                            "revision": asset.revision,
+                            "approval_state": asset.approval_state.value if hasattr(asset.approval_state, 'value') else str(asset.approval_state),
+                            "clearance_state": asset.clearance_state.value if hasattr(asset.clearance_state, 'value') else str(asset.clearance_state),
+                        }
+                except Exception:
+                    pass  # Non-fatal - asset info is optional
 
             # Add data access URLs if job completed
             if job_status == "completed" and job_result:

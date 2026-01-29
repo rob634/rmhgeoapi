@@ -1,0 +1,875 @@
+# ============================================================================
+# GEOSPATIAL ASSET SERVICE
+# ============================================================================
+# EPOCH: 4 - ACTIVE
+# STATUS: Service - Business logic for geospatial assets
+# PURPOSE: Orchestrate asset lifecycle: create, approve, reject, delete
+# LAST_REVIEWED: 29 JAN 2026
+# EXPORTS: AssetService, AssetExistsError
+# DEPENDENCIES: infrastructure.asset_repository, infrastructure.revision_repository
+# ============================================================================
+"""
+Geospatial Asset Service - V0.8 Entity Architecture.
+
+Business logic for the geospatial asset lifecycle. Handles:
+- Creating assets when Platform API receives requests
+- Approving assets (set clearance, optionally trigger ADF)
+- Rejecting assets
+- Soft deleting assets (audit trail preserved)
+- Linking jobs to assets
+
+This service coordinates:
+- GeospatialAssetRepository for main entity CRUD
+- AssetRevisionRepository for audit trail
+- Future: PGSTACRepository for STAC item updates
+- Future: AzureDataFactoryRepository for PUBLIC approval
+
+Exports:
+    AssetService: Business logic for asset lifecycle
+    AssetExistsError: Raised when asset exists and overwrite=False
+
+Created: 29 JAN 2026 as part of V0.8 Entity Architecture
+"""
+
+from typing import Optional, List, Dict, Any, Tuple
+from datetime import datetime, timezone
+
+from util_logger import LoggerFactory, ComponentType
+from core.models.asset import (
+    GeospatialAsset,
+    AssetRevision,
+    ApprovalState,
+    ClearanceState,
+    ProcessingStatus  # DAG Orchestration (29 JAN 2026)
+)
+from infrastructure.asset_repository import GeospatialAssetRepository
+from infrastructure.revision_repository import AssetRevisionRepository
+
+logger = LoggerFactory.create_logger(ComponentType.SERVICE, "AssetService")
+
+
+class AssetExistsError(Exception):
+    """Raised when asset already exists and overwrite=False."""
+
+    def __init__(self, asset_id: str, dataset_id: str, resource_id: str, version_id: str):
+        self.asset_id = asset_id
+        self.dataset_id = dataset_id
+        self.resource_id = resource_id
+        self.version_id = version_id
+        super().__init__(
+            f"Asset already exists for {dataset_id}/{resource_id}/{version_id}. "
+            f"Use overwrite=True to replace. Existing asset_id: {asset_id}"
+        )
+
+
+class AssetNotFoundError(Exception):
+    """Raised when asset not found for operation."""
+
+    def __init__(self, identifier: str, identifier_type: str = "asset_id"):
+        self.identifier = identifier
+        self.identifier_type = identifier_type
+        super().__init__(f"Asset not found: {identifier_type}={identifier}")
+
+
+class AssetStateError(Exception):
+    """Raised when asset is in invalid state for requested operation."""
+
+    def __init__(self, asset_id: str, current_state: str, required_state: str, operation: str):
+        self.asset_id = asset_id
+        self.current_state = current_state
+        self.required_state = required_state
+        self.operation = operation
+        super().__init__(
+            f"Cannot {operation} asset {asset_id}: "
+            f"current state is '{current_state}', requires '{required_state}'"
+        )
+
+
+class AssetService:
+    """
+    Service for managing geospatial asset lifecycle.
+
+    Provides:
+    - Asset creation with upsert semantics
+    - Approval workflow (approve/reject)
+    - Soft delete with audit trail
+    - Job linking
+    - Revision history
+
+    Usage:
+        from services.asset_service import AssetService
+
+        service = AssetService()
+
+        # Create or update asset
+        result = service.create_or_update_asset(
+            dataset_id="flood-2024",
+            resource_id="site-a",
+            version_id="v1.0",
+            data_type="raster",
+            stac_item_id="flood-2024-site-a-v10",
+            stac_collection_id="flood-2024",
+            overwrite=False
+        )
+
+        # Approve asset
+        asset = service.approve(
+            asset_id="abc123...",
+            reviewer="user@example.com",
+            clearance_level=ClearanceState.OUO
+        )
+    """
+
+    def __init__(self):
+        """Initialize with repository dependencies."""
+        self._asset_repo = GeospatialAssetRepository()
+        self._revision_repo = AssetRevisionRepository()
+
+    # =========================================================================
+    # CREATION
+    # =========================================================================
+
+    def create_or_update_asset(
+        self,
+        dataset_id: str,
+        resource_id: str,
+        version_id: str,
+        data_type: str,
+        stac_item_id: str,
+        stac_collection_id: str,
+        table_name: Optional[str] = None,
+        blob_path: Optional[str] = None,
+        overwrite: bool = False,
+        clearance_level: Optional[ClearanceState] = None,
+        submitted_by: Optional[str] = None
+    ) -> Tuple[GeospatialAsset, str]:
+        """
+        Create a new asset or update existing with overwrite.
+
+        Uses advisory locks via database function to handle concurrent requests.
+
+        Args:
+            dataset_id: DDH dataset identifier
+            resource_id: DDH resource identifier
+            version_id: DDH version identifier
+            data_type: 'vector' or 'raster'
+            stac_item_id: STAC item identifier
+            stac_collection_id: STAC collection identifier
+            table_name: PostGIS table name (vectors only)
+            blob_path: Azure Blob path (rasters only)
+            overwrite: If True, replace existing asset
+            clearance_level: Optional clearance level (default: UNCLEARED)
+            submitted_by: Who submitted the request (for audit trail if clearance set)
+
+        Returns:
+            Tuple of (GeospatialAsset, operation) where operation is:
+            - 'created': New asset created
+            - 'updated': Existing asset replaced (overwrite)
+            - 'reactivated': Soft-deleted asset restored
+
+        Raises:
+            AssetExistsError: If asset exists and overwrite=False
+        """
+        clearance_info = f", clearance={clearance_level.value}" if clearance_level else ""
+        logger.info(
+            f"Creating/updating asset for {dataset_id}/{resource_id}/{version_id} "
+            f"(type={data_type}, overwrite={overwrite}{clearance_info})"
+        )
+
+        # Generate deterministic asset_id
+        asset_id = GeospatialAsset.generate_asset_id(dataset_id, resource_id, version_id)
+
+        # Use upsert function (handles advisory locks internally)
+        operation, new_revision, error_message = self._asset_repo.upsert(
+            asset_id=asset_id,
+            dataset_id=dataset_id,
+            resource_id=resource_id,
+            version_id=version_id,
+            data_type=data_type,
+            stac_item_id=stac_item_id,
+            stac_collection_id=stac_collection_id,
+            table_name=table_name,
+            blob_path=blob_path,
+            overwrite=overwrite
+        )
+
+        if error_message:
+            # Asset exists and overwrite=False
+            raise AssetExistsError(asset_id, dataset_id, resource_id, version_id)
+
+        # Fetch the created/updated asset
+        asset = self._asset_repo.get_by_id(asset_id)
+        if not asset:
+            raise RuntimeError(f"Asset {asset_id} not found after upsert (operation={operation})")
+
+        # Apply optional clearance level if provided at submit time
+        # This is rare - most assets start as UNCLEARED and are cleared at approval
+        if clearance_level and clearance_level != ClearanceState.UNCLEARED:
+            from datetime import datetime, timezone
+            updates = {
+                'clearance_state': clearance_level.value,
+                'cleared_at': datetime.now(timezone.utc),
+                'cleared_by': submitted_by or 'system',
+            }
+            # Track made_public separately
+            if clearance_level == ClearanceState.PUBLIC:
+                updates['made_public_at'] = datetime.now(timezone.utc)
+                updates['made_public_by'] = submitted_by or 'system'
+
+            self._asset_repo.update(asset_id, updates)
+            asset = self._asset_repo.get_by_id(asset_id)
+            logger.info(f"Applied clearance_level={clearance_level.value} at submit time")
+
+        logger.info(f"Asset {operation}: {asset_id} at revision {new_revision}")
+        return asset, operation
+
+    def get_or_create_asset(
+        self,
+        dataset_id: str,
+        resource_id: str,
+        version_id: str,
+        data_type: str,
+        stac_item_id: str,
+        stac_collection_id: str,
+        table_name: Optional[str] = None,
+        blob_path: Optional[str] = None
+    ) -> Tuple[GeospatialAsset, bool]:
+        """
+        Get existing asset or create new one.
+
+        Idempotent - safe to call multiple times.
+
+        Args:
+            dataset_id: DDH dataset identifier
+            resource_id: DDH resource identifier
+            version_id: DDH version identifier
+            data_type: 'vector' or 'raster'
+            stac_item_id: STAC item identifier
+            stac_collection_id: STAC collection identifier
+            table_name: PostGIS table name (vectors only)
+            blob_path: Azure Blob path (rasters only)
+
+        Returns:
+            Tuple of (GeospatialAsset, created) where created is True if new
+        """
+        # Check if asset exists
+        asset_id = GeospatialAsset.generate_asset_id(dataset_id, resource_id, version_id)
+        existing = self._asset_repo.get_active_by_id(asset_id)
+
+        if existing:
+            logger.debug(f"Found existing asset: {asset_id}")
+            return existing, False
+
+        # Create new asset
+        asset, _ = self.create_or_update_asset(
+            dataset_id=dataset_id,
+            resource_id=resource_id,
+            version_id=version_id,
+            data_type=data_type,
+            stac_item_id=stac_item_id,
+            stac_collection_id=stac_collection_id,
+            table_name=table_name,
+            blob_path=blob_path,
+            overwrite=False
+        )
+        return asset, True
+
+    # =========================================================================
+    # READ
+    # =========================================================================
+
+    def get_asset(self, asset_id: str) -> Optional[GeospatialAsset]:
+        """Get an asset by ID (includes soft-deleted)."""
+        return self._asset_repo.get_by_id(asset_id)
+
+    def get_active_asset(self, asset_id: str) -> Optional[GeospatialAsset]:
+        """Get an active (not deleted) asset by ID."""
+        return self._asset_repo.get_active_by_id(asset_id)
+
+    def get_asset_by_identity(
+        self,
+        dataset_id: str,
+        resource_id: str,
+        version_id: str
+    ) -> Optional[GeospatialAsset]:
+        """Get an asset by DDH identity."""
+        return self._asset_repo.get_by_identity(dataset_id, resource_id, version_id)
+
+    def get_asset_by_stac_item(self, stac_item_id: str) -> Optional[GeospatialAsset]:
+        """Get an asset by STAC item ID."""
+        return self._asset_repo.get_by_stac_item_id(stac_item_id)
+
+    def get_asset_by_job(self, job_id: str) -> Optional[GeospatialAsset]:
+        """Get an asset linked to a job."""
+        return self._asset_repo.get_by_job_id(job_id)
+
+    def list_pending_review(self, limit: int = 50) -> List[GeospatialAsset]:
+        """List assets pending review."""
+        return self._asset_repo.list_pending_review(limit=limit)
+
+    def list_assets(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        include_deleted: bool = False
+    ) -> List[GeospatialAsset]:
+        """List all assets with optional filters."""
+        return self._asset_repo.list_all(
+            limit=limit,
+            offset=offset,
+            include_deleted=include_deleted
+        )
+
+    def get_state_counts(self) -> Dict[str, int]:
+        """Get counts of assets by approval state."""
+        return self._asset_repo.count_by_state()
+
+    def list_by_platform_refs(
+        self,
+        platform_id: str,
+        refs_filter: Dict[str, Any],
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[GeospatialAsset]:
+        """
+        List assets by platform and partial platform_refs.
+
+        V0.8 Enhancement (29 JAN 2026):
+        - Enables queries like "all assets for dataset X" without knowing resource/version
+        - Uses PostgreSQL JSONB containment operator (@>) for efficient queries
+
+        Args:
+            platform_id: Platform identifier (e.g., "ddh")
+            refs_filter: Partial refs to match (e.g., {"dataset_id": "IDN_lulc"})
+            limit: Maximum number of results
+            offset: Number of results to skip
+
+        Returns:
+            List of matching GeospatialAsset models
+
+        Example:
+            # Get all assets for a dataset (any resource/version)
+            assets = asset_service.list_by_platform_refs("ddh", {"dataset_id": "IDN_lulc"})
+        """
+        return self._asset_repo.list_by_platform_refs(
+            platform_id=platform_id,
+            refs_filter=refs_filter,
+            limit=limit,
+            offset=offset
+        )
+
+    # =========================================================================
+    # JOB LINKING
+    # =========================================================================
+
+    def link_job_to_asset(
+        self,
+        asset_id: str,
+        job_id: str,
+        content_hash: Optional[str] = None
+    ) -> GeospatialAsset:
+        """
+        Link a job to an asset.
+
+        Called when a job starts processing an asset.
+
+        Args:
+            asset_id: Asset to link
+            job_id: Job that is processing this asset
+            content_hash: Optional content hash of source file
+
+        Returns:
+            Updated GeospatialAsset
+
+        Raises:
+            AssetNotFoundError: If asset not found
+        """
+        asset = self._asset_repo.link_job(asset_id, job_id, content_hash)
+        if not asset:
+            raise AssetNotFoundError(asset_id)
+
+        logger.info(f"Linked job {job_id} to asset {asset_id}")
+        return asset
+
+    def link_job_by_identity(
+        self,
+        dataset_id: str,
+        resource_id: str,
+        version_id: str,
+        job_id: str,
+        content_hash: Optional[str] = None
+    ) -> GeospatialAsset:
+        """
+        Link a job to an asset by DDH identity.
+
+        Convenience method that looks up asset by identity first.
+
+        Args:
+            dataset_id: DDH dataset identifier
+            resource_id: DDH resource identifier
+            version_id: DDH version identifier
+            job_id: Job that is processing this asset
+            content_hash: Optional content hash of source file
+
+        Returns:
+            Updated GeospatialAsset
+
+        Raises:
+            AssetNotFoundError: If asset not found
+        """
+        asset = self._asset_repo.get_by_identity(dataset_id, resource_id, version_id)
+        if not asset:
+            raise AssetNotFoundError(
+                f"{dataset_id}/{resource_id}/{version_id}",
+                "identity"
+            )
+
+        return self.link_job_to_asset(asset.asset_id, job_id, content_hash)
+
+    # =========================================================================
+    # APPROVAL WORKFLOW
+    # =========================================================================
+
+    def approve(
+        self,
+        asset_id: str,
+        reviewer: str,
+        clearance_level: ClearanceState,
+        adf_run_id: Optional[str] = None
+    ) -> Tuple[GeospatialAsset, Optional[str]]:
+        """
+        Approve an asset with specified clearance level, or change clearance on approved asset.
+
+        V0.8 Enhancement (29 JAN 2026):
+        - Allows approval from PENDING_REVIEW state (standard workflow)
+        - Allows re-approval from APPROVED state to change clearance level
+          - Use case: "Data was internal, later got permission to share publicly"
+          - Downgrade (public→ouo) returns warning about manual ADF reversal
+
+        For PUBLIC clearance, caller should trigger ADF first and pass run_id.
+
+        Args:
+            asset_id: Asset to approve
+            reviewer: Email of reviewer
+            clearance_level: OUO or PUBLIC
+            adf_run_id: ADF pipeline run ID (if PUBLIC)
+
+        Returns:
+            Tuple of (GeospatialAsset, warning_message)
+            - warning_message is set when downgrading from PUBLIC
+
+        Raises:
+            AssetNotFoundError: If asset not found
+            AssetStateError: If asset is in REJECTED state (must resubmit)
+        """
+        existing = self._asset_repo.get_active_by_id(asset_id)
+        if not existing:
+            raise AssetNotFoundError(asset_id)
+
+        warning = None
+
+        # Check valid approval states
+        if existing.approval_state == ApprovalState.REJECTED:
+            raise AssetStateError(
+                asset_id,
+                existing.approval_state.value,
+                "pending_review or approved",
+                "approve (rejected assets must be resubmitted with overwrite=true)"
+            )
+
+        # Handle clearance change on already-approved asset
+        if existing.approval_state == ApprovalState.APPROVED:
+            old_clearance = existing.clearance_state
+            if old_clearance == clearance_level:
+                # No change needed
+                logger.info(f"Asset {asset_id} already approved with clearance {clearance_level.value}")
+                return existing, None
+
+            # Downgrade warning (public → ouo)
+            if old_clearance == ClearanceState.PUBLIC and clearance_level != ClearanceState.PUBLIC:
+                warning = (
+                    "Asset downgraded from PUBLIC. External zone data must be removed "
+                    "via separate ADF reversal process (not yet automated)."
+                )
+                logger.warning(f"CLEARANCE DOWNGRADE: {asset_id} from PUBLIC to {clearance_level.value}")
+
+            logger.info(
+                f"Clearance change for approved asset {asset_id}: "
+                f"{old_clearance.value} → {clearance_level.value}"
+            )
+
+        asset = self._asset_repo.approve(
+            asset_id=asset_id,
+            reviewer=reviewer,
+            clearance_level=clearance_level,
+            adf_run_id=adf_run_id
+        )
+
+        logger.info(
+            f"Approved asset {asset_id} by {reviewer} "
+            f"with clearance {clearance_level.value}"
+        )
+        return asset, warning
+
+    def reject(
+        self,
+        asset_id: str,
+        reviewer: str,
+        reason: str
+    ) -> GeospatialAsset:
+        """
+        Reject an asset.
+
+        Args:
+            asset_id: Asset to reject
+            reviewer: Email of reviewer
+            reason: Rejection reason (required)
+
+        Returns:
+            Updated GeospatialAsset
+
+        Raises:
+            AssetNotFoundError: If asset not found
+            AssetStateError: If asset is not in PENDING_REVIEW state
+            ValueError: If reason not provided
+        """
+        if not reason or not reason.strip():
+            raise ValueError("Rejection reason is required")
+
+        existing = self._asset_repo.get_active_by_id(asset_id)
+        if not existing:
+            raise AssetNotFoundError(asset_id)
+
+        if existing.approval_state != ApprovalState.PENDING_REVIEW:
+            raise AssetStateError(
+                asset_id,
+                existing.approval_state.value,
+                ApprovalState.PENDING_REVIEW.value,
+                "reject"
+            )
+
+        asset = self._asset_repo.reject(
+            asset_id=asset_id,
+            reviewer=reviewer,
+            reason=reason
+        )
+
+        logger.info(f"Rejected asset {asset_id} by {reviewer}: {reason}")
+        return asset
+
+    # =========================================================================
+    # DELETION
+    # =========================================================================
+
+    def soft_delete(
+        self,
+        asset_id: str,
+        deleted_by: str
+    ) -> GeospatialAsset:
+        """
+        Soft delete an asset (preserves for audit trail).
+
+        Args:
+            asset_id: Asset to delete
+            deleted_by: Who is deleting (user email or system)
+
+        Returns:
+            Updated GeospatialAsset
+
+        Raises:
+            AssetNotFoundError: If asset not found
+        """
+        asset = self._asset_repo.soft_delete(asset_id, deleted_by)
+        if not asset:
+            raise AssetNotFoundError(asset_id)
+
+        logger.warning(f"Soft deleted asset {asset_id} by {deleted_by}")
+        return asset
+
+    def soft_delete_by_identity(
+        self,
+        dataset_id: str,
+        resource_id: str,
+        version_id: str,
+        deleted_by: str
+    ) -> GeospatialAsset:
+        """
+        Soft delete an asset by DDH identity.
+
+        Args:
+            dataset_id: DDH dataset identifier
+            resource_id: DDH resource identifier
+            version_id: DDH version identifier
+            deleted_by: Who is deleting
+
+        Returns:
+            Updated GeospatialAsset
+
+        Raises:
+            AssetNotFoundError: If asset not found
+        """
+        asset = self._asset_repo.get_by_identity(dataset_id, resource_id, version_id)
+        if not asset:
+            raise AssetNotFoundError(
+                f"{dataset_id}/{resource_id}/{version_id}",
+                "identity"
+            )
+
+        return self.soft_delete(asset.asset_id, deleted_by)
+
+    # =========================================================================
+    # REVISION HISTORY
+    # =========================================================================
+
+    def get_revision_history(
+        self,
+        asset_id: str,
+        limit: int = 50
+    ) -> List[AssetRevision]:
+        """
+        Get revision history for an asset.
+
+        Args:
+            asset_id: Asset identifier
+            limit: Maximum number of revisions
+
+        Returns:
+            List of AssetRevision records ordered by revision descending
+        """
+        return self._revision_repo.list_by_asset(asset_id, limit=limit)
+
+    def get_specific_revision(
+        self,
+        asset_id: str,
+        revision: int
+    ) -> Optional[AssetRevision]:
+        """
+        Get a specific revision for an asset.
+
+        Args:
+            asset_id: Asset identifier
+            revision: Revision number
+
+        Returns:
+            AssetRevision if found, None otherwise
+        """
+        return self._revision_repo.get_by_asset_and_revision(asset_id, revision)
+
+    def count_revisions(self, asset_id: str) -> int:
+        """Count total revisions for an asset."""
+        return self._revision_repo.count_revisions(asset_id)
+
+    # =========================================================================
+    # PROCESSING LIFECYCLE (DAG Orchestration - 29 JAN 2026)
+    # =========================================================================
+
+    def start_processing(
+        self,
+        asset_id: str,
+        job_id: str,
+        workflow_id: Optional[str] = None,
+        workflow_version: Optional[int] = None,
+        request_id: Optional[str] = None
+    ) -> GeospatialAsset:
+        """
+        Mark asset as processing (job started).
+
+        Called by DAG orchestrator when job begins execution.
+        This is the entry point for the processing state dimension.
+
+        Args:
+            asset_id: Asset to update
+            job_id: Job that is processing this asset
+            workflow_id: Workflow identifier (e.g., "raster_processing")
+            workflow_version: Version of workflow for debugging
+            request_id: Request ID for B2B callback routing
+
+        Returns:
+            Updated GeospatialAsset
+
+        Raises:
+            AssetNotFoundError: If asset not found
+        """
+        asset = self._asset_repo.start_processing(
+            asset_id=asset_id,
+            job_id=job_id,
+            workflow_id=workflow_id,
+            workflow_version=workflow_version,
+            request_id=request_id
+        )
+        if not asset:
+            raise AssetNotFoundError(asset_id)
+
+        logger.info(
+            f"Started processing: asset={asset_id}, job={job_id}, "
+            f"workflow={workflow_id}, job_count={asset.job_count}"
+        )
+        return asset
+
+    def complete_processing(
+        self,
+        asset_id: str,
+        output_file_hash: Optional[str] = None
+    ) -> GeospatialAsset:
+        """
+        Mark asset as completed (job succeeded).
+
+        Called by DAG orchestrator when job finishes successfully.
+
+        Args:
+            asset_id: Asset to update
+            output_file_hash: Optional SHA256 of output file for integrity
+
+        Returns:
+            Updated GeospatialAsset
+
+        Raises:
+            AssetNotFoundError: If asset not found
+        """
+        asset = self._asset_repo.complete_processing(asset_id, output_file_hash)
+        if not asset:
+            raise AssetNotFoundError(asset_id)
+
+        logger.info(f"Completed processing: asset={asset_id}")
+        return asset
+
+    def fail_processing(
+        self,
+        asset_id: str,
+        error_message: str
+    ) -> GeospatialAsset:
+        """
+        Mark asset as failed (job failed).
+
+        Called by DAG orchestrator when job fails.
+
+        Args:
+            asset_id: Asset to update
+            error_message: Error message for debugging
+
+        Returns:
+            Updated GeospatialAsset
+
+        Raises:
+            AssetNotFoundError: If asset not found
+        """
+        asset = self._asset_repo.fail_processing(asset_id, error_message)
+        if not asset:
+            raise AssetNotFoundError(asset_id)
+
+        logger.warning(f"Failed processing: asset={asset_id}, error={error_message[:100]}")
+        return asset
+
+    def reset_for_retry(self, asset_id: str) -> GeospatialAsset:
+        """
+        Reset asset to pending for retry.
+
+        Called when submitting a retry request.
+
+        Args:
+            asset_id: Asset to reset
+
+        Returns:
+            Updated GeospatialAsset
+
+        Raises:
+            AssetNotFoundError: If asset not found
+        """
+        asset = self._asset_repo.reset_for_retry(asset_id)
+        if not asset:
+            raise AssetNotFoundError(asset_id)
+
+        logger.info(f"Reset for retry: asset={asset_id}")
+        return asset
+
+    def update_node_summary(
+        self,
+        asset_id: str,
+        node_summary: Dict[str, Any],
+        estimated_completion_at: Optional[datetime] = None
+    ) -> GeospatialAsset:
+        """
+        Update node progress summary (DAG workflow progress).
+
+        Called periodically by DAG orchestrator to track progress.
+
+        Args:
+            asset_id: Asset to update
+            node_summary: Progress info {total, completed, failed, current_node}
+            estimated_completion_at: Optional ETA
+
+        Returns:
+            Updated GeospatialAsset
+
+        Raises:
+            AssetNotFoundError: If asset not found
+        """
+        asset = self._asset_repo.update_node_summary(
+            asset_id, node_summary, estimated_completion_at
+        )
+        if not asset:
+            raise AssetNotFoundError(asset_id)
+
+        return asset
+
+    def list_by_processing_status(
+        self,
+        status: ProcessingStatus,
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[GeospatialAsset]:
+        """
+        List assets by processing status.
+
+        Useful for monitoring dashboards and stuck job detection.
+
+        Args:
+            status: Processing status to filter
+            limit: Maximum number of results
+            offset: Number of results to skip
+
+        Returns:
+            List of matching GeospatialAsset models
+        """
+        return self._asset_repo.list_by_processing_status(status, limit, offset)
+
+    def list_stuck_processing(self, older_than_hours: int = 1) -> List[GeospatialAsset]:
+        """
+        List assets stuck in processing state (SLA violation).
+
+        Args:
+            older_than_hours: How many hours to consider "stuck"
+
+        Returns:
+            List of stuck assets
+        """
+        return self._asset_repo.list_stuck_processing(older_than_hours)
+
+    # =========================================================================
+    # UTILITY
+    # =========================================================================
+
+    def exists(self, asset_id: str) -> bool:
+        """Check if an asset exists (including deleted)."""
+        return self._asset_repo.exists(asset_id)
+
+    def generate_asset_id(
+        self,
+        dataset_id: str,
+        resource_id: str,
+        version_id: str
+    ) -> str:
+        """Generate deterministic asset ID from DDH identifiers."""
+        return GeospatialAsset.generate_asset_id(dataset_id, resource_id, version_id)
+
+
+# ============================================================================
+# EXPORTS
+# ============================================================================
+
+__all__ = [
+    'AssetService',
+    'AssetExistsError',
+    'AssetNotFoundError',
+    'AssetStateError',
+]

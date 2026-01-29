@@ -148,6 +148,21 @@ from .approval import (
     ApprovalStatus
 )
 
+# Geospatial asset entity models (V0.8 Entity Architecture - 29 JAN 2026)
+from .asset import (
+    ApprovalState,
+    ClearanceState,
+    ProcessingStatus,  # DAG Orchestration (29 JAN 2026)
+    GeospatialAsset,
+    AssetRevision
+)
+
+# Platform registry models (V0.8 Entity Architecture - 29 JAN 2026)
+from .platform_registry import (
+    Platform,
+    DDH_PLATFORM
+)
+
 # Artifact registry models (20 JAN 2026)
 from .artifact import (
     Artifact,
@@ -294,6 +309,16 @@ __all__ = [
     # Dataset approval models (F4.AP)
     'DatasetApproval',
     'ApprovalStatus',
+
+    # Geospatial asset entity models (V0.8 Entity Architecture - 29 JAN 2026)
+    'ApprovalState',
+    'ClearanceState',
+    'GeospatialAsset',
+    'AssetRevision',
+
+    # Platform registry models (V0.8 Entity Architecture - 29 JAN 2026)
+    'Platform',
+    'DDH_PLATFORM',
 
     # Artifact registry models (20 JAN 2026)
     'Artifact',

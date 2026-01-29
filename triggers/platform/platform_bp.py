@@ -102,6 +102,164 @@ async def platform_status_list(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # ============================================================================
+# PLATFORM REGISTRY ENDPOINTS (V0.8 - 29 JAN 2026)
+# ============================================================================
+
+@bp.route(route="platforms", methods=["GET"])
+def platforms_list_route(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    List all supported B2B platforms.
+
+    GET /api/platforms
+
+    Returns list of platforms with their identifier requirements.
+    Used by B2B clients to understand what identifiers are needed for each platform.
+
+    Query Parameters:
+        active_only: If "false", include inactive platforms (default: true)
+
+    Response:
+        {
+            "success": true,
+            "platforms": [
+                {
+                    "platform_id": "ddh",
+                    "display_name": "Data Distribution Hub",
+                    "description": "Primary B2B platform with dataset/resource/version hierarchy",
+                    "required_refs": ["dataset_id", "resource_id", "version_id"],
+                    "optional_refs": ["title", "description", "access_level"],
+                    "is_active": true
+                }
+            ],
+            "count": 1
+        }
+    """
+    import json
+
+    try:
+        from infrastructure import PlatformRegistryRepository
+
+        # Parse query params
+        active_only = req.params.get("active_only", "true").lower() != "false"
+
+        repo = PlatformRegistryRepository()
+        platforms = repo.list_all(active_only=active_only)
+
+        return func.HttpResponse(
+            json.dumps({
+                "success": True,
+                "platforms": [
+                    {
+                        "platform_id": p.platform_id,
+                        "display_name": p.display_name,
+                        "description": p.description,
+                        "required_refs": p.required_refs,
+                        "optional_refs": p.optional_refs,
+                        "is_active": p.is_active
+                    }
+                    for p in platforms
+                ],
+                "count": len(platforms)
+            }),
+            status_code=200,
+            headers={"Content-Type": "application/json"}
+        )
+    except Exception as e:
+        logger.error(f"Failed to list platforms: {e}", exc_info=True)
+        return func.HttpResponse(
+            json.dumps({
+                "success": False,
+                "error": str(e),
+                "error_type": type(e).__name__
+            }),
+            status_code=500,
+            headers={"Content-Type": "application/json"}
+        )
+
+
+@bp.route(route="platforms/{platform_id}", methods=["GET"])
+def platform_get_route(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Get details of a specific platform.
+
+    GET /api/platforms/{platform_id}
+
+    Path Parameters:
+        platform_id: Platform identifier (e.g., "ddh")
+
+    Response:
+        {
+            "success": true,
+            "platform": {
+                "platform_id": "ddh",
+                "display_name": "Data Distribution Hub",
+                "description": "Primary B2B platform...",
+                "required_refs": ["dataset_id", "resource_id", "version_id"],
+                "optional_refs": ["title", "description"],
+                "is_active": true
+            }
+        }
+    """
+    import json
+
+    try:
+        from infrastructure import PlatformRegistryRepository
+
+        platform_id = req.route_params.get("platform_id")
+        if not platform_id:
+            return func.HttpResponse(
+                json.dumps({
+                    "success": False,
+                    "error": "platform_id is required",
+                    "error_type": "ValidationError"
+                }),
+                status_code=400,
+                headers={"Content-Type": "application/json"}
+            )
+
+        repo = PlatformRegistryRepository()
+        platform = repo.get(platform_id)
+
+        if not platform:
+            return func.HttpResponse(
+                json.dumps({
+                    "success": False,
+                    "error": f"Platform not found: {platform_id}",
+                    "error_type": "NotFound"
+                }),
+                status_code=404,
+                headers={"Content-Type": "application/json"}
+            )
+
+        return func.HttpResponse(
+            json.dumps({
+                "success": True,
+                "platform": {
+                    "platform_id": platform.platform_id,
+                    "display_name": platform.display_name,
+                    "description": platform.description,
+                    "required_refs": platform.required_refs,
+                    "optional_refs": platform.optional_refs,
+                    "is_active": platform.is_active
+                }
+            }),
+            status_code=200,
+            headers={"Content-Type": "application/json"}
+        )
+    except Exception as e:
+        logger.error(f"Failed to get platform: {e}", exc_info=True)
+        return func.HttpResponse(
+            json.dumps({
+                "success": False,
+                "error": str(e),
+                "error_type": type(e).__name__
+            }),
+            status_code=500,
+            headers={"Content-Type": "application/json"}
+        )
+
+
+# ============================================================================
 # DIAGNOSTICS ENDPOINTS (F7.12 - 15 JAN 2026)
 # ============================================================================
 
@@ -241,6 +399,38 @@ def platform_approve_route(req: func.HttpRequest) -> func.HttpResponse:
     return platform_approve(req)
 
 
+@bp.route(route="platform/reject", methods=["POST"])
+def platform_reject_route(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Reject a pending dataset (V0.8 - 29 JAN 2026).
+
+    POST /api/platform/reject
+
+    Rejects a pending dataset that is not suitable for publication.
+    This is for datasets that fail review (unlike revoke, which is for
+    already-approved datasets).
+
+    Body:
+        {
+            "approval_id": "apr-abc123...",       // Or stac_item_id, job_id, request_id
+            "reviewer": "user@example.com",
+            "reason": "Data quality issue found"  // Required for audit
+        }
+
+    Response:
+        {
+            "success": true,
+            "approval_id": "apr-abc123...",
+            "status": "rejected",
+            "asset_id": "...",
+            "asset_updated": true,
+            "message": "Dataset rejected"
+        }
+    """
+    from triggers.trigger_approvals import platform_reject
+    return platform_reject(req)
+
+
 @bp.route(route="platform/revoke", methods=["POST"])
 def platform_revoke_route(req: func.HttpRequest) -> func.HttpResponse:
     """
@@ -249,6 +439,7 @@ def platform_revoke_route(req: func.HttpRequest) -> func.HttpResponse:
     POST /api/platform/revoke
 
     This is an audit-logged operation for unpublishing approved data.
+    V0.8: Also soft-deletes the GeospatialAsset.
 
     Body:
         {
@@ -262,6 +453,8 @@ def platform_revoke_route(req: func.HttpRequest) -> func.HttpResponse:
             "success": true,
             "approval_id": "apr-abc123...",
             "status": "revoked",
+            "asset_id": "...",
+            "asset_deleted": true,
             "warning": "Approved dataset has been revoked",
             "message": "Approval revoked successfully"
         }

@@ -59,6 +59,10 @@ from services.platform_response import (
     idempotent_response,
 )
 
+# V0.8 Entity Architecture - Asset Service (29 JAN 2026)
+from services.asset_service import AssetService, AssetExistsError
+from core.models.asset import ClearanceState
+
 
 # ============================================================================
 # OVERWRITE HELPER
@@ -211,6 +215,19 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
         existing = platform_repo.get_request(request_id)
         overwrite = platform_req.processing_options.get('overwrite', False) if platform_req.processing_options else False
 
+        # Extract optional clearance_level (V0.8 - 29 JAN 2026)
+        # Most assets start UNCLEARED and are cleared at approval time.
+        # Optional: specify clearance at submit for pre-approved data sources.
+        clearance_level = None
+        clearance_level_str = req_body.get('clearance_level') or req_body.get('access_level')
+        if clearance_level_str:
+            try:
+                clearance_level = ClearanceState(clearance_level_str.lower())
+                logger.info(f"  Clearance level specified at submit: {clearance_level.value}")
+            except ValueError:
+                logger.warning(f"  Invalid clearance_level '{clearance_level_str}', ignoring")
+                clearance_level = None
+
         if existing:
             if overwrite:
                 # Overwrite mode: unpublish existing outputs and reprocess (21 JAN 2026)
@@ -239,6 +256,52 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
         job_type, job_params = translate_to_coremachine(platform_req, config)
 
         logger.info(f"  Translated to job_type: {job_type}")
+
+        # =====================================================================
+        # V0.8 ENTITY ARCHITECTURE: Create/Update GeospatialAsset (29 JAN 2026)
+        # =====================================================================
+        # Asset is created BEFORE job runs. This ensures:
+        # 1. Asset exists for all requests (even failed jobs)
+        # 2. Deterministic asset_id for concurrent request handling
+        # 3. Advisory locks prevent race conditions
+        # =====================================================================
+        try:
+            asset_service = AssetService()
+            # Get submitter for audit trail (optional - from request or B2B app header)
+            submitted_by = req_body.get('submitted_by') or req.headers.get('X-Submitted-By')
+
+            asset, asset_operation = asset_service.create_or_update_asset(
+                dataset_id=platform_req.dataset_id,
+                resource_id=platform_req.resource_id,
+                version_id=platform_req.version_id,
+                data_type=platform_req.data_type.value,
+                stac_item_id=job_params.get('stac_item_id', generate_stac_item_id(
+                    platform_req.dataset_id,
+                    platform_req.resource_id,
+                    platform_req.version_id
+                )),
+                stac_collection_id=job_params.get('collection_id', platform_req.dataset_id.lower()),
+                table_name=job_params.get('table_name') if platform_req.data_type.value == 'vector' else None,
+                blob_path=job_params.get('blob_name') if platform_req.data_type.value == 'raster' else None,
+                overwrite=overwrite,
+                clearance_level=clearance_level,
+                submitted_by=submitted_by
+            )
+            logger.info(f"  Asset {asset_operation}: {asset.asset_id[:16]} (revision {asset.revision})")
+
+            # Add asset_id to job params for handler to link back
+            job_params['asset_id'] = asset.asset_id
+
+        except AssetExistsError as asset_err:
+            # Asset exists and overwrite=False - this shouldn't happen if we handled
+            # overwrite above, but log and continue with existing asset
+            logger.warning(f"Asset exists (continuing with existing): {asset_err}")
+            job_params['asset_id'] = asset_err.asset_id
+
+        except Exception as asset_err:
+            # Non-fatal: log warning but continue with job creation
+            # Asset linking can be retried later
+            logger.warning(f"Failed to create asset (continuing without): {asset_err}")
 
         # Create CoreMachine job
         job_id = create_and_submit_job(job_type, job_params, request_id)

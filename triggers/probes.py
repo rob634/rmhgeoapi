@@ -100,9 +100,17 @@ class ReadyzProbe:
 
         # Check if all validations passed
         if STARTUP_STATE.all_passed:
+            # Import version (safe - config has minimal deps)
+            try:
+                from config import __version__
+                version = __version__
+            except ImportError:
+                version = "unknown"
+
             response = {
                 "status": "ready",
                 "probe": "readyz",
+                "version": version,
                 "message": "All startup validations passed",
                 "summary": STARTUP_STATE.get_summary()
             }

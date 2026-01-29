@@ -168,9 +168,11 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         Returns:
             Health status data
         """
+        from config import __version__
         config = get_config()
         health_data = {
             "status": "healthy",
+            "version": __version__,
             "components": {},
             "warnings": [],  # Track degraded/warning components
             "environment": {
@@ -1722,12 +1724,14 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                 self.logger.debug(f"Promote service lookup failed: {promote_error}")
 
             # NO FALLBACK - if not found in promote service, report as not configured
+            # Use _status: "warning" to avoid marking overall health as degraded (optional component)
             if not admin0_table:
                 return {
+                    "_status": "warning",  # Override to warning - system tables are optional
                     "admin0_table": None,
                     "admin0_source": "not_configured",
                     "exists": False,
-                    "error": "No system-reserved dataset found with role 'admin0_boundaries'",
+                    "message": "No system-reserved dataset found with role 'admin0_boundaries'",
                     "impact": "ISO3 country attribution and H3 land filtering unavailable",
                     "fix": "1. Create admin0 table via process_vector job\n2. Promote with: POST /api/promote {is_system_reserved: true, system_role: 'admin0_boundaries'}",
                     "promote_service_error": promote_error_msg
@@ -1753,10 +1757,11 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
 
                         if not table_exists:
                             result = {
+                                "_status": "warning",  # Override to warning - system tables are optional
                                 "admin0_table": admin0_table,
                                 "admin0_source": admin0_source,
                                 "exists": False,
-                                "error": f"Table {admin0_table} not found",
+                                "message": f"Table {admin0_table} not found",
                                 "impact": "ISO3 country attribution will be unavailable for STAC items",
                                 "fix": "Run process_vector job to create admin0 table, then promote with system_role='admin0_boundaries'"
                             }
@@ -1847,6 +1852,7 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             except Exception as e:
                 import traceback
                 result = {
+                    "_status": "warning",  # Override to warning - system tables are optional
                     "admin0_table": admin0_table,
                     "admin0_source": admin0_source,
                     "exists": False,

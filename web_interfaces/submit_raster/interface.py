@@ -344,63 +344,66 @@ class SubmitRasterInterface(BaseInterface):
             if processing_options:
                 platform_payload['processing_options'] = processing_options
 
-            # Submit via Platform API internal functions (22 JAN 2026 - unified to /submit)
-            from config import get_config, generate_platform_request_id
-            from infrastructure import PlatformRepository
-            from core.models import ApiRequest, PlatformRequest
-            from services.platform_translation import translate_to_coremachine
-            from services.platform_job_submit import create_and_submit_job
-            config = get_config()
-
             # Force data_type to raster
             platform_payload['data_type'] = 'raster'
 
-            # Create Platform request object
-            platform_req = PlatformRequest(**platform_payload)
+            # =================================================================
+            # V0.8 FIX (29 JAN 2026): Call Platform API endpoint via HTTP
+            # Previously called internal functions directly, bypassing V0.8
+            # Entity Architecture (GeospatialAsset creation, etc.)
+            # =================================================================
+            import urllib.request
+            import urllib.error
+            import os
 
-            # Generate deterministic request ID
-            request_id = generate_platform_request_id(
-                platform_req.dataset_id,
-                platform_req.resource_id,
-                platform_req.version_id
+            # Get base URL for internal API call
+            website_hostname = os.environ.get('WEBSITE_HOSTNAME')
+            if not website_hostname:
+                raise RuntimeError("WEBSITE_HOSTNAME not set - cannot call Platform API")
+
+            platform_api_url = f"https://{website_hostname}/api/platform/submit"
+
+            # Make HTTP POST to Platform API
+            logger.info(f"[WebUI] Submitting to Platform API: {platform_api_url}")
+            req_data = json.dumps(platform_payload).encode('utf-8')
+            http_request = urllib.request.Request(
+                platform_api_url,
+                data=req_data,
+                headers={'Content-Type': 'application/json'},
+                method='POST'
             )
 
-            # Check for existing request (idempotent)
-            platform_repo = PlatformRepository()
-            existing = platform_repo.get_request(request_id)
-            if existing:
-                return self._render_submit_success_platform({
-                    'request_id': request_id,
-                    'job_id': existing.job_id,
-                    'status': 'exists'
-                }, platform_payload)
+            try:
+                with urllib.request.urlopen(http_request, timeout=30) as response:
+                    response_data = json.loads(response.read().decode('utf-8'))
+                    logger.info(f"[WebUI] Platform API response: {response_data.get('request_id', 'N/A')[:16]}")
 
-            # Translate to CoreMachine job parameters (unified path)
-            job_type, job_params = translate_to_coremachine(platform_req, config)
+                    # Check for success
+                    if response_data.get('success'):
+                        return self._render_submit_success_platform({
+                            'request_id': response_data.get('request_id'),
+                            'job_id': response_data.get('job_id'),
+                            'job_type': response_data.get('job_type'),
+                            'status': 'accepted'
+                        }, platform_payload)
+                    else:
+                        return self._render_submit_error(
+                            response_data.get('error', 'Platform API returned failure')
+                        )
 
-            # Create and submit job
-            job_id = create_and_submit_job(job_type, job_params, request_id)
+            except urllib.error.HTTPError as http_err:
+                error_body = http_err.read().decode('utf-8')
+                try:
+                    error_json = json.loads(error_body)
+                    error_msg = error_json.get('error', str(http_err))
+                except:
+                    error_msg = error_body or str(http_err)
+                logger.error(f"[WebUI] Platform API error: {http_err.code} - {error_msg}")
+                return self._render_submit_error(f"Platform API error ({http_err.code}): {error_msg}")
 
-            if not job_id:
-                return self._render_submit_error("Failed to create CoreMachine job")
-
-            # Store tracking record
-            api_request = ApiRequest(
-                request_id=request_id,
-                dataset_id=platform_req.dataset_id,
-                resource_id=platform_req.resource_id,
-                version_id=platform_req.version_id,
-                job_id=job_id,
-                data_type='raster'
-            )
-            platform_repo.create_request(api_request)
-
-            return self._render_submit_success_platform({
-                'request_id': request_id,
-                'job_id': job_id,
-                'job_type': job_type,
-                'status': 'accepted'
-            }, platform_payload)
+            except urllib.error.URLError as url_err:
+                logger.error(f"[WebUI] Platform API connection error: {url_err}")
+                return self._render_submit_error(f"Could not connect to Platform API: {url_err}")
 
         except Exception as e:
             logger.error(f"Error submitting job: {e}", exc_info=True)

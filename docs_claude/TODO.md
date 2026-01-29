@@ -2,7 +2,7 @@
 **This file contains high level items only**
 This file references other documents containing implementation details. This is to avoid a 50,000 line TODO.md. This file should not exceed 500 lines.
 
-**Last Updated**: 27 JAN 2026
+**Last Updated**: 29 JAN 2026
 **Source of Truth**: [docs/epics/README.md](/docs/epics/README.md) - Epic/Feature/Story definitions
 **Purpose**: Sprint-level task tracking and delegation (INDEX format)
 
@@ -107,6 +107,47 @@ This file references other documents containing implementation details. This is 
 - [x] Update handler imports for typed results (25 JAN)
 - [ ] Update checkpoint save/load for type safety (Future)
 - [ ] Update `finalize_job()` to validate input (Future)
+
+---
+
+### Vector Revision Tracking (F7.23)
+**Status**: PLANNED
+**Priority**: MEDIUM - Enables audit trail for vector overwrites
+**Created**: 29 JAN 2026
+
+**Problem**: Vector ETL overwrites work (table drop + recreate) but there's no revision tracking. The existing `app.artifacts` table is blob-centric (storage_account, container, blob_path) and doesn't fit PostGIS tables.
+
+**Solution**: Create separate `app.vector_revisions` table with vector-specific fields.
+
+| Field | Purpose |
+|-------|---------|
+| `schema_name`, `table_name` | PostGIS location (vs blob path) |
+| `row_count` | Size metric (vs size_bytes) |
+| `geometry_type`, `srid` | Vector-specific metadata |
+| `columns` | Column names + types (JSONB) |
+| `revision` | Monotonic revision number |
+| `supersedes`, `superseded_by` | Revision chain |
+| `client_type`, `client_refs` | DDH passthrough |
+| `source_job_id` | Job linkage |
+
+**Implementation**:
+
+| Phase | Description | Status |
+|-------|-------------|--------|
+| Phase 1 | Create `app.vector_revisions` table + enum | Pending |
+| Phase 2 | Create `VectorRevisionRepository` | Pending |
+| Phase 3 | Create `VectorRevisionService` | Pending |
+| Phase 4 | Wire to `handler_vector_docker_complete.py` | Pending |
+| Phase 5 | Add revision info to job result | Pending |
+
+**Files to create**:
+- `core/models/vector_revision.py` - Pydantic model
+- `infrastructure/vector_revision_repository.py` - Repository
+- `services/vector_revision_service.py` - Service with supersession logic
+
+**Files to modify**:
+- `infrastructure/iac/ddl_*.py` - Add table DDL
+- `services/handler_vector_docker_complete.py` - Call service on completion
 
 ---
 

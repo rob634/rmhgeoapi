@@ -66,47 +66,41 @@ from services.platform_response import (
 
 def _handle_overwrite_unpublish(existing_request: ApiRequest, platform_repo: PlatformRepository) -> None:
     """
-    Handle unpublish before overwrite reprocessing (21 JAN 2026).
+    Handle unpublish before overwrite reprocessing (21 JAN 2026, fixed 29 JAN 2026).
 
     When processing_options.overwrite=true is specified and a request already exists,
     this function:
     1. Determines the data type from the existing request
-    2. Submits an unpublish job (synchronous call, dry_run=False)
-    3. Deletes the existing platform request record
+    2. For RASTER: Submits an unpublish job (async) to delete COG blobs
+    3. For VECTOR: Just deletes platform request - handler does table drop directly
+    4. Deletes the existing platform request record
+
+    IMPORTANT (29 JAN 2026): Vector overwrite does NOT submit unpublish job.
+    The vector_docker_etl handler drops the table directly when overwrite=true.
+    Submitting an async unpublish job creates a race condition where the unpublish
+    job can delete the STAC item AFTER the new ETL job creates it.
 
     Args:
         existing_request: The existing ApiRequest record to overwrite
         platform_repo: PlatformRepository instance
 
     Raises:
-        RuntimeError: If unpublish job creation fails
+        RuntimeError: If unpublish job creation fails (raster only)
         Exception: Any error from unpublish process
     """
     data_type = normalize_data_type(existing_request.data_type)
-    logger.info(f"Overwrite unpublish: data_type={data_type}, request_id={existing_request.request_id[:16]}")
+    logger.info(f"Overwrite: data_type={data_type}, request_id={existing_request.request_id[:16]}")
 
     # Generate unpublish parameters based on data type
     if data_type == "vector":
+        # VECTOR: Do NOT submit unpublish job - handler drops table directly (29 JAN 2026)
+        # This avoids race condition where unpublish job deletes STAC after new ETL creates it
         table_name = generate_table_name(
             existing_request.dataset_id,
             existing_request.resource_id,
             existing_request.version_id
         )
-        unpublish_request_id = generate_unpublish_request_id("vector", table_name)
-
-        # Submit unpublish job (NOT dry_run - we want to actually delete)
-        job_params = {
-            "table_name": table_name,
-            "schema_name": "geo",
-            "dry_run": False,
-            "force_approved": True  # Allow unpublishing even if approved
-        }
-        job_id = create_and_submit_job("unpublish_vector", job_params, unpublish_request_id)
-
-        if not job_id:
-            raise RuntimeError(f"Failed to create unpublish_vector job for overwrite")
-
-        logger.info(f"Overwrite: submitted unpublish_vector job {job_id[:16]} for table {table_name}")
+        logger.info(f"Overwrite vector: skipping unpublish job - handler will drop table {table_name} directly")
 
     elif data_type == "raster":
         stac_item_id = generate_stac_item_id(

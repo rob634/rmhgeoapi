@@ -302,17 +302,17 @@ class PlatformRegistryRepository(PostgreSQLRepository):
     # HELPERS
     # =========================================================================
 
-    def _row_to_platform(self, row: tuple) -> Platform:
-        """Convert database row to Platform model."""
+    def _row_to_platform(self, row: Dict[str, Any]) -> Platform:
+        """Convert database row (dict) to Platform model."""
         return Platform(
-            platform_id=row[0],
-            display_name=row[1],
-            description=row[2],
-            required_refs=row[3] if isinstance(row[3], list) else [],
-            optional_refs=row[4] if isinstance(row[4], list) else [],
-            is_active=row[5],
-            created_at=row[6],
-            updated_at=row[7]
+            platform_id=row['platform_id'],
+            display_name=row['display_name'],
+            description=row.get('description'),
+            required_refs=row.get('required_refs', []) if isinstance(row.get('required_refs'), list) else [],
+            optional_refs=row.get('optional_refs', []) if isinstance(row.get('optional_refs'), list) else [],
+            is_active=row.get('is_active', True),
+            created_at=row.get('created_at'),
+            updated_at=row.get('updated_at')
         )
 
 

@@ -380,6 +380,27 @@ class ArtifactService:
         """
         return self._repo.update_status(artifact_id, ArtifactStatus.ARCHIVED)
 
+    def update_metadata(
+        self,
+        artifact_id: UUID,
+        metadata_updates: Dict[str, Any]
+    ) -> bool:
+        """
+        Update artifact metadata fields.
+
+        Merges new metadata with existing (does not replace).
+        Used for overwrite operations when only metadata changed.
+
+        Args:
+            artifact_id: Artifact to update
+            metadata_updates: Dict of metadata fields to merge
+
+        Returns:
+            True if updated, False if not found
+        """
+        logger.info(f"Updating metadata for artifact {artifact_id}: {list(metadata_updates.keys())}")
+        return self._repo.update_metadata(artifact_id, metadata_updates)
+
     # =========================================================================
     # DUPLICATE DETECTION
     # =========================================================================

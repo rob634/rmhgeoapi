@@ -105,6 +105,17 @@ class ProcessRasterDockerJob(JobBaseMixin, JobBase):
         'tile_size': {'type': 'int', 'default': None},  # None = auto-calculate
         'overlap': {'type': 'int', 'default': 512, 'min': 0},
         'band_names': {'type': 'dict', 'default': None},  # e.g., {"5": "Red", "3": "Green", "2": "Blue"}
+
+        # Overwrite behavior (28 JAN 2026)
+        # When true, compares source checksum with existing artifact:
+        # - Same checksum + metadata changes → update STAC properties only
+        # - Same checksum + no changes → no-op (return existing)
+        # - Different checksum → full reprocess, delete old COG
+        'overwrite': {'type': 'bool', 'default': False},
+
+        # Metadata that can be updated via overwrite (28 JAN 2026)
+        'title': {'type': 'str', 'default': None},
+        'tags': {'type': 'list', 'default': None},
     }
 
     # Pre-flight validation - blob must exist
@@ -202,6 +213,11 @@ class ProcessRasterDockerJob(JobBaseMixin, JobBase):
                 'tile_size': job_params.get('tile_size'),
                 'overlap': job_params.get('overlap', 512),
                 'band_names': job_params.get('band_names'),
+
+                # Overwrite behavior (28 JAN 2026)
+                'overwrite': job_params.get('overwrite', False),
+                'title': job_params.get('title'),
+                'tags': job_params.get('tags'),
             }
         }]
 

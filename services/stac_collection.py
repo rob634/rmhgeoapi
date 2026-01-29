@@ -543,11 +543,26 @@ def _create_stac_collection_impl(
             logger.info(f"🔍 DEBUG: search_id type={type(search_id)}, value='{search_id}', len={len(search_id) if isinstance(search_id, str) else 'N/A'}")
 
             # Generate visualization URLs
+            # BUG-011 FIX (28 JAN 2026): Pass band_indexes for multi-band imagery
+            # Without bidx params, TiTiler returns HTTP 500 for 3+ band COGs
             config = get_config()
+
+            # Extract band indexes from raster metadata (set earlier in this function)
+            # rgb_bands is a list like [1,2,3] for 8-band imagery, or [1] for single-band
+            band_indexes = None
+            if raster_meta and raster_meta.rgb_bands:
+                band_indexes = raster_meta.rgb_bands
+                logger.info(f"   Using band indexes for visualization: {band_indexes}")
+            elif raster_meta and raster_meta.band_count and raster_meta.band_count > 3:
+                # Fallback: if no rgb_bands specified but >3 bands, default to [1,2,3]
+                band_indexes = [1, 2, 3]
+                logger.info(f"   Multi-band imagery ({raster_meta.band_count} bands) - defaulting to RGB bands [1,2,3]")
+
             urls = search_registrar.get_search_urls(
                 search_id=search_id,
                 titiler_base_url=config.titiler_base_url,
-                assets=["data"]
+                assets=["data"],
+                band_indexes=band_indexes
             )
             viewer_url = urls["viewer"]
             tilejson_url = urls["tilejson"]

@@ -247,7 +247,8 @@ class PgSTACSearchRegistration:
         self,
         search_id: str,
         titiler_base_url: str,
-        assets: Optional[List[str]] = None
+        assets: Optional[List[str]] = None,
+        band_indexes: Optional[List[int]] = None
     ) -> Dict[str, str]:
         """
         Generate TiTiler URLs for a registered search.
@@ -256,6 +257,9 @@ class PgSTACSearchRegistration:
             search_id: Search hash from register_search()
             titiler_base_url: TiTiler base URL (e.g., "https://rmhtitiler-...")
             assets: List of asset names to render (defaults to ["data"])
+            band_indexes: Band indexes for multi-band imagery (e.g., [1,2,3] for RGB).
+                         Required for 3+ band imagery or TiTiler returns HTTP 500.
+                         If None for multi-band, defaults to [1,2,3].
 
         Returns:
             dict: URLs for viewer, tilejson, and tiles endpoints
@@ -264,10 +268,11 @@ class PgSTACSearchRegistration:
             >>> urls = registrar.get_search_urls(
             ...     search_id="6ee588d7...",
             ...     titiler_base_url="https://rmhtitiler-...",
-            ...     assets=["data"]
+            ...     assets=["data"],
+            ...     band_indexes=[1, 2, 3]  # For 8-band WorldView imagery
             ... )
             >>> print(urls["viewer"])
-            'https://rmhtitiler-.../searches/6ee588d7.../WebMercatorQuad/map.html?assets=data'
+            'https://rmhtitiler-.../searches/6ee588d7.../WebMercatorQuad/map.html?assets=data&bidx=1&bidx=2&bidx=3'
         """
         if assets is None:
             assets = ["data"]
@@ -275,13 +280,20 @@ class PgSTACSearchRegistration:
         # Build assets query parameter
         assets_param = "&".join(f"assets={a}" for a in assets)
 
+        # BUG-011 FIX (28 JAN 2026): Add bidx params for multi-band imagery
+        # TiTiler assumes 3-band RGB by default. For imagery with more bands,
+        # explicit bidx= parameters are required or rendering fails with HTTP 500.
+        bidx_param = ""
+        if band_indexes:
+            bidx_param = "&" + "&".join(f"bidx={b}" for b in band_indexes)
+
         # Remove trailing slash from base URL
         base = titiler_base_url.rstrip('/')
 
         return {
-            "viewer": f"{base}/searches/{search_id}/WebMercatorQuad/map.html?{assets_param}",
-            "tilejson": f"{base}/searches/{search_id}/WebMercatorQuad/tilejson.json?{assets_param}",
-            "tiles": f"{base}/searches/{search_id}/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}?{assets_param}"
+            "viewer": f"{base}/searches/{search_id}/WebMercatorQuad/map.html?{assets_param}{bidx_param}",
+            "tilejson": f"{base}/searches/{search_id}/WebMercatorQuad/tilejson.json?{assets_param}{bidx_param}",
+            "tiles": f"{base}/searches/{search_id}/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}?{assets_param}{bidx_param}"
         }
 
 

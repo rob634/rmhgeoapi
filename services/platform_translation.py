@@ -348,7 +348,12 @@ def translate_to_coremachine(
                 # Processing options
                 'output_tier': opts.get('output_tier', 'analysis'),
                 'target_crs': opts.get('crs'),
-                'raster_type': opts.get('raster_type', 'auto')
+                'raster_type': opts.get('raster_type', 'auto'),
+
+                # Overwrite behavior (28 JAN 2026)
+                'overwrite': opts.get('overwrite', False),
+                'title': request.generated_title,
+                'tags': request.tags,
             }
 
     # ========================================================================
@@ -464,7 +469,12 @@ def translate_single_raster(
         # Processing options
         'output_tier': opts.get('output_tier', 'analysis'),
         'target_crs': opts.get('crs'),
-        'raster_type': opts.get('raster_type', 'auto')
+        'raster_type': opts.get('raster_type', 'auto'),
+
+        # Overwrite behavior (28 JAN 2026)
+        'overwrite': opts.get('overwrite', False),
+        'title': request.generated_title,
+        'tags': request.tags,
     }
 
 

@@ -248,8 +248,9 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
                 "total_rows": total_rows,
                 "geometry_type": table_result['geometry_type'],
                 "srid": table_result.get('srid', 4326),
-                "stac_item_id": stac_result.get('item_id'),
-                "collection_id": stac_result.get('collection_id'),
+                # STAC result is nested: {"success": True, "result": {"item_id": ..., "collection_id": ...}}
+                "stac_item_id": stac_result.get('result', {}).get('item_id'),
+                "collection_id": stac_result.get('result', {}).get('collection_id'),
                 "style_id": style_result.get('style_id', 'default'),
                 "chunks_uploaded": upload_result.get('chunks_uploaded', 0),
                 "checkpoint_count": len(checkpoints),

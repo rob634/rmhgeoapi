@@ -160,19 +160,36 @@ def extract_classification(result: dict) -> str:
 # PLATFORM CALLBACK
 # ============================================================================
 
+# Job types that produce datasets requiring approval before publication.
+# Approval is linked to job_id (source of truth), not STAC (downstream metadata).
+# STAC item/collection IDs are optional enrichment, added when available.
+APPROVAL_REQUIRED_JOB_TYPES = {
+    'process_vector',           # Function App vector ETL
+    'vector_docker_etl',        # Docker vector ETL
+    'process_raster_v2',        # Function App single raster
+    'process_raster_collection', # Function App tiled/collection raster
+    'raster_docker_etl',        # Docker raster ETL (if exists)
+}
+
+
 def _default_platform_callback(job_id: str, job_type: str, status: str, result: dict):
     """
     Default callback for Platform orchestration.
 
     This callback is invoked by CoreMachine when jobs complete.
     Handles:
-    1. Approval record creation for jobs that produce STAC items (F7.Approval - 22 JAN 2026)
+    1. Approval record creation for dataset-producing jobs (28 JAN 2026)
+
+    Approval Philosophy:
+    - job_id is the source of truth (not STAC)
+    - STAC item/collection IDs are optional enrichment
+    - Approval is created for all dataset-producing jobs, regardless of STAC status
 
     Args:
-        job_id: CoreMachine job ID
+        job_id: CoreMachine job ID (source of truth for approval)
         job_type: Type of job that completed
         status: 'completed' or 'failed'
-        result: Job result dict containing STAC item info
+        result: Job result dict (may contain STAC IDs for enrichment)
 
     Note:
         All operations are non-fatal - failures are logged but don't affect job status.
@@ -181,33 +198,42 @@ def _default_platform_callback(job_id: str, job_type: str, status: str, result: 
     if status != 'completed':
         return
 
-    # F7.Approval (22 JAN 2026): Create approval record for STAC items
-    # Every dataset requires explicit approval before publication
+    # Skip job types that don't produce datasets requiring approval
+    if job_type not in APPROVAL_REQUIRED_JOB_TYPES:
+        logger.debug(f"[APPROVAL] Skipping approval for job type '{job_type}' (not in APPROVAL_REQUIRED_JOB_TYPES)")
+        return
+
+    # Create approval record for dataset-producing jobs
+    # job_id is the source of truth; STAC IDs are optional enrichment
     try:
+        from services.approval_service import ApprovalService
+        from core.models.stac import AccessLevel
+
+        # Extract STAC IDs if available (optional enrichment, not required)
         stac_item_id = extract_stac_item_id(result)
         stac_collection_id = extract_stac_collection_id(result)
 
-        if stac_item_id:
-            from services.approval_service import ApprovalService
-            from core.models.stac import AccessLevel
+        # Extract classification from job parameters (default: OUO)
+        # NOTE: RESTRICTED is not yet supported (future enhancement)
+        classification_str = extract_classification(result)
+        classification = AccessLevel.PUBLIC if classification_str == 'public' else AccessLevel.OUO
 
-            # Extract classification from job parameters (default: OUO)
-            # NOTE: RESTRICTED is not yet supported (future enhancement)
-            classification_str = extract_classification(result)
-            classification = AccessLevel.PUBLIC if classification_str == 'public' else AccessLevel.OUO
+        approval_service = ApprovalService()
+        approval = approval_service.create_approval_for_job(
+            job_id=job_id,
+            job_type=job_type,
+            classification=classification,
+            stac_item_id=stac_item_id,          # Optional enrichment
+            stac_collection_id=stac_collection_id  # Optional enrichment
+        )
 
-            approval_service = ApprovalService()
-            approval = approval_service.create_approval_for_job(
-                job_id=job_id,
-                job_type=job_type,
-                classification=classification,
-                stac_item_id=stac_item_id,
-                stac_collection_id=stac_collection_id
-            )
-            logger.info(
-                f"[APPROVAL] Created approval record {approval.approval_id[:12]}... "
-                f"for job {job_id[:8]}... (STAC: {stac_item_id}, status: PENDING)"
-            )
+        # Log with or without STAC info
+        stac_info = f", STAC: {stac_item_id}" if stac_item_id else " (no STAC link yet)"
+        logger.info(
+            f"[APPROVAL] Created approval {approval.approval_id[:12]}... "
+            f"for job {job_id[:8]}... (type: {job_type}{stac_info}, status: PENDING)"
+        )
+
     except Exception as e:
         # Non-fatal: approval creation failure should not affect job completion
         logger.warning(f"[APPROVAL] Failed to create approval for job {job_id[:8]}... (non-fatal): {e}")

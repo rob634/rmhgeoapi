@@ -124,6 +124,265 @@ def _report_progress(
 
 
 # =============================================================================
+# OVERWRITE LOGIC (28 JAN 2026)
+# =============================================================================
+# Race-condition-free overwrite using source checksum comparison.
+# Replaces async unpublish jobs which caused timing issues.
+# =============================================================================
+
+def _compute_source_checksum(container_name: str, blob_name: str) -> str:
+    """
+    Compute SHA-256 checksum of source blob (Multihash format).
+
+    Args:
+        container_name: Source container
+        blob_name: Source blob path
+
+    Returns:
+        Multihash hex string (e.g., "1220abcd...")
+    """
+    from infrastructure.blob import BlobRepository
+    from util_checksum import compute_multihash
+
+    blob_repo = BlobRepository.for_zone('bronze')
+    source_bytes = blob_repo.read_blob(container_name, blob_name)
+    return compute_multihash(source_bytes, log_performance=True)
+
+
+def _check_overwrite_mode(params: Dict[str, Any], source_checksum: str) -> Dict[str, Any]:
+    """
+    Determine overwrite action based on source checksum comparison.
+
+    Args:
+        params: Task parameters including overwrite flag and client refs
+        source_checksum: SHA-256 checksum of source blob
+
+    Returns:
+        Dict with:
+        - action: 'full_reprocess' | 'metadata_only' | 'no_change'
+        - existing_artifact: Artifact or None
+        - old_cog_path: str or None (for cleanup if reprocessing)
+        - old_cog_container: str or None
+        - metadata_changes: dict or None (for metadata-only update)
+    """
+    from services.artifact_service import ArtifactService
+
+    overwrite = params.get('overwrite', False)
+    if not overwrite:
+        return {'action': 'full_reprocess', 'existing_artifact': None}
+
+    # Build client_refs for lookup
+    client_refs = {
+        'dataset_id': params.get('dataset_id'),
+        'resource_id': params.get('resource_id'),
+        'version_id': params.get('version_id'),
+    }
+
+    # Skip if no client refs (non-platform job)
+    if not all(client_refs.values()):
+        logger.info("Overwrite requested but no client_refs - proceeding with full processing")
+        return {'action': 'full_reprocess', 'existing_artifact': None}
+
+    artifact_service = ArtifactService()
+    existing = artifact_service.get_by_client_refs('ddh', client_refs)
+
+    if not existing:
+        # No existing artifact - normal first-time processing
+        logger.info("Overwrite requested but no existing artifact found - full processing")
+        return {'action': 'full_reprocess', 'existing_artifact': None}
+
+    # Compare source checksums
+    existing_source_checksum = existing.metadata.get('source_checksum')
+
+    if not existing_source_checksum:
+        # Old artifact without source_checksum - can't compare, full reprocess
+        logger.info(f"Existing artifact {existing.artifact_id} missing source_checksum - full reprocess")
+        return {
+            'action': 'full_reprocess',
+            'existing_artifact': existing,
+            'old_cog_path': existing.blob_path,
+            'old_cog_container': existing.container,
+        }
+
+    if existing_source_checksum == source_checksum:
+        # Same source data - check if metadata changed
+        metadata_changes = _detect_metadata_changes(params, existing)
+
+        if metadata_changes:
+            logger.info(f"Source unchanged, metadata changes detected: {list(metadata_changes.keys())}")
+            return {
+                'action': 'metadata_only',
+                'existing_artifact': existing,
+                'metadata_changes': metadata_changes,
+            }
+        else:
+            logger.info("Source and metadata unchanged - no-op")
+            return {
+                'action': 'no_change',
+                'existing_artifact': existing,
+            }
+    else:
+        # Different source data - full reprocess, delete old COG
+        logger.info(f"Source checksum changed - full reprocess (old COG will be deleted)")
+        return {
+            'action': 'full_reprocess',
+            'existing_artifact': existing,
+            'old_cog_path': existing.blob_path,
+            'old_cog_container': existing.container,
+        }
+
+
+def _detect_metadata_changes(params: Dict[str, Any], existing) -> Optional[Dict[str, Any]]:
+    """
+    Detect which metadata fields changed (title, tags only for now).
+
+    Args:
+        params: Task parameters with potential new values
+        existing: Existing artifact
+
+    Returns:
+        Dict of changes or None if no changes
+    """
+    changes = {}
+
+    # Title change
+    new_title = params.get('title')
+    existing_title = existing.metadata.get('title')
+    if new_title and new_title != existing_title:
+        changes['title'] = new_title
+
+    # Tags change
+    new_tags = params.get('tags')
+    existing_tags = existing.metadata.get('tags')
+    if new_tags and new_tags != existing_tags:
+        changes['tags'] = new_tags
+
+    return changes if changes else None
+
+
+def _handle_metadata_only_update(
+    existing_artifact,
+    metadata_changes: Dict[str, Any],
+    params: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Update only STAC metadata without reprocessing.
+
+    Args:
+        existing_artifact: Existing artifact to update
+        metadata_changes: Dict of changed metadata fields
+        params: Original task parameters
+
+    Returns:
+        Result dict compatible with handler return format
+    """
+    from infrastructure.pgstac_repository import PgStacRepository
+    from services.artifact_service import ArtifactService
+
+    logger.info(f"Performing metadata-only update for artifact {existing_artifact.artifact_id}")
+
+    pgstac = PgStacRepository()
+    artifact_service = ArtifactService()
+
+    # Update STAC item properties
+    stac_updates = {}
+    if 'title' in metadata_changes:
+        stac_updates['title'] = metadata_changes['title']
+    if 'tags' in metadata_changes:
+        # STAC uses 'app:tags' for custom properties
+        stac_updates['app:tags'] = metadata_changes['tags']
+
+    if stac_updates and existing_artifact.stac_item_id:
+        try:
+            pgstac.update_item_properties(
+                item_id=existing_artifact.stac_item_id,
+                collection_id=existing_artifact.stac_collection_id,
+                properties_update=stac_updates
+            )
+            logger.info(f"Updated STAC item {existing_artifact.stac_item_id} properties: {list(stac_updates.keys())}")
+        except Exception as e:
+            logger.warning(f"STAC update failed (non-fatal): {e}")
+
+    # Update artifact metadata
+    artifact_service.update_metadata(existing_artifact.artifact_id, metadata_changes)
+
+    return {
+        'success': True,
+        'result': {
+            'output_mode': 'metadata_only_update',
+            'action': 'metadata_only',
+            'changes': metadata_changes,
+            'stac_item_id': existing_artifact.stac_item_id,
+            'stac_collection_id': existing_artifact.stac_collection_id,
+            'artifact_id': str(existing_artifact.artifact_id),
+            'cog': {
+                'cog_blob': existing_artifact.blob_path,
+                'cog_container': existing_artifact.container,
+                'note': 'Existing COG unchanged',
+            },
+            'note': 'Source data unchanged, metadata updated',
+        }
+    }
+
+
+def _handle_no_change(existing_artifact) -> Dict[str, Any]:
+    """
+    Return result when source and metadata are unchanged.
+
+    Args:
+        existing_artifact: Existing artifact
+
+    Returns:
+        Result dict compatible with handler return format
+    """
+    logger.info(f"No changes detected - returning existing artifact {existing_artifact.artifact_id}")
+
+    return {
+        'success': True,
+        'result': {
+            'output_mode': 'no_change',
+            'action': 'no_change',
+            'stac_item_id': existing_artifact.stac_item_id,
+            'stac_collection_id': existing_artifact.stac_collection_id,
+            'artifact_id': str(existing_artifact.artifact_id),
+            'cog': {
+                'cog_blob': existing_artifact.blob_path,
+                'cog_container': existing_artifact.container,
+                'note': 'Existing COG unchanged',
+            },
+            'note': 'Source data and metadata unchanged - no processing needed',
+        }
+    }
+
+
+def _delete_old_cog(container: str, blob_path: str) -> bool:
+    """
+    Delete old COG blob after successful reprocessing.
+
+    Args:
+        container: COG container name
+        blob_path: COG blob path
+
+    Returns:
+        True if deleted, False if not found or error
+    """
+    from infrastructure.blob import BlobRepository
+
+    try:
+        blob_repo = BlobRepository.for_zone('silver')
+        if blob_repo.blob_exists(container, blob_path):
+            blob_repo.delete_blob(container, blob_path)
+            logger.info(f"🗑️ Deleted old COG: {container}/{blob_path}")
+            return True
+        else:
+            logger.debug(f"Old COG not found (already deleted?): {container}/{blob_path}")
+            return False
+    except Exception as e:
+        logger.warning(f"Failed to delete old COG {container}/{blob_path}: {e}")
+        return False
+
+
+# =============================================================================
 # V0.8: TILED WORKFLOW (24 JAN 2026)
 # =============================================================================
 
@@ -1322,6 +1581,56 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             logger.info("📦 Routing to VSI-based tiled workflow (fallback)...")
             return _process_raster_tiled(params, context, start_time)
 
+    # =========================================================================
+    # SOURCE CHECKSUM & OVERWRITE CHECK (28 JAN 2026)
+    # =========================================================================
+    # Compute source checksum for platform jobs (needed for overwrite comparison)
+    # If overwrite=true, compare with existing artifact to determine action
+    overwrite_result = None
+    source_checksum = None
+
+    # Determine if this is a platform job (has client_refs)
+    is_platform_job = all([
+        params.get('dataset_id'),
+        params.get('resource_id'),
+        params.get('version_id'),
+    ])
+
+    # Compute source checksum for platform jobs (enables future overwrite comparison)
+    if is_platform_job:
+        try:
+            logger.info("📦 Computing source checksum (for artifact tracking)...")
+            source_checksum = _compute_source_checksum(container_name, blob_name)
+            logger.info(f"   Source checksum: {source_checksum[:24]}...")
+        except Exception as e:
+            logger.warning(f"Source checksum computation failed (non-fatal): {e}")
+            source_checksum = None
+
+    # If overwrite=true, check if we can skip processing
+    if params.get('overwrite', False) and source_checksum:
+        logger.info("🔄 OVERWRITE MODE: Checking for changes...")
+        try:
+            overwrite_result = _check_overwrite_mode(params, source_checksum)
+            logger.info(f"   Overwrite action: {overwrite_result['action']}")
+
+            # Handle no_change case - return immediately
+            if overwrite_result['action'] == 'no_change':
+                return _handle_no_change(overwrite_result['existing_artifact'])
+
+            # Handle metadata_only case - update and return
+            if overwrite_result['action'] == 'metadata_only':
+                return _handle_metadata_only_update(
+                    overwrite_result['existing_artifact'],
+                    overwrite_result['metadata_changes'],
+                    params
+                )
+
+            # full_reprocess continues with normal processing below
+
+        except Exception as e:
+            logger.warning(f"Overwrite check failed (proceeding with full processing): {e}")
+            overwrite_result = {'action': 'full_reprocess', 'existing_artifact': None}
+
     # Initialize checkpoint manager
     # F7.18: Use DockerTaskContext if available (Docker mode)
     # Otherwise fall back to manual creation (Function App mode)
@@ -1724,6 +2033,22 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                 logger.debug(f"📦 ARTIFACT DEBUG: Creating ArtifactService...")
                 artifact_service = ArtifactService()
                 logger.debug(f"📦 ARTIFACT DEBUG: Calling create_artifact with cog_blob={cog_blob}, cog_container={cog_container}")
+                # Build artifact metadata (28 JAN 2026: include source_checksum for overwrite detection)
+                artifact_metadata = {
+                    'cog_tier': cog_result.get('cog_tier'),
+                    'compression': cog_result.get('compression'),
+                    'raster_type': cog_result.get('raster_type', {}).get('detected_type') if isinstance(cog_result.get('raster_type'), dict) else cog_result.get('raster_type'),
+                    # Source tracking for overwrite comparison (28 JAN 2026)
+                    'source_checksum': source_checksum,
+                    'source_container': container_name,
+                    'source_blob': blob_name,
+                }
+                # Include title/tags if provided (for overwrite metadata comparison)
+                if params.get('title'):
+                    artifact_metadata['title'] = params['title']
+                if params.get('tags'):
+                    artifact_metadata['tags'] = params['tags']
+
                 artifact = artifact_service.create_artifact(
                     storage_account=config.storage.silver.account_name,
                     container=cog_container,
@@ -1738,15 +2063,19 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                     size_bytes=cog_result.get('file_size'),
                     content_type='image/tiff; application=geotiff; profile=cloud-optimized',
                     blob_version_id=cog_result.get('blob_version_id'),  # Azure version (21 JAN 2026)
-                    metadata={
-                        'cog_tier': cog_result.get('cog_tier'),
-                        'compression': cog_result.get('compression'),
-                        'raster_type': cog_result.get('raster_type', {}).get('detected_type') if isinstance(cog_result.get('raster_type'), dict) else cog_result.get('raster_type'),
-                    },
+                    metadata=artifact_metadata,
                     overwrite=True  # Platform jobs always overwrite
                 )
                 artifact_id = str(artifact.artifact_id)
                 logger.info(f"📦 Artifact created: {artifact_id} (revision {artifact.revision})")
+
+                # Delete old COG if this was an overwrite with different source data (28 JAN 2026)
+                if overwrite_result and overwrite_result.get('old_cog_path'):
+                    old_path = overwrite_result['old_cog_path']
+                    old_container = overwrite_result.get('old_cog_container', cog_container)
+                    # Only delete if path is different (avoid deleting the new COG)
+                    if old_path != cog_blob:
+                        _delete_old_cog(old_container, old_path)
             else:
                 logger.debug("📦 ARTIFACT DEBUG: Skipping artifact creation - no client_refs (non-platform job)")
         except Exception as e:

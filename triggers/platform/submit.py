@@ -66,41 +66,34 @@ from services.platform_response import (
 
 def _handle_overwrite_unpublish(existing_request: ApiRequest, platform_repo: PlatformRepository) -> None:
     """
-    Handle unpublish before overwrite reprocessing (21 JAN 2026, fixed 29 JAN 2026).
+    Handle overwrite for platform requests (28 JAN 2026 - no async unpublish).
 
     When processing_options.overwrite=true is specified and a request already exists,
-    this function:
-    1. Determines the data type from the existing request
-    2. For RASTER: Submits an unpublish job (async) to delete COG blobs
-    3. For VECTOR: Just deletes platform request - handler does table drop directly
-    4. Deletes the existing platform request record
+    this function deletes the platform request record. The handler manages cleanup.
 
-    IMPORTANT (29 JAN 2026): Vector overwrite does NOT submit unpublish job.
-    The vector_docker_etl handler drops the table directly when overwrite=true.
-    Submitting an async unpublish job creates a race condition where the unpublish
-    job can delete the STAC item AFTER the new ETL job creates it.
+    ARCHITECTURE (28 JAN 2026):
+    Both vector and raster handlers now handle overwrite internally:
+    - Vector: Handler drops table directly when overwrite=true
+    - Raster: Handler compares source checksums and handles cleanup
+
+    This eliminates race conditions where async unpublish jobs could delete
+    STAC items AFTER new ETL jobs created them.
 
     Args:
         existing_request: The existing ApiRequest record to overwrite
         platform_repo: PlatformRepository instance
-
-    Raises:
-        RuntimeError: If unpublish job creation fails (raster only)
-        Exception: Any error from unpublish process
     """
     data_type = normalize_data_type(existing_request.data_type)
     logger.info(f"Overwrite: data_type={data_type}, request_id={existing_request.request_id[:16]}")
 
-    # Generate unpublish parameters based on data type
+    # Log what the handler will do (informational only)
     if data_type == "vector":
-        # VECTOR: Do NOT submit unpublish job - handler drops table directly (29 JAN 2026)
-        # This avoids race condition where unpublish job deletes STAC after new ETL creates it
         table_name = generate_table_name(
             existing_request.dataset_id,
             existing_request.resource_id,
             existing_request.version_id
         )
-        logger.info(f"Overwrite vector: skipping unpublish job - handler will drop table {table_name} directly")
+        logger.info(f"Overwrite vector: handler will drop table {table_name} directly")
 
     elif data_type == "raster":
         stac_item_id = generate_stac_item_id(
@@ -108,30 +101,18 @@ def _handle_overwrite_unpublish(existing_request: ApiRequest, platform_repo: Pla
             existing_request.resource_id,
             existing_request.version_id
         )
-        collection_id = existing_request.dataset_id
-        unpublish_request_id = generate_unpublish_request_id("raster", stac_item_id)
-
-        # Submit unpublish job (NOT dry_run - we want to actually delete)
-        job_params = {
-            "stac_item_id": stac_item_id,
-            "collection_id": collection_id,
-            "dry_run": False,
-            "force_approved": True  # Allow unpublishing even if approved
-        }
-        job_id = create_and_submit_job("unpublish_raster", job_params, unpublish_request_id)
-
-        if not job_id:
-            raise RuntimeError(f"Failed to create unpublish_raster job for overwrite")
-
-        logger.info(f"Overwrite: submitted unpublish_raster job {job_id[:16]} for item {stac_item_id}")
+        logger.info(f"Overwrite raster: handler will compare checksums for {stac_item_id}")
+        # Handler will:
+        # - Same checksum + metadata changes → update STAC only
+        # - Same checksum + no changes → no-op
+        # - Different checksum → full reprocess, delete old COG
 
     else:
-        raise ValueError(f"Unknown data_type for overwrite unpublish: {data_type}")
+        raise ValueError(f"Unknown data_type for overwrite: {data_type}")
 
     # Delete the existing platform request record so the new one can be created
-    # This allows the new request to use the same request_id
     _delete_platform_request(existing_request.request_id, platform_repo)
-    logger.info(f"Overwrite: deleted existing platform request {existing_request.request_id[:16]}")
+    logger.info(f"Overwrite: deleted platform request {existing_request.request_id[:16]} (handler manages cleanup)")
 
 
 def _delete_platform_request(request_id: str, platform_repo: PlatformRepository) -> None:

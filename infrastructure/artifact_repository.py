@@ -350,6 +350,35 @@ class ArtifactRepository(PostgreSQLRepository):
             rows = self._execute_query(query, (content_hash,), fetch='all')
             return [self._row_to_artifact(row) for row in rows]
 
+    def update_metadata(
+        self,
+        artifact_id: UUID,
+        metadata_updates: Dict[str, Any]
+    ) -> bool:
+        """
+        Update artifact metadata (JSONB merge).
+
+        Merges new metadata with existing metadata using PostgreSQL jsonb_concat.
+
+        Args:
+            artifact_id: Artifact to update
+            metadata_updates: Dict of metadata fields to merge
+
+        Returns:
+            True if artifact was updated, False if not found
+        """
+        with self._error_context("artifact metadata update", str(artifact_id)):
+            query = sql.SQL("""
+                UPDATE {}.artifacts
+                SET metadata = metadata || %s::jsonb, updated_at = NOW()
+                WHERE artifact_id = %s
+                RETURNING artifact_id
+            """).format(sql.Identifier(self.schema_name))
+
+            params = (json.dumps(metadata_updates), str(artifact_id))
+            row = self._execute_query(query, params, fetch='one')
+            return row is not None
+
     def get_stats(self, client_type: Optional[str] = None) -> Dict[str, Any]:
         """
         Get artifact statistics.

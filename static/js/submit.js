@@ -465,6 +465,7 @@ function clearSelection() {
 
     // Hide conditional sections
     document.getElementById('csv-fields')?.classList.add('hidden');
+    document.getElementById('vector-fields')?.classList.add('hidden');
     document.getElementById('raster-fields')?.classList.add('hidden');
     document.getElementById('docker-option')?.classList.add('hidden');
 
@@ -497,10 +498,13 @@ function updateForm() {
 
     // Show/hide conditional sections based on type
     const csvFields = document.getElementById('csv-fields');
+    const vectorFields = document.getElementById('vector-fields');
     const rasterFields = document.getElementById('raster-fields');
     const dockerOption = document.getElementById('docker-option');
 
     if (type.category === 'vector') {
+        // Show vector configuration for all vector types
+        if (vectorFields) vectorFields.classList.remove('hidden');
         if (csvFields) {
             if (file.extension === 'csv') {
                 csvFields.classList.remove('hidden');
@@ -512,6 +516,7 @@ function updateForm() {
         if (dockerOption) dockerOption.classList.add('hidden');
     } else if (type.category === 'raster') {
         if (csvFields) csvFields.classList.add('hidden');
+        if (vectorFields) vectorFields.classList.add('hidden');
         if (rasterFields) rasterFields.classList.remove('hidden');
         if (dockerOption) {
             // Show Docker option for raster or large files
@@ -572,7 +577,8 @@ function validateForm() {
 document.addEventListener('DOMContentLoaded', () => {
     const formInputs = [
         'dataset_id', 'resource_id', 'title',
-        'raster_collection_id', 'lat_column', 'lon_column', 'wkt_column'
+        'raster_collection_id', 'lat_column', 'lon_column', 'wkt_column',
+        'table_name'
     ];
 
     formInputs.forEach(id => {
@@ -639,14 +645,21 @@ function updateCurlPreview() {
         if (inputCrs) body.input_crs = inputCrs;
         if (collectionId) body.collection_id = collectionId;
         if (useDocker) body.processing_mode = 'docker';
-    } else if (file.extension === 'csv') {
-        const latCol = document.getElementById('lat_column')?.value?.trim();
-        const lonCol = document.getElementById('lon_column')?.value?.trim();
-        const wktCol = document.getElementById('wkt_column')?.value?.trim();
+    } else if (type?.category === 'vector') {
+        // Vector-specific fields
+        const tableName = document.getElementById('table_name')?.value?.trim();
+        if (tableName) body.table_name = tableName;
 
-        if (latCol) body.lat_column = latCol;
-        if (lonCol) body.lon_column = lonCol;
-        if (wktCol) body.wkt_column = wktCol;
+        // CSV-specific geometry fields
+        if (file.extension === 'csv') {
+            const latCol = document.getElementById('lat_column')?.value?.trim();
+            const lonCol = document.getElementById('lon_column')?.value?.trim();
+            const wktCol = document.getElementById('wkt_column')?.value?.trim();
+
+            if (latCol) body.lat_column = latCol;
+            if (lonCol) body.lon_column = lonCol;
+            if (wktCol) body.wkt_column = wktCol;
+        }
     }
 
     // Determine endpoint

@@ -169,6 +169,17 @@
                         {% endcall %}
                     </div>
 
+                    {# Vector-specific fields (conditionally shown for all vector types) #}
+                    <div id="vector-fields" class="conditional-section hidden">
+                        {% call form_section("Vector Configuration") %}
+                        {{ text_input("table_name", "Target Table Name",
+                                      placeholder="e.g., flood_zones_2024",
+                                      pattern="[a-z][a-z0-9_]*",
+                                      title="Lowercase letters, numbers, underscores. Must start with letter.",
+                                      hint="Optional - auto-generated from DDH IDs if not provided") }}
+                        {% endcall %}
+                    </div>
+
                     {# Raster-specific fields (conditionally shown) #}
                     <div id="raster-fields" class="conditional-section hidden">
                         {% call form_section("Raster Configuration") %}

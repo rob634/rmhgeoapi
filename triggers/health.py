@@ -2080,8 +2080,9 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                     "expected": app_mode_config.has_platform_endpoints,
                     "description": "/api/platform/* (approve, revoke, approvals, submit)",
                     "modes_enabled": ["standalone", "platform", "orchestrator"],
+                    # NOTE: trigger_approvals is lazy-loaded inside handlers (by design)
+                    # Only check the blueprint module which IS loaded at startup
                     "test_modules": [
-                        "triggers.trigger_approvals",
                         "triggers.platform.platform_bp",
                     ],
                 },
@@ -2098,8 +2099,10 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                     "expected": app_mode_config.has_jobs_endpoints,
                     "description": "/api/jobs/* (submit, status)",
                     "modes_enabled": ["standalone", "orchestrator"],
+                    # NOTE: Jobs use individual trigger modules, not a blueprint
                     "test_modules": [
-                        "triggers.jobs.jobs_bp",
+                        "triggers.submit_job",
+                        "triggers.get_job_status",
                     ],
                 },
             }

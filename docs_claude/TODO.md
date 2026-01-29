@@ -26,6 +26,7 @@ This file references other documents containing implementation details. This is 
 | [HISTORY.md](./HISTORY.md) | Completed work log |
 | [REFACTOR_TRIGGER_PLATFORM.md](./REFACTOR_TRIGGER_PLATFORM.md) | trigger_platform.py split plan |
 | [/V0.8_COPY.md](/V0.8_COPY.md) | AzCopy integration for 5-10x faster blob transfers |
+| [/V0.8_DAG_READINESS.md](/V0.8_DAG_READINESS.md) | DAG orchestration readiness assessment (Epoch 5 prep) |
 
 ---
 

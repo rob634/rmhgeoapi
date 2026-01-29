@@ -20,16 +20,28 @@ class DocsInterface(BaseInterface):
     API documentation interface for Platform (DDH) endpoints.
 
     Provides documentation for:
+        Submission:
         - POST /api/platform/submit - Generic data submission
         - POST /api/platform/raster - Single raster file
         - POST /api/platform/raster-collection - Multiple raster files
+
+        Monitoring:
         - GET /api/platform/status/{request_id} - Check request status
         - GET /api/platform/health - Platform health check
         - GET /api/platform/stats - Job statistics
         - GET /api/platform/failures - Recent failures
+
+        Approval / Activation:
+        - GET /api/platform/approvals - List pending approvals
+        - GET /api/platform/approvals/{id} - Get approval details
+        - GET /api/platform/approvals/status - Batch status lookup
+        - POST /api/platform/approve - Approve (activate) dataset
+
+        Unpublish / Delete:
         - POST /api/platform/unpublish/vector - Remove vector data
         - POST /api/platform/unpublish/raster - Remove raster data
 
+    Updated 29 JAN 2026: Added approval/activation endpoints for dataset publication workflow.
     Updated 09 JAN 2026: Unpublish endpoints now use platform layer with DDH identifier support.
     """
 
@@ -426,6 +438,15 @@ class DocsInterface(BaseInterface):
                         <li><a href="#platform-health">GET /api/platform/health</a> - Platform health check</li>
                         <li><a href="#platform-stats">GET /api/platform/stats</a> - Job statistics</li>
                         <li><a href="#platform-failures">GET /api/platform/failures</a> - Recent failures</li>
+                    </ul>
+                </div>
+                <div class="toc-section">
+                    <div class="toc-section-title">Approval / Activation</div>
+                    <ul>
+                        <li><a href="#platform-approvals">GET /api/platform/approvals</a> - List pending approvals</li>
+                        <li><a href="#platform-approval-get">GET /api/platform/approvals/{id}</a> - Get approval details</li>
+                        <li><a href="#platform-approval-status">GET /api/platform/approvals/status</a> - Batch status lookup</li>
+                        <li><a href="#platform-approve">POST /api/platform/approve</a> - Approve (activate) dataset</li>
                     </ul>
                 </div>
                 <div class="toc-section">
@@ -932,6 +953,357 @@ curl -X POST \\
     }
   ],
   <span class="key">"total_failures"</span>: 3
+}</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ================================================================== -->
+            <!-- APPROVAL / ACTIVATION ENDPOINTS -->
+            <!-- ================================================================== -->
+
+            <!-- List Approvals -->
+            <div id="platform-approvals" class="endpoint-section">
+                <div class="endpoint-header">
+                    <span class="method-badge get">GET</span>
+                    <code class="endpoint-path">/api/platform/approvals</code>
+                    <h2>List Approvals</h2>
+                </div>
+                <div class="endpoint-body">
+                    <p class="endpoint-desc">
+                        List all approval records with optional filtering. When a job completes,
+                        an approval record is automatically created with status <code>pending</code>.
+                        Use this endpoint to see datasets awaiting review.
+                    </p>
+
+                    <div class="params-section">
+                        <h3>Query Parameters</h3>
+                        <table class="params-table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Type</th>
+                                    <th>Description</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td><span class="param-name">status</span></td>
+                                    <td><span class="param-type">string</span></td>
+                                    <td>Filter by status: <code>pending</code>, <code>approved</code>, <code>rejected</code>, <code>revoked</code></td>
+                                </tr>
+                                <tr>
+                                    <td><span class="param-name">limit</span></td>
+                                    <td><span class="param-type">integer</span></td>
+                                    <td>Max results (default: 100)</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="param-name">offset</span></td>
+                                    <td><span class="param-type">integer</span></td>
+                                    <td>Pagination offset (default: 0)</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="params-section">
+                        <h3>Example Request</h3>
+                        <div class="code-block"><span class="comment"># List all pending approvals</span>
+curl "${API_BASE_URL}/api/platform/approvals?status=pending"</div>
+                    </div>
+
+                    <div class="response-section">
+                        <h4>Response</h4>
+                        <span class="status-badge success">200 OK</span>
+                        <div class="code-block">{
+  <span class="key">"success"</span>: true,
+  <span class="key">"approvals"</span>: [
+    {
+      <span class="key">"approval_id"</span>: <span class="string">"apr-3250e3e1"</span>,
+      <span class="key">"job_id"</span>: <span class="string">"79c3e3eb236911f5fa56fc6a1e3ca3ee..."</span>,
+      <span class="key">"job_type"</span>: <span class="string">"vector_docker_etl"</span>,
+      <span class="key">"classification"</span>: <span class="string">"ouo"</span>,
+      <span class="key">"status"</span>: <span class="string">"pending"</span>,
+      <span class="key">"stac_item_id"</span>: <span class="string">"boundaries-admin-v10"</span>,
+      <span class="key">"stac_collection_id"</span>: <span class="string">"system-vectors"</span>,
+      <span class="key">"reviewer"</span>: null,
+      <span class="key">"created_at"</span>: <span class="string">"2026-01-29T01:40:01.517181"</span>,
+      <span class="key">"reviewed_at"</span>: null
+    }
+  ],
+  <span class="key">"count"</span>: 1,
+  <span class="key">"limit"</span>: 100,
+  <span class="key">"offset"</span>: 0,
+  <span class="key">"status_counts"</span>: {
+    <span class="key">"pending"</span>: 1,
+    <span class="key">"approved"</span>: 3
+  }
+}</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Get Approval by ID -->
+            <div id="platform-approval-get" class="endpoint-section">
+                <div class="endpoint-header">
+                    <span class="method-badge get">GET</span>
+                    <code class="endpoint-path">/api/platform/approvals/{approval_id}</code>
+                    <h2>Get Approval Details</h2>
+                </div>
+                <div class="endpoint-body">
+                    <p class="endpoint-desc">
+                        Get full details of a specific approval record including reviewer information,
+                        notes, and timestamps.
+                    </p>
+
+                    <div class="params-section">
+                        <h3>Example Request</h3>
+                        <div class="code-block">curl "${API_BASE_URL}/api/platform/approvals/apr-3250e3e1"</div>
+                    </div>
+
+                    <div class="response-section">
+                        <h4>Response</h4>
+                        <span class="status-badge success">200 OK</span>
+                        <div class="code-block">{
+  <span class="key">"success"</span>: true,
+  <span class="key">"approval"</span>: {
+    <span class="key">"approval_id"</span>: <span class="string">"apr-3250e3e1"</span>,
+    <span class="key">"job_id"</span>: <span class="string">"79c3e3eb236911f5fa56fc6a1e3ca3ee..."</span>,
+    <span class="key">"job_type"</span>: <span class="string">"vector_docker_etl"</span>,
+    <span class="key">"classification"</span>: <span class="string">"ouo"</span>,
+    <span class="key">"status"</span>: <span class="string">"approved"</span>,
+    <span class="key">"stac_item_id"</span>: <span class="string">"boundaries-admin-v10"</span>,
+    <span class="key">"stac_collection_id"</span>: <span class="string">"system-vectors"</span>,
+    <span class="key">"reviewer"</span>: <span class="string">"user@worldbank.org"</span>,
+    <span class="key">"notes"</span>: <span class="string">"Reviewed and approved for publication"</span>,
+    <span class="key">"rejection_reason"</span>: null,
+    <span class="key">"adf_run_id"</span>: null,
+    <span class="key">"created_at"</span>: <span class="string">"2026-01-29T01:40:01.517181"</span>,
+    <span class="key">"reviewed_at"</span>: <span class="string">"2026-01-29T01:45:00.000000"</span>
+  }
+}</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Batch Approval Status -->
+            <div id="platform-approval-status" class="endpoint-section">
+                <div class="endpoint-header">
+                    <span class="method-badge get">GET</span>
+                    <code class="endpoint-path">/api/platform/approvals/status</code>
+                    <h2>Batch Approval Status</h2>
+                </div>
+                <div class="endpoint-body">
+                    <p class="endpoint-desc">
+                        Check approval status for multiple STAC items at once. Useful for DDH
+                        to display publication status across many datasets.
+                    </p>
+
+                    <div class="params-section">
+                        <h3>Query Parameters</h3>
+                        <table class="params-table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Type</th>
+                                    <th>Description</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td><span class="param-name">stac_item_ids</span></td>
+                                    <td><span class="param-type">string</span></td>
+                                    <td>Comma-separated list of STAC item IDs</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="params-section">
+                        <h3>Example Request</h3>
+                        <div class="code-block">curl "${API_BASE_URL}/api/platform/approvals/status?stac_item_ids=boundaries-v10,flood-zones-v20,parcels-v15"</div>
+                    </div>
+
+                    <div class="response-section">
+                        <h4>Response</h4>
+                        <span class="status-badge success">200 OK</span>
+                        <div class="code-block">{
+  <span class="key">"success"</span>: true,
+  <span class="key">"statuses"</span>: {
+    <span class="key">"boundaries-v10"</span>: <span class="string">"approved"</span>,
+    <span class="key">"flood-zones-v20"</span>: <span class="string">"pending"</span>,
+    <span class="key">"parcels-v15"</span>: null  <span class="comment">// no approval record found</span>
+  }
+}</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Approve Dataset -->
+            <div id="platform-approve" class="endpoint-section">
+                <div class="endpoint-header">
+                    <span class="method-badge post">POST</span>
+                    <code class="endpoint-path">/api/platform/approve</code>
+                    <h2>Approve (Activate) Dataset</h2>
+                </div>
+                <div class="endpoint-body">
+                    <p class="endpoint-desc">
+                        Approve a pending dataset for publication. This is called when a user clicks
+                        "Activate" after previewing. The behavior differs based on classification:
+                    </p>
+                    <table class="params-table" style="margin: 16px 0;">
+                        <thead>
+                            <tr>
+                                <th>Classification</th>
+                                <th>Action on Approval</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><span class="access-level ouo">OUO</span></td>
+                                <td>Updates STAC metadata with <code>app:published=true</code>. Data stays internal.</td>
+                            </tr>
+                            <tr>
+                                <td><span class="access-level public">PUBLIC</span></td>
+                                <td>Triggers ADF pipeline to copy data to external zone, then updates STAC. Returns <code>adf_run_id</code>.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <div class="params-section">
+                        <h3>Request Parameters</h3>
+                        <table class="params-table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Type</th>
+                                    <th>Required</th>
+                                    <th>Description</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td colspan="4" style="background: #f8f9fa; font-weight: 600;">Identification (use ONE)</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="param-name">approval_id</span></td>
+                                    <td><span class="param-type">string</span></td>
+                                    <td><span class="param-required">Option 1</span></td>
+                                    <td>Approval ID from list approvals (e.g., "apr-3250e3e1")</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="param-name">request_id</span></td>
+                                    <td><span class="param-type">string</span></td>
+                                    <td><span class="param-required">Option 2</span></td>
+                                    <td>Request ID from original platform submission</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="param-name">job_id</span></td>
+                                    <td><span class="param-type">string</span></td>
+                                    <td><span class="param-required">Option 3</span></td>
+                                    <td>Job ID from original submission</td>
+                                </tr>
+                                <tr>
+                                    <td colspan="4" style="background: #f8f9fa; font-weight: 600;">Reviewer Info</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="param-name">reviewer</span></td>
+                                    <td><span class="param-type">string</span></td>
+                                    <td><span class="param-required">Required</span></td>
+                                    <td>Email of approving user</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="param-name">notes</span></td>
+                                    <td><span class="param-type">string</span></td>
+                                    <td><span class="param-optional">Optional</span></td>
+                                    <td>Review notes for audit trail</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="params-section">
+                        <h3>Example Request</h3>
+                        <div class="example-tabs">
+                            <button class="example-tab active" onclick="showExample('approve', 'approval')">By Approval ID</button>
+                            <button class="example-tab" onclick="showExample('approve', 'request')">By Request ID</button>
+                            <button class="example-tab" onclick="showExample('approve', 'job')">By Job ID</button>
+                        </div>
+
+                        <div id="approve-approval" class="code-block"><span class="comment"># Approve using approval_id (from list approvals)</span>
+curl -X POST \\
+  ${API_BASE_URL}/api/platform/approve \\
+  -H 'Content-Type: application/json' \\
+  -d '{
+    <span class="key">"approval_id"</span>: <span class="string">"apr-3250e3e1"</span>,
+    <span class="key">"reviewer"</span>: <span class="string">"user@worldbank.org"</span>,
+    <span class="key">"notes"</span>: <span class="string">"Data quality verified, approved for publication"</span>
+  }'</div>
+
+                        <div id="approve-request" class="code-block" style="display: none;"><span class="comment"># Approve using request_id from original submission</span>
+curl -X POST \\
+  ${API_BASE_URL}/api/platform/approve \\
+  -H 'Content-Type: application/json' \\
+  -d '{
+    <span class="key">"request_id"</span>: <span class="string">"791147831f11d833c779f8288d34fa5a"</span>,
+    <span class="key">"reviewer"</span>: <span class="string">"user@worldbank.org"</span>
+  }'</div>
+
+                        <div id="approve-job" class="code-block" style="display: none;"><span class="comment"># Approve using job_id</span>
+curl -X POST \\
+  ${API_BASE_URL}/api/platform/approve \\
+  -H 'Content-Type: application/json' \\
+  -d '{
+    <span class="key">"job_id"</span>: <span class="string">"5a5f62fd4e0526a30d8aa6fa11fac9ec"</span>,
+    <span class="key">"reviewer"</span>: <span class="string">"user@worldbank.org"</span>
+  }'</div>
+                    </div>
+
+                    <div class="response-section">
+                        <h4>Response (OUO Classification)</h4>
+                        <span class="status-badge success">200 OK</span>
+                        <div class="code-block">{
+  <span class="key">"success"</span>: true,
+  <span class="key">"approval_id"</span>: <span class="string">"apr-3250e3e1"</span>,
+  <span class="key">"status"</span>: <span class="string">"approved"</span>,
+  <span class="key">"action"</span>: <span class="string">"stac_updated"</span>,
+  <span class="key">"adf_run_id"</span>: null,
+  <span class="key">"stac_updated"</span>: true,
+  <span class="key">"classification"</span>: <span class="string">"ouo"</span>,
+  <span class="key">"message"</span>: <span class="string">"Dataset approved successfully"</span>
+}</div>
+                    </div>
+
+                    <div class="response-section">
+                        <h4>Response (PUBLIC Classification)</h4>
+                        <span class="status-badge success">200 OK</span>
+                        <div class="code-block">{
+  <span class="key">"success"</span>: true,
+  <span class="key">"approval_id"</span>: <span class="string">"apr-7890abcd"</span>,
+  <span class="key">"status"</span>: <span class="string">"approved"</span>,
+  <span class="key">"action"</span>: <span class="string">"adf_triggered"</span>,
+  <span class="key">"adf_run_id"</span>: <span class="string">"abc123-def456-..."</span>,
+  <span class="key">"stac_updated"</span>: true,
+  <span class="key">"classification"</span>: <span class="string">"public"</span>,
+  <span class="key">"message"</span>: <span class="string">"Dataset approved. ADF pipeline triggered to copy to external zone."</span>
+}</div>
+                    </div>
+
+                    <div class="response-section">
+                        <h4>Error: Not Found</h4>
+                        <span class="status-badge error">404 Not Found</span>
+                        <div class="code-block">{
+  <span class="key">"success"</span>: false,
+  <span class="key">"error"</span>: <span class="string">"Approval not found for the provided identifier"</span>
+}</div>
+                    </div>
+
+                    <div class="response-section">
+                        <h4>Error: Already Approved</h4>
+                        <span class="status-badge error">400 Bad Request</span>
+                        <div class="code-block">{
+  <span class="key">"success"</span>: false,
+  <span class="key">"error"</span>: <span class="string">"Approval is not in pending status (current: approved)"</span>
 }</div>
                     </div>
                 </div>

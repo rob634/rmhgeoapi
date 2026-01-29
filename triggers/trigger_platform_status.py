@@ -618,10 +618,13 @@ async def platform_health(req: func.HttpRequest) -> func.HttpResponse:
     {
         "status": "healthy|degraded|unavailable",
         "ready_for_jobs": true,
+        "version": "0.7.35.5",
+        "uptime_seconds": 3600,
         "summary": {
             "database": "healthy",
             "storage": "healthy",
-            "service_bus": "healthy"
+            "service_bus": "healthy",
+            "docker_worker": "healthy"
         },
         "jobs": {
             "queue_backlog": 5,
@@ -631,11 +634,19 @@ async def platform_health(req: func.HttpRequest) -> func.HttpResponse:
         },
         "timestamp": "2026-01-15T10:00:00Z"
     }
+
+    Updated 29 JAN 2026: Added version, uptime_seconds, docker_worker status.
+    Fixed storage/service_bus config checks.
     """
+    import requests
+    import psutil
+    from config import __version__, get_app_mode_config
+
     logger.info("Platform health endpoint called")
 
     try:
         config = get_config()
+        app_mode_config = get_app_mode_config()
         repos = RepositoryFactory.create_repositories()
         job_repo = repos['job_repo']
 
@@ -643,6 +654,13 @@ async def platform_health(req: func.HttpRequest) -> func.HttpResponse:
         status = "healthy"
         ready_for_jobs = True
         component_status = {}
+
+        # Get uptime
+        try:
+            process = psutil.Process()
+            uptime_seconds = int((datetime.now(timezone.utc) - datetime.fromtimestamp(process.create_time(), tz=timezone.utc)).total_seconds())
+        except Exception:
+            uptime_seconds = None
 
         # Check database connectivity
         try:
@@ -657,18 +675,19 @@ async def platform_health(req: func.HttpRequest) -> func.HttpResponse:
             status = "degraded"
             ready_for_jobs = False
 
-        # Check storage connectivity (simplified - just check config exists)
+        # Check storage connectivity (fixed 29 JAN 2026 - correct config path)
         try:
-            if config.storage and config.storage.bronze_account:
+            if config.storage and config.storage.bronze and config.storage.bronze.account_name:
                 component_status["storage"] = "healthy"
             else:
                 component_status["storage"] = "not_configured"
                 status = "degraded"
-        except Exception:
+        except Exception as storage_err:
+            logger.warning(f"Storage config check failed: {storage_err}")
             component_status["storage"] = "unavailable"
             status = "degraded"
 
-        # Check Service Bus (simplified)
+        # Check Service Bus (fixed 29 JAN 2026 - correct config path)
         try:
             if config.queues and config.queues.service_bus_fqdn:
                 component_status["service_bus"] = "healthy"
@@ -677,6 +696,25 @@ async def platform_health(req: func.HttpRequest) -> func.HttpResponse:
         except Exception:
             component_status["service_bus"] = "unknown"
 
+        # Check Docker worker (added 29 JAN 2026)
+        try:
+            if app_mode_config.docker_worker_enabled and app_mode_config.docker_worker_url:
+                worker_url = app_mode_config.docker_worker_url.rstrip('/')
+                try:
+                    resp = requests.get(f"{worker_url}/health", timeout=10)
+                    if resp.status_code == 200:
+                        component_status["docker_worker"] = "healthy"
+                    else:
+                        component_status["docker_worker"] = "degraded"
+                        status = "degraded"
+                except requests.exceptions.RequestException:
+                    component_status["docker_worker"] = "unavailable"
+                    status = "degraded"
+            else:
+                component_status["docker_worker"] = "disabled"
+        except Exception:
+            component_status["docker_worker"] = "unknown"
+
         # Get job statistics
         job_stats = {}
         try:
@@ -684,18 +722,21 @@ async def platform_health(req: func.HttpRequest) -> func.HttpResponse:
                 with job_repo._get_connection() as conn:
                     with conn.cursor() as cur:
                         # Queue backlog (pending + queued jobs)
-                        cur.execute(f"""
+                        # Use parameterized schema name via psycopg.sql for safety
+                        from psycopg import sql
+                        query = sql.SQL("""
                             SELECT
-                                COUNT(*) FILTER (WHERE status IN ('queued', 'pending')) as backlog,
-                                COUNT(*) FILTER (WHERE status = 'processing') as processing,
-                                COUNT(*) FILTER (WHERE status = 'failed'
+                                COUNT(*) FILTER (WHERE status::text IN ('queued', 'pending')) as backlog,
+                                COUNT(*) FILTER (WHERE status::text = 'processing') as processing,
+                                COUNT(*) FILTER (WHERE status::text = 'failed'
                                     AND updated_at >= NOW() - INTERVAL '24 hours') as failed_24h,
                                 AVG(EXTRACT(EPOCH FROM (updated_at - created_at))/60)
-                                    FILTER (WHERE status = 'completed'
+                                    FILTER (WHERE status::text = 'completed'
                                     AND updated_at >= NOW() - INTERVAL '24 hours') as avg_minutes
-                            FROM {config.app_schema}.jobs
+                            FROM {schema}.jobs
                             WHERE created_at >= NOW() - INTERVAL '7 days'
-                        """)
+                        """).format(schema=sql.Identifier(config.app_schema))
+                        cur.execute(query)
                         row = cur.fetchone()
                         job_stats = {
                             "queue_backlog": row['backlog'] or 0,
@@ -715,6 +756,8 @@ async def platform_health(req: func.HttpRequest) -> func.HttpResponse:
         result = {
             "status": status,
             "ready_for_jobs": ready_for_jobs,
+            "version": __version__,
+            "uptime_seconds": uptime_seconds,
             "summary": component_status,
             "jobs": job_stats,
             "timestamp": datetime.now(timezone.utc).isoformat()

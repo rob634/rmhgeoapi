@@ -64,32 +64,38 @@ class IntegrationInterface(BaseInterface):
             </header>
 
             <div class="cards-grid">
-                <a href="/api/interface/integration-process-raster" class="card">
+                <!-- PRIMARY: Unified Platform Submit -->
+                <a href="/api/interface/integration-platform-submit" class="card card-primary">
+                    <div class="card-badge">Recommended</div>
+                    <h3>Platform Submit</h3>
+                    <p class="description">
+                        <strong>Unified data submission endpoint.</strong> Auto-detects vector or raster
+                        based on file extension. Supports all formats: GeoJSON, GeoPackage, Shapefile,
+                        CSV, GeoTIFF, and more.
+                    </p>
+                    <div class="card-footer">View Guide &rarr;</div>
+                </a>
+
+                <!-- LEGACY: Kept for reference -->
+                <a href="/api/interface/integration-process-raster" class="card card-legacy">
+                    <div class="card-badge badge-legacy">Legacy</div>
                     <h3>Process Raster</h3>
                     <p class="description">
-                        Convert raster files to Cloud Optimized GeoTIFFs (COGs) and register
-                        in STAC catalog. Includes validation, processing, and metadata registration.
+                        Direct raster processing endpoint. Use Platform Submit instead for
+                        new integrations.
                     </p>
-                    <div class="card-footer">View Guide &rarr;</div>
+                    <div class="card-footer">View Legacy Guide &rarr;</div>
                 </a>
 
-                <a href="/api/interface/integration-process-vector" class="card">
+                <a href="/api/interface/integration-process-vector" class="card card-legacy">
+                    <div class="card-badge badge-legacy">Legacy</div>
                     <h3>Process Vector</h3>
                     <p class="description">
-                        Load vector files into PostGIS and register in STAC catalog.
-                        Supports GeoJSON, GeoPackage, Shapefile, CSV with coordinates.
+                        Direct vector processing endpoint. Use Platform Submit instead for
+                        new integrations.
                     </p>
-                    <div class="card-footer">View Guide &rarr;</div>
+                    <div class="card-footer">View Legacy Guide &rarr;</div>
                 </a>
-
-                <div class="card card-disabled">
-                    <h3>Raster Collection</h3>
-                    <p class="description">
-                        Process multiple raster files into a unified MosaicJSON collection.
-                        Coming soon.
-                    </p>
-                    <div class="card-footer">Coming Soon</div>
-                </div>
             </div>
         </div>
         """
@@ -105,6 +111,37 @@ class IntegrationInterface(BaseInterface):
 
             .card-disabled .card-footer {
                 color: var(--ds-gray);
+            }
+
+            .card-primary {
+                border: 2px solid var(--ds-blue-primary);
+                position: relative;
+            }
+
+            .card-legacy {
+                opacity: 0.7;
+                position: relative;
+            }
+
+            .card-legacy:hover {
+                opacity: 1;
+            }
+
+            .card-badge {
+                position: absolute;
+                top: -10px;
+                right: 16px;
+                background: var(--ds-blue-primary);
+                color: white;
+                padding: 4px 12px;
+                border-radius: 12px;
+                font-size: 11px;
+                font-weight: 700;
+                text-transform: uppercase;
+            }
+
+            .card-badge.badge-legacy {
+                background: var(--ds-gray);
             }
         """
 
@@ -2063,4 +2100,992 @@ class ProcessVectorIntegrationInterface(BaseInterface):
                     }
                 });
             }
+        """
+
+
+# =============================================================================
+# PLATFORM SUBMIT INTEGRATION (UNIFIED)
+# =============================================================================
+
+@InterfaceRegistry.register('integration-platform-submit')
+class PlatformSubmitIntegrationInterface(BaseInterface):
+    """
+    Unified Platform Submit Integration Guide.
+
+    The recommended integration pattern for DDH. Auto-detects data type
+    (vector or raster) based on file extension and routes to appropriate
+    processing workflow.
+
+    Three-block layout showing:
+    1. Job submission with live CURL (auto-detect type)
+    2. Job monitoring with status polling
+    3. Output data retrieval + Approval workflow
+
+    Supports HTMX fragments for dynamic container/file loading.
+    """
+
+    def render(self, request: func.HttpRequest) -> str:
+        """Generate Platform Submit integration guide HTML."""
+        content = self._generate_html_content()
+        custom_css = self._generate_custom_css()
+        custom_js = self._generate_custom_js()
+
+        return self.wrap_html(
+            title="Integration: Platform Submit",
+            content=content,
+            custom_css=custom_css,
+            custom_js=custom_js,
+            include_htmx=True
+        )
+
+    def htmx_partial(self, request: func.HttpRequest, fragment: str) -> str:
+        """Handle HTMX partial requests."""
+        if fragment == 'containers':
+            return self._render_containers_fragment(request)
+        elif fragment == 'files':
+            return self._render_files_fragment(request)
+        else:
+            raise ValueError(f"Unknown fragment: {fragment}")
+
+    def _render_containers_fragment(self, request: func.HttpRequest) -> str:
+        """Render container options for Bronze zone."""
+        try:
+            from infrastructure.blob import BlobRepository
+
+            repo = BlobRepository.for_zone("bronze")
+            containers = repo.list_containers()
+
+            if not containers:
+                return '<option value="">No containers in Bronze zone</option>'
+
+            options = ['<option value="">-- Select Container --</option>']
+            options += [f'<option value="{c["name"]}">{c["name"]}</option>' for c in containers]
+            return '\n'.join(options)
+
+        except Exception as e:
+            logger.error(f"Error loading containers: {e}")
+            return '<option value="">Error loading containers</option>'
+
+    def _render_files_fragment(self, request: func.HttpRequest) -> str:
+        """Render file list items (all supported formats)."""
+        container = request.params.get('container', '')
+        prefix = request.params.get('prefix', '')
+        limit = int(request.params.get('limit', '100'))
+
+        if not container:
+            return '<div class="file-item placeholder">Select a container first</div>'
+
+        try:
+            from infrastructure.blob import BlobRepository
+
+            repo = BlobRepository.for_zone("bronze")
+            blobs = repo.list_blobs(
+                container=container,
+                prefix=prefix,
+                limit=limit * 2
+            )
+
+            # Filter for all supported extensions (vector + raster)
+            all_extensions = RASTER_EXTENSIONS + VECTOR_EXTENSIONS
+            supported_blobs = []
+            for blob in blobs:
+                name = blob.get('name', '').lower()
+                if any(name.endswith(ext) for ext in all_extensions):
+                    supported_blobs.append(blob)
+                if len(supported_blobs) >= limit:
+                    break
+
+            if not supported_blobs:
+                return '<div class="file-item placeholder">No supported files found</div>'
+
+            # Build file items with type indicator
+            items = []
+            for blob in supported_blobs:
+                name = blob.get('name', '')
+                short_name = name.split('/')[-1] if '/' in name else name
+                size_mb = blob.get('size', 0) / (1024 * 1024)
+
+                # Detect type for icon
+                is_raster = any(name.lower().endswith(ext) for ext in RASTER_EXTENSIONS)
+                type_icon = '🗺️' if is_raster else '📍'
+                type_class = 'raster' if is_raster else 'vector'
+
+                items.append(
+                    f'<div class="file-item {type_class}" onclick="selectFile(this, \'{name}\')" '
+                    f'data-blob="{name}" data-size="{size_mb:.1f}" data-type="{type_class}">'
+                    f'{type_icon} {short_name} <span class="file-size-hint">({size_mb:.1f} MB)</span></div>'
+                )
+
+            return '\n'.join(items)
+
+        except Exception as e:
+            logger.error(f"Error loading files: {e}")
+            return f'<div class="file-item error">Error: {str(e)[:50]}</div>'
+
+    def _generate_html_content(self) -> str:
+        """Generate the three-block layout for unified Platform Submit."""
+        return """
+        <div class="container">
+            <!-- Page Header -->
+            <header class="dashboard-header">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <h1>Integration Guide: Platform Submit</h1>
+                        <p class="subtitle">Unified data submission - auto-detects vector or raster</p>
+                    </div>
+                    <a href="/api/interface/integration" class="btn btn-secondary">
+                        &larr; All Guides
+                    </a>
+                </div>
+            </header>
+
+            <!-- Info Box -->
+            <div class="info-box">
+                <strong>Recommended Integration Pattern</strong>
+                <code>POST /api/platform/submit</code> is the unified endpoint for all data types.
+                It auto-detects vector (.geojson, .gpkg, .shp) vs raster (.tif, .tiff) based on
+                file extension and routes to the appropriate processing workflow.
+            </div>
+
+            <!-- BLOCK 1: Job Submission -->
+            <div class="block-row">
+                <div class="block-header">
+                    <div class="block-number">1</div>
+                    <div class="block-title">Submit Processing Job</div>
+                    <div class="block-subtitle">POST /api/platform/submit</div>
+                </div>
+                <div class="block-content">
+                    <!-- Left: Form -->
+                    <div class="form-section">
+                        <!-- Zone (fixed) -->
+                        <div class="form-group">
+                            <label>Storage Zone</label>
+                            <div class="zone-badge">BRONZE (Source Data)</div>
+                        </div>
+
+                        <!-- Container Selection (HTMX) -->
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Container <span class="required">*</span></label>
+                                <select id="container-select"
+                                        hx-get="/api/interface/integration-platform-submit?fragment=containers"
+                                        hx-trigger="load"
+                                        hx-swap="innerHTML"
+                                        onchange="loadFiles(); updateCurl();">
+                                    <option value="">Loading containers...</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Path Filter</label>
+                                <input type="text" id="prefix-filter" placeholder="e.g., data/"
+                                       oninput="debouncedLoadFiles()">
+                            </div>
+                        </div>
+
+                        <!-- File List (HTMX) -->
+                        <div class="form-group">
+                            <label>Select Source File <span class="required">*</span></label>
+                            <div class="file-list-compact" id="file-list">
+                                <div class="file-item placeholder">Select a container first</div>
+                            </div>
+                            <div class="detected-type" id="detected-type"></div>
+                        </div>
+
+                        <!-- DDH Platform Identifiers (Required) -->
+                        <div class="ddh-section">
+                            <div class="ddh-section-title">DDH Platform Identifiers (Required)</div>
+                            <div class="form-group">
+                                <label>Dataset ID <span class="required">*</span></label>
+                                <input type="text" id="dataset-id" placeholder="e.g., boundaries-2024" oninput="updateCurl()">
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>Resource ID <span class="required">*</span></label>
+                                    <input type="text" id="resource-id" placeholder="e.g., admin-regions" oninput="updateCurl()">
+                                </div>
+                                <div class="form-group">
+                                    <label>Version ID</label>
+                                    <input type="text" id="version-id" value="v1.0" placeholder="e.g., v1.0" oninput="updateCurl()">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Metadata Section -->
+                        <div class="metadata-section">
+                            <div class="form-group-header">Metadata</div>
+                            <div class="form-group">
+                                <label>Service Name <span class="required">*</span></label>
+                                <input type="text" id="service-name" placeholder="Human-readable dataset name" oninput="updateCurl()">
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>Access Level</label>
+                                    <select id="access-level" onchange="updateCurl()">
+                                        <option value="OUO" selected>OUO (Official Use Only)</option>
+                                        <option value="PUBLIC">PUBLIC</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>Overwrite Existing</label>
+                                    <select id="overwrite" onchange="updateCurl()">
+                                        <option value="false">No (fail if exists)</option>
+                                        <option value="true">Yes (replace existing)</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Processing Options (context-sensitive) -->
+                        <div class="processing-section" id="raster-options" style="display: none;">
+                            <div class="form-group-header">Raster Processing Options</div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>Raster Type</label>
+                                    <select id="raster-type" onchange="updateCurl()">
+                                        <option value="auto">Auto-detect</option>
+                                        <option value="rgb">RGB Imagery</option>
+                                        <option value="dem">DEM (Elevation)</option>
+                                        <option value="categorical">Categorical</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>Output Tier</label>
+                                    <select id="output-tier" onchange="updateCurl()">
+                                        <option value="analysis">Analysis (LZW)</option>
+                                        <option value="visualization">Visualization (JPEG)</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="processing-section" id="vector-options" style="display: none;">
+                            <div class="form-group-header">Vector Processing Options</div>
+                            <div class="form-row" id="csv-options" style="display: none;">
+                                <div class="form-group">
+                                    <label>Longitude Column</label>
+                                    <input type="text" id="lon-column" placeholder="e.g., longitude" oninput="updateCurl()">
+                                </div>
+                                <div class="form-group">
+                                    <label>Latitude Column</label>
+                                    <input type="text" id="lat-column" placeholder="e.g., latitude" oninput="updateCurl()">
+                                </div>
+                            </div>
+                        </div>
+
+                        <button class="btn btn-primary" style="width: 100%;" onclick="simulateSubmit()">Submit Job (Demo)</button>
+                    </div>
+
+                    <!-- Right: CURL -->
+                    <div class="curl-section">
+                        <div class="curl-header">
+                            <span class="curl-label">Platform API CURL</span>
+                            <button class="copy-btn" onclick="copyCurl('curl-submit')">Copy</button>
+                        </div>
+                        <pre class="curl-code" id="curl-submit">Loading...</pre>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Workflow Connector -->
+            <div class="workflow-connector">
+                <div class="workflow-arrow">Response contains job_id and request_id</div>
+            </div>
+
+            <!-- BLOCK 2: Job Monitoring -->
+            <div class="block-row">
+                <div class="block-header">
+                    <div class="block-number">2</div>
+                    <div class="block-title">Monitor Job Progress</div>
+                    <div class="block-subtitle">Poll until status = "completed"</div>
+                </div>
+                <div class="block-content">
+                    <!-- Left: Mini Monitor -->
+                    <div class="monitor-mini">
+                        <div class="job-status-bar">
+                            <span class="job-id-display placeholder" id="job-id-display">(submit job to see ID)</span>
+                            <span class="status-badge status-processing" id="status-badge">PENDING</span>
+                        </div>
+
+                        <div class="stages-mini">
+                            <div class="stage-mini" id="stage-1">
+                                <div class="stage-mini-number">Stage 1</div>
+                                <div class="stage-mini-name">Validate</div>
+                                <div class="stage-mini-status">Check source file</div>
+                            </div>
+                            <div class="stage-mini" id="stage-2">
+                                <div class="stage-mini-number">Stage 2</div>
+                                <div class="stage-mini-name">Process</div>
+                                <div class="stage-mini-status">Load/transform data</div>
+                            </div>
+                            <div class="stage-mini" id="stage-3">
+                                <div class="stage-mini-number">Stage 3</div>
+                                <div class="stage-mini-name">Register</div>
+                                <div class="stage-mini-status">STAC catalog</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right: CURL Examples -->
+                    <div class="curl-section">
+                        <div class="curl-header">
+                            <span class="curl-label">CURL - Check Job Status</span>
+                            <button class="copy-btn" onclick="copyCurl('curl-status')">Copy</button>
+                        </div>
+                        <pre class="curl-code" id="curl-status"><span class="cmd">curl</span> <span class="url">"{API_BASE_URL}/api/platform/status/<span id="curl-request-id">{request_id}</span>"</span>
+
+<span class="comment"># Response (processing):</span>
+{
+  <span class="key">"success"</span>: true,
+  <span class="key">"request_id"</span>: <span class="string">"abc123..."</span>,
+  <span class="key">"job_status"</span>: <span class="string">"processing"</span>,
+  <span class="key">"job_stage"</span>: <span class="number">2</span>
+}
+
+<span class="comment"># Response (completed):</span>
+{
+  <span class="key">"success"</span>: true,
+  <span class="key">"request_id"</span>: <span class="string">"abc123..."</span>,
+  <span class="key">"job_status"</span>: <span class="string">"completed"</span>,
+  <span class="key">"job_result"</span>: { ... }
+}</pre>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Workflow Connector -->
+            <div class="workflow-connector">
+                <div class="workflow-arrow">When status = "completed"</div>
+            </div>
+
+            <!-- BLOCK 3: Approval Workflow -->
+            <div class="block-row">
+                <div class="block-header">
+                    <div class="block-number">3</div>
+                    <div class="block-title">Approve & Activate</div>
+                    <div class="block-subtitle">POST /api/platform/approve</div>
+                </div>
+                <div class="block-content">
+                    <!-- Left: Workflow -->
+                    <div class="approval-workflow">
+                        <div class="workflow-step">
+                            <div class="step-icon">✅</div>
+                            <div class="step-content">
+                                <div class="step-title">Job Completes</div>
+                                <div class="step-desc">Approval record created automatically (status: pending)</div>
+                            </div>
+                        </div>
+                        <div class="workflow-step">
+                            <div class="step-icon">👁️</div>
+                            <div class="step-content">
+                                <div class="step-title">User Previews Data</div>
+                                <div class="step-desc">Use viewer URLs from job result to verify data quality</div>
+                            </div>
+                        </div>
+                        <div class="workflow-step">
+                            <div class="step-icon">🔓</div>
+                            <div class="step-content">
+                                <div class="step-title">Approve (Activate)</div>
+                                <div class="step-desc">POST /api/platform/approve with request_id or job_id</div>
+                            </div>
+                        </div>
+                        <div class="classification-note">
+                            <strong>Classification Behavior:</strong>
+                            <ul>
+                                <li><span class="access-level ouo">OUO</span> Updates STAC metadata, data stays internal</li>
+                                <li><span class="access-level public">PUBLIC</span> Triggers ADF pipeline to copy to external zone</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <!-- Right: CURL -->
+                    <div class="curl-section">
+                        <div class="curl-header">
+                            <span class="curl-label">CURL - Approve Dataset</span>
+                            <button class="copy-btn" onclick="copyCurl('curl-approve')">Copy</button>
+                        </div>
+                        <pre class="curl-code" id="curl-approve"><span class="comment"># Approve using request_id from submit response</span>
+<span class="cmd">curl</span> -X POST \\
+  <span class="url">"{API_BASE_URL}/api/platform/approve"</span> \\
+  -H <span class="string">"Content-Type: application/json"</span> \\
+  -d '{
+    <span class="key">"request_id"</span>: <span class="string">"<span id="curl-approve-request-id">{request_id}</span>"</span>,
+    <span class="key">"reviewer"</span>: <span class="string">"user@worldbank.org"</span>,
+    <span class="key">"notes"</span>: <span class="string">"Data quality verified"</span>
+  }'
+
+<span class="comment"># Response:</span>
+{
+  <span class="key">"success"</span>: true,
+  <span class="key">"approval_id"</span>: <span class="string">"apr-abc123"</span>,
+  <span class="key">"status"</span>: <span class="string">"approved"</span>,
+  <span class="key">"action"</span>: <span class="string">"stac_updated"</span>,
+  <span class="key">"classification"</span>: <span class="string">"ouo"</span>
+}</pre>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quick Reference -->
+            <div class="quick-reference">
+                <h3>Quick Reference: Complete Workflow</h3>
+                <table class="reference-table">
+                    <thead>
+                        <tr>
+                            <th>Step</th>
+                            <th>Endpoint</th>
+                            <th>Purpose</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>1</td>
+                            <td><code>POST /api/platform/submit</code></td>
+                            <td>Submit data for processing (returns request_id)</td>
+                        </tr>
+                        <tr>
+                            <td>2</td>
+                            <td><code>GET /api/platform/status/{request_id}</code></td>
+                            <td>Poll until job_status = "completed"</td>
+                        </tr>
+                        <tr>
+                            <td>3</td>
+                            <td><code>POST /api/platform/approve</code></td>
+                            <td>Approve dataset for publication</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        """
+
+    def _generate_custom_css(self) -> str:
+        """Generate custom CSS for Platform Submit integration guide."""
+        return """
+            /* Info Box */
+            .info-box {
+                background: #e7f3ff;
+                border: 1px solid #b3d7ff;
+                border-radius: 6px;
+                padding: 16px 20px;
+                margin-bottom: 24px;
+                font-size: 14px;
+                color: #0056b3;
+            }
+
+            .info-box strong {
+                display: block;
+                margin-bottom: 8px;
+            }
+
+            .info-box code {
+                background: white;
+                padding: 2px 6px;
+                border-radius: 3px;
+            }
+
+            /* Block Rows */
+            .block-row {
+                background: white;
+                border-radius: 3px;
+                margin-bottom: 20px;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+                overflow: hidden;
+                border-left: 4px solid var(--ds-blue-primary);
+            }
+
+            .block-header {
+                background: var(--ds-bg);
+                padding: 16px 24px;
+                display: flex;
+                align-items: center;
+                gap: 16px;
+                border-bottom: 1px solid var(--ds-gray-light);
+            }
+
+            .block-number {
+                background: var(--ds-blue-primary);
+                color: white;
+                width: 32px;
+                height: 32px;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-weight: 700;
+                font-size: 16px;
+            }
+
+            .block-title {
+                font-size: 16px;
+                font-weight: 700;
+                color: var(--ds-navy);
+            }
+
+            .block-subtitle {
+                color: var(--ds-gray);
+                font-size: 13px;
+                margin-left: auto;
+                font-family: monospace;
+            }
+
+            .block-content {
+                padding: 24px;
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 24px;
+            }
+
+            /* Form Styles */
+            .form-section { display: flex; flex-direction: column; gap: 16px; }
+            .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+            .required { color: #dc2626; }
+
+            .zone-badge {
+                background: #cd7f32;
+                color: white;
+                padding: 10px 16px;
+                border-radius: 3px;
+                font-weight: 600;
+                text-align: center;
+            }
+
+            .file-list-compact {
+                background: var(--ds-bg);
+                border: 1px solid var(--ds-gray-light);
+                border-radius: 3px;
+                height: 120px;
+                overflow-y: auto;
+                padding: 8px;
+            }
+
+            .file-item {
+                padding: 6px 10px;
+                font-size: 13px;
+                color: var(--ds-gray);
+                cursor: pointer;
+                border-radius: 3px;
+                font-family: monospace;
+            }
+
+            .file-item:hover { background: var(--ds-gray-light); color: var(--ds-navy); }
+            .file-item.selected { background: var(--ds-blue-primary); color: white; }
+            .file-item.placeholder { color: var(--ds-gray); font-style: italic; cursor: default; font-family: inherit; }
+            .file-size-hint { font-size: 11px; opacity: 0.7; }
+
+            .detected-type {
+                margin-top: 8px;
+                padding: 8px 12px;
+                border-radius: 3px;
+                font-size: 13px;
+                font-weight: 600;
+            }
+
+            .detected-type.vector { background: #d4edda; color: #155724; }
+            .detected-type.raster { background: #cce5ff; color: #004085; }
+
+            /* DDH Section */
+            .ddh-section {
+                background: var(--ds-bg);
+                border: 2px solid var(--ds-gold);
+                border-radius: 3px;
+                padding: 16px;
+            }
+
+            .ddh-section-title {
+                color: var(--ds-navy);
+                font-size: 14px;
+                font-weight: 700;
+                margin-bottom: 12px;
+            }
+
+            /* Sections */
+            .metadata-section, .processing-section {
+                background: var(--ds-bg);
+                border: 1px solid var(--ds-gray-light);
+                border-radius: 3px;
+                padding: 16px;
+            }
+
+            .form-group-header {
+                font-weight: 600;
+                color: var(--ds-navy);
+                margin-bottom: 12px;
+            }
+
+            /* CURL Display */
+            .curl-section {
+                background: #1e1e1e;
+                border-radius: 3px;
+                overflow: hidden;
+            }
+
+            .curl-header {
+                background: #2d2d2d;
+                padding: 10px 16px;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            }
+
+            .curl-label { color: #888; font-size: 12px; }
+            .copy-btn {
+                background: #444;
+                color: #fff;
+                border: none;
+                padding: 4px 12px;
+                border-radius: 3px;
+                cursor: pointer;
+                font-size: 12px;
+            }
+            .copy-btn:hover { background: #555; }
+
+            .curl-code {
+                margin: 0;
+                padding: 16px;
+                color: #d4d4d4;
+                font-family: monospace;
+                font-size: 13px;
+                overflow-x: auto;
+                white-space: pre;
+            }
+
+            .curl-code .cmd { color: #569cd6; }
+            .curl-code .url { color: #ce9178; }
+            .curl-code .string { color: #ce9178; }
+            .curl-code .key { color: #9cdcfe; }
+            .curl-code .number { color: #b5cea8; }
+            .curl-code .comment { color: #6a9955; }
+
+            /* Workflow Connector */
+            .workflow-connector {
+                display: flex;
+                justify-content: center;
+                padding: 10px 0;
+            }
+
+            .workflow-arrow {
+                background: var(--ds-bg);
+                padding: 8px 20px;
+                border-radius: 20px;
+                font-size: 13px;
+                color: var(--ds-gray);
+                border: 1px solid var(--ds-gray-light);
+            }
+
+            /* Monitor Mini */
+            .monitor-mini { padding: 20px; }
+
+            .job-status-bar {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 20px;
+            }
+
+            .job-id-display {
+                font-family: monospace;
+                font-size: 14px;
+                color: var(--ds-navy);
+            }
+
+            .job-id-display.placeholder { color: var(--ds-gray); font-style: italic; }
+
+            .status-badge {
+                padding: 4px 12px;
+                border-radius: 4px;
+                font-size: 12px;
+                font-weight: 700;
+            }
+
+            .status-processing { background: #fff3cd; color: #856404; }
+            .status-completed { background: #d4edda; color: #155724; }
+
+            .stages-mini { display: flex; gap: 12px; }
+
+            .stage-mini {
+                flex: 1;
+                padding: 12px;
+                background: var(--ds-bg);
+                border-radius: 4px;
+                text-align: center;
+                border: 2px solid transparent;
+            }
+
+            .stage-mini.active { border-color: var(--ds-blue-primary); background: #e7f3ff; }
+            .stage-mini.completed { border-color: #28a745; background: #d4edda; }
+
+            .stage-mini-number { font-size: 11px; color: var(--ds-gray); }
+            .stage-mini-name { font-weight: 600; color: var(--ds-navy); margin: 4px 0; }
+            .stage-mini-status { font-size: 11px; color: var(--ds-gray); }
+
+            /* Approval Workflow */
+            .approval-workflow { padding: 20px; }
+
+            .workflow-step {
+                display: flex;
+                gap: 16px;
+                margin-bottom: 20px;
+                align-items: flex-start;
+            }
+
+            .step-icon {
+                font-size: 24px;
+                width: 40px;
+                text-align: center;
+            }
+
+            .step-title { font-weight: 600; color: var(--ds-navy); }
+            .step-desc { font-size: 13px; color: var(--ds-gray); margin-top: 4px; }
+
+            .classification-note {
+                background: var(--ds-bg);
+                padding: 16px;
+                border-radius: 4px;
+                font-size: 13px;
+            }
+
+            .classification-note ul {
+                margin: 8px 0 0 0;
+                padding-left: 20px;
+            }
+
+            .classification-note li { margin: 8px 0; }
+
+            .access-level {
+                display: inline-block;
+                padding: 2px 8px;
+                border-radius: 12px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+
+            .access-level.ouo { background: #fff3cd; color: #856404; }
+            .access-level.public { background: #d4edda; color: #155724; }
+
+            /* Quick Reference */
+            .quick-reference {
+                background: white;
+                border-radius: 3px;
+                padding: 24px;
+                margin-top: 20px;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            }
+
+            .quick-reference h3 {
+                margin: 0 0 16px 0;
+                color: var(--ds-navy);
+            }
+
+            .reference-table {
+                width: 100%;
+                border-collapse: collapse;
+            }
+
+            .reference-table th, .reference-table td {
+                padding: 12px;
+                text-align: left;
+                border-bottom: 1px solid var(--ds-gray-light);
+            }
+
+            .reference-table th {
+                background: var(--ds-bg);
+                font-weight: 600;
+                color: var(--ds-navy);
+            }
+
+            .reference-table code {
+                background: #f4f4f4;
+                padding: 2px 8px;
+                border-radius: 3px;
+                font-size: 13px;
+            }
+        """
+
+    def _generate_custom_js(self) -> str:
+        """Generate JavaScript for Platform Submit integration guide."""
+        return """
+            let selectedFile = '';
+            let selectedContainer = '';
+            let detectedType = '';
+            let debounceTimer = null;
+            let currentRequestId = '';
+
+            const RASTER_EXTENSIONS = ['.tif', '.tiff', '.geotiff', '.img', '.jp2', '.vrt', '.nc'];
+            const VECTOR_EXTENSIONS = ['.geojson', '.json', '.gpkg', '.kml', '.kmz', '.shp', '.zip', '.csv'];
+
+            function detectFileType(filename) {
+                const lower = filename.toLowerCase();
+                if (RASTER_EXTENSIONS.some(ext => lower.endsWith(ext))) return 'raster';
+                if (VECTOR_EXTENSIONS.some(ext => lower.endsWith(ext))) return 'vector';
+                return 'unknown';
+            }
+
+            function loadFiles() {
+                selectedContainer = document.getElementById('container-select').value;
+                if (!selectedContainer) {
+                    document.getElementById('file-list').innerHTML =
+                        '<div class="file-item placeholder">Select a container first</div>';
+                    return;
+                }
+
+                const prefix = document.getElementById('prefix-filter').value;
+                const url = '/api/interface/integration-platform-submit?fragment=files&container=' +
+                    encodeURIComponent(selectedContainer) + '&prefix=' + encodeURIComponent(prefix);
+
+                htmx.ajax('GET', url, {target: '#file-list', swap: 'innerHTML'});
+            }
+
+            function debouncedLoadFiles() {
+                clearTimeout(debounceTimer);
+                debounceTimer = setTimeout(loadFiles, 300);
+            }
+
+            function selectFile(element, blobName) {
+                document.querySelectorAll('.file-item').forEach(el => el.classList.remove('selected'));
+                element.classList.add('selected');
+                selectedFile = blobName;
+
+                // Detect type and show appropriate options
+                detectedType = detectFileType(blobName);
+
+                const typeIndicator = document.getElementById('detected-type');
+                const rasterOptions = document.getElementById('raster-options');
+                const vectorOptions = document.getElementById('vector-options');
+                const csvOptions = document.getElementById('csv-options');
+
+                if (detectedType === 'raster') {
+                    typeIndicator.textContent = '🗺️ Detected: RASTER - will create COG and register in STAC';
+                    typeIndicator.className = 'detected-type raster';
+                    rasterOptions.style.display = 'block';
+                    vectorOptions.style.display = 'none';
+                } else if (detectedType === 'vector') {
+                    typeIndicator.textContent = '📍 Detected: VECTOR - will load to PostGIS and register in STAC';
+                    typeIndicator.className = 'detected-type vector';
+                    rasterOptions.style.display = 'none';
+                    vectorOptions.style.display = 'block';
+
+                    // Show CSV options if CSV file
+                    if (blobName.toLowerCase().endsWith('.csv')) {
+                        csvOptions.style.display = 'grid';
+                    } else {
+                        csvOptions.style.display = 'none';
+                    }
+                } else {
+                    typeIndicator.textContent = '❓ Unknown file type';
+                    typeIndicator.className = 'detected-type';
+                    rasterOptions.style.display = 'none';
+                    vectorOptions.style.display = 'none';
+                }
+
+                updateCurl();
+            }
+
+            function updateCurl() {
+                const container = document.getElementById('container-select').value || '{container}';
+                const datasetId = document.getElementById('dataset-id').value || '{dataset_id}';
+                const resourceId = document.getElementById('resource-id').value || '{resource_id}';
+                const versionId = document.getElementById('version-id').value || 'v1.0';
+                const serviceName = document.getElementById('service-name').value || '{service_name}';
+                const accessLevel = document.getElementById('access-level').value || 'OUO';
+                const overwrite = document.getElementById('overwrite').value === 'true';
+                const fileName = selectedFile || '{file_name}';
+
+                let payload = {
+                    dataset_id: datasetId,
+                    resource_id: resourceId,
+                    version_id: versionId,
+                    container_name: container,
+                    file_name: fileName,
+                    service_name: serviceName,
+                    access_level: accessLevel,
+                    processing_options: {
+                        overwrite: overwrite
+                    }
+                };
+
+                // Add type-specific options
+                if (detectedType === 'raster') {
+                    const rasterType = document.getElementById('raster-type').value;
+                    const outputTier = document.getElementById('output-tier').value;
+                    if (rasterType !== 'auto') payload.processing_options.raster_type = rasterType;
+                    if (outputTier) payload.processing_options.output_tier = outputTier;
+                } else if (detectedType === 'vector' && fileName.toLowerCase().endsWith('.csv')) {
+                    const lonCol = document.getElementById('lon-column').value;
+                    const latCol = document.getElementById('lat-column').value;
+                    if (lonCol) payload.processing_options.lon_column = lonCol;
+                    if (latCol) payload.processing_options.lat_column = latCol;
+                }
+
+                const curlCmd = `<span class="cmd">curl</span> -X POST \\
+  <span class="url">"` + API_BASE_URL + `/api/platform/submit"</span> \\
+  -H <span class="string">"Content-Type: application/json"</span> \\
+  -d '<span class="string">` + JSON.stringify(payload, null, 2).replace(/</g, '&lt;').replace(/>/g, '&gt;') + `</span>'
+
+<span class="comment"># Response:</span>
+{
+  <span class="key">"success"</span>: true,
+  <span class="key">"request_id"</span>: <span class="string">"abc123..."</span>,
+  <span class="key">"job_id"</span>: <span class="string">"def456..."</span>,
+  <span class="key">"job_type"</span>: <span class="string">"` + (detectedType === 'raster' ? 'process_raster_docker' : 'vector_docker_etl') + `"</span>,
+  <span class="key">"monitor_url"</span>: <span class="string">"/api/platform/status/abc123..."</span>
+}`;
+
+                document.getElementById('curl-submit').innerHTML = curlCmd;
+            }
+
+            function simulateSubmit() {
+                currentRequestId = 'req-' + Math.random().toString(36).substring(2, 10);
+
+                document.getElementById('job-id-display').textContent = currentRequestId;
+                document.getElementById('job-id-display').classList.remove('placeholder');
+                document.getElementById('curl-request-id').textContent = currentRequestId;
+                document.getElementById('curl-approve-request-id').textContent = currentRequestId;
+
+                simulateProgress();
+            }
+
+            function simulateProgress() {
+                const stages = ['stage-1', 'stage-2', 'stage-3'];
+
+                stages.forEach(s => document.getElementById(s).classList.remove('active', 'completed'));
+                document.getElementById('status-badge').textContent = 'PROCESSING';
+                document.getElementById('status-badge').className = 'status-badge status-processing';
+
+                let currentStage = 0;
+
+                const interval = setInterval(() => {
+                    if (currentStage > 0) {
+                        document.getElementById(stages[currentStage - 1]).classList.remove('active');
+                        document.getElementById(stages[currentStage - 1]).classList.add('completed');
+                    }
+
+                    if (currentStage < stages.length) {
+                        document.getElementById(stages[currentStage]).classList.add('active');
+                        currentStage++;
+                    } else {
+                        clearInterval(interval);
+                        document.getElementById('status-badge').textContent = 'COMPLETED';
+                        document.getElementById('status-badge').className = 'status-badge status-completed';
+                    }
+                }, 1200);
+            }
+
+            function copyCurl(elementId) {
+                const element = document.getElementById(elementId);
+                const text = element.textContent;
+                navigator.clipboard.writeText(text).then(() => {
+                    const header = element.previousElementSibling;
+                    const btn = header ? header.querySelector('.copy-btn') : null;
+                    if (btn) {
+                        const originalText = btn.textContent;
+                        btn.textContent = 'Copied!';
+                        setTimeout(() => btn.textContent = originalText, 2000);
+                    }
+                });
+            }
+
+            // Initialize
+            document.addEventListener('DOMContentLoaded', function() {
+                updateCurl();
+            });
         """

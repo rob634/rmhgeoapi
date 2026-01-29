@@ -28,13 +28,13 @@ from typing import Optional, List, Dict, Any
 from psycopg import sql
 
 from util_logger import LoggerFactory, ComponentType
-from infrastructure.base_repository import BaseRepository
+from .postgresql import PostgreSQLRepository
 from core.models.platform_registry import Platform
 
 logger = LoggerFactory.create_logger(ComponentType.REPOSITORY, "PlatformRegistryRepository")
 
 
-class PlatformRegistryRepository(BaseRepository):
+class PlatformRegistryRepository(PostgreSQLRepository):
     """
     Repository for Platform registry CRUD operations.
 

@@ -25,6 +25,7 @@ This file references other documents containing implementation details. This is 
 | [/UI_MIGRATION.md](/UI_MIGRATION.md) | UI migration to Jinja2/Docker |
 | [HISTORY.md](./HISTORY.md) | Completed work log |
 | [REFACTOR_TRIGGER_PLATFORM.md](./REFACTOR_TRIGGER_PLATFORM.md) | trigger_platform.py split plan |
+| [/V0.8_COPY.md](/V0.8_COPY.md) | AzCopy integration for 5-10x faster blob transfers |
 
 ---
 
@@ -442,6 +443,30 @@ Continue testing and validation.
 |-------|--------|
 | S7.13.13: Test checkpoint/resume after crash | Pending |
 | S7.13.14: Add `process_vector_docker` job | Pending |
+
+---
+
+### AzCopy Integration for Docker Worker (F7.24)
+**Status**: PLANNED
+**Priority**: MEDIUM - Performance optimization (5-10x speedup)
+**Details**: [/V0.8_COPY.md](/V0.8_COPY.md)
+**Created**: 29 JAN 2026
+
+**Problem**: Current `stream_blob_to_mount()` and `stream_mount_to_blob()` use Python Azure SDK with 32MB chunked transfers, limited by Python's GIL.
+
+**Solution**: Integrate AzCopy (Go-based CLI) for 5-10x faster blob ↔ Azure Files transfers.
+
+| Phase | Description | Status |
+|-------|-------------|--------|
+| Phase 1 | Add AzCopy to Dockerfile | Pending |
+| Phase 2 | Submit eService for RBAC role | Pending |
+| Phase 3 | Create `infrastructure/azcopy.py` wrapper | Pending |
+| Phase 4 | Add `_fast` methods to BlobRepository | Pending |
+| Phase 5 | Wire to `raster_cog.py` | Pending |
+
+**Effort**: ~1 hour implementation + eService lead time for RBAC
+
+**Prerequisite**: eService request for "Storage File Data Privileged Contributor" role on Docker worker managed identity (template in V0.8_COPY.md)
 
 ---
 

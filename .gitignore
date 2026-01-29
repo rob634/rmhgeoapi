@@ -143,6 +143,8 @@ testing/
 test*
 *Test*
 Test*
+# Exception: V0.8 testing documentation
+!docs_claude/V0.8_TESTING_PLAN.md
 .claude*
 .vscode*
 old_reference*

@@ -164,11 +164,17 @@ def extract_classification(result: dict) -> str:
 # Approval is linked to job_id (source of truth), not STAC (downstream metadata).
 # STAC item/collection IDs are optional enrichment, added when available.
 APPROVAL_REQUIRED_JOB_TYPES = {
-    'process_vector',           # Function App vector ETL
-    'vector_docker_etl',        # Docker vector ETL
-    'process_raster_v2',        # Function App single raster
-    'process_raster_collection', # Function App tiled/collection raster
-    'raster_docker_etl',        # Docker raster ETL (if exists)
+    # Vector jobs
+    'process_vector',               # Function App vector ETL
+    'vector_docker_etl',            # Docker vector ETL
+    # Raster jobs - Function App
+    'process_raster_v2',            # Function App single raster
+    'process_large_raster_v2',      # Function App large raster
+    'process_raster_collection',    # Function App collection (legacy name)
+    'process_raster_collection_v2', # Function App collection v2
+    # Raster jobs - Docker
+    'process_raster_docker',        # Docker single raster
+    'process_large_raster_docker',  # Docker large raster
 }
 
 

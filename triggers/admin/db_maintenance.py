@@ -112,6 +112,7 @@ class AdminDbMaintenanceTrigger:
         "rebuild": "_rebuild",  # Consolidated rebuild (08 JAN 2026)
         "cleanup": "_cleanup_old_records",
         "ensure": "_ensure_tables",  # Additive schema sync (16 JAN 2026)
+        "nuke_geo": "_nuke_geo_tables",  # Drop all geo user tables (30 JAN 2026) - DEV ONLY
         # Legacy aliases (deprecated - will be removed in future version)
         "full-rebuild": "_rebuild",  # Alias for backward compatibility
     }
@@ -185,12 +186,14 @@ class AdminDbMaintenanceTrigger:
         POST /api/dbadmin/maintenance?action=rebuild&target=pgstac&confirm=yes # pgSTAC only (with warning)
         POST /api/dbadmin/maintenance?action=ensure&confirm=yes               # Additive - create missing tables/indexes
         POST /api/dbadmin/maintenance?action=cleanup&confirm=yes&days=30      # Clean old records
+        POST /api/dbadmin/maintenance?action=nuke_geo&confirm=yes             # DEV ONLY - Drop all geo user tables
 
         Query Parameters:
             action: Operation to perform (required)
                 - rebuild: Rebuild schema(s) - RECOMMENDED for fresh start
                 - ensure: Additive sync - creates missing tables/indexes without dropping (SAFE)
                 - cleanup: Remove old completed jobs/tasks
+                - nuke_geo: DEV ONLY - Cascade delete all user tables in geo schema
             target: Schema target for rebuild (default: all)
                 - all: Both app+pgstac schemas (RECOMMENDED - maintains referential integrity)
                 - app: Application schema only (jobs, tasks) - WARNING: may orphan STAC items
@@ -212,7 +215,7 @@ class AdminDbMaintenanceTrigger:
                 return func.HttpResponse(
                     body=json.dumps({
                         'error': "action parameter required",
-                        'valid_actions': ['rebuild', 'ensure', 'cleanup'],
+                        'valid_actions': ['rebuild', 'ensure', 'cleanup', 'nuke_geo'],
                         'usage': 'POST /api/dbadmin/maintenance?action=ensure&confirm=yes',
                         'recommended': 'Use action=ensure for safe additive updates, action=rebuild for fresh start',
                         'timestamp': datetime.now(timezone.utc).isoformat()
@@ -225,7 +228,7 @@ class AdminDbMaintenanceTrigger:
                 return func.HttpResponse(
                     body=json.dumps({
                         'error': f"Invalid action: '{action}'",
-                        'valid_actions': ['rebuild', 'ensure', 'cleanup'],
+                        'valid_actions': ['rebuild', 'ensure', 'cleanup', 'nuke_geo'],
                         'usage': 'POST /api/dbadmin/maintenance?action=ensure&confirm=yes',
                         'timestamp': datetime.now(timezone.utc).isoformat()
                     }),
@@ -2045,6 +2048,19 @@ class AdminDbMaintenanceTrigger:
     def _check_geo_orphans(self, req: func.HttpRequest) -> func.HttpResponse:
         """Delegates to GeoTableOperations.check_geo_orphans."""
         return self.geo_table_ops.check_geo_orphans(req)
+
+    def _nuke_geo_tables(self, req: func.HttpRequest) -> func.HttpResponse:
+        """
+        DEV ONLY - Cascade delete ALL user tables in geo schema.
+
+        POST /api/dbadmin/maintenance?action=nuke_geo&confirm=yes
+
+        Preserves system tables (table_catalog, table_metadata, feature_collection_styles).
+        Deletes: STAC items → catalog entries → ETL tracking → geo tables.
+
+        NOT FOR PRODUCTION - no audit trail, immediate deletion.
+        """
+        return self.geo_table_ops.nuke_geo_tables(req)
 
 
 # Create singleton instance

@@ -361,18 +361,24 @@ def asset_to_dto(asset: Any) -> AssetDTO:
 
     Works with the V0.8 GeospatialAsset model.
 
+    V0.8 Migration (30 JAN 2026):
+    - Reads DDH identifiers from asset.platform_refs instead of explicit fields
+
     Args:
         asset: GeospatialAsset instance
 
     Returns:
         AssetDTO with mapped fields
     """
+    # V0.8: Get DDH identifiers from platform_refs
+    platform_refs = getattr(asset, 'platform_refs', {}) or {}
+
     return AssetDTO(
-        # Identity
+        # Identity - V0.8: from platform_refs
         asset_id=asset.asset_id,
-        dataset_id=asset.dataset_id,
-        resource_id=asset.resource_id,
-        version_id=asset.version_id,
+        dataset_id=platform_refs.get('dataset_id', ''),
+        resource_id=platform_refs.get('resource_id', ''),
+        version_id=platform_refs.get('version_id', ''),
 
         # Type
         data_type=asset.data_type,

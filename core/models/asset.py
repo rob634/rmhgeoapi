@@ -4,7 +4,7 @@
 # EPOCH: 4 - ACTIVE
 # STATUS: Core - First-class entity for Platform API data model
 # PURPOSE: Define GeospatialAsset and related models for V0.8 entity architecture
-# LAST_REVIEWED: 29 JAN 2026
+# LAST_REVIEWED: 30 JAN 2026 (DDH column migration)
 # EXPORTS: ApprovalState, ClearanceState, ProcessingStatus, GeospatialAsset, AssetRevision
 # DEPENDENCIES: pydantic, datetime, uuid
 # ============================================================================
@@ -26,7 +26,7 @@ Design Decisions (documented in V0.8_ENTITIES.md):
     - Entity created on request receipt (before job runs)
     - Soft delete with deleted_at for audit trail
     - Advisory locks for concurrent request handling
-    - Deterministic asset_id from DDH identifiers
+    - Deterministic asset_id from platform_id + platform_refs (V0.8 migration)
 
 Tables Auto-Generated (stored in app schema):
     - app.geospatial_assets
@@ -115,7 +115,12 @@ class GeospatialAsset(BaseModel):
     Tracks the full lifecycle: creation -> approval -> clearance -> deletion.
 
     Table: app.geospatial_assets
-    Primary Key: asset_id (deterministic from dataset_id|resource_id|version_id)
+    Primary Key: asset_id (deterministic from platform_id + platform_refs)
+
+    V0.8 Migration (30 JAN 2026):
+        - Removed explicit DDH columns (dataset_id, resource_id, version_id)
+        - All platform identification via platform_id + platform_refs (JSONB)
+        - Use platform_refs for queries: WHERE platform_refs @> '{"dataset_id": "X"}'
 
     DDL generation uses __sql_* class attributes for model-driven schema.
 
@@ -143,10 +148,13 @@ class GeospatialAsset(BaseModel):
         "current_job_id": "app.jobs(job_id)"
     }
     __sql_unique_constraints: ClassVar[List[Dict[str, Any]]] = [
-        {"columns": ["dataset_id", "resource_id", "version_id"], "name": "uq_assets_identity"}
+        # V0.8 Migration: Uniqueness now via platform_id + platform_refs
+        # Note: JSONB unique constraint handled via application logic + GIN index
+        # The GIN index on platform_refs enables efficient containment queries
     ]
     __sql_indexes: ClassVar[List[Dict[str, Any]]] = [
-        {"columns": ["dataset_id", "resource_id", "version_id"], "name": "idx_assets_identity"},
+        # V0.8 Migration: Removed idx_assets_identity (DDH columns removed)
+        # Platform identification via GIN index on platform_refs
         {"columns": ["stac_item_id"], "name": "idx_assets_stac_item"},
         {"columns": ["approval_state"], "name": "idx_assets_approval"},
         {"columns": ["clearance_state"], "name": "idx_assets_clearance"},
@@ -210,28 +218,6 @@ class GeospatialAsset(BaseModel):
     platform_refs: Dict[str, Any] = Field(
         default_factory=dict,
         description="Platform-specific identifiers as JSONB for flexible queries"
-    )
-
-    # =========================================================================
-    # DDH IDENTIFIERS (Kept for backward compatibility during migration)
-    # =========================================================================
-    # These mirror values in platform_refs for DDH platform.
-    # Eventually can be deprecated once all queries use platform_refs.
-    # =========================================================================
-    dataset_id: str = Field(
-        ...,
-        max_length=255,
-        description="DDH dataset identifier (mirrored in platform_refs)"
-    )
-    resource_id: str = Field(
-        ...,
-        max_length=255,
-        description="DDH resource identifier (mirrored in platform_refs)"
-    )
-    version_id: str = Field(
-        ...,
-        max_length=100,
-        description="DDH version identifier (mirrored in platform_refs)"
     )
 
     # =========================================================================
@@ -450,87 +436,56 @@ class GeospatialAsset(BaseModel):
     # HELPER METHODS
     # =========================================================================
     @staticmethod
-    def generate_asset_id(
-        dataset_id: str = None,
-        resource_id: str = None,
-        version_id: str = None,
-        platform_id: str = None,
-        platform_refs: Dict[str, Any] = None
-    ) -> str:
+    def generate_asset_id(platform_id: str, platform_refs: Dict[str, Any]) -> str:
         """
         Generate deterministic asset ID from platform identifiers.
 
-        V0.8 Enhancement (29 JAN 2026):
-        - New signature: generate_asset_id(platform_id="ddh", platform_refs={...})
-        - Legacy signature: generate_asset_id(dataset_id, resource_id, version_id)
-          (automatically converted to platform_refs for DDH)
+        V0.8 Migration (30 JAN 2026):
+        - Removed legacy (dataset_id, resource_id, version_id) signature
+        - All callers must use (platform_id, platform_refs) signature
 
         Args:
-            dataset_id: DDH dataset identifier (legacy)
-            resource_id: DDH resource identifier (legacy)
-            version_id: DDH version identifier (legacy)
-            platform_id: Platform identifier (new)
-            platform_refs: Platform-specific identifiers (new)
+            platform_id: Platform identifier (e.g., "ddh")
+            platform_refs: Platform-specific identifiers as dict
 
         Returns:
             32-character hex string (truncated SHA256)
 
         Example:
-            # New style
             generate_asset_id(
                 platform_id="ddh",
                 platform_refs={"dataset_id": "IDN_lulc", "resource_id": "jakarta", "version_id": "v1"}
             )
-            # Legacy style (backward compatible)
-            generate_asset_id("IDN_lulc", "jakarta", "v1")
         """
         import json
 
-        # Handle legacy signature (DDH-specific)
-        if dataset_id and not platform_refs:
-            platform_id = "ddh"
-            platform_refs = {
-                "dataset_id": dataset_id,
-                "resource_id": resource_id,
-                "version_id": version_id
-            }
-
-        if not platform_id or not platform_refs:
-            raise ValueError("Must provide either (dataset_id, resource_id, version_id) or (platform_id, platform_refs)")
+        if not platform_id:
+            raise ValueError("platform_id is required")
+        if not platform_refs:
+            raise ValueError("platform_refs is required")
 
         # Sort keys for deterministic ordering
         sorted_refs = json.dumps(platform_refs, sort_keys=True, separators=(',', ':'))
         composite = f"{platform_id}|{sorted_refs}"
         return hashlib.sha256(composite.encode()).hexdigest()[:32]
 
-    @staticmethod
-    def generate_asset_id_ddh(dataset_id: str, resource_id: str, version_id: str) -> str:
+    def get_ddh_refs(self) -> Dict[str, str]:
         """
-        Generate asset ID for DDH platform (backward compatible helper).
-
-        Equivalent to:
-            generate_asset_id(platform_id="ddh", platform_refs={
-                "dataset_id": dataset_id,
-                "resource_id": resource_id,
-                "version_id": version_id
-            })
-
-        Args:
-            dataset_id: DDH dataset identifier
-            resource_id: DDH resource identifier
-            version_id: DDH version identifier
+        Get DDH-specific refs from platform_refs (convenience method).
 
         Returns:
-            32-character hex string (truncated SHA256)
+            Dict with dataset_id, resource_id, version_id (empty strings if not present)
+
+        Raises:
+            ValueError: If platform_id is not "ddh"
         """
-        return GeospatialAsset.generate_asset_id(
-            platform_id="ddh",
-            platform_refs={
-                "dataset_id": dataset_id,
-                "resource_id": resource_id,
-                "version_id": version_id
-            }
-        )
+        if self.platform_id != "ddh":
+            raise ValueError(f"get_ddh_refs() only valid for DDH platform, got: {self.platform_id}")
+        return {
+            "dataset_id": self.platform_refs.get("dataset_id", ""),
+            "resource_id": self.platform_refs.get("resource_id", ""),
+            "version_id": self.platform_refs.get("version_id", ""),
+        }
 
     def is_active(self) -> bool:
         """Check if asset is not deleted."""
@@ -577,9 +532,6 @@ class GeospatialAsset(BaseModel):
             'asset_id': self.asset_id,
             'platform_id': self.platform_id,
             'platform_refs': self.platform_refs,
-            'dataset_id': self.dataset_id,
-            'resource_id': self.resource_id,
-            'version_id': self.version_id,
             'data_type': self.data_type,
             'table_name': self.table_name,
             'blob_path': self.blob_path,

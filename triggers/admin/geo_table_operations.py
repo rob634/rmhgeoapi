@@ -638,3 +638,219 @@ class GeoTableOperations:
             status_code=status_code,
             mimetype='application/json'
         )
+
+    def nuke_geo_tables(self, req: func.HttpRequest) -> func.HttpResponse:
+        """
+        DEV ONLY - Cascade delete ALL user tables in geo schema.
+
+        POST /api/dbadmin/maintenance?action=nuke_geo&confirm=yes
+
+        This is a DESTRUCTIVE operation that:
+        1. Lists all user tables in geo schema (excludes system tables)
+        2. For each table: deletes STAC item → catalog entry → ETL tracking → drops table
+        3. Truncates geo.table_catalog and app.vector_etl_tracking
+
+        System tables preserved:
+        - geo.table_catalog (truncated, not dropped)
+        - geo.table_metadata (legacy, if exists)
+        - geo.feature_collection_styles
+
+        NOT FOR PRODUCTION - no audit trail, immediate deletion.
+
+        Query Parameters:
+            confirm: Must be "yes" to execute
+
+        Returns:
+            JSON with deletion summary and any warnings
+        """
+        confirm = req.params.get('confirm')
+
+        # Require confirmation
+        if confirm != 'yes':
+            return func.HttpResponse(
+                body=json.dumps({
+                    "error": "Confirmation required",
+                    "message": "Add &confirm=yes to execute this DESTRUCTIVE operation",
+                    "warning": "This will DELETE ALL user tables in geo schema, their STAC items, and catalog entries",
+                    "usage": "POST /api/dbadmin/maintenance?action=nuke_geo&confirm=yes",
+                    "dev_only": True
+                }),
+                status_code=400,
+                mimetype='application/json'
+            )
+
+        logger.warning("🔥 NUKE GEO: Starting cascade delete of ALL geo user tables...")
+
+        result = {
+            "success": False,
+            "action": "nuke_geo",
+            "deleted": {
+                "tables": [],
+                "stac_items": [],
+                "catalog_entries": 0,
+                "etl_tracking_entries": 0
+            },
+            "preserved": {
+                "system_tables": ["table_catalog", "table_metadata", "feature_collection_styles"]
+            },
+            "warnings": [],
+            "errors": []
+        }
+
+        try:
+            repo = PostgreSQLRepository()
+
+            with repo._get_connection() as conn:
+                with conn.cursor() as cur:
+                    # =========================================================
+                    # STEP 1: Get list of user tables to delete
+                    # =========================================================
+                    cur.execute("""
+                        SELECT table_name
+                        FROM information_schema.tables
+                        WHERE table_schema = 'geo'
+                        AND table_type = 'BASE TABLE'
+                        AND table_name NOT IN ('table_catalog', 'table_metadata', 'feature_collection_styles')
+                        ORDER BY table_name
+                    """)
+                    user_tables = [row['table_name'] for row in cur.fetchall()]
+
+                    logger.info(f"🔥 NUKE GEO: Found {len(user_tables)} user tables to delete")
+
+                    if not user_tables:
+                        result["success"] = True
+                        result["message"] = "No user tables found in geo schema - nothing to delete"
+                        return func.HttpResponse(
+                            body=json.dumps(result, default=str, indent=2),
+                            status_code=200,
+                            mimetype='application/json'
+                        )
+
+                    # =========================================================
+                    # STEP 2: Check if pgstac.items exists for STAC cleanup
+                    # =========================================================
+                    cur.execute("""
+                        SELECT EXISTS (
+                            SELECT 1 FROM information_schema.tables
+                            WHERE table_schema = 'pgstac' AND table_name = 'items'
+                        ) as pgstac_exists
+                    """)
+                    pgstac_exists = cur.fetchone()['pgstac_exists']
+
+                    # =========================================================
+                    # STEP 3: Build STAC item ID lookup from catalog
+                    # =========================================================
+                    stac_item_ids = {}
+                    cur.execute("""
+                        SELECT EXISTS (
+                            SELECT 1 FROM information_schema.tables
+                            WHERE table_schema = 'geo' AND table_name = 'table_catalog'
+                        ) as catalog_exists
+                    """)
+                    catalog_exists = cur.fetchone()['catalog_exists']
+
+                    if catalog_exists:
+                        cur.execute("""
+                            SELECT table_name, stac_item_id
+                            FROM geo.table_catalog
+                            WHERE stac_item_id IS NOT NULL
+                        """)
+                        for row in cur.fetchall():
+                            stac_item_ids[row['table_name']] = row['stac_item_id']
+
+                    # =========================================================
+                    # STEP 4: Delete STAC items (batch delete)
+                    # =========================================================
+                    if pgstac_exists and stac_item_ids:
+                        stac_ids_to_delete = list(stac_item_ids.values())
+                        logger.info(f"🔥 NUKE GEO: Deleting {len(stac_ids_to_delete)} STAC items...")
+
+                        try:
+                            cur.execute("SAVEPOINT stac_delete_batch")
+                            cur.execute("""
+                                DELETE FROM pgstac.items
+                                WHERE id = ANY(%s)
+                                RETURNING id
+                            """, (stac_ids_to_delete,))
+                            deleted_stac = [row['id'] for row in cur.fetchall()]
+                            result["deleted"]["stac_items"] = deleted_stac
+                            cur.execute("RELEASE SAVEPOINT stac_delete_batch")
+                            logger.info(f"🔥 NUKE GEO: Deleted {len(deleted_stac)} STAC items")
+                        except Exception as stac_err:
+                            cur.execute("ROLLBACK TO SAVEPOINT stac_delete_batch")
+                            result["warnings"].append(f"STAC batch delete failed: {stac_err}")
+                            logger.warning(f"STAC batch delete failed: {stac_err}")
+
+                    # =========================================================
+                    # STEP 5: Truncate catalog and ETL tracking
+                    # =========================================================
+                    if catalog_exists:
+                        cur.execute("SELECT COUNT(*) FROM geo.table_catalog")
+                        catalog_count = cur.fetchone()['count']
+                        cur.execute("TRUNCATE TABLE geo.table_catalog")
+                        result["deleted"]["catalog_entries"] = catalog_count
+                        logger.info(f"🔥 NUKE GEO: Truncated geo.table_catalog ({catalog_count} rows)")
+
+                    # Check and truncate ETL tracking
+                    cur.execute("""
+                        SELECT EXISTS (
+                            SELECT 1 FROM information_schema.tables
+                            WHERE table_schema = 'app' AND table_name = 'vector_etl_tracking'
+                        ) as etl_tracking_exists
+                    """)
+                    etl_tracking_exists = cur.fetchone()['etl_tracking_exists']
+
+                    if etl_tracking_exists:
+                        cur.execute("SELECT COUNT(*) FROM app.vector_etl_tracking")
+                        etl_count = cur.fetchone()['count']
+                        cur.execute("TRUNCATE TABLE app.vector_etl_tracking")
+                        result["deleted"]["etl_tracking_entries"] = etl_count
+                        logger.info(f"🔥 NUKE GEO: Truncated app.vector_etl_tracking ({etl_count} rows)")
+
+                    # =========================================================
+                    # STEP 6: Drop all user tables
+                    # =========================================================
+                    logger.info(f"🔥 NUKE GEO: Dropping {len(user_tables)} tables...")
+
+                    for table_name in user_tables:
+                        try:
+                            cur.execute(
+                                sql.SQL("DROP TABLE IF EXISTS {schema}.{table} CASCADE").format(
+                                    schema=sql.Identifier("geo"),
+                                    table=sql.Identifier(table_name)
+                                )
+                            )
+                            result["deleted"]["tables"].append(table_name)
+                            logger.debug(f"Dropped geo.{table_name}")
+                        except Exception as drop_err:
+                            result["errors"].append(f"Failed to drop {table_name}: {drop_err}")
+                            logger.error(f"Failed to drop geo.{table_name}: {drop_err}")
+
+                    conn.commit()
+
+            result["success"] = True
+            result["message"] = f"Deleted {len(result['deleted']['tables'])} tables from geo schema"
+
+            logger.warning(
+                f"🔥 NUKE GEO COMPLETE: "
+                f"{len(result['deleted']['tables'])} tables, "
+                f"{len(result['deleted']['stac_items'])} STAC items, "
+                f"{result['deleted']['catalog_entries']} catalog entries"
+            )
+
+            return func.HttpResponse(
+                body=json.dumps(result, default=str, indent=2),
+                status_code=200,
+                mimetype='application/json'
+            )
+
+        except Exception as e:
+            logger.error(f"🔥 NUKE GEO FAILED: {e}")
+            logger.error(traceback.format_exc())
+            result["error"] = str(e)
+            result["error_type"] = type(e).__name__
+            return func.HttpResponse(
+                body=json.dumps(result, default=str, indent=2),
+                status_code=500,
+                mimetype='application/json'
+            )

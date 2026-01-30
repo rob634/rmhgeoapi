@@ -63,26 +63,21 @@ This file references other documents containing implementation details. This is 
 - [ ] **Test External Service Registry** - `/api/jobs/services/register`, list, health check
 
 ### Geo Schema Emergency Management (MEDIUM PRIORITY)
-**Status**: PLANNED
+**Status**: ✅ DONE (30 JAN 2026)
 **Priority**: MEDIUM - Testing/DEV enhancement for V0.8 validation
 **Pattern**: NOT for production - emergency override for dev/QA only
 
-**Problem**: When testing fails catastrophically or data is corrupted, there's no quick way to clear all geo tables. Currently must unpublish each table individually via `/api/dbadmin/geo?action=unpublish&table_name={name}&confirm=yes`.
+**Endpoint**: `POST /api/dbadmin/maintenance?action=nuke_geo&confirm=yes`
 
-**Proposed Solution**: Add "geo nuke" endpoint similar to STAC nuke pattern.
+Cascade deletes ALL user tables in geo schema:
+1. Deletes STAC items from pgstac.items
+2. Truncates geo.table_catalog
+3. Truncates app.vector_etl_tracking
+4. Drops all user tables (preserves system tables)
 
-| Action | Endpoint | Behavior |
-|--------|----------|----------|
-| `nuke_geo` | `POST /api/dbadmin/geo?action=nuke&confirm=yes` | Drop ALL tables in geo schema, truncate vector_metadata |
+**Preserved system tables**: `table_catalog`, `table_metadata`, `feature_collection_styles`
 
-**Implementation**:
-- Add to `triggers/admin/geo_table_operations.py`
-- Follow STAC nuke pattern in `triggers/admin/stac_nuke.py`
-- Require `confirm=yes` parameter
-- Log warning about destructive action
-- Return list of dropped tables
-
-**Reference**: Existing single-table endpoint works: `POST /api/dbadmin/geo?action=unpublish&table_name={name}&confirm=yes`
+**Reference**: Single-table endpoint also available: `POST /api/dbadmin/geo?action=unpublish&table_name={name}&confirm=yes`
 
 ---
 

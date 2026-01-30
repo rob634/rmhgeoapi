@@ -259,6 +259,7 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
 
         # =====================================================================
         # V0.8 ENTITY ARCHITECTURE: Create/Update GeospatialAsset (29 JAN 2026)
+        # V0.8 DDH Migration (30 JAN 2026): Uses platform_id + platform_refs
         # =====================================================================
         # Asset is created BEFORE job runs. This ensures:
         # 1. Asset exists for all requests (even failed jobs)
@@ -270,10 +271,16 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
             # Get submitter for audit trail (optional - from request or B2B app header)
             submitted_by = req_body.get('submitted_by') or req.headers.get('X-Submitted-By')
 
+            # Build platform_refs from DDH request fields
+            platform_refs = {
+                "dataset_id": platform_req.dataset_id,
+                "resource_id": platform_req.resource_id,
+                "version_id": platform_req.version_id
+            }
+
             asset, asset_operation = asset_service.create_or_update_asset(
-                dataset_id=platform_req.dataset_id,
-                resource_id=platform_req.resource_id,
-                version_id=platform_req.version_id,
+                platform_id="ddh",
+                platform_refs=platform_refs,
                 data_type=platform_req.data_type.value,
                 stac_item_id=job_params.get('stac_item_id', generate_stac_item_id(
                     platform_req.dataset_id,

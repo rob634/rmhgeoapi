@@ -1513,8 +1513,9 @@ $$""").format(
             sql.Identifier("update_updated_at_column")
         ))
 
-        # 6. upsert_geospatial_asset function (V0.8 Entity Architecture - 29 JAN 2026)
+        # 6. upsert_geospatial_asset function (V0.8 Entity Architecture - 30 JAN 2026)
         # Uses advisory locks to serialize concurrent requests for the same asset
+        # V0.8: Uses platform_id + platform_refs instead of explicit DDH columns
         body_upsert_asset = """
 DECLARE
     v_existing RECORD;
@@ -1559,16 +1560,14 @@ BEGIN
 
             RETURN QUERY SELECT 'reactivated'::VARCHAR(20), v_existing.revision + 1, NULL::TEXT;
         ELSE
-            -- Create new asset (30 JAN 2026: added platform_id, platform_refs with defaults)
+            -- Create new asset (V0.8: platform_id + platform_refs only, no DDH columns)
             INSERT INTO {schema}.geospatial_assets (
                 asset_id, platform_id, platform_refs,
-                dataset_id, resource_id, version_id,
                 data_type, stac_item_id, stac_collection_id,
                 table_name, blob_path,
                 revision, approval_state, clearance_state
             ) VALUES (
-                p_asset_id, 'ddh', '{{}}'::jsonb,
-                p_dataset_id, p_resource_id, p_version_id,
+                p_asset_id, p_platform_id, p_platform_refs,
                 p_data_type, p_stac_item_id, p_stac_collection_id,
                 p_table_name, p_blob_path,
                 1, 'pending_review'::{schema}.approval_state, 'uncleared'::{schema}.clearance_state
@@ -1630,9 +1629,8 @@ END;
         functions.append(sql.SQL("""
 CREATE OR REPLACE FUNCTION {}.{}(
     p_asset_id VARCHAR(64),
-    p_dataset_id VARCHAR(255),
-    p_resource_id VARCHAR(255),
-    p_version_id VARCHAR(100),
+    p_platform_id VARCHAR(50),
+    p_platform_refs JSONB,
     p_data_type VARCHAR(20),
     p_stac_item_id VARCHAR(200),
     p_stac_collection_id VARCHAR(200),

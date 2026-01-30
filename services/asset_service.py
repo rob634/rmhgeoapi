@@ -4,7 +4,7 @@
 # EPOCH: 4 - ACTIVE
 # STATUS: Service - Business logic for geospatial assets
 # PURPOSE: Orchestrate asset lifecycle: create, approve, reject, delete
-# LAST_REVIEWED: 29 JAN 2026
+# LAST_REVIEWED: 30 JAN 2026 (DDH column migration)
 # EXPORTS: AssetService, AssetExistsError
 # DEPENDENCIES: infrastructure.asset_repository, infrastructure.revision_repository
 # ============================================================================
@@ -51,13 +51,12 @@ logger = LoggerFactory.create_logger(ComponentType.SERVICE, "AssetService")
 class AssetExistsError(Exception):
     """Raised when asset already exists and overwrite=False."""
 
-    def __init__(self, asset_id: str, dataset_id: str, resource_id: str, version_id: str):
+    def __init__(self, asset_id: str, platform_id: str, platform_refs: Dict[str, Any]):
         self.asset_id = asset_id
-        self.dataset_id = dataset_id
-        self.resource_id = resource_id
-        self.version_id = version_id
+        self.platform_id = platform_id
+        self.platform_refs = platform_refs
         super().__init__(
-            f"Asset already exists for {dataset_id}/{resource_id}/{version_id}. "
+            f"Asset already exists for {platform_id}: {platform_refs}. "
             f"Use overwrite=True to replace. Existing asset_id: {asset_id}"
         )
 
@@ -96,16 +95,22 @@ class AssetService:
     - Job linking
     - Revision history
 
+    V0.8 Migration (30 JAN 2026):
+    - Changed from DDH-specific params to platform_id + platform_refs
+
     Usage:
         from services.asset_service import AssetService
 
         service = AssetService()
 
-        # Create or update asset
+        # Create or update asset (V0.8 signature)
         result = service.create_or_update_asset(
-            dataset_id="flood-2024",
-            resource_id="site-a",
-            version_id="v1.0",
+            platform_id="ddh",
+            platform_refs={
+                "dataset_id": "flood-2024",
+                "resource_id": "site-a",
+                "version_id": "v1.0"
+            },
             data_type="raster",
             stac_item_id="flood-2024-site-a-v10",
             stac_collection_id="flood-2024",
@@ -131,9 +136,8 @@ class AssetService:
 
     def create_or_update_asset(
         self,
-        dataset_id: str,
-        resource_id: str,
-        version_id: str,
+        platform_id: str,
+        platform_refs: Dict[str, Any],
         data_type: str,
         stac_item_id: str,
         stac_collection_id: str,
@@ -146,12 +150,13 @@ class AssetService:
         """
         Create a new asset or update existing with overwrite.
 
-        Uses advisory locks via database function to handle concurrent requests.
+        V0.8 Migration (30 JAN 2026):
+        - Changed from DDH-specific params to platform_id + platform_refs
+        - Uses advisory locks via database function to handle concurrent requests
 
         Args:
-            dataset_id: DDH dataset identifier
-            resource_id: DDH resource identifier
-            version_id: DDH version identifier
+            platform_id: Platform identifier (e.g., "ddh")
+            platform_refs: Platform-specific identifiers as dict
             data_type: 'vector' or 'raster'
             stac_item_id: STAC item identifier
             stac_collection_id: STAC collection identifier
@@ -172,19 +177,18 @@ class AssetService:
         """
         clearance_info = f", clearance={clearance_level.value}" if clearance_level else ""
         logger.info(
-            f"Creating/updating asset for {dataset_id}/{resource_id}/{version_id} "
+            f"Creating/updating asset for {platform_id}: {platform_refs} "
             f"(type={data_type}, overwrite={overwrite}{clearance_info})"
         )
 
         # Generate deterministic asset_id
-        asset_id = GeospatialAsset.generate_asset_id(dataset_id, resource_id, version_id)
+        asset_id = GeospatialAsset.generate_asset_id(platform_id, platform_refs)
 
         # Use upsert function (handles advisory locks internally)
         operation, new_revision, error_message = self._asset_repo.upsert(
             asset_id=asset_id,
-            dataset_id=dataset_id,
-            resource_id=resource_id,
-            version_id=version_id,
+            platform_id=platform_id,
+            platform_refs=platform_refs,
             data_type=data_type,
             stac_item_id=stac_item_id,
             stac_collection_id=stac_collection_id,
@@ -195,7 +199,7 @@ class AssetService:
 
         if error_message:
             # Asset exists and overwrite=False
-            raise AssetExistsError(asset_id, dataset_id, resource_id, version_id)
+            raise AssetExistsError(asset_id, platform_id, platform_refs)
 
         # Fetch the created/updated asset
         asset = self._asset_repo.get_by_id(asset_id)
@@ -225,9 +229,8 @@ class AssetService:
 
     def get_or_create_asset(
         self,
-        dataset_id: str,
-        resource_id: str,
-        version_id: str,
+        platform_id: str,
+        platform_refs: Dict[str, Any],
         data_type: str,
         stac_item_id: str,
         stac_collection_id: str,
@@ -239,10 +242,12 @@ class AssetService:
 
         Idempotent - safe to call multiple times.
 
+        V0.8 Migration (30 JAN 2026):
+        - Changed from DDH-specific params to platform_id + platform_refs
+
         Args:
-            dataset_id: DDH dataset identifier
-            resource_id: DDH resource identifier
-            version_id: DDH version identifier
+            platform_id: Platform identifier (e.g., "ddh")
+            platform_refs: Platform-specific identifiers as dict
             data_type: 'vector' or 'raster'
             stac_item_id: STAC item identifier
             stac_collection_id: STAC collection identifier
@@ -253,7 +258,7 @@ class AssetService:
             Tuple of (GeospatialAsset, created) where created is True if new
         """
         # Check if asset exists
-        asset_id = GeospatialAsset.generate_asset_id(dataset_id, resource_id, version_id)
+        asset_id = GeospatialAsset.generate_asset_id(platform_id, platform_refs)
         existing = self._asset_repo.get_active_by_id(asset_id)
 
         if existing:
@@ -262,9 +267,8 @@ class AssetService:
 
         # Create new asset
         asset, _ = self.create_or_update_asset(
-            dataset_id=dataset_id,
-            resource_id=resource_id,
-            version_id=version_id,
+            platform_id=platform_id,
+            platform_refs=platform_refs,
             data_type=data_type,
             stac_item_id=stac_item_id,
             stac_collection_id=stac_collection_id,
@@ -286,14 +290,25 @@ class AssetService:
         """Get an active (not deleted) asset by ID."""
         return self._asset_repo.get_active_by_id(asset_id)
 
-    def get_asset_by_identity(
+    def get_asset_by_platform_refs(
         self,
-        dataset_id: str,
-        resource_id: str,
-        version_id: str
+        platform_id: str,
+        platform_refs: Dict[str, Any]
     ) -> Optional[GeospatialAsset]:
-        """Get an asset by DDH identity."""
-        return self._asset_repo.get_by_identity(dataset_id, resource_id, version_id)
+        """
+        Get an asset by exact platform_refs match.
+
+        V0.8 Migration (30 JAN 2026):
+        - Replaces get_asset_by_identity() which used DDH columns
+
+        Args:
+            platform_id: Platform identifier (e.g., "ddh")
+            platform_refs: Exact platform_refs to match
+
+        Returns:
+            GeospatialAsset if found, None otherwise
+        """
+        return self._asset_repo.get_by_platform_refs_exact(platform_id, platform_refs)
 
     def get_asset_by_stac_item(self, stac_item_id: str) -> Optional[GeospatialAsset]:
         """Get an asset by STAC item ID."""
@@ -391,23 +406,22 @@ class AssetService:
         logger.info(f"Linked job {job_id} to asset {asset_id}")
         return asset
 
-    def link_job_by_identity(
+    def link_job_by_platform_refs(
         self,
-        dataset_id: str,
-        resource_id: str,
-        version_id: str,
+        platform_id: str,
+        platform_refs: Dict[str, Any],
         job_id: str,
         content_hash: Optional[str] = None
     ) -> GeospatialAsset:
         """
-        Link a job to an asset by DDH identity.
+        Link a job to an asset by platform_refs.
 
-        Convenience method that looks up asset by identity first.
+        V0.8 Migration (30 JAN 2026):
+        - Replaces link_job_by_identity() which used DDH columns
 
         Args:
-            dataset_id: DDH dataset identifier
-            resource_id: DDH resource identifier
-            version_id: DDH version identifier
+            platform_id: Platform identifier (e.g., "ddh")
+            platform_refs: Platform-specific identifiers
             job_id: Job that is processing this asset
             content_hash: Optional content hash of source file
 
@@ -417,11 +431,11 @@ class AssetService:
         Raises:
             AssetNotFoundError: If asset not found
         """
-        asset = self._asset_repo.get_by_identity(dataset_id, resource_id, version_id)
+        asset = self._asset_repo.get_by_platform_refs_exact(platform_id, platform_refs)
         if not asset:
             raise AssetNotFoundError(
-                f"{dataset_id}/{resource_id}/{version_id}",
-                "identity"
+                f"{platform_id}: {platform_refs}",
+                "platform_refs"
             )
 
         return self.link_job_to_asset(asset.asset_id, job_id, content_hash)
@@ -586,20 +600,21 @@ class AssetService:
         logger.warning(f"Soft deleted asset {asset_id} by {deleted_by}")
         return asset
 
-    def soft_delete_by_identity(
+    def soft_delete_by_platform_refs(
         self,
-        dataset_id: str,
-        resource_id: str,
-        version_id: str,
+        platform_id: str,
+        platform_refs: Dict[str, Any],
         deleted_by: str
     ) -> GeospatialAsset:
         """
-        Soft delete an asset by DDH identity.
+        Soft delete an asset by platform_refs.
+
+        V0.8 Migration (30 JAN 2026):
+        - Replaces soft_delete_by_identity() which used DDH columns
 
         Args:
-            dataset_id: DDH dataset identifier
-            resource_id: DDH resource identifier
-            version_id: DDH version identifier
+            platform_id: Platform identifier (e.g., "ddh")
+            platform_refs: Platform-specific identifiers
             deleted_by: Who is deleting
 
         Returns:
@@ -608,11 +623,11 @@ class AssetService:
         Raises:
             AssetNotFoundError: If asset not found
         """
-        asset = self._asset_repo.get_by_identity(dataset_id, resource_id, version_id)
+        asset = self._asset_repo.get_by_platform_refs_exact(platform_id, platform_refs)
         if not asset:
             raise AssetNotFoundError(
-                f"{dataset_id}/{resource_id}/{version_id}",
-                "identity"
+                f"{platform_id}: {platform_refs}",
+                "platform_refs"
             )
 
         return self.soft_delete(asset.asset_id, deleted_by)
@@ -855,12 +870,16 @@ class AssetService:
 
     def generate_asset_id(
         self,
-        dataset_id: str,
-        resource_id: str,
-        version_id: str
+        platform_id: str,
+        platform_refs: Dict[str, Any]
     ) -> str:
-        """Generate deterministic asset ID from DDH identifiers."""
-        return GeospatialAsset.generate_asset_id(dataset_id, resource_id, version_id)
+        """
+        Generate deterministic asset ID from platform identifiers.
+
+        V0.8 Migration (30 JAN 2026):
+        - Changed signature to use platform_id + platform_refs
+        """
+        return GeospatialAsset.generate_asset_id(platform_id, platform_refs)
 
 
 # ============================================================================

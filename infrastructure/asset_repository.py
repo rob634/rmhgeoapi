@@ -4,7 +4,7 @@
 # EPOCH: 4 - ACTIVE
 # STATUS: Infrastructure - GeospatialAsset CRUD operations
 # PURPOSE: Database operations for app.geospatial_assets table
-# LAST_REVIEWED: 29 JAN 2026
+# LAST_REVIEWED: 30 JAN 2026 (DDH column migration)
 # EXPORTS: GeospatialAssetRepository
 # DEPENDENCIES: psycopg, core.models.asset
 # ============================================================================
@@ -68,9 +68,8 @@ class GeospatialAssetRepository(PostgreSQLRepository):
     def upsert(
         self,
         asset_id: str,
-        dataset_id: str,
-        resource_id: str,
-        version_id: str,
+        platform_id: str,
+        platform_refs: Dict[str, Any],
         data_type: str,
         stac_item_id: str,
         stac_collection_id: str,
@@ -81,14 +80,14 @@ class GeospatialAssetRepository(PostgreSQLRepository):
         """
         Upsert a geospatial asset using the database function.
 
-        Uses advisory locks to serialize concurrent requests for the same asset.
-        Returns operation result (created/updated/exists/reactivated).
+        V0.8 Migration (30 JAN 2026):
+        - Changed from DDH-specific params to platform_id + platform_refs
+        - Uses advisory locks to serialize concurrent requests for the same asset
 
         Args:
-            asset_id: Deterministic ID from DDH identifiers
-            dataset_id: DDH dataset identifier
-            resource_id: DDH resource identifier
-            version_id: DDH version identifier
+            asset_id: Deterministic ID from platform_id + platform_refs
+            platform_id: Platform identifier (e.g., "ddh")
+            platform_refs: Platform-specific identifiers as dict
             data_type: 'vector' or 'raster'
             stac_item_id: STAC item identifier
             stac_collection_id: STAC collection identifier
@@ -102,18 +101,19 @@ class GeospatialAssetRepository(PostgreSQLRepository):
             - new_revision: Current revision number
             - error_message: None on success, error text on 'exists'
         """
-        logger.info(f"Upserting asset: {asset_id} (overwrite={overwrite})")
+        import json
+        logger.info(f"Upserting asset: {asset_id} (platform={platform_id}, overwrite={overwrite})")
 
         with self._get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     sql.SQL("""
                         SELECT * FROM {}.upsert_geospatial_asset(
-                            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                            %s, %s, %s, %s, %s, %s, %s, %s, %s
                         )
                     """).format(sql.Identifier(self.schema)),
                     (
-                        asset_id, dataset_id, resource_id, version_id,
+                        asset_id, platform_id, json.dumps(platform_refs),
                         data_type, stac_item_id, stac_collection_id,
                         table_name, blob_path, overwrite
                     )
@@ -143,6 +143,9 @@ class GeospatialAssetRepository(PostgreSQLRepository):
         Note: Prefer upsert() for normal operations as it handles
         concurrency and revision tracking automatically.
 
+        V0.8 Migration (30 JAN 2026):
+        - Uses platform_id + platform_refs instead of DDH columns
+
         Args:
             asset: GeospatialAsset model to insert
 
@@ -152,6 +155,7 @@ class GeospatialAssetRepository(PostgreSQLRepository):
         Raises:
             ValueError: If asset_id already exists
         """
+        import json
         logger.info(f"Creating asset directly: {asset.asset_id}")
 
         with self._get_connection() as conn:
@@ -171,7 +175,7 @@ class GeospatialAssetRepository(PostgreSQLRepository):
                 cur.execute(
                     sql.SQL("""
                         INSERT INTO {}.{} (
-                            asset_id, dataset_id, resource_id, version_id,
+                            asset_id, platform_id, platform_refs,
                             data_type, table_name, blob_path,
                             stac_item_id, stac_collection_id,
                             revision, current_job_id, content_hash,
@@ -180,7 +184,7 @@ class GeospatialAssetRepository(PostgreSQLRepository):
                             deleted_at, deleted_by,
                             created_at, updated_at
                         ) VALUES (
-                            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                         )
                         RETURNING *
                     """).format(
@@ -188,7 +192,7 @@ class GeospatialAssetRepository(PostgreSQLRepository):
                         sql.Identifier(self.table)
                     ),
                     (
-                        asset.asset_id, asset.dataset_id, asset.resource_id, asset.version_id,
+                        asset.asset_id, asset.platform_id, json.dumps(asset.platform_refs),
                         asset.data_type, asset.table_name, asset.blob_path,
                         asset.stac_item_id, asset.stac_collection_id,
                         asset.revision, asset.current_job_id, asset.content_hash,
@@ -257,35 +261,45 @@ class GeospatialAssetRepository(PostgreSQLRepository):
                 row = cur.fetchone()
                 return self._row_to_model(row) if row else None
 
-    def get_by_identity(
+    def get_by_platform_refs_exact(
         self,
-        dataset_id: str,
-        resource_id: str,
-        version_id: str
+        platform_id: str,
+        platform_refs: Dict[str, Any]
     ) -> Optional[GeospatialAsset]:
         """
-        Get an asset by DDH identity (dataset_id, resource_id, version_id).
+        Get an asset by exact platform_refs match (JSONB equality).
+
+        V0.8 Migration (30 JAN 2026):
+        - Replaces get_by_identity() which used DDH columns
 
         Args:
-            dataset_id: DDH dataset identifier
-            resource_id: DDH resource identifier
-            version_id: DDH version identifier
+            platform_id: Platform identifier (e.g., "ddh")
+            platform_refs: Exact platform_refs to match
 
         Returns:
             GeospatialAsset if found, None otherwise
+
+        Example:
+            asset = repo.get_by_platform_refs_exact("ddh", {
+                "dataset_id": "IDN_lulc",
+                "resource_id": "jakarta",
+                "version_id": "v1.0"
+            })
         """
+        import json
         with self._get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     sql.SQL("""
                         SELECT * FROM {}.{}
-                        WHERE dataset_id = %s AND resource_id = %s AND version_id = %s
+                        WHERE platform_id = %s
+                          AND platform_refs = %s
                           AND deleted_at IS NULL
                     """).format(
                         sql.Identifier(self.schema),
                         sql.Identifier(self.table)
                     ),
-                    (dataset_id, resource_id, version_id)
+                    (platform_id, json.dumps(platform_refs))
                 )
                 row = cur.fetchone()
                 return self._row_to_model(row) if row else None
@@ -1022,7 +1036,13 @@ class GeospatialAssetRepository(PostgreSQLRepository):
     # =========================================================================
 
     def _row_to_model(self, row: Dict[str, Any]) -> GeospatialAsset:
-        """Convert database row to GeospatialAsset model."""
+        """
+        Convert database row to GeospatialAsset model.
+
+        V0.8 Migration (30 JAN 2026):
+        - Removed DDH column mappings (dataset_id, resource_id, version_id)
+        - Uses platform_id + platform_refs for identification
+        """
         # Parse approval_state
         approval_state_value = row.get('approval_state', 'pending_review')
         try:
@@ -1046,9 +1066,9 @@ class GeospatialAssetRepository(PostgreSQLRepository):
 
         return GeospatialAsset(
             asset_id=row['asset_id'],
-            dataset_id=row['dataset_id'],
-            resource_id=row['resource_id'],
-            version_id=row['version_id'],
+            # V0.8: Platform identification via platform_id + platform_refs
+            platform_id=row.get('platform_id', 'ddh'),
+            platform_refs=row.get('platform_refs', {}),
             data_type=row['data_type'],
             table_name=row.get('table_name'),
             blob_path=row.get('blob_path'),
@@ -1072,9 +1092,6 @@ class GeospatialAssetRepository(PostgreSQLRepository):
             deleted_by=row.get('deleted_by'),
             created_at=row.get('created_at'),
             updated_at=row.get('updated_at'),
-            # Platform Registry (29 JAN 2026)
-            platform_id=row.get('platform_id', 'ddh'),
-            platform_refs=row.get('platform_refs', {}),
             # DAG Orchestration (29 JAN 2026)
             workflow_id=row.get('workflow_id'),
             workflow_version=row.get('workflow_version'),

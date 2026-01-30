@@ -201,6 +201,38 @@ class PlatformProperties(BaseModel):
         description="Client application identifier"
     )
 
+    @classmethod
+    def from_platform_refs(
+        cls,
+        platform_refs: Dict[str, Any],
+        request_id: Optional[str] = None,
+        access_level: Optional[AccessLevel] = None,
+        client: str = "ddh"
+    ) -> "PlatformProperties":
+        """
+        Create PlatformProperties from platform_refs dict.
+
+        V0.8 Migration (30 JAN 2026):
+        - Factory method to create from GeospatialAsset.platform_refs
+
+        Args:
+            platform_refs: Dict with dataset_id, resource_id, version_id
+            request_id: Optional platform request ID
+            access_level: Optional access level
+            client: Client identifier (default: "ddh")
+
+        Returns:
+            PlatformProperties instance
+        """
+        return cls(
+            dataset_id=platform_refs.get("dataset_id"),
+            resource_id=platform_refs.get("resource_id"),
+            version_id=platform_refs.get("version_id"),
+            request_id=request_id,
+            access_level=access_level,
+            client=client
+        )
+
     def to_flat_dict(self) -> Dict[str, Any]:
         """Convert to flat dict with namespaced keys."""
         result = {}

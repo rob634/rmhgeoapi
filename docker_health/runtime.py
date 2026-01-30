@@ -78,8 +78,10 @@ class RuntimeSubsystem(WorkerSubsystem):
         # Check GDAL
         components["gdal"] = self._check_gdal()
 
-        # Check imports
-        components["imports"] = self._check_imports()
+        # Check imports - COMMENTED OUT (29 JAN 2026)
+        # Lazy-loaded modules (rasterio) cause false warnings. The Docker Worker
+        # can only respond if imports succeeded, making this check redundant.
+        # components["imports"] = self._check_imports()
 
         # Check deployment config
         components["deployment_config"] = self._check_deployment_config()

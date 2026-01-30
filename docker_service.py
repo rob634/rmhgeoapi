@@ -1271,7 +1271,7 @@ def interface_health(request: Request):
     # Get Function App URL for cross-system health (GAP-01)
     function_app_url = ''
     try:
-        function_app_url = config.platform.etl_app_base_url or ''
+        function_app_url = config.etl_app_base_url or ''
         if function_app_url and not function_app_url.startswith('http'):
             function_app_url = f'https://{function_app_url}'
     except Exception:
@@ -2661,7 +2661,7 @@ async def proxy_function_app_health():
 
     try:
         config = get_config()
-        fa_url = config.platform.etl_app_base_url
+        fa_url = config.etl_app_base_url  # Fixed: was config.etl_app_base_url
 
         if not fa_url:
             return {
@@ -2718,7 +2718,7 @@ async def proxy_function_app_dbstats():
 
     try:
         config = get_config()
-        fa_url = config.platform.etl_app_base_url
+        fa_url = config.etl_app_base_url
 
         if not fa_url:
             return {"error": "Function App URL not configured"}

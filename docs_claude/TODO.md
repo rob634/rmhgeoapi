@@ -2,7 +2,7 @@
 **This file contains high level items only**
 This file references other documents containing implementation details. This is to avoid a 50,000 line TODO.md. This file should not exceed 500 lines.
 
-**Last Updated**: 29 JAN 2026
+**Last Updated**: 30 JAN 2026
 **Source of Truth**: [docs/epics/README.md](/docs/epics/README.md) - Epic/Feature/Story definitions
 **Purpose**: Sprint-level task tracking and delegation (INDEX format)
 
@@ -27,6 +27,7 @@ This file references other documents containing implementation details. This is 
 | [REFACTOR_TRIGGER_PLATFORM.md](./REFACTOR_TRIGGER_PLATFORM.md) | trigger_platform.py split plan |
 | [/V0.8_COPY.md](/V0.8_COPY.md) | AzCopy integration for 5-10x faster blob transfers |
 | [/V0.8_DAG_READINESS.md](/V0.8_DAG_READINESS.md) | DAG orchestration readiness assessment (Epoch 5 prep) |
+| [/V0.8_DDH_MIGRATION.md](/V0.8_DDH_MIGRATION.md) | **DDH column removal - platform_refs migration** |
 
 ---
 

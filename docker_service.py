@@ -3867,455 +3867,58 @@ def readiness_probe():
     }
 
 
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║  HEALTH SUBSYSTEM ARCHITECTURE - 29 JAN 2026 - V0.8.1.1                   ║
+# ║                                                                           ║
+# ║  Refactored to use modular subsystem architecture anticipating dual       ║
+# ║  queue systems: Classic Worker (existing) + DAG Worker (future).          ║
+# ║                                                                           ║
+# ║  Subsystems:                                                              ║
+# ║  - SharedInfrastructureSubsystem: Database, Storage, Service Bus          ║
+# ║  - RuntimeSubsystem: Hardware, GDAL, ETL Mount, Deployment                ║
+# ║  - ClassicWorkerSubsystem: Queue worker, Auth, Lifecycle                  ║
+# ║  - DAGWorkerSubsystem: Future DAG workflow processing (stub)              ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+
 @app.get("/health")
 def health_check():
     """
-    Detailed health check endpoint.
+    Detailed health check endpoint using subsystem architecture.
 
-    Returns comprehensive health information including:
-    - Hardware metrics (CPU, memory, platform)
-    - Token status (TTL, expiry)
-    - Database connectivity
-    - Storage connectivity
-    - Background worker status
+    Returns comprehensive health information from all subsystems:
+    - SharedInfrastructure: Database, Storage, Service Bus
+    - Runtime: Hardware, GDAL, ETL Mount, Deployment
+    - ClassicWorker: Queue worker, Auth tokens, Lifecycle
+    - DAGWorker: Future DAG workflow processing (currently disabled)
 
-    Format matches Function App /api/health for compatibility with health.js UI.
+    Format maintains compatibility with health.js UI while adding
+    subsystem-level grouping for operational visibility.
 
     Returns:
-        Detailed health status with components structure
+        Detailed health status with components and subsystems structure
     """
-    import platform
-    import psutil
+    from docker_health import get_all_subsystems, HealthAggregator
 
-    from infrastructure.auth import get_token_status
-    from config import get_config, __version__
+    # Get all subsystems with dependencies injected
+    subsystems = get_all_subsystems(
+        queue_worker=queue_worker,
+        worker_lifecycle=worker_lifecycle,
+        token_refresh_worker=token_refresh_worker,
+        etl_mount_status=_etl_mount_status,
+        dag_processor=None,  # Future: inject DAG processor when implemented
+    )
 
-    config = get_config()
-    timestamp = datetime.now(timezone.utc)
+    # Aggregate health from all subsystems
+    aggregator = HealthAggregator(subsystems)
+    response, overall_status = aggregator.get_health()
 
-    # Get token status
-    token_status = get_token_status()
-
-    # Test connectivity
-    db_status = test_database_connectivity()
-    storage_status = test_storage_connectivity()
-
-    # Hardware metrics (same format as Function App - 12 JAN 2026)
-    memory = psutil.virtual_memory()
-    process = psutil.Process()
-    mem_info = process.memory_info()
-    total_ram_gb = round(memory.total / (1024**3), 1)
-
-    hardware = {
-        "cpu_count": psutil.cpu_count(),
-        "total_ram_gb": total_ram_gb,
-        "platform": platform.system(),
-        "python_version": platform.python_version(),
-        "azure_site_name": os.environ.get("WEBSITE_SITE_NAME", "docker-worker"),
-        "azure_sku": os.environ.get("WEBSITE_SKU", "Container"),
-    }
-
-    # Instance info for log correlation (matches Function App pattern)
-    instance = {
-        "container_id": os.environ.get("HOSTNAME", "unknown")[:12],
-        "website_instance_id": os.environ.get("WEBSITE_INSTANCE_ID", "local")[:8],
-        "instance_id_short": os.environ.get("WEBSITE_INSTANCE_ID", "local")[:8],
-        "app_name": os.environ.get("APP_NAME", "docker-worker"),
-    }
-
-    # Process info
-    try:
-        create_time = datetime.fromtimestamp(process.create_time(), tz=timezone.utc)
-        uptime_seconds = (datetime.now(timezone.utc) - create_time).total_seconds()
-    except Exception:
-        uptime_seconds = 0
-
-    process_info = {
-        "pid": process.pid,
-        "uptime_seconds": round(uptime_seconds),
-        "uptime_human": f"{int(uptime_seconds // 3600)}h {int((uptime_seconds % 3600) // 60)}m",
-        "threads": process.num_threads(),
-    }
-
-    # Memory stats (system and process)
-    memory_stats = {
-        "system_total_gb": total_ram_gb,
-        "system_available_mb": round(memory.available / (1024**2), 1),
-        "system_percent": round(memory.percent, 1),
-        "process_rss_mb": round(mem_info.rss / (1024**2), 1),
-        "process_vms_mb": round(mem_info.vms / (1024**2), 1),
-        "process_percent": round(process.memory_percent(), 2),
-        "cpu_percent": round(psutil.cpu_percent(interval=0.1), 1),
-    }
-
-    # Capacity thresholds (same as Function App)
-    capacity = {
-        "safe_file_limit_mb": round((total_ram_gb * 1024) / 4, 0),
-        "warning_threshold_percent": 80,
-        "critical_threshold_percent": 90,
-    }
-
-    # Connection pool stats (F7.18)
-    try:
-        from infrastructure.connection_pool import ConnectionPoolManager
-        pool_stats = ConnectionPoolManager.get_pool_stats()
-    except Exception as e:
-        pool_stats = {"error": str(e)}
-
-    # ETL mount status (V0.8)
-    etl_mount_info = _etl_mount_status or {}
-
-    # Queue worker status
-    queue_status = queue_worker.get_status()
-    token_refresh_status = token_refresh_worker.get_status()
-
-    # =========================================================================
-    # BUILD COMPONENTS (health.js compatible format)
-    # =========================================================================
-    # Each component needs: status, description, details, checked_at
-    # _source tag indicates grouping: "docker_worker" or "function_app"
-
-    components = {}
-
-    # =========================================================================
-    # DOCKER WORKER CORE COMPONENTS
-    # =========================================================================
-
-    # Runtime component (Container environment - primary Docker Worker component)
-    components["runtime"] = {
-        "status": "healthy",
-        "description": "Docker container runtime environment",
-        "checked_at": timestamp.isoformat(),
-        "_source": "docker_worker",
-        "details": {
-            "hardware": hardware,
-            "instance": instance,
-            "process": process_info,
-            "memory": memory_stats,
-            "capacity": capacity,
-        }
-    }
-
-    # ETL Mount component (V0.8 - critical for large file processing)
-    mount_enabled = etl_mount_info.get("mount_enabled", False)
-    mount_validated = etl_mount_info.get("validated", False)
-    mount_degraded = etl_mount_info.get("degraded", False)
-    if mount_enabled and mount_validated:
-        mount_status = "healthy"
-    elif mount_degraded:
-        mount_status = "warning"
-    elif not mount_enabled:
-        mount_status = "disabled"
-    else:
-        mount_status = "unhealthy"
-
-    components["etl_mount"] = {
-        "status": mount_status,
-        "description": "Azure Files mount for large raster processing",
-        "checked_at": timestamp.isoformat(),
-        "_source": "docker_worker",
-        "details": {
-            "mount_enabled": mount_enabled,
-            "mount_path": etl_mount_info.get("mount_path", "N/A"),
-            "validated": mount_validated,
-            "disk_space": etl_mount_info.get("disk_space"),
-            "message": etl_mount_info.get("message"),
-            "error": etl_mount_info.get("error"),
-        }
-    }
-
-    # Queue Worker component (Service Bus consumer)
-    # Init failure = UNHEALTHY (broken app), not running = WARNING
-    queue_running = queue_status.get("running", False)
-    queue_init_failed = queue_status.get("init_failed", False)
-    if queue_init_failed:
-        queue_worker_status = "unhealthy"  # Broken - can't process tasks
-    elif queue_running:
-        queue_worker_status = "healthy"
-    else:
-        queue_worker_status = "warning"  # Not running yet but may start
-
-    components["queue_worker"] = {
-        "status": queue_worker_status,
-        "description": "Service Bus long-running-tasks consumer",
-        "checked_at": timestamp.isoformat(),
-        "_source": "docker_worker",
-        "details": {
-            "queue_name": queue_status.get("queue_name", "N/A"),
-            "running": queue_running,
-            "healthy": queue_worker.is_healthy(),
-            "init_failed": queue_init_failed,
-            "init_error": queue_status.get("init_error"),
-            "messages_processed": queue_status.get("messages_processed", 0),
-            "started_at": queue_status.get("started_at"),
-            "last_poll_time": queue_status.get("last_poll_time"),
-            "last_error": queue_status.get("last_error"),
-            "shutdown_signaled": queue_status.get("shutdown_signaled", False),
-            "uses_shared_shutdown": queue_status.get("uses_shared_shutdown", True),
-        }
-    }
-
-    # Authentication tokens component
-    pg_token = token_status.get("postgres", {})
-    storage_token = token_status.get("storage", {})
-    tokens_healthy = pg_token.get("has_token", False)
-    components["auth_tokens"] = {
-        "status": "healthy" if tokens_healthy else "unhealthy",
-        "description": "OAuth tokens for PostgreSQL and Storage",
-        "checked_at": timestamp.isoformat(),
-        "_source": "docker_worker",
-        "details": {
-            "postgres": {
-                "has_token": pg_token.get("has_token", False),
-                "ttl_minutes": pg_token.get("ttl_minutes"),
-            },
-            "storage": {
-                "has_token": storage_token.get("has_token", False),
-            },
-            "token_refresh_worker": {
-                "running": token_refresh_status.get("running", False),
-                "refresh_count": token_refresh_status.get("refresh_count", 0),
-                "last_refresh": token_refresh_status.get("last_refresh"),
-            },
-        }
-    }
-
-    # Connection pool component
-    pool_has_error = "error" in pool_stats
-    components["connection_pool"] = {
-        "status": "healthy" if not pool_has_error else "warning",
-        "description": "PostgreSQL connection pool (psycopg)",
-        "checked_at": timestamp.isoformat(),
-        "_source": "docker_worker",
-        "details": pool_stats,
-    }
-
-    # Lifecycle component (graceful shutdown status)
+    # Determine if we should return 503
+    # Unhealthy OR shutting down = 503 (prevents new traffic during shutdown)
     lifecycle_status = worker_lifecycle.get_status()
     is_shutting_down = lifecycle_status.get("shutdown_initiated", False)
-    components["lifecycle"] = {
-        "status": "warning" if is_shutting_down else "healthy",
-        "description": "Graceful shutdown and signal handling",
-        "checked_at": timestamp.isoformat(),
-        "_source": "docker_worker",
-        "details": lifecycle_status,
-    }
 
-    # GDAL Configuration component
-    gdal_config = {}
-    try:
-        from osgeo import gdal
-        gdal_config = {
-            "version": gdal.__version__,
-            "cpl_tmpdir": os.environ.get("CPL_TMPDIR", "default"),
-            "gdal_data": os.environ.get("GDAL_DATA", "default"),
-            "proj_lib": os.environ.get("PROJ_LIB", "default"),
-        }
-        gdal_status = "healthy"
-    except Exception as e:
-        gdal_config = {"error": str(e)}
-        gdal_status = "unhealthy"
-
-    components["gdal"] = {
-        "status": gdal_status,
-        "description": "GDAL geospatial library configuration",
-        "checked_at": timestamp.isoformat(),
-        "_source": "docker_worker",
-        "details": gdal_config,
-    }
-
-    # =========================================================================
-    # SHARED INFRASTRUCTURE COMPONENTS (accessed by both apps)
-    # =========================================================================
-
-    # Database component
-    db_connected = db_status.get("connected", False)
-    components["database"] = {
-        "status": "healthy" if db_connected else "unhealthy",
-        "description": "PostgreSQL connection",
-        "checked_at": timestamp.isoformat(),
-        "_source": "function_app",  # Shared but owned by Function App
-        "details": {
-            "host": config.database.host,
-            "database": db_status.get("database", config.database.database),
-            "user": db_status.get("user", "N/A"),
-            "version": db_status.get("version", "N/A"),
-            "managed_identity": config.database.use_managed_identity,
-            "error": db_status.get("error") if not db_connected else None,
-        }
-    }
-
-    # Storage component
-    storage_connected = storage_status.get("connected", False)
-    components["storage_containers"] = {
-        "status": "healthy" if storage_connected else "unhealthy",
-        "description": "Azure Blob Storage (Silver zone)",
-        "checked_at": timestamp.isoformat(),
-        "_source": "function_app",  # Shared but owned by Function App
-        "details": {
-            "account": storage_status.get("account", config.storage.silver.account_name),
-            "containers_accessible": storage_status.get("containers_accessible", False),
-            "error": storage_status.get("error") if not storage_connected else None,
-        }
-    }
-
-    # Service Bus component (shared queue infrastructure)
-    components["service_bus"] = {
-        "status": "healthy" if queue_running else "warning",
-        "description": "Azure Service Bus queues",
-        "checked_at": timestamp.isoformat(),
-        "_source": "function_app",  # Shared but owned by Function App
-        "details": {
-            "namespace": config.queues.namespace,
-            "long_running_queue": queue_status.get("queue_name", "N/A"),
-            "worker_connected": queue_running,
-        }
-    }
-
-    # =========================================================================
-    # ADDITIONAL COMPONENTS (for health.js COMPONENT_MAPPING compatibility)
-    # These are marked as disabled/N/A for Docker Worker context
-    # =========================================================================
-
-    # Jobs component (expected by comp-orchestrator)
-    components["jobs"] = {
-        "status": "disabled",
-        "description": "Job orchestration (Function App only)",
-        "checked_at": timestamp.isoformat(),
-        "_source": "function_app",
-        "details": {
-            "note": "Docker Worker processes tasks, not jobs",
-            "context": "docker_worker",
-        }
-    }
-
-    # Imports component (expected by comp-io-worker, comp-compute-worker)
-    components["imports"] = {
-        "status": "healthy",
-        "description": "Python dependencies loaded",
-        "checked_at": timestamp.isoformat(),
-        "_source": "docker_worker",
-        "details": {
-            "python_version": platform.python_version(),
-            "context": "docker_worker",
-        }
-    }
-
-    # Pgstac component (expected by comp-output-tables)
-    components["pgstac"] = {
-        "status": "healthy" if db_connected else "unhealthy",
-        "description": "STAC catalog (via database)",
-        "checked_at": timestamp.isoformat(),
-        "_source": "function_app",
-        "details": {
-            "note": "Accessed via shared PostgreSQL database",
-            "database_connected": db_connected,
-        }
-    }
-
-    # TiTiler component (expected by comp-titiler)
-    titiler_url = getattr(config, 'titiler_base_url', None) or ''
-    components["titiler"] = {
-        "status": "disabled",
-        "description": "TiTiler-pgstac (external service)",
-        "checked_at": timestamp.isoformat(),
-        "_source": "function_app",
-        "details": {
-            "url": titiler_url,
-            "note": "External raster tile service",
-        }
-    }
-
-    # OGC Features component (expected by comp-ogc-features)
-    components["ogc_features"] = {
-        "status": "disabled",
-        "description": "OGC Features API (Function App only)",
-        "checked_at": timestamp.isoformat(),
-        "_source": "function_app",
-        "details": {
-            "note": "Served by Function App, not Docker Worker",
-        }
-    }
-
-    # Deployment config component (expected by comp-platform-api)
-    components["deployment_config"] = {
-        "status": "healthy",
-        "description": "Docker Worker deployment",
-        "checked_at": timestamp.isoformat(),
-        "_source": "docker_worker",
-        "details": {
-            "hostname": os.environ.get("WEBSITE_HOSTNAME", "docker-worker"),
-            "container_id": os.environ.get("HOSTNAME", "unknown")[:12],
-            "sku": os.environ.get("WEBSITE_SKU", "Container"),
-        }
-    }
-
-    # =========================================================================
-    # OVERALL STATUS
-    # =========================================================================
-    # Queue worker init failure = UNHEALTHY (can't do its job)
-    # Mount degraded = WARNING (reduced capability, not broken)
-    healthy = db_connected and not is_shutting_down and not queue_init_failed
-    if is_shutting_down:
-        status = "unhealthy"
-    elif queue_init_failed:
-        status = "unhealthy"
-    elif healthy:
-        status = "healthy"
-    else:
-        status = "unhealthy"
-
-    # Build errors list
-    errors = []
-    if not db_connected:
-        errors.append(f"Database: {db_status.get('error', 'Not connected')}")
-    if not storage_connected:
-        errors.append(f"Storage: {storage_status.get('error', 'Not connected')}")
-    if is_shutting_down:
-        errors.append("Worker is shutting down")
-    if queue_init_failed:
-        errors.append(f"Queue worker init failed: {queue_status.get('init_error', 'Unknown error')}")
-    if mount_degraded:
-        errors.append(f"ETL mount degraded: {etl_mount_info.get('error', 'mount unavailable')}")
-
-    # Environment info (for health.js renderEnvironmentInfo)
-    environment = {
-        "version": __version__,
-        "environment": os.environ.get("ENVIRONMENT", "dev"),
-        "debug_mode": os.environ.get("DEBUG_MODE", "false").lower() == "true",
-        "hostname": os.environ.get("WEBSITE_HOSTNAME", os.environ.get("HOSTNAME", "docker-worker")),
-    }
-
-    response = {
-        "status": status,
-        "timestamp": timestamp.isoformat(),
-        "errors": errors,
-        "environment": environment,
-        "components": components,
-        # Legacy fields for backward compatibility
-        "version": __version__,
-        "lifecycle": lifecycle_status,
-        "tokens": token_status,
-        "connectivity": {
-            "database": db_status,
-            "storage": storage_status,
-        },
-        "background_workers": {
-            "token_refresh": token_refresh_status,
-            "queue_worker": queue_status,
-        },
-        "connection_pool": pool_stats,
-        "runtime": {
-            "hardware": hardware,
-            "instance": instance,
-            "process": process_info,
-            "memory": memory_stats,
-            "capacity": capacity,
-        },
-    }
-
-    # Return 503 if unhealthy OR shutting down (prevents new traffic during shutdown)
-    if not healthy or is_shutting_down:
+    if overall_status == "unhealthy" or is_shutting_down:
         return JSONResponse(status_code=503, content=response)
 
     return response

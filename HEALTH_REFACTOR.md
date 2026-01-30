@@ -1,8 +1,9 @@
 # Health Check Refactoring Plan
 
 **Created**: 29 JAN 2026
-**Status**: PLANNED
+**Status**: COMPLETE - All 7 Phases Done (19 checks in plugin architecture)
 **Priority**: Medium (technical debt reduction)
+**Last Updated**: 29 JAN 2026
 
 ---
 
@@ -320,152 +321,205 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
 
 ## Implementation Phases
 
-### Phase 1: Foundation (Estimated: 1 session)
+### Phase 1: Foundation - COMPLETE (29 JAN 2026)
 
 **Goal**: Create plugin infrastructure without breaking existing functionality.
 
 **Tasks**:
-1. Create `triggers/health_checks/` directory
-2. Create `base.py` with `HealthCheckPlugin` base class
-3. Create `__init__.py` with plugin registry
-4. Create empty plugin files with class stubs
-5. **Test**: Verify existing health endpoint still works
+1. [x] Create `triggers/health_checks/` directory
+2. [x] Create `base.py` with `HealthCheckPlugin` base class
+3. [x] Create `__init__.py` with plugin registry
+4. [x] Create empty plugin files with class stubs
+5. [x] **Test**: Verify existing health endpoint still works
 
 **Files Created**:
-- `triggers/health_checks/__init__.py`
-- `triggers/health_checks/base.py`
-- `triggers/health_checks/infrastructure.py` (stub)
-- `triggers/health_checks/database.py` (stub)
-- `triggers/health_checks/external_services.py` (stub)
-- `triggers/health_checks/application.py` (stub)
-- `triggers/health_checks/startup.py` (stub)
+- `triggers/health_checks/__init__.py` - Plugin registry with `get_all_plugins()`
+- `triggers/health_checks/base.py` - `HealthCheckPlugin` ABC with `check_component_health()`
+- `triggers/health_checks/infrastructure.py` (stub) - Priority 30
+- `triggers/health_checks/database.py` (stub) - Priority 40
+- `triggers/health_checks/external_services.py` (stub) - Priority 50
+- `triggers/health_checks/application.py` (stub) - Priority 20
+- `triggers/health_checks/startup.py` (stub) - Priority 10
 
-**Validation**:
-```bash
-# Local import test
-python -c "from triggers.health_checks import get_all_plugins; print(get_all_plugins())"
+**Validation Results**:
+```
+=== Health Check Plugin Architecture Test ===
+Registered plugins: 5
 
-# Existing health endpoint still works
-curl http://localhost:7071/api/health
+  [10] startup              - 0 checks, 0 parallel
+  [20] application          - 0 checks, 0 parallel
+  [30] infrastructure       - 0 checks, 0 parallel
+  [40] database             - 0 checks, 0 parallel
+  [50] external_services    - 0 checks, 0 parallel
+
+All imports successful!
+HealthCheckTrigger initialized: health_check
+Existing health.py still works!
 ```
 
 ---
 
-### Phase 2: Application Checks (Estimated: 1 session)
+### Phase 2: Application Checks - COMPLETE (29 JAN 2026)
 
 **Goal**: Migrate smallest category first as proof of concept.
 
-**Methods to Move**:
-- `_check_app_mode` (~60 lines)
-- `_check_endpoint_registration` (~120 lines)
-- `_check_jobs_registry` (~35 lines)
+**Methods Migrated**:
+- [x] `check_app_mode` (~60 lines)
+- [x] `check_endpoint_registration` (~120 lines)
+- [x] `check_jobs_registry` (~35 lines)
 
-**Total**: ~215 lines → `application.py`
+**Total**: ~290 lines → `application.py`
 
-**Tasks**:
-1. Copy methods to `application.py`
-2. Adapt to use `check_component_health` from base class
-3. Update `health.py` to call plugin instead of local methods
-4. Remove migrated methods from `health.py`
-5. **Test**: Verify application checks work
-
-**Validation**:
-```bash
-# Check that application components appear in health response
-curl http://localhost:7071/api/health | jq '.components | keys' | grep -E "app_mode|endpoint|jobs"
+**Validation Results**:
+```
+  [20] application          - 3 sequential, 0 parallel = 3 total
+       - app_mode
+       - endpoint_registration
+       - jobs
 ```
 
 ---
 
-### Phase 3: Startup Checks (Estimated: 1 session)
+### Phase 3: Startup Checks - COMPLETE (29 JAN 2026)
 
 **Goal**: Migrate startup-related checks.
 
-**Methods to Move**:
-- `_check_deployment_config` (~120 lines)
-- `_check_startup_validation` (~80 lines)
-- `_check_import_validation` (~55 lines)
-- `_check_runtime_environment` (~150 lines)
+**Methods Migrated**:
+- [x] `check_deployment_config` (~120 lines)
+- [x] `check_startup_validation` (~80 lines)
+- [x] `check_import_validation` (~55 lines)
+- [x] `check_runtime_environment` (~150 lines)
 
-**Total**: ~405 lines → `startup.py`
+**Total**: ~450 lines → `startup.py`
 
-**Validation**:
-```bash
-curl http://localhost:7071/api/health | jq '.components | keys' | grep -E "deployment|startup|import|runtime"
+**Validation Results**:
+```
+  [10] startup              - 4 sequential, 0 parallel = 4 total
+       - deployment_config
+       - startup_validation
+       - imports
+       - runtime
 ```
 
 ---
 
-### Phase 4: External Services (Estimated: 1 session)
+### Phase 4: External Services - COMPLETE (29 JAN 2026)
 
 **Goal**: Migrate I/O-bound checks that run in parallel.
 
-**Methods to Move**:
-- `_check_geotiler_health` (~200 lines)
-- `_check_ogc_features_health` (~80 lines)
-- `_check_docker_worker_health` (~80 lines)
+**Methods Migrated**:
+- [x] `check_geotiler_health` (~200 lines)
+- [x] `check_ogc_features_health` (~80 lines)
+- [x] `check_docker_worker_health` (~80 lines)
 
-**Total**: ~360 lines → `external_services.py`
+**Total**: ~425 lines → `external_services.py`
 
-**Special Consideration**: These use `_run_checks_parallel()`. The plugin should override `get_parallel_checks()` instead of `get_checks()`.
+**Special Feature**: Uses `get_parallel_checks()` for I/O-bound parallel execution.
 
-**Validation**:
-```bash
-curl http://localhost:7071/api/health | jq '.components | keys' | grep -E "geotiler|ogc|docker"
+**Validation Results**:
 ```
+  [50] external_services    - 0 sequential, 2 parallel = 2 total
+       - geotiler (parallel)
+       - ogc_features (parallel)
+```
+
+Note: docker_worker only appears when DOCKER_WORKER_ENABLED=true
 
 ---
 
-### Phase 5: Infrastructure Checks (Estimated: 1 session)
+### Phase 5: Infrastructure Checks - COMPLETE (29 JAN 2026)
 
 **Goal**: Migrate infrastructure-related checks.
 
-**Methods to Move**:
-- `_check_storage_containers` (~125 lines)
-- `_check_service_bus_queues` (~300 lines)
-- `_check_network_environment` (~170 lines)
+**Methods Migrated**:
+- [x] `check_storage_containers` (~175 lines)
+- [x] `check_service_bus_queues` (~285 lines) + helper `_get_service_bus_fix_recommendation`
+- [x] `check_network_environment` (~140 lines)
 
-**Total**: ~595 lines → `infrastructure.py`
+**Total**: ~630 lines → `infrastructure.py`
 
-**Validation**:
-```bash
-curl http://localhost:7071/api/health | jq '.components | keys' | grep -E "storage|service_bus|network"
+**Validation Results**:
+```
+  [30] infrastructure       - 3 sequential, 0 parallel = 3 total
+       - storage_containers
+       - service_bus
+       - network_environment
 ```
 
 ---
 
-### Phase 6: Database Checks (Estimated: 2 sessions)
+### Phase 6: Database Checks - COMPLETE (29 JAN 2026)
 
 **Goal**: Migrate largest category - database-related checks.
 
-**Methods to Move**:
-- `_check_database` (~225 lines)
-- `_check_database_configuration` (~65 lines)
-- `_check_duckdb` (~60 lines)
-- `_check_pgstac` (~195 lines)
-- `_check_system_reference_tables` (~245 lines)
-- `_check_schema_summary` (~135 lines)
-- `_check_public_database` (~120 lines)
+**Methods Migrated**:
+- [x] `check_database` (~200 lines)
+- [x] `check_database_configuration` (~55 lines)
+- [x] `check_duckdb` (~45 lines)
+- [x] `check_pgstac` (~175 lines)
+- [x] `check_system_reference_tables` (~200 lines)
+- [x] `check_schema_summary` (~115 lines)
+- [x] `check_public_database` (~100 lines)
 
-**Total**: ~1,045 lines → `database.py`
+**Total**: ~1,025 lines → `database.py`
 
-**Validation**:
-```bash
-curl http://localhost:7071/api/health | jq '.components | keys' | grep -E "database|duckdb|pgstac|schema|system_ref"
+**Validation Results**:
+```
+  [40] database             - 7 sequential, 0 parallel = 7 total
+       - database
+       - database_config
+       - duckdb
+       - pgstac
+       - system_reference_tables
+       - schema_summary
+       - public_database
 ```
 
 ---
 
-### Phase 7: Cleanup & Utilities (Estimated: 1 session)
+---
 
-**Goal**: Final cleanup and move utilities.
+## Progress Summary (Phases 1-6 Complete)
 
-**Tasks**:
-1. Move `_get_config_sources` to appropriate location (maybe `startup.py`)
-2. Move `_run_checks_parallel` to `base.py` as shared utility
-3. Remove all migrated code from `health.py`
-4. Update `handle_request` to use new architecture
-5. Final testing and documentation
+| Plugin | Priority | Sequential | Parallel | Total |
+|--------|----------|------------|----------|-------|
+| startup | 10 | 4 | 0 | 4 |
+| application | 20 | 3 | 0 | 3 |
+| infrastructure | 30 | 3 | 0 | 3 |
+| database | 40 | 7 | 0 | 7 |
+| external_services | 50 | 0 | 2-3* | 2-3 |
+| **Total** | | **17** | **2-3** | **19-20** |
+
+*docker_worker check only appears when `DOCKER_WORKER_ENABLED=true`
+
+---
+
+### Phase 7: Cleanup & Integration - COMPLETE (29 JAN 2026)
+
+**Goal**: Final cleanup - update health.py orchestrator to use plugins.
+
+**Tasks Completed**:
+1. [x] Update `health.py` `process_request` to iterate over plugins
+2. [x] Remove all migrated check methods from `health.py`
+3. [x] Keep `_run_checks_parallel` in orchestrator for parallel execution
+4. [x] Keep `_get_config_sources` in orchestrator for observability mode
+5. [x] Final testing: all 19 checks verified working
+6. [x] Update documentation
+
+**Final File Sizes**:
+| File | Lines |
+|------|-------|
+| `health.py` | 511 |
+| `__init__.py` | 105 |
+| `base.py` | 193 |
+| `startup.py` | 448 |
+| `application.py` | 289 |
+| `infrastructure.py` | 629 |
+| `database.py` | 1,024 |
+| `external_services.py` | 424 |
+| **Total** | **3,623** |
+
+**Reduction**: 3,231 lines → 511 lines in main file (84% reduction)
 
 **Final File Sizes**:
 | File | Target Lines |

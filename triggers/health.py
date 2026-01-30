@@ -1,13 +1,31 @@
 # ============================================================================
-# HEALTH CHECK HTTP TRIGGER
+# HEALTH CHECK HTTP TRIGGER - ORCHESTRATOR
 # ============================================================================
-# STATUS: Trigger - Deployment verification endpoint
+# EPOCH: 4 - ACTIVE
+# STATUS: Trigger - Deployment verification endpoint (Refactored)
 # PURPOSE: GET /api/health - Comprehensive system health monitoring
-# LAST_REVIEWED: 07 JAN 2026
-# REVIEW_STATUS: Checks 1-7 Applied (Check 8: Deployment verification endpoint)
+# LAST_REVIEWED: 29 JAN 2026
+# REFACTORED: 29 JAN 2026 - Plugin architecture (see HEALTH_REFACTOR.md)
+# ============================================================================
+#
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║  MAGNIFICENT REFACTORING - 29 JAN 2026 - V0.8.1.1                         ║
+# ║                                                                           ║
+# ║  This file was reduced from 3,231 lines to ~510 lines (84% reduction)     ║
+# ║  by extracting 20 health checks into a modular plugin architecture.       ║
+# ║                                                                           ║
+# ║  The monolithic God Class anti-pattern has been replaced with:            ║
+# ║    • 5 category-based plugins in triggers/health_checks/                  ║
+# ║    • Priority-ordered execution (10→50)                                   ║
+# ║    • Parallel execution for I/O-bound external service checks             ║
+# ║    • Independent testability per plugin                                   ║
+# ║                                                                           ║
+# ║  See HEALTH_REFACTOR.md for full documentation.                           ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+#
 # ============================================================================
 """
-Health Check HTTP Trigger.
+Health Check HTTP Trigger - Orchestrator.
 
 ================================================================================
 DEPLOYMENT VERIFICATION
@@ -33,27 +51,23 @@ Debug Mode (for troubleshooting):
 For full deployment verification steps, see CLAUDE.md → Post-Deployment Validation
 
 ================================================================================
+PLUGIN ARCHITECTURE (29 JAN 2026)
+================================================================================
 
-Comprehensive system health monitoring endpoint for GET /api/health.
+Health checks are organized into category-based plugins:
 
-Components Monitored:
-    - Startup Validation (03 JAN 2026) - env_vars, imports, Service Bus DNS/queues
-    - Runtime Environment (07 JAN 2026) - hardware, instance, process, memory (merged)
-    - Network Environment (04 JAN 2026) - VNet, ASE, DNS, all WEBSITE_* vars
-    - Import Validation
-    - Service Bus Queues
-    - Database Configuration
-    - Database Connectivity
-    - DuckDB
-    - Jobs Registry
-    - PgSTAC
-    - System Reference Tables
-    - Schema Summary (07 DEC 2025) - All schemas, tables, row counts
-    - TiTiler (13 DEC 2025) - Raster tile server health
-    - OGC Features (13 DEC 2025) - Vector feature API health
+    triggers/health_checks/
+    ├── base.py              # HealthCheckPlugin base class
+    ├── startup.py           # Priority 10 - deployment, startup, imports, runtime
+    ├── application.py       # Priority 20 - app_mode, endpoints, jobs
+    ├── infrastructure.py    # Priority 30 - storage, service_bus, network
+    ├── database.py          # Priority 40 - database, pgstac, duckdb, schema
+    └── external_services.py # Priority 50 - geotiler, ogc_features, docker_worker
 
-Observability Mode Features (OBSERVABILITY_MODE=true):
-    - config_sources: Shows env var vs default sources for all config values
+Each plugin returns checks via get_checks() (sequential) or get_parallel_checks() (I/O-bound).
+See HEALTH_REFACTOR.md for full architecture documentation.
+
+================================================================================
 
 Exports:
     HealthCheckTrigger: Health check trigger class
@@ -67,19 +81,22 @@ from datetime import datetime, timezone
 
 import azure.functions as func
 from .http_base import SystemMonitoringTrigger
+from .health_checks import get_all_plugins
 from config import get_config, AzureDefaults, StorageDefaults, get_app_mode_config
-from core.schema.deployer import SchemaManagerFactory
-# NOTE: 'from utils import validator' REMOVED (12 DEC 2025)
-# Importing validator triggers cascade: validator → function_app → CoreMachine → 75+ seconds
-# The lightweight _check_import_validation() now uses sys.modules instead
 
 
 class HealthCheckTrigger(SystemMonitoringTrigger):
-    """Health check HTTP trigger implementation."""
-    
+    """
+    Health check HTTP trigger - orchestrates health check plugins.
+
+    This class coordinates the execution of health check plugins and
+    aggregates their results into a unified health response.
+    """
+
     def __init__(self):
         super().__init__("health_check")
-    
+        # Plugins are instantiated fresh for each request to ensure clean state
+
     def get_allowed_methods(self) -> List[str]:
         """Health check only supports GET."""
         return ["GET"]
@@ -106,18 +123,8 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         Returns:
             Dict mapping check names to their results
             e.g., {"geotiler": {...}, "ogc_features": {...}}
-
-        Example:
-            results = self._run_checks_parallel([
-                ("geotiler", self._check_geotiler_health),
-                ("ogc_features", self._check_ogc_features_health),
-                ("external_api", self._check_some_other_service),
-            ])
-            for name, result in results.items():
-                health_data["components"][name] = result
         """
         from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
-        from datetime import datetime, timezone
 
         results = {}
 
@@ -160,246 +167,101 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
 
     def process_request(self, req: func.HttpRequest) -> Dict[str, Any]:
         """
-        Perform comprehensive health check.
-        
+        Perform comprehensive health check using plugin architecture.
+
+        Iterates through all registered health check plugins (sorted by priority)
+        and executes their checks. Sequential checks run one-by-one, while
+        parallel checks (I/O-bound) run concurrently for performance.
+
         Args:
             req: HTTP request (not used for health check)
-            
+
         Returns:
-            Health status data
+            Health status data with all component results
         """
         from config import __version__
+
         config = get_config()
+
+        # Initialize health data structure
         health_data = {
             "status": "healthy",
             "version": __version__,
             "components": {},
-            "warnings": [],  # Track degraded/warning components
+            "warnings": [],
             "environment": {
                 "bronze_storage_account": config.storage.bronze.account_name,
                 "python_version": sys.version.split()[0],
                 "function_runtime": "python",
-                "health_check_version": "v2025-12-08_IDENTITY_ECHO"
+                "health_check_version": "v2026-01-29_PLUGIN_ARCH"
             },
             "identity": {
                 "database": {
                     "admin_identity_name": config.database.managed_identity_admin_name,
                     "use_managed_identity": config.database.use_managed_identity,
                     "auth_method": "managed_identity" if config.database.use_managed_identity else "password",
-                    "note": "Single admin identity used for all database operations (ETL, OGC/STAC, TiTiler)"
+                    "note": "Single admin identity used for all database operations"
                 },
                 "storage": {
                     "auth_method": "DefaultAzureCredential (system-assigned)",
-                    "note": "Storage uses system-assigned managed identity via DefaultAzureCredential"
+                    "note": "Storage uses system-assigned managed identity"
                 }
             },
             "errors": []
         }
-        
-        # Check deployment configuration (critical for new tenant deployment)
-        deployment_health = self._check_deployment_config()
-        health_data["components"]["deployment_config"] = deployment_health
-        # Note: Deployment config using defaults is a WARNING, not a failure
-        # This allows the dev environment to work while alerting on production deployments
-        if deployment_health.get("details", {}).get("config_status") == "using_defaults":
-            health_data["errors"].append("Configuration using development defaults - set environment variables for production")
 
-        # Check app mode configuration (07 DEC 2025 - Multi-Function App Architecture)
-        app_mode_health = self._check_app_mode()
-        health_data["components"]["app_mode"] = app_mode_health
+        # Get all plugins (instantiated fresh, sorted by priority)
+        plugins = get_all_plugins(logger=self.logger)
 
-        # Check endpoint registration consistency (27 JAN 2026 - BUG-006 detection)
-        # Validates that endpoints expected for APP_MODE are actually registered
-        endpoint_health = self._check_endpoint_registration()
-        health_data["components"]["endpoint_registration"] = endpoint_health
-        endpoint_details = endpoint_health.get("details", {})
-        if endpoint_details.get("warnings"):
-            health_data["warnings"].extend(endpoint_details["warnings"])
-            # Endpoint registration issues degrade health but don't make unhealthy
-            if health_data["status"] == "healthy":
-                health_data["status"] = "degraded"
-        if endpoint_details.get("issues"):
-            health_data["errors"].extend(endpoint_details["issues"])
+        # Track all parallel checks to run at the end
+        all_parallel_checks = []
 
-        # Check runtime environment (07 JAN 2026 - merged hardware + instance_info)
-        # Single psutil call for hardware specs, instance ID, process details, memory
-        runtime_health = self._check_runtime_environment()
-        health_data["components"]["runtime"] = runtime_health
+        # Execute each plugin's checks
+        for plugin in plugins:
+            if not plugin.is_enabled(config):
+                continue
 
-        # Check network/VNet/ASE environment (04 JAN 2026)
-        # Critical for diagnosing corporate Azure environments where configs change without warning
-        network_health = self._check_network_environment()
-        health_data["components"]["network_environment"] = network_health
+            # Run sequential checks
+            for check_name, check_method in plugin.get_checks():
+                try:
+                    result = check_method()
+                    health_data["components"][check_name] = result
+                    self._update_health_status(health_data, check_name, result)
+                except Exception as e:
+                    self.logger.error(f"Check '{check_name}' failed: {e}")
+                    error_result = {
+                        "component": check_name,
+                        "status": "error",
+                        "error": str(e)[:200],
+                        "error_type": type(e).__name__,
+                        "checked_at": datetime.now(timezone.utc).isoformat()
+                    }
+                    health_data["components"][check_name] = error_result
+                    self._update_health_status(health_data, check_name, error_result)
 
-        # Task routing coverage REMOVED (12 DEC 2025)
-        # Moved to services/__init__.py (startup validation) and scripts/validate_config.py (pre-deployment)
-        # This is configuration validation, not runtime health - doesn't belong in health endpoint
+            # Collect parallel checks (run all together at the end)
+            parallel_checks = plugin.get_parallel_checks()
+            all_parallel_checks.extend(parallel_checks)
 
-        # Check import validation (critical for application startup)
-        import_health = self._check_import_validation()
-        health_data["components"]["imports"] = import_health
-        if import_health["status"] == "unhealthy":
-            health_data["status"] = "unhealthy"
-            health_data["errors"].extend(import_health.get("errors", []))
+        # Run all parallel checks together for maximum concurrency
+        if all_parallel_checks:
+            parallel_results = self._run_checks_parallel(
+                all_parallel_checks,
+                timeout_seconds=25.0
+            )
+            for check_name, result in parallel_results.items():
+                health_data["components"][check_name] = result
+                self._update_health_status(health_data, check_name, result)
 
-        # Check startup validation state (03 JAN 2026 - STARTUP_REFORM.md)
-        # Shows results from Phase 2 soft validation (env_vars, DNS, queues)
-        startup_health = self._check_startup_validation()
-        health_data["components"]["startup_validation"] = startup_health
-        if startup_health["status"] == "unhealthy":
-            health_data["status"] = "unhealthy"
-            if startup_health.get("errors"):
-                health_data["errors"].extend(startup_health["errors"])
-
-        # Check critical storage containers (08 DEC 2025)
-        storage_containers_health = self._check_storage_containers()
-        health_data["components"]["storage_containers"] = storage_containers_health
-        # Note: Missing containers are a warning, not a failure - the container can be created
-        if storage_containers_health["status"] == "error":
-            health_data["errors"].append("Storage container check failed")
-
-        # Check Service Bus queues
-        service_bus_health = self._check_service_bus_queues()
-        health_data["components"]["service_bus"] = service_bus_health
-        if service_bus_health["status"] == "unhealthy":
-            health_data["status"] = "unhealthy"
-            health_data["errors"].extend(service_bus_health.get("errors", []))
-
-        # Key Vault disabled - using environment variables only
-        # vault_health = self._check_vault_configuration()
-        # health_data["components"]["vault"] = vault_health
+        # Add vault placeholder (disabled - using env vars only)
         health_data["components"]["vault"] = {
-            "component": "vault", 
+            "component": "vault",
             "status": "disabled",
             "details": {"message": "Key Vault disabled - using environment variables only"},
             "checked_at": datetime.now(timezone.utc).isoformat()
         }
-        
-        # Check database configuration
-        db_config_health = self._check_database_configuration()
-        health_data["components"]["database_config"] = db_config_health
-        if db_config_health["status"] == "unhealthy":
-            health_data["status"] = "unhealthy"
-            health_data["errors"].extend(db_config_health.get("errors", []))
-        
-        # Check database connectivity (optional)
-        if self._should_check_database():
-            db_health = self._check_database()
-            health_data["components"]["database"] = db_health
-            if db_health["status"] == "unhealthy":
-                health_data["status"] = "unhealthy"
-                health_data["errors"].extend(db_health.get("errors", []))
 
-        # Check DuckDB analytical engine (optional component)
-        # Controlled by ENABLE_DUCKDB_HEALTH_CHECK environment variable (default: false)
-        config = get_config()
-        if config.enable_duckdb_health_check:
-            duckdb_health = self._check_duckdb()
-            health_data["components"]["duckdb"] = duckdb_health
-            # Note: DuckDB is optional - don't fail overall health if unavailable
-            if duckdb_health["status"] == "error":
-                health_data["errors"].append("DuckDB unavailable (optional analytical component)")
-        else:
-            health_data["components"]["duckdb"] = {
-                "component": "duckdb",
-                "status": "disabled",
-                "details": {
-                    "message": "DuckDB check disabled via config - module still available",
-                    "enable_with": "Set ENABLE_DUCKDB_HEALTH_CHECK=true"
-                },
-                "checked_at": datetime.now(timezone.utc).isoformat()
-            }
-
-        # Check jobs registry (critical for job processing)
-        jobs_health = self._check_jobs_registry()
-        health_data["components"]["jobs"] = jobs_health
-        if jobs_health["status"] == "unhealthy":
-            health_data["status"] = "unhealthy"
-            health_data["errors"].extend(jobs_health.get("errors", []))
-
-        # Check PgSTAC (optional but important for STAC workflows)
-        # Controlled by ENABLE_DATABASE_HEALTH_CHECK environment variable
-        if self._should_check_database():
-            pgstac_health = self._check_pgstac()
-            health_data["components"]["pgstac"] = pgstac_health
-            # Note: PgSTAC is optional - don't fail overall health if unavailable (6 DEC 2025)
-            if pgstac_health["status"] == "error":
-                health_data["errors"].append("PgSTAC unavailable (impacts STAC collection/item workflows)")
-                # Add degraded capabilities info for clarity
-                health_data["degraded_capabilities"] = ["STAC API", "STAC item discovery", "STAC collection browsing"]
-                health_data["available_capabilities"] = [
-                    "OGC Features API (vector queries)",
-                    "TiTiler COG viewing (raster tiles)",
-                    "Vector ETL (PostGIS)",
-                    "Raster ETL (COG creation)"
-                ]
-
-            # Check system reference tables (admin0 boundaries for ISO3 attribution)
-            system_tables_health = self._check_system_reference_tables()
-            health_data["components"]["system_reference_tables"] = system_tables_health
-            # Note: System reference tables are optional - don't fail overall health
-            # Missing tables just means ISO3 country attribution won't be available
-            if system_tables_health["status"] == "error":
-                health_data["errors"].append("System reference tables unavailable (ISO3 country attribution disabled)")
-
-            # Schema summary for remote database inspection (07 DEC 2025)
-            schema_summary_health = self._check_schema_summary()
-            health_data["components"]["schema_summary"] = schema_summary_health
-
-        # Check public database if configured (07 JAN 2026)
-        # This is the external-facing OGC Features database
-        if config.is_public_database_configured():
-            public_db_health = self._check_public_database()
-            health_data["components"]["public_database"] = public_db_health
-            if public_db_health["status"] == "unhealthy":
-                health_data["warnings"].append("Public database unavailable (external OGC Features impacted)")
-
-        # ====================================================================
-        # PARALLEL EXTERNAL SERVICE CHECKS (07 JAN 2026)
-        # ====================================================================
-        # These checks make HTTP calls to external services and can run in
-        # parallel since they're I/O-bound. Future external checks can be
-        # added to this list.
-        external_checks = [
-            ("geotiler", self._check_geotiler_health),
-            ("ogc_features", self._check_ogc_features_health),
-        ]
-
-        # Add Docker worker check if enabled (11 JAN 2026 - F7.13)
-        from config import get_app_mode_config
-        app_mode_config = get_app_mode_config()
-        if app_mode_config.docker_worker_enabled and app_mode_config.docker_worker_url:
-            external_checks.append(("docker_worker", self._check_docker_worker_health))
-
-        parallel_results = self._run_checks_parallel(external_checks, timeout_seconds=25.0)
-
-        # Process GeoTiler result (13 JAN 2026 - E8 TiPG Integration)
-        geotiler_health = parallel_results.get("geotiler", {"status": "error", "error": "Check not completed"})
-        health_data["components"]["geotiler"] = geotiler_health
-        geotiler_status = geotiler_health.get("status")
-        if geotiler_status == "unhealthy":
-            health_data["errors"].append("GeoTiler unavailable (COG tiles, TiPG OGC Features, STAC API disabled)")
-        elif geotiler_status == "warning":
-            health_data["warnings"].append("GeoTiler degraded - some services unavailable")
-            if health_data["status"] == "healthy":
-                health_data["status"] = "degraded"
-
-        # Process OGC Features result
-        ogc_features_health = parallel_results.get("ogc_features", {"status": "error", "error": "Check not completed"})
-        health_data["components"]["ogc_features"] = ogc_features_health
-        if ogc_features_health.get("status") == "unhealthy":
-            health_data["errors"].append("OGC Features API unavailable (vector feature queries disabled)")
-
-        # Process Docker worker result (11 JAN 2026 - F7.13)
-        if "docker_worker" in parallel_results:
-            docker_worker_health = parallel_results.get("docker_worker", {"status": "error", "error": "Check not completed"})
-            health_data["components"]["docker_worker"] = docker_worker_health
-            if docker_worker_health.get("status") == "unhealthy":
-                health_data["warnings"].append("Docker worker unavailable (large raster processing disabled)")
-                if health_data["status"] == "healthy":
-                    health_data["status"] = "degraded"
-
-        # Observability status - always include (10 JAN 2026 - F7.12.C)
+        # Observability status - always include
         health_data["observability_status"] = config.get_debug_status()
 
         # Config sources - only include when OBSERVABILITY_MODE=true
@@ -410,7 +272,50 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             health_data["_debug_notice"] = "Verbose config sources included - OBSERVABILITY_MODE=true"
 
         return health_data
-    
+
+    def _update_health_status(
+        self,
+        health_data: Dict[str, Any],
+        check_name: str,
+        result: Dict[str, Any]
+    ) -> None:
+        """
+        Update overall health status based on individual check result.
+
+        Status hierarchy:
+        - "unhealthy" (highest) - critical component failed
+        - "degraded" - optional component failed or warning
+        - "healthy" (lowest) - all checks passed
+
+        Args:
+            health_data: The health data dict to update
+            check_name: Name of the check for error messages
+            result: The check result dict
+        """
+        status = result.get("status", "healthy")
+
+        if status == "unhealthy":
+            health_data["status"] = "unhealthy"
+            if result.get("error"):
+                health_data["errors"].append(f"{check_name}: {result['error']}")
+            elif result.get("errors"):
+                health_data["errors"].extend(result["errors"])
+
+        elif status == "error":
+            # Error status also degrades health
+            if health_data["status"] == "healthy":
+                health_data["status"] = "degraded"
+            if result.get("error"):
+                health_data["errors"].append(f"{check_name}: {result['error']}")
+
+        elif status == "warning":
+            if health_data["status"] == "healthy":
+                health_data["status"] = "degraded"
+            if result.get("warning"):
+                health_data["warnings"].append(result["warning"])
+            elif result.get("warnings"):
+                health_data["warnings"].extend(result["warnings"])
+
     def handle_request(self, req: func.HttpRequest) -> func.HttpResponse:
         """
         Override to provide proper HTTP status codes for health checks.
@@ -425,11 +330,10 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         Azure health probes should treat 200 as healthy.
         """
         import json
-        from datetime import datetime, timezone
         import uuid
-        
+
         request_id = str(uuid.uuid4())
-        
+
         try:
             # Validate HTTP method
             if req.method not in self.get_allowed_methods():
@@ -443,10 +347,10 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                     status_code=405,
                     mimetype="application/json"
                 )
-            
+
             # Process the health check
             health_data = self.process_request(req)
-            
+
             # Determine HTTP status code based on health status
             # "degraded" returns 200 because app is functional (optional components have issues)
             if health_data["status"] in ("healthy", "degraded"):
@@ -455,14 +359,14 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                 status_code = 503  # Service Unavailable - critical components failing
             else:
                 status_code = 500  # Internal Server Error (unexpected status)
-            
+
             # Add response metadata
             response_data = {
                 **health_data,
                 "request_id": request_id,
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }
-            
+
             return func.HttpResponse(
                 json.dumps(response_data, default=str),
                 status_code=status_code,
@@ -472,11 +376,11 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                     "Cache-Control": "no-cache, no-store, must-revalidate"
                 }
             )
-            
+
         except Exception as e:
             # Log the error
-            self.logger.error(f"💥 [{self.trigger_name}] Health check error: {e}")
-            
+            self.logger.error(f"Health check error: {e}")
+
             return func.HttpResponse(
                 json.dumps({
                     "error": "Internal server error",
@@ -489,2630 +393,10 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                 mimetype="application/json",
                 headers={"X-Request-ID": request_id}
             )
-    
-    def _check_storage_containers(self) -> Dict[str, Any]:
-        """
-        Check critical storage container existence for Bronze and Silver zones.
-
-        Verifies that storage accounts are accessible and required containers exist:
-
-        Bronze Zone (raw data input):
-        - bronze-vectors: Raw vector uploads (Shapefiles, GeoJSON)
-        - bronze-rasters: Raw raster uploads (GeoTIFF)
-
-        Silver Zone (processed data):
-        - silver-cogs: Cloud Optimized GeoTIFFs (COG output)
-        - pickles: Vector ETL intermediate storage
-
-        Updated 09 DEC 2025: Expanded to check Bronze/Silver accounts and critical containers.
-        """
-        def check_containers():
-            from infrastructure.blob import BlobRepository
-            from config.defaults import VectorDefaults, StorageDefaults
-            from config import get_config
-
-            config = get_config()
-            result = {
-                "zones": {},
-                "summary": {
-                    "total_containers_checked": 0,
-                    "containers_exist": 0,
-                    "containers_missing": 0,
-                    "zones_accessible": 0,
-                    "zones_error": 0
-                }
-            }
-
-            # Define critical containers per zone
-            # Format: (container_name, purpose, criticality)
-            critical_containers = {
-                "bronze": [
-                    (config.storage.bronze.vectors, "Raw vector uploads (Shapefiles, GeoJSON)", "high"),
-                    (config.storage.bronze.rasters, "Raw raster uploads (GeoTIFF)", "high"),
-                ],
-                "silver": [
-                    (config.storage.silver.cogs, "Cloud Optimized GeoTIFFs (COG output)", "high"),
-                    (VectorDefaults.PICKLE_CONTAINER, "Vector ETL intermediate storage", "high"),
-                ]
-            }
-
-            for zone, containers in critical_containers.items():
-                zone_result = {
-                    "account": None,
-                    "account_accessible": False,
-                    "containers": {}
-                }
-
-                try:
-                    # Get repository for zone
-                    repo = BlobRepository.for_zone(zone)
-                    zone_config = config.storage.get_account(zone)
-                    zone_result["account"] = zone_config.account_name
-                    zone_result["account_accessible"] = True
-                    result["summary"]["zones_accessible"] += 1
-
-                    # Check each critical container
-                    for container_name, purpose, criticality in containers:
-                        result["summary"]["total_containers_checked"] += 1
-
-                        try:
-                            exists = repo.container_exists(container_name)
-                            if exists:
-                                zone_result["containers"][container_name] = {
-                                    "status": "exists",
-                                    "purpose": purpose,
-                                    "criticality": criticality
-                                }
-                                result["summary"]["containers_exist"] += 1
-                            else:
-                                zone_result["containers"][container_name] = {
-                                    "status": "missing",
-                                    "purpose": purpose,
-                                    "criticality": criticality,
-                                    "action_required": f"Create container '{container_name}' in {zone_config.account_name}"
-                                }
-                                result["summary"]["containers_missing"] += 1
-                        except Exception as container_error:
-                            zone_result["containers"][container_name] = {
-                                "status": "error",
-                                "purpose": purpose,
-                                "criticality": criticality,
-                                "error": str(container_error)[:200]
-                            }
-                            result["summary"]["containers_missing"] += 1
-
-                except Exception as zone_error:
-                    zone_result["account_accessible"] = False
-                    zone_result["error"] = str(zone_error)[:200]
-                    result["summary"]["zones_error"] += 1
-                    # Still count containers as missing since we couldn't check them
-                    result["summary"]["total_containers_checked"] += len(containers)
-                    result["summary"]["containers_missing"] += len(containers)
-
-                result["zones"][zone] = zone_result
-
-            # Determine overall health based on missing containers
-            if result["summary"]["containers_missing"] > 0 or result["summary"]["zones_error"] > 0:
-                missing_list = []
-                for zone, zone_data in result["zones"].items():
-                    if zone_data.get("error"):
-                        missing_list.append(f"{zone} zone inaccessible")
-                    else:
-                        for container, status in zone_data.get("containers", {}).items():
-                            if status.get("status") != "exists":
-                                missing_list.append(f"{zone}/{container}")
-
-                result["error"] = f"Missing or inaccessible: {', '.join(missing_list)}"
-                result["impact"] = "ETL operations may fail for affected data types"
-                result["fix"] = "Create missing containers or check storage account access"
-
-            return result
-
-        return self.check_component_health(
-            "storage_containers",
-            check_containers,
-            description="Bronze and Silver zone storage accounts and critical containers"
-        )
-
-    def _check_service_bus_queues(self) -> Dict[str, Any]:
-        """
-        Check Azure Service Bus queue health using ServiceBusRepository.
-
-        Updated 26 JAN 2026: V0.8 queue consolidation.
-        All queues must be accessible for Service Bus to be healthy.
-
-        Queues checked (V0.8):
-        - geospatial-jobs: Job orchestration + stage_complete signals
-        - functionapp-tasks: Lightweight operations (DB, STAC, inventory)
-        - container-tasks: Heavy operations (GDAL, geopandas) - Docker worker
-        """
-        def classify_error(error_str: str, exception: Exception) -> dict:
-            """Classify Service Bus errors for actionable diagnostics."""
-            error_lower = error_str.lower()
-            exc_type = type(exception).__name__
-
-            # DNS resolution failure
-            if "name or service not known" in error_lower or "errno -2" in error_lower:
-                return {
-                    "error_type": "DNS_RESOLUTION",
-                    "category": "network",
-                    "error": error_str[:300],
-                    "diagnosis": "Cannot resolve Service Bus namespace hostname",
-                    "likely_causes": [
-                        "SERVICE_BUS_FQDN env var has wrong value",
-                        "VNet DNS configuration issue",
-                        "Private DNS zone not linked to VNet",
-                        "Network isolation blocking DNS"
-                    ],
-                    "fix": "Verify SERVICE_BUS_FQDN is correct (e.g., myns.servicebus.windows.net)"
-                }
-
-            # Socket/connection errors (VNet, firewall)
-            if "socket" in error_lower or "connection refused" in error_lower or "errno 111" in error_lower:
-                return {
-                    "error_type": "CONNECTION_REFUSED",
-                    "category": "network",
-                    "error": error_str[:300],
-                    "diagnosis": "TCP connection to Service Bus failed",
-                    "likely_causes": [
-                        "VNet/subnet not configured for Service Bus access",
-                        "Private endpoint not configured",
-                        "NSG blocking outbound port 5671/5672 (AMQP)",
-                        "Firewall blocking Service Bus IPs",
-                        "Corporate firewall blocking AMQP - try WebSocket transport (port 443)"
-                    ],
-                    "fix": "Check VNet service endpoints, or try AMQP-over-WebSockets if port 5671 is blocked"
-                }
-
-            # Timeout errors
-            if "timeout" in error_lower or "timed out" in error_lower:
-                return {
-                    "error_type": "TIMEOUT",
-                    "category": "network",
-                    "error": error_str[:300],
-                    "diagnosis": "Connection to Service Bus timed out",
-                    "likely_causes": [
-                        "Network latency or congestion",
-                        "Service Bus namespace overloaded",
-                        "Partial network connectivity (packets dropping)"
-                    ],
-                    "fix": "Check network path and Service Bus namespace health in Azure portal"
-                }
-
-            # Authentication/authorization errors
-            if "unauthorized" in error_lower or "401" in error_str or "403" in error_str:
-                return {
-                    "error_type": "AUTH_FAILED",
-                    "category": "authentication",
-                    "error": error_str[:300],
-                    "diagnosis": "Authentication to Service Bus failed",
-                    "likely_causes": [
-                        "Managed identity not assigned Azure Service Bus Data Owner role",
-                        "Connection string invalid or expired",
-                        "Wrong Service Bus namespace"
-                    ],
-                    "fix": "Verify managed identity role assignment: az role assignment list --assignee <identity>"
-                }
-
-            # Queue not found
-            if "not found" in error_lower or "404" in error_str or "MessagingEntityNotFoundError" in exc_type:
-                return {
-                    "error_type": "QUEUE_NOT_FOUND",
-                    "category": "configuration",
-                    "error": "Queue does not exist",
-                    "diagnosis": "Queue has not been created in Service Bus namespace",
-                    "likely_causes": [
-                        "Queue never created",
-                        "Queue was deleted",
-                        "Wrong queue name in configuration"
-                    ],
-                    "fix": "Run schema rebuild: POST /api/dbadmin/maintenance?action=rebuild&confirm=yes"
-                }
-
-            # SSL/TLS errors
-            if "ssl" in error_lower or "certificate" in error_lower:
-                return {
-                    "error_type": "TLS_ERROR",
-                    "category": "security",
-                    "error": error_str[:300],
-                    "diagnosis": "TLS/SSL handshake failed",
-                    "likely_causes": [
-                        "Certificate validation failure",
-                        "TLS version mismatch",
-                        "Proxy intercepting TLS traffic"
-                    ],
-                    "fix": "Check if corporate proxy is intercepting traffic"
-                }
-
-            # Generic/unknown error
-            return {
-                "error_type": "UNKNOWN",
-                "category": "unknown",
-                "error": error_str[:300],
-                "exception_type": exc_type,
-                "diagnosis": "Unclassified Service Bus error",
-                "likely_causes": ["See error message for details"],
-                "fix": "Check Application Insights for full stack trace"
-            }
-
-        def check_service_bus():
-            import socket
-            from infrastructure.service_bus import ServiceBusRepository
-            from config import get_config
-
-            config = get_config()
-            queue_status = {}
-
-            # Network diagnostics - check DNS resolution before attempting connections
-            namespace = config.service_bus_namespace
-            dns_check = {"namespace": namespace}
-
-            try:
-                # Extract hostname (handle both FQDN and short name)
-                hostname = namespace if "." in namespace else f"{namespace}.servicebus.windows.net"
-                dns_check["hostname_used"] = hostname
-
-                # Attempt DNS resolution
-                ip_addresses = socket.getaddrinfo(hostname, 5671, socket.AF_UNSPEC, socket.SOCK_STREAM)
-                resolved_ips = list(set([addr[4][0] for addr in ip_addresses]))
-                dns_check["resolved"] = True
-                dns_check["ip_addresses"] = resolved_ips[:5]  # Limit to 5 IPs
-                dns_check["is_private_ip"] = any(
-                    ip.startswith("10.") or ip.startswith("172.") or ip.startswith("192.168.")
-                    for ip in resolved_ips
-                )
-                if dns_check["is_private_ip"]:
-                    dns_check["note"] = "Private IP detected - using Private Endpoint or VNet integration"
-
-                # Port connectivity checks (08 JAN 2026)
-                # Check both AMQP (5671) and AMQP-over-WebSockets (443) ports
-                port_checks = {}
-                for port, protocol in [(5671, "AMQP"), (443, "AMQP-over-WebSockets")]:
-                    try:
-                        test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                        test_socket.settimeout(5)  # 5 second timeout
-                        result = test_socket.connect_ex((hostname, port))
-                        test_socket.close()
-                        port_checks[port] = {
-                            "protocol": protocol,
-                            "reachable": result == 0,
-                            "error_code": result if result != 0 else None
-                        }
-                    except Exception as port_error:
-                        port_checks[port] = {
-                            "protocol": protocol,
-                            "reachable": False,
-                            "error": str(port_error)[:100]
-                        }
-
-                dns_check["port_connectivity"] = port_checks
-
-                # Determine transport recommendation
-                amqp_ok = port_checks.get(5671, {}).get("reachable", False)
-                websocket_ok = port_checks.get(443, {}).get("reachable", False)
-
-                if amqp_ok:
-                    dns_check["recommended_transport"] = "AMQP (port 5671)"
-                elif websocket_ok:
-                    dns_check["recommended_transport"] = "AMQP-over-WebSockets (port 443)"
-                    dns_check["transport_warning"] = "Standard AMQP port 5671 blocked - consider configuring WebSocket transport"
-                else:
-                    dns_check["transport_error"] = "Neither AMQP (5671) nor WebSocket (443) ports are reachable"
-
-            except socket.gaierror as e:
-                dns_check["resolved"] = False
-                dns_check["dns_error"] = str(e)
-                dns_check["diagnosis"] = "DNS resolution failed - check VNet DNS or namespace name"
-
-            queue_status["_network_diagnostics"] = dns_check
-
-            # If DNS failed, we know connections will fail - but still try for specific errors
-            try:
-                service_bus_repo = ServiceBusRepository()
-            except Exception as e:
-                queue_status["_status"] = "unhealthy"
-                queue_status["error"] = f"Failed to initialize ServiceBusRepository: {str(e)[:200]}"
-                queue_status["_repository_error"] = classify_error(str(e), e)
-                return queue_status
-
-            # Check all 3 queues (V0.8 - 26 JAN 2026)
-            queues_to_check = [
-                {"name": config.service_bus_jobs_queue, "purpose": "Job orchestration + stage_complete signals"},
-                {"name": config.queues.functionapp_tasks_queue, "purpose": "Lightweight tasks (DB, STAC, inventory)"},
-                {"name": config.queues.container_tasks_queue, "purpose": "Heavy tasks (GDAL, geopandas) - Docker worker"}
-            ]
-
-            queues_accessible = 0
-            queues_missing = 0
-            queues_connection_error = 0
-            error_categories = set()
-
-            for queue_config in queues_to_check:
-                queue_name = queue_config["name"]
-                try:
-                    # Peek at queue to verify connectivity and get approximate count
-                    message_count = service_bus_repo.get_queue_length(queue_name)
-                    queue_status[queue_name] = {
-                        "status": "accessible",
-                        "purpose": queue_config["purpose"],
-                        "approximate_message_count": message_count,
-                        "note": "Count is approximate (peek limit: 100)"
-                    }
-                    queues_accessible += 1
-
-                except Exception as e:
-                    error_info = classify_error(str(e), e)
-                    error_categories.add(error_info["category"])
-
-                    if error_info["error_type"] == "QUEUE_NOT_FOUND":
-                        queue_status[queue_name] = {
-                            "status": "missing",
-                            "purpose": queue_config["purpose"],
-                            **error_info
-                        }
-                        queues_missing += 1
-                    else:
-                        queue_status[queue_name] = {
-                            "status": "connection_error",
-                            "purpose": queue_config["purpose"],
-                            **error_info
-                        }
-                        queues_connection_error += 1
-
-            # Summary with all error counts
-            total_errors = queues_missing + queues_connection_error
-            all_healthy = total_errors == 0
-
-            queue_status["_summary"] = {
-                "total_queues": len(queues_to_check),
-                "accessible": queues_accessible,
-                "missing": queues_missing,
-                "connection_errors": queues_connection_error,
-                "error_categories": list(error_categories) if error_categories else None,
-                "all_queues_healthy": all_healthy,
-                "multi_function_app_ready": all_healthy
-            }
-
-            # Repository info
-            queue_status["_repository_info"] = {
-                "singleton_id": id(service_bus_repo),
-                "type": "ServiceBusRepository",
-                "namespace": namespace,
-                "connection_method": "managed_identity" if not os.getenv("SERVICE_BUS_CONNECTION_STRING") else "connection_string"
-            }
-
-            # Set explicit status - ANY error means unhealthy
-            if not all_healthy:
-                queue_status["_status"] = "unhealthy"
-
-                # Create top-level error summary for check_component_health detection
-                error_parts = []
-                if queues_connection_error > 0:
-                    queue_status["error"] = f"{queues_connection_error} queue(s) with connection errors"
-                    error_parts.append(f"{queues_connection_error} connection error(s)")
-                if queues_missing > 0:
-                    error_parts.append(f"{queues_missing} missing queue(s)")
-
-                queue_status["_error_summary"] = {
-                    "message": " + ".join(error_parts),
-                    "categories": list(error_categories),
-                    "recommendation": self._get_service_bus_fix_recommendation(error_categories)
-                }
-
-            return queue_status
-
-        return self.check_component_health(
-            "service_bus",
-            check_service_bus,
-            description="Azure Service Bus message queues for job and task orchestration"
-        )
-
-    def _get_service_bus_fix_recommendation(self, error_categories: set) -> str:
-        """Get prioritized fix recommendation based on error categories."""
-        if "network" in error_categories:
-            return "PRIORITY: Check VNet configuration, Private Endpoints, and DNS settings"
-        if "authentication" in error_categories:
-            return "Check managed identity role assignments (Azure Service Bus Data Owner)"
-        if "configuration" in error_categories:
-            return "Run rebuild to create missing queues"
-        return "Check Application Insights for detailed error logs"
-
-    def _check_database(self) -> Dict[str, Any]:
-        """Enhanced PostgreSQL database health check with query metrics.
-
-        IMPORTANT: Uses PostgreSQLRepository which respects USE_MANAGED_IDENTITY setting.
-        This ensures health check uses the same authentication method as the application.
-        """
-        def check_pg():
-            import psycopg
-            import time
-            from config import get_config
-            from infrastructure.postgresql import PostgreSQLRepository
-
-            config = get_config()
-            start_time = time.time()
-
-            # Use PostgreSQLRepository to get connection string (respects managed identity)
-            # This ensures health check uses same auth method as application
-            try:
-                repo = PostgreSQLRepository(config=config)
-                conn_str = repo.conn_string
-            except Exception as repo_error:
-                # If repository initialization fails, return error immediately
-                return {
-                    "component": "database",
-                    "status": "unhealthy",
-                    "error": f"Failed to initialize PostgreSQL repository: {str(repo_error)}",
-                    "error_type": type(repo_error).__name__,
-                    "checked_at": time.time()
-                }
-
-            # Use autocommit mode to allow subtransactions for isolated tests
-            with psycopg.connect(conn_str, autocommit=True) as conn:
-                with conn.cursor() as cur:
-                    # Track connection time
-                    connection_time_ms = round((time.time() - start_time) * 1000, 2)
-                    # Check PostgreSQL version
-                    cur.execute("SELECT version()")
-                    pg_version = cur.fetchone()[0]
-                    
-                    # Check PostGIS version
-                    cur.execute("SELECT PostGIS_Version()")
-                    postgis_version = cur.fetchone()[0]
-                    
-                    # Check app schema exists (for jobs and tasks tables)
-                    try:
-                        cur.execute("SELECT schema_name FROM information_schema.schemata WHERE schema_name = %s", (config.app_schema,))
-                        app_schema_exists = cur.fetchone() is not None
-                    except Exception as e:
-                        self.logger.debug(f"Could not check app schema: {e}")
-                        app_schema_exists = False
-
-                    # Check postgis schema exists (for STAC data)
-                    try:
-                        cur.execute("SELECT schema_name FROM information_schema.schemata WHERE schema_name = %s", (config.postgis_schema,))
-                        postgis_schema_exists = cur.fetchone() is not None
-                    except Exception as e:
-                        self.logger.debug(f"Could not check postgis schema: {e}")
-                        postgis_schema_exists = False
-
-                    # Count STAC items (optional) - use pg_stat for performance (12 DEC 2025)
-                    try:
-                        cur.execute("""
-                            SELECT n_live_tup FROM pg_stat_user_tables
-                            WHERE schemaname = %s AND relname = 'items'
-                        """, (config.postgis_schema,))
-                        result = cur.fetchone()
-                        stac_count = result[0] if result else 0
-                    except Exception as e:
-                        self.logger.debug(f"Could not count STAC items: {e}")
-                        stac_count = "unknown"
-                    
-                    # Ensure app tables exist and validate schema
-                    # NOTE: Schema manager uses its own connection - skip during health check
-                    # to avoid transaction context conflicts
-                    app_tables_status = {}
-                    table_management_results = {}
-
-                    if app_schema_exists:
-                        # Simple table existence check (no schema manager - it creates its own connection)
-                        try:
-                            for table_name in ['jobs', 'tasks']:
-                                cur.execute("""
-                                    SELECT EXISTS (
-                                        SELECT FROM information_schema.tables
-                                        WHERE table_schema = %s
-                                        AND table_name = %s
-                                    )
-                                """, (config.app_schema, table_name))
-                                table_exists = cur.fetchone()[0]
-                                app_tables_status[table_name] = table_exists
-                                table_management_results[table_name] = "exists" if table_exists else "missing"
-                        except Exception as table_check_error:
-                            table_management_results['table_check_error'] = f"error: {str(table_check_error)}"
-                            app_tables_status['jobs'] = False
-                            app_tables_status['tasks'] = False
-                    
-                    # DETAILED SCHEMA INSPECTION - Added for debugging function signature mismatches
-                    # NOTE: Each section wrapped in try-except to prevent transaction cascade failures
-                    detailed_schema_info = {}
-
-                    # Inspect table columns (separate transaction to avoid contamination)
-                    try:
-                        for table_name in ['jobs', 'tasks']:
-                            cur.execute("""
-                                SELECT column_name, data_type, is_nullable, column_default
-                                FROM information_schema.columns
-                                WHERE table_schema = %s AND table_name = %s
-                                ORDER BY ordinal_position
-                            """, (config.app_schema, table_name))
-
-                            columns = cur.fetchall()
-                            detailed_schema_info[f"{table_name}_columns"] = [
-                                {
-                                    "column_name": col[0],
-                                    "data_type": col[1],
-                                    "is_nullable": col[2],
-                                    "column_default": col[3]
-                                } for col in columns
-                            ]
-                    except Exception as col_error:
-                        detailed_schema_info['columns_inspection_error'] = f"Column inspection failed: {str(col_error)}"
-
-                    # Inspect PostgreSQL function signatures (separate transaction)
-                    try:
-                        cur.execute("""
-                            SELECT
-                                routine_name,
-                                data_type as return_type,
-                                routine_definition
-                            FROM information_schema.routines
-                            WHERE routine_schema = %s
-                            AND routine_name IN ('check_job_completion', 'complete_task_and_check_stage', 'advance_job_stage')
-                            ORDER BY routine_name
-                        """, (config.app_schema,))
-
-                        functions = cur.fetchall()
-                        detailed_schema_info['postgresql_functions'] = [
-                            {
-                                "function_name": func[0],
-                                "return_type": func[1],
-                                "definition_snippet": func[2][:200] + "..." if func[2] and len(func[2]) > 200 else func[2]
-                            } for func in functions
-                        ]
-                    except Exception as func_sig_error:
-                        detailed_schema_info['function_signature_error'] = f"Function signature inspection failed: {str(func_sig_error)}"
-
-                    # Test function call (isolated transaction - failure won't affect subsequent queries)
-                    try:
-                        with conn.transaction():
-                            cur.execute(f"SELECT job_complete, final_stage, total_tasks, completed_tasks, task_results FROM {config.app_schema}.check_job_completion('test_job_id')")
-                            detailed_schema_info['function_test'] = "SUCCESS - Function signature matches query"
-                    except Exception as func_error:
-                        # Transaction auto-rolled back by context manager
-                        # Cursor remains valid for new queries
-                        detailed_schema_info['function_test'] = f"ERROR: {str(func_error)}"
-                        detailed_schema_info['function_error_type'] = type(func_error).__name__
-                    
-                    # NOTE (12 DEC 2025): Query metrics REMOVED for health check performance
-                    # Job/task status breakdown and function tests moved to /api/dbadmin/metrics
-                    # These were adding 5+ seconds and multiple transactions to health check
-                    query_metrics = {
-                        "connection_time_ms": connection_time_ms,
-                        "note": "Detailed metrics available at /api/dbadmin/stats",
-                        "metrics_removed_reason": "Performance optimization - health check should be <5s"
-                    }
-                    
-                    # Determine if critical app schema is missing (08 DEC 2025)
-                    # App schema is CRITICAL - without it, job/task orchestration is non-functional
-                    tables_ready = all(status is True for status in app_tables_status.values()) if app_tables_status else False
-
-                    # Build error message if app schema is missing or tables not ready
-                    error_msg = None
-                    impact_msg = None
-                    if not app_schema_exists:
-                        error_msg = f"CRITICAL: App schema '{config.app_schema}' does not exist - run rebuild"
-                        impact_msg = "Job/task orchestration completely unavailable"
-                    elif not tables_ready:
-                        error_msg = f"App schema exists but required tables missing: {table_management_results}"
-                        impact_msg = "Job/task orchestration may fail"
-
-                    result = {
-                        "postgresql_version": pg_version.split()[0],
-                        "postgis_version": postgis_version,
-                        "connection": "successful",
-                        "connection_time_ms": connection_time_ms,
-                        "schema_health": {
-                            "app_schema_name": config.app_schema,
-                            "app_schema_exists": app_schema_exists,
-                            "app_schema_critical": True,  # Indicates this is required for core functionality
-                            "postgis_schema_name": config.postgis_schema,
-                            "postgis_schema_exists": postgis_schema_exists,
-                            "app_tables": app_tables_status if app_schema_exists else "schema_not_found"
-                        },
-                        "table_management": {
-                            "auto_creation_enabled": True,
-                            "operations_performed": table_management_results,
-                            "tables_ready": tables_ready
-                        },
-                        "stac_data": {
-                            "items_count": stac_count,
-                            "schema_accessible": postgis_schema_exists
-                        },
-                        "detailed_schema_inspection": detailed_schema_info,
-                        "query_performance": query_metrics
-                    }
-
-                    # Add error field if app schema issues detected (triggers unhealthy status)
-                    if error_msg:
-                        result["error"] = error_msg
-                        result["impact"] = impact_msg
-                        result["fix"] = "POST /api/dbadmin/maintenance?action=rebuild&confirm=yes"
-
-                    return result
-
-        return self.check_component_health(
-            "database",
-            check_pg,
-            description="PostgreSQL/PostGIS database connectivity and query metrics"
-        )
-    
-    # NOTE (12 DEC 2025): _check_vault_configuration REMOVED
-    # Key Vault is disabled - using environment variables only
-    # Dead code removed for maintainability
-    
-    def _check_database_configuration(self) -> Dict[str, Any]:
-        """Check PostgreSQL database configuration."""
-        def check_db_config():
-            config = get_config()
-
-            # Required environment variables for database connection
-            # Note: KEY_VAULT is optional - system uses env vars for password (08 DEC 2025)
-            required_env_vars = {
-                "POSTGIS_DATABASE": os.getenv("POSTGIS_DATABASE"),
-                "POSTGIS_HOST": os.getenv("POSTGIS_HOST"),
-                "POSTGIS_USER": os.getenv("POSTGIS_USER"),
-                "POSTGIS_PORT": os.getenv("POSTGIS_PORT")
-            }
-
-            # Optional environment variables
-            # KEY_VAULT is optional - disabled by default, using environment variables (08 DEC 2025)
-            optional_env_vars = {
-                "KEY_VAULT": os.getenv("KEY_VAULT"),
-                "KEY_VAULT_DATABASE_SECRET": os.getenv("KEY_VAULT_DATABASE_SECRET"),
-                "POSTGIS_PASSWORD": bool(os.getenv("POSTGIS_PASSWORD")),
-                "POSTGIS_SCHEMA": os.getenv("POSTGIS_SCHEMA", "geo"),
-                "APP_SCHEMA": os.getenv("APP_SCHEMA", "app")
-            }
-            
-            # Check for missing required variables
-            missing_vars = []
-            present_vars = {}
-            
-            for var_name, var_value in required_env_vars.items():
-                if var_value:
-                    present_vars[var_name] = var_value
-                else:
-                    missing_vars.append(var_name)
-            
-            # Configuration from loaded config
-            config_values = {
-                "postgis_host": config.postgis_host,
-                "postgis_port": config.postgis_port,
-                "postgis_user": config.postgis_user,
-                "postgis_database": config.postgis_database,
-                "postgis_schema": config.postgis_schema,
-                "app_schema": config.app_schema,
-                "key_vault_name": config.key_vault_name,
-                "key_vault_database_secret": config.key_vault_database_secret,
-                "postgis_password_configured": bool(config.postgis_password)
-            }
-            
-            return {
-                "required_env_vars_present": present_vars,
-                "missing_required_vars": missing_vars,
-                "optional_env_vars": optional_env_vars,
-                "loaded_config_values": config_values,
-                "configuration_complete": len(missing_vars) == 0
-            }
-
-        return self.check_component_health(
-            "database_config",
-            check_db_config,
-            description="PostgreSQL connection environment variables and configuration"
-        )
-    
-    def _should_check_database(self) -> bool:
-        """Check if database health check is enabled."""
-        return os.getenv("ENABLE_DATABASE_HEALTH_CHECK", "false").lower() == "true"
-
-    def _check_startup_validation(self) -> Dict[str, Any]:
-        """
-        Check startup validation state from STARTUP_STATE (03 JAN 2026 - STARTUP_REFORM.md).
-
-        This component shows the results of Phase 2 soft validation that runs
-        during function_app.py startup. It checks:
-        - env_vars: Required environment variables present
-        - imports: Critical Python modules importable
-        - service_bus_dns: Service Bus namespace DNS resolution
-        - service_bus_queues: Required queues exist and accessible
-
-        If any validation failed, Service Bus triggers are NOT registered,
-        but diagnostic endpoints (/api/livez, /api/readyz, /api/health) remain
-        available to help diagnose the issue.
-
-        Returns:
-            Dict with startup validation status and any failures
-        """
-        def check_startup():
-            from startup_state import STARTUP_STATE
-
-            # Check if validation has completed
-            if not STARTUP_STATE.validation_complete:
-                return {
-                    "validation_complete": False,
-                    "all_passed": False,
-                    "message": "Startup validation still in progress",
-                    "startup_time": STARTUP_STATE.startup_time
-                }
-
-            # Get summary from STARTUP_STATE
-            summary = STARTUP_STATE.get_summary()
-
-            # Build detailed check results
-            checks = {}
-            for check_name in ["env_vars", "imports", "service_bus_dns", "service_bus_queues"]:
-                check_result = getattr(STARTUP_STATE, check_name, None)
-                if check_result:
-                    checks[check_name] = check_result.to_dict()
-
-            result = {
-                "validation_complete": STARTUP_STATE.validation_complete,
-                "all_passed": STARTUP_STATE.all_passed,
-                "startup_time": STARTUP_STATE.startup_time,
-                "summary": summary,
-                "checks": checks
-            }
-
-            # Add critical error if present
-            if STARTUP_STATE.critical_error:
-                result["critical_error"] = STARTUP_STATE.critical_error
-
-            # Add service bus trigger status
-            result["triggers_registered"] = STARTUP_STATE.all_passed
-
-            return result
-
-        # Use check_component_health wrapper for consistent formatting
-        component_result = self.check_component_health(
-            "startup_validation",
-            check_startup,
-            description="Startup validation state (env_vars, imports, Service Bus DNS/queues)"
-        )
-
-        # Override status based on STARTUP_STATE.all_passed
-        # The check_component_health only sees exceptions, not logical failures
-        try:
-            from startup_state import STARTUP_STATE
-            if STARTUP_STATE.validation_complete and not STARTUP_STATE.all_passed:
-                component_result["status"] = "unhealthy"
-                failed = STARTUP_STATE.get_failed_checks()
-                component_result["errors"] = [
-                    f"{f.name}: {f.error_message or f.error_type}" for f in failed
-                ]
-        except Exception:
-            pass  # If we can't import STARTUP_STATE, the check already failed
-
-        return component_result
-
-    def _check_import_validation(self) -> Dict[str, Any]:
-        """
-        Lightweight import validation check (12 DEC 2025 - Performance Fix).
-
-        IMPORTANT: This check verifies that critical modules are loaded in sys.modules
-        rather than re-importing them. Re-importing triggers a cascade through
-        function_app.py → CoreMachine → all jobs/handlers → GDAL/rasterio which
-        takes 75+ seconds and causes health check timeouts.
-
-        Since this health endpoint can only run if function_app.py already loaded
-        successfully, re-validating imports is redundant - if imports had failed,
-        this endpoint wouldn't be callable in the first place.
-
-        Returns:
-            Dict with lightweight import validation status
-        """
-        def check_imports():
-            # Check critical modules are in sys.modules (already loaded at startup)
-            # No new imports triggered - just checking what's already there
-            critical_modules = {
-                'azure.functions': 'Azure Functions runtime',
-                'pydantic': 'Data validation library',
-                'psycopg': 'PostgreSQL adapter',
-                'azure.identity': 'Azure authentication',
-                'azure.storage.blob': 'Azure Blob Storage client',
-            }
-
-            module_status = {}
-            for module, description in critical_modules.items():
-                module_status[module] = {
-                    'loaded': module in sys.modules,
-                    'description': description
-                }
-
-            all_loaded = all(status['loaded'] for status in module_status.values())
-            loaded_count = sum(1 for status in module_status.values() if status['loaded'])
-
-            return {
-                "overall_success": all_loaded,
-                "validation_summary": f"All critical modules loaded" if all_loaded else f"Missing modules detected",
-                "statistics": {
-                    "modules_checked": len(critical_modules),
-                    "modules_loaded": loaded_count,
-                    "success_rate_percent": round(loaded_count / len(critical_modules) * 100, 1)
-                },
-                "critical_dependencies": module_status,
-                "note": "Lightweight check via sys.modules - full validation runs at startup only",
-                "rationale": "If this endpoint responds, function_app.py loaded successfully, proving all imports work"
-            }
-
-        return self.check_component_health(
-            "import_validation",
-            check_imports,
-            description="Python module imports (lightweight sys.modules check)"
-        )
-
-    def _check_duckdb(self) -> Dict[str, Any]:
-        """
-        Check DuckDB analytical engine health (optional component).
-
-        DuckDB is an optional analytical query engine used for:
-        - Serverless queries over Azure Blob Storage Parquet files
-        - Spatial analytics with PostGIS-like ST_* functions
-        - GeoParquet exports for Gold tier data products
-
-        This component is NOT critical for core operations - health check
-        will not fail if DuckDB is unavailable or not installed.
-
-        Returns:
-            Dict with DuckDB health status, extensions, and connection info
-        """
-        def check_duckdb():
-            try:
-                # Try to import DuckDB repository
-                from infrastructure.factory import RepositoryFactory
-
-                # Create DuckDB repository singleton
-                duckdb_repo = RepositoryFactory.create_duckdb_repository()
-
-                # Get comprehensive health check from repository
-                health_result = duckdb_repo.health_check()
-
-                # Add component metadata
-                health_result["component_type"] = "analytical_engine"
-                health_result["optional"] = True
-                health_result["purpose"] = "Serverless Parquet queries and GeoParquet exports"
-
-                return health_result
-
-            except ImportError as e:
-                # DuckDB not installed - this is OK, it's optional
-                return {
-                    "status": "not_installed",
-                    "optional": True,
-                    "message": "DuckDB not installed (optional dependency)",
-                    "install_command": "pip install duckdb>=1.1.0 pyarrow>=10.0.0",
-                    "impact": "GeoParquet exports and serverless blob queries unavailable"
-                }
-            except Exception as e:
-                # Other errors during initialization
-                import traceback
-                return {
-                    "status": "error",
-                    "optional": True,
-                    "error": str(e)[:200],
-                    "error_type": type(e).__name__,
-                    "traceback": traceback.format_exc()[:500],
-                    "impact": "Analytical queries and GeoParquet exports unavailable"
-                }
-
-        return self.check_component_health(
-            "duckdb",
-            check_duckdb,
-            description="DuckDB analytical engine for serverless queries and GeoParquet exports"
-        )
-
-    def _check_jobs_registry(self) -> Dict[str, Any]:
-        """
-        Check jobs registry status and available job types.
-
-        This provides visibility into which jobs are registered and available,
-        helping diagnose deployment issues where jobs fail to register.
-
-        Returns:
-            Dict with jobs registry health status including:
-            - available_jobs: List of registered job type names
-            - total_jobs: Count of registered jobs
-            - registry_location: Where jobs are registered
-            - validation_performed: Whether validation was successful
-        """
-        def check_jobs():
-            from jobs import ALL_JOBS
-
-            job_types = sorted(list(ALL_JOBS.keys()))
-
-            return {
-                "available_jobs": job_types,
-                "total_jobs": len(job_types),
-                "registry_location": "jobs/__init__.py",
-                "validation_performed": True,
-                "registry_type": "explicit",
-                "note": "Jobs are explicitly registered in jobs/__init__.py ALL_JOBS dict"
-            }
-
-        return self.check_component_health(
-            "jobs",
-            check_jobs,
-            description="Job registry showing available ETL job types and their handlers"
-        )
-
-    def _check_pgstac(self) -> Dict[str, Any]:
-        """
-        Check PgSTAC (PostgreSQL STAC extension) health.
-
-        This provides visibility into PgSTAC installation status and critical table availability,
-        particularly the pgstac.searches table which is required for TiTiler integration.
-
-        Returns:
-            Dict with PgSTAC health status including:
-            - pgstac_version: Version string from pgstac.get_version()
-            - schema_exists: Whether pgstac schema exists
-            - critical_tables: Status of collections, items, searches tables
-            - searches_table_exists: Specific check for searches table (required for search registration)
-            - table_counts: Row counts for collections and items
-        """
-        def check_pgstac():
-            from infrastructure.postgresql import PostgreSQLRepository
-            from config import get_config
-
-            config = get_config()
-            repo = PostgreSQLRepository(schema_name='pgstac')
-
-            try:
-                with repo._get_connection() as conn:
-                    with conn.cursor() as cur:
-                        # Check if pgstac schema exists
-                        cur.execute(
-                            "SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname = 'pgstac') as schema_exists"
-                        )
-                        schema_exists = cur.fetchone()['schema_exists']
-
-                        if not schema_exists:
-                            return {
-                                "schema_exists": False,
-                                "installed": False,
-                                "error": "PgSTAC schema not found - run /api/stac/setup to install",
-                                "impact": "STAC collections and items cannot be created"
-                            }
-
-                        # Get PgSTAC version
-                        pgstac_version = None
-                        try:
-                            cur.execute("SELECT pgstac.get_version() as version")
-                            pgstac_version = cur.fetchone()['version']
-                        except Exception as ver_error:
-                            pgstac_version = f"error: {str(ver_error)[:100]}"
-
-                        # Check critical tables existence
-                        critical_tables = {}
-                        for table_name in ['collections', 'items', 'searches']:
-                            cur.execute("""
-                                SELECT EXISTS (
-                                    SELECT FROM information_schema.tables
-                                    WHERE table_schema = 'pgstac'
-                                    AND table_name = %s
-                                ) as table_exists
-                            """, (table_name,))
-                            table_exists = cur.fetchone()['table_exists']
-                            critical_tables[table_name] = table_exists
-
-                        # Get row counts for collections and items - use pg_stat for performance (12 DEC 2025)
-                        table_counts = {}
-
-                        if critical_tables.get('collections', False):
-                            try:
-                                cur.execute("""
-                                    SELECT n_live_tup FROM pg_stat_user_tables
-                                    WHERE schemaname = 'pgstac' AND relname = 'collections'
-                                """)
-                                result = cur.fetchone()
-                                table_counts['collections'] = result['n_live_tup'] if result else 0
-                            except Exception:
-                                table_counts['collections'] = "error"
-                        else:
-                            table_counts['collections'] = "table_missing"
-
-                        if critical_tables.get('items', False):
-                            try:
-                                cur.execute("""
-                                    SELECT n_live_tup FROM pg_stat_user_tables
-                                    WHERE schemaname = 'pgstac' AND relname = 'items'
-                                """)
-                                result = cur.fetchone()
-                                table_counts['items'] = result['n_live_tup'] if result else 0
-                            except Exception:
-                                table_counts['items'] = "error"
-                        else:
-                            table_counts['items'] = "table_missing"
-
-                        # Specific check for searches table (critical for TiTiler integration)
-                        searches_table_exists = critical_tables.get('searches', False)
-
-                        # Check critical functions for search registration (18 NOV 2025)
-                        critical_functions = {}
-                        function_warnings = []
-
-                        try:
-                            # Check for search_tohash and search_hash functions
-                            cur.execute("""
-                                SELECT p.proname
-                                FROM pg_proc p
-                                JOIN pg_namespace n ON p.pronamespace = n.oid
-                                WHERE n.nspname = 'pgstac'
-                                AND p.proname IN ('search_tohash', 'search_hash')
-                            """)
-                            functions_found = [row['proname'] for row in cur.fetchall()]
-
-                            critical_functions['search_tohash'] = 'search_tohash' in functions_found
-                            critical_functions['search_hash'] = 'search_hash' in functions_found
-
-                            # Check if searches table has GENERATED hash column
-                            if searches_table_exists:
-                                try:
-                                    cur.execute("""
-                                        SELECT column_name, is_generated
-                                        FROM information_schema.columns
-                                        WHERE table_schema = 'pgstac'
-                                        AND table_name = 'searches'
-                                        AND column_name = 'hash'
-                                    """)
-                                    hash_column = cur.fetchone()
-
-                                    if hash_column and hash_column.get('is_generated') == 'ALWAYS':
-                                        critical_functions['searches_hash_column_generated'] = True
-                                    else:
-                                        critical_functions['searches_hash_column_generated'] = False
-                                        function_warnings.append("searches.hash is not a GENERATED column")
-                                except Exception:
-                                    critical_functions['searches_hash_column_generated'] = None
-
-                            # Generate warnings for missing functions
-                            if not critical_functions['search_tohash']:
-                                function_warnings.append("Missing function: pgstac.search_tohash()")
-                            if not critical_functions['search_hash']:
-                                function_warnings.append("Missing function: pgstac.search_hash()")
-
-                        except Exception as func_error:
-                            critical_functions['error'] = str(func_error)[:100]
-
-                        # Determine overall health status
-                        all_tables_exist = all(critical_tables.values())
-                        all_functions_exist = critical_functions.get('search_tohash', False) and critical_functions.get('search_hash', False)
-
-                        result = {
-                            "schema_exists": True,
-                            "installed": True,
-                            "pgstac_version": pgstac_version,
-                            "critical_tables": critical_tables,
-                            "searches_table_exists": searches_table_exists,
-                            "critical_functions": critical_functions,
-                            "table_counts": table_counts,
-                            "all_critical_tables_present": all_tables_exist,
-                            "all_critical_functions_present": all_functions_exist,
-                            "criticality": "medium"  # Not required for single raster workflows
-                        }
-
-                        # Add warnings/errors if issues detected (08 DEC 2025)
-                        warnings = []
-
-                        if not searches_table_exists:
-                            warnings.append("pgstac.searches table missing - search registration will fail")
-
-                        if not all_functions_exist:
-                            warnings.extend(function_warnings)
-                            warnings.append("Search registration will fail - run /api/dbadmin/maintenance?action=rebuild&confirm=yes")
-
-                        if warnings:
-                            result["warnings"] = warnings
-                            result["impact"] = "Cannot register pgSTAC searches for TiTiler visualization"
-                            result["fix"] = "POST /api/dbadmin/maintenance?action=rebuild&confirm=yes"
-                            # Add error field to trigger unhealthy status when critical tables/functions missing
-                            if not all_tables_exist or not all_functions_exist:
-                                result["error"] = f"PgSTAC incomplete: tables_ok={all_tables_exist}, functions_ok={all_functions_exist}"
-
-                        return result
-
-            except Exception as e:
-                import traceback
-                return {
-                    "schema_exists": False,
-                    "installed": False,
-                    "error": str(e)[:200],
-                    "error_type": type(e).__name__,
-                    "traceback": traceback.format_exc()[:500],
-                    "impact": "PgSTAC health check failed - STAC operations may be impacted"
-                }
-
-        return self.check_component_health(
-            "pgstac",
-            check_pgstac,
-            description="PgSTAC extension for STAC catalog storage and TiTiler integration"
-        )
-
-    def _check_system_reference_tables(self) -> Dict[str, Any]:
-        """
-        Check system reference tables required for spatial operations.
-
-        System reference tables include:
-        - admin0 boundaries - Country boundaries for ISO3 attribution
-
-        Resolution order (23 DEC 2025):
-        1. Check PromoteService for system-reserved dataset with role 'admin0_boundaries'
-        2. Fall back to config default (geo.curated_admin0)
-
-        These tables are used for enriching STAC items with country codes and
-        for H3 grid generation with land/ocean filtering.
-
-        Returns:
-            Dict with system reference tables health status including:
-            - admin0_table: Resolved table name (from promote service or config)
-            - admin0_source: Where table name came from ('promote_service' or 'config_default')
-            - promoted_dataset: If from promote service, the promoted_id
-            - exists: Whether table exists in database
-            - row_count: Number of country records loaded
-            - columns: Required column availability (iso3, geom, name)
-            - spatial_index: Whether GIST index exists for query performance
-            - ready_for_attribution: Boolean indicating readiness for ISO3 attribution
-        """
-        def check_system_tables():
-            from infrastructure.postgresql import PostgreSQLRepository
-
-            repo = PostgreSQLRepository()
-
-            # Resolution: ONLY via promote service - no fallback (23 DEC 2025)
-            admin0_table = None
-            admin0_source = None
-            promoted_dataset_info = None
-            promote_error_msg = None
-
-            try:
-                from services.promote_service import PromoteService
-                from core.models.promoted import SystemRole
-
-                promote_service = PromoteService()
-                promoted = promote_service.get_by_system_role(SystemRole.ADMIN0_BOUNDARIES.value)
-
-                if promoted:
-                    # Get table name from STAC item properties (24 DEC 2025)
-                    # STAC items have postgis:schema and postgis:table properties
-                    stac_id = promoted.get('stac_collection_id') or promoted.get('stac_item_id')
-                    if stac_id:
-                        # Try to get actual table from STAC item properties
-                        try:
-                            from infrastructure.pgstac_bootstrap import get_item_by_id
-                            # Pass collection_id for pgstac partitioned lookup (24 DEC 2025)
-                            # Vector items go to 'system-vectors' collection
-                            collection_id = 'system-vectors' if stac_id.startswith('postgis-') else None
-                            stac_item = get_item_by_id(stac_id, collection_id=collection_id)
-                            if stac_item and 'error' not in stac_item:
-                                props = stac_item.get('properties', {})
-                                postgis_schema = props.get('postgis:schema', 'geo')
-                                postgis_table = props.get('postgis:table')
-                                if postgis_table:
-                                    admin0_table = f"{postgis_schema}.{postgis_table}"
-                                else:
-                                    # Fallback: parse from asset href (24 DEC 2025)
-                                    # Asset href format: postgis://host/db/schema.table
-                                    assets = stac_item.get('assets', {})
-                                    data_asset = assets.get('data', {})
-                                    href = data_asset.get('href', '')
-                                    if href.startswith('postgis://') and '/' in href:
-                                        # Extract schema.table from last path segment
-                                        table_part = href.split('/')[-1]
-                                        if '.' in table_part:
-                                            admin0_table = table_part
-                                        else:
-                                            admin0_table = f"geo.{stac_id}"
-                                    else:
-                                        admin0_table = f"geo.{stac_id}"
-                            else:
-                                # STAC item not found - use stac_id as fallback
-                                admin0_table = f"geo.{stac_id}"
-                        except Exception as stac_err:
-                            self.logger.debug(f"STAC item lookup failed: {stac_err}")
-                            admin0_table = f"geo.{stac_id}"
-
-                        admin0_source = "promote_service"
-                        promoted_dataset_info = {
-                            "promoted_id": promoted.get('promoted_id'),
-                            "stac_type": "collection" if promoted.get('stac_collection_id') else "item",
-                            "stac_id": stac_id,
-                            "system_role": promoted.get('system_role'),
-                            "is_system_reserved": promoted.get('is_system_reserved', False)
-                        }
-            except Exception as promote_error:
-                promote_error_msg = str(promote_error)[:200]
-                self.logger.debug(f"Promote service lookup failed: {promote_error}")
-
-            # NO FALLBACK - if not found in promote service, report as not configured
-            # Use _status: "warning" to avoid marking overall health as degraded (optional component)
-            if not admin0_table:
-                return {
-                    "_status": "warning",  # Override to warning - system tables are optional
-                    "admin0_table": None,
-                    "admin0_source": "not_configured",
-                    "exists": False,
-                    "message": "No system-reserved dataset found with role 'admin0_boundaries'",
-                    "impact": "ISO3 country attribution and H3 land filtering unavailable",
-                    "fix": "1. Create admin0 table via process_vector job\n2. Promote with: POST /api/promote {is_system_reserved: true, system_role: 'admin0_boundaries'}",
-                    "promote_service_error": promote_error_msg
-                }
-
-            # Parse schema.table
-            if '.' in admin0_table:
-                schema, table = admin0_table.split('.', 1)
-            else:
-                schema, table = 'geo', admin0_table
-
-            try:
-                with repo._get_connection() as conn:
-                    with conn.cursor() as cur:
-                        # Check table exists
-                        cur.execute("""
-                            SELECT EXISTS (
-                                SELECT FROM information_schema.tables
-                                WHERE table_schema = %s AND table_name = %s
-                            ) as table_exists
-                        """, (schema, table))
-                        table_exists = cur.fetchone()['table_exists']
-
-                        if not table_exists:
-                            result = {
-                                "_status": "warning",  # Override to warning - system tables are optional
-                                "admin0_table": admin0_table,
-                                "admin0_source": admin0_source,
-                                "exists": False,
-                                "message": f"Table {admin0_table} not found",
-                                "impact": "ISO3 country attribution will be unavailable for STAC items",
-                                "fix": "Run process_vector job to create admin0 table, then promote with system_role='admin0_boundaries'"
-                            }
-                            if promoted_dataset_info:
-                                result["promoted_dataset"] = promoted_dataset_info
-                                result["note"] = "Promoted dataset exists but referenced table is missing"
-                            return result
-
-                        # Check required columns
-                        cur.execute("""
-                            SELECT column_name
-                            FROM information_schema.columns
-                            WHERE table_schema = %s AND table_name = %s
-                        """, (schema, table))
-                        columns = [row['column_name'] for row in cur.fetchall()]
-
-                        # Accept both iso3 and iso_a3 as valid ISO3 column names
-                        has_iso3 = 'iso3' in columns or 'iso_a3' in columns
-                        has_geom = 'geom' in columns or 'geometry' in columns
-                        has_name = 'name' in columns or 'nam_0' in columns
-
-                        # Check row count - use pg_stat for performance (12 DEC 2025)
-                        row_count = 0
-                        try:
-                            cur.execute("""
-                                SELECT n_live_tup FROM pg_stat_user_tables
-                                WHERE schemaname = %s AND relname = %s
-                            """, (schema, table))
-                            result = cur.fetchone()
-                            row_count = result['n_live_tup'] if result else 0
-                        except Exception:
-                            row_count = "error"
-
-                        # Check spatial index exists
-                        cur.execute("""
-                            SELECT COUNT(*) > 0 as has_gist_index
-                            FROM pg_indexes
-                            WHERE schemaname = %s AND tablename = %s
-                            AND indexdef LIKE '%%USING gist%%'
-                        """, (schema, table))
-                        has_spatial_index = cur.fetchone()['has_gist_index']
-
-                        # Build result
-                        ready = has_iso3 and has_geom and isinstance(row_count, int) and row_count > 0
-
-                        # Determine which column names were found
-                        iso3_col = 'iso3' if 'iso3' in columns else ('iso_a3' if 'iso_a3' in columns else None)
-                        geom_col = 'geom' if 'geom' in columns else ('geometry' if 'geometry' in columns else None)
-                        name_col = 'name' if 'name' in columns else ('nam_0' if 'nam_0' in columns else None)
-
-                        result = {
-                            "admin0_table": admin0_table,
-                            "admin0_source": admin0_source,
-                            "exists": True,
-                            "row_count": row_count,
-                            "columns": {
-                                "iso3": iso3_col,
-                                "geom": geom_col,
-                                "name": name_col
-                            },
-                            "spatial_index": has_spatial_index,
-                            "ready_for_attribution": ready,
-                            "criticality": "low"  # Optional - only affects ISO3 country attribution
-                        }
-
-                        # Add promoted dataset info if resolved via promote service
-                        if promoted_dataset_info:
-                            result["promoted_dataset"] = promoted_dataset_info
-
-                        # Add warnings if issues detected
-                        warnings = []
-                        if not has_iso3:
-                            warnings.append("Missing required column: iso3")
-                        if not has_geom:
-                            warnings.append("Missing required column: geom")
-                        if not has_spatial_index:
-                            warnings.append("No GIST spatial index - queries will be slow")
-                        if isinstance(row_count, int) and row_count == 0:
-                            warnings.append("Table is empty - no country boundaries loaded")
-
-                        if warnings:
-                            result["warnings"] = warnings
-                            result["impact"] = "ISO3 country attribution may fail or be incomplete"
-                            result["fix"] = "Ensure table has iso3, geom columns with data and GIST index"
-
-                        return result
-
-            except Exception as e:
-                import traceback
-                result = {
-                    "_status": "warning",  # Override to warning - system tables are optional
-                    "admin0_table": admin0_table,
-                    "admin0_source": admin0_source,
-                    "exists": False,
-                    "error": str(e)[:200],
-                    "error_type": type(e).__name__,
-                    "traceback": traceback.format_exc()[:500],
-                    "impact": "System reference tables check failed"
-                }
-                if promoted_dataset_info:
-                    result["promoted_dataset"] = promoted_dataset_info
-                return result
-
-        return self.check_component_health(
-            "system_reference_tables",
-            check_system_tables,
-            description="Reference data tables for ISO3 country attribution and spatial enrichment"
-        )
-
-    def _check_deployment_config(self) -> Dict[str, Any]:
-        """
-        Check if deployment configuration is properly set for this Azure tenant.
-
-        Validates that tenant-specific values (storage accounts, URLs, managed identities)
-        have been overridden from their development defaults. Uses AzureDefaults class
-        from config/defaults.py to detect default values.
-
-        This check helps identify when deploying to a new Azure tenant whether
-        all required environment variables have been properly configured.
-
-        Returns:
-            Dict with deployment configuration validation status including:
-            - config_status: "configured" | "using_defaults" | "partial"
-            - issues: List of configuration issues detected
-            - defaults_detected: Dict of fields still using development defaults
-            - environment_vars_set: Dict of which env vars were found
-            - deployment_ready: Boolean indicating readiness for production
-        """
-        def check_deployment():
-            config = get_config()
-
-            issues = []
-            defaults_detected = {}
-            env_vars_set = {}
-
-            # Check storage accounts (zone-specific - 08 DEC 2025)
-            bronze_account = config.storage.bronze.account_name
-            if bronze_account == StorageDefaults.DEFAULT_ACCOUNT_NAME:
-                defaults_detected['bronze_storage_account'] = {
-                    'current_value': bronze_account,
-                    'default_value': StorageDefaults.DEFAULT_ACCOUNT_NAME,
-                    'env_var': 'BRONZE_STORAGE_ACCOUNT'
-                }
-                issues.append(f"Bronze storage using development default: {bronze_account}")
-            env_vars_set['BRONZE_STORAGE_ACCOUNT'] = bool(os.getenv('BRONZE_STORAGE_ACCOUNT'))
-
-            # Check TiTiler URL
-            titiler_url = config.titiler_base_url
-            if titiler_url == AzureDefaults.TITILER_BASE_URL:
-                defaults_detected['titiler_base_url'] = {
-                    'current_value': titiler_url,
-                    'default_value': AzureDefaults.TITILER_BASE_URL,
-                    'env_var': 'TITILER_BASE_URL'
-                }
-                issues.append(f"TiTiler URL using development default")
-            env_vars_set['TITILER_BASE_URL'] = bool(os.getenv('TITILER_BASE_URL'))
-
-            # OGC_STAC_APP_URL removed 28 JAN 2026 - OGC Features now served by TiPG at {TITILER_BASE_URL}/vector
-
-            # Check ETL App URL
-            etl_url = config.etl_app_base_url
-            if etl_url == AzureDefaults.ETL_APP_URL:
-                defaults_detected['etl_app_base_url'] = {
-                    'current_value': etl_url,
-                    'default_value': AzureDefaults.ETL_APP_URL,
-                    'env_var': 'ETL_APP_URL'
-                }
-                issues.append(f"ETL App URL using development default")
-            env_vars_set['ETL_APP_URL'] = bool(os.getenv('ETL_APP_URL'))
-
-            # Check Managed Identity name (if using managed identity)
-            # NOTE: Default must match database_config.py (default is 'true' for database auth)
-            use_managed_identity = os.getenv('USE_MANAGED_IDENTITY', 'true').lower() == 'true'
-            if use_managed_identity:
-                mi_name = config.database.managed_identity_admin_name
-                if mi_name == AzureDefaults.MANAGED_IDENTITY_NAME:
-                    defaults_detected['managed_identity_admin_name'] = {
-                        'current_value': mi_name,
-                        'default_value': AzureDefaults.MANAGED_IDENTITY_NAME,
-                        'env_var': 'DB_ADMIN_MANAGED_IDENTITY_NAME'
-                    }
-                    issues.append(f"Managed Identity Admin using development default: {mi_name}")
-                env_vars_set['DB_ADMIN_MANAGED_IDENTITY_NAME'] = bool(os.getenv('DB_ADMIN_MANAGED_IDENTITY_NAME'))
-            else:
-                env_vars_set['USE_MANAGED_IDENTITY'] = False
-
-            # Check database host (required for any deployment)
-            db_host = config.database.host
-            env_vars_set['POSTGIS_HOST'] = bool(os.getenv('POSTGIS_HOST'))
-            if not os.getenv('POSTGIS_HOST'):
-                issues.append("Database host (POSTGIS_HOST) not set via environment variable")
-
-            # Determine overall status
-            defaults_count = len(defaults_detected)
-            total_azure_configs = 5  # storage, titiler, ogc_stac, etl, managed_identity
-
-            if defaults_count == 0:
-                config_status = "configured"
-                deployment_ready = True
-            elif defaults_count == total_azure_configs:
-                config_status = "using_defaults"
-                deployment_ready = False
-            else:
-                config_status = "partial"
-                deployment_ready = False
-
-            return {
-                "config_status": config_status,
-                "deployment_ready": deployment_ready,
-                "azure_tenant_specific_configs": {
-                    "total_checked": total_azure_configs,
-                    "properly_configured": total_azure_configs - defaults_count,
-                    "using_defaults": defaults_count
-                },
-                "issues": issues if issues else None,
-                "defaults_detected": defaults_detected if defaults_detected else None,
-                "environment_vars_set": env_vars_set,
-                "recommendation": None if deployment_ready else (
-                    "Set tenant-specific environment variables before deploying to production. "
-                    "See config/defaults.py for the list of AzureDefaults values that should be overridden."
-                )
-            }
-
-        return self.check_component_health(
-            "deployment_config",
-            check_deployment,
-            description="Tenant-specific configuration validation for production deployments"
-        )
-
-    def _check_app_mode(self) -> Dict[str, Any]:
-        """
-        Check application mode configuration (07 DEC 2025 - Multi-Function App Architecture).
-
-        Reports on the current app mode and which queues this instance listens to.
-        Used for monitoring multi-Function App deployments.
-
-        Returns:
-            Dict with app mode health status including:
-            - mode: Current app mode (standalone, platform_raster, etc.)
-            - app_name: Unique identifier for this app instance
-            - queues_listening: Which queues this app processes
-            - routing: External routing configuration
-            - role: Platform vs Worker role indicators
-        """
-        def check_app_mode():
-            app_mode_config = get_app_mode_config()
-            config = get_config()
-
-            return {
-                "mode": app_mode_config.mode.value,
-                "app_name": app_mode_config.app_name,
-                "docker_worker_enabled": app_mode_config.docker_worker_enabled,
-                "queues_listening": {
-                    "jobs": app_mode_config.listens_to_jobs_queue,
-                    "functionapp_tasks": app_mode_config.listens_to_functionapp_tasks,
-                    "container_tasks": app_mode_config.listens_to_container_tasks,
-                },
-                "queue_names": {
-                    "jobs": config.queues.jobs_queue,
-                    "functionapp_tasks": config.queues.functionapp_tasks_queue,
-                    "container_tasks": config.queues.container_tasks_queue,
-                },
-                "routing": {
-                    "routes_tasks_externally": app_mode_config.routes_tasks_externally,
-                },
-                "role": {
-                    "is_platform": app_mode_config.is_platform_mode,
-                    "is_worker": app_mode_config.is_worker_mode,
-                    "has_http": app_mode_config.has_http_endpoints
-                },
-                "endpoints_enabled": {
-                    "platform": app_mode_config.has_platform_endpoints,
-                    "admin": app_mode_config.has_admin_endpoints,
-                    "jobs": app_mode_config.has_jobs_endpoints,
-                },
-                "environment_var": {
-                    "APP_MODE": os.getenv("APP_MODE", "not_set (defaults to standalone)"),
-                    "APP_NAME": os.getenv("APP_NAME", "not_set (defaults to rmhazuregeoapi)"),
-                    "DOCKER_WORKER_ENABLED": os.getenv("DOCKER_WORKER_ENABLED", "not_set (defaults to false)")
-                }
-            }
-
-        return self.check_component_health(
-            "app_mode",
-            check_app_mode,
-            description="Multi-Function App deployment mode and queue routing configuration"
-        )
-
-    def _check_endpoint_registration(self) -> Dict[str, Any]:
-        """
-        Check endpoint registration consistency (27 JAN 2026 - BUG-006 detection).
-
-        Validates that endpoints expected for the current APP_MODE are actually
-        registered and accessible. Detects configuration issues like:
-        - Platform endpoints expected but not registered
-        - Import failures preventing blueprint registration
-        - Mismatched APP_MODE vs actual endpoint availability
-
-        This check helps diagnose 404 errors when endpoints should be available
-        but are disabled due to APP_MODE misconfiguration.
-
-        Returns:
-            Dict with endpoint registration health including warnings
-        """
-        def check_endpoints():
-            from config import get_app_mode_config
-            import sys
-
-            app_mode_config = get_app_mode_config()
-            warnings = []
-            issues = []
-
-            # Define endpoint expectations per mode
-            endpoint_checks = {
-                "platform_endpoints": {
-                    "expected": app_mode_config.has_platform_endpoints,
-                    "description": "/api/platform/* (approve, revoke, approvals, submit)",
-                    "modes_enabled": ["standalone", "platform", "orchestrator"],
-                    # NOTE: trigger_approvals is lazy-loaded inside handlers (by design)
-                    # Only check the blueprint module which IS loaded at startup
-                    "test_modules": [
-                        "triggers.platform.platform_bp",
-                    ],
-                },
-                "admin_endpoints": {
-                    "expected": app_mode_config.has_admin_endpoints,
-                    "description": "/api/dbadmin/*, /api/admin/*",
-                    "modes_enabled": ["standalone", "orchestrator", "worker_functionapp"],
-                    "test_modules": [
-                        "triggers.admin.admin_db",
-                        "triggers.admin.admin_system",
-                    ],
-                },
-                "jobs_endpoints": {
-                    "expected": app_mode_config.has_jobs_endpoints,
-                    "description": "/api/jobs/* (submit, status)",
-                    "modes_enabled": ["standalone", "orchestrator"],
-                    # NOTE: Jobs use individual trigger modules, not a blueprint
-                    "test_modules": [
-                        "triggers.submit_job",
-                        "triggers.get_job_status",
-                    ],
-                },
-            }
-
-            results = {}
-            for endpoint_type, config in endpoint_checks.items():
-                result = {
-                    "expected": config["expected"],
-                    "modes_enabled": config["modes_enabled"],
-                    "description": config["description"],
-                }
-
-                if config["expected"]:
-                    # Verify modules are loaded (would not be loaded if blueprint not registered)
-                    module_results = []
-                    all_loaded = True
-                    for module_path in config["test_modules"]:
-                        is_loaded = module_path in sys.modules
-                        module_results.append({
-                            "module": module_path,
-                            "loaded": is_loaded
-                        })
-                        if not is_loaded:
-                            all_loaded = False
-
-                    result["modules_loaded"] = module_results
-                    result["all_modules_loaded"] = all_loaded
-
-                    if not all_loaded:
-                        # This is a serious issue - endpoints expected but not registered
-                        warning_msg = (
-                            f"{endpoint_type}: Expected endpoints not registered. "
-                            f"Check for import errors in Application Insights. "
-                            f"APP_MODE={app_mode_config.mode.value}"
-                        )
-                        warnings.append(warning_msg)
-                        result["warning"] = warning_msg
-                else:
-                    result["note"] = f"Disabled for APP_MODE={app_mode_config.mode.value}"
-
-                results[endpoint_type] = result
-
-            # Build summary
-            summary = {
-                "app_mode": app_mode_config.mode.value,
-                "endpoints": results,
-            }
-
-            if warnings:
-                summary["warnings"] = warnings
-            if issues:
-                summary["issues"] = issues
-
-            # Provide actionable guidance for common issues
-            if app_mode_config.mode.value in ["worker_functionapp", "worker_docker"]:
-                summary["guidance"] = (
-                    f"APP_MODE={app_mode_config.mode.value} disables platform endpoints. "
-                    "If you need /api/platform/approve or /api/platform/approvals, "
-                    "set APP_MODE=standalone or APP_MODE=orchestrator"
-                )
-
-            return summary
-
-        return self.check_component_health(
-            "endpoint_registration",
-            check_endpoints,
-            description="Validates expected endpoints are registered for current APP_MODE"
-        )
-
-    # _check_task_routing_coverage() REMOVED (12 DEC 2025)
-    # Moved to services/__init__.py (startup validation) and scripts/validate_config.py (pre-deployment)
-    # Configuration validation doesn't belong in runtime health checks
-
-    def _check_schema_summary(self) -> Dict[str, Any]:
-        """
-        Get comprehensive schema summary for remote database inspection (07 DEC 2025).
-
-        Provides visibility into all schemas, tables, row counts, and STAC statistics
-        without requiring direct database access. Critical for QA environment where
-        database access requires PRIVX → Windows Server → DBeaver workflow.
-
-        Returns:
-            Dict with schema summary including:
-            - schemas: Dict of schema names with tables, counts, sizes
-            - pgstac: STAC collection/item counts
-            - total_tables: Total table count across all schemas
-        """
-        def check_schemas():
-            from infrastructure.postgresql import PostgreSQLRepository
-            from config import get_config
-
-            config = get_config()
-            repo = PostgreSQLRepository()
-
-            try:
-                with repo._get_connection() as conn:
-                    with conn.cursor() as cur:
-                        schemas_data = {}
-
-                        # Get all relevant schemas
-                        target_schemas = ['app', 'geo', 'pgstac', 'h3']
-
-                        for schema_name in target_schemas:
-                            # Check if schema exists
-                            cur.execute("""
-                                SELECT EXISTS(
-                                    SELECT 1 FROM pg_namespace WHERE nspname = %s
-                                ) as schema_exists
-                            """, (schema_name,))
-                            schema_exists = cur.fetchone()['schema_exists']
-
-                            if not schema_exists:
-                                schemas_data[schema_name] = {
-                                    "exists": False,
-                                    "tables": [],
-                                    "table_count": 0
-                                }
-                                continue
-
-                            # Get tables in schema
-                            cur.execute("""
-                                SELECT table_name
-                                FROM information_schema.tables
-                                WHERE table_schema = %s
-                                AND table_type = 'BASE TABLE'
-                                ORDER BY table_name
-                            """, (schema_name,))
-                            tables = [row['table_name'] for row in cur.fetchall()]
-
-                            # Get row counts for all tables in schema - single query using pg_stat (12 DEC 2025)
-                            # This is instant regardless of table size, unlike COUNT(*)
-                            cur.execute("""
-                                SELECT relname, n_live_tup
-                                FROM pg_stat_user_tables
-                                WHERE schemaname = %s
-                                ORDER BY relname
-                            """, (schema_name,))
-                            table_counts = {row['relname']: row['n_live_tup'] for row in cur.fetchall()}
-
-                            schemas_data[schema_name] = {
-                                "exists": True,
-                                "tables": tables,
-                                "table_count": len(tables),
-                                "row_counts": table_counts,
-                                "note": "Row counts are approximate (from pg_stat_user_tables)"
-                            }
-
-                        # Special handling for pgstac - get collection/item counts using pg_stat (12 DEC 2025)
-                        if schemas_data.get('pgstac', {}).get('exists', False):
-                            try:
-                                cur.execute("""
-                                    SELECT relname, n_live_tup
-                                    FROM pg_stat_user_tables
-                                    WHERE schemaname = 'pgstac' AND relname IN ('collections', 'items')
-                                """)
-                                stac_counts = {row['relname']: row['n_live_tup'] for row in cur.fetchall()}
-
-                                schemas_data['pgstac']['stac_counts'] = {
-                                    "collections": stac_counts.get('collections', 0),
-                                    "items": stac_counts.get('items', 0)
-                                }
-                            except Exception as e:
-                                schemas_data['pgstac']['stac_counts'] = {
-                                    "error": str(e)[:100]
-                                }
-
-                        # Special handling for geo - count geometry columns
-                        if schemas_data.get('geo', {}).get('exists', False):
-                            try:
-                                cur.execute("""
-                                    SELECT COUNT(*) as count
-                                    FROM geometry_columns
-                                    WHERE f_table_schema = 'geo'
-                                """)
-                                geometry_count = cur.fetchone()['count']
-                                schemas_data['geo']['geometry_columns'] = geometry_count
-                            except Exception:
-                                schemas_data['geo']['geometry_columns'] = "error"
-
-                        # Calculate totals
-                        total_tables = sum(
-                            s.get('table_count', 0)
-                            for s in schemas_data.values()
-                            if isinstance(s, dict)
-                        )
-
-                        return {
-                            "schemas": schemas_data,
-                            "total_tables": total_tables,
-                            "schemas_checked": target_schemas
-                        }
-
-            except Exception as e:
-                import traceback
-                return {
-                    "error": str(e)[:200],
-                    "error_type": type(e).__name__,
-                    "traceback": traceback.format_exc()[:500]
-                }
-
-        return self.check_component_health(
-            "schema_summary",
-            check_schemas,
-            description="Database schema inventory with table counts and STAC statistics"
-        )
-
-    def _check_public_database(self) -> Dict[str, Any]:
-        """
-        Check public database health (07 JAN 2026).
-
-        The public database is a separate PostgreSQL instance used for
-        public-facing OGC Feature Collections. It's optional - only
-        checked if PUBLIC_DB_* environment variables are configured.
-
-        Returns:
-            Dict with public database health status including:
-            - host: Database hostname
-            - database: Database name
-            - schema: Target schema (usually 'geo')
-            - connected: Whether connection succeeded
-            - version: PostgreSQL version if connected
-            - table_count: Number of tables in schema
-        """
-        def check_public_db():
-            import psycopg
-            import time
-            from config import get_config
-            from infrastructure.postgresql import PostgreSQLRepository
-
-            config = get_config()
-            start_time = time.time()
-
-            # Get public database configuration
-            if not config.is_public_database_configured():
-                return {
-                    "configured": False,
-                    "message": "Public database not configured (PUBLIC_DB_* env vars not set)"
-                }
-
-            public_config = config.public_database
-
-            # Initialize repository for public database
-            try:
-                repo = PostgreSQLRepository(
-                    config=config,
-                    target_database="public"
-                )
-                conn_str = repo.conn_string
-            except Exception as repo_error:
-                return {
-                    "configured": True,
-                    "host": public_config.host,
-                    "database": public_config.database,
-                    "connected": False,
-                    "error": f"Failed to initialize repository: {str(repo_error)[:200]}",
-                    "error_type": type(repo_error).__name__
-                }
-
-            # Try to connect and get basic info
-            try:
-                with psycopg.connect(conn_str, autocommit=True) as conn:
-                    with conn.cursor() as cur:
-                        connection_time_ms = round((time.time() - start_time) * 1000, 2)
-
-                        # Get PostgreSQL version
-                        cur.execute("SELECT version()")
-                        pg_version = cur.fetchone()[0].split(',')[0]  # Just the version part
-
-                        # Check if PostGIS is available
-                        try:
-                            cur.execute("SELECT PostGIS_Version()")
-                            postgis_version = cur.fetchone()[0]
-                        except Exception:
-                            postgis_version = "not installed"
-
-                        # Check target schema exists
-                        target_schema = public_config.db_schema
-                        cur.execute("""
-                            SELECT EXISTS(
-                                SELECT 1 FROM pg_namespace WHERE nspname = %s
-                            ) as schema_exists
-                        """, (target_schema,))
-                        schema_exists = cur.fetchone()[0]
-
-                        # Count tables in schema
-                        table_count = 0
-                        if schema_exists:
-                            cur.execute("""
-                                SELECT COUNT(*) FROM information_schema.tables
-                                WHERE table_schema = %s AND table_type = 'BASE TABLE'
-                            """, (target_schema,))
-                            table_count = cur.fetchone()[0]
-
-                        return {
-                            "configured": True,
-                            "host": public_config.host,
-                            "database": public_config.database,
-                            "schema": target_schema,
-                            "connected": True,
-                            "connection_time_ms": connection_time_ms,
-                            "postgres_version": pg_version,
-                            "postgis_version": postgis_version,
-                            "schema_exists": schema_exists,
-                            "table_count": table_count,
-                            "purpose": "Public-facing OGC Feature Collections"
-                        }
-
-            except Exception as conn_error:
-                return {
-                    "configured": True,
-                    "host": public_config.host,
-                    "database": public_config.database,
-                    "connected": False,
-                    "error": str(conn_error)[:200],
-                    "error_type": type(conn_error).__name__
-                }
-
-        return self.check_component_health(
-            "public_database",
-            check_public_db,
-            description="Public-facing database for OGC Feature Collections"
-        )
-
-    def _check_geotiler_health(self) -> Dict[str, Any]:
-        """
-        Check GeoTiler Docker app health (13 JAN 2026 - E8 TiPG Integration).
-
-        GeoTiler is a Docker container that hosts multiple services:
-        - COG: Cloud-Optimized GeoTIFF tile serving (TiTiler core)
-        - XArray: Zarr/NetCDF multidimensional array tiles
-        - pgSTAC: STAC mosaic searches and dynamic tiling
-        - TiPG: OGC Features API + Vector Tiles (MVT)
-        - STAC API: STAC catalog browsing and search
-
-        The /health endpoint returns structured status for each service:
-        {
-            "status": "healthy|degraded",
-            "services": {
-                "cog": {"status": "healthy", "available": true, ...},
-                "tipg": {"status": "healthy", "available": true, "details": {...}},
-                ...
-            },
-            "dependencies": {
-                "database": {"status": "ok", "ping_time_ms": 12.5, ...},
-                ...
-            }
-        }
-
-        Returns:
-            Dict with GeoTiler health status including individual service statuses.
-        """
-        def check_geotiler():
-            import requests
-            from config import get_config
-
-            config = get_config()
-            geotiler_url = config.titiler_base_url.rstrip('/')
-
-            # Check if URL is the placeholder default (not configured)
-            if geotiler_url == "https://your-titiler-webapp-url":
-                return {
-                    "configured": False,
-                    "error": "TITILER_BASE_URL not configured (using placeholder default)",
-                    "impact": "Tile serving and OGC Features unavailable",
-                    "fix": "Set TITILER_BASE_URL environment variable to your GeoTiler deployment URL"
-                }
-
-            livez_ok = False
-            health_ok = False
-            livez_response = None
-            health_body = None
-            livez_error = None
-            health_error = None
-
-            # Check /livez endpoint (basic liveness probe)
-            try:
-                resp = requests.get(f"{geotiler_url}/livez", timeout=10)
-                livez_ok = resp.status_code == 200
-                livez_response = {
-                    "status_code": resp.status_code,
-                    "ok": livez_ok
-                }
-            except requests.exceptions.Timeout:
-                livez_error = "Connection timed out (10s)"
-            except requests.exceptions.ConnectionError as e:
-                livez_error = f"Connection failed: {str(e)[:100]}"
-            except Exception as e:
-                livez_error = f"Error: {str(e)[:100]}"
-
-            # Check /health endpoint (full readiness probe with service details)
-            try:
-                resp = requests.get(f"{geotiler_url}/health", timeout=10)
-                health_ok = resp.status_code == 200
-                try:
-                    health_body = resp.json()
-                except Exception:
-                    health_body = None
-            except requests.exceptions.Timeout:
-                health_error = "Connection timed out (10s)"
-            except requests.exceptions.ConnectionError as e:
-                health_error = f"Connection failed: {str(e)[:100]}"
-            except Exception as e:
-                health_error = f"Error: {str(e)[:100]}"
-
-            # Parse individual service statuses from health response
-            services = {}
-            dependencies = {}
-            service_summary = {"healthy": 0, "degraded": 0, "disabled": 0, "unavailable": 0}
-
-            if health_body and isinstance(health_body, dict):
-                # Extract services section
-                if "services" in health_body:
-                    for svc_name, svc_data in health_body["services"].items():
-                        if isinstance(svc_data, dict):
-                            svc_status = svc_data.get("status", "unknown")
-                            svc_available = svc_data.get("available", False)
-
-                            services[svc_name] = {
-                                "status": svc_status,
-                                "available": svc_available,
-                            }
-
-                            # Include description if provided
-                            if "description" in svc_data:
-                                services[svc_name]["description"] = svc_data["description"]
-
-                            # Include endpoints if provided
-                            if "endpoints" in svc_data:
-                                services[svc_name]["endpoints"] = svc_data["endpoints"]
-
-                            # Include details (e.g., tipg collections count)
-                            if "details" in svc_data:
-                                services[svc_name]["details"] = svc_data["details"]
-
-                            # Include disabled reason if applicable
-                            if "disabled_reason" in svc_data:
-                                services[svc_name]["disabled_reason"] = svc_data["disabled_reason"]
-
-                            # Count by status
-                            if svc_status == "healthy":
-                                service_summary["healthy"] += 1
-                            elif svc_status == "disabled":
-                                service_summary["disabled"] += 1
-                            elif svc_status == "unavailable":
-                                service_summary["unavailable"] += 1
-                            else:
-                                service_summary["degraded"] += 1
-
-                # Extract dependencies section
-                if "dependencies" in health_body:
-                    for dep_name, dep_data in health_body["dependencies"].items():
-                        if isinstance(dep_data, dict):
-                            dependencies[dep_name] = {
-                                "status": dep_data.get("status", "unknown")
-                            }
-                            # Include ping time for database
-                            if "ping_time_ms" in dep_data:
-                                dependencies[dep_name]["ping_time_ms"] = dep_data["ping_time_ms"]
-                            # Include expiry for oauth tokens
-                            if "expires_in_seconds" in dep_data:
-                                dependencies[dep_name]["expires_in_seconds"] = dep_data["expires_in_seconds"]
-                            # Include required_by mapping
-                            if "required_by" in dep_data:
-                                dependencies[dep_name]["required_by"] = dep_data["required_by"]
-
-            # Determine overall status
-            # - All services healthy and both endpoints respond → healthy
-            # - Some services unavailable or degraded → warning
-            # - Neither endpoint responds → unhealthy
-            if livez_ok and health_ok:
-                geotiler_status = health_body.get("status", "healthy") if health_body else "healthy"
-                if geotiler_status == "healthy" and service_summary["unavailable"] == 0:
-                    overall_status = "healthy"
-                    status_reason = f"All {service_summary['healthy']} services healthy"
-                else:
-                    overall_status = "warning"
-                    status_reason = f"{service_summary['healthy']} healthy, {service_summary['unavailable']} unavailable, {service_summary['disabled']} disabled"
-            elif livez_ok and not health_ok:
-                overall_status = "warning"
-                status_reason = "App is alive (/livez OK) but health check failed"
-            else:
-                overall_status = "unhealthy"
-                status_reason = "GeoTiler not responding - neither /livez nor /health accessible"
-
-            result = {
-                "configured": True,
-                "base_url": geotiler_url,
-                "livez": livez_response if livez_response else {"error": livez_error},
-                "overall_status": overall_status,
-                "status_reason": status_reason,
-                "purpose": "Multi-service tile server: COG, XArray, pgSTAC mosaic, TiPG OGC Features, STAC API",
-                "_status": overall_status
-            }
-
-            # Add version if available
-            if health_body and "version" in health_body:
-                result["version"] = health_body["version"]
-
-            # Add services breakdown
-            if services:
-                result["services"] = services
-                result["service_summary"] = service_summary
-
-            # Add dependencies breakdown
-            if dependencies:
-                result["dependencies"] = dependencies
-
-            # Add issues from health response
-            if health_body and health_body.get("issues"):
-                result["issues"] = health_body["issues"]
-
-            # Add health error if check failed
-            if health_error:
-                result["health_error"] = health_error
-
-            # Add error field for unhealthy status
-            if overall_status == "unhealthy":
-                result["error"] = status_reason
-
-            return result
-
-        return self.check_component_health(
-            "geotiler",
-            check_geotiler,
-            description="GeoTiler Docker app: COG, XArray, pgSTAC, TiPG (OGC Features + Vector Tiles), STAC API"
-        )
-
-    def _check_ogc_features_health(self) -> Dict[str, Any]:
-        """
-        Check TiPG OGC Features API health (28 JAN 2026 - migrated from OGC_STAC_APP_URL).
-
-        TiPG runs in the same Docker container as TiTiler at the /vector prefix.
-        Checks the /vector/collections endpoint to verify TiPG is responding.
-
-        Returns:
-            Dict with TiPG health status including:
-            - tipg_url: TiPG base URL
-            - collections_count: Number of vector collections available
-            - overall_status: healthy/unhealthy
-        """
-        def check_tipg():
-            import requests
-            from config import get_config
-
-            config = get_config()
-            tipg_url = config.tipg_base_url.rstrip('/')
-
-            # Check if TITILER_BASE_URL is configured (TiPG derives from it)
-            if "your-titiler-webapp-url" in tipg_url:
-                return {
-                    "configured": False,
-                    "error": "TITILER_BASE_URL not configured (using placeholder default)",
-                    "impact": "TiPG OGC Features API unavailable for vector queries",
-                    "fix": "Set TITILER_BASE_URL environment variable"
-                }
-
-            collections_endpoint = f"{tipg_url}/collections"
-            health_ok = False
-            collections_count = None
-            health_error = None
-
-            try:
-                resp = requests.get(collections_endpoint, timeout=15)
-                health_ok = resp.status_code == 200
-                if health_ok:
-                    try:
-                        body = resp.json()
-                        collections = body.get("collections", [])
-                        collections_count = len(collections)
-                    except Exception:
-                        pass
-            except requests.exceptions.Timeout:
-                health_error = "Connection timed out (15s)"
-            except requests.exceptions.ConnectionError as e:
-                health_error = f"Connection failed: {str(e)[:100]}"
-            except Exception as e:
-                health_error = f"Error: {str(e)[:100]}"
-
-            # Determine status
-            if health_ok:
-                overall_status = "healthy"
-                status_reason = f"TiPG responding with {collections_count} collections"
-            else:
-                overall_status = "unhealthy"
-                status_reason = health_error or "TiPG not responding"
-
-            result = {
-                "configured": True,
-                "tipg_url": tipg_url,
-                "collections_endpoint": collections_endpoint,
-                "collections_count": collections_count,
-                "overall_status": overall_status,
-                "status_reason": status_reason,
-                "purpose": "TiPG OGC API - Features for PostGIS vector queries"
-            }
-
-            # Add error field for unhealthy status
-            if overall_status == "unhealthy":
-                result["error"] = status_reason
-
-            return result
-
-        return self.check_component_health(
-            "ogc_features",
-            check_tipg,
-            description="TiPG OGC API - Features for PostGIS vector queries (at TiTiler /vector)"
-        )
-
-    def _check_docker_worker_health(self) -> Dict[str, Any]:
-        """
-        Check Docker worker health (11 JAN 2026 - F7.13).
-
-        The Docker worker handles long-running tasks that exceed Function App
-        timeout limits (e.g., large raster processing). This check is only
-        performed when DOCKER_WORKER_ENABLED=true and DOCKER_WORKER_URL is set.
-
-        Returns:
-            Dict with Docker worker health status including:
-            - url: Docker worker URL
-            - health_endpoint: Full health endpoint URL
-            - health: Response from health endpoint
-            - overall_status: healthy/unhealthy
-            - purpose: Description of worker function
-        """
-        def check_docker_worker():
-            import requests
-            from config import get_app_mode_config
-
-            app_mode_config = get_app_mode_config()
-            worker_url = app_mode_config.docker_worker_url.rstrip('/')
-
-            health_ok = False
-            health_response = None
-            health_error = None
-
-            # Check /health endpoint
-            health_endpoint = f"{worker_url}/health"
-            try:
-                resp = requests.get(health_endpoint, timeout=15)
-                health_ok = resp.status_code == 200
-                health_response = {
-                    "status_code": resp.status_code,
-                    "ok": health_ok
-                }
-                # Try to get health response body if JSON
-                try:
-                    body = resp.json()
-                    health_response["body"] = body
-                    health_response["status"] = body.get("status", "unknown")
-                except Exception:
-                    pass
-            except requests.exceptions.Timeout:
-                health_error = "Connection timed out (15s)"
-            except requests.exceptions.ConnectionError as e:
-                health_error = f"Connection failed: {str(e)[:100]}"
-            except Exception as e:
-                health_error = f"Error: {str(e)[:100]}"
-
-            # Determine status
-            if health_ok:
-                overall_status = "healthy"
-                status_reason = "/health endpoint responding"
-            else:
-                overall_status = "unhealthy"
-                status_reason = health_error or "Docker worker not responding"
-
-            result = {
-                "url": worker_url,
-                "health_endpoint": health_endpoint,
-                "health": health_response if health_response else {"error": health_error},
-                "overall_status": overall_status,
-                "status_reason": status_reason,
-                "purpose": "Long-running task processing (large rasters, Docker-based COG creation)"
-            }
-
-            # Add error field for unhealthy status
-            if overall_status == "unhealthy":
-                result["error"] = status_reason
-
-            return result
-
-        return self.check_component_health(
-            "docker_worker",
-            check_docker_worker,
-            description="Docker worker for long-running geospatial tasks"
-        )
-
-    def _check_runtime_environment(self) -> Dict[str, Any]:
-        """
-        Check runtime environment including hardware and instance info (07 JAN 2026).
-
-        Merged from separate hardware and instance_info checks to eliminate
-        redundant psutil calls. Single check provides comprehensive view of:
-        - Hardware specs (CPU, RAM, platform)
-        - Instance identification (for log correlation)
-        - Process details (uptime, threads, memory)
-        - Cold start detection
-        - Worker configuration
-
-        Returns:
-            Dict with sections:
-            - hardware: CPU count, RAM, platform, SKU
-            - instance: Instance IDs for log correlation
-            - process: PID, uptime, threads
-            - memory: System and process memory stats
-            - cold_start: Cold start detection flags
-            - worker_config: Function worker settings
-            - scale_controller: Scale logging status
-        """
-        def check_runtime():
-            import psutil
-            import threading
-            import multiprocessing
-            from datetime import datetime, timezone
-
-            # Single psutil Process object for all process-related queries
-            process = psutil.Process()
-            mem = psutil.virtual_memory()
-            mem_info = process.memory_info()
-
-            # Process timing
-            process_create_time = datetime.fromtimestamp(
-                process.create_time(), tz=timezone.utc
-            )
-            now = datetime.now(timezone.utc)
-            process_uptime_seconds = (now - process_create_time).total_seconds()
-
-            def format_uptime(seconds: float) -> str:
-                """Format uptime in human-readable form."""
-                if seconds < 60:
-                    return f"{int(seconds)}s (cold)"
-                elif seconds < 3600:
-                    return f"{int(seconds // 60)}m {int(seconds % 60)}s"
-                elif seconds < 86400:
-                    hours = int(seconds // 3600)
-                    mins = int((seconds % 3600) // 60)
-                    return f"{hours}h {mins}m"
-                else:
-                    days = int(seconds // 86400)
-                    hours = int((seconds % 86400) // 3600)
-                    return f"{days}d {hours}h"
-
-            # Hardware specs
-            total_ram_gb = round(mem.total / (1024**3), 1)
-            hardware = {
-                "cpu_count": psutil.cpu_count() or 0,
-                "total_ram_gb": total_ram_gb,
-                "platform": os.sys.platform,
-                "python_version": sys.version.split()[0],
-                "azure_sku": os.environ.get('WEBSITE_SKU', 'unknown'),
-                "azure_site_name": os.environ.get('WEBSITE_SITE_NAME', 'local'),
-            }
-
-            # Instance identification (for correlating with Application Insights logs)
-            instance_id_full = os.environ.get('WEBSITE_INSTANCE_ID', 'local')
-            instance = {
-                "instance_id": instance_id_full,
-                "instance_id_short": instance_id_full[:16] + '...' if len(instance_id_full) > 16 else instance_id_full,
-            }
-            # Add optional ASE-specific fields if present
-            role_instance = os.environ.get('WEBSITE_ROLE_INSTANCE_ID')
-            if role_instance:
-                instance["role_instance_id"] = role_instance
-            worker_id = os.environ.get('WEBSITE_WORKER_ID')
-            if worker_id:
-                instance["worker_id"] = worker_id
-
-            # Process details
-            process_info = {
-                "pid": process.pid,
-                "uptime_seconds": round(process_uptime_seconds, 1),
-                "uptime_human": format_uptime(process_uptime_seconds),
-                "start_time": process_create_time.isoformat(),
-                "thread_count": threading.active_count(),
-                "thread_names": [t.name for t in threading.enumerate()][:10],
-            }
-
-            # Memory stats (system and process combined)
-            memory = {
-                "system_total_gb": total_ram_gb,
-                "system_available_mb": round(mem.available / (1024**2), 1),
-                "system_percent": round(mem.percent, 1),
-                "process_rss_mb": round(mem_info.rss / (1024**2), 1),
-                "process_vms_mb": round(mem_info.vms / (1024**2), 1),
-                "process_percent": round(process.memory_percent(), 2),
-                "cpu_percent": round(psutil.cpu_percent(interval=None), 1),
-            }
-
-            # Cold start detection
-            cold_start = {
-                "likely_cold_start": process_uptime_seconds < 60,
-                "likely_warm": process_uptime_seconds > 300,
-            }
-
-            # Worker configuration
-            worker_config = {
-                "process_count": os.environ.get('FUNCTIONS_WORKER_PROCESS_COUNT', '1'),
-                "runtime": os.environ.get('FUNCTIONS_WORKER_RUNTIME', 'python'),
-            }
-            max_concurrent = os.environ.get('FUNCTIONS_MAX_CONCURRENT_REQUESTS')
-            if max_concurrent:
-                worker_config["max_concurrent_requests"] = max_concurrent
-
-            # Scale controller logging status
-            scale_logging = os.environ.get('SCALE_CONTROLLER_LOGGING_ENABLED')
-            scale_controller = {
-                "logging_enabled": scale_logging or 'disabled',
-            }
-            if not scale_logging:
-                scale_controller["tip"] = "Set SCALE_CONTROLLER_LOGGING_ENABLED=AppInsights:Verbose"
-
-            # Capacity thresholds for reference
-            capacity = {
-                "safe_file_limit_mb": round((total_ram_gb * 1024) / 4, 0),
-                "warning_threshold_percent": 80,
-                "critical_threshold_percent": 90,
-            }
-
-            return {
-                "hardware": hardware,
-                "instance": instance,
-                "process": process_info,
-                "memory": memory,
-                "cold_start": cold_start,
-                "worker_config": worker_config,
-                "scale_controller": scale_controller,
-                "capacity_thresholds": capacity,
-            }
-
-        return self.check_component_health(
-            "runtime",
-            check_runtime,
-            description="Runtime environment (hardware, instance, process, memory)"
-        )
-
-    def _check_network_environment(self) -> Dict[str, Any]:
-        """
-        Check network/VNet/ASE environment configuration (04 JAN 2026).
-
-        Captures ALL available Azure platform environment variables related to
-        networking, VNet integration, and App Service Environment (ASE) settings.
-
-        Environment-responsive: Works in both standard deployments and ASE/VNet
-        environments. Variables that don't exist in the current environment are
-        simply omitted from the response.
-
-        This is critical for diagnosing corporate Azure environments where:
-        - ASE configurations may change without warning
-        - VNet routing affects outbound connectivity
-        - DNS settings determine service resolution
-        - Private endpoints may be required
-
-        Returns:
-            Dict with network configuration including:
-            - vnet: VNet integration settings (private IP, routing, DNS)
-            - ase: App Service Environment settings (if applicable)
-            - platform: General Azure platform identifiers
-            - dns: DNS server configuration
-            - discovered: Any other WEBSITE_*/AZURE_* vars found dynamically
-        """
-        def check_network():
-            # ================================================================
-            # KNOWN ENVIRONMENT VARIABLES - Organized by Category
-            # ================================================================
-
-            # VNet Integration Variables
-            vnet_vars = {
-                'private_ip': 'WEBSITE_PRIVATE_IP',              # IP from VNet subnet
-                'vnet_route_all': 'WEBSITE_VNET_ROUTE_ALL',      # Route all traffic through VNet
-                'content_over_vnet': 'WEBSITE_CONTENTOVERVNET',  # Storage shares via VNet
-                'swap_vnet': 'WEBSITE_SWAP_WARMUP_VNET',         # VNet during slot swap
-            }
-
-            # DNS Configuration
-            dns_vars = {
-                'dns_server': 'WEBSITE_DNS_SERVER',              # Primary DNS
-                'dns_alt_server': 'WEBSITE_DNS_ALT_SERVER',      # Alternate DNS
-            }
-
-            # App Service Environment (ASE) Variables
-            ase_vars = {
-                'ase_name': 'WEBSITE_ASE_NAME',                  # ASE name if deployed to ASE
-                'home_stampname': 'WEBSITE_HOME_STAMPNAME',      # Stamp/scale unit name
-                'stamp_deployment_id': 'WEBSITE_STAMP_DEPLOYMENT_ID',
-                'worker_id': 'WEBSITE_WORKER_ID',                # Worker instance
-                'roleinstance_id': 'WEBSITE_ROLEINSTANCE_ID',    # Role instance
-            }
-
-            # Platform/Identity Variables
-            platform_vars = {
-                'site_name': 'WEBSITE_SITE_NAME',                # App name
-                'hostname': 'WEBSITE_HOSTNAME',                  # Primary hostname
-                'instance_id': 'WEBSITE_INSTANCE_ID',            # VM instance ID
-                'sku': 'WEBSITE_SKU',                            # SKU tier
-                'compute_mode': 'WEBSITE_COMPUTE_MODE',          # Shared vs Dedicated
-                'slot_name': 'WEBSITE_SLOT_NAME',                # Deployment slot
-                'owner_name': 'WEBSITE_OWNER_NAME',              # Subscription+RG
-                'resource_group': 'WEBSITE_RESOURCE_GROUP',      # Resource group
-                'region_name': 'REGION_NAME',                    # Azure region
-                'platform_version': 'WEBSITE_PLATFORM_VERSION',  # Platform version
-                'node_default_version': 'WEBSITE_NODE_DEFAULT_VERSION',
-            }
-
-            # Storage/Content Variables
-            storage_vars = {
-                'contentazurefileconnectionstring': 'WEBSITE_CONTENTAZUREFILECONNECTIONSTRING',
-                'contentshare': 'WEBSITE_CONTENTSHARE',
-                'run_from_package': 'WEBSITE_RUN_FROM_PACKAGE',
-                'use_zip_deploy': 'WEBSITE_USE_ZIP_DEPLOY',
-            }
-
-            # Functions-specific Variables
-            functions_vars = {
-                'functions_extension_version': 'FUNCTIONS_EXTENSION_VERSION',
-                'functions_worker_runtime': 'FUNCTIONS_WORKER_RUNTIME',
-                'azure_functions_environment': 'AZURE_FUNCTIONS_ENVIRONMENT',
-                'scm_run_from_package': 'SCM_RUN_FROM_PACKAGE',
-            }
-
-            # Security/Auth Variables
-            auth_vars = {
-                'auth_enabled': 'WEBSITE_AUTH_ENABLED',
-                'auth_encryption_key': 'WEBSITE_AUTH_ENCRYPTION_KEY',  # Existence only
-                'https_only': 'WEBSITE_HTTPSONLY',
-            }
-
-            # Helper to get env vars (returns None if not set)
-            def get_vars(var_map: dict) -> dict:
-                result = {}
-                for key, env_name in var_map.items():
-                    value = os.environ.get(env_name)
-                    if value is not None:
-                        # Mask sensitive values but show they exist
-                        if 'connection' in key.lower() or 'key' in key.lower():
-                            result[key] = f"[SET - {len(value)} chars]"
-                        # Truncate very long values
-                        elif len(value) > 200:
-                            result[key] = value[:200] + f"... [{len(value)} chars total]"
-                        else:
-                            result[key] = value
-                return result
-
-            # Collect all known variables
-            network_config = {
-                'vnet': get_vars(vnet_vars),
-                'dns': get_vars(dns_vars),
-                'ase': get_vars(ase_vars),
-                'platform': get_vars(platform_vars),
-                'storage': get_vars(storage_vars),
-                'functions': get_vars(functions_vars),
-                'auth': get_vars(auth_vars),
-            }
-
-            # Remove empty categories
-            network_config = {k: v for k, v in network_config.items() if v}
-
-            # ================================================================
-            # DYNAMIC DISCOVERY - Find any WEBSITE_* or AZURE_* vars we missed
-            # ================================================================
-            known_vars = set()
-            for var_map in [vnet_vars, dns_vars, ase_vars, platform_vars,
-                           storage_vars, functions_vars, auth_vars]:
-                known_vars.update(var_map.values())
-
-            discovered = {}
-            for env_name, env_value in os.environ.items():
-                # Look for Azure-related vars we haven't explicitly captured
-                if env_name.startswith(('WEBSITE_', 'AZURE_', 'APPSETTING_')):
-                    if env_name not in known_vars:
-                        # Mask potentially sensitive values
-                        if any(s in env_name.lower() for s in ['key', 'secret', 'password', 'connection', 'token']):
-                            discovered[env_name] = f"[SET - {len(env_value)} chars]"
-                        elif len(env_value) > 200:
-                            discovered[env_name] = env_value[:200] + f"... [{len(env_value)} chars total]"
-                        else:
-                            discovered[env_name] = env_value
-
-            if discovered:
-                network_config['discovered'] = discovered
-
-            # ================================================================
-            # ENVIRONMENT SUMMARY
-            # ================================================================
-            # Determine environment type based on what variables are present
-            env_type = "standard"
-            if network_config.get('ase', {}).get('ase_name'):
-                env_type = "ase"
-            elif network_config.get('vnet', {}).get('private_ip'):
-                env_type = "vnet_integrated"
-
-            network_config['_summary'] = {
-                'environment_type': env_type,
-                'has_vnet_integration': bool(network_config.get('vnet')),
-                'has_ase': bool(network_config.get('ase')),
-                'has_custom_dns': bool(network_config.get('dns')),
-                'total_vars_captured': sum(len(v) for v in network_config.values() if isinstance(v, dict)),
-                'discovered_count': len(discovered),
-            }
-
-            return network_config
-
-        return self.check_component_health(
-            "network_environment",
-            check_network,
-            description="Azure network/VNet/ASE environment configuration"
-        )
 
     def _get_config_sources(self) -> Dict[str, Any]:
         """
-        Get configuration values with their sources for debugging (07 DEC 2025).
+        Get configuration values with their sources for debugging.
 
         Shows whether each config value came from:
         - ENV: Environment variable
@@ -3127,7 +411,7 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         config = get_config()
         sources = {}
 
-        # Storage configuration (zone-specific - 08 DEC 2025)
+        # Storage configuration (zone-specific)
         bronze_env = os.getenv('BRONZE_STORAGE_ACCOUNT')
         sources['bronze_storage_account'] = {
             "value": config.storage.bronze.account_name,
@@ -3144,8 +428,6 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             "env_var": "DB_ADMIN_MANAGED_IDENTITY_NAME",
             "is_default": config.database.managed_identity_admin_name == AzureDefaults.MANAGED_IDENTITY_NAME
         }
-
-        # NOTE (08 DEC 2025): Reader identity removed - single admin identity for all operations
 
         # Database host
         db_host_env = os.getenv('POSTGIS_HOST')
@@ -3183,7 +465,7 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             "is_default": config.etl_app_base_url == AzureDefaults.ETL_APP_URL
         }
 
-        # Service Bus namespace (check both new SERVICE_BUS_FQDN and legacy SERVICE_BUS_NAMESPACE)
+        # Service Bus namespace
         sb_fqdn = os.getenv('SERVICE_BUS_FQDN')
         sb_namespace = os.getenv('SERVICE_BUS_NAMESPACE')
         sb_env = sb_fqdn or sb_namespace
@@ -3194,11 +476,10 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             "is_default": not bool(sb_env)
         }
 
-        # Observability mode (10 JAN 2026 - F7.12.C)
+        # Observability mode
         obs_env = os.getenv('OBSERVABILITY_MODE')
         debug_env = os.getenv('DEBUG_MODE')
         metrics_debug_env = os.getenv('METRICS_DEBUG_MODE')
-        # Show which env var is active
         if obs_env:
             source = "ENV (OBSERVABILITY_MODE)"
         elif metrics_debug_env:
@@ -3231,5 +512,17 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         }
 
 
-# Create singleton instance for use in function_app.py
+# ============================================================================
+# SINGLETON INSTANCE
+# ============================================================================
+
 health_check_trigger = HealthCheckTrigger()
+
+
+# ============================================================================
+# AZURE FUNCTION ENTRY POINT
+# ============================================================================
+
+def main(req: func.HttpRequest) -> func.HttpResponse:
+    """Azure Function entry point for health check."""
+    return health_check_trigger.handle_request(req)

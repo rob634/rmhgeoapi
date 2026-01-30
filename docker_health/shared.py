@@ -232,13 +232,16 @@ class SharedInfrastructureSubsystem(WorkerSubsystem):
                 credential=credential,
             )
 
-            # Try to list containers (limited)
-            containers = list(blob_service.list_containers(max_results=1))
+            # Try to list containers (get first one to verify access)
+            # Use results_per_page for SDK compatibility
+            container_iter = blob_service.list_containers(results_per_page=1)
+            first_page = next(container_iter.by_page(), [])
+            containers_found = len(list(first_page))
 
             return {
                 "connected": True,
                 "account": config.storage.silver.account_name,
-                "containers_accessible": len(containers) >= 0,  # Even 0 is success
+                "containers_accessible": True,  # If we got here, access works
             }
 
         except Exception as e:

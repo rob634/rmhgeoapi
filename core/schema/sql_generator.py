@@ -742,7 +742,26 @@ class PydanticToSQL:
                 return "JSONB"
             elif origin in (list, List):
                 return "JSONB"
-        
+
+        # Handle Literal types (e.g., Literal["vector", "raster"]) - 30 JAN 2026
+        # Literal types should map to VARCHAR, not JSONB
+        from typing import Literal as TypingLiteral
+        try:
+            from typing_extensions import Literal as ExtLiteral
+            literal_types = (TypingLiteral, ExtLiteral)
+        except ImportError:
+            literal_types = (TypingLiteral,)
+
+        if origin is not None and hasattr(origin, '__name__') and origin.__name__ == 'Literal':
+            # Literal types are string enums without a Python Enum class
+            # Map to VARCHAR with length based on longest value
+            args = get_args(field_type)
+            if args and all(isinstance(a, str) for a in args):
+                max_len = max(len(a) for a in args)
+                # Add some buffer for future values
+                return f"VARCHAR({max(max_len + 10, 20)})"
+            return "VARCHAR(50)"
+
         # Handle string fields with max_length - check metadata FIRST
         if actual_type == str:
             # In Pydantic v2, constraints are stored in metadata
@@ -1540,14 +1559,16 @@ BEGIN
 
             RETURN QUERY SELECT 'reactivated'::VARCHAR(20), v_existing.revision + 1, NULL::TEXT;
         ELSE
-            -- Create new asset
+            -- Create new asset (30 JAN 2026: added platform_id, platform_refs with defaults)
             INSERT INTO {schema}.geospatial_assets (
-                asset_id, dataset_id, resource_id, version_id,
+                asset_id, platform_id, platform_refs,
+                dataset_id, resource_id, version_id,
                 data_type, stac_item_id, stac_collection_id,
                 table_name, blob_path,
                 revision, approval_state, clearance_state
             ) VALUES (
-                p_asset_id, p_dataset_id, p_resource_id, p_version_id,
+                p_asset_id, 'ddh', '{{}}'::jsonb,
+                p_dataset_id, p_resource_id, p_version_id,
                 p_data_type, p_stac_item_id, p_stac_collection_id,
                 p_table_name, p_blob_path,
                 1, 'pending_review'::{schema}.approval_state, 'uncleared'::{schema}.clearance_state

@@ -1,0 +1,513 @@
+{
+  "_type": "export",
+  "__export_format": 4,
+  "__export_date": "2026-01-30T00:00:00.000Z",
+  "__export_source": "insomnia.desktop.app:v2023.5.8",
+  "resources": [
+    {
+      "_id": "wrk_platform_api",
+      "parentId": null,
+      "modified": 1706572800000,
+      "created": 1706572800000,
+      "name": "Platform API - QA",
+      "description": "B2B Integration Guide for Platform API v0.8.2.2",
+      "scope": "collection",
+      "_type": "workspace"
+    },
+    {
+      "_id": "env_qa",
+      "parentId": "wrk_platform_api",
+      "modified": 1706572800000,
+      "created": 1706572800000,
+      "name": "QA Environment",
+      "data": {
+        "base_url": "https://gddatahubetlqa-qa.ocappsaseqa2.appserviceenvironment.net",
+        "titiler_url": "https://gddatahubpyfeqa.ocappsaseqa2.appserviceenvironment.net",
+        "bronze_container": "gddathub-bronze-qa",
+        "dataset_id": "your-dataset-id",
+        "resource_id": "your-resource-id",
+        "version_id": "v1",
+        "vector_file": "roads.gpkg",
+        "raster_file": "dctest.tif",
+        "request_id": "",
+        "job_id": "",
+        "approval_id": "",
+        "reviewer_email": "qa-tester@example.com"
+      },
+      "dataPropertyOrder": {
+        "&": ["base_url", "titiler_url", "bronze_container", "dataset_id", "resource_id", "version_id", "vector_file", "raster_file", "request_id", "job_id", "approval_id", "reviewer_email"]
+      },
+      "color": null,
+      "isPrivate": false,
+      "_type": "environment"
+    },
+    {
+      "_id": "fld_1_health",
+      "parentId": "wrk_platform_api",
+      "modified": 1706572800000,
+      "created": 1706572800000,
+      "name": "1. Health",
+      "description": "Platform health check",
+      "_type": "request_group"
+    },
+    {
+      "_id": "req_health",
+      "parentId": "fld_1_health",
+      "modified": 1706572800000,
+      "created": 1706572800000,
+      "name": "Platform Health",
+      "description": "Check if the platform is ready to accept jobs.\n\nReturns: ready_for_jobs, queue_backlog, version",
+      "url": "{{ _.base_url }}/api/platform/health",
+      "method": "GET",
+      "body": {},
+      "parameters": [],
+      "headers": [],
+      "authentication": {},
+      "metaSortKey": 1,
+      "_type": "request"
+    },
+    {
+      "_id": "fld_2_workflow",
+      "parentId": "wrk_platform_api",
+      "modified": 1706572800000,
+      "created": 1706572800000,
+      "name": "2. Workflow",
+      "description": "Complete platform workflow: Validate -> Submit -> Poll -> Approve",
+      "_type": "request_group"
+    },
+    {
+      "_id": "req_validate_raster",
+      "parentId": "fld_2_workflow",
+      "modified": 1706572800000,
+      "created": 1706572800000,
+      "name": "2.1a Validate (Raster)",
+      "description": "Pre-flight validation - check if raster file exists and get recommended job type.",
+      "url": "{{ _.base_url }}/api/platform/validate",
+      "method": "POST",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"data_type\": \"raster\",\n  \"container_name\": \"{{ _.bronze_container }}\",\n  \"blob_name\": \"{{ _.raster_file }}\"\n}"
+      },
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": 1,
+      "_type": "request"
+    },
+    {
+      "_id": "req_validate_vector",
+      "parentId": "fld_2_workflow",
+      "modified": 1706572800000,
+      "created": 1706572800000,
+      "name": "2.1b Validate (Vector)",
+      "description": "Pre-flight validation - check if vector file exists and get recommended job type.",
+      "url": "{{ _.base_url }}/api/platform/validate",
+      "method": "POST",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"data_type\": \"vector\",\n  \"container_name\": \"{{ _.bronze_container }}\",\n  \"blob_name\": \"{{ _.vector_file }}\"\n}"
+      },
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": 2,
+      "_type": "request"
+    },
+    {
+      "_id": "req_submit_raster",
+      "parentId": "fld_2_workflow",
+      "modified": 1706572800000,
+      "created": 1706572800000,
+      "name": "2.2a Submit (Raster)",
+      "description": "Submit raster data for processing.\n\nSave the request_id from the response for polling.",
+      "url": "{{ _.base_url }}/api/platform/submit",
+      "method": "POST",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"dataset_id\": \"{{ _.dataset_id }}\",\n  \"resource_id\": \"{{ _.resource_id }}\",\n  \"version_id\": \"{{ _.version_id }}\",\n  \"container_name\": \"{{ _.bronze_container }}\",\n  \"file_name\": \"{{ _.raster_file }}\",\n  \"access_level\": \"ouo\"\n}"
+      },
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": 3,
+      "_type": "request"
+    },
+    {
+      "_id": "req_submit_vector",
+      "parentId": "fld_2_workflow",
+      "modified": 1706572800000,
+      "created": 1706572800000,
+      "name": "2.2b Submit (Vector)",
+      "description": "Submit vector data for processing.\n\nSave the request_id from the response for polling.",
+      "url": "{{ _.base_url }}/api/platform/submit",
+      "method": "POST",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"dataset_id\": \"{{ _.dataset_id }}\",\n  \"resource_id\": \"{{ _.resource_id }}\",\n  \"version_id\": \"{{ _.version_id }}\",\n  \"container_name\": \"{{ _.bronze_container }}\",\n  \"file_name\": \"{{ _.vector_file }}\",\n  \"access_level\": \"ouo\"\n}"
+      },
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": 4,
+      "_type": "request"
+    },
+    {
+      "_id": "req_poll_status",
+      "parentId": "fld_2_workflow",
+      "modified": 1706572800000,
+      "created": 1706572800000,
+      "name": "2.3 Poll Status",
+      "description": "Monitor job progress using the request ID.\n\nSet request_id in environment from submit response.\nRepeat until job_status is 'completed' or 'failed'.",
+      "url": "{{ _.base_url }}/api/platform/status/{{ _.request_id }}",
+      "method": "GET",
+      "body": {},
+      "parameters": [],
+      "headers": [],
+      "authentication": {},
+      "metaSortKey": 5,
+      "_type": "request"
+    },
+    {
+      "_id": "req_approve",
+      "parentId": "fld_2_workflow",
+      "modified": 1706572800000,
+      "created": 1706572800000,
+      "name": "2.4a Approve",
+      "description": "Approve a completed job for publication.\n\nSet job_id in environment from poll status response.\nclearance_level is REQUIRED: 'ouo' or 'public'",
+      "url": "{{ _.base_url }}/api/platform/approve",
+      "method": "POST",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"job_id\": \"{{ _.job_id }}\",\n  \"clearance_level\": \"ouo\",\n  \"reviewer\": \"{{ _.reviewer_email }}\",\n  \"notes\": \"QA test approval\"\n}"
+      },
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": 6,
+      "_type": "request"
+    },
+    {
+      "_id": "req_reject",
+      "parentId": "fld_2_workflow",
+      "modified": 1706572800000,
+      "created": 1706572800000,
+      "name": "2.4b Reject",
+      "description": "Reject a dataset that fails review.\n\nreason is REQUIRED for audit trail.",
+      "url": "{{ _.base_url }}/api/platform/reject",
+      "method": "POST",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"job_id\": \"{{ _.job_id }}\",\n  \"reviewer\": \"{{ _.reviewer_email }}\",\n  \"reason\": \"Data quality issue: missing CRS metadata\"\n}"
+      },
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": 7,
+      "_type": "request"
+    },
+    {
+      "_id": "fld_3_unpublish",
+      "parentId": "wrk_platform_api",
+      "modified": 1706572800000,
+      "created": 1706572800000,
+      "name": "3. Revoke & Unpublish",
+      "description": "Remove published datasets: Revoke (required) -> Unpublish",
+      "_type": "request_group"
+    },
+    {
+      "_id": "req_revoke",
+      "parentId": "fld_3_unpublish",
+      "modified": 1706572800000,
+      "created": 1706572800000,
+      "name": "3.1 Revoke Approval",
+      "description": "Revoke approval before unpublishing.\n\nREQUIRED before unpublish for approved datasets.\nreason is REQUIRED for audit trail.",
+      "url": "{{ _.base_url }}/api/platform/revoke",
+      "method": "POST",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"job_id\": \"{{ _.job_id }}\",\n  \"revoker\": \"{{ _.reviewer_email }}\",\n  \"reason\": \"QA test cleanup - removing test data\"\n}"
+      },
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": 1,
+      "_type": "request"
+    },
+    {
+      "_id": "req_unpublish_dry",
+      "parentId": "fld_3_unpublish",
+      "modified": 1706572800000,
+      "created": 1706572800000,
+      "name": "3.2a Unpublish (Dry Run)",
+      "description": "Preview what would be deleted without actually deleting.\n\ndry_run=true (default) - no changes made.",
+      "url": "{{ _.base_url }}/api/platform/unpublish",
+      "method": "POST",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"dataset_id\": \"{{ _.dataset_id }}\",\n  \"resource_id\": \"{{ _.resource_id }}\",\n  \"version_id\": \"{{ _.version_id }}\",\n  \"dry_run\": true\n}"
+      },
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": 2,
+      "_type": "request"
+    },
+    {
+      "_id": "req_unpublish_execute",
+      "parentId": "fld_3_unpublish",
+      "modified": 1706572800000,
+      "created": 1706572800000,
+      "name": "3.2b Unpublish (Execute)",
+      "description": "Actually delete the data (STAC item, table/COG).\n\nWARNING: This is destructive. Run dry_run first!",
+      "url": "{{ _.base_url }}/api/platform/unpublish",
+      "method": "POST",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"dataset_id\": \"{{ _.dataset_id }}\",\n  \"resource_id\": \"{{ _.resource_id }}\",\n  \"version_id\": \"{{ _.version_id }}\",\n  \"dry_run\": false\n}"
+      },
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": 3,
+      "_type": "request"
+    },
+    {
+      "_id": "fld_4_catalog",
+      "parentId": "wrk_platform_api",
+      "modified": 1706572800000,
+      "created": 1706572800000,
+      "name": "4. Catalog Discovery",
+      "description": "Query published assets",
+      "_type": "request_group"
+    },
+    {
+      "_id": "req_catalog_list",
+      "parentId": "fld_4_catalog",
+      "modified": 1706572800000,
+      "created": 1706572800000,
+      "name": "4.1 List Assets",
+      "description": "List all assets with optional filters.\n\nQuery params: limit, approval_state, clearance_state",
+      "url": "{{ _.base_url }}/api/platform/catalog/assets",
+      "method": "GET",
+      "body": {},
+      "parameters": [
+        {
+          "name": "limit",
+          "value": "10",
+          "disabled": false
+        }
+      ],
+      "headers": [],
+      "authentication": {},
+      "metaSortKey": 1,
+      "_type": "request"
+    },
+    {
+      "_id": "req_catalog_lookup",
+      "parentId": "fld_4_catalog",
+      "modified": 1706572800000,
+      "created": 1706572800000,
+      "name": "4.2 Lookup by DDH Identifiers",
+      "description": "Find asset by dataset_id, resource_id, version_id.",
+      "url": "{{ _.base_url }}/api/platform/catalog/lookup",
+      "method": "GET",
+      "body": {},
+      "parameters": [
+        {
+          "name": "dataset_id",
+          "value": "{{ _.dataset_id }}",
+          "disabled": false
+        },
+        {
+          "name": "resource_id",
+          "value": "{{ _.resource_id }}",
+          "disabled": false
+        },
+        {
+          "name": "version_id",
+          "value": "{{ _.version_id }}",
+          "disabled": false
+        }
+      ],
+      "headers": [],
+      "authentication": {},
+      "metaSortKey": 2,
+      "_type": "request"
+    },
+    {
+      "_id": "fld_5_recovery",
+      "parentId": "wrk_platform_api",
+      "modified": 1706572800000,
+      "created": 1706572800000,
+      "name": "5. Recovery",
+      "description": "Job recovery operations",
+      "_type": "request_group"
+    },
+    {
+      "_id": "req_resubmit_dry",
+      "parentId": "fld_5_recovery",
+      "modified": 1706572800000,
+      "created": 1706572800000,
+      "name": "5.1a Resubmit (Dry Run)",
+      "description": "Preview cleanup plan for resubmitting a failed job.",
+      "url": "{{ _.base_url }}/api/platform/resubmit",
+      "method": "POST",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"dataset_id\": \"{{ _.dataset_id }}\",\n  \"resource_id\": \"{{ _.resource_id }}\",\n  \"version_id\": \"{{ _.version_id }}\",\n  \"dry_run\": true,\n  \"delete_blobs\": false\n}"
+      },
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": 1,
+      "_type": "request"
+    },
+    {
+      "_id": "req_resubmit_execute",
+      "parentId": "fld_5_recovery",
+      "modified": 1706572800000,
+      "created": 1706572800000,
+      "name": "5.1b Resubmit (Execute)",
+      "description": "Clean up failed job and resubmit with same parameters.",
+      "url": "{{ _.base_url }}/api/platform/resubmit",
+      "method": "POST",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"dataset_id\": \"{{ _.dataset_id }}\",\n  \"resource_id\": \"{{ _.resource_id }}\",\n  \"version_id\": \"{{ _.version_id }}\",\n  \"dry_run\": false,\n  \"delete_blobs\": false\n}"
+      },
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": 2,
+      "_type": "request"
+    },
+    {
+      "_id": "fld_6_service_layer",
+      "parentId": "wrk_platform_api",
+      "modified": 1706572800000,
+      "created": 1706572800000,
+      "name": "6. Service Layer",
+      "description": "Data access via TiTiler/STAC/TiPG",
+      "_type": "request_group"
+    },
+    {
+      "_id": "req_titiler_health",
+      "parentId": "fld_6_service_layer",
+      "modified": 1706572800000,
+      "created": 1706572800000,
+      "name": "6.1 Service Layer Health",
+      "description": "Check TiTiler service health.",
+      "url": "{{ _.titiler_url }}/health",
+      "method": "GET",
+      "body": {},
+      "parameters": [],
+      "headers": [],
+      "authentication": {},
+      "metaSortKey": 1,
+      "_type": "request"
+    },
+    {
+      "_id": "req_stac_collections",
+      "parentId": "fld_6_service_layer",
+      "modified": 1706572800000,
+      "created": 1706572800000,
+      "name": "6.2 STAC Collections",
+      "description": "List all STAC collections.",
+      "url": "{{ _.titiler_url }}/stac/collections",
+      "method": "GET",
+      "body": {},
+      "parameters": [],
+      "headers": [],
+      "authentication": {},
+      "metaSortKey": 2,
+      "_type": "request"
+    },
+    {
+      "_id": "req_vector_collections",
+      "parentId": "fld_6_service_layer",
+      "modified": 1706572800000,
+      "created": 1706572800000,
+      "name": "6.3 Vector Collections",
+      "description": "List all vector collections (OGC Features).",
+      "url": "{{ _.titiler_url }}/vector/collections",
+      "method": "GET",
+      "body": {},
+      "parameters": [],
+      "headers": [],
+      "authentication": {},
+      "metaSortKey": 3,
+      "_type": "request"
+    },
+    {
+      "_id": "req_openapi_docs",
+      "parentId": "fld_6_service_layer",
+      "modified": 1706572800000,
+      "created": 1706572800000,
+      "name": "6.4 API Documentation",
+      "description": "OpenAPI documentation for service layer.",
+      "url": "{{ _.titiler_url }}/docs",
+      "method": "GET",
+      "body": {},
+      "parameters": [],
+      "headers": [],
+      "authentication": {},
+      "metaSortKey": 4,
+      "_type": "request"
+    }
+  ]
+}

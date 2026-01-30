@@ -682,12 +682,17 @@ def _create_stac_item(
 
         result = create_vector_stac(stac_params)
 
-        logger.info(f"[{job_id[:8]}] STAC item created: {result.get('item_id')}")
+        # Extract item_id from nested result structure (30 JAN 2026 fix)
+        # create_vector_stac returns: {"success": True, "result": {"item_id": "...", ...}}
+        stac_result = result.get('result', {})
+        item_id = stac_result.get('item_id')
+
+        logger.info(f"[{job_id[:8]}] STAC item created: {item_id}")
 
         return {
-            'item_id': result.get('item_id'),
-            'collection_id': collection_id,
-            'success': True
+            'item_id': item_id,
+            'collection_id': stac_result.get('collection_id', collection_id),
+            'success': result.get('success', False)
         }
 
     except Exception as e:

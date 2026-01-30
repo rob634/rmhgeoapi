@@ -2,7 +2,7 @@
 **This file contains high level items only**
 This file references other documents containing implementation details. This is to avoid a 50,000 line TODO.md. This file should not exceed 500 lines.
 
-**Last Updated**: 30 JAN 2026
+**Last Updated**: 30 JAN 2026 (STAC ID mismatch bug added)
 **Source of Truth**: [docs/epics/README.md](/docs/epics/README.md) - Epic/Feature/Story definitions
 **Purpose**: Sprint-level task tracking and delegation (INDEX format)
 
@@ -151,6 +151,51 @@ This file references other documents containing implementation details. This is 
 **Files to modify**:
 - `infrastructure/iac/ddl_*.py` - Add table DDL
 - `services/handler_vector_docker_complete.py` - Call service on completion
+
+---
+
+### Vector STAC ID Mismatch Bug (V0.8 CRITICAL)
+**Status**: BUG - Needs fix
+**Priority**: CRITICAL - Breaks GeospatialAsset ↔ STAC linkage
+**Discovered**: 30 JAN 2026
+
+**Problem**: Vector ETL creates STAC items with one ID format but GeospatialAsset stores a different ID format, breaking the link between them.
+
+| Location | STAC Item ID Format | Example |
+|----------|---------------------|---------|
+| `pgstac.items` (actual) | `postgis-{schema}-{table}` | `postgis-geo-blessed_hexagons_v8_testing_v10` |
+| `app.geospatial_assets` (expected) | `{dataset_id}-{resource_id}-{version_id}` | `blessed-hexagons-v8-testing-v10` |
+
+**Root Cause**: Two different ID generation strategies:
+1. `create_vector_stac()` in `services/vector_stac.py` uses `postgis-{schema}-{table}` format
+2. `handler_vector_docker_complete.py` passes `stac_item_id` from job params which uses DDH format
+
+**Also Missing**: STAC item properties don't include `platform:dataset_id`, `platform:resource_id`, `platform:version_id` - these should be added for B2B discoverability.
+
+**Fix Options**:
+
+| Option | Description | Pros | Cons |
+|--------|-------------|------|------|
+| A | Change `create_vector_stac()` to use DDH format | Aligns with GeospatialAsset | Breaking change for existing items |
+| B | Change GeospatialAsset to use postgis format | No STAC changes | Loses DDH semantic meaning |
+| **C (Recommended)** | Pass explicit `item_id` to `create_vector_stac()` | Handler controls ID, backward compatible | Minor code change |
+
+**Recommended Fix (Option C)**:
+1. Modify `create_vector_stac()` to accept optional `item_id` parameter
+2. If provided, use it; if not, fall back to `postgis-{schema}-{table}` format
+3. Add `platform:*` properties to STAC item from job params
+4. Handler passes DDH-format `stac_item_id` from job params
+
+**Files to modify**:
+- `services/vector_stac.py` - Accept `item_id` param, add platform properties
+- `services/handler_vector_docker_complete.py` - Pass `stac_item_id` to create_vector_stac
+
+**Verification**:
+```sql
+-- After fix, these should match:
+SELECT stac_item_id FROM app.geospatial_assets WHERE table_name = 'X';
+SELECT id FROM pgstac.items WHERE content->'properties'->>'postgis:table' = 'X';
+```
 
 ---
 

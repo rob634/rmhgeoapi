@@ -369,6 +369,74 @@ def platform_unpublish_route(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # ============================================================================
+# RESUBMIT ENDPOINT (30 JAN 2026)
+# ============================================================================
+
+@bp.route(route="platform/resubmit", methods=["POST"])
+def platform_resubmit_route(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Resubmit a failed job with cleanup.
+
+    POST /api/platform/resubmit
+
+    Cleans up all artifacts from a failed job and resubmits with the same
+    parameters. Useful for retrying failed jobs from external applications.
+
+    Body Options:
+        Option 1 - By DDH Identifiers (Preferred):
+        {
+            "dataset_id": "aerial-imagery-2024",
+            "resource_id": "site-alpha",
+            "version_id": "v1.0",
+            "dry_run": false,
+            "delete_blobs": false
+        }
+
+        Option 2 - By Request ID:
+        {
+            "request_id": "a3f2c1b8e9d7f6a5...",
+            "dry_run": false
+        }
+
+        Option 3 - By Job ID:
+        {
+            "job_id": "abc123...",
+            "dry_run": false
+        }
+
+    Options:
+        dry_run: Preview cleanup without executing (default: false)
+        delete_blobs: Also delete COG files from storage (default: false)
+        force: Resubmit even if job is currently processing (default: false)
+
+    Response:
+        {
+            "success": true,
+            "original_job_id": "abc123...",
+            "new_job_id": "def456...",
+            "job_type": "process_raster_v2",
+            "platform_refs": {
+                "request_id": "...",
+                "dataset_id": "...",
+                "resource_id": "...",
+                "version_id": "..."
+            },
+            "cleanup_summary": {
+                "tasks_deleted": 5,
+                "job_deleted": true,
+                "tables_dropped": [],
+                "stac_items_deleted": ["item-123"],
+                "blobs_deleted": []
+            },
+            "message": "Job resubmitted successfully",
+            "monitor_url": "/api/platform/status/def456..."
+        }
+    """
+    from triggers.platform.resubmit import platform_resubmit
+    return platform_resubmit(req)
+
+
+# ============================================================================
 # APPROVAL ENDPOINTS (17 JAN 2026)
 # ============================================================================
 

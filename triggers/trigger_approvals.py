@@ -235,11 +235,13 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
                 )
 
         # Perform approval (legacy DatasetApproval)
+        # V0.8 FIX (31 JAN 2026): Pass clearance_level to service (BUG-016)
         logger.info(f"Approving {approval_id} by {reviewer} with clearance={clearance_level.value}")
         result = approval_service.approve(
             approval_id=approval_id,
             reviewer=reviewer,
-            notes=notes
+            notes=notes,
+            classification=clearance_level  # V0.8 FIX: Pass clearance level
         )
 
         if not result.get('success'):
@@ -258,6 +260,7 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
 
         # =====================================================================
         # V0.8: Also update GeospatialAsset (29 JAN 2026)
+        # V0.8 FIX (31 JAN 2026): Use STAC item ID as fallback lookup (BUG-016)
         # =====================================================================
         asset_updated = False
         asset_id = None
@@ -266,27 +269,39 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
             from services.asset_service import AssetService, AssetNotFoundError, AssetStateError
             asset_service = AssetService()
 
-            # Find asset by job_id (from approval record)
+            # Find asset - try multiple lookup methods
+            asset = None
+
+            # Method 1: By job_id (from approval record)
             if approval_data and approval_data.job_id:
                 asset = asset_service.get_asset_by_job(approval_data.job_id)
                 if asset:
-                    try:
-                        asset, clearance_warning = asset_service.approve(
-                            asset_id=asset.asset_id,
-                            reviewer=reviewer,
-                            clearance_level=clearance_level,
-                            adf_run_id=adf_run_id
-                        )
-                        asset_updated = True
-                        asset_id = asset.asset_id
-                        logger.info(f"Updated GeospatialAsset {asset.asset_id[:16]} to clearance={clearance_level.value}")
-                        if clearance_warning:
-                            logger.warning(f"Clearance change warning: {clearance_warning}")
-                    except AssetStateError as state_err:
-                        # Asset is rejected - log but don't fail
-                        logger.warning(f"Asset state error (non-fatal): {state_err}")
-                else:
-                    logger.debug(f"No GeospatialAsset found for job {approval_data.job_id[:16]} (pre-V0.8 job)")
+                    logger.debug(f"Found asset via job_id lookup: {asset.asset_id[:16]}")
+
+            # Method 2: By STAC item ID (fallback for pre-V0.8 jobs without current_job_id)
+            if not asset and approval_data and approval_data.stac_item_id:
+                asset = asset_service.get_asset_by_stac_item(approval_data.stac_item_id)
+                if asset:
+                    logger.debug(f"Found asset via stac_item_id lookup: {asset.asset_id[:16]}")
+
+            if asset:
+                try:
+                    asset, clearance_warning = asset_service.approve(
+                        asset_id=asset.asset_id,
+                        reviewer=reviewer,
+                        clearance_level=clearance_level,
+                        adf_run_id=adf_run_id
+                    )
+                    asset_updated = True
+                    asset_id = asset.asset_id
+                    logger.info(f"Updated GeospatialAsset {asset.asset_id[:16]} to clearance={clearance_level.value}")
+                    if clearance_warning:
+                        logger.warning(f"Clearance change warning: {clearance_warning}")
+                except AssetStateError as state_err:
+                    # Asset is rejected - log but don't fail
+                    logger.warning(f"Asset state error (non-fatal): {state_err}")
+            else:
+                logger.debug(f"No GeospatialAsset found for approval {approval_id[:16]} (pre-V0.8 data)")
         except Exception as asset_err:
             # Non-fatal: legacy approval succeeded, asset update is optional
             logger.warning(f"Failed to update GeospatialAsset (non-fatal): {asset_err}")

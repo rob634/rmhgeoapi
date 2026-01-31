@@ -472,16 +472,21 @@ class ApprovalRepository(PostgreSQLRepository):
         approval_id: str,
         reviewer: str,
         notes: Optional[str] = None,
-        adf_run_id: Optional[str] = None
+        adf_run_id: Optional[str] = None,
+        classification: Optional[AccessLevel] = None
     ) -> Optional[DatasetApproval]:
         """
         Approve a dataset.
+
+        V0.8 Enhancement (31 JAN 2026): Added classification parameter to allow
+        setting clearance level at approval time (BUG-016 fix).
 
         Args:
             approval_id: Approval to approve
             reviewer: Email or identifier of reviewer
             notes: Optional review notes
             adf_run_id: ADF pipeline run ID (if PUBLIC classification triggered ADF)
+            classification: Optional new classification (OUO or PUBLIC)
 
         Returns:
             Updated DatasetApproval if found, None otherwise
@@ -507,10 +512,13 @@ class ApprovalRepository(PostgreSQLRepository):
             updates['notes'] = notes
         if adf_run_id:
             updates['adf_run_id'] = adf_run_id
+        # V0.8 FIX (31 JAN 2026): Update classification if provided
+        if classification:
+            updates['classification'] = classification
 
         result = self.update(approval_id, updates)
         if result:
-            logger.info(f"Approved: {approval_id} by {reviewer}")
+            logger.info(f"Approved: {approval_id} by {reviewer} (classification: {classification.value if classification else 'unchanged'})")
         return result
 
     def reject(

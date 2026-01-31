@@ -147,21 +147,26 @@ class ApprovalService:
         self,
         approval_id: str,
         reviewer: str,
-        notes: Optional[str] = None
+        notes: Optional[str] = None,
+        classification: Optional[AccessLevel] = None
     ) -> Dict[str, Any]:
         """
         Approve a dataset for publication.
+
+        V0.8 Enhancement (31 JAN 2026): Added classification parameter to allow
+        setting clearance level at approval time (BUG-016 fix).
 
         Performs the following:
         1. Validates approval is in PENDING status
         2. Updates STAC item with app:published=true
         3. If PUBLIC classification, triggers ADF pipeline
-        4. Updates approval record to APPROVED status
+        4. Updates approval record to APPROVED status (with optional classification)
 
         Args:
             approval_id: Approval to approve
             reviewer: Email or identifier of reviewer
             notes: Optional review notes
+            classification: Optional new classification (OUO or PUBLIC)
 
         Returns:
             Dict with:
@@ -174,7 +179,7 @@ class ApprovalService:
         Raises:
             ValueError: If approval not found or invalid status
         """
-        logger.info(f"Approving {approval_id} by {reviewer}")
+        logger.info(f"Approving {approval_id} by {reviewer} (classification: {classification.value if classification else 'unchanged'})")
 
         # Get approval
         approval = self.repo.get_by_id(approval_id)
@@ -198,10 +203,12 @@ class ApprovalService:
             # Continue with approval - STAC update is best-effort
 
         # Check if we need to trigger ADF for PUBLIC data
+        # Use the new classification if provided, otherwise use existing
+        effective_classification = classification if classification else approval.classification
         adf_run_id = None
         action = 'stac_updated'
 
-        if approval.classification == AccessLevel.PUBLIC:
+        if effective_classification == AccessLevel.PUBLIC:
             adf_result = self._trigger_adf_pipeline(approval)
             if adf_result['success']:
                 adf_run_id = adf_result.get('run_id')
@@ -211,12 +218,13 @@ class ApprovalService:
                 logger.warning(f"ADF trigger failed for {approval_id}: {adf_result.get('error')}")
                 # Continue with approval - ADF is best-effort in current implementation
 
-        # Update approval record
+        # Update approval record (with classification if provided)
         updated = self.repo.approve(
             approval_id=approval_id,
             reviewer=reviewer,
             notes=notes,
-            adf_run_id=adf_run_id
+            adf_run_id=adf_run_id,
+            classification=classification
         )
 
         return {
@@ -224,7 +232,8 @@ class ApprovalService:
             'approval': updated,
             'action': action,
             'adf_run_id': adf_run_id,
-            'stac_updated': stac_updated.get('success', False)
+            'stac_updated': stac_updated.get('success', False),
+            'classification_updated': classification is not None
         }
 
     def _update_stac_published(self, approval: DatasetApproval, reviewer: str) -> Dict[str, Any]:

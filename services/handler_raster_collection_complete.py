@@ -385,7 +385,7 @@ def _process_files_to_cogs(
 
             cog_params = {
                 'local_file_path': local_path,
-                'source_crs': validated.get('crs'),
+                'source_crs': validated.get('source_crs'),  # From validation result
                 'target_crs': params.get('target_crs') or config.raster.target_crs,
                 'raster_type': validated.get('raster_type', {}),
                 'output_tier': params.get('output_tier', 'analysis'),

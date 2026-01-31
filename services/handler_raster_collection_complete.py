@@ -384,7 +384,7 @@ def _process_files_to_cogs(
             local_cog_path = cog_dest_path / output_filename
 
             cog_params = {
-                'local_file_path': local_path,
+                '_local_source_path': local_path,  # V0.8.1: Local source mode (skips blob download)
                 'source_crs': validated.get('source_crs'),  # From validation result
                 'target_crs': params.get('target_crs') or config.raster.target_crs,
                 'raster_type': validated.get('raster_type', {}),

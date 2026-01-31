@@ -149,11 +149,15 @@ def platform_unpublish(req: func.HttpRequest) -> func.HttpResponse:
         if original_request and not dry_run:
             try:
                 asset_service = AssetService()
-                # Find asset by DDH identity
-                asset = asset_service.get_asset_by_identity(
-                    dataset_id=original_request.dataset_id,
-                    resource_id=original_request.resource_id,
-                    version_id=original_request.version_id
+                # Find asset by platform_refs (V0.8 - 30 JAN 2026)
+                platform_refs = {
+                    "dataset_id": original_request.dataset_id,
+                    "resource_id": original_request.resource_id,
+                    "version_id": original_request.version_id
+                }
+                asset = asset_service.get_asset_by_platform_refs(
+                    platform_id="ddh",
+                    platform_refs=platform_refs
                 )
                 if asset and asset.is_active():
                     deleted_by = req_body.get('deleted_by', 'platform_unpublish')

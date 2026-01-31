@@ -110,6 +110,23 @@ class Platform(BaseModel):
     )
 
     # =========================================================================
+    # VERSIONING SCHEMA (V0.8 Release Control - 30 JAN 2026)
+    # =========================================================================
+    nominal_refs: List[str] = Field(
+        default_factory=list,
+        description="Refs that form stable identity WITHOUT version (e.g., ['dataset_id', 'resource_id'])"
+    )
+    version_ref: Optional[str] = Field(
+        default=None,
+        max_length=50,
+        description="Which ref is the version field (e.g., 'version_id'). NULL = no versioning."
+    )
+    uses_versioning: bool = Field(
+        default=False,
+        description="Whether this platform supports asset versioning with lineage tracking"
+    )
+
+    # =========================================================================
     # STATUS
     # =========================================================================
     is_active: bool = Field(
@@ -156,10 +173,30 @@ class Platform(BaseModel):
             'description': self.description,
             'required_refs': self.required_refs,
             'optional_refs': self.optional_refs,
+            'nominal_refs': self.nominal_refs,
+            'version_ref': self.version_ref,
+            'uses_versioning': self.uses_versioning,
             'is_active': self.is_active,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }
+
+    def get_nominal_refs_from_platform_refs(self, platform_refs: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Extract only the nominal refs from platform_refs.
+
+        Used for lineage_id generation.
+
+        Args:
+            platform_refs: Full platform refs dict
+
+        Returns:
+            Dict with only nominal ref keys
+        """
+        if not self.nominal_refs:
+            # No versioning - all refs are nominal
+            return platform_refs
+        return {k: v for k, v in platform_refs.items() if k in self.nominal_refs}
 
 
 # ============================================================================
@@ -173,6 +210,10 @@ DDH_PLATFORM = Platform(
     description="Primary B2B integration platform with dataset/resource/version hierarchy",
     required_refs=["dataset_id", "resource_id", "version_id"],
     optional_refs=["title", "description", "access_level"],
+    # Versioning config (V0.8 Release Control - 30 JAN 2026)
+    nominal_refs=["dataset_id", "resource_id"],  # Identity WITHOUT version
+    version_ref="version_id",                     # The version field
+    uses_versioning=True,                         # Enable lineage tracking
     is_active=True
 )
 

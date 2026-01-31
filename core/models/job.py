@@ -54,6 +54,10 @@ class JobRecord(JobData):
     - error_details: Error message if failed
     - created_at, updated_at: Audit timestamps
 
+    V0.8 Release Control (30 JAN 2026):
+    - asset_id: FK to GeospatialAsset being processed (nullable - not all jobs have assets)
+    - platform_id: FK to Platform that submitted this job (nullable - internal jobs)
+
     This is the DATA half of the "Job" entity.
     The BEHAVIOR half is Workflow (services/workflow.py).
     They collaborate via composition in CoreMachine.
@@ -67,6 +71,19 @@ class JobRecord(JobData):
     status: JobStatus = Field(default=JobStatus.QUEUED, description="Current job status")
     stage: int = Field(default=1, ge=1, description="Current stage number")
     total_stages: int = Field(default=1, ge=1, description="Total number of stages")
+
+    # V0.8 Release Control: Asset & Platform linkage (30 JAN 2026)
+    # Nullable - not all jobs have assets (e.g., hello_world, maintenance)
+    asset_id: Optional[str] = Field(
+        default=None,
+        max_length=64,
+        description="FK to geospatial_assets - the asset this job processes"
+    )
+    platform_id: Optional[str] = Field(
+        default=None,
+        max_length=50,
+        description="FK to platforms - identifies B2B platform that submitted"
+    )
 
     # Data fields (Database-specific)
     stage_results: Dict[str, Any] = Field(default_factory=dict, description="Results from completed stages")

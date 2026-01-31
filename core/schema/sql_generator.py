@@ -1080,6 +1080,15 @@ class PydanticToSQL:
             indexes.append(IndexBuilder.btree(s, "jobs", "job_type", name="idx_jobs_job_type"))
             indexes.append(IndexBuilder.btree(s, "jobs", "created_at", name="idx_jobs_created_at"))
             indexes.append(IndexBuilder.btree(s, "jobs", "updated_at", name="idx_jobs_updated_at"))
+            # V0.8 Release Control: Asset & Platform linkage (30 JAN 2026)
+            indexes.append(IndexBuilder.btree(
+                s, "jobs", "asset_id", name="idx_jobs_asset",
+                partial_where="asset_id IS NOT NULL"
+            ))
+            indexes.append(IndexBuilder.btree(
+                s, "jobs", "platform_id", name="idx_jobs_platform",
+                partial_where="platform_id IS NOT NULL"
+            ))
 
         elif table_name == "tasks":
             indexes.append(IndexBuilder.btree(s, "tasks", "parent_job_id", name="idx_tasks_parent_job_id"))
@@ -1100,6 +1109,15 @@ class PydanticToSQL:
             # NOTE: api_requests does NOT have a status column (removed 22 NOV 2025)
             indexes.append(IndexBuilder.btree(s, "api_requests", "dataset_id", name="idx_api_requests_dataset_id"))
             indexes.append(IndexBuilder.btree(s, "api_requests", "created_at", name="idx_api_requests_created_at"))
+            # V0.8 Release Control: Asset & Platform linkage (30 JAN 2026)
+            indexes.append(IndexBuilder.btree(
+                s, "api_requests", "asset_id", name="idx_api_requests_asset",
+                partial_where="asset_id IS NOT NULL"
+            ))
+            indexes.append(IndexBuilder.btree(
+                s, "api_requests", "platform_id", name="idx_api_requests_platform",
+                partial_where="platform_id IS NOT NULL"
+            ))
 
         elif table_name == "orchestration_jobs":
             indexes.append(IndexBuilder.btree(s, "orchestration_jobs", "request_id", name="idx_orchestration_jobs_request_id"))
@@ -1516,6 +1534,7 @@ $$""").format(
         # 6. upsert_geospatial_asset function (V0.8 Entity Architecture - 30 JAN 2026)
         # Uses advisory locks to serialize concurrent requests for the same asset
         # V0.8: Uses platform_id + platform_refs instead of explicit DDH columns
+        # V0.8 Release Control: Added lineage_id, version_ordinal, previous_asset_id, is_latest
         body_upsert_asset = """
 DECLARE
     v_existing RECORD;
@@ -1555,19 +1574,27 @@ BEGIN
                 made_public_by = NULL,
                 table_name = p_table_name,
                 blob_path = p_blob_path,
+                -- V0.8 Release Control: Update lineage fields on reactivation
+                lineage_id = COALESCE(p_lineage_id, v_existing.lineage_id),
+                version_ordinal = COALESCE(p_version_ordinal, v_existing.version_ordinal),
+                previous_asset_id = COALESCE(p_previous_asset_id, v_existing.previous_asset_id),
+                is_latest = COALESCE(p_is_latest, TRUE),
+                is_served = TRUE,
                 updated_at = NOW()
             WHERE asset_id = p_asset_id;
 
             RETURN QUERY SELECT 'reactivated'::VARCHAR(20), v_existing.revision + 1, NULL::TEXT;
         ELSE
-            -- Create new asset (V0.8: platform_id + platform_refs only, no DDH columns)
+            -- Create new asset (V0.8: platform_id + platform_refs + lineage fields)
             INSERT INTO {schema}.geospatial_assets (
                 asset_id, platform_id, platform_refs,
+                lineage_id, version_ordinal, previous_asset_id, is_latest, is_served,
                 data_type, stac_item_id, stac_collection_id,
                 table_name, blob_path,
                 revision, approval_state, clearance_state
             ) VALUES (
                 p_asset_id, p_platform_id, p_platform_refs,
+                p_lineage_id, COALESCE(p_version_ordinal, 1), p_previous_asset_id, COALESCE(p_is_latest, TRUE), TRUE,
                 p_data_type, p_stac_item_id, p_stac_collection_id,
                 p_table_name, p_blob_path,
                 1, 'pending_review'::{schema}.approval_state, 'uncleared'::{schema}.clearance_state
@@ -1613,6 +1640,11 @@ BEGIN
             made_public_by = NULL,
             table_name = COALESCE(p_table_name, table_name),
             blob_path = COALESCE(p_blob_path, blob_path),
+            -- V0.8 Release Control: Update lineage fields on overwrite
+            lineage_id = COALESCE(p_lineage_id, lineage_id),
+            version_ordinal = COALESCE(p_version_ordinal, version_ordinal),
+            previous_asset_id = COALESCE(p_previous_asset_id, previous_asset_id),
+            is_latest = COALESCE(p_is_latest, is_latest),
             updated_at = NOW()
         WHERE asset_id = p_asset_id;
 
@@ -1636,7 +1668,12 @@ CREATE OR REPLACE FUNCTION {}.{}(
     p_stac_collection_id VARCHAR(200),
     p_table_name VARCHAR(63) DEFAULT NULL,
     p_blob_path VARCHAR(500) DEFAULT NULL,
-    p_overwrite BOOLEAN DEFAULT FALSE
+    p_overwrite BOOLEAN DEFAULT FALSE,
+    -- V0.8 Release Control: Lineage parameters (30 JAN 2026)
+    p_lineage_id VARCHAR(64) DEFAULT NULL,
+    p_version_ordinal INTEGER DEFAULT NULL,
+    p_previous_asset_id VARCHAR(64) DEFAULT NULL,
+    p_is_latest BOOLEAN DEFAULT NULL
 )
 RETURNS TABLE (
     operation VARCHAR(20),
@@ -1687,17 +1724,21 @@ $$""").format(
         self.logger.debug("🌱 Generating seed data")
         seeds = []
 
-        # Seed DDH platform (V0.8 - 29 JAN 2026)
+        # Seed DDH platform (V0.8 - 29 JAN 2026, updated 30 JAN 2026 for versioning)
         # Uses ON CONFLICT DO NOTHING for safe re-execution
         seeds.append(sql.SQL("""
 INSERT INTO {schema}.{table} (
-    platform_id, display_name, description, required_refs, optional_refs, is_active
+    platform_id, display_name, description, required_refs, optional_refs,
+    nominal_refs, version_ref, uses_versioning, is_active
 ) VALUES (
     {platform_id},
     {display_name},
     {description},
     {required_refs}::jsonb,
     {optional_refs}::jsonb,
+    {nominal_refs}::jsonb,
+    {version_ref},
+    {uses_versioning},
     {is_active}
 ) ON CONFLICT (platform_id) DO NOTHING
 """).format(
@@ -1708,6 +1749,9 @@ INSERT INTO {schema}.{table} (
             description=sql.Literal(DDH_PLATFORM.description),
             required_refs=sql.Literal(str(DDH_PLATFORM.required_refs).replace("'", '"')),
             optional_refs=sql.Literal(str(DDH_PLATFORM.optional_refs).replace("'", '"')),
+            nominal_refs=sql.Literal(str(DDH_PLATFORM.nominal_refs).replace("'", '"')),
+            version_ref=sql.Literal(DDH_PLATFORM.version_ref),
+            uses_versioning=sql.Literal(DDH_PLATFORM.uses_versioning),
             is_active=sql.Literal(DDH_PLATFORM.is_active)
         ))
 

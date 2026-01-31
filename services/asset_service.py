@@ -145,7 +145,13 @@ class AssetService:
         blob_path: Optional[str] = None,
         overwrite: bool = False,
         clearance_level: Optional[ClearanceState] = None,
-        submitted_by: Optional[str] = None
+        submitted_by: Optional[str] = None,
+        # V0.8 Release Control: Lineage parameters (30 JAN 2026)
+        lineage_id: Optional[str] = None,
+        version_ordinal: Optional[int] = None,
+        previous_asset_id: Optional[str] = None,
+        is_latest: Optional[bool] = None,
+        retire_versions: Optional[List[str]] = None
     ) -> Tuple[GeospatialAsset, str]:
         """
         Create a new asset or update existing with overwrite.
@@ -153,6 +159,11 @@ class AssetService:
         V0.8 Migration (30 JAN 2026):
         - Changed from DDH-specific params to platform_id + platform_refs
         - Uses advisory locks via database function to handle concurrent requests
+
+        V0.8 Release Control (30 JAN 2026):
+        - Added lineage_id, version_ordinal, previous_asset_id, is_latest parameters
+        - Handles is_latest flag flip when adding new version to lineage
+        - Supports retire_versions to stop serving old versions
 
         Args:
             platform_id: Platform identifier (e.g., "ddh")
@@ -165,6 +176,11 @@ class AssetService:
             overwrite: If True, replace existing asset
             clearance_level: Optional clearance level (default: UNCLEARED)
             submitted_by: Who submitted the request (for audit trail if clearance set)
+            lineage_id: Lineage identifier for version grouping
+            version_ordinal: B2B-provided version order (1, 2, 3...)
+            previous_asset_id: FK to previous version in lineage
+            is_latest: Whether this is the latest version (default: True)
+            retire_versions: Optional list of version_ids to stop serving
 
         Returns:
             Tuple of (GeospatialAsset, operation) where operation is:
@@ -176,13 +192,22 @@ class AssetService:
             AssetExistsError: If asset exists and overwrite=False
         """
         clearance_info = f", clearance={clearance_level.value}" if clearance_level else ""
+        lineage_info = f", lineage={lineage_id}" if lineage_id else ""
         logger.info(
             f"Creating/updating asset for {platform_id}: {platform_refs} "
-            f"(type={data_type}, overwrite={overwrite}{clearance_info})"
+            f"(type={data_type}, overwrite={overwrite}{clearance_info}{lineage_info})"
         )
 
         # Generate deterministic asset_id
         asset_id = GeospatialAsset.generate_asset_id(platform_id, platform_refs)
+
+        # If this is a new version in an existing lineage, flip is_latest on current latest
+        current_latest = None
+        if lineage_id and (is_latest is None or is_latest):
+            current_latest = self._asset_repo.get_latest_in_lineage(lineage_id)
+            if current_latest and current_latest.asset_id != asset_id:
+                # We'll flip is_latest after the new asset is created
+                logger.info(f"Will flip is_latest from {current_latest.asset_id} to {asset_id}")
 
         # Use upsert function (handles advisory locks internally)
         operation, new_revision, error_message = self._asset_repo.upsert(
@@ -194,12 +219,22 @@ class AssetService:
             stac_collection_id=stac_collection_id,
             table_name=table_name,
             blob_path=blob_path,
-            overwrite=overwrite
+            overwrite=overwrite,
+            # V0.8 Release Control parameters
+            lineage_id=lineage_id,
+            version_ordinal=version_ordinal,
+            previous_asset_id=previous_asset_id,
+            is_latest=is_latest if is_latest is not None else True
         )
 
         if error_message:
             # Asset exists and overwrite=False
             raise AssetExistsError(asset_id, platform_id, platform_refs)
+
+        # Flip is_latest on previous latest if needed
+        if current_latest and current_latest.asset_id != asset_id and operation == 'created':
+            self._asset_repo.flip_is_latest(current_latest.asset_id, asset_id)
+            logger.info(f"Flipped is_latest: {current_latest.asset_id} -> {asset_id}")
 
         # Fetch the created/updated asset
         asset = self._asset_repo.get_by_id(asset_id)
@@ -223,6 +258,12 @@ class AssetService:
             self._asset_repo.update(asset_id, updates)
             asset = self._asset_repo.get_by_id(asset_id)
             logger.info(f"Applied clearance_level={clearance_level.value} at submit time")
+
+        # Handle version retirement
+        if retire_versions and lineage_id:
+            retired = self.retire_versions(lineage_id, retire_versions)
+            if retired:
+                logger.info(f"Retired {len(retired)} versions: {retire_versions}")
 
         logger.info(f"Asset {operation}: {asset_id} at revision {new_revision}")
         return asset, operation
@@ -859,6 +900,260 @@ class AssetService:
             List of stuck assets
         """
         return self._asset_repo.list_stuck_processing(older_than_hours)
+
+    # =========================================================================
+    # LINEAGE QUERIES (V0.8 Release Control - 30 JAN 2026)
+    # =========================================================================
+
+    def get_latest_in_lineage(self, lineage_id: str) -> Optional[GeospatialAsset]:
+        """
+        Get the latest version of an asset lineage.
+
+        V0.8 Release Control (30 JAN 2026):
+        Used by Service Layer to resolve /latest URLs.
+
+        Args:
+            lineage_id: Lineage identifier (hash of platform_id + nominal refs)
+
+        Returns:
+            GeospatialAsset if found, None otherwise
+        """
+        return self._asset_repo.get_latest_in_lineage(lineage_id)
+
+    def get_asset_by_version(
+        self,
+        lineage_id: str,
+        version_id: str
+    ) -> Optional[GeospatialAsset]:
+        """
+        Get a specific version of an asset by version_id.
+
+        V0.8 Release Control (30 JAN 2026):
+        Used by Service Layer to resolve /v1.0 URLs.
+
+        Args:
+            lineage_id: Lineage identifier
+            version_id: Version identifier from platform_refs (e.g., "v1.0")
+
+        Returns:
+            GeospatialAsset if found and served, None otherwise
+        """
+        return self._asset_repo.get_by_version(lineage_id, version_id)
+
+    def get_version_history(
+        self,
+        lineage_id: str,
+        include_retired: bool = False
+    ) -> List[GeospatialAsset]:
+        """
+        Get all versions in a lineage ordered by version_ordinal.
+
+        V0.8 Release Control (30 JAN 2026):
+        Used by /versions endpoint to list available versions.
+
+        Args:
+            lineage_id: Lineage identifier
+            include_retired: If True, include is_served=FALSE versions
+
+        Returns:
+            List of GeospatialAsset models ordered by version_ordinal DESC
+        """
+        return self._asset_repo.get_version_history(lineage_id, include_retired)
+
+    def get_lineage_state(
+        self,
+        platform_id: str,
+        platform_refs: Dict[str, Any],
+        nominal_refs: List[str]
+    ) -> Dict[str, Any]:
+        """
+        Get lineage state for validate endpoint.
+
+        V0.8 Release Control (30 JAN 2026):
+        Used by /api/platform/validate to check lineage state before submit.
+
+        Args:
+            platform_id: Platform identifier (e.g., "ddh")
+            platform_refs: Full platform refs (including version)
+            nominal_refs: List of nominal ref keys (e.g., ["dataset_id", "resource_id"])
+
+        Returns:
+            Dict with:
+            - lineage_exists: bool
+            - lineage_id: str
+            - current_latest: Optional[dict] with version info
+            - version_history: List of version summaries
+            - version_exists: bool (if requested version already exists)
+            - existing_asset: Optional[dict] if version exists
+            - suggested_action: str
+            - suggested_params: dict with version_ordinal and previous_version_id
+        """
+        # Generate lineage_id from nominal refs only
+        lineage_id = GeospatialAsset.generate_lineage_id(platform_id, platform_refs, nominal_refs)
+
+        # Check if requested version already exists
+        version_id = platform_refs.get('version_id')
+        existing_version = None
+        if version_id:
+            existing_version = self._asset_repo.get_by_version(lineage_id, version_id)
+
+        # Get current latest
+        current_latest = self._asset_repo.get_latest_in_lineage(lineage_id)
+
+        # Get version history
+        version_history = self._asset_repo.get_version_history(lineage_id, include_retired=True)
+
+        # Build response
+        result = {
+            'lineage_id': lineage_id,
+            'lineage_exists': len(version_history) > 0,
+            'current_latest': None,
+            'version_history': [],
+            'version_exists': existing_version is not None,
+            'existing_asset': None,
+            'suggested_action': 'submit_new',
+            'suggested_params': {
+                'version_ordinal': 1,
+                'previous_version_id': None
+            },
+            'warnings': []
+        }
+
+        if existing_version:
+            result['existing_asset'] = {
+                'version_id': existing_version.platform_refs.get('version_id'),
+                'asset_id': existing_version.asset_id,
+                'processing_status': existing_version.processing_status.value if hasattr(existing_version.processing_status, 'value') else existing_version.processing_status,
+                'is_latest': existing_version.is_latest,
+                'is_served': existing_version.is_served
+            }
+            result['suggested_action'] = 'use_overwrite_or_change_version'
+            result['warnings'].append(
+                f"Version {version_id} already exists. Use overwrite=true to replace."
+            )
+
+        if current_latest:
+            result['current_latest'] = {
+                'version_id': current_latest.platform_refs.get('version_id'),
+                'version_ordinal': current_latest.version_ordinal,
+                'asset_id': current_latest.asset_id,
+                'is_served': current_latest.is_served,
+                'created_at': current_latest.created_at.isoformat() if current_latest.created_at else None
+            }
+
+            if not existing_version:
+                result['suggested_action'] = 'submit_new_version'
+                result['suggested_params'] = {
+                    'version_ordinal': current_latest.version_ordinal + 1,
+                    'previous_version_id': current_latest.platform_refs.get('version_id')
+                }
+
+        # Build version history summary
+        for asset in version_history:
+            result['version_history'].append({
+                'version_id': asset.platform_refs.get('version_id'),
+                'ordinal': asset.version_ordinal,
+                'is_latest': asset.is_latest,
+                'is_served': asset.is_served
+            })
+
+        return result
+
+    def flip_is_latest(
+        self,
+        old_asset_id: str,
+        new_asset_id: str
+    ) -> bool:
+        """
+        Atomically flip is_latest from old asset to new asset.
+
+        V0.8 Release Control (30 JAN 2026):
+        Called when submitting a new version to a lineage.
+
+        Args:
+            old_asset_id: Current latest asset (will become is_latest=FALSE)
+            new_asset_id: New asset (will become is_latest=TRUE)
+
+        Returns:
+            True if both updates succeeded, False otherwise
+        """
+        return self._asset_repo.flip_is_latest(old_asset_id, new_asset_id)
+
+    def update_is_served(
+        self,
+        asset_id: str,
+        is_served: bool
+    ) -> GeospatialAsset:
+        """
+        Update is_served flag for version retirement.
+
+        V0.8 Release Control (30 JAN 2026):
+        Called to retire/restore versions.
+
+        Args:
+            asset_id: Asset to update
+            is_served: New is_served value
+
+        Returns:
+            Updated GeospatialAsset
+
+        Raises:
+            AssetNotFoundError: If asset not found
+        """
+        asset = self._asset_repo.update_is_served(asset_id, is_served)
+        if not asset:
+            raise AssetNotFoundError(asset_id)
+        return asset
+
+    def retire_versions(
+        self,
+        lineage_id: str,
+        version_ids: List[str]
+    ) -> List[GeospatialAsset]:
+        """
+        Retire multiple versions in a lineage.
+
+        V0.8 Release Control (30 JAN 2026):
+        Stops serving old versions while preserving data.
+
+        Args:
+            lineage_id: Lineage identifier
+            version_ids: List of version_ids to retire
+
+        Returns:
+            List of updated GeospatialAsset models
+        """
+        retired = []
+        for version_id in version_ids:
+            asset = self._asset_repo.get_by_version(lineage_id, version_id)
+            if asset:
+                updated = self._asset_repo.update_is_served(asset.asset_id, False)
+                if updated:
+                    retired.append(updated)
+                    logger.info(f"Retired version {version_id} in lineage {lineage_id}")
+        return retired
+
+    def generate_lineage_id(
+        self,
+        platform_id: str,
+        platform_refs: Dict[str, Any],
+        nominal_refs: List[str]
+    ) -> str:
+        """
+        Generate lineage ID from nominal refs only.
+
+        V0.8 Release Control (30 JAN 2026):
+        Groups assets by their stable identity (without version).
+
+        Args:
+            platform_id: Platform identifier
+            platform_refs: Full platform refs
+            nominal_refs: Keys that form stable identity
+
+        Returns:
+            32-character lineage ID hash
+        """
+        return GeospatialAsset.generate_lineage_id(platform_id, platform_refs, nominal_refs)
 
     # =========================================================================
     # UTILITY

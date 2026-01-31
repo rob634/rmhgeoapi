@@ -173,6 +173,19 @@ class GeospatialAsset(BaseModel):
         # Platform Registry indexes (V0.8 - 29 JAN 2026)
         {"columns": ["platform_id"], "name": "idx_assets_platform"},
         {"columns": ["platform_refs"], "name": "idx_assets_platform_refs", "index_type": "gin"},
+        # Lineage & Versioning indexes (V0.8 Release Control - 30 JAN 2026)
+        {"columns": ["lineage_id"], "name": "idx_assets_lineage", "partial_where": "deleted_at IS NULL"},
+        {
+            "columns": ["lineage_id", "is_latest"],
+            "name": "idx_assets_lineage_latest",
+            "partial_where": "is_latest = true AND deleted_at IS NULL"
+        },
+        {
+            "columns": ["lineage_id", "is_served"],
+            "name": "idx_assets_lineage_served",
+            "partial_where": "is_served = true AND deleted_at IS NULL"
+        },
+        {"columns": ["lineage_id", "version_ordinal"], "name": "idx_assets_lineage_ordinal"},
         # DAG Orchestration indexes (V0.8 - 29 JAN 2026)
         {"columns": ["processing_status"], "name": "idx_assets_processing_status"},
         {"columns": ["workflow_id"], "name": "idx_assets_workflow"},
@@ -218,6 +231,36 @@ class GeospatialAsset(BaseModel):
     platform_refs: Dict[str, Any] = Field(
         default_factory=dict,
         description="Platform-specific identifiers as JSONB for flexible queries"
+    )
+
+    # =========================================================================
+    # LINEAGE & VERSIONING (V0.8 Release Control - 30 JAN 2026)
+    # =========================================================================
+    # Enables version tracking across assets with same nominal identity.
+    # lineage_id groups assets by their nominal refs (without version).
+    # =========================================================================
+    lineage_id: Optional[str] = Field(
+        default=None,
+        max_length=64,
+        description="Groups versions: SHA256(platform_id|nominal_refs_json)[:32]"
+    )
+    version_ordinal: int = Field(
+        default=1,
+        ge=1,
+        description="B2B-provided version order (1, 2, 3...). Not parsed, just stored."
+    )
+    previous_asset_id: Optional[str] = Field(
+        default=None,
+        max_length=64,
+        description="FK to self - explicit link to previous version in lineage"
+    )
+    is_latest: bool = Field(
+        default=True,
+        description="Whether this is the latest version in its lineage (for /latest resolution)"
+    )
+    is_served: bool = Field(
+        default=True,
+        description="Whether this version is served via Service Layer URLs (can retire old versions)"
     )
 
     # =========================================================================
@@ -469,6 +512,47 @@ class GeospatialAsset(BaseModel):
         composite = f"{platform_id}|{sorted_refs}"
         return hashlib.sha256(composite.encode()).hexdigest()[:32]
 
+    @staticmethod
+    def generate_lineage_id(platform_id: str, platform_refs: Dict[str, Any], nominal_refs: List[str]) -> str:
+        """
+        Generate lineage ID from nominal refs only (excludes version).
+
+        V0.8 Release Control (30 JAN 2026):
+        Groups assets by their stable identity (without version) for lineage tracking.
+
+        Args:
+            platform_id: Platform identifier (e.g., "ddh")
+            platform_refs: Full platform-specific identifiers
+            nominal_refs: List of keys that form the stable identity (e.g., ["dataset_id", "resource_id"])
+
+        Returns:
+            32-character hex string (truncated SHA256)
+
+        Example:
+            generate_lineage_id(
+                platform_id="ddh",
+                platform_refs={"dataset_id": "floods", "resource_id": "jakarta", "version_id": "v2"},
+                nominal_refs=["dataset_id", "resource_id"]
+            )
+            # Returns hash of "ddh|{"dataset_id":"floods","resource_id":"jakarta"}"
+            # Same for v1, v2, v3 - all share this lineage_id
+        """
+        import json
+
+        if not platform_id:
+            raise ValueError("platform_id is required")
+        if not platform_refs:
+            raise ValueError("platform_refs is required")
+        if not nominal_refs:
+            # No versioning - use all refs (lineage_id = asset_id logic)
+            nominal_refs = list(platform_refs.keys())
+
+        # Extract only nominal values (sorted for determinism)
+        nominal_values = {k: platform_refs[k] for k in sorted(nominal_refs) if k in platform_refs}
+        sorted_refs = json.dumps(nominal_values, sort_keys=True, separators=(',', ':'))
+        composite = f"{platform_id}|{sorted_refs}"
+        return hashlib.sha256(composite.encode()).hexdigest()[:32]
+
     def get_ddh_refs(self) -> Dict[str, str]:
         """
         Get DDH-specific refs from platform_refs (convenience method).
@@ -532,6 +616,12 @@ class GeospatialAsset(BaseModel):
             'asset_id': self.asset_id,
             'platform_id': self.platform_id,
             'platform_refs': self.platform_refs,
+            # Lineage & Versioning (V0.8 Release Control - 30 JAN 2026)
+            'lineage_id': self.lineage_id,
+            'version_ordinal': self.version_ordinal,
+            'previous_asset_id': self.previous_asset_id,
+            'is_latest': self.is_latest,
+            'is_served': self.is_served,
             'data_type': self.data_type,
             'table_name': self.table_name,
             'blob_path': self.blob_path,

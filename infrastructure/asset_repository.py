@@ -75,7 +75,12 @@ class GeospatialAssetRepository(PostgreSQLRepository):
         stac_collection_id: str,
         table_name: Optional[str] = None,
         blob_path: Optional[str] = None,
-        overwrite: bool = False
+        overwrite: bool = False,
+        # V0.8 Release Control: Lineage parameters (30 JAN 2026)
+        lineage_id: Optional[str] = None,
+        version_ordinal: Optional[int] = None,
+        previous_asset_id: Optional[str] = None,
+        is_latest: Optional[bool] = None
     ) -> Tuple[str, int, Optional[str]]:
         """
         Upsert a geospatial asset using the database function.
@@ -83,6 +88,9 @@ class GeospatialAssetRepository(PostgreSQLRepository):
         V0.8 Migration (30 JAN 2026):
         - Changed from DDH-specific params to platform_id + platform_refs
         - Uses advisory locks to serialize concurrent requests for the same asset
+
+        V0.8 Release Control (30 JAN 2026):
+        - Added lineage_id, version_ordinal, previous_asset_id, is_latest parameters
 
         Args:
             asset_id: Deterministic ID from platform_id + platform_refs
@@ -94,6 +102,10 @@ class GeospatialAssetRepository(PostgreSQLRepository):
             table_name: PostGIS table name (for vectors)
             blob_path: Azure Blob path (for rasters)
             overwrite: If True, replace existing asset
+            lineage_id: Lineage identifier for version grouping
+            version_ordinal: B2B-provided version order (1, 2, 3...)
+            previous_asset_id: FK to previous version in lineage
+            is_latest: Whether this is the latest version
 
         Returns:
             Tuple of (operation, new_revision, error_message)
@@ -102,20 +114,22 @@ class GeospatialAssetRepository(PostgreSQLRepository):
             - error_message: None on success, error text on 'exists'
         """
         import json
-        logger.info(f"Upserting asset: {asset_id} (platform={platform_id}, overwrite={overwrite})")
+        logger.info(f"Upserting asset: {asset_id} (platform={platform_id}, overwrite={overwrite}, lineage={lineage_id})")
 
         with self._get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     sql.SQL("""
                         SELECT * FROM {}.upsert_geospatial_asset(
-                            %s, %s, %s, %s, %s, %s, %s, %s, %s
+                            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                         )
                     """).format(sql.Identifier(self.schema)),
                     (
                         asset_id, platform_id, json.dumps(platform_refs),
                         data_type, stac_item_id, stac_collection_id,
-                        table_name, blob_path, overwrite
+                        table_name, blob_path, overwrite,
+                        # V0.8 Release Control parameters
+                        lineage_id, version_ordinal, previous_asset_id, is_latest
                     )
                 )
                 result = cur.fetchone()
@@ -1042,6 +1056,9 @@ class GeospatialAssetRepository(PostgreSQLRepository):
         V0.8 Migration (30 JAN 2026):
         - Removed DDH column mappings (dataset_id, resource_id, version_id)
         - Uses platform_id + platform_refs for identification
+
+        V0.8 Release Control (30 JAN 2026):
+        - Added lineage fields: lineage_id, version_ordinal, previous_asset_id, is_latest, is_served
         """
         # Parse approval_state
         approval_state_value = row.get('approval_state', 'pending_review')
@@ -1069,6 +1086,12 @@ class GeospatialAssetRepository(PostgreSQLRepository):
             # V0.8: Platform identification via platform_id + platform_refs
             platform_id=row.get('platform_id', 'ddh'),
             platform_refs=row.get('platform_refs', {}),
+            # V0.8 Release Control: Lineage fields (30 JAN 2026)
+            lineage_id=row.get('lineage_id'),
+            version_ordinal=row.get('version_ordinal', 1),
+            previous_asset_id=row.get('previous_asset_id'),
+            is_latest=row.get('is_latest', True),
+            is_served=row.get('is_served', True),
             data_type=row['data_type'],
             table_name=row.get('table_name'),
             blob_path=row.get('blob_path'),
@@ -1120,6 +1143,242 @@ class GeospatialAssetRepository(PostgreSQLRepository):
                     (asset_id,)
                 )
                 return cur.fetchone() is not None
+
+    # =========================================================================
+    # LINEAGE QUERIES (V0.8 Release Control - 30 JAN 2026)
+    # =========================================================================
+
+    def get_latest_in_lineage(self, lineage_id: str) -> Optional[GeospatialAsset]:
+        """
+        Get the latest version of an asset lineage.
+
+        V0.8 Release Control (30 JAN 2026):
+        Used by Service Layer to resolve /latest URLs.
+
+        Args:
+            lineage_id: Lineage identifier (hash of platform_id + nominal refs)
+
+        Returns:
+            GeospatialAsset if found, None otherwise
+        """
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL("""
+                        SELECT * FROM {}.{}
+                        WHERE lineage_id = %s
+                          AND is_latest = TRUE
+                          AND deleted_at IS NULL
+                    """).format(
+                        sql.Identifier(self.schema),
+                        sql.Identifier(self.table)
+                    ),
+                    (lineage_id,)
+                )
+                row = cur.fetchone()
+                return self._row_to_model(row) if row else None
+
+    def get_by_version(
+        self,
+        lineage_id: str,
+        version_id: str
+    ) -> Optional[GeospatialAsset]:
+        """
+        Get a specific version of an asset by version_id.
+
+        V0.8 Release Control (30 JAN 2026):
+        Used by Service Layer to resolve /v1.0 URLs.
+
+        Args:
+            lineage_id: Lineage identifier
+            version_id: Version identifier from platform_refs (e.g., "v1.0")
+
+        Returns:
+            GeospatialAsset if found and served, None otherwise
+        """
+        import json
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL("""
+                        SELECT * FROM {}.{}
+                        WHERE lineage_id = %s
+                          AND platform_refs->>'version_id' = %s
+                          AND is_served = TRUE
+                          AND deleted_at IS NULL
+                    """).format(
+                        sql.Identifier(self.schema),
+                        sql.Identifier(self.table)
+                    ),
+                    (lineage_id, version_id)
+                )
+                row = cur.fetchone()
+                return self._row_to_model(row) if row else None
+
+    def get_version_history(
+        self,
+        lineage_id: str,
+        include_retired: bool = False
+    ) -> List[GeospatialAsset]:
+        """
+        Get all versions in a lineage ordered by version_ordinal.
+
+        V0.8 Release Control (30 JAN 2026):
+        Used by /versions endpoint to list available versions.
+
+        Args:
+            lineage_id: Lineage identifier
+            include_retired: If True, include is_served=FALSE versions
+
+        Returns:
+            List of GeospatialAsset models ordered by version_ordinal DESC
+        """
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                if include_retired:
+                    query = sql.SQL("""
+                        SELECT * FROM {}.{}
+                        WHERE lineage_id = %s
+                          AND deleted_at IS NULL
+                        ORDER BY version_ordinal DESC
+                    """)
+                else:
+                    query = sql.SQL("""
+                        SELECT * FROM {}.{}
+                        WHERE lineage_id = %s
+                          AND is_served = TRUE
+                          AND deleted_at IS NULL
+                        ORDER BY version_ordinal DESC
+                    """)
+
+                cur.execute(
+                    query.format(
+                        sql.Identifier(self.schema),
+                        sql.Identifier(self.table)
+                    ),
+                    (lineage_id,)
+                )
+                rows = cur.fetchall()
+                return [self._row_to_model(row) for row in rows]
+
+    def flip_is_latest(
+        self,
+        old_asset_id: str,
+        new_asset_id: str
+    ) -> bool:
+        """
+        Atomically flip is_latest from old asset to new asset.
+
+        V0.8 Release Control (30 JAN 2026):
+        Called when submitting a new version to a lineage.
+
+        Args:
+            old_asset_id: Current latest asset (will become is_latest=FALSE)
+            new_asset_id: New asset (will become is_latest=TRUE)
+
+        Returns:
+            True if both updates succeeded, False otherwise
+        """
+        now = datetime.now(timezone.utc)
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                # Set old asset to not latest
+                cur.execute(
+                    sql.SQL("""
+                        UPDATE {}.{}
+                        SET is_latest = FALSE, updated_at = %s
+                        WHERE asset_id = %s AND is_latest = TRUE
+                    """).format(
+                        sql.Identifier(self.schema),
+                        sql.Identifier(self.table)
+                    ),
+                    (now, old_asset_id)
+                )
+                old_updated = cur.rowcount
+
+                # Set new asset to latest
+                cur.execute(
+                    sql.SQL("""
+                        UPDATE {}.{}
+                        SET is_latest = TRUE, updated_at = %s
+                        WHERE asset_id = %s
+                    """).format(
+                        sql.Identifier(self.schema),
+                        sql.Identifier(self.table)
+                    ),
+                    (now, new_asset_id)
+                )
+                new_updated = cur.rowcount
+
+                conn.commit()
+
+                if old_updated and new_updated:
+                    logger.info(f"Flipped is_latest: {old_asset_id} -> {new_asset_id}")
+                    return True
+                else:
+                    logger.warning(
+                        f"flip_is_latest partial update: old={old_updated}, new={new_updated}"
+                    )
+                    return False
+
+    def update_is_served(
+        self,
+        asset_id: str,
+        is_served: bool
+    ) -> Optional[GeospatialAsset]:
+        """
+        Update is_served flag (for version retirement).
+
+        V0.8 Release Control (30 JAN 2026):
+        Called when retiring/restoring versions.
+
+        Args:
+            asset_id: Asset to update
+            is_served: New is_served value
+
+        Returns:
+            Updated GeospatialAsset if found, None otherwise
+        """
+        result = self.update(asset_id, {'is_served': is_served})
+        if result:
+            action = "enabled" if is_served else "retired"
+            logger.info(f"Asset {asset_id} serving {action}")
+        return result
+
+    def list_by_lineage(
+        self,
+        lineage_id: str,
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[GeospatialAsset]:
+        """
+        List all assets in a lineage (alias for get_version_history with pagination).
+
+        Args:
+            lineage_id: Lineage identifier
+            limit: Maximum number of results
+            offset: Number of results to skip
+
+        Returns:
+            List of GeospatialAsset models
+        """
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL("""
+                        SELECT * FROM {}.{}
+                        WHERE lineage_id = %s
+                          AND deleted_at IS NULL
+                        ORDER BY version_ordinal DESC
+                        LIMIT %s OFFSET %s
+                    """).format(
+                        sql.Identifier(self.schema),
+                        sql.Identifier(self.table)
+                    ),
+                    (lineage_id, limit, offset)
+                )
+                rows = cur.fetchall()
+                return [self._row_to_model(row) for row in rows]
 
 
 # Module exports

@@ -352,6 +352,7 @@ class ApiRequest(BaseModel):
 
     ⚠️ SIMPLIFIED (22 NOV 2025): This is now a thin tracking layer.
     ⚠️ UPDATED (01 JAN 2026): Added retry_count and updated_at for failed job resubmission.
+    ⚠️ UPDATED (30 JAN 2026 - V0.8 Release Control): Added asset_id and platform_id for linkage.
 
     Purpose:
         - Store DDH identifiers for status lookup
@@ -359,6 +360,7 @@ class ApiRequest(BaseModel):
         - Enable DDH to poll /api/platform/status/{request_id}
         - Platform looks up job_id, fetches status from CoreMachine
         - Track user-initiated retries of failed jobs (retry_count)
+        - Track asset and platform linkage (V0.8 Release Control)
 
     What's REMOVED:
         - jobs JSONB (was: multi-job tracking)
@@ -375,6 +377,8 @@ class ApiRequest(BaseModel):
             version_id VARCHAR(50) NOT NULL,
             job_id VARCHAR(64) NOT NULL,
             data_type VARCHAR(50) NOT NULL,
+            asset_id VARCHAR(64),  -- V0.8 Release Control
+            platform_id VARCHAR(50),  -- V0.8 Release Control
             retry_count INTEGER NOT NULL DEFAULT 0,
             created_at TIMESTAMPTZ DEFAULT NOW(),
             updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -404,6 +408,20 @@ class ApiRequest(BaseModel):
         description="CoreMachine job ID (1:1 mapping)"
     )
     data_type: str = Field(..., max_length=50, description="Type of data: raster, vector, etc.")
+
+    # V0.8 Release Control: Asset & Platform linkage (30 JAN 2026)
+    # Links this request to the asset it created/updated
+    asset_id: Optional[str] = Field(
+        default=None,
+        max_length=64,
+        description="FK to geospatial_assets - the asset this request creates/updates"
+    )
+    platform_id: Optional[str] = Field(
+        default=None,
+        max_length=50,
+        description="FK to platforms - identifies B2B platform that made request"
+    )
+
     retry_count: int = Field(
         default=0,
         description="Number of user-initiated retries (0 = first submission)"
@@ -426,6 +444,8 @@ class ApiRequest(BaseModel):
             'version_id': self.version_id,
             'job_id': self.job_id,
             'data_type': self.data_type,
+            'asset_id': self.asset_id,
+            'platform_id': self.platform_id,
             'retry_count': self.retry_count,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None

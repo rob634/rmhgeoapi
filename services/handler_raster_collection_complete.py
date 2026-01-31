@@ -128,24 +128,29 @@ def _report_progress(
 # MOUNT PATH HELPERS
 # =============================================================================
 
-def _get_mount_paths(job_id: str) -> Dict[str, Path]:
+def _get_mount_paths(job_id: str, config) -> Dict[str, Path]:
     """
     Get mount paths for temp storage.
 
-    Uses /mnt/data for Azure File Share mount in Docker.
+    Uses config.raster.etl_mount_path for Azure Files mount in Docker.
     Falls back to /tmp for local development.
 
     Args:
         job_id: Job ID for unique folder naming
+        config: AppConfig instance
 
     Returns:
         Dict with 'base', 'source', 'cogs' paths
     """
+    # Use configured mount path (default: /mounts/etl-temp)
+    mount_path = config.raster.etl_mount_path
+
     # Check for mounted storage
-    if os.path.exists('/mnt/data') and os.access('/mnt/data', os.W_OK):
-        base = Path('/mnt/data') / f"collection_{job_id[:8]}"
+    if os.path.exists(mount_path) and os.access(mount_path, os.W_OK):
+        base = Path(mount_path) / f"collection_{job_id[:8]}"
     else:
         # Fallback for local dev
+        logger.warning(f"Mount path {mount_path} not available, using /tmp")
         base = Path('/tmp') / f"collection_{job_id[:8]}"
 
     return {
@@ -625,9 +630,10 @@ def raster_collection_complete(
     cleanup_result = {}
 
     try:
-        # Setup mount paths
-        mount_paths = _get_mount_paths(job_id)
+        # Setup mount paths (uses config.raster.etl_mount_path)
+        mount_paths = _get_mount_paths(job_id, config)
         _ensure_mount_paths(mount_paths)
+        logger.info(f"   Mount base: {mount_paths['base']}")
 
         # =====================================================================
         # PHASE 1: DOWNLOAD (0-25%)

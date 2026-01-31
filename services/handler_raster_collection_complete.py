@@ -357,7 +357,7 @@ def _process_files_to_cogs(
             # Note: validate_raster expects blob_url but rasterio can open local paths
             validation_params = {
                 'blob_url': local_path,  # Local path works with rasterio.open()
-                'blob_name': blob_info['blob_name'],
+                'blob_name': original_blob,  # From file_info['blob_name']
                 'container_name': params.get('container_name', 'local'),
                 'input_crs': params.get('input_crs'),
                 'raster_type': params.get('raster_type', 'auto'),

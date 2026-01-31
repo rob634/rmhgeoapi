@@ -3,20 +3,26 @@
 # ============================================================================
 # EPOCH: 4 - ACTIVE
 # STATUS: Web Interface - Submit Raster Collection Job Form
-# PURPOSE: HTMX interface for ProcessRasterCollectionV2Job submission
-# LAST_REVIEWED: 01 JAN 2026
+# PURPOSE: HTMX interface for ProcessRasterCollectionDockerJob submission
+# LAST_REVIEWED: 30 JAN 2026
 # EXPORTS: SubmitRasterCollectionInterface
-# DEPENDENCIES: azure.functions, web_interfaces.base, jobs.process_raster_collection_v2
+# DEPENDENCIES: azure.functions, web_interfaces.base, jobs.process_raster_collection_docker
 # ============================================================================
 """
 Submit Raster Collection Job interface module.
 
-Web interface for submitting ProcessRasterCollectionV2Job with multi-file browser.
+Web interface for submitting ProcessRasterCollectionDockerJob with multi-file browser.
 
-Features (01 JAN 2026):
+V0.8 (30 JAN 2026): Updated to use Docker-based collection processing.
+    - Sequential checkpoint-based workflow
+    - Downloads all files to temp storage first (avoids OOM)
+    - N GeoTIFFs in → N COGs out (one-to-one mapping)
+    - Creates STAC Collection with items for each COG
+
+Features:
     - HTMX-powered file browser with multi-select checkboxes
     - Auto-filter for raster extensions (.tif, .tiff, .img, .jp2, etc.)
-    - Form for ProcessRasterCollectionV2Job parameters
+    - Form for ProcessRasterCollectionDockerJob parameters
     - Collection-specific fields (collection_id, collection_description)
     - File count validation (max 20 files)
     - HTMX job submission with result display
@@ -24,7 +30,7 @@ Features (01 JAN 2026):
 Key Differences from Single Raster:
     - Multi-select file browser (checkboxes)
     - blob_list instead of single file_name
-    - Creates MosaicJSON + STAC Collection (not just STAC Item)
+    - Creates STAC Collection with multiple items
     - Collection ID and description fields
 
 Exports:
@@ -58,8 +64,8 @@ class SubmitRasterCollectionInterface(BaseInterface):
     """
     Submit Raster Collection Job interface with HTMX interactivity.
 
-    Multi-file selection browser with ProcessRasterCollectionV2Job submission.
-    Creates COGs + MosaicJSON + STAC Collection.
+    Multi-file selection browser with ProcessRasterCollectionDockerJob submission.
+    Creates COGs + STAC Collection (V0.8 - Docker sequential processing).
 
     Fragments supported:
         - containers: Returns container <option> elements for zone
@@ -387,7 +393,7 @@ class SubmitRasterCollectionInterface(BaseInterface):
             return self._render_submit_success_platform({
                 'request_id': request_id,
                 'job_id': job_id,
-                'job_type': 'process_raster_collection_v2',
+                'job_type': job_type,  # process_raster_collection_docker
                 'status': 'accepted',
                 'file_count': len(blob_list),
                 'collection_id': job_params.get('collection_id')
@@ -464,7 +470,7 @@ class SubmitRasterCollectionInterface(BaseInterface):
             <!-- Header -->
             <header class="dashboard-header">
                 <h1>🗺️ Submit Raster Collection</h1>
-                <p class="subtitle">Process multiple raster tiles into COGs + MosaicJSON + STAC Collection</p>
+                <p class="subtitle">Process multiple raster files into COGs + STAC Collection (Docker)</p>
             </header>
 
             <div class="two-column-layout">
@@ -704,11 +710,44 @@ class SubmitRasterCollectionInterface(BaseInterface):
                                         </select>
                                     </div>
                                 </div>
-                                <div class="form-group">
-                                    <label for="input_crs">Input CRS (optional)</label>
-                                    <input type="text" id="input_crs" name="input_crs"
-                                           placeholder="e.g., EPSG:32618">
-                                    <span class="field-hint">Override if source CRS is missing or wrong</span>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="input_crs">Input CRS (optional)</label>
+                                        <input type="text" id="input_crs" name="input_crs"
+                                               placeholder="e.g., EPSG:32618">
+                                        <span class="field-hint">Override if source CRS is missing</span>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="target_crs">Target CRS (optional)</label>
+                                        <input type="text" id="target_crs" name="target_crs"
+                                               placeholder="e.g., EPSG:4326">
+                                        <span class="field-hint">Output CRS (default: EPSG:4326)</span>
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="jpeg_quality">JPEG Quality</label>
+                                        <input type="number" id="jpeg_quality" name="jpeg_quality"
+                                               min="1" max="100" placeholder="85">
+                                        <span class="field-hint">Only for Visualization tier (1-100)</span>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="license">License</label>
+                                        <select id="license" name="license">
+                                            <option value="proprietary" selected>Proprietary</option>
+                                            <option value="CC-BY-4.0">CC-BY-4.0</option>
+                                            <option value="CC-BY-SA-4.0">CC-BY-SA-4.0</option>
+                                            <option value="CC0-1.0">CC0-1.0 (Public Domain)</option>
+                                            <option value="other">Other</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="form-group checkbox-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="strict_mode" name="strict_mode" value="true">
+                                        <span>Strict Mode</span>
+                                    </label>
+                                    <span class="field-hint">Fail on validation warnings (default: ignore warnings)</span>
                                 </div>
                             </div>
                         </div>
@@ -1093,6 +1132,27 @@ class SubmitRasterCollectionInterface(BaseInterface):
 
         .processing-fields {
             padding: 16px;
+        }
+
+        /* Checkbox group */
+        .checkbox-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            font-weight: normal;
+        }
+
+        .checkbox-label input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
         }
 
         /* Form styles */
@@ -1537,6 +1597,10 @@ class SubmitRasterCollectionInterface(BaseInterface):
             const rasterType = document.getElementById('raster_type').value;
             const outputTier = document.getElementById('output_tier').value;
             const inputCrs = document.getElementById('input_crs').value;
+            const targetCrs = document.getElementById('target_crs').value;
+            const jpegQuality = document.getElementById('jpeg_quality').value;
+            const license = document.getElementById('license').value;
+            const strictMode = document.getElementById('strict_mode').checked;
 
             if (!datasetId || !resourceId) {{
                 return 'Fill in DDH identifiers (dataset_id, resource_id) to see the Platform API cURL command';
@@ -1586,7 +1650,11 @@ class SubmitRasterCollectionInterface(BaseInterface):
             const processingOptions = {{}};
             if (rasterType && rasterType !== 'auto') processingOptions.raster_type = rasterType;
             if (outputTier && outputTier !== 'analysis') processingOptions.output_tier = outputTier;
-            if (inputCrs) processingOptions.crs = inputCrs;
+            if (inputCrs) processingOptions.input_crs = inputCrs;
+            if (targetCrs) processingOptions.crs = targetCrs;
+            if (jpegQuality) processingOptions.jpeg_quality = parseInt(jpegQuality);
+            if (license && license !== 'proprietary') processingOptions.license = license;
+            if (strictMode) processingOptions.strict_mode = true;
 
             if (Object.keys(processingOptions).length > 0) {{
                 payload.processing_options = processingOptions;
@@ -1624,7 +1692,8 @@ class SubmitRasterCollectionInterface(BaseInterface):
         document.addEventListener('DOMContentLoaded', () => {{
             const formInputs = ['dataset_id', 'resource_id', 'version_id', 'title',
                                 'collection_id', 'collection_description', 'description',
-                                'access_level', 'tags', 'raster_type', 'output_tier', 'input_crs'];
+                                'access_level', 'tags', 'raster_type', 'output_tier', 'input_crs',
+                                'target_crs', 'jpeg_quality', 'license', 'strict_mode'];
             formInputs.forEach(id => {{
                 const el = document.getElementById(id);
                 if (el) {{

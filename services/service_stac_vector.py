@@ -80,7 +80,8 @@ class StacVectorService:
         source_file: Optional[str] = None,
         additional_properties: Optional[Dict[str, Any]] = None,
         platform_meta: Optional['PlatformMetadata'] = None,
-        app_meta: Optional['AppMetadata'] = None
+        app_meta: Optional['AppMetadata'] = None,
+        item_id: Optional[str] = None
     ) -> Item:
         """
         Extract STAC Item from PostGIS table.
@@ -93,6 +94,8 @@ class StacVectorService:
             additional_properties: Optional custom properties to add
             platform_meta: Optional PlatformMetadata for DDH identifiers (25 NOV 2025)
             app_meta: Optional AppMetadata for job linkage (25 NOV 2025)
+            item_id: Optional custom STAC item ID (30 JAN 2026 - DDH format support)
+                     If not provided, falls back to 'postgis-{schema}-{table_name}'
 
         Returns:
             Validated stac-pydantic Item
@@ -113,8 +116,12 @@ class StacVectorService:
         # Get table metadata from PostGIS
         metadata = self._get_table_metadata(schema, table_name)
 
-        # Generate semantic item ID
-        item_id = f"postgis-{schema}-{table_name}"
+        # Use provided item_id or fall back to legacy format (30 JAN 2026)
+        if item_id:
+            logger.info(f"  Using provided item_id: {item_id}")
+        else:
+            item_id = f"postgis-{schema}-{table_name}"
+            logger.info(f"  Using auto-generated item_id: {item_id}")
 
         # Build geometry from extent (bbox)
         bbox = metadata['bbox']

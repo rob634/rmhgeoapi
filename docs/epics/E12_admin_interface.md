@@ -1,8 +1,9 @@
 # Epic E12: Admin Interface (B2B)
 
 **Type**: Enabler
-**Status**: Partial
-**Last Updated**: 24 JAN 2026
+**Status**: Operational
+**Last Updated**: 30 JAN 2026
+**ADO Feature**: "Operator Admin Portal"
 
 ---
 
@@ -50,12 +51,14 @@ Self-service onboarding interface for platform operators and integrators. Every 
 | Feature | Status | Scope |
 |---------|--------|-------|
 | F12.1 HTMX Integration | ✅ | Interactive UI without custom JS |
-| F12.2 System Dashboard | 🚧 | Health, schema stats, architecture |
-| F12.3 Pipeline Workflow Hub | 🚧 | Job submission and monitoring |
+| F12.2 System Dashboard | ✅ | Health, schema stats, queue status, cross-system view |
+| F12.3 Pipeline Workflow Hub | ✅ | Job submission, monitoring, task viewer |
 | F12.4 API Documentation Hub | ✅ | Swagger UI, OpenAPI spec |
-| F12.5 STAC Browser | 🚧 | Collection/item exploration |
-| F12.6 OGC Features Browser | 🚧 | Vector collection exploration |
-| F12.7 Approvals Interface | 📋 | Pending approval queue |
+| F12.5 STAC Browser | ✅ | Collection/item exploration, raster curator |
+| F12.6 OGC Features Browser | ✅ | Vector collection exploration, vector curator |
+| F12.7 Approvals Interface | 📋 | Pending approval queue (buttons exist, full UI pending) |
+
+**Updated 30 JAN 2026**: F12.2-F12.6 completed as part of V0.8 Docker UI migration.
 
 ---
 

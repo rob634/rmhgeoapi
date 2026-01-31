@@ -1,8 +1,9 @@
 # Epic E2: Raster Data as API
 
 **Type**: Business
-**Status**: Operational
-**Last Updated**: 24 JAN 2026
+**Status**: Complete
+**Last Updated**: 30 JAN 2026
+**ADO Feature**: "Raster Data Pipeline"
 
 ---
 

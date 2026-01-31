@@ -459,9 +459,11 @@ class VectorDockerETLJob(JobBaseMixin, JobBase):
             "geometry_type": result_data.get("geometry_type"),
             "srid": result_data.get("srid"),
 
-            # STAC info
-            "stac_item_id": result_data.get("stac_item_id"),
-            "collection_id": result_data.get("collection_id", STACDefaults.VECTOR_COLLECTION),
+            # STAC info - V0.8 FIX (31 JAN 2026): Use nested stac dict for catalog lookup
+            "stac": {
+                "item_id": result_data.get("stac_item_id"),
+                "collection_id": result_data.get("collection_id", STACDefaults.VECTOR_COLLECTION),
+            },
 
             # Style info
             "style_id": result_data.get("style_id", "default"),

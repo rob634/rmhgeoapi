@@ -165,9 +165,11 @@ class PlatformCatalogService:
             }
 
         # Step 4: Extract STAC IDs from job result
+        # V0.8 FIX (30 JAN 2026): STAC info is nested under 'stac' key
         result_data = job.result_data or {}
-        collection_id = result_data.get("collection_id")
-        item_id = result_data.get("stac_item_id")
+        stac_data = result_data.get("stac", {})
+        collection_id = stac_data.get("collection_id")
+        item_id = stac_data.get("item_id")
 
         if not collection_id or not item_id:
             logger.warning("   STAC IDs not in job result")

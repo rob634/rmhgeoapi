@@ -1,8 +1,9 @@
 # Epic E4: Security & Externalization
 
 **Type**: Enabler (Compliance)
-**Status**: Operational (F4.2 ✅, F4.1/F4.3 need type-safety work)
-**Last Updated**: 25 JAN 2026
+**Status**: In Progress (67% - F4.2 complete, F4.1 Phase 1 done, F4.3 pending env)
+**Last Updated**: 30 JAN 2026
+**ADO Feature**: "Security & Data Classification"
 
 ---
 

@@ -1,8 +1,9 @@
 # Epic E6: Service Layer (B2C APIs)
 
 **Type**: Platform
-**Status**: Operational
-**Last Updated**: 24 JAN 2026
+**Status**: Complete
+**Last Updated**: 30 JAN 2026
+**ADO Feature**: "Consumer APIs (TiTiler/TiPG)"
 **Repository**: `rmhtitiler`
 
 ---

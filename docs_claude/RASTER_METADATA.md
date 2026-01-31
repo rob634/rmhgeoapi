@@ -4,7 +4,7 @@
 **Epic**: E7 Pipeline Infrastructure → E2 Raster Data as API
 **Goal**: RasterMetadata model providing single source of truth for STAC-based raster catalogs
 **Dependency**: F7.8 (BaseMetadata, VectorMetadata pattern established)
-**Status**: Phase 1 Complete, Phase 2 IN PROGRESS
+**Status**: ✅ COMPLETE (31 JAN 2026)
 **Priority**: CRITICAL - Raster is primary STAC use case
 
 ---
@@ -76,7 +76,7 @@ Platform Gateway ──▶ geospatial-jobs ──▶ Orchestrator (CoreMachine)
 | S7.11.5 | Enable raster rebuild in `rebuild_stac_handlers.py` | Done |
 | S7.11.5a | Query `app.cog_metadata` for raster validation | Done |
 | S7.11.5b | Use `RasterMetadata.to_stac_item()` for rebuild | Done |
-| S7.9.TEST | Test: `process_raster_docker` populates cog_metadata + STAC | NEXT |
+| S7.9.TEST | Test: `process_raster_docker` populates cog_metadata + STAC | Done (31 JAN 2026) |
 
 ---
 

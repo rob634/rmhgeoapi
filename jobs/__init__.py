@@ -58,6 +58,7 @@ from .repair_stac_items import RepairStacItemsJob
 from .rebuild_stac import RebuildStacJob
 from .ingest_collection import IngestCollectionJob
 from .process_raster_docker import ProcessRasterDockerJob
+from .process_raster_collection_docker import ProcessRasterCollectionDockerJob
 from .process_large_raster_docker import ProcessLargeRasterDockerJob
 from .detect_orphan_blobs import DetectOrphanBlobsJob
 from .register_silver_blobs import RegisterSilverBlobsJob
@@ -109,6 +110,7 @@ ALL_JOBS = {
 
     # Raster ETL (Docker - single stage)
     "process_raster_docker": ProcessRasterDockerJob,
+    "process_raster_collection_docker": ProcessRasterCollectionDockerJob,
     "process_large_raster_docker": ProcessLargeRasterDockerJob,
 
     # Container Inventory

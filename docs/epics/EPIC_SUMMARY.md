@@ -1,6 +1,9 @@
 # Epic Summary - Feature Status
 
-**Last Updated**: 25 JAN 2026
+**Last Updated**: 30 JAN 2026
+**ADO Epic**: "Geospatial API for DDH"
+
+> **ADO Migration**: See `V0.8_ADO.md` for migration plan. WB Claude will configure ADO.
 
 ---
 
@@ -15,6 +18,7 @@
 ---
 
 ## E1: Vector Data as API ✅
+**ADO Feature**: Vector Data Pipeline
 
 | Feature | Status |
 |---------|--------|
@@ -27,6 +31,7 @@
 ---
 
 ## E2: Raster Data as API ✅
+**ADO Feature**: Raster Data Pipeline
 
 | Feature | Status |
 |---------|--------|
@@ -39,7 +44,8 @@
 
 ---
 
-## E3: DDH Integration 🚧
+## E3: DDH Integration 🚧 (50%)
+**ADO Feature**: DDH Platform Integration
 
 | Feature | Status |
 |---------|--------|
@@ -50,17 +56,19 @@
 
 ---
 
-## E4: Security & Externalization 🚧
+## E4: Security & Externalization 🚧 (67%)
+**ADO Feature**: Security & Data Classification
 
 | Feature | Status |
 |---------|--------|
-| F4.1 Classification Enforcement | 🚧 |
+| F4.1 Classification Enforcement | 🚧 (Phase 1 done, Phase 2 optional) |
 | F4.2 Approval Workflow | ✅ |
-| F4.3 ADF External Delivery | 📋 |
+| F4.3 ADF External Delivery | 🚧 (code done, needs env config) |
 
 ---
 
 ## E6: Service Layer (B2C) ✅
+**ADO Feature**: Consumer APIs (TiTiler/TiPG)
 
 | Feature | Status |
 |---------|--------|
@@ -74,6 +82,7 @@
 ---
 
 ## E7: Pipeline Infrastructure ✅
+**ADO Feature**: ETL Pipeline Infrastructure
 
 | Feature | Status |
 |---------|--------|
@@ -85,7 +94,8 @@
 
 ---
 
-## E8: GeoAnalytics 🚧
+## E8: GeoAnalytics 🚧 (57%)
+**ADO Feature**: H3 Analytics Pipeline
 
 | Feature | Status |
 |---------|--------|
@@ -99,7 +109,8 @@
 
 ---
 
-## E9: Large & Multidimensional Data 🚧
+## E9: Large & Multidimensional Data 🚧 (20%)
+**ADO Feature**: Large Dataset Processing
 
 | Feature | Status |
 |---------|--------|
@@ -111,7 +122,8 @@
 
 ---
 
-## E12: Admin Interface (B2B) 🚧
+## E12: Admin Interface (B2B) ✅
+**ADO Feature**: Operator Admin Portal
 
 | Feature | Status |
 |---------|--------|
@@ -121,7 +133,7 @@
 | F12.4 API Documentation Hub | ✅ |
 | F12.5 STAC Browser | ✅ |
 | F12.6 OGC Features Browser | ✅ |
-| F12.7 Approvals Interface | 📋 |
+| F12.7 Approvals Interface | 📋 (buttons exist, full UI pending) |
 
 ---
 
@@ -129,7 +141,9 @@
 
 | Status | Count |
 |--------|-------|
-| ✅ Complete | 36 |
-| 🚧 In Progress | 4 |
-| 📋 Planned | 11 |
-| **Total** | **51** |
+| ✅ Complete | 35 |
+| 🚧 In Progress | 3 |
+| 📋 Planned | 10 |
+| **Total** | **48** |
+
+**Overall Progress**: 73% complete (35/48 features)

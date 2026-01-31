@@ -312,13 +312,16 @@ def _handle_metadata_only_update(
             'output_mode': 'metadata_only_update',
             'action': 'metadata_only',
             'changes': metadata_changes,
-            'stac_item_id': existing_artifact.stac_item_id,
-            'stac_collection_id': existing_artifact.stac_collection_id,
             'artifact_id': str(existing_artifact.artifact_id),
             'cog': {
                 'cog_blob': existing_artifact.blob_path,
                 'cog_container': existing_artifact.container,
                 'note': 'Existing COG unchanged',
+            },
+            # V0.8 FIX (30 JAN 2026): STAC info in 'stac' dict for catalog lookup
+            'stac': {
+                'item_id': existing_artifact.stac_item_id,
+                'collection_id': existing_artifact.stac_collection_id,
             },
             'note': 'Source data unchanged, metadata updated',
         }
@@ -342,13 +345,16 @@ def _handle_no_change(existing_artifact) -> Dict[str, Any]:
         'result': {
             'output_mode': 'no_change',
             'action': 'no_change',
-            'stac_item_id': existing_artifact.stac_item_id,
-            'stac_collection_id': existing_artifact.stac_collection_id,
             'artifact_id': str(existing_artifact.artifact_id),
             'cog': {
                 'cog_blob': existing_artifact.blob_path,
                 'cog_container': existing_artifact.container,
                 'note': 'Existing COG unchanged',
+            },
+            # V0.8 FIX (30 JAN 2026): STAC info in 'stac' dict for catalog lookup
+            'stac': {
+                'item_id': existing_artifact.stac_item_id,
+                'collection_id': existing_artifact.stac_collection_id,
             },
             'note': 'Source data and metadata unchanged - no processing needed',
         }
@@ -1942,7 +1948,8 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                 'container_name': cog_container,
                 'blob_name': cog_blob,
                 'collection_id': params.get('collection_id') or config.raster.stac_default_collection,
-                'item_id': params.get('item_id'),
+                # 30 JAN 2026: Use stac_item_id from Platform (DDH format) if available
+                'item_id': params.get('stac_item_id') or params.get('item_id'),
                 # Platform passthrough
                 'dataset_id': params.get('dataset_id'),
                 'resource_id': params.get('resource_id'),

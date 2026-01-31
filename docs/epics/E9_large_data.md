@@ -1,8 +1,9 @@
 # Epic E9: Large & Multidimensional Data
 
 **Type**: Business
-**Status**: Partial
-**Last Updated**: 24 JAN 2026
+**Status**: In Progress (20% - FATHOM ETL complete, hosting pipelines pending)
+**Last Updated**: 30 JAN 2026
+**ADO Feature**: "Large Dataset Processing"
 
 ---
 

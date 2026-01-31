@@ -150,7 +150,7 @@ Cascade deletes ALL user tables in geo schema:
 ---
 
 ### Vector STAC ID Mismatch Bug (V0.8 CRITICAL)
-**Status**: BUG - Needs fix
+**Status**: ✅ FIXED (31 JAN 2026) - Version 0.8.3.4 (previous fix was incomplete)
 **Priority**: CRITICAL - Breaks GeospatialAsset ↔ STAC linkage
 **Discovered**: 30 JAN 2026
 
@@ -256,7 +256,7 @@ SELECT id FROM pgstac.items WHERE content->'properties'->>'postgis:table' = 'X';
 ---
 
 ### RasterMetadata + STAC Self-Healing (F7.9 + F7.11)
-**Status**: Phase 1 COMPLETE, Phase 2 IN PROGRESS
+**Status**: ✅ COMPLETE (31 JAN 2026)
 **Details**: [RASTER_METADATA.md](./RASTER_METADATA.md)
 **Priority**: CRITICAL - Raster is primary STAC use case
 
@@ -266,7 +266,10 @@ SELECT id FROM pgstac.items WHERE content->'properties'->>'postgis:table' = 'X';
 | RasterMetadataRepository | Done |
 | Wire to extract_stac_metadata | Done |
 | Enable raster rebuild | Done |
-| Test: process_raster_docker populates cog_metadata | NEXT |
+| Test: process_raster_docker populates cog_metadata | Done |
+
+**Verified**: Job `eb8bb38b...` confirmed `app.cog_metadata` populated with correct STAC IDs.
+**Minor gap**: `etl_job_id` column not populated (non-blocking).
 
 ---
 

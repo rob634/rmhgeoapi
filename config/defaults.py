@@ -430,6 +430,7 @@ class TaskRoutingDefaults:
         # =====================================================================
         "raster_process_complete",        # F7.13: Validate → COG → STAC
         "raster_process_large_complete",  # F7.18: Tiling pipeline (deprecated)
+        "raster_collection_complete",     # V0.8: Collection to COGs (sequential)
 
         # =====================================================================
         # H3 PYRAMID (Docker-only)

@@ -274,8 +274,11 @@ def translate_to_coremachine(
 
         # Check if this is a raster collection (multiple files)
         if request.is_raster_collection:
-            # Multiple rasters → process_raster_collection_v2 (mixin pattern, 04 DEC 2025)
-            return 'process_raster_collection_v2', {
+            # Multiple rasters → process_raster_collection_docker (V0.8 - 30 JAN 2026)
+            # Sequential checkpoint-based processing on Docker worker
+            logger.info(f"  Raster collection: {len(request.file_name)} files → process_raster_collection_docker")
+
+            return 'process_raster_collection_docker', {
                 # File location (required)
                 'container_name': request.container_name,
                 'blob_list': request.file_name,  # Already a list
@@ -283,20 +286,29 @@ def translate_to_coremachine(
                 # Output location
                 'output_folder': output_folder,
 
-                # STAC metadata (MosaicJSON schema)
+                # STAC metadata
                 'collection_id': collection_id,
-                'stac_item_id': stac_item_id,
+                'collection_title': request.generated_title,
                 'collection_description': request.description,
-                'access_level': request.access_level.value,  # E4 Phase 1: enum → string
+                'license': opts.get('license', 'proprietary'),
 
                 # DDH identifiers (Platform passthrough)
                 'dataset_id': request.dataset_id,
                 'resource_id': request.resource_id,
                 'version_id': request.version_id,
+                'access_level': request.access_level.value,  # E4 Phase 1: enum → string
 
                 # Processing options
                 'output_tier': opts.get('output_tier', 'analysis'),
-                'target_crs': opts.get('crs')
+                'target_crs': opts.get('crs'),
+                'input_crs': opts.get('input_crs'),
+                'raster_type': opts.get('raster_type', 'auto'),
+                'jpeg_quality': opts.get('jpeg_quality'),
+
+                # Docker options
+                'use_mount_storage': opts.get('use_mount_storage', True),
+                'cleanup_temp': opts.get('cleanup_temp', True),
+                'strict_mode': opts.get('strict_mode', False),
             }
         else:
             # Single raster → process_raster_v2 or process_raster_docker (12 JAN 2026)
@@ -486,14 +498,16 @@ def translate_raster_collection(
     Translate DDH request to raster collection job parameters.
 
     Used by /api/platform/raster-collection endpoint.
-    Always returns process_raster_collection_v2 (MosaicJSON pipeline).
+
+    V0.8 (30 JAN 2026): Routes to process_raster_collection_docker.
+    Sequential checkpoint-based processing on Docker worker.
 
     Args:
         request: PlatformRequest from DDH
         cfg: AppConfig instance (optional, will fetch if not provided)
 
     Returns:
-        Tuple of ('process_raster_collection_v2', job_parameters)
+        Tuple of ('process_raster_collection_docker', job_parameters)
     """
     if cfg is None:
         cfg = get_config()
@@ -519,13 +533,9 @@ def translate_raster_collection(
     else:
         logger.info(f"  Using collection_id override: {collection_id}")
 
-    stac_item_id = platform_cfg.generate_stac_item_id(
-        request.dataset_id,
-        request.resource_id,
-        request.version_id
-    )
+    logger.info(f"  Raster collection: {len(request.file_name)} files → process_raster_collection_docker")
 
-    return 'process_raster_collection_v2', {
+    return 'process_raster_collection_docker', {
         # File location (required)
         'container_name': request.container_name,
         'blob_list': request.file_name,  # Already validated as list by endpoint
@@ -533,18 +543,27 @@ def translate_raster_collection(
         # Output location
         'output_folder': output_folder,
 
-        # STAC metadata (MosaicJSON schema)
+        # STAC metadata
         'collection_id': collection_id,
-        'stac_item_id': stac_item_id,
+        'collection_title': request.generated_title,
         'collection_description': request.description,
-        'access_level': request.access_level.value,  # E4 Phase 1: enum → string
+        'license': opts.get('license', 'proprietary'),
 
         # DDH identifiers (Platform passthrough)
         'dataset_id': request.dataset_id,
         'resource_id': request.resource_id,
         'version_id': request.version_id,
+        'access_level': request.access_level.value,  # E4 Phase 1: enum → string
 
         # Processing options
         'output_tier': opts.get('output_tier', 'analysis'),
-        'target_crs': opts.get('crs')
+        'target_crs': opts.get('crs'),
+        'input_crs': opts.get('input_crs'),
+        'raster_type': opts.get('raster_type', 'auto'),
+        'jpeg_quality': opts.get('jpeg_quality'),
+
+        # Docker options
+        'use_mount_storage': opts.get('use_mount_storage', True),
+        'cleanup_temp': opts.get('cleanup_temp', True),
+        'strict_mode': opts.get('strict_mode', False),
     }

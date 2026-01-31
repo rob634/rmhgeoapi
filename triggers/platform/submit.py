@@ -278,6 +278,28 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                 "version_id": platform_req.version_id
             }
 
+            # =====================================================================
+            # V0.8.4.1 RELEASE CONTROL: Lineage wiring (30 JAN 2026)
+            # Get lineage state to enable version tracking
+            # =====================================================================
+            # DDH nominal_refs (identity without version) - configured in platforms table
+            nominal_refs = ["dataset_id", "resource_id"]
+            lineage_state = asset_service.get_lineage_state(
+                platform_id="ddh",
+                platform_refs=platform_refs,
+                nominal_refs=nominal_refs
+            )
+
+            lineage_id = lineage_state['lineage_id']
+            version_ordinal = lineage_state['suggested_params']['version_ordinal']
+            previous_asset_id = None
+
+            # Get previous_asset_id from current_latest if exists
+            if lineage_state['current_latest']:
+                previous_asset_id = lineage_state['current_latest'].get('asset_id')
+
+            logger.info(f"  Lineage: {lineage_id[:16]}... ordinal={version_ordinal}, prev={previous_asset_id[:16] if previous_asset_id else 'None'}")
+
             asset, asset_operation = asset_service.create_or_update_asset(
                 platform_id="ddh",
                 platform_refs=platform_refs,
@@ -292,9 +314,14 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                 blob_path=job_params.get('blob_name') if platform_req.data_type.value == 'raster' else None,
                 overwrite=overwrite,
                 clearance_level=clearance_level,
-                submitted_by=submitted_by
+                submitted_by=submitted_by,
+                # V0.8.4.1 Release Control - lineage parameters
+                lineage_id=lineage_id,
+                version_ordinal=version_ordinal,
+                previous_asset_id=previous_asset_id,
+                is_latest=True
             )
-            logger.info(f"  Asset {asset_operation}: {asset.asset_id[:16]} (revision {asset.revision})")
+            logger.info(f"  Asset {asset_operation}: {asset.asset_id[:16]} (revision {asset.revision}, lineage ordinal {version_ordinal})")
 
             # Add asset_id to job params for handler to link back
             job_params['asset_id'] = asset.asset_id

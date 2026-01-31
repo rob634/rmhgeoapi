@@ -274,9 +274,9 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
                 "total_rows": total_rows,
                 "geometry_type": table_result['geometry_type'],
                 "srid": table_result.get('srid', 4326),
-                # STAC result is nested: {"success": True, "result": {"item_id": ..., "collection_id": ...}}
-                "stac_item_id": stac_result.get('result', {}).get('item_id'),
-                "collection_id": stac_result.get('result', {}).get('collection_id'),
+                # V0.8 FIX (31 JAN 2026): _create_stac_item returns flat structure
+                "stac_item_id": stac_result.get('item_id'),
+                "collection_id": stac_result.get('collection_id'),
                 "style_id": style_result.get('style_id', 'default'),
                 "chunks_uploaded": upload_result.get('chunks_uploaded', 0),
                 "checkpoint_count": len(checkpoints),
@@ -673,7 +673,9 @@ def _create_stac_item(
             'description': parameters.get('description'),
             'keywords': parameters.get('keywords'),
             'license': parameters.get('license'),
-            'attribution': parameters.get('attribution')
+            'attribution': parameters.get('attribution'),
+            # 30 JAN 2026: Use stac_item_id from Platform (DDH format) if available
+            'item_id': parameters.get('stac_item_id') or parameters.get('item_id'),
         }
 
         # Add platform job ID if available

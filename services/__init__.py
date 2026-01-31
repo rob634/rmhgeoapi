@@ -148,6 +148,9 @@ from .handler_fathom_finalize import fathom_finalize
 # Docker Vector ETL handler (V0.8 - single stage with checkpoints)
 from .handler_vector_docker_complete import vector_docker_complete
 
+# Docker Raster Collection handler (V0.8 - sequential checkpoint-based)
+from .handler_raster_collection_complete import raster_collection_complete
+
 # Ingest Collection handlers
 from .ingest import ALL_HANDLERS as INGEST_HANDLERS
 
@@ -207,6 +210,7 @@ ALL_HANDLERS = {
     # Docker consolidated handlers (F7.13, F7.18)
     "raster_process_complete": process_raster_complete,
     "raster_process_large_complete": process_large_raster_complete,
+    "raster_collection_complete": raster_collection_complete,
 
     # Vector handlers
     # Vector handlers (Function App - multi-stage)

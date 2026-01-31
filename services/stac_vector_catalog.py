@@ -45,7 +45,8 @@ def create_vector_stac(params: dict) -> dict[str, Any]:
             "collection_id": str,       # STAC collection (default: "system-vectors")
             "source_file": str,         # Original blob name (e.g., "kba_shp.zip")
             "source_format": str,       # File extension (e.g., "shp")
-            "job_id": str               # Job ID for tracking
+            "job_id": str,              # Job ID for tracking
+            "item_id": str              # Optional: Custom STAC item ID (30 JAN 2026 - DDH format)
         }
 
     Returns:
@@ -77,6 +78,8 @@ def create_vector_stac(params: dict) -> dict[str, Any]:
     source_file = params.get("source_file")
     source_format = params.get("source_format")
     job_id = params.get("job_id")
+    # 30 JAN 2026: Custom item_id support for DDH format (Platform jobs)
+    item_id = params.get("item_id")
 
     if not schema or not table_name:
         error_msg = "Missing required parameters: schema and table_name"
@@ -138,7 +141,8 @@ def create_vector_stac(params: dict) -> dict[str, Any]:
             table_name=table_name,
             collection_id=collection_id,
             source_file=source_file,
-            additional_properties=additional_properties
+            additional_properties=additional_properties,
+            item_id=item_id  # 30 JAN 2026: DDH format support
         )
 
         logger.info(f"✅ STEP 1: STAC Item extracted - item_id={item.id}")

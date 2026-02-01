@@ -1248,20 +1248,32 @@ class StacInterface(BaseInterface):
                     return;
                 }
 
-                // Find first COG URL for the header button
-                let firstCogUrl = null;
-                for (const item of items) {
-                    const cogUrl = getCogUrlFromItem(item);
-                    if (cogUrl) {
-                        firstCogUrl = cogUrl;
-                        break;
-                    }
-                }
+                // Check for mosaic search_id first (collection-level mosaic view)
+                // This provides a seamless view of all items in the collection
+                const searchId = currentCollection?.['mosaic:search_id'];
 
-                // Show raster viewer button if we have a COG
-                if (firstCogUrl) {
-                    titilerBtn.href = `/api/interface/raster-viewer?url=${encodeURIComponent(firstCogUrl)}`;
+                if (searchId) {
+                    // Use mosaic mode with search_id for collection-wide view
+                    titilerBtn.href = `/api/interface/raster-viewer?search_id=${encodeURIComponent(searchId)}`;
+                    titilerBtn.textContent = '🗺️ Open Collection Mosaic';
                     titilerBtn.classList.remove('hidden');
+                } else {
+                    // Fallback: Find first COG URL for single-item view
+                    let firstCogUrl = null;
+                    for (const item of items) {
+                        const cogUrl = getCogUrlFromItem(item);
+                        if (cogUrl) {
+                            firstCogUrl = cogUrl;
+                            break;
+                        }
+                    }
+
+                    // Show raster viewer button if we have a COG
+                    if (firstCogUrl) {
+                        titilerBtn.href = `/api/interface/raster-viewer?url=${encodeURIComponent(firstCogUrl)}`;
+                        titilerBtn.textContent = '🗺️ Open in Raster Viewer';
+                        titilerBtn.classList.remove('hidden');
+                    }
                 }
 
                 // Render items with raster viewer links
@@ -1329,7 +1341,9 @@ class StacInterface(BaseInterface):
             document.getElementById('detail-view').classList.add('hidden');
             document.getElementById('collections-view').classList.remove('hidden');
             // Reset TiTiler button
-            document.getElementById('titiler-viewer-btn').classList.add('hidden');
+            const titilerBtn = document.getElementById('titiler-viewer-btn');
+            titilerBtn.classList.add('hidden');
+            titilerBtn.textContent = '🗺️ Open in Raster Viewer';  // Reset to default text
         }
 
         // Initialize on page load

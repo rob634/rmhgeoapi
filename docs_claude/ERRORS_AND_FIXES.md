@@ -1,6 +1,6 @@
 # ERRORS_AND_FIXES.md - Error Tracking and Resolution Log
 
-**Last Updated**: 27 JAN 2026
+**Last Updated**: 01 FEB 2026
 **Purpose**: Canonical error tracking for pattern analysis and faster troubleshooting
 
 ---
@@ -988,6 +988,69 @@ return {
 1. When deprecating a feature, grep for ALL references and clean up dead code
 2. Variable initialization should be done before conditional branches that may define them
 3. Return dict fields should not reference variables that may be undefined
+
+---
+
+### COD-008: TiTiler bidx parameters missing for multi-band collections (BUG-012)
+
+**Date**: 01 FEB 2026
+**Version**: V0.8 (0.8.6.4)
+**Severity**: Multi-band tile rendering fails (HTTP 500 from TiTiler)
+
+**Error Message**:
+```
+TiTiler returns HTTP 500 when viewing collections with 4+ band COGs
+Preview URL: ...map.html?assets=data (missing bidx=1&bidx=2&bidx=3)
+```
+
+**Location**: `services/handler_raster_collection_complete.py:446`
+
+**Root Cause**:
+The handler was extracting `detected_type` from the wrong level of the validation result. The RasterValidationData has structure:
+```python
+{
+    "band_count": 8,  # TOP LEVEL
+    "raster_type": {
+        "detected_type": "multispectral",  # NESTED HERE
+    }
+}
+```
+
+But the code was doing:
+```python
+v.get('detected_type', 'unknown')  # Always 'unknown' - field not at top level
+```
+
+While `band_count` was correctly at top level, the `detected_type` bug masked confidence in the raster type detection. Additionally, checkpoint resume didn't re-derive raster_type from older checkpoints missing this field.
+
+**Wrong Code**:
+```python
+# Lines 446-450 - BUG: detected_type is NESTED in raster_type
+raster_type_info = {
+    'detected_type': v.get('detected_type', 'unknown'),  # WRONG - not at top level
+    'band_count': v.get('band_count', 3),  # OK
+    'data_type': v.get('data_type', 'uint8'),  # OK
+}
+```
+
+**Fixed Code**:
+```python
+# BUG-012 FIX: detected_type is nested inside raster_type
+rt = v.get('raster_type', {})
+raster_type_info = {
+    'detected_type': rt.get('detected_type', 'unknown'),  # Fixed: access nested field
+    'band_count': v.get('band_count', 3),
+    'data_type': v.get('data_type', 'uint8'),
+}
+```
+
+**Also Fixed**:
+- Checkpoint resume now re-derives raster_type if missing from older checkpoints
+
+**Prevention**:
+1. When accessing nested structures, trace the full path through Pydantic models
+2. Add logging to confirm raster_type propagation through the pipeline
+3. Test multi-band (4+, 8-band) imagery specifically, not just 3-band RGB
 
 ---
 

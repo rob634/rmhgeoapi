@@ -49,6 +49,7 @@ class RasterViewerInterface(BaseInterface):
 
         Query Parameters:
             url: Optional COG URL to load on page open
+            search_id: Optional PgSTAC search ID for mosaic view
 
         Args:
             request: Azure Functions HTTP request
@@ -56,12 +57,13 @@ class RasterViewerInterface(BaseInterface):
         Returns:
             Complete HTML page string
         """
-        # Get optional COG URL from query params
+        # Get optional parameters
         cog_url = request.params.get('url', '')
+        search_id = request.params.get('search_id', '')
 
-        return self._generate_full_page(cog_url)
+        return self._generate_full_page(cog_url, search_id)
 
-    def _generate_full_page(self, initial_url: str = '') -> str:
+    def _generate_full_page(self, initial_url: str = '', initial_search_id: str = '') -> str:
         """Generate complete HTML document with Leaflet map and controls."""
         titiler_url = os.getenv('TITILER_BASE_URL', 'https://titiler.xyz')
 
@@ -84,10 +86,25 @@ class RasterViewerInterface(BaseInterface):
 
     <div class="control-panel">
         <h3>Raster Viewer</h3>
-        <p class="subtitle">TiTiler COG Visualization</p>
+        <p class="subtitle">TiTiler COG & Mosaic Visualization</p>
+
+        <!-- Mode Toggle -->
+        <div class="control-group">
+            <label>Mode:</label>
+            <div class="mode-toggle">
+                <label class="radio-label">
+                    <input type="radio" name="viewer-mode" value="cog" checked
+                           onchange="switchMode('cog')"> Single COG
+                </label>
+                <label class="radio-label">
+                    <input type="radio" name="viewer-mode" value="mosaic"
+                           onchange="switchMode('mosaic')"> Mosaic (Search)
+                </label>
+            </div>
+        </div>
 
         <!-- COG URL Input -->
-        <div class="control-group">
+        <div id="cog-input-section" class="control-group">
             <label for="cog-url">COG URL:</label>
             <input type="text" id="cog-url" placeholder="https://storage.blob.../file.tif"
                    value="{initial_url}">
@@ -96,9 +113,20 @@ class RasterViewerInterface(BaseInterface):
             </button>
         </div>
 
-        <!-- COG Info Section (hidden until loaded) -->
+        <!-- Search ID Input (hidden by default) -->
+        <div id="search-input-section" class="control-group" style="display: none;">
+            <label for="search-id">Search ID:</label>
+            <input type="text" id="search-id" placeholder="abc123def456..."
+                   value="{initial_search_id}">
+            <button onclick="loadSearchInfo()" class="btn-primary btn-small" style="margin-top: 8px;">
+                Load Mosaic
+            </button>
+            <p class="input-hint">From STAC collection's mosaic:search_id</p>
+        </div>
+
+        <!-- Info Section (hidden until loaded) -->
         <div id="cog-info-section" class="info-section" style="display: none;">
-            <div class="section-header">COG Info</div>
+            <div class="section-header" id="info-section-header">COG Info</div>
             <div id="cog-info-content"></div>
             <button onclick="zoomToExtent()" class="btn-zoom-extent" style="margin-top: 10px;">
                 Zoom to Data Extent
@@ -618,6 +646,41 @@ class RasterViewerInterface(BaseInterface):
             margin: 10px 14px;
             font-family: "Open Sans", Arial, sans-serif;
         }
+
+        /* Mode toggle */
+        .mode-toggle {
+            display: flex;
+            gap: 16px;
+            margin-top: 4px;
+        }
+
+        .mode-toggle .radio-label {
+            font-size: 13px;
+            color: #053657;
+        }
+
+        .input-hint {
+            font-size: 11px;
+            color: #626F86;
+            margin-top: 6px;
+            font-style: italic;
+        }
+
+        /* Mosaic info styling */
+        .mosaic-info-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+            margin-bottom: 4px;
+        }
+
+        .mosaic-note {
+            font-size: 11px;
+            color: #626F86;
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid #e9ecef;
+        }
         """
 
     def _generate_javascript(self, titiler_url: str) -> str:
@@ -633,6 +696,9 @@ class RasterViewerInterface(BaseInterface):
         let cogInfo = null;
         let cogStats = null;
         let currentCogUrl = '';
+        let currentSearchId = '';
+        let currentMode = 'cog';  // 'cog' or 'mosaic'
+        let mosaicBounds = null;
 
         // Initialize map
         function initMap() {{
@@ -662,6 +728,143 @@ class RasterViewerInterface(BaseInterface):
             const el = document.getElementById('status');
             el.textContent = message;
             el.className = 'status-text' + (type ? ' ' + type : '');
+        }}
+
+        // Switch between COG and Mosaic mode
+        function switchMode(mode) {{
+            currentMode = mode;
+            const cogSection = document.getElementById('cog-input-section');
+            const searchSection = document.getElementById('search-input-section');
+            const bandSection = document.getElementById('band-section');
+
+            if (mode === 'cog') {{
+                cogSection.style.display = 'block';
+                searchSection.style.display = 'none';
+                // Show band selection in COG mode (if we have cogInfo)
+                if (cogInfo) {{
+                    bandSection.style.display = 'block';
+                }}
+                document.getElementById('info-section-header').textContent = 'COG Info';
+                setStatus('Enter a COG URL to begin');
+            }} else {{
+                cogSection.style.display = 'none';
+                searchSection.style.display = 'block';
+                // Hide band selection in mosaic mode (mosaic has its own default rendering)
+                bandSection.style.display = 'none';
+                document.getElementById('info-section-header').textContent = 'Mosaic Info';
+                setStatus('Enter a Search ID to load mosaic');
+            }}
+
+            // Clear current layers when switching modes
+            if (tileLayer) {{
+                map.removeLayer(tileLayer);
+                tileLayer = null;
+            }}
+            document.getElementById('cog-info-section').style.display = 'none';
+            document.getElementById('rescale-section').style.display = 'none';
+            document.getElementById('colormap-section').style.display = 'none';
+            document.getElementById('point-section').style.display = 'none';
+            document.getElementById('qa-section').style.display = 'none';
+        }}
+
+        // Load mosaic info from TiTiler-PgSTAC
+        async function loadSearchInfo() {{
+            const searchInput = document.getElementById('search-id');
+            const searchId = searchInput.value.trim();
+
+            if (!searchId) {{
+                setStatus('Please enter a Search ID', 'error');
+                return;
+            }}
+
+            currentSearchId = searchId;
+            currentCogUrl = '';  // Clear COG URL when loading mosaic
+            showSpinner('Loading mosaic info...');
+
+            try {{
+                // Fetch TileJSON for the search (this gives us bounds and metadata)
+                const tileJsonUrl = `${{TITILER_URL}}/searches/${{searchId}}/tilejson.json`;
+                const resp = await fetch(tileJsonUrl);
+
+                if (!resp.ok) {{
+                    if (resp.status === 404) {{
+                        throw new Error('Search ID not found. Check the ID is correct.');
+                    }}
+                    throw new Error(`TiTiler error: ${{resp.status}} ${{resp.statusText}}`);
+                }}
+
+                const tileJson = await resp.json();
+                console.log('Mosaic TileJSON:', tileJson);
+
+                // Store bounds for zoom functionality
+                mosaicBounds = tileJson.bounds;
+
+                hideSpinner();
+
+                // Display mosaic info
+                displayMosaicInfo(tileJson);
+
+                // Show info section
+                document.getElementById('cog-info-section').style.display = 'block';
+                document.getElementById('rescale-section').style.display = 'block';
+                document.getElementById('point-section').style.display = 'block';
+                document.getElementById('qa-section').style.display = 'block';
+                // Keep band section hidden for mosaic (uses default rendering)
+                document.getElementById('band-section').style.display = 'none';
+
+                // Add tile layer
+                updateTileLayer();
+
+                // Zoom to bounds
+                if (mosaicBounds && mosaicBounds.length === 4) {{
+                    const bounds = [
+                        [mosaicBounds[1], mosaicBounds[0]],
+                        [mosaicBounds[3], mosaicBounds[2]]
+                    ];
+                    map.fitBounds(bounds, {{
+                        padding: [50, 50],
+                        maxZoom: 18,
+                        animate: false
+                    }});
+                }}
+
+                setStatus('Mosaic loaded successfully', 'success');
+
+            }} catch (error) {{
+                hideSpinner();
+                console.error('Error loading mosaic:', error);
+                setStatus(`Error: ${{error.message}}`, 'error');
+            }}
+        }}
+
+        // Display mosaic info
+        function displayMosaicInfo(tileJson) {{
+            const container = document.getElementById('cog-info-content');
+
+            const minZoom = tileJson.minzoom || '?';
+            const maxZoom = tileJson.maxzoom || '?';
+            const bounds = tileJson.bounds || [];
+            const boundsStr = bounds.length === 4
+                ? `${{bounds[0].toFixed(4)}}, ${{bounds[1].toFixed(4)}} to ${{bounds[2].toFixed(4)}}, ${{bounds[3].toFixed(4)}}`
+                : 'Unknown';
+
+            let html = `
+                <div class="info-row">
+                    <span class="info-label">Search ID:</span>
+                    <span class="info-value mono">${{currentSearchId.substring(0, 16)}}...</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Zoom Range:</span>
+                    <span class="info-value">${{minZoom}} - ${{maxZoom}}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Bounds:</span>
+                    <span class="info-value mono" style="font-size: 10px;">${{boundsStr}}</span>
+                </div>
+                <p class="mosaic-note">Mosaic combines multiple STAC items into a seamless layer.</p>
+            `;
+
+            container.innerHTML = html;
         }}
 
         // Load COG info from TiTiler
@@ -767,6 +970,25 @@ class RasterViewerInterface(BaseInterface):
 
         // Zoom to data extent (manual button)
         function zoomToExtent() {{
+            if (currentMode === 'mosaic' && currentSearchId) {{
+                // Use stored mosaic bounds
+                if (mosaicBounds && mosaicBounds.length === 4) {{
+                    const bounds = [
+                        [mosaicBounds[1], mosaicBounds[0]],
+                        [mosaicBounds[3], mosaicBounds[2]]
+                    ];
+                    map.fitBounds(bounds, {{
+                        padding: [50, 50],
+                        maxZoom: 18,
+                        animate: true
+                    }});
+                    setStatus('Zoomed to mosaic extent', 'success');
+                }} else {{
+                    setStatus('No bounds available for this mosaic', 'error');
+                }}
+                return;
+            }}
+
             if (!currentCogUrl) {{
                 setStatus('No COG loaded', 'error');
                 return;
@@ -911,90 +1133,135 @@ class RasterViewerInterface(BaseInterface):
 
         // Update TiTiler tile layer
         function updateTileLayer() {{
-            if (!currentCogUrl || !cogInfo) return;
-
             // Remove existing tile layer
             if (tileLayer) {{
                 map.removeLayer(tileLayer);
             }}
 
-            // Get selected bands
-            const bandR = document.getElementById('band-r').value;
-            const bandG = document.getElementById('band-g').value;
-            const bandB = document.getElementById('band-b').value;
+            let tileUrl;
 
-            // Build bidx parameter
-            const bands = [bandR, bandG, bandB].filter(b => b);
-            const isSingleBand = bands.length === 1;
+            if (currentMode === 'mosaic' && currentSearchId) {{
+                // MOSAIC MODE - use /searches/{{search_id}}/tiles endpoint
+                let params = new URLSearchParams();
 
-            // Build URL parameters
-            let params = new URLSearchParams();
-            params.append('url', currentCogUrl);
+                // Rescale (mosaic mode)
+                const rescaleMode = document.querySelector('input[name="rescale-mode"]:checked').value;
+                const manualRescaleDiv = document.getElementById('manual-rescale');
 
-            bands.forEach(b => params.append('bidx', b));
-
-            // Rescale
-            const rescaleMode = document.querySelector('input[name="rescale-mode"]:checked').value;
-            const manualRescaleDiv = document.getElementById('manual-rescale');
-
-            if (rescaleMode === 'auto' && cogStats) {{
-                // Use statistics for rescale
-                manualRescaleDiv.style.display = 'none';
-
-                // Get min/max from first selected band stats
-                const firstBand = bands[0];
-                const bandKey = `b${{firstBand}}`;
-                if (cogStats[bandKey]) {{
-                    const min = cogStats[bandKey].min || cogStats[bandKey].percentile_2 || 0;
-                    const max = cogStats[bandKey].max || cogStats[bandKey].percentile_98 || 255;
+                if (rescaleMode === 'manual') {{
+                    manualRescaleDiv.style.display = 'flex';
+                    const min = document.getElementById('rescale-min').value || 0;
+                    const max = document.getElementById('rescale-max').value || 255;
                     params.append('rescale', `${{min}},${{max}}`);
-
-                    // Update manual inputs for reference
-                    document.getElementById('rescale-min').value = Math.floor(min);
-                    document.getElementById('rescale-max').value = Math.ceil(max);
+                }} else {{
+                    manualRescaleDiv.style.display = 'none';
                 }}
-            }} else {{
-                // Manual rescale
-                manualRescaleDiv.style.display = 'flex';
-                const min = document.getElementById('rescale-min').value || 0;
-                const max = document.getElementById('rescale-max').value || 255;
-                params.append('rescale', `${{min}},${{max}}`);
-            }}
 
-            // Colormap (only for single band)
-            if (isSingleBand) {{
+                // Colormap for mosaic (show it since we don't have band selection)
                 document.getElementById('colormap-section').style.display = 'block';
                 const colormap = document.getElementById('colormap').value;
                 if (colormap) {{
                     params.append('colormap_name', colormap);
                 }}
-            }} else {{
-                document.getElementById('colormap-section').style.display = 'none';
+
+                // Build mosaic tile URL
+                const queryStr = params.toString();
+                tileUrl = `${{TITILER_URL}}/searches/${{currentSearchId}}/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}@2x.png${{queryStr ? '?' + queryStr : ''}}`;
+
+                console.log('Mosaic Tile URL:', tileUrl);
+
+                tileLayer = L.tileLayer(tileUrl, {{
+                    tileSize: 512,
+                    zoomOffset: -1,
+                    minNativeZoom: 0,
+                    maxNativeZoom: 22,
+                    maxZoom: 24,
+                    attribution: 'TiTiler-PgSTAC'
+                }}).addTo(map);
+
+                setStatus('Displaying mosaic', 'success');
+
+            }} else if (currentCogUrl && cogInfo) {{
+                // COG MODE - existing logic
+                // Get selected bands
+                const bandR = document.getElementById('band-r').value;
+                const bandG = document.getElementById('band-g').value;
+                const bandB = document.getElementById('band-b').value;
+
+                // Build bidx parameter
+                const bands = [bandR, bandG, bandB].filter(b => b);
+                const isSingleBand = bands.length === 1;
+
+                // Build URL parameters
+                let params = new URLSearchParams();
+                params.append('url', currentCogUrl);
+
+                bands.forEach(b => params.append('bidx', b));
+
+                // Rescale
+                const rescaleMode = document.querySelector('input[name="rescale-mode"]:checked').value;
+                const manualRescaleDiv = document.getElementById('manual-rescale');
+
+                if (rescaleMode === 'auto' && cogStats) {{
+                    // Use statistics for rescale
+                    manualRescaleDiv.style.display = 'none';
+
+                    // Get min/max from first selected band stats
+                    const firstBand = bands[0];
+                    const bandKey = `b${{firstBand}}`;
+                    if (cogStats[bandKey]) {{
+                        const min = cogStats[bandKey].min || cogStats[bandKey].percentile_2 || 0;
+                        const max = cogStats[bandKey].max || cogStats[bandKey].percentile_98 || 255;
+                        params.append('rescale', `${{min}},${{max}}`);
+
+                        // Update manual inputs for reference
+                        document.getElementById('rescale-min').value = Math.floor(min);
+                        document.getElementById('rescale-max').value = Math.ceil(max);
+                    }}
+                }} else {{
+                    // Manual rescale
+                    manualRescaleDiv.style.display = 'flex';
+                    const min = document.getElementById('rescale-min').value || 0;
+                    const max = document.getElementById('rescale-max').value || 255;
+                    params.append('rescale', `${{min}},${{max}}`);
+                }}
+
+                // Colormap (only for single band)
+                if (isSingleBand) {{
+                    document.getElementById('colormap-section').style.display = 'block';
+                    const colormap = document.getElementById('colormap').value;
+                    if (colormap) {{
+                        params.append('colormap_name', colormap);
+                    }}
+                }} else {{
+                    document.getElementById('colormap-section').style.display = 'none';
+                }}
+
+                // Build tile URL
+                tileUrl = `${{TITILER_URL}}/cog/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}@2x.png?${{params.toString()}}`;
+
+                console.log('COG Tile URL:', tileUrl);
+
+                // Add new tile layer
+                // minNativeZoom: 0 prevents negative zoom requests when zoomed out far
+                // (tileSize: 512 + zoomOffset: -1 can calculate z=-1 at low view zooms)
+                tileLayer = L.tileLayer(tileUrl, {{
+                    tileSize: 512,
+                    zoomOffset: -1,
+                    minNativeZoom: 0,
+                    maxNativeZoom: 22,
+                    maxZoom: 24,
+                    attribution: 'TiTiler'
+                }}).addTo(map);
+
+                setStatus(`Displaying bands: ${{bands.join(', ')}}`, 'success');
             }}
-
-            // Build tile URL
-            const tileUrl = `${{TITILER_URL}}/cog/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}@2x.png?${{params.toString()}}`;
-
-            console.log('Tile URL template:', tileUrl);
-
-            // Add new tile layer
-            // minNativeZoom: 0 prevents negative zoom requests when zoomed out far
-            // (tileSize: 512 + zoomOffset: -1 can calculate z=-1 at low view zooms)
-            tileLayer = L.tileLayer(tileUrl, {{
-                tileSize: 512,
-                zoomOffset: -1,
-                minNativeZoom: 0,
-                maxNativeZoom: 22,
-                maxZoom: 24,
-                attribution: 'TiTiler'
-            }}).addTo(map);
-
-            setStatus(`Displaying bands: ${{bands.join(', ')}}`, 'success');
         }}
 
         // Handle map click for point query
         async function handleMapClick(e) {{
-            if (!currentCogUrl) return;
+            // Need either COG URL or search ID to query
+            if (!currentCogUrl && !currentSearchId) return;
 
             const lat = e.latlng.lat;
             const lon = e.latlng.lng;
@@ -1005,10 +1272,22 @@ class RasterViewerInterface(BaseInterface):
             pointContent.innerHTML = `<div class="point-coords">Querying ${{lat.toFixed(6)}}, ${{lon.toFixed(6)}}...</div>`;
 
             try {{
-                const pointUrl = `${{TITILER_URL}}/cog/point/${{lon}},${{lat}}?url=${{encodeURIComponent(currentCogUrl)}}`;
+                let pointUrl;
+
+                if (currentMode === 'mosaic' && currentSearchId) {{
+                    // Mosaic point query
+                    pointUrl = `${{TITILER_URL}}/searches/${{currentSearchId}}/point/${{lon}},${{lat}}`;
+                }} else {{
+                    // COG point query
+                    pointUrl = `${{TITILER_URL}}/cog/point/${{lon}},${{lat}}?url=${{encodeURIComponent(currentCogUrl)}}`;
+                }}
+
                 const resp = await fetch(pointUrl);
 
                 if (!resp.ok) {{
+                    if (resp.status === 404) {{
+                        throw new Error('No data at this location');
+                    }}
                     throw new Error(`Point query failed: ${{resp.status}}`);
                 }}
 
@@ -1067,7 +1346,17 @@ class RasterViewerInterface(BaseInterface):
         window.onload = function() {{
             initMap();
 
-            // Check for URL parameter
+            // Check for search_id parameter first (mosaic mode)
+            const searchInput = document.getElementById('search-id');
+            if (searchInput.value) {{
+                // Switch to mosaic mode and load
+                document.querySelector('input[name="viewer-mode"][value="mosaic"]').checked = true;
+                switchMode('mosaic');
+                loadSearchInfo();
+                return;
+            }}
+
+            // Check for URL parameter (COG mode)
             const urlInput = document.getElementById('cog-url');
             if (urlInput.value) {{
                 loadCogInfo();

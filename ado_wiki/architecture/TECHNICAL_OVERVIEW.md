@@ -540,81 +540,39 @@ def bulk_insert_with_copy(conn, table_name, rows: list[dict]):
 | **Observability** | Structured logging + blob-based metrics |
 | **Connection exhaustion** | Memory-first pattern, single-connection burst |
 
-### Graceful Degradation (pgSTAC Optional)
+### Database Schema Architecture
 
-**Design Principle**: The system continues to function with reduced capabilities when optional components are unavailable.
-
-**Architecture Enabler**: Schema separation in PostgreSQL allows independent failure of components:
+**Design Principle**: The platform uses schema separation in PostgreSQL for clear component boundaries and security isolation.
 
 ```
-PostgreSQL Database (4 independent schemas)
+PostgreSQL Database (3 schemas)
 ├── app     (CoreMachine)  ← CRITICAL: Job/task orchestration
 ├── geo     (Vector Data)  ← CRITICAL: PostGIS tables, OGC Features API
-└── pgstac  (STAC Catalog) ← OPTIONAL: Metadata discovery
+└── pgstac  (STAC Catalog) ← CRITICAL: Metadata discovery and search
 ```
 
-**What Works WITHOUT pgSTAC**:
+**Schema Responsibilities**:
 
-| Capability | Vector Jobs | Raster Jobs | Notes |
-|------------|-------------|-------------|-------|
-| Stage 1: Validation | ✅ | ✅ | No pgstac dependencies |
-| Stage 2: Processing | ✅ | ✅ | PostGIS / COG creation |
-| Stage 3: STAC Cataloging | ⚠️ Degraded | ⚠️ Degraded | Skipped with warning |
-| OGC Features API | ✅ | N/A | Reads from `geo` schema directly |
-| TiTiler COG Viewing | N/A | ✅ | URLs generated from config |
-| Vector Viewer | ✅ | N/A | Uses OGC Features API |
-| STAC API Discovery | ❌ | ❌ | Requires pgstac schema |
+| Schema | Purpose | Critical For |
+|--------|---------|--------------|
+| `app` | Job records, task records, API request tracking, artifact registry | Job orchestration, system operation |
+| `geo` | PostGIS vector tables, user-uploaded data | OGC Features API, vector data serving |
+| `pgstac` | STAC collections, items, and metadata | STAC API discovery, spatiotemporal search, raster metadata |
 
-**How It Works**:
+**Why pgSTAC is Critical**:
 
-1. **Detection**: `PgStacBootstrap.is_available()` checks if pgstac schema is functional (cached for 60 seconds)
-2. **Handler Behavior**: STAC handlers detect unavailability and return success with `degraded: true` flag
-3. **Job Completion**: Jobs complete successfully with warnings in `degraded_mode` field
-4. **Health Endpoint**: Reports `degraded_capabilities` and `available_capabilities` lists
+1. **Metadata Discovery**: STAC API provides spatiotemporal search across all raster assets
+2. **Raster Job Completion**: Raster processing jobs register output COGs in pgSTAC as the final stage
+3. **Service Layer Integration**: stac-fastapi reads from pgstac schema for all catalog operations
+4. **Asset URL Management**: STAC items contain authoritative URLs for all processed assets
+5. **Collection Management**: Raster collections are organized and searchable via pgSTAC
 
-**User-Facing Response** (degraded mode):
+**Dependencies**:
 
-```json
-{
-  "success": true,
-  "degraded_mode": true,
-  "warnings": ["STAC cataloging skipped - pgSTAC unavailable"],
-  "available_capabilities": ["OGC Features API", "TiTiler COG viewing"],
-  "unavailable_capabilities": ["STAC API discovery"],
-  "result": {
-    "table_name": "my_dataset",
-    "ogc_features_url": "/api/features/collections/my_dataset/items"
-  }
-}
-```
-
-**Why This Matters**:
-
-- **Corporate environments**: DBA may not grant pgstac role prerequisites immediately
-- **Deployment resilience**: pypgstac migration failures don't block entire system
-- **Clear communication**: Users know exactly what works and what doesn't
-- **Graceful recovery**: When pgstac is fixed, full functionality returns automatically
-
-**Implementation Pattern** (for handlers):
-
-```python
-def my_stac_handler(params: Dict[str, Any]) -> Dict[str, Any]:
-    # Check availability FIRST (before any pgstac operations)
-    if not PgStacBootstrap.is_available():
-        logger.warning("pgSTAC unavailable - degraded mode")
-        return {
-            "success": True,
-            "degraded": True,
-            "warning": "pgSTAC schema not available",
-            "result": {
-                # Return whatever IS available
-                "ogc_features_available": True,
-                "stac_item_created": False
-            }
-        }
-
-    # Normal pgstac operations...
-```
+All three schemas must be available for full platform operation:
+- **Without `app`**: No job orchestration possible
+- **Without `geo`**: No vector data serving possible
+- **Without `pgstac`**: No raster metadata catalog, STAC API unavailable
 
 ---
 

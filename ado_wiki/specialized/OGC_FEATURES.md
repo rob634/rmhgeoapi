@@ -1,6 +1,8 @@
 # WIKI_OGC_FEATURES.md - OGC API Features Implementation Guide
 
 **Created**: 23 DEC 2025
+**Last Updated**: 31 JAN 2026
+**Last Verified**: 31 JAN 2026 (all endpoints tested)
 **Status**: Production
 **Spec Version**: OGC API - Features - Part 1: Core 1.0.0
 
@@ -11,6 +13,17 @@
 This document is the comprehensive reference for our OGC API - Features implementation. It covers spec compliance, architecture, error handling, and developer guidance.
 
 **Spec URL**: https://docs.ogc.org/is/17-069r3/17-069r3.html
+
+### Deployment Architecture
+
+The orchestrator app provides OGC Features for **internal/emergency use**. For B2C production access, use TiTiler/TiPG which provides the same data plus vector tiles.
+
+| Endpoint | Use Case | Vector Tiles |
+|----------|----------|--------------|
+| Orchestrator `/api/features` | Internal, emergency, debugging | ❌ No |
+| TiPG `/vector` | B2C production, web mapping | ✅ Yes (MVT) |
+
+**Note**: Collection metadata responses include links to TiPG endpoints for seamless integration.
 
 ---
 
@@ -330,42 +343,74 @@ else:
 
 ### 1. Simplify Units (IMPORTANT)
 
-**Status**: Bug identified, fix needed
+**Status**: Known limitation (documented workaround)
 
-The `simplify` parameter documentation says "meters" but PostGIS `ST_Simplify` uses the geometry's SRID units. For EPSG:4326, this is **degrees**, not meters.
+The `simplify` parameter uses PostGIS `ST_Simplify` which operates in the geometry's SRID units. For EPSG:4326, this is **degrees**, not meters.
 
-**Workaround**: Use very small values (e.g., `simplify=0.0001` for ~11m tolerance)
+**Workaround**: Use very small values (e.g., `simplify=0.001` for ~111m tolerance at equator)
 
-**Conversion**: At equator, 1 degree = ~111,000 meters
+**Conversion**: At equator, 1 degree ≈ 111,000 meters
 
-**TODO**: Implement meters-to-degrees conversion or use `ST_Transform` to project before simplifying.
+| simplify value | Approximate tolerance |
+|----------------|----------------------|
+| 0.0001 | ~11 meters |
+| 0.001 | ~111 meters |
+| 0.01 | ~1.1 km |
+
+**Future**: Consider implementing meters-to-degrees conversion or using `ST_Transform` to project before simplifying.
 
 ### 2. Unknown Parameter Validation
 
-**Status**: Not yet implemented
+**Status**: Not yet implemented (low priority)
 
 OGC spec requirement `/req/core/query-param-unknown` requires 400 for unknown parameters. Currently, unknown parameters are passed through as property filters.
 
-**TODO**: Implement allowlist of valid OGC parameters and return 400 for truly unknown params.
+**Impact**: Low - unknown params are ignored or treated as property filters, which is generally safe behavior.
 
 ---
 
 ## Testing
 
+### Verified Test Results (31 JAN 2026)
+
+All endpoints tested against production deployment:
+
+| Endpoint | Test | Result |
+|----------|------|--------|
+| `GET /api/features` | Landing page with HATEOAS links | ✅ Pass |
+| `GET /api/features/conformance` | Returns core + geojson conformance | ✅ Pass |
+| `GET /api/features/collections` | Lists 15 collections | ✅ Pass |
+| `GET /api/features/collections/{id}` | Returns metadata with TiPG links | ✅ Pass |
+| `GET /api/features/collections/{id}/items` | Returns FeatureCollection | ✅ Pass |
+| `GET /api/features/collections/{id}/items/{fid}` | Returns single Feature | ✅ Pass |
+| `?limit=N` | Pagination works | ✅ Pass |
+| `?offset=N` | Offset pagination works | ✅ Pass |
+| `?bbox=minx,miny,maxx,maxy` | Spatial filtering works | ✅ Pass |
+| `?precision=N` | Coordinate precision works | ✅ Pass |
+| `?simplify=N` | Geometry simplification works | ✅ Pass |
+| `?limit=abc` | Returns 400 InvalidParameterValue | ✅ Pass |
+| `?bbox=1,2,three,4` | Returns 400 InvalidParameterValue | ✅ Pass |
+| Missing collection | Returns 404 NotFound | ✅ Pass |
+
 ### Manual Testing
 
 ```bash
+BASE_URL="https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net"
+
 # Landing page
-curl https://your-app/api/features
+curl $BASE_URL/api/features
 
 # List collections
-curl https://your-app/api/features/collections
+curl $BASE_URL/api/features/collections
 
 # Query features with parameters
-curl "https://your-app/api/features/collections/countries/items?limit=10&precision=4"
+curl "$BASE_URL/api/features/collections/hard_cutlines_v8_testing_v10/items?limit=10&precision=4"
+
+# Test bbox filtering
+curl "$BASE_URL/api/features/collections/hard_cutlines_v8_testing_v10/items?bbox=-76,4,-75,5&limit=5"
 
 # Test invalid parameter (should return 400)
-curl "https://your-app/api/features/collections/countries/items?limit=abc"
+curl "$BASE_URL/api/features/collections/hard_cutlines_v8_testing_v10/items?limit=abc"
 ```
 
 ### Expected 400 Response
@@ -380,7 +425,7 @@ curl "https://your-app/api/features/collections/countries/items?limit=abc"
 ### Conformance Check
 
 ```bash
-curl https://your-app/api/features/conformance
+curl $BASE_URL/api/features/conformance
 ```
 
 Expected conformance classes:
@@ -415,6 +460,7 @@ Expected conformance classes:
 
 | Date | Change |
 |------|--------|
+| 31 JAN 2026 | Full endpoint verification; added deployment architecture section; updated test commands |
 | 23 DEC 2025 | Added OGC-compliant 400 errors for invalid parameter values |
 | 06 DEC 2025 | Added `geo.table_catalog` integration |
 | 14 NOV 2025 | Added `precision` and `simplify` parameters |

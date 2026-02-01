@@ -464,6 +464,12 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Could not import Service Preview interface: {e}")
 
+try:
+    from .submit import interface as _submit
+    logger.info("✅ Imported Unified Submit interface module")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import Unified Submit interface: {e}")
+
 
 # Public API
 __all__ = [

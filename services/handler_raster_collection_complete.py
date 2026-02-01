@@ -440,14 +440,18 @@ def _process_files_to_cogs(
     }, duration_ms=duration_ms)
 
     # Infer raster_type from first result for STAC
+    # BUG-012 FIX (01 FEB 2026): detected_type is nested inside raster_type, not at top level
     raster_type_info = None
     if cog_results and cog_results[0].get('validation'):
         v = cog_results[0]['validation']
+        # raster_type is a nested dict containing detected_type, confidence, etc.
+        rt = v.get('raster_type', {})
         raster_type_info = {
-            'detected_type': v.get('detected_type', 'unknown'),
-            'band_count': v.get('band_count', 3),
-            'data_type': v.get('data_type', 'uint8'),
+            'detected_type': rt.get('detected_type', 'unknown'),  # BUG-012: Was incorrectly v.get()
+            'band_count': v.get('band_count', 3),  # band_count IS at top level
+            'data_type': v.get('data_type', 'uint8'),  # data_type IS at top level
         }
+        logger.info(f"   Raster type info: {raster_type_info['detected_type']}, {raster_type_info['band_count']} bands")
 
     return {
         'cog_blobs': cog_blobs,
@@ -669,11 +673,28 @@ def raster_collection_complete(
         if checkpoint and checkpoint.should_skip(2) and checkpoint.get_data('cog_last_index', -1) >= len(downloaded_files) - 1:
             logger.info("⏭️ PHASE 2: Skipping COG creation (checkpoint)")
             _report_progress(docker_context, 85, 2, 4, "Create COGs", "Skipped (resumed)")
+
+            # BUG-012 FIX (01 FEB 2026): Re-derive raster_type if missing from older checkpoint
+            cog_results_checkpoint = checkpoint.get_data('cog_results', [])
+            raster_type_checkpoint = checkpoint.get_data('raster_type')
+
+            if not raster_type_checkpoint and cog_results_checkpoint:
+                # Re-derive from first result's validation
+                v = cog_results_checkpoint[0].get('validation', {})
+                rt = v.get('raster_type', {})
+                if v.get('band_count'):
+                    raster_type_checkpoint = {
+                        'detected_type': rt.get('detected_type', 'unknown'),
+                        'band_count': v.get('band_count', 3),
+                        'data_type': v.get('data_type', 'uint8'),
+                    }
+                    logger.info(f"   Re-derived raster_type from checkpoint validation: {raster_type_checkpoint}")
+
             cog_result = {
                 'cog_blobs': checkpoint.get_data('cog_blobs', []),
-                'cog_results': checkpoint.get_data('cog_results', []),
+                'cog_results': cog_results_checkpoint,
                 'cog_count': len(checkpoint.get_data('cog_blobs', [])),
-                'raster_type': checkpoint.get_data('raster_type'),
+                'raster_type': raster_type_checkpoint,
             }
         else:
             logger.info(f"🔄 PHASE 2: Creating COGs for {len(downloaded_files)} files...")

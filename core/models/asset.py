@@ -186,6 +186,13 @@ class GeospatialAsset(BaseModel):
             "partial_where": "is_served = true AND deleted_at IS NULL"
         },
         {"columns": ["lineage_id", "version_ordinal"], "name": "idx_assets_lineage_ordinal"},
+        # V0.8 Release Control: Prevent race condition - only one is_latest per lineage (31 JAN 2026)
+        {
+            "columns": ["lineage_id"],
+            "name": "idx_single_latest_per_lineage",
+            "unique": True,
+            "partial_where": "is_latest = true AND deleted_at IS NULL"
+        },
         # DAG Orchestration indexes (V0.8 - 29 JAN 2026)
         {"columns": ["processing_status"], "name": "idx_assets_processing_status"},
         {"columns": ["workflow_id"], "name": "idx_assets_workflow"},

@@ -307,14 +307,26 @@ async def platform_lineage_route(req: func.HttpRequest) -> func.HttpResponse:
 @bp.route(route="platform/validate", methods=["POST"])
 async def platform_validate_route(req: func.HttpRequest) -> func.HttpResponse:
     """
-    Pre-flight validation before job submission.
+    Pre-flight validation before job submission (V0.8 Release Control).
 
     POST /api/platform/validate
 
-    Validates a file exists, returns size, recommended job type, and
-    estimated processing time before actually submitting a job.
+    Returns the same response as POST /api/platform/submit?dry_run=true.
+    Both endpoints use the same validation logic for consistency.
 
-    Body: {"data_type": "raster", "container_name": "...", "blob_name": "..."}
+    Body: Same as /api/platform/submit (PlatformRequest format)
+
+    Response:
+    {
+        "valid": true/false,
+        "dry_run": true,
+        "request_id": "...",
+        "would_create_job_type": "...",
+        "lineage_state": {...},
+        "validation": {"previous_version_valid": true/false},
+        "warnings": [],
+        "suggested_params": {"previous_version_id": "v1.0"}
+    }
     """
     from triggers.trigger_platform_status import platform_validate
     return await platform_validate(req)

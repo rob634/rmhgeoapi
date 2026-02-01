@@ -118,6 +118,18 @@ class PlatformRequest(BaseModel):
     version_id: str = Field(..., max_length=50, description="DDH version identifier")
 
     # ========================================================================
+    # V0.8 Release Control - Version Validation (31 JAN 2026)
+    # ========================================================================
+    # Required for subsequent versions to prevent race conditions.
+    # Must match current latest version_id in the lineage.
+    # See: docs_claude/DRY_RUN_IMPLEMENTATION.md
+    previous_version_id: Optional[str] = Field(
+        default=None,
+        max_length=50,
+        description="Required for version advances. Must match current latest version_id in lineage."
+    )
+
+    # ========================================================================
     # DDH Operation (Required)
     # ========================================================================
     operation: OperationType = Field(

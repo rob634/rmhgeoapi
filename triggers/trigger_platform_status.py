@@ -1180,31 +1180,49 @@ async def platform_lineage(req: func.HttpRequest) -> func.HttpResponse:
 
 async def platform_validate(req: func.HttpRequest) -> func.HttpResponse:
     """
-    Pre-flight validation before job submission (F7.12 S7.12.4).
+    Pre-flight validation before job submission (V0.8 Release Control - 31 JAN 2026).
 
     POST /api/platform/validate
 
-    Validates a file before submitting an ETL job. Checks if the file
-    exists, is readable, and returns recommended job type and estimated
-    processing time.
+    Validates a platform request BEFORE submission. This endpoint returns the
+    same response as POST /api/platform/submit?dry_run=true for workflow flexibility.
 
-    Request Body:
+    Use Cases:
+    - Workflow A: Call /validate first, then /submit if valid
+    - Workflow B: Call /submit?dry_run=true, then /submit if valid
+
+    Both approaches use the same underlying validation logic.
+
+    Request Body (same as /api/platform/submit):
     {
-        "data_type": "raster",  // or "vector"
+        "dataset_id": "floods",
+        "resource_id": "jakarta",
+        "version_id": "v2.0",
         "container_name": "bronze-rasters",
-        "blob_name": "imagery.tif"
+        "file_name": "jakarta_flood.tif",
+        "previous_version_id": "v1.0"  // Required for version advances
     }
 
-    Response:
+    Response (same structure as dry_run=true):
     {
         "valid": true,
-        "file_exists": true,
-        "file_size_mb": 250.5,
-        "recommended_job_type": "process_raster_v2",
-        "processing_mode": "function",  // or "docker"
-        "estimated_minutes": 15,
+        "dry_run": true,
+        "request_id": "abc123...",
+        "would_create_job_type": "process_raster_docker",
+        "lineage_state": {
+            "lineage_id": "def456...",
+            "lineage_exists": true,
+            "current_latest": {"version_id": "v1.0", ...}
+        },
+        "validation": {
+            "data_type_detected": "raster",
+            "previous_version_valid": true
+        },
         "warnings": [],
-        "timestamp": "2026-01-15T10:00:00Z"
+        "suggested_params": {
+            "previous_version_id": "v1.0",
+            "version_ordinal": 2
+        }
     }
     """
     logger.info("Platform validate endpoint called")
@@ -1212,146 +1230,98 @@ async def platform_validate(req: func.HttpRequest) -> func.HttpResponse:
     try:
         # Parse request body
         try:
-            body = req.get_json()
+            req_body = req.get_json()
         except ValueError:
             return func.HttpResponse(
                 json.dumps({
+                    "valid": False,
                     "error": "Invalid JSON body",
-                    "usage": {
-                        "data_type": "raster or vector",
-                        "container_name": "container name",
-                        "blob_name": "blob path"
-                    }
+                    "usage": "Same request body as POST /api/platform/submit"
                 }),
                 status_code=400,
                 headers={"Content-Type": "application/json"}
             )
 
-        data_type = body.get('data_type')
-        container_name = body.get('container_name')
-        blob_name = body.get('blob_name')
-
-        # Validate required fields
-        if not all([data_type, container_name, blob_name]):
-            return func.HttpResponse(
-                json.dumps({
-                    "error": "Missing required fields: data_type, container_name, blob_name",
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                }),
-                status_code=400,
-                headers={"Content-Type": "application/json"}
-            )
-
-        if data_type not in ['raster', 'vector']:
-            return func.HttpResponse(
-                json.dumps({
-                    "error": f"Invalid data_type: {data_type}. Must be 'raster' or 'vector'",
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                }),
-                status_code=400,
-                headers={"Content-Type": "application/json"}
-            )
+        # Import models and services
+        from core.models import PlatformRequest
+        from services.asset_service import AssetService
+        from services.platform_validation import validate_version_lineage
+        from services.platform_translation import translate_to_coremachine
+        from config import generate_platform_request_id
 
         config = get_config()
-        warnings = []
 
-        # Check if file exists and get size
-        file_exists = False
-        file_size_mb = None
-
+        # Parse as PlatformRequest (validates required fields)
         try:
-            from azure.storage.blob import BlobServiceClient
-            from azure.identity import DefaultAzureCredential
+            platform_req = PlatformRequest(**req_body)
+        except Exception as validation_err:
+            return func.HttpResponse(
+                json.dumps({
+                    "valid": False,
+                    "error": f"Invalid request: {validation_err}",
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }),
+                status_code=400,
+                headers={"Content-Type": "application/json"}
+            )
 
-            credential = DefaultAzureCredential()
-            account_url = f"https://{config.storage.bronze_account}.blob.core.windows.net"
-            blob_service = BlobServiceClient(account_url=account_url, credential=credential)
+        # Generate deterministic request ID
+        request_id = generate_platform_request_id(
+            platform_req.dataset_id,
+            platform_req.resource_id,
+            platform_req.version_id
+        )
 
-            container_client = blob_service.get_container_client(container_name)
-            blob_client = container_client.get_blob_client(blob_name)
+        # Translate to get job type
+        try:
+            job_type, _ = translate_to_coremachine(platform_req, config)
+        except Exception as translate_err:
+            return func.HttpResponse(
+                json.dumps({
+                    "valid": False,
+                    "request_id": request_id,
+                    "error": f"Translation failed: {translate_err}",
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }),
+                status_code=400,
+                headers={"Content-Type": "application/json"}
+            )
 
-            props = blob_client.get_blob_properties()
-            file_exists = True
-            file_size_mb = round(props.size / (1024 * 1024), 2)
-
-        except Exception as blob_err:
-            error_str = str(blob_err).lower()
-            if 'not found' in error_str or 'does not exist' in error_str:
-                file_exists = False
-            else:
-                warnings.append(f"Could not verify file: {type(blob_err).__name__}")
-                logger.warning(f"Blob validation error: {blob_err}")
-
-        # Determine recommended job type and processing mode
-        recommended_job_type = None
-        processing_mode = None
-        estimated_minutes = None
-
-        if data_type == 'raster':
-            # ================================================================
-            # V0.8 ARCHITECTURE (24 JAN 2026)
-            # ================================================================
-            # - ALL raster operations go to Docker worker (container-tasks queue)
-            # - Single job: process_raster_docker handles both single COG and tiled output
-            # - ETL mount is EXPECTED in production (False = degraded state)
-            # - Tiling decision based on raster_tiling_threshold_mb
-            # ================================================================
-            import math
-            raster_config = config.raster
-            mount_enabled = raster_config.use_etl_mount
-            tiling_threshold_mb = raster_config.raster_tiling_threshold_mb
-            tile_target_mb = raster_config.raster_tile_target_mb
-
-            # All raster goes to Docker
-            processing_mode = "docker"
-            recommended_job_type = "process_raster_docker"
-
-            # Determine output mode (single COG vs tiled)
-            output_mode = "single_cog"
-            estimated_tiles = 1
-
-            if file_size_mb is not None:
-                if file_size_mb > tiling_threshold_mb:
-                    output_mode = "tiled"
-                    estimated_tiles = math.ceil(file_size_mb / tile_target_mb)
-                    warnings.append(f"Large file ({file_size_mb:.1f}MB) - will produce ~{estimated_tiles} tiles")
-
-                # Estimate processing time (rough: ~50MB/min for Docker)
-                estimated_minutes = max(2, int(file_size_mb / 50) + 2)
-            else:
-                warnings.append("Could not determine file size")
-
-            # V0.8: Mount is expected - warn if disabled
-            if not mount_enabled:
-                warnings.append("WARNING: ETL mount disabled - system in degraded state")
-
-        elif data_type == 'vector':
-            recommended_job_type = "process_vector"
-            processing_mode = "function"
-            if file_size_mb:
-                estimated_minutes = max(2, int(file_size_mb / 50) + 1)
-            else:
-                estimated_minutes = 5
-
-        # V0.8: Include raster-specific output mode info
-        result = {
-            "valid": file_exists and recommended_job_type is not None,
-            "file_exists": file_exists,
-            "file_size_mb": file_size_mb,
-            "data_type": data_type,
-            "recommended_job_type": recommended_job_type,
-            "processing_mode": processing_mode,
-            "estimated_minutes": estimated_minutes,
-            "warnings": warnings if warnings else None,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+        # Build platform_refs
+        platform_refs = {
+            "dataset_id": platform_req.dataset_id,
+            "resource_id": platform_req.resource_id,
+            "version_id": platform_req.version_id
         }
 
-        # Add raster-specific V0.8 fields
-        if data_type == 'raster':
-            result["etl_mount_enabled"] = config.raster.use_etl_mount
-            result["output_mode"] = output_mode if 'output_mode' in dir() else "single_cog"
-            result["estimated_tiles"] = estimated_tiles if 'estimated_tiles' in dir() else 1
-            result["tiling_threshold_mb"] = config.raster.raster_tiling_threshold_mb
+        # Run version lineage validation
+        asset_service = AssetService()
+        validation_result = validate_version_lineage(
+            platform_id="ddh",
+            platform_refs=platform_refs,
+            previous_version_id=platform_req.previous_version_id,
+            asset_service=asset_service
+        )
+
+        # Build response (same structure as dry_run=true)
+        result = {
+            "valid": validation_result.valid,
+            "dry_run": True,
+            "request_id": request_id,
+            "would_create_job_type": job_type,
+            "lineage_state": {
+                "lineage_id": validation_result.lineage_id,
+                "lineage_exists": validation_result.lineage_exists,
+                "current_latest": validation_result.current_latest
+            },
+            "validation": {
+                "data_type_detected": platform_req.data_type.value,
+                "previous_version_valid": validation_result.valid
+            },
+            "warnings": validation_result.warnings,
+            "suggested_params": validation_result.suggested_params,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
 
         return func.HttpResponse(
             json.dumps(result, indent=2),
@@ -1363,7 +1333,9 @@ async def platform_validate(req: func.HttpRequest) -> func.HttpResponse:
         logger.error(f"Platform validate failed: {e}", exc_info=True)
         return func.HttpResponse(
             json.dumps({
+                "valid": False,
                 "error": "Validation failed",
+                "error_type": type(e).__name__,
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }),
             status_code=500,

@@ -63,6 +63,9 @@ from services.platform_response import (
 from services.asset_service import AssetService, AssetExistsError
 from core.models.asset import ClearanceState
 
+# V0.8 Release Control - Version validation (31 JAN 2026)
+from services.platform_validation import validate_version_lineage
+
 
 # ============================================================================
 # OVERWRITE HELPER
@@ -191,6 +194,11 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
         req_body = req.get_json()
         platform_req = PlatformRequest(**req_body)
 
+        # V0.8 Release Control: Check dry_run parameter (31 JAN 2026)
+        dry_run = req.params.get('dry_run', '').lower() == 'true'
+        if dry_run:
+            logger.info("  dry_run=true: Validation-only mode")
+
         # Validate expected_data_type if specified (21 JAN 2026)
         # Catches mismatches like submitting .geojson when expecting raster
         platform_req.validate_expected_data_type()
@@ -279,24 +287,58 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
             }
 
             # =====================================================================
-            # V0.8.4.1 RELEASE CONTROL: Lineage wiring (30 JAN 2026)
-            # Get lineage state to enable version tracking
+            # V0.8 RELEASE CONTROL: Version Lineage Validation (31 JAN 2026)
+            # Validate previous_version_id before allowing job creation.
+            # Prevents race conditions where two clients submit v2.0 concurrently.
             # =====================================================================
-            # DDH nominal_refs (identity without version) - configured in platforms table
-            nominal_refs = ["dataset_id", "resource_id"]
-            lineage_state = asset_service.get_lineage_state(
+            validation_result = validate_version_lineage(
                 platform_id="ddh",
                 platform_refs=platform_refs,
-                nominal_refs=nominal_refs
+                previous_version_id=platform_req.previous_version_id,
+                asset_service=asset_service
             )
 
-            lineage_id = lineage_state['lineage_id']
-            version_ordinal = lineage_state['suggested_params']['version_ordinal']
+            if dry_run:
+                # Return validation result without creating job
+                # job_type already translated above (line 264)
+                return func.HttpResponse(
+                    json.dumps({
+                        "valid": validation_result.valid,
+                        "dry_run": True,
+                        "request_id": request_id,
+                        "would_create_job_type": job_type,
+                        "lineage_state": {
+                            "lineage_id": validation_result.lineage_id,
+                            "lineage_exists": validation_result.lineage_exists,
+                            "current_latest": validation_result.current_latest
+                        },
+                        "validation": {
+                            "data_type_detected": platform_req.data_type.value,
+                            "previous_version_valid": validation_result.valid
+                        },
+                        "warnings": validation_result.warnings,
+                        "suggested_params": validation_result.suggested_params
+                    }),
+                    status_code=200,
+                    mimetype="application/json"
+                )
+
+            # Not dry_run - enforce validation before creating job
+            if not validation_result.valid:
+                logger.warning(f"Version validation failed: {validation_result.warnings}")
+                return validation_error(validation_result.warnings[0])
+
+            # =====================================================================
+            # V0.8.4.1 RELEASE CONTROL: Lineage wiring (30 JAN 2026)
+            # Use lineage state from validation result
+            # =====================================================================
+            lineage_id = validation_result.lineage_id
+            version_ordinal = validation_result.suggested_params.get('version_ordinal', 1)
             previous_asset_id = None
 
             # Get previous_asset_id from current_latest if exists
-            if lineage_state['current_latest']:
-                previous_asset_id = lineage_state['current_latest'].get('asset_id')
+            if validation_result.current_latest:
+                previous_asset_id = validation_result.current_latest.get('asset_id')
 
             logger.info(f"  Lineage: {lineage_id[:16]}... ordinal={version_ordinal}, prev={previous_asset_id[:16] if previous_asset_id else 'None'}")
 

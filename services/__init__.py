@@ -176,6 +176,11 @@ from .stac_metadata_helper import (
 )
 
 # ============================================================================
+# PLATFORM VALIDATION (V0.8 Release Control - dry_run support)
+# ============================================================================
+from .platform_validation import validate_version_lineage, VersionValidationResult
+
+# ============================================================================
 # EXPLICIT HANDLER REGISTRY
 # ============================================================================
 # To add a new handler:
@@ -371,4 +376,7 @@ __all__ = [
     'VisualizationMetadata',
     'ISO3Attribution',
     'ISO3AttributionService',
+    # Platform validation (V0.8 Release Control)
+    'validate_version_lineage',
+    'VersionValidationResult',
 ]

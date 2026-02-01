@@ -1,11 +1,10 @@
 # Geospatial Data Platform - Technical Overview
 
-> **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [Errors](WIKI_API_ERRORS.md) | [Glossary](WIKI_API_GLOSSARY.md)
+> **Navigation**: [Quick Start](../getting-started/QUICK_START.md) | [Platform API](../api-reference/PLATFORM_API.md) | [Errors](../api-reference/ERRORS.md)
 
-**Last Updated**: 21 JAN 2026
+**Last Updated**: 01 FEB 2026
 **Audience**: Development team (all disciplines)
 **Purpose**: High-level understanding of platform architecture, patterns, and technology stack
-**Wiki**: Azure DevOps Wiki - Technical architecture documentation
 
 ---
 
@@ -123,10 +122,10 @@ The platform is organized into three security zones with distinct responsibiliti
 
 | Component | Runtime | Purpose | Details |
 |-----------|---------|---------|---------|
-| **Platform App** | Function App | Anti-corruption layer for external clients | Translates DDH params to CoreMachine params. See [WIKI_PLATFORM_API.md](WIKI_PLATFORM_API.md) |
+| **Platform App** | Function App | Anti-corruption layer for external clients | Translates DDH params to CoreMachine params. See [Platform API](../api-reference/PLATFORM_API.md) |
 | **Orchestrator App** | Function App | CoreMachine job/stage/task orchestration | Manages job state, routes tasks to workers |
 | **Function Worker** | Function App | Lightweight parallelizable operations | Database operations, fan-out tasks |
-| **Docker Worker** | Container App | GDAL-heavy geospatial processing | COG creation, raster processing, long-running tasks. See [WIKI_DOCKER.md](WIKI_DOCKER.md) |
+| **Docker Worker** | Container App | **PRIMARY** for all heavy geospatial processing | COG creation, vector ETL, large rasters. V0.8 doctrine: Docker Worker handles ALL vector ETL and memory-intensive operations |
 
 ### Service Layer Components
 
@@ -136,7 +135,7 @@ The platform is organized into three security zones with distinct responsibiliti
 | **TiPG** | Docker | Vector tile and feature serving | OGC API - Features, vector tiles |
 | **STAC API** | Docker | Metadata catalog search | Spatiotemporal asset discovery |
 
-See [WIKI_SERVICE_LAYER.md](WIKI_SERVICE_LAYER.md) for detailed service layer documentation.
+See Service Layer documentation for detailed component information.
 
 ### Data Storage
 
@@ -146,19 +145,18 @@ See [WIKI_SERVICE_LAYER.md](WIKI_SERVICE_LAYER.md) for detailed service layer do
 | **Silver** | Processed COGs, outputs | Write by Workers, Read by Service Layer |
 | **External** | Airgapped copy for public access | Write by ADF, Read by External Service Layer |
 
-See [WIKI_API_STORAGE.md](WIKI_API_STORAGE.md) for storage configuration.
+See [ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md) for storage configuration.
 
 ### PostgreSQL Schemas
 
 | Schema | Purpose | Managed By |
 |--------|---------|------------|
-| `app` | Job/task orchestration state | CoreMachine |
+| `app` | Job/task orchestration, API requests, assets | CoreMachine |
 | `pgstac` | STAC metadata catalog | pypgstac |
-| `geo` | Vector data (PostGIS) | ETL jobs |
+| `geo` | Vector data (PostGIS tables) | ETL jobs |
 | `h3` | H3 hexagonal grids | Static SQL |
-| `platform` | API request tracking | Platform App |
 
-See [WIKI_API_DATABASE.md](WIKI_API_DATABASE.md) for database setup.
+See [ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md) for schema configuration.
 
 ---
 
@@ -260,7 +258,7 @@ def process_task(msg: ServiceBusMessage):
 - Stateful applications (servers come and go)
 - Predictable constant load (dedicated VMs might be cheaper)
 
-**Long-running processes**: Azure Functions have a 10-minute timeout. For GDAL-heavy geospatial processing that exceeds this limit, we use the **Docker Worker** (Container App) which supports checkpoint/resume and graceful shutdown. See [WIKI_DOCKER.md](WIKI_DOCKER.md).
+**Long-running processes**: Azure Functions have a 10-minute timeout. For GDAL-heavy geospatial processing that exceeds this limit, we use the **Docker Worker** (Container App) which supports checkpoint/resume and graceful shutdown.
 
 **Our use case**: This architecture is well-suited to our needs. ETL jobs are event-driven (triggered by data uploads), highly parallelizable (chunks processed independently), and have variable load. The hybrid approach (Function Workers for lightweight tasks, Docker Worker for heavy processing) provides optimal resource utilization.
 
@@ -268,7 +266,7 @@ def process_task(msg: ServiceBusMessage):
 
 ## Distributed Systems Patterns
 
-> **Note**: For formal definitions of these patterns, see [Glossary: Architecture Terms](WIKI_API_GLOSSARY.md#architecture-terms).
+> **Note**: For formal definitions of distributed systems patterns, see standard references like "Designing Data-Intensive Applications" by Martin Kleppmann.
 
 ### Fan-Out / Fan-In Pattern
 
@@ -540,7 +538,7 @@ def bulk_insert_with_copy(conn, table_name, rows: list[dict]):
 | **Partial failures** | Atomic tasks (all-or-nothing) |
 | **Task coordination** | PostgreSQL as single source of truth |
 | **Retry logic** | Service Bus automatic retries + dead-letter queue |
-| **Observability** | Application Insights structured logging |
+| **Observability** | Structured logging + blob-based metrics |
 | **Connection exhaustion** | Memory-first pattern, single-connection burst |
 
 ### Graceful Degradation (pgSTAC Optional)
@@ -1413,4 +1411,4 @@ flowchart LR
 
 ---
 
-**Questions?** See the [Developer Onboarding Guide](WIKI_ONBOARDING.md) or contact the team.
+**Questions?** See the [Quick Start Guide](../getting-started/QUICK_START.md) or contact the team.

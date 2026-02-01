@@ -2,9 +2,8 @@
 
 > **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [Errors](WIKI_API_ERRORS.md) | [Glossary](WIKI_API_GLOSSARY.md)
 
-**Date**: 29 DEC 2025
+**Last Updated**: 01 FEB 2026
 **Purpose**: Reference for API error responses and troubleshooting
-**Wiki**: Azure DevOps Wiki - Error handling documentation
 
 ---
 
@@ -201,6 +200,87 @@ These errors occur when required parameters are missing or have invalid values.
 | `n` (hello_world) | 1 | 1,000 | 1 |
 | `failure_rate` | 0.0 | 1.0 | 0.0 |
 | `jpeg_quality` | 1 | 100 | 85 |
+
+---
+
+## Version Lineage Errors (HTTP 400)
+
+These errors occur when submitting a new version of a dataset/resource without proper version lineage validation. See [Platform API - Version Lineage](PLATFORM_API.md#13-version-lineage) for details.
+
+### Missing previous_version_id
+
+When submitting a new version to an existing lineage without specifying which version it follows:
+
+**Error Response**:
+```json
+{
+  "success": false,
+  "error": "Version 'v1.0' already exists for this dataset/resource. Specify previous_version_id='v1.0' to submit a new version.",
+  "error_type": "ValidationError"
+}
+```
+
+**Solution**: Add `previous_version_id` to your request:
+```json
+{
+  "dataset_id": "floods",
+  "resource_id": "jakarta",
+  "version_id": "v2.0",
+  "previous_version_id": "v1.0",
+  ...
+}
+```
+
+**Tip**: Use `POST /api/platform/submit?dry_run=true` to check lineage state before submitting.
+
+---
+
+### Wrong previous_version_id
+
+When the specified `previous_version_id` doesn't match the current latest version:
+
+**Error Response**:
+```json
+{
+  "success": false,
+  "error": "previous_version_id='v0.5' does not match current latest version 'v1.0'",
+  "error_type": "ValidationError"
+}
+```
+
+**Causes**:
+- Another client submitted a newer version (race condition)
+- Typo in `previous_version_id` value
+
+**Solution**:
+1. Query current lineage state with `dry_run=true`
+2. Use the `suggested_params.previous_version_id` from the response
+3. Resubmit with the correct `previous_version_id`
+
+---
+
+### previous_version_id on Empty Lineage
+
+When specifying `previous_version_id` for a first version (no versions exist yet):
+
+**Error Response**:
+```json
+{
+  "success": false,
+  "error": "previous_version_id='v1.0' specified but no versions exist for this dataset/resource",
+  "error_type": "ValidationError"
+}
+```
+
+**Solution**: For the first version of a dataset/resource, omit `previous_version_id`:
+```json
+{
+  "dataset_id": "floods",
+  "resource_id": "jakarta",
+  "version_id": "v1.0",
+  ...
+}
+```
 
 ---
 
@@ -406,17 +486,14 @@ Or for WKT geometry:
 | "Parameter X is required" | Missing required field | Add the parameter |
 | "Parameter X must be type Y" | Wrong data type | Check JSON formatting |
 | "Pre-flight validation failed" | Resource doesn't exist | Verify blob/container exists |
+| "Version X already exists" | Missing previous_version_id | Use dry_run to get suggested params |
+| "previous_version_id does not match" | Version race condition | Re-query lineage and retry |
 | "Table already exists" | Naming conflict | Use different name or drop table |
 | "Connection pool exhausted" | System overloaded | Wait and retry |
 
 ### 2. Use Request ID for Log Correlation
 
-Every error includes a `request_id`. Use this to find related logs:
-
-```bash
-# Query Application Insights by request_id
-traces | where customDimensions.request_id == "f2e53c96" | order by timestamp desc
-```
+Every error includes a `request_id`. Use this to find related logs in Azure Portal → Function App → Log stream. Search for the request ID to find related log entries.
 
 ### 3. Check Job Status for Execution Errors
 
@@ -434,10 +511,6 @@ curl https://<platform-api-url>/api/dbadmin/tasks/{JOB_ID}
 
 ## Related Documentation
 
-- **Internal Error Handling**: [WIKI_DEV_ERROR_HANDLING.md](WIKI_DEV_ERROR_HANDLING.md) - Exception hierarchy, retry telemetry, Application Insights queries
-- **Platform API**: [WIKI_PLATFORM_API.md](WIKI_PLATFORM_API.md) - Full API reference
-- **Glossary**: [WIKI_API_GLOSSARY.md](WIKI_API_GLOSSARY.md) - Technical terminology
-
----
-
-**Last Updated**: 29 DEC 2025
+- **Platform API**: [PLATFORM_API.md](PLATFORM_API.md) - Full API reference including version lineage
+- **Health Endpoints**: [HEALTH.md](HEALTH.md) - Health probes and diagnostics
+- **Quick Start**: [../getting-started/QUICK_START.md](../getting-started/QUICK_START.md) - Getting started guide

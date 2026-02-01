@@ -2,7 +2,7 @@
 
 > **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [Errors](WIKI_API_ERRORS.md) | **Health**
 
-**Last Updated**: 11 JAN 2026
+**Last Updated**: 01 FEB 2026
 **Status**: Reference Documentation
 **Purpose**: Health probes, startup validation, and diagnostic endpoints
 
@@ -20,9 +20,6 @@ The platform provides diagnostic endpoints following Kubernetes-style health pro
 | `/api/diagnostics` | Deep system diagnostics (connectivity, DNS, pools) | Yes |
 | `/api/metrics/stats` | Service latency metrics statistics | Yes |
 | `/api/metrics/flush` | Force flush metrics to blob storage | Yes |
-| `/api/appinsights/query` | Query App Insights logs via REST API | Yes |
-| `/api/appinsights/export` | Export logs to blob storage | Yes |
-| `/api/appinsights/templates` | List available query templates | Yes |
 
 ---
 
@@ -46,19 +43,6 @@ curl https://YOUR_APP.azurewebsites.net/api/metrics/stats
 
 # Force flush metrics to blob storage
 curl -X POST https://YOUR_APP.azurewebsites.net/api/metrics/flush
-
-# List available App Insights query templates
-curl https://YOUR_APP.azurewebsites.net/api/appinsights/templates
-
-# Query App Insights logs
-curl -X POST https://YOUR_APP.azurewebsites.net/api/appinsights/query \
-  -H "Content-Type: application/json" \
-  -d '{"query": "traces | take 10"}'
-
-# Export logs to blob storage using a template
-curl -X POST https://YOUR_APP.azurewebsites.net/api/appinsights/export \
-  -H "Content-Type: application/json" \
-  -d '{"template": "service_latency", "timespan": "24h"}'
 ```
 
 ---
@@ -277,105 +261,6 @@ curl "https://YOUR_APP.azurewebsites.net/api/diagnostics?pools=false&instance=fa
 
 ---
 
-### GET /api/appinsights/templates - List Query Templates (10 JAN 2026)
-
-**Purpose**: List available predefined query templates for App Insights log export.
-
-**Response (200)**:
-```json
-{
-  "status": "ok",
-  "templates": {
-    "recent_traces": {"query_pattern": "traces | where timestamp >= ago({timespan}) | order by timestamp desc | take {limit}"},
-    "recent_errors": {"query_pattern": "traces | where severityLevel >= 3 | ..."},
-    "service_latency": {"query_pattern": "traces | where message contains '[SERVICE_LATENCY]' | ..."},
-    "db_latency": {"query_pattern": "traces | where message contains '[DB_LATENCY]' | ..."},
-    "startup_failures": {"query_pattern": "traces | where message contains 'STARTUP_FAILED' | ..."},
-    "exceptions": {"query_pattern": "exceptions | where timestamp >= ago({timespan}) | ..."},
-    "slow_requests": {"query_pattern": "requests | where duration > 5000 | ..."}
-  },
-  "usage": "POST /api/appinsights/export with {\"template\": \"<name>\", \"timespan\": \"24h\"}"
-}
-```
-
----
-
-### POST /api/appinsights/query - Query App Insights Logs (10 JAN 2026)
-
-**Purpose**: Run a KQL query against Application Insights and return results.
-
-**Request Body**:
-```json
-{
-  "query": "traces | where timestamp >= ago(1h) | take 100",
-  "timespan": "PT1H"  // Optional, ISO 8601 duration (default: PT1H)
-}
-```
-
-**Response (200)**:
-```json
-{
-  "status": "ok",
-  "row_count": 100,
-  "columns": ["timestamp", "message", "severityLevel", "customDimensions"],
-  "rows": [
-    ["2026-01-10T14:30:00Z", "Request completed", 1, {"operation": "ogc.get_features"}],
-    ...
-  ],
-  "query_duration_ms": 1234,
-  "truncated": false
-}
-```
-
-**Note**: Results are limited to 100 rows in the response. Use `/api/appinsights/export` for larger exports.
-
-**Requires**:
-- `APPINSIGHTS_APP_ID` environment variable
-- Function App managed identity must have **Monitoring Reader** role on Application Insights resource
-
----
-
-### POST /api/appinsights/export - Export Logs to Blob Storage (10 JAN 2026)
-
-**Purpose**: Export App Insights logs to blob storage as JSON Lines for offline analysis.
-
-**Request Body (Template-based)**:
-```json
-{
-  "template": "service_latency",  // One of the templates from /api/appinsights/templates
-  "timespan": "24h",              // Duration without PT prefix
-  "limit": 1000,                  // Optional, default 1000
-  "container": "applogs"          // Optional, default "applogs"
-}
-```
-
-**Request Body (Custom Query)**:
-```json
-{
-  "query": "traces | where message contains '[SERVICE_LATENCY]' | where customDimensions.slow == true",
-  "timespan": "PT24H",            // ISO 8601 duration
-  "container": "applogs",         // Optional
-  "prefix": "exports/custom"      // Optional blob path prefix
-}
-```
-
-**Response (200)**:
-```json
-{
-  "status": "ok",
-  "blob_path": "applogs/exports/service_latency/2026-01-10/20260110T143000Z.jsonl",
-  "row_count": 523,
-  "query_duration_ms": 2341,
-  "export_duration_ms": 3456
-}
-```
-
-**Blob Storage Path**: `{container}/{prefix}/{date}/{timestamp}.jsonl`
-
-**Use Case**: Export slow operation logs for analysis when portal access is restricted in corporate environments.
-
----
-
 ## Startup Validation Flow
 
 The app validates configuration in phases to ensure diagnostic endpoints are always available:
@@ -468,13 +353,7 @@ POSTGIS_HOST: Invalid format
 
 **Solution**:
 1. Check `/api/livez` - if 404, the process crashed during import
-2. Check Application Insights for `STARTUP_FAILED` logs:
-   ```kusto
-   traces
-   | where message contains "STARTUP_FAILED"
-   | order by timestamp desc
-   | take 5
-   ```
+2. Check Azure Portal → Function App → Log stream for `STARTUP_FAILED` messages
 3. Common causes:
    - Missing Python package in requirements.txt
    - Circular import issue
@@ -554,13 +433,6 @@ readinessProbe:
   initialDelaySeconds: 30
   periodSeconds: 10
 ```
-
-### Application Insights Availability Test
-
-Create availability test:
-- URL: `https://YOUR_APP.azurewebsites.net/api/health`
-- Frequency: 5 minutes
-- Alert on: Status code != 200
 
 ---
 

@@ -1,6 +1,6 @@
 # Environment Variables Reference
 
-**Last Updated**: 10 JAN 2026
+**Last Updated**: 01 FEB 2026
 **Purpose**: Complete reference for all environment variables used by the platform
 
 ---
@@ -231,7 +231,7 @@ Each trust zone can have its own storage account. Required accounts are in Secti
 | `FUNCTION_TIMEOUT_MINUTES` | `30` | Azure Function timeout |
 | `LOG_LEVEL` | `INFO` | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
 
-### 6.3 Observability (10 JAN 2026 - F7.12)
+### 6.3 Observability
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -241,7 +241,6 @@ Each trust zone can have its own storage account. Required accounts are in Secti
 | `METRICS_FLUSH_INTERVAL` | `60` | Seconds between metrics blob flushes |
 | `METRICS_BUFFER_SIZE` | `100` | Max records before auto-flush |
 | `METRICS_BLOB_CONTAINER` | `applogs` | Container for metrics JSON files |
-| `APPINSIGHTS_APP_ID` | — | Application Insights App ID (for log export) |
 
 **When `OBSERVABILITY_MODE=true`:**
 - Memory/CPU tracking enabled (`log_memory_checkpoint`)
@@ -307,6 +306,38 @@ Each trust zone can have its own storage account. Required accounts are in Secti
 | `DUCKDB_ENABLE_SPATIAL` | `true` | Enable spatial extension |
 | `DUCKDB_ENABLE_HTTPFS` | `true` | Enable HTTP filesystem |
 | `DUCKDB_ENABLE_AZURE` | `true` | Enable Azure blob access |
+
+---
+
+## 9. Docker Worker (V0.8 Heavy Processing)
+
+The Docker Worker handles memory-intensive operations (large rasters, vector ETL) in a dedicated container with blob storage mount.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DOCKER_WORKER_ENABLED` | `false` | Enable routing to Docker Worker |
+| `DOCKER_WORKER_URL` | — | Docker Worker base URL (required if enabled) |
+
+**Example:**
+```
+DOCKER_WORKER_ENABLED=true
+DOCKER_WORKER_URL=https://myheavyapi.azurewebsites.net
+```
+
+**When `DOCKER_WORKER_ENABLED=true`:**
+- Vector ETL jobs route to `long-running-tasks` queue
+- Large raster processing routes to Docker Worker
+- Docker Worker must have blob storage mounted at `/mnt/azure`
+
+**Docker Worker Container Settings** (set on the Web App, not Function App):
+
+| Variable | Description |
+|----------|-------------|
+| `WEBSITES_ENABLE_APP_SERVICE_STORAGE` | Set to `false` for container apps |
+| `AZURE_STORAGE_ACCOUNT` | Storage account for blob mount |
+| `AZURE_STORAGE_ACCESS_KEY` | Storage account access key |
+
+See [DOCKER_INTEGRATION.md](../architecture/DOCKER_INTEGRATION.md) for full setup guide.
 
 ---
 
@@ -411,7 +442,7 @@ The `/api/health` and `/api/readyz` endpoints show validation status:
 
 ### Validation Errors
 
-If validation fails, you'll see detailed error messages in Application Insights:
+If validation fails, you'll see detailed error messages in Azure Portal → Function App → Log stream:
 
 ```
 ❌ STARTUP: Environment variable validation failed (1 errors):
@@ -420,6 +451,8 @@ If validation fails, you'll see detailed error messages in Application Insights:
     Expected: Must be full FQDN ending in .servicebus.windows.net
     Fix: Use full URL like 'myservicebus.servicebus.windows.net' (not just 'myservicebus')
 ```
+
+You can also check the `/api/readyz` endpoint which returns detailed validation errors in the response body.
 
 ### Adding New Validation Rules
 
@@ -441,7 +474,8 @@ ENV_VAR_RULES["MY_NEW_VAR"] = EnvVarRule(
 
 ---
 
-**See Also**:
-- [Component Glossary](./docs/epics/README.md#component-glossary) — Abstract component names
-- [config/defaults.py](./config/defaults.py) — Default values and fail-fast placeholders
-- [config/env_validation.py](./config/env_validation.py) — Validation rules and patterns
+## Related Documentation
+
+- [Health Endpoints](../api-reference/HEALTH.md) — Startup validation and `/api/readyz` error details
+- [Platform API](../api-reference/PLATFORM_API.md) — API reference
+- [Quick Start](../getting-started/QUICK_START.md) — Getting started guide

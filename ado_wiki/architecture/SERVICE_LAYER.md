@@ -1,288 +1,168 @@
 # Service Layer API Documentation
 
-**Purpose:** Comprehensive documentation for the data access APIs that serve finished geospatial products.
+> **Navigation**: [Technical Overview](TECHNICAL_OVERVIEW.md) | [Environment Variables](ENVIRONMENT_VARIABLES.md) | **Service Layer** | [Platform API](../api-reference/PLATFORM_API.md)
 
-**Last Updated:** 10 JAN 2026
+**Purpose:** Documentation for the unified Service Layer that serves finished geospatial products.
+
+**Last Updated:** 01 FEB 2026
 
 ---
 
 ## Overview
 
-The Service Layer provides read-only query access to processed geospatial data through standardized APIs. These APIs are **completely independent from the ETL layer** (CoreMachine, jobs, Service Bus) and can be deployed as standalone Function Apps.
+The Service Layer provides read-only query access to processed geospatial data through standardized APIs. As of **V0.8**, the Service Layer is deployed as a **single Docker container** running three Dev Seed applications:
+
+| Application | Provider | Purpose | Documentation |
+|-------------|----------|---------|---------------|
+| **TiTiler** | [Development Seed](https://developmentseed.org/) | Dynamic COG/Zarr tile serving | [TiTiler Docs](https://developmentseed.org/titiler/) |
+| **TiPG** | [Development Seed](https://developmentseed.org/) | OGC Features API + MVT tiles | [TiPG Docs](https://developmentseed.org/tipg/) |
+| **stac-fastapi** | STAC Community | STAC API for raster catalog | [stac-fastapi Docs](https://stac-utils.github.io/stac-fastapi/) |
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                    Service Layer (Read-Only Query APIs)                      │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐        │
-│  │  /api/stac  │  │/api/features│  │ /api/raster │  │ /api/xarray │        │
-│  │  (Catalog)  │  │  (Vectors)  │  │  (Queries)  │  │  (Queries)  │        │
-│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘        │
-└─────────┼────────────────┼────────────────┼────────────────┼───────────────┘
-          │                │                │                │
-          ▼                ▼                ▼                ▼
-    ┌──────────┐     ┌──────────┐     ┌──────────┐     ┌──────────┐
-    │  pgSTAC  │     │ PostGIS  │     │   COGs   │     │   Zarr   │
-    │(metadata)│     │ (vector) │     │ (Blob)   │     │  (Blob)  │
-    └──────────┘     └──────────┘     └──────────┘     └──────────┘
+│                  Service Layer Docker App (Unified Container)               │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │                      FastAPI Application                              │  │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌────────────┐  │  │
+│  │  │  STAC API   │  │    TiPG     │  │   TiTiler   │  │  TiTiler   │  │  │
+│  │  │  /stac/*    │  │ /features/* │  │   /cog/*    │  │  /xarray/* │  │  │
+│  │  │  (Catalog)  │  │ /tiles/mvt/*│  │ (COG tiles) │  │(Zarr tiles)│  │  │
+│  │  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └─────┬──────┘  │  │
+│  └─────────┼────────────────┼────────────────┼───────────────┼─────────┘  │
+└────────────┼────────────────┼────────────────┼───────────────┼────────────┘
+             │                │                │               │
+             ▼                ▼                ▼               ▼
+       ┌──────────┐     ┌──────────┐     ┌──────────┐    ┌──────────┐
+       │  pgSTAC  │     │ PostGIS  │     │   COGs   │    │   Zarr   │
+       │(metadata)│     │ (vector) │     │  (Blob)  │    │  (Blob)  │
+       └──────────┘     └──────────┘     └──────────┘    └──────────┘
 ```
 
 ### API Categories
 
-| Category | APIs | Response Time | Deployment |
-|----------|------|---------------|------------|
-| **Catalog** | STAC API | < 1s | Azure Functions |
-| **Vector** | OGC Features | < 5s | Azure Functions |
-| **Raster Tiles** | TiTiler (COG/Zarr) | < 1s | Docker (always separate) |
-| **Raster Queries** | Pixel math, zonal stats | < 60s | Azure Functions |
-| **Xarray Queries** | Time-series, aggregations | < 60s | Azure Functions |
+| Category | API | Provider | Endpoints | Backend |
+|----------|-----|----------|-----------|---------|
+| **Catalog** | STAC API | stac-fastapi | `/stac/*` | pgSTAC (PostgreSQL) |
+| **Vector Features** | OGC Features | TiPG | `/features/*` | PostGIS |
+| **Vector Tiles** | MVT Tiles | TiPG | `/tiles/mvt/*` | PostGIS |
+| **Raster Tiles** | TiTiler-pgSTAC | TiTiler | `/cog/*` | COGs (Blob Storage) |
+| **Xarray Tiles** | TiTiler-xarray | TiTiler | `/xarray/*` | Zarr (Blob Storage) |
 
-**Synchronous Query Definition**: Any operation completing in < 60 seconds. This generous timeout accommodates complex multi-band raster calculations and time-series aggregations while staying well within Azure Functions limits.
+### Key Benefits of Unified Architecture
 
-### Component Summary
-
-| Component | Purpose | Backend | Deployment |
-|-----------|---------|---------|------------|
-| **STAC API** | Raster metadata catalog | pgSTAC (PostgreSQL) | Azure Functions |
-| **OGC Features** | Vector data access | PostGIS | Azure Functions |
-| **Raster Tiles** | Dynamic tile serving | TiTiler (Docker) | Docker / App Service |
-| **Raster Queries** | Pixel math, zonal stats | COGs via rasterio | Azure Functions |
-| **Xarray Queries** | Time-series, aggregations | Zarr via xarray | Azure Functions |
+- **Single deployment**: One Docker container to manage
+- **Shared connection pools**: Efficient database connections across all APIs
+- **Consistent routing**: Single FastAPI application handles all requests
+- **Simplified configuration**: One set of environment variables
+- **Lower operational overhead**: Single health check, single log stream
 
 ---
 
-## Standalone Deployment Architecture
+## Dev Seed Open Source Stack
 
-### Current State: Development Monolith
+The Service Layer is built on the [Development Seed](https://developmentseed.org/) open source geospatial stack:
 
-Currently, all APIs are developed in a single codebase (`<platform-function-app>`) for convenience:
+### TiTiler
 
-```
-<platform-function-app> (Single Function App)
-├── ETL LAYER (CoreMachine, Jobs, Service Bus)
-│   ├── jobs/                    # Job definitions
-│   ├── services/                # Task handlers
-│   ├── core/machine.py          # CoreMachine orchestrator
-│   └── triggers/                # Service Bus triggers
-│
-└── SERVICE LAYER (Read-Only APIs) ← Can be extracted
-    ├── stac_api/                # STAC API
-    ├── ogc_features/            # OGC Features API
-    ├── raster_api/              # Raster queries (future)
-    └── xarray_api/              # Xarray queries (future)
-```
+**Repository**: [developmentseed/titiler](https://github.com/developmentseed/titiler)
+**Documentation**: [developmentseed.org/titiler](https://developmentseed.org/titiler/)
 
-### Future State: Standalone Service Layer App
+TiTiler is a dynamic tile server for Cloud Optimized GeoTIFFs (COGs). Key features:
+- **Dynamic tiling**: Generate tiles on-the-fly without pre-rendering
+- **Band math**: Calculate derived indices (NDVI, etc.)
+- **Rescaling and colormaps**: Apply visualization parameters per request
+- **Multiple formats**: PNG, JPEG, WebP, GeoTIFF
 
-The Service Layer can be deployed as a **completely separate Function App** for:
-- **Independent scaling**: Scale read APIs separately from ETL workloads
-- **Isolated deployments**: Deploy API fixes without touching ETL
-- **Security boundaries**: Different auth policies for public vs internal APIs
-- **Cost optimization**: Right-size each app for its workload
+The platform uses two TiTiler extensions:
+- **titiler-pgstac**: Serves tiles from STAC-cataloged COGs
+- **titiler-xarray**: Serves tiles from Zarr/NetCDF datasets
 
-```
-Azure API Management (<api-gateway-domain>)
-├─→ <service-layer> (Standalone Function App)
-│   ├── /api/stac/*       → STAC API
-│   ├── /api/features/*   → OGC Features API
-│   ├── /api/raster/*     → Raster Queries
-│   └── /api/xarray/*     → Xarray Queries
-│
-├─→ <titiler-app> (Docker Container App)
-│   └── /cog/*, /xarray/* → TiTiler tile serving
-│
-└─→ <platform-function-app> (ETL Function App)
-    ├── /api/platform/*   → Platform API (DDH integration)
-    └── /api/jobs/*       → Job submission/status
+### TiPG
 
-All connect to: PostgreSQL (shared database, read-only for Service Layer)
-```
+**Repository**: [developmentseed/tipg](https://github.com/developmentseed/tipg)
+**Documentation**: [developmentseed.org/tipg](https://developmentseed.org/tipg/)
 
-### File Mapping: Standalone Service Layer App
+TiPG implements OGC API - Features and OGC API - Tiles for PostGIS tables:
+- **OGC Features**: GeoJSON feature access with filtering
+- **MVT Tiles**: Mapbox Vector Tiles for efficient rendering
+- **Auto-discovery**: Automatically exposes PostGIS tables as collections
+- **CQL2 Filtering**: Advanced query filtering support
 
-When extracting the Service Layer to a standalone Function App, copy these files:
+### stac-fastapi
 
-```
-<service-layer>/                    # New standalone Function App
-├── function_app.py                   # NEW: Azure Functions entry point
-├── host.json                         # NEW: Function App config
-├── requirements.txt                  # NEW: Subset of dependencies
-│
-├── stac_api/                         # COPY: Entire module
-│   ├── __init__.py
-│   ├── triggers.py                   # HTTP endpoints
-│   ├── service.py                    # Business logic
-│   └── infrastructure.py             # pgSTAC queries
-│
-├── ogc_features/                     # COPY: Entire module (~2,600 lines)
-│   ├── __init__.py
-│   ├── config.py                     # OGC-specific config
-│   ├── models.py                     # Pydantic models
-│   ├── repository.py                 # PostGIS queries
-│   ├── service.py                    # Business logic
-│   └── triggers.py                   # HTTP endpoints
-│
-├── raster_api/                       # COPY: When implemented
-│   └── ...
-│
-├── xarray_api/                       # COPY: When implemented
-│   └── ...
-│
-├── core/                             # COPY: Shared models only
-│   └── models/
-│       ├── __init__.py
-│       ├── unified_metadata.py       # VectorMetadata model (F7.8)
-│       └── external_refs.py          # DatasetRef model (F7.8)
-│
-├── config/                           # COPY: Database config only
-│   ├── __init__.py
-│   └── database.py                   # Connection string builder
-│
-└── web_interfaces/                   # OPTIONAL: Interactive viewers
-    └── ...
-```
+**Repository**: [stac-utils/stac-fastapi](https://github.com/stac-utils/stac-fastapi)
+**Documentation**: [stac-utils.github.io/stac-fastapi](https://stac-utils.github.io/stac-fastapi/)
 
-### Files NOT Needed in Service Layer App
-
-These are ETL-only and should NOT be copied:
-
-```
-DO NOT COPY:
-├── jobs/                    # Job definitions (ETL only)
-├── services/                # Task handlers (ETL only)
-├── core/machine.py          # CoreMachine (ETL only)
-├── core/state_manager.py    # Job state management (ETL only)
-├── triggers/trigger_*.py    # Service Bus triggers (ETL only)
-├── platform/                # Platform API (ETL only)
-└── docker/                  # GDAL worker (ETL only)
-```
-
-### Database Access Pattern
-
-The Service Layer is **read-only** and accesses only these schemas:
-
-| Schema | Tables | Access |
-|--------|--------|--------|
-| `geo` | `table_catalog`, `feature_collection_styles`, vector tables | SELECT only |
-| `pgstac` | `collections`, `items`, `searches` | SELECT only |
-| `h3` | H3 grid tables | SELECT only |
-
-The Service Layer does **NOT** access:
-- `app` schema (jobs, tasks) - ETL only
-- Service Bus queues - ETL only
-- Bronze storage account - ETL only
-
-### Shared Model: VectorMetadata (F7.8)
-
-The `VectorMetadata` model (`core/models/unified_metadata.py`) provides a single source of truth for dataset metadata with conversion methods:
-
-```python
-from core.models.unified_metadata import VectorMetadata
-
-# Repository returns VectorMetadata model
-metadata = repo.get_vector_metadata("admin_boundaries")
-
-# Convert to OGC Features response
-ogc_collection = metadata.to_ogc_collection(base_url="/api/features")
-
-# Convert to STAC response
-stac_collection = metadata.to_stac_collection(base_url="/api/stac")
-```
-
-This model is used by both OGC Features and STAC APIs, ensuring consistent metadata across both standards.
+STAC API implementation with pgSTAC backend:
+- **STAC 1.0.0 compliant**: Full specification support
+- **pgSTAC backend**: Efficient PostGIS-based queries
+- **Cross-collection search**: Query multiple collections at once
+- **Transactions support**: Create/update/delete items (if enabled)
 
 ---
 
-## 1. STAC API (`/api/stac/...`)
+## 1. STAC API (`/stac/...`)
 
 ### Overview
 
-Implements **STAC API v1.0.0** specification for managing raster metadata and asset discovery. Uses pgSTAC as the backend for efficient spatial-temporal queries.
-
-### Architecture
-
-```
-HTTP Request → STAC Triggers → Service Layer → pgSTAC
-                                     ↓
-                              Pure STAC JSON Response
-```
-
-The implementation follows a three-layer design:
-- **Triggers Layer** (`stac_api/triggers.py`): HTTP endpoints, parameter extraction
-- **Service Layer** (`stac_api/service.py`): Business logic, response formatting
-- **Infrastructure Layer** (`stac_api/infrastructure.py`): pgSTAC SQL queries
+Implements **STAC API v1.0.0** specification for raster metadata discovery. Powered by [stac-fastapi](https://stac-utils.github.io/stac-fastapi/) with pgSTAC backend.
 
 ### Core Endpoints
 
 | Endpoint | Purpose |
 |----------|---------|
-| `GET /api/stac` | Landing page with API links |
-| `GET /api/stac/conformance` | Supported conformance classes |
-| `GET /api/stac/collections` | List all collections |
-| `GET /api/stac/collections/{id}` | Collection metadata |
-| `GET /api/stac/collections/{id}/items` | List items in collection |
-| `GET /api/stac/collections/{id}/items/{item_id}` | Single item metadata |
-| `POST /api/stac/search` | Cross-collection search |
+| `GET /stac` | Landing page with API links |
+| `GET /stac/conformance` | Supported conformance classes |
+| `GET /stac/collections` | List all collections |
+| `GET /stac/collections/{id}` | Collection metadata |
+| `GET /stac/collections/{id}/items` | List items in collection |
+| `GET /stac/collections/{id}/items/{item_id}` | Single item metadata |
+| `POST /stac/search` | Cross-collection search |
 
 ### Query Parameters
 
 ```bash
 # Search items by bbox
-curl "/api/stac/collections/my-cogs/items?bbox=-70.7,-56.3,-70.6,-56.2"
+curl "/stac/collections/my-cogs/items?bbox=-70.7,-56.3,-70.6,-56.2"
 
 # Search by datetime
-curl "/api/stac/collections/my-cogs/items?datetime=2024-01-01/2024-12-31"
+curl "/stac/collections/my-cogs/items?datetime=2024-01-01/2024-12-31"
 
 # Full-text search
-curl -X POST "/api/stac/search" \
+curl -X POST "/stac/search" \
   -H "Content-Type: application/json" \
   -d '{"collections": ["my-cogs"], "bbox": [-180,-90,180,90], "limit": 10}'
 ```
 
 ### Key Features
 
-- **Pure STAC JSON**: No extra fields - compliant with standard STAC clients
+- **Pure STAC JSON**: Compliant with standard STAC clients
 - **pgSTAC Backend**: Efficient PostGIS-based queries for millions of items
 - **Cross-Collection Search**: Single query across multiple collections
 - **Pagination**: Standard `limit` and `next` token support
 
-### STAC Nuclear Button (Dev/Test Only)
+### STAC Browser Integration
 
-```bash
-# Clear all STAC items and collections
-curl -X POST "/api/stac/nuke?confirm=yes&mode=all"
-```
+The STAC API integrates with [STAC Browser](https://github.com/radiantearth/stac-browser) for interactive catalog exploration.
 
 ---
 
-## 2. OGC Features API (`/api/features/...`)
+## 2. OGC Features API (`/features/...`)
 
 ### Overview
 
-Implements **OGC API - Features Core 1.0** for serving vector data from PostGIS. The implementation is ~2,600 lines and can be deployed as a standalone module.
-
-### Architecture
-
-```
-HTTP Request → Features Triggers → Service Layer → Repository Layer → PostGIS
-                                          ↓
-                                    GeoJSON Response
-```
-
-Three-layer design:
-- **Triggers Layer** (`ogc_features/triggers.py`): HTTP endpoints
-- **Service Layer** (`ogc_features/service.py`): Query building, response formatting
-- **Repository Layer** (`ogc_features/repository.py`): SQL generation, geometry handling
+Implements **OGC API - Features Core 1.0** for serving vector data. Powered by [TiPG](https://developmentseed.org/tipg/).
 
 ### Core Endpoints
 
 | Endpoint | Purpose |
 |----------|---------|
-| `GET /api/features` | Landing page |
-| `GET /api/features/conformance` | Conformance declaration |
-| `GET /api/features/collections` | List all collections |
-| `GET /api/features/collections/{id}` | Collection metadata |
-| `GET /api/features/collections/{id}/items` | Query features |
-| `GET /api/features/collections/{id}/items/{fid}` | Single feature |
+| `GET /features` | Landing page |
+| `GET /features/conformance` | Conformance declaration |
+| `GET /features/collections` | List all collections |
+| `GET /features/collections/{id}` | Collection metadata |
+| `GET /features/collections/{id}/items` | Query features |
+| `GET /features/collections/{id}/items/{fid}` | Single feature |
 
 ### Query Parameters
 
@@ -293,562 +173,312 @@ Three-layer design:
 | `limit` | Max features returned | `limit=100` |
 | `offset` | Pagination offset | `offset=100` |
 | `sortby` | Sort field (+/- prefix) | `sortby=-created` |
-| `simplify` | Geometry simplification (m) | `simplify=100` |
-| `properties` | Attribute filter | `properties=status:active` |
+| `filter` | CQL2 filter expression | `filter=status='active'` |
+| `filter-lang` | Filter language | `filter-lang=cql2-text` |
 
 ### Examples
 
 ```bash
 # Query by bounding box
-curl "/api/features/collections/buildings/items?bbox=-70.7,-56.3,-70.6,-56.2&limit=5"
+curl "/features/collections/buildings/items?bbox=-70.7,-56.3,-70.6,-56.2&limit=5"
 
 # Temporal filter
-curl "/api/features/collections/observations/items?datetime=2024-06-01/2024-06-30"
+curl "/features/collections/observations/items?datetime=2024-06-01/2024-06-30"
 
-# Attribute filter with sorting
-curl "/api/features/collections/parcels/items?properties=type:residential&sortby=-area&limit=10"
-
-# Geometry simplification (reduce data size)
-curl "/api/features/collections/boundaries/items?simplify=500"
+# CQL2 filter with sorting
+curl "/features/collections/parcels/items?filter=type='residential'&sortby=-area&limit=10"
 ```
 
-### Key Features
+### CQL2 Filtering
 
-- **Spatial Filtering**: Efficient bbox queries via PostGIS indexes
-- **Temporal Queries**: Date range filtering on temporal columns
-- **Attribute Filtering**: Filter by any property field
-- **Geometry Optimization**: Server-side simplification reduces transfer size
-- **Sorting**: Ascending (+) or descending (-) on any field
-- **Pagination**: Standard limit/offset with next links
+TiPG supports [CQL2](https://docs.ogc.org/DRAFTS/21-065.html) for advanced filtering:
 
-### Interactive Map
+```bash
+# Text filter
+curl "/features/collections/buildings/items?filter=name LIKE 'School%'"
 
-Access the web viewer at: `/api/interface/map`
+# Numeric comparison
+curl "/features/collections/parcels/items?filter=area > 1000"
+
+# Spatial filter
+curl "/features/collections/sites/items?filter=S_INTERSECTS(geom, POLYGON((...)))"
+```
 
 ---
 
-## 3. Raster APIs
+## 3. Vector Tiles (`/tiles/mvt/...`)
 
-The raster stack has two components:
-1. **TiTiler** (Docker) - Dynamic tile serving for maps
-2. **Raster Queries** (Azure Functions) - Synchronous pixel math and zonal statistics
+### Overview
 
-### 3a. TiTiler - Dynamic Tile Serving (`/cog/...`, `/xarray/...`)
+TiPG generates [Mapbox Vector Tiles (MVT)](https://docs.mapbox.com/vector-tiles/specification/) directly from PostGIS, enabling efficient client-side rendering.
 
-TiTiler provides dynamic raster tile serving for Cloud Optimized GeoTIFFs (COGs) and Zarr datasets. It runs as a **Docker container** and cannot be deployed as Azure Functions.
-
-### Deployment Options
-
-| Option | URL | Use Case |
-|--------|-----|----------|
-| Azure App Service | `https://yourapp.azurewebsites.net` | Production |
-| Azure Container Instances | Dynamic | Testing |
-| Local Docker | `http://localhost:8000` | Development |
-
-### Docker Setup
-
-```bash
-# Development environment
-docker run -p 8000:8000 \
-  -e TITILER_API_CACHECONTROL="public, max-age=3600" \
-  ghcr.io/developmentseed/titiler-pgstac:latest
-
-# With pgSTAC connection
-docker run -p 8000:8000 \
-  -e DATABASE_URL="postgresql://user:pass@host:5432/db" \
-  -e TITILER_API_CACHECONTROL="public, max-age=3600" \
-  ghcr.io/developmentseed/titiler-pgstac:latest
-```
-
-### COG Endpoints (TiTiler-pgSTAC)
+### Endpoints
 
 | Endpoint | Purpose |
 |----------|---------|
-| `/cog/tiles/{z}/{x}/{y}.png` | Get map tiles |
-| `/cog/tilejson.json` | TileJSON metadata |
-| `/cog/info` | COG metadata |
-| `/cog/statistics` | Band statistics |
-| `/cog/preview.png` | Quick preview image |
-| `/cog/point/{lon},{lat}` | Point value query |
-| `/cog/bbox/{minx},{miny},{maxx},{maxy}.tif` | Extract bbox |
+| `GET /tiles/mvt/{collection}/{z}/{x}/{y}.pbf` | Vector tile |
+| `GET /tiles/mvt/{collection}/tilejson.json` | TileJSON metadata |
+| `GET /tiles/mvt/{collection}/style.json` | MapLibre style |
 
-### COG Examples
+### Integration with MapLibre GL
+
+```javascript
+// Add TiPG vector tiles to MapLibre GL
+map.addSource('buildings', {
+  type: 'vector',
+  url: 'https://service-layer/tiles/mvt/buildings/tilejson.json'
+});
+
+map.addLayer({
+  id: 'buildings-fill',
+  type: 'fill',
+  source: 'buildings',
+  'source-layer': 'default',
+  paint: {
+    'fill-color': '#627BC1',
+    'fill-opacity': 0.5
+  }
+});
+```
+
+---
+
+## 4. COG Tile Serving (`/cog/...`)
+
+### Overview
+
+[TiTiler-pgSTAC](https://developmentseed.org/titiler/advanced/tiler_factories/#titiler-pgstac) provides dynamic tile serving for Cloud Optimized GeoTIFFs cataloged in STAC.
+
+### Core Endpoints
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /cog/tiles/{z}/{x}/{y}.png` | Map tiles |
+| `GET /cog/tilejson.json` | TileJSON metadata |
+| `GET /cog/info` | COG metadata |
+| `GET /cog/statistics` | Band statistics |
+| `GET /cog/preview.png` | Quick preview image |
+| `GET /cog/point/{lon},{lat}` | Point value query |
+| `GET /cog/bbox/{minx},{miny},{maxx},{maxy}.tif` | Extract bbox |
+
+### Examples
 
 ```bash
-# Get tile
-curl "https://titiler/cog/tiles/10/512/384.png?url=https://storage.blob.core.windows.net/cogs/my-image.tif"
+# Get tile with URL
+curl "/cog/tiles/10/512/384.png?url=https://storage.blob.core.windows.net/cogs/image.tif"
 
-# Get info
-curl "https://titiler/cog/info?url=https://storage.blob.core.windows.net/cogs/my-image.tif"
+# Get COG info
+curl "/cog/info?url=https://storage.blob.core.windows.net/cogs/image.tif"
 
 # Point query
-curl "https://titiler/cog/point/-77.0,38.9?url=https://storage.blob.core.windows.net/cogs/my-image.tif"
+curl "/cog/point/-77.0,38.9?url=https://storage.blob.core.windows.net/cogs/image.tif"
+
+# Band math (NDVI)
+curl "/cog/tiles/10/512/384.png?url=...&expression=(b4-b3)/(b4+b3)&colormap_name=rdylgn"
 ```
 
-### Zarr Endpoints (TiTiler-xarray)
+### Visualization Parameters
+
+| Parameter | Purpose | Example |
+|-----------|---------|---------|
+| `bidx` | Band indexes | `bidx=1&bidx=2&bidx=3` |
+| `expression` | Band math | `expression=(b4-b3)/(b4+b3)` |
+| `rescale` | Value range | `rescale=0,255` |
+| `colormap_name` | Named colormap | `colormap_name=viridis` |
+| `return_mask` | Include alpha | `return_mask=true` |
+
+---
+
+## 5. Zarr/Xarray Tile Serving (`/xarray/...`)
+
+### Overview
+
+[TiTiler-xarray](https://developmentseed.org/titiler/advanced/tiler_factories/#titiler-xarray) serves tiles from Zarr and NetCDF datasets using xarray.
+
+### Core Endpoints
 
 | Endpoint | Purpose |
 |----------|---------|
-| `/xarray/variables` | List Zarr variables |
-| `/xarray/info` | Variable metadata |
-| `/xarray/tiles/WebMercatorQuad/{z}/{x}/{y}@1x.png` | Map tiles |
-| `/xarray/point/{lon},{lat}` | Point query |
-| `/xarray/WebMercatorQuad/map.html` | Interactive viewer |
+| `GET /xarray/variables` | List Zarr variables |
+| `GET /xarray/info` | Variable metadata |
+| `GET /xarray/tiles/WebMercatorQuad/{z}/{x}/{y}@1x.png` | Map tiles |
+| `GET /xarray/point/{lon},{lat}` | Point query |
+| `GET /xarray/WebMercatorQuad/map.html` | Interactive viewer |
 
-### Zarr Examples
+### Examples
 
 ```bash
 # List variables
-curl "https://titiler/xarray/variables?url=https://storage.blob.core.windows.net/zarr/era5.zarr&decode_times=false"
+curl "/xarray/variables?url=https://storage.blob.core.windows.net/zarr/era5.zarr&decode_times=false"
 
-# Get info for variable
-curl "https://titiler/xarray/info?url=https://storage.blob.core.windows.net/zarr/era5.zarr&variable=air_temperature_at_2_metres&decode_times=false"
+# Get variable info
+curl "/xarray/info?url=https://storage.blob.core.windows.net/zarr/era5.zarr&variable=temperature&decode_times=false"
 
 # Get tile (temperature visualization)
-curl "https://titiler/xarray/tiles/WebMercatorQuad/3/4/2@1x.png\
+curl "/xarray/tiles/WebMercatorQuad/3/4/2@1x.png\
 ?url=https://storage.blob.core.windows.net/zarr/era5.zarr\
-&variable=air_temperature_at_2_metres\
+&variable=temperature\
 &decode_times=false\
 &bidx=1\
 &colormap_name=viridis\
 &rescale=250,320"
 
 # Point query
-curl "https://titiler/xarray/point/-77.0,38.9\
+curl "/xarray/point/-77.0,38.9\
 ?url=https://storage.blob.core.windows.net/zarr/era5.zarr\
-&variable=air_temperature_at_2_metres\
-&decode_times=false\
-&bidx=1"
-
-# Interactive map
-open "https://titiler/xarray/WebMercatorQuad/map.html\
-?url=https://storage.blob.core.windows.net/zarr/era5.zarr\
-&variable=air_temperature_at_2_metres\
-&decode_times=false\
-&bidx=1\
-&colormap_name=viridis\
-&rescale=250,320"
+&variable=temperature\
+&decode_times=false"
 ```
 
-### Critical TiTiler-xarray Parameters
+### Critical Parameters
 
 | Parameter | Purpose | Required |
 |-----------|---------|----------|
 | `url` | Zarr store URL | Yes |
-| `variable` | Data variable name | Yes (for /info, /tiles, /point) |
-| `decode_times=false` | Handle non-standard calendars | Yes (for climate data) |
-| `bidx=N` | Band/time index (1-based) | Yes (for temporal data) |
+| `variable` | Data variable name | Yes (for tiles/point) |
+| `decode_times=false` | Handle non-standard calendars | Yes (climate data) |
+| `bidx=N` | Band/time index (1-based) | Yes (temporal data) |
 | `colormap_name` | Color palette | Optional |
 | `rescale=min,max` | Value range for colormap | Recommended |
 
 ---
 
-### 3b. Raster Queries API (`/api/raster/...`)
-
-**Status**: Under Consideration
-
-Synchronous raster query operations that complete within 60 seconds. Unlike TiTiler (which serves tiles for maps), the Raster Queries API performs **analytical operations** on COG data.
-
-### Use Cases
-
-| Operation | Description | Example |
-|-----------|-------------|---------|
-| **Point Query** | Get pixel value(s) at coordinates | "What's the elevation at this point?" |
-| **Zonal Statistics** | Stats within a polygon | "Average flood depth in this district" |
-| **Band Math** | Calculate derived indices | "NDVI = (NIR - Red) / (NIR + Red)" |
-| **Transect** | Values along a line | "Elevation profile along this route" |
-| **Multi-Band Extract** | Extract all bands at location | "Get all 12 FATHOM scenarios at this point" |
-
-### Proposed Endpoints
-
-```bash
-# Point query - single location, all bands
-GET /api/raster/point/{collection}/{item}
-    ?lon=-77.0&lat=38.9
-    &bands=1,2,3           # Optional: specific bands
-
-# Zonal statistics - stats within polygon
-POST /api/raster/zonal/{collection}/{item}
-    Content-Type: application/json
-    {
-      "geometry": {"type": "Polygon", "coordinates": [...]},
-      "stats": ["min", "max", "mean", "std", "count"]
-    }
-
-# Band math - calculated index
-GET /api/raster/bandmath/{collection}/{item}
-    ?expression=(b4-b3)/(b4+b3)    # NDVI formula
-    &bbox=-77.1,38.8,-76.9,39.0
-    &format=tif|png
-
-# Transect - values along a line
-POST /api/raster/transect/{collection}/{item}
-    Content-Type: application/json
-    {
-      "geometry": {"type": "LineString", "coordinates": [...]},
-      "resolution": 30,     # Sample every 30m
-      "bands": [1]
-    }
-```
-
-### Response Format
-
-```json
-{
-  "collection": "fathom-flood",
-  "item": "rwanda-pluvial-100yr",
-  "operation": "point",
-  "location": [-77.0, 38.9],
-  "crs": "EPSG:4326",
-  "values": {
-    "band_1": 2.34,
-    "band_2": 1.89,
-    "band_3": 0.45
-  },
-  "unit": "meters",
-  "processing_time_ms": 145
-}
-```
-
-### Performance Constraints
-
-- **Timeout**: 60 seconds max (Azure Functions limit)
-- **Area limit**: ~10,000 km² for zonal stats (adjustable)
-- **Concurrent requests**: Scales with Function App instances
-- **COG requirement**: Data must be Cloud Optimized GeoTIFF
-
-### Architecture
-
-```
-HTTP Request → Raster Triggers → Raster Service → COG Reader (rasterio)
-                                        ↓
-                                 JSON/GeoTIFF Response
-```
-
-The Raster Queries API uses `rasterio` with HTTP range requests to read only the required pixels from COGs in blob storage - no full file download required.
-
----
-
-## 4. Xarray Queries API (`/api/xarray/...`)
-
-**Status**: Under Consideration
-
-### Overview
-
-Synchronous Zarr access via xarray for time-series analysis and temporal aggregations. Operations complete within 60 seconds. More efficient than multiple TiTiler requests when querying many timesteps or performing aggregations.
-
-### When to Use xarray vs TiTiler
-
-| Use Case | Recommended API |
-|----------|-----------------|
-| Single tile/image | TiTiler `/xarray/tiles` |
-| Single point, single time | TiTiler `/xarray/point` |
-| Point time-series (many times) | xarray `/api/xarray/point` |
-| Temporal aggregation (mean, max) | xarray `/api/xarray/aggregate` |
-| Regional statistics over time | xarray `/api/xarray/statistics` |
-
-### Proposed Endpoints
-
-```
-GET /api/xarray/point/{collection}/{item}
-    ?location={lon},{lat}
-    &start_time={iso_date}
-    &end_time={iso_date}
-    &aggregation=none|daily|monthly|yearly
-
-GET /api/xarray/statistics/{collection}/{item}
-    ?bbox={minx},{miny},{maxx},{maxy}
-    &start_time={iso_date}
-    &end_time={iso_date}
-    &stat=mean|max|min|sum
-
-GET /api/xarray/aggregate/{collection}/{item}
-    ?bbox={minx},{miny},{maxx},{maxy}
-    &start_time={iso_date}
-    &end_time={iso_date}
-    &temporal_agg=mean|max|min
-    &format=tif|png
-```
-
-### Example: Point Time-Series
-
-```bash
-# Get daily temperature for 2015 at Washington DC
-curl "https://api.../xarray/point/era5/temperature\
-?location=-77.0,38.9\
-&start_time=2020-01-01\
-&end_time=2020-01-31"
-```
-
-Response:
-```json
-{
-  "location": [-77.0, 38.9],
-  "item_id": "temperature",
-  "variable": "air_temperature_at_2_metres",
-  "unit": "K",
-  "time_series": [
-    {"time": "2020-01-01", "value": 279.8},
-    {"time": "2020-01-02", "value": 281.2},
-    ...
-  ],
-  "statistics": {
-    "min": 265.2,
-    "max": 285.4,
-    "mean": 275.1
-  }
-}
-```
-
-### Service Implementation
-
-The xarray API uses the `XArrayReaderService` in `services/xarray_reader.py`:
-
-```python
-import xarray as xr
-
-class XArrayReaderService:
-    def open_zarr(self, url: str, storage_options: dict = None) -> xr.Dataset:
-        """Open a Zarr store with xarray."""
-        return xr.open_zarr(
-            url,
-            storage_options=storage_options or {},
-            consolidated=True
-        )
-
-    def point_query(self, ds: xr.Dataset, lon: float, lat: float,
-                    variable: str, time_slice: slice = None) -> dict:
-        """Extract time-series at a point."""
-        da = ds[variable].sel(lat=lat, lon=lon, method="nearest")
-        if time_slice:
-            da = da.sel(time=time_slice)
-        return {
-            "values": da.values.tolist(),
-            "times": [str(t)[:10] for t in da.time.values]
-        }
-```
-
----
-
-## 5. TiTiler + Zarr Integration Lessons
-
-### Summary
-
-Successfully integrated ERA5 global climate data (~27GB, 9 variables, 744 hourly timesteps, 0.25° resolution) with TiTiler-xarray. Key lessons learned during integration.
-
-### Issue 1: Zarr 3.x API Breaking Changes
-
-**Problem:** `zarr.storage.FSStore` was removed in zarr 3.x.
-
-```
-AttributeError: module 'zarr.storage' has no attribute 'FSStore'
-```
-
-**Solution:** Use xarray's `storage_options` parameter:
-
-```python
-# OLD (zarr 2.x)
-store = zarr.storage.FSStore(path, fs=fs)
-ds.to_zarr(store)
-
-# NEW (zarr 3.x compatible)
-storage_opts = {'account_name': ..., 'account_key': ...}
-ds.to_zarr("abfs://container/path", storage_options=storage_opts)
-```
-
-### Issue 2: Chunk Alignment Errors
-
-**Problem:** Source data has irregular chunks that don't align with target.
-
-```
-ValueError: Specified Zarr chunks encoding['chunks']=(372, 150, 150) would overlap multiple Dask chunks
-```
-
-**Solution:** Explicitly set encoding chunks as tuples:
-
-```python
-encoding = {}
-for var in combined.data_vars:
-    var_dims = combined[var].dims
-    var_chunks = tuple(actual_chunks.get(dim, combined.dims[dim]) for dim in var_dims)
-    encoding[var] = {'chunks': var_chunks}
-
-combined.to_zarr(url, encoding=encoding, zarr_format=2)
-```
-
-### Issue 3: Blosc Codec Compatibility
-
-**Problem:** zarr 3.x changed codec handling.
-
-```
-TypeError: Expected a BytesBytesCodec. Got <class 'numcodecs.blosc.Blosc'> instead.
-```
-
-**Solution:** Use `zarr_format=2` when writing:
-
-```python
-combined.to_zarr(url, zarr_format=2, consolidated=True)
-```
-
-### Issue 4: TiTiler Empty Variables
-
-**Problem:** TiTiler-xarray returned empty variables despite valid .zmetadata.
-
-```json
-{"detail":"\"No variable named 'air_temperature'. Variables on the dataset include []\""}
-```
-
-**Root Cause:** Incomplete .zmetadata file from initial consolidation.
-
-**Temporary Workaround:**
-```
-&reader_options={%22consolidated%22:false}
-```
-Note: Braces must NOT be URL-encoded, only quotes.
-
-**Permanent Solution:** Re-consolidate metadata:
-
-```python
-ds = xr.open_zarr(url, storage_options=storage_opts, consolidated=False)
-ds.to_zarr(url, storage_options=storage_opts, mode='a', consolidated=True, zarr_format=2)
-```
-
-### Issue 5: Azure Storage Public Access
-
-**Problem:** TiTiler couldn't access private containers.
-
-**Solution:**
-```bash
-# Enable at account level
-az storage account update --name $ACCOUNT --allow-blob-public-access true
-
-# Set container level
-az storage container set-permission --name silver-cogs --account-name $ACCOUNT --public-access blob
-```
-
-### Issue 6: HNS vs Non-HNS Storage
-
-**Finding:** Both Hierarchical Namespace (HNS) and non-HNS storage accounts work identically with TiTiler once:
-1. Public access is enabled
-2. Metadata is properly consolidated
-
-### Zarr Dataset Checklist
-
-When preparing new Zarr datasets for TiTiler:
-
-1. [ ] Write with `zarr_format=2` for compatibility
-2. [ ] Use `consolidated=True` and verify .zmetadata is complete
-3. [ ] Enable public blob access on container
-4. [ ] Test `/xarray/variables` endpoint first
-5. [ ] Use `decode_times=false` for climate data
-6. [ ] Use `bidx=1` for first timestep
-7. [ ] Set appropriate `rescale` range for your data
-
-### Data Copy Script
-
-See `scripts/copy_era5_subset.py` for a working example that handles:
-- Planetary Computer STAC authentication
-- Azure storage account key retrieval
-- Proper chunk encoding
-- zarr v2 format compatibility
-- Metadata consolidation
-
-```bash
-# Dry run to see what would be copied
-python scripts/copy_era5_subset.py --month 2020-01 --dry-run
-
-# Actual copy
-python scripts/copy_era5_subset.py --month 2020-01
-```
-
----
-
-## 6. Web Interfaces
-
-Interactive web viewers are available for exploring data:
-
-| Interface | URL | Purpose |
-|-----------|-----|---------|
-| Gallery | `/api/interface/gallery` | Featured dataset showcase |
-| Map Viewer | `/api/interface/map` | OGC Features + Leaflet |
-| STAC Browser | `/api/interface/stac` | STAC catalog explorer |
-| Zarr Viewer | `/api/interface/zarr` | ERA5 climate visualization |
-
----
-
-## 7. Deployment Summary
-
-> **Detailed Architecture**: See [Standalone Deployment Architecture](#standalone-deployment-architecture) section above for complete file mappings and extraction guide.
-
-### Deployment Options
-
-| Option | Description | When to Use |
-|--------|-------------|-------------|
-| **Combined** | All APIs in single Function App | Development, low traffic |
-| **Standalone** | Service Layer as separate app | Production, independent scaling |
-| **TiTiler** | Docker container (always separate) | Required for tile serving |
+## 6. Deployment Architecture
 
 ### Current Production Setup
 
 ```
-<platform-function-app> (B3 Basic)
-├── ETL Layer (CoreMachine, Jobs, Platform)
-└── Service Layer (STAC, OGC Features, Raster, Xarray)
+Azure API Management (api.example.com)
+├─→ Platform Function App (<platform-function-app>)
+│   ├── /api/platform/*    → Platform API (job submission)
+│   ├── /api/jobs/*        → Job status
+│   └── /api/dbadmin/*     → Admin endpoints
+│
+└─→ Service Layer Docker App (<service-layer-app>)
+    ├── /stac/*            → STAC API (stac-fastapi)
+    ├── /features/*        → OGC Features (TiPG)
+    ├── /tiles/mvt/*       → Vector Tiles (TiPG)
+    ├── /cog/*             → COG Tiles (TiTiler)
+    └── /xarray/*          → Zarr Tiles (TiTiler)
 
-<titiler-app> (Docker - future)
-└── TiTiler tile serving
+Both connect to: PostgreSQL (shared database)
 ```
 
-### TiTiler Deployment (Docker Required)
+### Docker Deployment
+
+The Service Layer runs as a single Docker container:
 
 ```bash
-# Azure App Service for Containers
-az webapp create --resource-group $RG --plan $PLAN --name $NAME \
-  --deployment-container-image-name ghcr.io/developmentseed/titiler-pgstac:latest
+# Build and push
+az acr build --registry $ACR --image service-layer:$VERSION --file Dockerfile.service .
 
-# Environment variables
-az webapp config appsettings set --name $NAME --resource-group $RG \
-  --settings DATABASE_URL="postgresql://..." TITILER_API_CACHECONTROL="public, max-age=3600"
+# Deploy to Azure Web App for Containers
+az webapp create --resource-group $RG --plan $PLAN --name $NAME \
+  --deployment-container-image-name $ACR.azurecr.io/service-layer:$VERSION
+
+# Configure environment
+az webapp config appsettings set --name $NAME --resource-group $RG --settings \
+  DATABASE_URL="postgresql://..." \
+  PGSTAC_SCHEMA="pgstac" \
+  TIPG_SCHEMA="geo" \
+  TITILER_API_CACHECONTROL="public, max-age=3600"
 ```
 
-### When to Split to Standalone
+### Environment Variables
 
-Split the Service Layer when:
-- **Performance bottlenecks**: Read APIs impacted by ETL workloads
-- **Deployment conflicts**: Need to deploy API fixes without touching ETL
-- **Security requirements**: Different auth policies for public vs internal
-- **Cost optimization**: Scale read-heavy APIs independently
+| Variable | Purpose | Example |
+|----------|---------|---------|
+| `DATABASE_URL` | PostgreSQL connection string | `postgresql://user:pass@host:5432/db` |
+| `PGSTAC_SCHEMA` | Schema for STAC metadata | `pgstac` |
+| `TIPG_SCHEMA` | Schema for vector tables | `geo` |
+| `TITILER_API_CACHECONTROL` | Cache headers | `public, max-age=3600` |
+| `AZURE_STORAGE_ACCOUNT` | Storage for COGs/Zarr | `myaccount` |
+| `AZURE_STORAGE_SAS_TOKEN` | SAS token (if private) | `sv=2022-...` |
+
+### Database Access Pattern
+
+The Service Layer is **read-only** and accesses these schemas:
+
+| Schema | Tables | Access |
+|--------|--------|--------|
+| `geo` | Vector tables, `table_catalog` | SELECT only |
+| `pgstac` | `collections`, `items`, `searches` | SELECT only |
+| `h3` | H3 grid tables | SELECT only |
+
+The Service Layer does **NOT** access:
+- `app` schema (jobs, tasks) - Platform API only
+- Service Bus queues - Platform API only
+- Bronze storage account - Platform API only
+
+---
+
+## 7. Zarr Dataset Integration
+
+### Preparing Zarr for TiTiler
+
+When preparing new Zarr datasets:
+
+1. **Write with zarr_format=2** for TiTiler compatibility
+2. **Consolidate metadata** - verify `.zmetadata` is complete
+3. **Enable public blob access** (or configure SAS tokens)
+4. **Test `/xarray/variables` endpoint** before tile requests
+5. **Use `decode_times=false`** for climate data with non-standard calendars
+
+### Common Issues
+
+**Empty Variables Error**
+```json
+{"detail":"No variable named 'temperature'. Variables on the dataset include []"}
+```
+**Solution**: Re-consolidate metadata or use `&reader_options={"consolidated":false}`
+
+**Chunk Alignment Errors**
+```
+ValueError: Specified Zarr chunks encoding would overlap multiple Dask chunks
+```
+**Solution**: Explicitly set encoding chunks as tuples matching Dask chunks.
+
+See `docs_claude/ZARR_TITILER_LESSONS.md` for detailed troubleshooting.
 
 ---
 
 ## 8. API Quick Reference
 
-### STAC API
+### STAC API (stac-fastapi)
 ```bash
-GET  /api/stac                               # Landing page
-GET  /api/stac/collections                   # List collections
-GET  /api/stac/collections/{id}/items        # Query items
-POST /api/stac/search                        # Cross-collection search
+GET  /stac                               # Landing page
+GET  /stac/collections                   # List collections
+GET  /stac/collections/{id}/items        # Query items
+POST /stac/search                        # Cross-collection search
 ```
 
-### OGC Features API
+### OGC Features API (TiPG)
 ```bash
-GET  /api/features                           # Landing page
-GET  /api/features/collections               # List collections
-GET  /api/features/collections/{id}/items    # Query features
+GET  /features                           # Landing page
+GET  /features/collections               # List collections
+GET  /features/collections/{id}/items    # Query features
      ?bbox=-70,-56,-69,-55
      &datetime=2024-01-01/2024-12-31
      &limit=100&sortby=-created
+     &filter=status='active'             # CQL2 filter
 ```
 
-### TiTiler (COGs) - Tile Serving
+### Vector Tiles (TiPG)
 ```bash
-GET  /cog/tiles/{z}/{x}/{y}.png?url=...      # Map tiles
-GET  /cog/info?url=...                       # Metadata
-GET  /cog/point/{lon},{lat}?url=...          # Point query
+GET  /tiles/mvt/{collection}/{z}/{x}/{y}.pbf   # Vector tile
+GET  /tiles/mvt/{collection}/tilejson.json     # TileJSON
+GET  /tiles/mvt/{collection}/style.json        # MapLibre style
 ```
 
-### TiTiler (Zarr) - Tile Serving
+### COG Tiles (TiTiler)
+```bash
+GET  /cog/tiles/{z}/{x}/{y}.png?url=...  # Map tiles
+GET  /cog/info?url=...                   # Metadata
+GET  /cog/point/{lon},{lat}?url=...      # Point query
+GET  /cog/preview.png?url=...            # Preview image
+```
+
+### Zarr Tiles (TiTiler-xarray)
 ```bash
 GET  /xarray/variables?url=...&decode_times=false
 GET  /xarray/info?url=...&variable=...&decode_times=false
@@ -857,128 +487,35 @@ GET  /xarray/tiles/WebMercatorQuad/{z}/{x}/{y}@1x.png
      &colormap_name=viridis&rescale=250,320
 ```
 
-### Raster Queries API (Synchronous - Under Consideration)
-```bash
-GET  /api/raster/point/{collection}/{item}   # Point value query
-     ?lon=-77.0&lat=38.9&bands=1,2,3
-POST /api/raster/zonal/{collection}/{item}   # Zonal statistics
-     {"geometry": {...}, "stats": ["mean", "max"]}
-GET  /api/raster/bandmath/{collection}/{item} # Band math
-     ?expression=(b4-b3)/(b4+b3)&bbox=...
-POST /api/raster/transect/{collection}/{item} # Transect profile
-     {"geometry": {"type": "LineString", ...}}
-```
-
-### Xarray Queries API (Synchronous - Under Consideration)
-```bash
-GET  /api/xarray/point/{collection}/{item}   # Time-series at point
-     ?location={lon},{lat}&start_time=...&end_time=...
-GET  /api/xarray/statistics/{collection}/{item} # Regional stats
-     ?bbox=...&start_time=...&end_time=...
-GET  /api/xarray/aggregate/{collection}/{item}  # Temporal aggregation
-     ?bbox=...&temporal_agg=mean&format=tif
-```
-
 ---
 
-## 9. Service Latency Tracking (10 JAN 2026)
+## 9. Observability
 
-### Overview
+### Health Endpoints
 
-Service layer operations can be instrumented with latency tracking for debugging performance issues in opaque QA environments.
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /health` | Combined health status |
+| `GET /stac/health` | STAC API health |
+| `GET /features/health` | TiPG health |
 
-**Controlled by**: `METRICS_DEBUG_MODE=true` (default: false)
+### Metrics
 
-### Architecture
-
-```
-HTTP Request → Service Layer (@track_latency) → Repository Layer (@track_db_operation)
-                     │                                    │
-                     ▼                                    ▼
-            Application Insights                 Application Insights
-            [SERVICE_LATENCY] logs              [DB_LATENCY] logs
-                     │                                    │
-                     └──────────── Blob Storage ──────────┘
-                                   (applogs container)
-```
-
-### Decorators
-
-| Decorator | Use For | Log Prefix |
-|-----------|---------|------------|
-| `@track_latency("operation.name")` | Service layer methods | `[SERVICE_LATENCY]` |
-| `@track_db_operation("operation.name")` | Repository/database methods | `[DB_LATENCY]` |
-
-### Usage
-
-```python
-from infrastructure.service_latency import track_latency, track_db_operation
-
-class OGCFeaturesService:
-    @track_latency("ogc.query_features")
-    def query_features(self, collection_id: str, **params):
-        # Service logic...
-        pass
-
-class OGCFeaturesRepository:
-    @track_db_operation("ogc.query_features_db")
-    def query_features(self, collection_id: str, bbox=None):
-        # Database query...
-        pass
-```
-
-### Instrumented Operations
-
-**OGC Features API** (`ogc_features/service.py`):
-- `ogc.list_collections`
-- `ogc.get_collection`
-- `ogc.query_features`
-- `ogc.get_feature`
-
-**OGC Features Repository** (`ogc_features/repository.py`):
-- `ogc.list_collections_db`
-- `ogc.get_collection_metadata_db`
-- `ogc.query_features_db`
-- `ogc.get_feature_by_id_db`
-
-**STAC API** (`stac_api/service.py`):
-- `stac.get_collections`
-- `stac.get_collection`
-- `stac.get_items`
-- `stac.get_item`
-
-### Blob Storage Output
-
-When enabled, metrics are buffered and flushed to blob storage:
+Service latency is tracked via blob-based metrics when `OBSERVABILITY_MODE=true`:
 
 **Path**: `applogs/service-metrics/{date}/{instance_id}/{timestamp}.jsonl`
 
-**Format** (JSON Lines):
+**Format**:
 ```json
-{"ts": "2026-01-10T14:30:52Z", "op": "ogc.query_features", "ms": 145.2, "status": "success", "layer": "service"}
-{"ts": "2026-01-10T14:30:53Z", "op": "ogc.query_features_db", "ms": 89.1, "status": "success", "layer": "database"}
+{"ts": "2026-01-10T14:30:52Z", "op": "stac.search", "ms": 145.2, "status": "success"}
+{"ts": "2026-01-10T14:30:53Z", "op": "tipg.query_features", "ms": 89.1, "status": "success"}
 ```
 
-### Performance Impact
+### Logging
 
-- **Disabled** (`METRICS_DEBUG_MODE=false`): Zero overhead - decorators return immediately
-- **Enabled**: ~0.1ms overhead per operation (timing + logging)
-
-### Configuration
-
-| Env Var | Default | Description |
-|---------|---------|-------------|
-| `METRICS_DEBUG_MODE` | `false` | Enable/disable latency tracking |
-| `SERVICE_LATENCY_SLOW_MS` | `2000` | Threshold for SLOW warnings |
-| `METRICS_FLUSH_INTERVAL` | `60` | Seconds between blob flushes |
-| `METRICS_BUFFER_SIZE` | `100` | Records before auto-flush |
-
-### Endpoints
-
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/api/metrics/stats` | GET | View current metrics statistics |
-| `/api/metrics/flush` | POST | Force flush metrics to blob |
+All logs are sent to the container's stdout and captured by Azure App Service logging. View via:
+- Azure Portal → Web App → Log stream
+- Azure CLI: `az webapp log tail --name $NAME --resource-group $RG`
 
 ---
 
@@ -986,14 +523,15 @@ When enabled, metrics are buffered and flushed to blob storage:
 
 | Document | Purpose |
 |----------|---------|
-| `docs_claude/APIM_ARCHITECTURE.md` | Future microservices architecture with APIM |
-| `docs_claude/ZARR_TITILER_LESSONS.md` | Detailed zarr/TiTiler integration notes |
+| [TiTiler Documentation](https://developmentseed.org/titiler/) | Official TiTiler docs |
+| [TiPG Documentation](https://developmentseed.org/tipg/) | Official TiPG docs |
+| [stac-fastapi Documentation](https://stac-utils.github.io/stac-fastapi/) | Official stac-fastapi docs |
+| [STAC Specification](https://stacspec.org/) | STAC standard |
+| [OGC API - Features](https://ogcapi.ogc.org/features/) | OGC standard |
+| `docs_claude/ZARR_TITILER_LESSONS.md` | Zarr integration notes |
 | `docs_claude/ARCHITECTURE_REFERENCE.md` | Overall system architecture |
-| `docs_claude/OGC_FEATURES_METADATA_INTEGRATION.md` | Metadata integration guide |
-| `ogc_features/README.md` | OGC Features implementation details |
-| `stac_api/README.md` | STAC API implementation details |
 
 ---
 
 **Author:** Platform Team
-**Last Updated:** 10 JAN 2026
+**Last Updated:** 01 FEB 2026

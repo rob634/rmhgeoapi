@@ -403,7 +403,6 @@ The Service Layer is **read-only** and accesses these schemas:
 |--------|--------|--------|
 | `geo` | Vector tables, `table_catalog` | SELECT only |
 | `pgstac` | `collections`, `items`, `searches` | SELECT only |
-| `h3` | H3 grid tables | SELECT only |
 
 The Service Layer does **NOT** access:
 - `app` schema (jobs, tasks) - Platform API only

@@ -154,7 +154,6 @@ See [ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md) for storage configurati
 | `app` | Job/task orchestration, API requests, assets | CoreMachine |
 | `pgstac` | STAC metadata catalog | pypgstac |
 | `geo` | Vector data (PostGIS tables) | ETL jobs |
-| `h3` | H3 hexagonal grids | Static SQL |
 
 See [ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md) for schema configuration.
 
@@ -527,7 +526,7 @@ def bulk_insert_with_copy(conn, table_name, rows: list[dict]):
 4. **Budget connections explicitly** - Calculate max connections per task before scaling
 5. **Fail fast on connection errors** - Don't retry connection exhaustion (it makes it worse)
 
-**Further reading**: The H3 cascade handler refactoring applied this pattern successfully.
+**Further reading**: The cascade handler refactoring applied this pattern successfully.
 
 ### Distributed Systems Challenges We Solved
 
@@ -551,8 +550,7 @@ def bulk_insert_with_copy(conn, table_name, rows: list[dict]):
 PostgreSQL Database (4 independent schemas)
 ├── app     (CoreMachine)  ← CRITICAL: Job/task orchestration
 ├── geo     (Vector Data)  ← CRITICAL: PostGIS tables, OGC Features API
-├── pgstac  (STAC Catalog) ← OPTIONAL: Metadata discovery
-└── h3      (H3 Grids)     ← OPTIONAL: Hexagonal grid system
+└── pgstac  (STAC Catalog) ← OPTIONAL: Metadata discovery
 ```
 
 **What Works WITHOUT pgSTAC**:

@@ -143,7 +143,7 @@ WHERE rolname IN ('<admin_identity_name>', '<reader_identity_name>');
 -- Run on: geoapp database
 -- ============================================================================
 
--- Allow creating schemas (this is how the app creates app/geo/h3/pgstac schemas)
+-- Allow creating schemas (this is how the app creates app/geo/pgstac schemas)
 GRANT CREATE ON DATABASE geoapp TO "<admin_identity_name>";
 
 -- Verify
@@ -214,11 +214,6 @@ GRANT USAGE ON SCHEMA pgstac TO "<reader_identity_name>";
 GRANT SELECT ON ALL TABLES IN SCHEMA pgstac TO "<reader_identity_name>";
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgstac TO "<reader_identity_name>";
 
--- h3 schema (H3 grids)
-GRANT USAGE ON SCHEMA h3 TO "<reader_identity_name>";
-GRANT SELECT ON ALL TABLES IN SCHEMA h3 TO "<reader_identity_name>";
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA h3 TO "<reader_identity_name>";
-
 -- public schema (PostGIS functions)
 GRANT USAGE ON SCHEMA public TO "<reader_identity_name>";
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO "<reader_identity_name>";
@@ -241,9 +236,6 @@ ALTER DEFAULT PRIVILEGES FOR ROLE "<admin_identity_name>" IN SCHEMA geo
     GRANT SELECT ON TABLES TO "<reader_identity_name>";
 
 ALTER DEFAULT PRIVILEGES FOR ROLE "<admin_identity_name>" IN SCHEMA pgstac
-    GRANT SELECT ON TABLES TO "<reader_identity_name>";
-
-ALTER DEFAULT PRIVILEGES FOR ROLE "<admin_identity_name>" IN SCHEMA h3
     GRANT SELECT ON TABLES TO "<reader_identity_name>";
 ```
 
@@ -284,7 +276,7 @@ SELECT
     n.nspname as schema,
     has_schema_privilege('<reader_identity_name>', n.nspname, 'USAGE') as has_usage
 FROM pg_namespace n
-WHERE n.nspname IN ('geo', 'pgstac', 'h3', 'public')
+WHERE n.nspname IN ('geo', 'pgstac', 'public')
 ORDER BY n.nspname;
 
 -- Expected: all has_usage = true

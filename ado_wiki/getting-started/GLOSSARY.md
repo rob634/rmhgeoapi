@@ -36,7 +36,6 @@ This document provides clear definitions for technical terms used throughout the
 | FOSS | Free and Open Source Software | Software with publicly available source code |
 | GDAL | Geospatial Data Abstraction Library | Library for reading and writing geospatial file formats |
 | GIS | Geographic Information System | System for storing, analyzing, and visualizing geographic data |
-| H3 | Hexagonal Hierarchical Spatial Index | Uber's hexagonal grid system for spatial indexing |
 | HTTP | Hypertext Transfer Protocol | Protocol for transmitting data over the internet |
 | JSON | JavaScript Object Notation | Lightweight data interchange format |
 | MRO | Method Resolution Order | Order in which Python searches for methods in class hierarchy |
@@ -203,7 +202,6 @@ A namespace within a PostgreSQL database that contains tables, functions, and ot
 - **app**: Job and task records
 - **geo**: User vector data
 - **pgstac**: STAC metadata
-- **h3**: H3 hexagonal grid data
 
 ### Advisory Lock
 A PostgreSQL feature that allows code to acquire a lock on a custom identifier. Used to ensure only one task advances a job to the next stage.

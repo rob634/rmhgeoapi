@@ -60,9 +60,6 @@ PostgreSQL Database
 │   ├── {user_tables}           # PostGIS tables created by process_vector jobs
 │   └── spatial indexes
 │
-├── h3 (Analytics)
-│   └── {h3_cells}              # Static H3 grid data for zonal aggregation
-│
 └── pgstac (STAC Metadata)
     ├── collections   # STAC collection records
     ├── items         # STAC item records

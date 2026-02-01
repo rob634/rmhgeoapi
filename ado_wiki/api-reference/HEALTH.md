@@ -323,7 +323,6 @@ Environment variables are validated at startup with **regex patterns** to catch 
 | `POSTGIS_SCHEMA` | Lowercase letters/numbers/underscore | `geo` |
 | `APP_SCHEMA` | Lowercase letters/numbers/underscore | `app` |
 | `PGSTAC_SCHEMA` | Lowercase letters/numbers/underscore | `pgstac` |
-| `H3_SCHEMA` | Lowercase letters/numbers/underscore | `h3` |
 
 ### Common Validation Errors
 

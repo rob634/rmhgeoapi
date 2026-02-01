@@ -70,7 +70,6 @@ One of these is required:
 | `POSTGIS_SCHEMA` | PostGIS/vector data schema | `geo` |
 | `APP_SCHEMA` | Job/task orchestration schema | `app` |
 | `PGSTAC_SCHEMA` | STAC catalog schema | `pgstac` |
-| `H3_SCHEMA` | H3 analytics schema | `h3` |
 
 ---
 
@@ -83,7 +82,7 @@ One of these is required:
 | `POSTGIS_PORT` | `5432` | PostgreSQL port |
 | `DB_CONNECTION_TIMEOUT` | `30` | Connection timeout in seconds |
 
-**Note**: Schema names (`POSTGIS_SCHEMA`, `APP_SCHEMA`, `PGSTAC_SCHEMA`, `H3_SCHEMA`) moved to Section 1.5 — they are now REQUIRED with no defaults.
+**Note**: Schema names (`POSTGIS_SCHEMA`, `APP_SCHEMA`, `PGSTAC_SCHEMA`) moved to Section 1.5 — they are now REQUIRED with no defaults.
 
 ### 2.2 Business Database (Optional - Separate DB)
 
@@ -166,7 +165,6 @@ Each trust zone can have its own storage account. Required accounts are in Secti
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `GOLD_GEOPARQUET_CONTAINER` | `gold-geoparquet` | GeoParquet exports |
-| `GOLD_H3_GRIDS_CONTAINER` | `gold-h3-grids` | H3 grid exports |
 | `GOLD_TEMP_CONTAINER` | `gold-temp` | Temporary export files |
 
 ---
@@ -202,15 +200,6 @@ Each trust zone can have its own storage account. Required accounts are in Secti
 | `VECTOR_CREATE_SPATIAL_INDEXES` | `true` | Create spatial indexes |
 | `VECTOR_PICKLE_CONTAINER` | `bronze-temp` | Container for pickle files |
 | `VECTOR_PICKLE_PREFIX` | `temp/vector_etl` | Prefix for pickle files |
-
-### 5.3 H3 Analytics
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `H3_DEFAULT_RESOLUTION` | `4` | Default H3 resolution (0-15) |
-| `H3_ENABLE_LAND_FILTER` | `true` | Filter to land cells only |
-| `H3_SYSTEM_ADMIN0_TABLE` | `geo.admin0` | Admin0 boundaries table |
-| `H3_SPATIAL_FILTER_TABLE` | `geo.land_mask` | Land mask table |
 
 ---
 
@@ -363,7 +352,6 @@ See [DOCKER_INTEGRATION.md](../architecture/DOCKER_INTEGRATION.md) for full setu
     "POSTGIS_SCHEMA": "geo",
     "APP_SCHEMA": "app",
     "PGSTAC_SCHEMA": "pgstac",
-    "H3_SCHEMA": "h3",
 
     "APP_NAME": "local-dev",
     "SERVICE_BUS_FQDN": "your-servicebus.servicebus.windows.net",
@@ -389,7 +377,6 @@ POSTGIS_DATABASE=geodb
 POSTGIS_SCHEMA=geo
 APP_SCHEMA=app
 PGSTAC_SCHEMA=pgstac
-H3_SCHEMA=h3
 
 # Authentication
 USE_MANAGED_IDENTITY=true

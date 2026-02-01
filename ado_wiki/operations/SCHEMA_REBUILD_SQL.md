@@ -90,7 +90,6 @@ The executing user (managed identity) needs:
 | `app` | **YES** | SQL below | CoreMachine jobs/tasks |
 | `pgstac` | **YES** | pypgstac CLI | STAC metadata catalog |
 | `geo` | **NEVER** | - | User business data |
-| `h3` | Manual only | Bootstrap SQL | Static H3 grid data |
 
 ---
 

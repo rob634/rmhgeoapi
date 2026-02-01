@@ -93,7 +93,7 @@ USER REQUEST
 │                                                      │
 │ • raster-tasks      - COG processing, tile extract  │
 │ • vector-tasks      - PostGIS operations            │
-│ • long-running-tasks - H3 grids, large batch ops    │
+│ • long-running-tasks - Large batch operations       │
 │                                                      │
 │ Messages: N × TaskQueueMessage                      │
 │   {                                                  │
@@ -314,7 +314,7 @@ Max Delivery Count: 1 (CRITICAL - disables Service Bus retries)
 Default Message TTL: P7D (7 days)
 Max Size: 1024 MB (1 GB)
 Dead-Letter Queue: Enabled (automatic)
-Purpose: H3 grid generation, large batch operations, cascade handlers
+Purpose: Large batch operations, cascade handlers
 ```
 
 **How to create**:
@@ -841,7 +841,7 @@ Tasks are automatically routed to the appropriate queue based on their type:
 |------------------|-------|-----------|
 | `*_raster_*`, `extract_tiles`, `create_cog` | raster-tasks | Memory-intensive raster ops |
 | `*_vector_*`, `postgis_*`, `ingest_features` | vector-tasks | PostGIS operations |
-| `*_h3_*`, `cascade_*`, `generate_grid` | long-running-tasks | Operations > 5 minutes |
+| `cascade_*`, long-running operations | long-running-tasks | Operations > 5 minutes |
 | All others | raster-tasks | Default queue |
 
 ### Queue Configuration Values
@@ -873,8 +873,8 @@ All task queues share the same configuration:
 | Queue | Purpose | Typical Tasks |
 |-------|---------|---------------|
 | `raster-tasks` | Memory-intensive raster operations | COG creation, tile extraction, STAC registration |
-| `vector-tasks` | PostGIS database operations | Feature ingestion, spatial queries, H3 lookups |
-| `long-running-tasks` | Operations exceeding 5 minutes | H3 grid generation, cascade handlers, batch aggregations |
+| `vector-tasks` | PostGIS database operations | Feature ingestion, spatial queries |
+| `long-running-tasks` | Operations exceeding 5 minutes | Cascade handlers, batch aggregations |
 
 ### host.json Configuration
 
@@ -1538,7 +1538,7 @@ For developers setting up a new environment, follow this checklist:
   - [ ] `geospatial-jobs` (job orchestration)
   - [ ] `raster-tasks` (raster processing)
   - [ ] `vector-tasks` (PostGIS operations)
-  - [ ] `long-running-tasks` (H3 grids, cascade handlers)
+  - [ ] `long-running-tasks` (cascade handlers, batch operations)
 - [ ] **Step 3**: Verify `maxDeliveryCount: 1` on ALL queues
 - [ ] **Step 4**: Get Service Bus connection string
 - [ ] **Step 5**: Set `ServiceBusConnection` environment variable in Function App

@@ -5,7 +5,7 @@
 **Last Updated**: 01 FEB 2026
 **Purpose**: B2B integration API for geospatial data processing
 **Audience**: DDH developers, external application integrators
-**API Version**: 1.4.0
+**API Version**: 1.5.0 (V0.8.6.2 - Version Lineage + dry_run)
 
 ---
 
@@ -18,18 +18,20 @@ The Platform API provides a complete lifecycle for geospatial data:
 │                          PLATFORM API WORKFLOW                               │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│   1. SUBMIT          2. POLL           3. APPROVE/REJECT   4. UNPUBLISH    │
-│   ────────────       ────────────      ────────────────    ────────────    │
-│   POST /submit   →   GET /status   →   POST /approve   →   POST /unpublish │
-│                                        POST /reject                         │
-│   Returns:           Returns:          Triggers:           Removes:         │
-│   • request_id       • job_status      • Publication       • STAC items     │
-│   • polling URL      • progress        • Service Layer     • COG blobs      │
-│                      • preview URLs      availability      • Tables         │
-│                        (on complete)                                        │
+│   0. VALIDATE        1. SUBMIT          2. POLL           3. APPROVE       │
+│   ────────────       ────────────       ────────────      ────────────     │
+│   POST /validate →   POST /submit   →   GET /status   →   POST /approve    │
+│   (or ?dry_run)                                           POST /reject     │
 │                                                                             │
-│   RESUBMIT (retry failed jobs)                                              │
-│   POST /resubmit → Cleanup artifacts → New job created                      │
+│   Returns:           Returns:           Returns:          Triggers:         │
+│   • lineage_state    • request_id       • job_status      • Publication     │
+│   • valid: t/f       • polling URL      • progress        • Service Layer   │
+│   • suggested_params                    • preview URLs                      │
+│                                                                             │
+│   4. UNPUBLISH                     RESUBMIT (retry failed jobs)             │
+│   ────────────                     ────────────────────────────             │
+│   POST /unpublish                  POST /resubmit → Cleanup → New job       │
+│   Removes: STAC, COGs, Tables                                               │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -124,7 +126,13 @@ Generic submission endpoint that auto-detects data type from file extension or e
 | `service_name` | string | - | Human-readable dataset name |
 | `access_level` | string | `OUO` | `OUO` (internal) or `PUBLIC` (external delivery) |
 | `processing_options` | object | - | Type-specific processing options |
-| `dry_run` | boolean | false | Validate without executing |
+| `previous_version_id` | string | - | **Required for version advances** - must match current latest version |
+
+### Query Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `dry_run` | boolean | `false` | Validate without creating job (returns lineage state) |
 
 ### Supported Operations
 
@@ -238,39 +246,141 @@ GET /api/platform/status?limit=100&status=pending
 
 ---
 
-## 3. Pre-flight Validation
+## 3. Pre-flight Validation & Version Lineage
 
-### Endpoint
+### Overview
+
+The Platform API tracks **version lineage** for datasets. When submitting a new version (e.g., v2.0 after v1.0), you must specify `previous_version_id` to prevent race conditions where two clients submit the same version simultaneously.
+
+**Two equivalent validation workflows:**
+- `POST /api/platform/validate` - Standalone validation endpoint
+- `POST /api/platform/submit?dry_run=true` - Submit with dry_run parameter
+
+Both return identical responses and use the same validation logic.
+
+### Validation Endpoint
+
 ```
 POST /api/platform/validate
+POST /api/platform/submit?dry_run=true
 ```
-
-### Purpose
-Validate a submission before creating a job. Returns the same result as `POST /api/platform/submit?dry_run=true`.
 
 ### Request Body
 Same format as `/api/platform/submit`.
 
-### Response
+### Response Structure
 
 ```json
 {
     "valid": true,
     "dry_run": true,
     "request_id": "791147831f11d833c779f8288d34fa5a",
-    "would_create_job_type": "process_raster_v2",
+    "would_create_job_type": "vector_docker_etl",
     "lineage_state": {
-        "has_previous_version": false,
-        "previous_version_id": null
+        "lineage_id": "c391b297bdf4a51cc23f0dd1af9d37d1",
+        "lineage_exists": true,
+        "current_latest": {
+            "version_id": "v1.0",
+            "version_ordinal": 1,
+            "asset_id": "d386f436d2219eb2...",
+            "is_served": true,
+            "created_at": "2026-02-01T21:41:41.039810"
+        }
     },
     "validation": {
-        "file_exists": true,
-        "file_size_mb": 250.5,
-        "format_valid": true
+        "data_type_detected": "vector",
+        "previous_version_valid": true
     },
     "warnings": [],
-    "suggested_params": {}
+    "suggested_params": {
+        "version_ordinal": 2,
+        "previous_version_id": "v1.0"
+    }
 }
+```
+
+### Version Validation Matrix
+
+| `previous_version_id` | Lineage State | Result |
+|-----------------------|---------------|--------|
+| `null` | Empty (first version) | ✅ **valid: true** |
+| `null` | Has versions (v1.0 exists) | ❌ **valid: false** - "Specify previous_version_id='v1.0'" |
+| `"v1.0"` | Empty lineage | ❌ **valid: false** - "v1.0 doesn't exist" |
+| `"v1.0"` | Latest is v1.0 | ✅ **valid: true** |
+| `"v1.0"` | Latest is v2.0 | ❌ **valid: false** - "v1.0 is not latest, current is v2.0" |
+
+### Recommended Workflow
+
+**Step 1: Validate before submitting**
+```bash
+curl -X POST "{BASE_URL}/api/platform/submit?dry_run=true" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "dataset_id": "floods",
+    "resource_id": "jakarta",
+    "version_id": "v2.0",
+    "data_type": "vector",
+    "container_name": "bronze-vectors",
+    "file_name": "jakarta_v2.gpkg"
+  }'
+```
+
+**Response (lineage exists, missing previous_version_id):**
+```json
+{
+    "valid": false,
+    "warnings": [
+        "Version 'v1.0' already exists for this dataset/resource. Specify previous_version_id='v1.0' to submit a new version."
+    ],
+    "suggested_params": {
+        "previous_version_id": "v1.0",
+        "version_ordinal": 2
+    }
+}
+```
+
+**Step 2: Submit with previous_version_id**
+```bash
+curl -X POST "{BASE_URL}/api/platform/submit" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "dataset_id": "floods",
+    "resource_id": "jakarta",
+    "version_id": "v2.0",
+    "previous_version_id": "v1.0",
+    "data_type": "vector",
+    "container_name": "bronze-vectors",
+    "file_name": "jakarta_v2.gpkg"
+  }'
+```
+
+### Validation Errors (Submit without dry_run)
+
+If you submit without `dry_run=true` and validation fails, you get a **400 Bad Request**:
+
+```json
+{
+    "success": false,
+    "error": "Version 'v1.0' already exists for this dataset/resource. Specify previous_version_id='v1.0' to submit a new version.",
+    "error_type": "ValidationError"
+}
+```
+
+### First Version (No Lineage)
+
+For the first version of a dataset/resource, `previous_version_id` is not required:
+
+```bash
+curl -X POST "{BASE_URL}/api/platform/submit" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "dataset_id": "floods",
+    "resource_id": "jakarta",
+    "version_id": "v1.0",
+    "data_type": "vector",
+    "container_name": "bronze-vectors",
+    "file_name": "jakarta_v1.gpkg"
+  }'
 ```
 
 ---
@@ -922,7 +1032,93 @@ request_id = SHA256(dataset_id + resource_id + version_id)
 
 ---
 
-## 13. Error Handling
+## 13. Version Lineage
+
+### Concept
+
+A **lineage** groups all versions of the same dataset/resource combination. The lineage ID is computed from:
+
+```
+lineage_id = SHA256(platform_id + dataset_id + resource_id)
+```
+
+Note: `version_id` is **excluded** from the lineage hash, so all versions share the same lineage.
+
+### Lineage State
+
+Each lineage tracks:
+- **current_latest**: The most recent version (`is_latest=true`)
+- **version_ordinal**: Sequential version number (1, 2, 3...)
+- **previous_asset_id**: Links to the prior version's asset
+
+### Version Chain Example
+
+```
+Lineage: floods/jakarta (lineage_id: c391b297...)
+├── v1.0 (ordinal=1, is_latest=false, previous=null)
+├── v2.0 (ordinal=2, is_latest=false, previous=v1.0)
+└── v3.0 (ordinal=3, is_latest=true,  previous=v2.0)  ← current
+```
+
+### Race Condition Prevention
+
+The `previous_version_id` requirement prevents race conditions:
+
+```
+┌──────────────┐     ┌──────────────┐
+│   Client A   │     │   Client B   │
+└──────┬───────┘     └──────┬───────┘
+       │                    │
+       │  Submit v2.0       │  Submit v2.0
+       │  prev=v1.0         │  prev=v1.0
+       ▼                    ▼
+┌──────────────────────────────────────┐
+│           Platform API               │
+│  ┌────────────────────────────────┐  │
+│  │  DB Constraint:                │  │
+│  │  Only ONE is_latest per lineage│  │
+│  └────────────────────────────────┘  │
+└──────────────────────────────────────┘
+       │                    │
+       ▼                    ▼
+   ✅ Success           ❌ 400 Error
+   (v2.0 created)       (v1.0 no longer latest)
+```
+
+**Without `previous_version_id`**: Both could succeed, creating corrupt state.
+
+**With `previous_version_id`**: Second client gets clear error message explaining v2.0 is now latest.
+
+### Checking Lineage State
+
+Use dry_run to check lineage before submitting:
+
+```bash
+curl -X POST "{BASE_URL}/api/platform/submit?dry_run=true" \
+  -d '{"dataset_id": "floods", "resource_id": "jakarta", "version_id": "v3.0", ...}'
+```
+
+Response shows current lineage state and suggested parameters:
+
+```json
+{
+    "lineage_state": {
+        "lineage_exists": true,
+        "current_latest": {
+            "version_id": "v2.0",
+            "version_ordinal": 2
+        }
+    },
+    "suggested_params": {
+        "previous_version_id": "v2.0",
+        "version_ordinal": 3
+    }
+}
+```
+
+---
+
+## 14. Error Handling
 
 ### Validation Error (400)
 
@@ -930,6 +1126,28 @@ request_id = SHA256(dataset_id + resource_id + version_id)
 {
     "success": false,
     "error": "Missing required parameter: dataset_id",
+    "error_type": "ValidationError"
+}
+```
+
+### Version Lineage Error (400)
+
+When submitting a new version without the correct `previous_version_id`:
+
+```json
+{
+    "success": false,
+    "error": "Version 'v1.0' already exists for this dataset/resource. Specify previous_version_id='v1.0' to submit a new version.",
+    "error_type": "ValidationError"
+}
+```
+
+When specifying wrong `previous_version_id`:
+
+```json
+{
+    "success": false,
+    "error": "previous_version_id='v0.5' does not match current latest version 'v1.0'",
     "error_type": "ValidationError"
 }
 ```
@@ -970,7 +1188,7 @@ request_id = SHA256(dataset_id + resource_id + version_id)
 
 ---
 
-## 14. Deprecated Endpoints
+## 15. Deprecated Endpoints
 
 These endpoints return 410 Gone with migration instructions:
 

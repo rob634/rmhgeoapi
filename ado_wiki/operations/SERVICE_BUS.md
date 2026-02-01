@@ -1417,7 +1417,7 @@ curl https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/health
 
 ### Deployment
 - **[docs_claude/DEPLOYMENT_GUIDE.md](docs_claude/DEPLOYMENT_GUIDE.md)** - General deployment procedures
-- **[CLAUDE.md](CLAUDE.md)** - Quick deployment commands and testing procedures
+- **deployment documentation** - Quick deployment commands and testing procedures
 
 ### Database Configuration
 - **API_DATABASE.md** (TO BE CREATED) - PostgreSQL setup and configuration guide

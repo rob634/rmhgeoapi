@@ -675,7 +675,7 @@ spec:
 
 ## Contact / Handoff Notes
 
-This document was prepared for handoff to "Docker Claude" - the Claude instance working on the Docker container application.
+This document was prepared for handoff to the Docker container application development.
 
 **Key Files to Reference**:
 - `config/app_mode_config.py` - AppMode enum and properties

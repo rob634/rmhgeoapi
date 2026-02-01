@@ -80,7 +80,7 @@ The Service Layer can be deployed as a **completely separate Function App** for:
 - **Cost optimization**: Right-size each app for its workload
 
 ```
-Azure API Management (geospatial.rmh.org)
+Azure API Management (<api-gateway-domain>)
 ├─→ <service-layer> (Standalone Function App)
 │   ├── /api/stac/*       → STAC API
 │   ├── /api/features/*   → OGC Features API
@@ -995,5 +995,5 @@ When enabled, metrics are buffered and flushed to blob storage:
 
 ---
 
-**Author:** Claude + Robert Harrison
+**Author:** Platform Team
 **Last Updated:** 10 JAN 2026

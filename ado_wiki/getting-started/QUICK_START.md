@@ -1,10 +1,9 @@
 # Quick Start Guide
 
-> **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [Health](WIKI_API_HEALTH.md) | [Errors](WIKI_API_ERRORS.md) | [Glossary](WIKI_API_GLOSSARY.md)
+> **Navigation**: **Quick Start** | [Platform API](../api-reference/PLATFORM_API.md) | [Health](../api-reference/HEALTH.md) | [Errors](../api-reference/ERRORS.md) | [Glossary](GLOSSARY.md)
 
-**Date**: 14 DEC 2025
+**Last Updated**: 01 FEB 2026
 **Status**: Reference Documentation
-**Wiki**: Azure DevOps Wiki - Getting started guide
 **Purpose**: Get new developers running their first job in 5 minutes
 **Audience**: New team members and developers unfamiliar with the system
 
@@ -43,8 +42,8 @@ curl https://<platform-api-url>/api/health
 ```json
 {
   "status": "healthy",
-  "timestamp": "2025-11-24T...",
-  "version": "..."
+  "timestamp": "2026-01-15T...",
+  "version": "0.8.6.2"
 }
 ```
 
@@ -130,7 +129,34 @@ Replace `{COLLECTION_NAME}` with a collection name from Step 4.
 
 ## Common Commands Reference
 
-### Job Submission
+### Platform API (Recommended for DDH Integration)
+
+The Platform API provides validation, version lineage tracking, and dry_run support:
+
+```bash
+# Validate parameters without creating job (dry_run)
+curl -X POST ".../api/platform/submit?dry_run=true" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "platform_id": "ddh",
+    "dataset_id": "floods",
+    "resource_id": "jakarta",
+    "version_id": "v1.0",
+    "job_type": "process_vector",
+    "blob_name": "data.geojson",
+    "file_extension": "geojson",
+    "table_name": "flood_jakarta_v1"
+  }'
+
+# Submit job (creates version lineage record)
+curl -X POST ".../api/platform/submit" \
+  -H 'Content-Type: application/json' \
+  -d '{...same payload without dry_run...}'
+```
+
+### Direct Job Submission (Power Users)
+
+For direct access without platform tracking:
 
 ```bash
 # Submit any job type
@@ -141,7 +167,7 @@ curl -X POST .../api/jobs/submit/hello_world \
   -H 'Content-Type: application/json' \
   -d '{"message": "test"}'
 
-# Example: process_vector (idempotent)
+# Example: process_vector
 curl -X POST .../api/jobs/submit/process_vector \
   -H 'Content-Type: application/json' \
   -d '{
@@ -193,6 +219,9 @@ POST /api/stac/search
 # Health check
 GET /api/health
 
+# Readiness probe
+GET /api/readyz
+
 # Database statistics
 GET /api/dbadmin/stats
 ```
@@ -201,15 +230,16 @@ GET /api/dbadmin/stats
 
 ## Job Types Quick Reference
 
-| Job Type | Purpose | Required Parameters |
-|----------|---------|---------------------|
-| `hello_world` | Test system | `message` (optional) |
-| `process_vector` | Load vector data to PostGIS | `blob_name`, `file_extension`, `table_name` |
-| `process_raster_v2` | Convert raster to COG (recommended) | `blob_name`, `container_name` |
-| `process_raster` | Convert raster to COG (legacy) | `blob_name`, `container_name` |
-| `process_raster_collection` | Process multiple rasters | `blob_list`, `collection_id`, `container_name` |
+| Job Type | Purpose | Processing | Required Parameters |
+|----------|---------|------------|---------------------|
+| `hello_world` | Test system | Function App | `message` (optional) |
+| `process_vector` | Load vector data to PostGIS | Docker Worker | `blob_name`, `file_extension`, `table_name` |
+| `process_raster` | Convert raster to COG | Docker Worker | `blob_name`, `container_name` |
+| `process_raster_collection` | Process multiple rasters | Docker Worker | `blob_list`, `collection_id`, `container_name` |
 
-For complete parameter documentation, see [WIKI_PLATFORM_API.md](WIKI_PLATFORM_API.md).
+**Note**: Heavy processing jobs (vector ETL, raster processing) are routed to the Docker Worker for efficient memory management.
+
+For complete parameter documentation, see [Platform API](../api-reference/PLATFORM_API.md).
 
 ---
 
@@ -225,7 +255,7 @@ For complete parameter documentation, see [WIKI_PLATFORM_API.md](WIKI_PLATFORM_A
 ### Workflow 2: Process Raster Data
 
 1. Upload GeoTIFF to Bronze container
-2. Submit `process_raster_v2` job (recommended) - see [WIKI_JOB_PROCESS_RASTER_V2.md](WIKI_JOB_PROCESS_RASTER_V2.md)
+2. Submit `process_raster` job
 3. Check job status until completed
 4. Access COG via TiTiler URLs in job result
 
@@ -236,13 +266,19 @@ For complete parameter documentation, see [WIKI_PLATFORM_API.md](WIKI_PLATFORM_A
 3. Check job status until completed
 4. Access collection via STAC API and TiTiler
 
+### Workflow 4: Version Management (DDH Integration)
+
+1. Use `dry_run=true` to check version lineage state
+2. Submit with `previous_version_id` if updating existing data
+3. Platform tracks version history automatically
+
 ---
 
 ## Job Status Values
 
 | Status | Meaning |
 |--------|---------|
-| `queued` | Job received, waiting for processing |
+| `pending` | Job received, waiting for processing |
 | `processing` | Job is currently executing |
 | `completed` | Job finished successfully |
 | `failed` | Job encountered an error |
@@ -254,22 +290,19 @@ For complete parameter documentation, see [WIKI_PLATFORM_API.md](WIKI_PLATFORM_A
 
 ### Documentation
 
-- **[WIKI_PLATFORM_API.md](WIKI_PLATFORM_API.md)** - Platform API reference (submit, poll, approve, unpublish)
-- **[WIKI_API_GLOSSARY.md](WIKI_API_GLOSSARY.md)** - Terminology and acronym definitions
-- **[WIKI_TECHNICAL_OVERVIEW.md](WIKI_TECHNICAL_OVERVIEW.md)** - Architecture and technology stack
-- **[WIKI_API_SERVICE_BUS.md](WIKI_API_SERVICE_BUS.md)** - Service Bus configuration
-
-### Job Development
-
-- **[WIKI_JOB_PROCESS_RASTER_V2.md](WIKI_JOB_PROCESS_RASTER_V2.md)** - Raster processing with JobBaseMixin pattern
-- **[WIKI_PLATFORM_API.md](WIKI_PLATFORM_API.md)** - DDH integration API (canonical)
+- **[Platform API](../api-reference/PLATFORM_API.md)** - Platform API reference (submit, validate, version lineage)
+- **[Glossary](GLOSSARY.md)** - Terminology and acronym definitions
+- **[Technical Overview](../architecture/TECHNICAL_OVERVIEW.md)** - Architecture and technology stack
+- **[Service Layer](../architecture/SERVICE_LAYER.md)** - Data access APIs (TiTiler, TiPG, STAC)
+- **[Errors](../api-reference/ERRORS.md)** - Error codes and troubleshooting
 
 ### Support
 
 For issues or questions:
-1. Check the relevant workflow trace document
+1. Check the [Health endpoint](../api-reference/HEALTH.md) for system status
 2. Review error messages in job status response
-3. Contact the platform team
+3. Use `dry_run=true` to validate parameters before submission
+4. Contact the platform team
 
 ---
 
@@ -277,11 +310,12 @@ For issues or questions:
 
 After completing this quick start:
 
-1. **Read the API Reference**: [WIKI_PLATFORM_API.md](WIKI_PLATFORM_API.md) for complete parameter documentation
-2. **Understand the Architecture**: [WIKI_TECHNICAL_OVERVIEW.md](WIKI_TECHNICAL_OVERVIEW.md) for system design
-3. **Learn the Terminology**: [WIKI_API_GLOSSARY.md](WIKI_API_GLOSSARY.md) for definitions
-4. **Try Real Data**: Upload your own files and process them
+1. **Read the API Reference**: [Platform API](../api-reference/PLATFORM_API.md) for complete parameter documentation
+2. **Understand the Architecture**: [Technical Overview](../architecture/TECHNICAL_OVERVIEW.md) for system design
+3. **Learn the Terminology**: [Glossary](GLOSSARY.md) for definitions
+4. **Explore the Service Layer**: [Service Layer](../architecture/SERVICE_LAYER.md) for TiTiler, TiPG, STAC APIs
+5. **Try Real Data**: Upload your own files and process them
 
 ---
 
-**Last Updated**: 14 DEC 2025
+**Last Updated**: 01 FEB 2026

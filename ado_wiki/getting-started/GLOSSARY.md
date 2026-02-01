@@ -1,10 +1,9 @@
 # Geospatial Platform Glossary
 
-> **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [Health](WIKI_API_HEALTH.md) | [Errors](WIKI_API_ERRORS.md) | [Glossary](WIKI_API_GLOSSARY.md)
+> **Navigation**: [Quick Start](QUICK_START.md) | [Platform API](../api-reference/PLATFORM_API.md) | [Health](../api-reference/HEALTH.md) | [Errors](../api-reference/ERRORS.md) | **Glossary**
 
-**Date**: 24 NOV 2025
+**Last Updated**: 01 FEB 2026
 **Status**: Reference Documentation
-**Wiki**: Azure DevOps Wiki - Terminology reference
 **Purpose**: Clear definitions of technical terms for all team members
 **Audience**: Development team (all disciplines, including ESL speakers)
 
@@ -25,6 +24,7 @@ This document provides clear definitions for technical terms used throughout the
 | bbox | Bounding Box | Rectangle defined by minimum and maximum coordinates that contains a geographic area |
 | CLI | Command Line Interface | Text-based interface for running commands |
 | COG | Cloud-Optimized GeoTIFF | GeoTIFF file format optimized for cloud storage access |
+| CQL2 | Common Query Language 2 | OGC standard for filtering geospatial data in API queries |
 | CRS | Coordinate Reference System | System that defines how coordinates map to locations on Earth |
 | CSV | Comma-Separated Values | Simple text file format for tabular data |
 | DDH | Development Data Hub | External application that integrates with the platform |
@@ -36,10 +36,12 @@ This document provides clear definitions for technical terms used throughout the
 | FOSS | Free and Open Source Software | Software with publicly available source code |
 | GDAL | Geospatial Data Abstraction Library | Library for reading and writing geospatial file formats |
 | GIS | Geographic Information System | System for storing, analyzing, and visualizing geographic data |
+| H3 | Hexagonal Hierarchical Spatial Index | Uber's hexagonal grid system for spatial indexing |
 | HTTP | Hypertext Transfer Protocol | Protocol for transmitting data over the internet |
 | JSON | JavaScript Object Notation | Lightweight data interchange format |
 | MRO | Method Resolution Order | Order in which Python searches for methods in class hierarchy |
 | MVP | Minimum Viable Product | Product with just enough features to be usable |
+| MVT | Mapbox Vector Tiles | Binary format for encoding vector data as map tiles |
 | OGC | Open Geospatial Consortium | Organization that creates geospatial standards |
 | PNG | Portable Network Graphics | Image file format with lossless compression |
 | REST | Representational State Transfer | Architectural style for web APIs |
@@ -62,8 +64,17 @@ This document provides clear definitions for technical terms used throughout the
 ### CoreMachine
 The internal job orchestration engine that manages the Job, Stage, and Task workflow. Power users interact with CoreMachine directly through the `/api/jobs/submit/{job_type}` endpoint.
 
+### Platform API
+The external-facing API for submitting geospatial processing jobs. Provides the `/api/platform/submit` endpoint with validation, version lineage tracking, and dry_run support.
+
 ### Platform Layer
 The anti-corruption layer that sits between external applications (like DDH) and CoreMachine. It translates external identifiers to internal parameters.
+
+### Service Layer
+The unified Docker container that serves processed geospatial data through standardized APIs. Runs TiTiler, TiPG, and stac-fastapi as a single application. See [Service Layer](../architecture/SERVICE_LAYER.md).
+
+### Docker Worker
+A containerized processing environment for memory-intensive geospatial operations. **V0.8 doctrine**: The Docker Worker is PRIMARY for all vector ETL and heavy raster processing, while Azure Functions handle lightweight orchestration.
 
 ### Fan-Out Pattern
 A distributed processing pattern where a single stage creates multiple parallel tasks. For example, processing 100 raster tiles creates 100 parallel COG creation tasks.
@@ -74,12 +85,14 @@ A distributed processing pattern where multiple parallel tasks converge into a s
 ### Last Task Completion Detection Pattern
 The method used to detect when all parallel tasks in a stage have completed. Uses atomic database operations to ensure exactly one task triggers the next stage.
 
-**Previously called**: "Last task turns out the lights" (this informal name has been replaced)
-
 ### Early Validation Pattern
 The practice of checking for errors (missing files, invalid parameters) at job submission time before any processing begins. This prevents wasted compute resources.
 
-**Previously called**: "Fast-fail" (this informal name has been replaced)
+### dry_run
+A validation mode (`?dry_run=true`) that checks all parameters and returns what would happen without actually creating a job. Useful for verifying version lineage state before submission.
+
+### Version Lineage
+Groups all versions of the same dataset/resource together. Computed as `SHA256(platform_id + dataset_id + resource_id)` excluding version_id. Enables tracking version history and ensuring proper sequencing with `previous_version_id`.
 
 ### Idempotency
 The property where submitting the same request multiple times produces the same result. In this system, job IDs are SHA256 hashes of parameters, so identical submissions return the existing job.
@@ -100,6 +113,9 @@ Azure Blob Storage container for final exports and aggregated data. Used for Geo
 ### Blob
 A file stored in Azure Blob Storage. The term comes from "Binary Large Object".
 
+### Zarr
+A format for storing chunked, compressed N-dimensional arrays. Optimized for cloud storage and parallel access. Used for climate and weather data like ERA5.
+
 ---
 
 ## Geospatial Terms
@@ -117,6 +133,9 @@ A system that defines how map coordinates relate to real locations on Earth. Com
 
 ### GeoJSON
 A JSON format for encoding geographic features. Contains geometry (points, lines, polygons) and properties (attributes). Widely supported by web mapping libraries.
+
+### GeoParquet
+A columnar file format for geospatial data based on Apache Parquet. Efficient for large datasets and analytical queries.
 
 ### MosaicJSON
 A JSON file that indexes multiple COG files into a virtual seamless mosaic. Allows tile servers to efficiently serve tiles from multiple source files.
@@ -138,6 +157,12 @@ A small square image (typically 256x256 or 512x512 pixels) representing a portio
 
 ### Vector
 Point, line, or polygon data with associated attributes. Examples include city locations (points), roads (lines), and country boundaries (polygons).
+
+### Vector Tiles (MVT)
+Mapbox Vector Tiles - a binary format that encodes vector data as map tiles. Enables efficient client-side rendering with styling applied in the browser.
+
+### xarray
+A Python library for working with labeled multi-dimensional arrays. Used for climate data, satellite imagery time series, and other N-dimensional datasets.
 
 ---
 
@@ -178,6 +203,7 @@ A namespace within a PostgreSQL database that contains tables, functions, and ot
 - **app**: Job and task records
 - **geo**: User vector data
 - **pgstac**: STAC metadata
+- **h3**: H3 hexagonal grid data
 
 ### Advisory Lock
 A PostgreSQL feature that allows code to acquire a lock on a custom identifier. Used to ensure only one task advances a job to the next stage.
@@ -190,16 +216,25 @@ PostgreSQL data type for storing JSON data in binary format. Allows indexing and
 ## API and Protocol Terms
 
 ### Endpoint
-A specific URL path that accepts requests. Example: `/api/jobs/submit/hello_world`
+A specific URL path that accepts requests. Example: `/api/platform/submit`
 
 ### OGC API - Features
 A REST API standard for serving vector data. Replaces the older WFS (Web Feature Service) standard. Returns GeoJSON format.
+
+### CQL2 (Common Query Language 2)
+An OGC standard for filtering geospatial data. Supports property comparisons, spatial operations, and temporal queries. Example: `filter=area > 1000`
 
 ### STAC API
 A REST API for searching and discovering geospatial datasets using STAC metadata.
 
 ### TiTiler
-A dynamic tile server that generates map tiles from COGs on request. Does not require pre-rendered tile caches.
+A dynamic tile server developed by [Development Seed](https://developmentseed.org/) that generates map tiles from COGs and Zarr datasets on request. Does not require pre-rendered tile caches. See [TiTiler Documentation](https://developmentseed.org/titiler/).
+
+### TiPG
+A PostGIS-backed OGC API server developed by [Development Seed](https://developmentseed.org/) that provides OGC API - Features and vector tile (MVT) endpoints. See [TiPG Documentation](https://developmentseed.org/tipg/).
+
+### stac-fastapi
+A STAC API implementation with pgSTAC backend for efficient spatial-temporal queries. See [stac-fastapi Documentation](https://stac-utils.github.io/stac-fastapi/).
 
 ### pgSTAC
 PostgreSQL extension that stores STAC metadata and enables fast spatial and temporal queries.
@@ -211,6 +246,9 @@ PostgreSQL extension that stores STAC metadata and enables fast spatial and temp
 ### Function App
 An Azure service that runs serverless functions. Code executes in response to triggers (HTTP requests, queue messages, timers).
 
+### Web App for Containers
+An Azure service that runs Docker containers. Used for the Service Layer and Docker Worker.
+
 ### Service Bus
 Azure messaging service that provides reliable message queuing. Supports features like message locking, dead-letter queues, and scheduled delivery.
 
@@ -219,6 +257,21 @@ An Azure feature that allows services to authenticate to other Azure resources w
 
 ### Flexible Server
 Azure PostgreSQL deployment option that provides more configuration flexibility than Single Server.
+
+### Container Registry (ACR)
+Azure Container Registry - a managed Docker registry for storing and managing container images.
+
+---
+
+## Development Seed Stack
+
+The Service Layer uses open source tools from [Development Seed](https://developmentseed.org/):
+
+| Tool | Purpose | Documentation |
+|------|---------|---------------|
+| **TiTiler** | Dynamic COG/Zarr tile serving | [developmentseed.org/titiler](https://developmentseed.org/titiler/) |
+| **TiPG** | OGC Features API + MVT tiles | [developmentseed.org/tipg](https://developmentseed.org/tipg/) |
+| **stac-fastapi** | STAC API implementation | [stac-utils.github.io/stac-fastapi](https://stac-utils.github.io/stac-fastapi/) |
 
 ---
 
@@ -260,4 +313,13 @@ The following pattern names are used consistently throughout all documentation:
 
 ---
 
-**Last Updated**: 24 NOV 2025
+## Related Documentation
+
+- [Quick Start](QUICK_START.md) - Getting started guide
+- [Platform API](../api-reference/PLATFORM_API.md) - Job submission API
+- [Service Layer](../architecture/SERVICE_LAYER.md) - Data access APIs
+- [Technical Overview](../architecture/TECHNICAL_OVERVIEW.md) - System architecture
+
+---
+
+**Last Updated**: 01 FEB 2026

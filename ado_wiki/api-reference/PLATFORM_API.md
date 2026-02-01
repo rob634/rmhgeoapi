@@ -1,11 +1,11 @@
 # Platform API Guide
 
-> **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [Errors](WIKI_API_ERRORS.md) | [Glossary](WIKI_API_GLOSSARY.md)
+> **Navigation**: [Quick Start](../getting-started/QUICK_START.md) | **Platform API** | [Errors](ERRORS.md) | [Glossary](../getting-started/GLOSSARY.md)
 
-**Last Updated**: 21 JAN 2026
+**Last Updated**: 01 FEB 2026
 **Purpose**: B2B integration API for geospatial data processing
 **Audience**: DDH developers, external application integrators
-**OpenAPI Spec**: `openapi/platform-api-v1.json` (v1.3.0)
+**API Version**: 1.4.0
 
 ---
 
@@ -14,31 +14,51 @@
 The Platform API provides a complete lifecycle for geospatial data:
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        PLATFORM API WORKFLOW                            │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│   1. SUBMIT          2. POLL              3. APPROVE      4. UNPUBLISH  │
-│   ────────────       ────────────         ────────────    ────────────  │
-│   POST /submit   →   GET /status/{id} →   POST /approve → POST /unpublish│
-│                                                                         │
-│   Returns:           Returns:             Triggers:       Removes:      │
-│   • request_id       • job_status         • Finalization  • STAC items  │
-│   • polling URL      • progress           • Service Layer • COG blobs   │
-│                      • preview URLs         availability  • Tables      │
-│                        (on complete)                                    │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          PLATFORM API WORKFLOW                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   1. SUBMIT          2. POLL           3. APPROVE/REJECT   4. UNPUBLISH    │
+│   ────────────       ────────────      ────────────────    ────────────    │
+│   POST /submit   →   GET /status   →   POST /approve   →   POST /unpublish │
+│                                        POST /reject                         │
+│   Returns:           Returns:          Triggers:           Removes:         │
+│   • request_id       • job_status      • Publication       • STAC items     │
+│   • polling URL      • progress        • Service Layer     • COG blobs      │
+│                      • preview URLs      availability      • Tables         │
+│                        (on complete)                                        │
+│                                                                             │
+│   RESUBMIT (retry failed jobs)                                              │
+│   POST /resubmit → Cleanup artifacts → New job created                      │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Four Key Workflows
+### Endpoint Summary
 
-| Workflow | Endpoint | Purpose |
-|----------|----------|---------|
-| **1. Submit** | `POST /api/platform/submit` | Submit raster or vector for processing → returns polling URL |
-| **2. Poll** | `GET /api/platform/status/{request_id}` | Check job status → returns preview URLs on completion |
-| **3. Approve** | `POST /api/platform/approve` | Triggers finalization and Service Layer availability |
-| **4. Unpublish** | `POST /api/platform/unpublish` | Undo everything - delete outputs, STAC items, tables |
+| Category | Endpoint | Method | Purpose |
+|----------|----------|--------|---------|
+| **Submit** | `/api/platform/submit` | POST | Submit raster/vector for processing |
+| **Status** | `/api/platform/status/{id}` | GET | Check job/request status |
+| **Status** | `/api/platform/status` | GET | List all platform requests |
+| **Validate** | `/api/platform/validate` | POST | Pre-flight validation (dry run) |
+| **Approve** | `/api/platform/approve` | POST | Approve dataset for publication |
+| **Reject** | `/api/platform/reject` | POST | Reject pending dataset |
+| **Revoke** | `/api/platform/revoke` | POST | Revoke approved dataset |
+| **Approvals** | `/api/platform/approvals` | GET | List approvals with filters |
+| **Approvals** | `/api/platform/approvals/{id}` | GET | Get approval details |
+| **Approvals** | `/api/platform/approvals/status` | GET | Batch approval status lookup |
+| **Unpublish** | `/api/platform/unpublish` | POST | Remove published data |
+| **Resubmit** | `/api/platform/resubmit` | POST | Retry failed job with cleanup |
+| **Health** | `/api/platform/health` | GET | System readiness check |
+| **Failures** | `/api/platform/failures` | GET | Recent failures with patterns |
+| **Lineage** | `/api/platform/lineage/{id}` | GET | Data lineage trace |
+| **Catalog** | `/api/platform/catalog/lookup` | GET | STAC lookup by DDH IDs |
+| **Catalog** | `/api/platform/catalog/item/{col}/{item}` | GET | Get STAC item |
+| **Catalog** | `/api/platform/catalog/assets/{col}/{item}` | GET | Get asset URLs |
+| **Catalog** | `/api/platform/catalog/dataset/{id}` | GET | List items for dataset |
+| **Platforms** | `/api/platforms` | GET | List supported B2B platforms |
+| **Platforms** | `/api/platforms/{id}` | GET | Get platform details |
 
 ---
 
@@ -54,11 +74,10 @@ All endpoints use `{BASE_URL}` as the base. Replace with the environment-specifi
 | `{TITILER_URL}` | TiTiler raster tile service URL |
 | `{STAC_URL}` | STAC catalog API URL |
 | `{WEB_MAP_URL}` | Interactive web map viewer URL |
-| `{STORAGE_URL}` | Azure Blob Storage URL |
+| `{STORAGE_URL}` | Blob Storage URL |
 | `{BRONZE_CONTAINER}` | Input data container name |
 
 ---
-
 
 ## 1. Submit Data for Processing
 
@@ -68,7 +87,7 @@ POST /api/platform/submit
 ```
 
 ### Purpose
-Generic submission endpoint that auto-detects data type from parameters.
+Generic submission endpoint that auto-detects data type from file extension or explicit parameter.
 
 ### Request Body
 
@@ -86,6 +105,27 @@ Generic submission endpoint that auto-detects data type from parameters.
 }
 ```
 
+### Required Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `dataset_id` | string | DDH dataset identifier |
+| `resource_id` | string | DDH resource identifier |
+| `version_id` | string | DDH version identifier |
+| `container_name` | string | Source container name |
+| `file_name` | string or array | Source file(s) - array for collections |
+
+### Optional Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `data_type` | string | auto | `raster` or `vector` (auto-detected from extension) |
+| `operation` | string | `CREATE` | `CREATE` or `UPDATE` |
+| `service_name` | string | - | Human-readable dataset name |
+| `access_level` | string | `OUO` | `OUO` (internal) or `PUBLIC` (external delivery) |
+| `processing_options` | object | - | Type-specific processing options |
+| `dry_run` | boolean | false | Validate without executing |
+
 ### Supported Operations
 
 | Operation | Description |
@@ -93,43 +133,45 @@ Generic submission endpoint that auto-detects data type from parameters.
 | `CREATE` | Create new dataset (default) |
 | `UPDATE` | Overwrite existing dataset - use `overwrite: true` in processing_options |
 
-### Update Workflow (Overwrite Existing Dataset)
-
-To update an existing dataset with new data while maintaining the same STAC item IDs:
+### Response (202 Accepted)
 
 ```json
 {
-    "dataset_id": "boundaries-2024",
-    "resource_id": "admin-regions",
-    "version_id": "v1.0",
-    "data_type": "vector",
-    "container_name": "{BRONZE_CONTAINER}",
-    "file_name": "boundaries_updated.geojson",
-    "service_name": "Administrative Boundaries",
-    "processing_options": {
-        "overwrite": true
-    }
+    "success": true,
+    "request_id": "791147831f11d833c779f8288d34fa5a",
+    "job_id": "5a5f62fd4e0526a30d8aa6fa11fac9ec...",
+    "job_type": "process_raster_v2",
+    "message": "Platform request submitted",
+    "monitor_url": "/api/platform/status/791147831f11d833c779f8288d34fa5a"
 }
 ```
 
-The `overwrite: true` parameter:
-- Replaces existing table/COG data with new source file
-- Maintains the same STAC item and collection IDs
-- Updates STAC metadata with new processing timestamp
-- Preserves approval status (if previously approved)
+### Raster Collection (Multiple Files)
+
+Submit multiple rasters as a collection by passing an array:
+
+```json
+{
+    "dataset_id": "satellite-imagery",
+    "resource_id": "region-tiles",
+    "version_id": "v1.0",
+    "container_name": "{BRONZE_CONTAINER}",
+    "file_name": ["tile_001.tif", "tile_002.tif", "tile_003.tif"]
+}
+```
 
 ---
 
 ## 2. Check Request Status
 
-### Endpoint
+### Get Status by ID
+
 ```
-GET /api/platform/status/{request_id} OR
+GET /api/platform/status/{request_id}
 GET /api/platform/status/{job_id}
 ```
 
-### Purpose
-Check the status of a submitted request, including underlying job progress.
+The endpoint auto-detects whether the ID is a request_id or job_id.
 
 ### Response
 
@@ -142,7 +184,7 @@ Check the status of a submitted request, including underlying job progress.
     "version_id": "v1",
     "data_type": "raster",
     "created_at": "2025-12-14T03:52:23.002245",
-    "job_id": "5a5f62fd4e0526a30d8aa6fa11fac9ecbf12cfe5298f0b23797e7eda6ab1aed9",
+    "job_id": "5a5f62fd4e0526a30d8aa6fa11fac9ec...",
     "job_type": "process_raster_v2",
     "job_status": "completed",
     "job_stage": 3,
@@ -163,7 +205,6 @@ Check the status of a submitted request, including underlying job progress.
         "total": 3,
         "completed": 3,
         "failed": 0,
-        "": 0,
         "by_stage": {
             "1": {"total": 1, "completed": 1, "task_types": ["validate_raster"]},
             "2": {"total": 1, "completed": 1, "task_types": ["create_cog"]},
@@ -173,11 +214,17 @@ Check the status of a submitted request, including underlying job progress.
 }
 ```
 
-### Example (curl)
+### List All Requests
 
-```bash
-curl "{BASE_URL}/api/platform/status/791147831f11d833c779f8288d34fa5a"
 ```
+GET /api/platform/status?limit=100&status=pending
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `limit` | integer | 100 | Maximum results |
+| `status` | string | - | Filter: `pending`, `processing`, `completed`, `failed` |
+| `offset` | integer | 0 | Pagination offset |
 
 ### Job Status Values
 
@@ -191,247 +238,70 @@ curl "{BASE_URL}/api/platform/status/791147831f11d833c779f8288d34fa5a"
 
 ---
 
-## Output Naming Convention
+## 3. Pre-flight Validation
 
-Platform auto-generates all output paths from DDH identifiers:
-
-### From These Inputs:
-```json
-{
-    "dataset_id": "aerial-imagery-2024",
-    "resource_id": "site-alpha",
-    "version_id": "v1.0"
-}
+### Endpoint
+```
+POST /api/platform/validate
 ```
 
-### These Outputs Are Generated:
+### Purpose
+Validate a submission before creating a job. Returns the same result as `POST /api/platform/submit?dry_run=true`.
 
-| Output Type | Generated Value |
-|-------------|-----------------|
-| **Output folder** | `aerial-imagery-2024/site-alpha/v1.0/` |
-| **STAC collection ID** | `aerial-imagery-2024` |
-| **STAC item ID** | `aerial-imagery-2024-site-alpha-v1.0` |
-| **COG path** | `silver-cogs/aerial-imagery-2024/site-alpha/v1.0/{filename}_cog_analysis.tif` |
-| **Vector table** | `geo.aerial_imagery_2024_site_alpha_v1_0` |
+### Request Body
+Same format as `/api/platform/submit`.
 
-### Naming Rules
-
-- Hyphens preserved in IDs
-- Dots replaced with underscores for PostgreSQL table names
-- Paths use forward slashes
-- All lowercase
-
----
-
-## Idempotency
-
-Platform API is fully idempotent based on DDH identifiers:
-
-```
-request_id = SHA256(dataset_id + resource_id + version_id)
-```
-
-### Behavior
-
-| Scenario | Response |
-|----------|----------|
-| First submission | 202 Accepted, job created |
-| Duplicate submission (same IDs) | 200 OK, returns existing request |
-| Same file, different version_id | 202 Accepted, new job created |
-
-### Example: Idempotent Response
+### Response
 
 ```json
 {
-    "success": true,
+    "valid": true,
+    "dry_run": true,
     "request_id": "791147831f11d833c779f8288d34fa5a",
-    "job_id": "5a5f62fd...",
-    "message": "Request already submitted (idempotent)",
-    "monitor_url": "/api/platform/status/791147831f11d833c779f8288d34fa5a"
+    "would_create_job_type": "process_raster_v2",
+    "lineage_state": {
+        "has_previous_version": false,
+        "previous_version_id": null
+    },
+    "validation": {
+        "file_exists": true,
+        "file_size_mb": 250.5,
+        "format_valid": true
+    },
+    "warnings": [],
+    "suggested_params": {}
 }
 ```
 
 ---
 
-## Error Handling
+## 4. Approval Workflow
 
-### Validation Error (400)
-
-```json
-{
-    "success": false,
-    "error": "Missing required parameter: dataset_id",
-    "error_type": "ValidationError"
-}
-```
-
-### Not Implemented (501)
-
-```json
-{
-    "success": false,
-    "error": "UPDATE operation coming in Phase 2",
-    "error_type": "NotImplemented"
-}
-```
-
-### Pre-flight Validation Failure (400)
-
-```json
-{
-    "success": false,
-    "error": "Pre-flight validation failed: Blob 'missing.tif' does not exist in container '{BRONZE_CONTAINER}'",
-    "error_type": "ValidationError"
-}
-```
-
-### Server Error (500)
-
-```json
-{
-    "success": false,
-    "error": "Internal server error",
-    "error_type": "RuntimeError"
-}
-```
-
----
-
-## Processing Options
-
-Optional processing parameters can be included in the request:
-
-### Raster Options
-
-```json
-{
-    "dataset_id": "...",
-    "resource_id": "...",
-    "version_id": "...",
-    "container_name": "...",
-    "file_name": "image.tif",
-    "processing_options": {
-        "output_tier": "analysis",
-        "crs": "EPSG:4326",
-        "raster_type": "auto",
-        "overwrite": "false"
-    }
-}
-```
-
-| Option | Values | Default | Description |
-|--------|--------|---------|-------------|
-| `output_tier` | `analysis`, `visualization`, `archive` | `analysis` | COG compression profile |
-| `crs` | EPSG code | `EPSG:4326` | Target coordinate system |
-| `raster_type` | `auto`, `rgb`, `dem`, `categorical` | `auto` | Raster type hint |
-| `overwrite` | Replace existing data |
-
-### Vector Options
-
-```json
-{
-    "processing_options": {
-        "lon_column": "longitude",
-        "lat_column": "latitude",
-        "overwrite": false
-    }
-}
-```
-
-| Option | Description |
-|--------|-------------|
-| `lon_column` | Longitude column name (for CSV) |
-| `lat_column` | Latitude column name (for CSV) |
-| `wkt_column` | WKT geometry column name (for CSV) |
-| `overwrite` | Replace existing data |
-
----
-
-## Complete Workflow Example
-
-### 1. Submit Data
-
-```bash
-curl -X POST \
-  "{BASE_URL}/api/platform/submit" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "dataset_id": "project-alpha",
-    "resource_id": "satellite-image",
-    "version_id": "v1.0",
-    "data_type": "raster",
-    "container_name": "{BRONZE_CONTAINER}",
-    "file_name": "satellite.tif",
-    "service_name": "Project Alpha Satellite",
-    "access_level": "OUO"
-  }'
-```
-
-**Response:**
-```json
-{
-    "success": true,
-    "request_id": "abc123...",
-    "job_id": "def456...",
-    "monitor_url": "/api/platform/status/abc123..."
-}
-```
-
-### 2. Poll Status
-
-```bash
-curl "{BASE_URL}/api/platform/status/abc123..."
-```
-
-### 3. Access Results (when completed)
-
-**Interactive Map Viewer:**
-```
-{TITILER_URL}/cog/WebMercatorQuad/map.html?url=...
-```
-
-**STAC Item:**
-```
-{STAC_URL}/api/stac/collections/project-alpha/items/project-alpha-satellite-image-v1.0
-```
-
-**Tile Endpoint (for web maps):**
-```
-{TITILER_URL}/cog/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=...
-```
-
----
-
-## 3. Approve Dataset
-
-The Approvals API manages dataset approval before publication. Approving a dataset marks it as published in the STAC catalog.
-
-### Approve
+### Approve Dataset
 
 ```
 POST /api/platform/approve
 ```
 
-**Request Body** - identify dataset by ONE of:
+Approves a pending dataset for publication.
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `approval_id` | string | Option 1 | Approval record ID (e.g., `apr-abc123...`) |
-| `stac_item_id` | string | Option 2 | STAC item ID for the dataset |
-| `job_id` | string | Option 3 | Job ID that processed the dataset |
-| `reviewer` | string | **Yes** | Email of person approving |
-| `notes` | string | No | Review notes |
-
-**Example:**
-```bash
-curl -X POST "{BASE_URL}/api/platform/approve" \
-  -H "Content-Type: application/json" \
-  -d '{
+**Request Body:**
+```json
+{
     "stac_item_id": "flood-data-res-001-v1-0",
     "reviewer": "user@example.com",
     "notes": "QA review passed"
-  }'
+}
 ```
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `approval_id` | string | Option 1 | Approval record ID |
+| `stac_item_id` | string | Option 2 | STAC item ID |
+| `job_id` | string | Option 3 | Job ID |
+| `request_id` | string | Option 4 | Platform request ID |
+| `reviewer` | string | **Yes** | Reviewer email |
+| `notes` | string | No | Review notes |
 
 **Response:**
 ```json
@@ -444,10 +314,21 @@ curl -X POST "{BASE_URL}/api/platform/approve" \
 }
 ```
 
-### Revoke Approval
+### Reject Dataset
 
 ```
-POST /api/platform/revoke
+POST /api/platform/reject
+```
+
+Rejects a pending dataset that fails review (different from revoke which is for already-approved datasets).
+
+**Request Body:**
+```json
+{
+    "stac_item_id": "flood-data-res-001-v1-0",
+    "reviewer": "user@example.com",
+    "reason": "Data quality issue found"
+}
 ```
 
 | Parameter | Type | Required | Description |
@@ -455,18 +336,58 @@ POST /api/platform/revoke
 | `approval_id` | string | Option 1 | Approval record ID |
 | `stac_item_id` | string | Option 2 | STAC item ID |
 | `job_id` | string | Option 3 | Job ID |
-| `revoker` | string | **Yes** | Email of person revoking |
-| `reason` | string | **Yes** | Reason for revocation (audit trail) |
+| `request_id` | string | Option 4 | Platform request ID |
+| `reviewer` | string | **Yes** | Reviewer email |
+| `reason` | string | **Yes** | Rejection reason (audit trail) |
 
-**Example:**
-```bash
-curl -X POST "{BASE_URL}/api/platform/revoke" \
-  -H "Content-Type: application/json" \
-  -d '{
+**Response:**
+```json
+{
+    "success": true,
+    "approval_id": "apr-abc123...",
+    "status": "rejected",
+    "asset_id": "...",
+    "asset_updated": true,
+    "message": "Dataset rejected"
+}
+```
+
+### Revoke Approval
+
+```
+POST /api/platform/revoke
+```
+
+Revokes an already-approved dataset (unpublishes it). This is an audit-logged operation.
+
+**Request Body:**
+```json
+{
     "stac_item_id": "flood-data-res-001-v1-0",
     "revoker": "admin@example.com",
     "reason": "Data quality issue discovered"
-  }'
+}
+```
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `approval_id` | string | Option 1 | Approval record ID |
+| `stac_item_id` | string | Option 2 | STAC item ID |
+| `job_id` | string | Option 3 | Job ID |
+| `revoker` | string | **Yes** | Revoker email |
+| `reason` | string | **Yes** | Revocation reason (audit trail) |
+
+**Response:**
+```json
+{
+    "success": true,
+    "approval_id": "apr-abc123...",
+    "status": "revoked",
+    "asset_id": "...",
+    "asset_deleted": true,
+    "warning": "Approved dataset has been revoked",
+    "message": "Approval revoked successfully"
+}
 ```
 
 ### List Approvals
@@ -482,17 +403,29 @@ GET /api/platform/approvals?status=pending&limit=50
 | `limit` | Max results (default: 100) |
 | `offset` | Pagination offset |
 
+**Response:**
+```json
+{
+    "success": true,
+    "approvals": [...],
+    "count": 25,
+    "status_counts": {"pending": 5, "approved": 15, "rejected": 3, "revoked": 2}
+}
+```
+
 ### Get Approval Details
 
 ```
 GET /api/platform/approvals/{approval_id}
 ```
 
-### Batch Approval Status (for UI dashboards)
+### Batch Approval Status
 
 ```
 GET /api/platform/approvals/status?stac_item_ids=item1,item2,item3
 ```
+
+Returns approval status for multiple items (useful for UI dashboards).
 
 **Response:**
 ```json
@@ -508,7 +441,7 @@ GET /api/platform/approvals/status?stac_item_ids=item1,item2,item3
 
 ---
 
-## 4. Unpublish Data
+## 5. Unpublish Data
 
 ### Endpoint
 ```
@@ -516,10 +449,11 @@ POST /api/platform/unpublish
 ```
 
 ### Purpose
-Remove a dataset from the platform. Auto-detects data type (vector or raster) and removes all associated outputs: PostGIS tables, COG blobs, STAC items, and metadata.
+Remove a dataset from the platform. Auto-detects data type and removes all outputs.
 
-### Request Body
+### Request Body Options
 
+**Option 1 - By DDH Identifiers (Preferred):**
 ```json
 {
     "dataset_id": "aerial-imagery-2024",
@@ -529,14 +463,27 @@ Remove a dataset from the platform. Auto-detects data type (vector or raster) an
 }
 ```
 
+**Option 2 - By Request ID:**
+```json
+{
+    "request_id": "a3f2c1b8e9d7f6a5...",
+    "dry_run": true
+}
+```
+
+**Option 3 - By Job ID:**
+```json
+{
+    "job_id": "abc123...",
+    "dry_run": true
+}
+```
+
 ### Parameters
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `dataset_id` | string | **Yes** | - | DDH dataset identifier |
-| `resource_id` | string | **Yes** | - | DDH resource identifier |
-| `version_id` | string | **Yes** | - | DDH version identifier |
-| `dry_run` | boolean | No | `true` | Preview mode - shows what would be deleted without executing |
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `dry_run` | boolean | `true` | Preview mode - shows what would be deleted |
 
 ### Response (202 Accepted)
 
@@ -552,31 +499,6 @@ Remove a dataset from the platform. Auto-detects data type (vector or raster) an
 }
 ```
 
-### Example (curl)
-
-```bash
-# Dry run first (default) - preview what will be deleted
-curl -X POST \
-  "{BASE_URL}/api/platform/unpublish" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "dataset_id": "aerial-imagery-2024",
-    "resource_id": "site-alpha",
-    "version_id": "v1.0"
-  }'
-
-# Execute deletion
-curl -X POST \
-  "{BASE_URL}/api/platform/unpublish" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "dataset_id": "aerial-imagery-2024",
-    "resource_id": "site-alpha",
-    "version_id": "v1.0",
-    "dry_run": false
-  }'
-```
-
 ### What Gets Deleted
 
 | Data Type | Outputs Removed |
@@ -584,30 +506,92 @@ curl -X POST \
 | **Vector** | PostGIS table, `geo.table_catalog` metadata, STAC item |
 | **Raster** | COG blob(s), MosaicJSON (if collection), STAC item |
 
-### Job Result (when completed)
+---
+
+## 6. Resubmit Failed Job
+
+### Endpoint
+```
+POST /api/platform/resubmit
+```
+
+### Purpose
+Retry a failed job with automatic cleanup of partial artifacts.
+
+### Request Body Options
+
+**Option 1 - By DDH Identifiers (Preferred):**
+```json
+{
+    "dataset_id": "aerial-imagery-2024",
+    "resource_id": "site-alpha",
+    "version_id": "v1.0",
+    "dry_run": false,
+    "delete_blobs": false
+}
+```
+
+**Option 2 - By Request ID:**
+```json
+{
+    "request_id": "a3f2c1b8e9d7f6a5...",
+    "dry_run": false
+}
+```
+
+**Option 3 - By Job ID:**
+```json
+{
+    "job_id": "abc123...",
+    "dry_run": false
+}
+```
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `dry_run` | boolean | `false` | Preview cleanup without executing |
+| `delete_blobs` | boolean | `false` | Also delete COG files from storage |
+| `force` | boolean | `false` | Resubmit even if job is currently processing |
+
+### Response
 
 ```json
 {
-    "job_result": {
-        "data_type": "raster",
-        "stac_item_deleted": "aerial-imagery-2024-site-alpha-v1-0",
-        "blobs_deleted": ["silver-cogs/.../site-alpha_cog_analysis.tif"],
-        "audit_record_id": "unpublish_abc123"
-    }
+    "success": true,
+    "original_job_id": "abc123...",
+    "new_job_id": "def456...",
+    "job_type": "process_raster_v2",
+    "platform_refs": {
+        "request_id": "...",
+        "dataset_id": "...",
+        "resource_id": "...",
+        "version_id": "..."
+    },
+    "cleanup_summary": {
+        "tasks_deleted": 5,
+        "job_deleted": true,
+        "tables_dropped": [],
+        "stac_items_deleted": ["item-123"],
+        "blobs_deleted": []
+    },
+    "message": "Job resubmitted successfully",
+    "monitor_url": "/api/platform/status/def456..."
 }
 ```
 
 ---
 
-## 5. System Health and Monitoring
+## 7. System Health and Monitoring
 
-### Platform Health (Simplified)
+### Platform Health
 
-The `/api/platform/health` endpoint provides a simplified system readiness check designed for external apps:
-
-```bash
-curl "{BASE_URL}/api/platform/health"
 ```
+GET /api/platform/health
+```
+
+Simplified system readiness check for external apps.
 
 **Response:**
 ```json
@@ -631,11 +615,11 @@ curl "{BASE_URL}/api/platform/health"
 
 ### Platform Failures
 
-Get recent failures with sanitized error summaries (no internal paths or secrets):
-
-```bash
-curl "{BASE_URL}/api/platform/failures?hours=24&limit=20"
 ```
+GET /api/platform/failures?hours=24&limit=20
+```
+
+Recent failures with sanitized error summaries (no internal paths or secrets).
 
 **Response:**
 ```json
@@ -662,146 +646,49 @@ curl "{BASE_URL}/api/platform/failures?hours=24&limit=20"
 
 ### Platform Lineage
 
-Trace data lineage for a Platform request (source → processing → outputs):
-
-```bash
-curl "{BASE_URL}/api/platform/lineage/{request_id}"
+```
+GET /api/platform/lineage/{request_id}
 ```
 
-### Pre-flight Validation
-
-Validate a file before submitting a job:
-
-```bash
-curl -X POST "{BASE_URL}/api/platform/validate" \
-  -H "Content-Type: application/json" \
-  -d '{"data_type": "raster", "container_name": "bronze-rasters", "blob_name": "imagery.tif"}'
-```
+Trace data lineage (source → processing → outputs).
 
 **Response:**
 ```json
 {
-    "valid": true,
-    "file_exists": true,
-    "file_size_mb": 250.5,
-    "recommended_job_type": "process_raster_v2",
-    "processing_mode": "function",
-    "estimated_minutes": 15,
-    "warnings": []
-}
-```
-
-### Failed Jobs Query
-
-Use the dbadmin endpoint to query failed jobs with full details:
-
-```bash
-curl "{BASE_URL}/api/dbadmin/jobs?status=failed&hours=24&limit=10"
-```
-
-**Parameters:**
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `status` | string | - | Filter by status (failed, completed, processing) |
-| `hours` | integer | 24 | Time window to search |
-| `limit` | integer | 50 | Maximum jobs to return |
-
----
-
-## 6. Data Access URLs
-
-After successful processing, jobs return access URLs for the published data.
-
-### Vector Data Access
-
-When a vector job completes, the result includes:
-
-```json
-{
-    "job_result": {
-        "data_access": {
-            "postgis": {
-                "schema": "geo",
-                "table": "city_parcels_v1_0",
-                "connection": "See platform admin for credentials"
-            },
-            "ogc_features": {
-                "collection": "/api/features/collections/city_parcels_v1_0",
-                "items": "/api/features/collections/city_parcels_v1_0/items",
-                "bbox_query": "/api/features/collections/city_parcels_v1_0/items?bbox=-122.5,37.7,-122.4,37.8"
-            },
-            "web_map": "{WEB_MAP_URL}/?collection=city_parcels_v1_0"
+    "success": true,
+    "request_id": "...",
+    "lineage": {
+        "source": {
+            "container": "bronze-rasters",
+            "blob": "image.tif",
+            "size_mb": 250.5
+        },
+        "processing": {
+            "job_id": "...",
+            "job_type": "process_raster_v2",
+            "started_at": "...",
+            "completed_at": "..."
+        },
+        "outputs": {
+            "cog_blob": "silver-cogs/.../image_cog.tif",
+            "stac_item": "dataset-resource-v1",
+            "stac_collection": "dataset"
         }
     }
 }
 ```
 
-**Access Methods:**
-
-| Method | URL Pattern | Description |
-|--------|-------------|-------------|
-| **OGC Features API** | `/api/features/collections/{table}/items` | Standards-compliant GeoJSON API |
-| **Interactive Map** | `{WEB_MAP_URL}/` | Web map viewer |
-| **Direct PostGIS** | Connect to `{POSTGRES_HOST}` | SQL access |
-
-### Raster Data Access
-
-When a raster job completes, the result includes:
-
-```json
-{
-    "job_result": {
-        "cog": {
-            "blob_path": "silver-cogs/aerial-imagery-2024/site-alpha/v1.0/site-alpha_cog_analysis.tif",
-            "size_mb": 127.07
-        },
-        "stac": {
-            "collection_id": "aerial-imagery-2024",
-            "item_id": "aerial-imagery-2024-site-alpha-v1.0"
-        },
-        "share_url": "{TITILER_URL}/cog/map?url=...",
-        "data_access": {
-            "stac_item": "/api/stac/collections/aerial-imagery-2024/items/aerial-imagery-2024-site-alpha-v1.0",
-            "stac_search": "/api/stac/search",
-            "tile_endpoint": "{TITILER_URL}/cog/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=...",
-            "preview": "{TITILER_URL}/cog/preview?url=..."
-        }
-    }
-}
-```
-
-**Access Methods:**
-
-| Method | URL Pattern | Description |
-|--------|-------------|-------------|
-| **STAC Item** | `/api/stac/collections/{collection}/items/{item}` | Metadata + asset links |
-| **STAC Search** | `/api/stac/search?bbox=...&datetime=...` | Spatial/temporal search |
-| **XYZ Tiles** | `{TITILER_URL}/cog/tiles/{z}/{x}/{y}.png?url=...` | For web maps (Leaflet, MapLibre) |
-| **Preview Image** | `{TITILER_URL}/cog/preview?url=...` | Quick thumbnail |
-| **Interactive Map** | `share_url` from job result | Full-screen map viewer |
-
 ---
 
-## 7. Catalog API - STAC Verification
+## 8. Catalog API (STAC Access)
 
-The Catalog API allows DDH to verify that processed data exists in the STAC catalog and retrieve asset URLs for visualization. This is the B2B interface for STAC access.
+The Catalog API allows B2B apps to verify processed data in the STAC catalog.
 
 ### Catalog Lookup
 
-Verify a STAC item exists using DDH identifiers:
-
-```bash
-curl "{BASE_URL}/api/platform/catalog/lookup?dataset_id=flood-data&resource_id=res-001&version_id=v1.0"
 ```
-
-**Query Parameters:**
-
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `dataset_id` | Yes | DDH dataset identifier |
-| `resource_id` | Yes | DDH resource identifier |
-| `version_id` | Yes | DDH version identifier |
+GET /api/platform/catalog/lookup?dataset_id=X&resource_id=Y&version_id=Z
+```
 
 **Response (found):**
 ```json
@@ -821,16 +708,11 @@ curl "{BASE_URL}/api/platform/catalog/lookup?dataset_id=flood-data&resource_id=r
     "metadata": {
         "bbox": [-75.5, -56.5, -66.5, -49.0],
         "datetime": "2026-01-15T00:00:00Z"
-    },
-    "ddh_refs": {
-        "dataset_id": "flood-data",
-        "resource_id": "res-001",
-        "version_id": "v1.0"
     }
 }
 ```
 
-**Response (not found - job still processing):**
+**Response (not found - job processing):**
 ```json
 {
     "found": false,
@@ -843,27 +725,17 @@ curl "{BASE_URL}/api/platform/catalog/lookup?dataset_id=flood-data&resource_id=r
 
 ### Get STAC Item
 
-Retrieve the full STAC item (GeoJSON Feature) with all metadata:
-
-```bash
-curl "{BASE_URL}/api/platform/catalog/item/{collection_id}/{item_id}"
+```
+GET /api/platform/catalog/item/{collection_id}/{item_id}
 ```
 
-Returns standard STAC Item format (GeoJSON Feature) with geometry, properties, and assets.
+Returns the full STAC item (GeoJSON Feature).
 
 ### Get Asset URLs with TiTiler
 
-Retrieve asset URLs with pre-built TiTiler visualization URLs:
-
-```bash
-curl "{BASE_URL}/api/platform/catalog/assets/{collection_id}/{item_id}"
 ```
-
-**Query Parameters:**
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `include_titiler` | `true` | Include TiTiler URLs |
+GET /api/platform/catalog/assets/{collection_id}/{item_id}?include_titiler=true
+```
 
 **Response:**
 ```json
@@ -884,21 +756,14 @@ curl "{BASE_URL}/api/platform/catalog/assets/{collection_id}/{item_id}"
         "info": "{TITILER_URL}/cog/info?url=...",
         "tilejson": "{TITILER_URL}/cog/tilejson.json?url=...",
         "wmts": "{TITILER_URL}/cog/WMTSCapabilities.xml?url=..."
-    },
-    "platform_refs": {
-        "dataset_id": "flood-data",
-        "resource_id": "res-001",
-        "version_id": "v1.0"
     }
 }
 ```
 
 ### List Items for Dataset
 
-List all STAC items for a DDH dataset:
-
-```bash
-curl "{BASE_URL}/api/platform/catalog/dataset/{dataset_id}?limit=50"
+```
+GET /api/platform/catalog/dataset/{dataset_id}?limit=50
 ```
 
 **Response:**
@@ -921,15 +786,209 @@ curl "{BASE_URL}/api/platform/catalog/dataset/{dataset_id}?limit=50"
 
 ---
 
-## Related Documentation
+## 9. Platform Registry
 
-- **Architecture**: See [WIKI_TECHNICAL_OVERVIEW.md](WIKI_TECHNICAL_OVERVIEW.md) for system architecture and security zones
-- **STAC API**: See `/api/stac` endpoints for metadata queries
-- **OGC Features API**: See [WIKI_OGC_FEATURES.md](WIKI_OGC_FEATURES.md) for vector data access
-- **Service Layer**: See [WIKI_SERVICE_LAYER.md](WIKI_SERVICE_LAYER.md) for TiTiler and data serving
-- **OpenAPI Spec**: See `openapi/platform-api-v1.json` for machine-readable API definition
+List supported B2B platforms and their identifier requirements.
+
+### List Platforms
+
+```
+GET /api/platforms
+GET /api/platforms?active_only=false
+```
+
+**Response:**
+```json
+{
+    "success": true,
+    "platforms": [
+        {
+            "platform_id": "ddh",
+            "display_name": "Data Distribution Hub",
+            "description": "Primary B2B platform with dataset/resource/version hierarchy",
+            "required_refs": ["dataset_id", "resource_id", "version_id"],
+            "optional_refs": ["title", "description", "access_level"],
+            "is_active": true
+        }
+    ],
+    "count": 1
+}
+```
+
+### Get Platform Details
+
+```
+GET /api/platforms/{platform_id}
+```
+
+**Response:**
+```json
+{
+    "success": true,
+    "platform": {
+        "platform_id": "ddh",
+        "display_name": "Data Distribution Hub",
+        "description": "Primary B2B platform...",
+        "required_refs": ["dataset_id", "resource_id", "version_id"],
+        "optional_refs": ["title", "description"],
+        "is_active": true
+    }
+}
+```
 
 ---
 
-**Last Updated**: 21 JAN 2026
-**API Version**: 1.3.0
+## 10. Processing Options
+
+### Raster Options
+
+```json
+{
+    "processing_options": {
+        "output_tier": "analysis",
+        "crs": "EPSG:4326",
+        "raster_type": "auto",
+        "overwrite": false
+    }
+}
+```
+
+| Option | Values | Default | Description |
+|--------|--------|---------|-------------|
+| `output_tier` | `analysis`, `visualization`, `archive` | `analysis` | COG compression profile |
+| `crs` | EPSG code | `EPSG:4326` | Target coordinate system |
+| `raster_type` | `auto`, `rgb`, `dem`, `categorical` | `auto` | Raster type hint |
+| `overwrite` | boolean | `false` | Replace existing data |
+
+### Vector Options
+
+```json
+{
+    "processing_options": {
+        "lon_column": "longitude",
+        "lat_column": "latitude",
+        "overwrite": false
+    }
+}
+```
+
+| Option | Description |
+|--------|-------------|
+| `lon_column` | Longitude column name (for CSV) |
+| `lat_column` | Latitude column name (for CSV) |
+| `wkt_column` | WKT geometry column name (for CSV) |
+| `overwrite` | Replace existing data |
+
+---
+
+## 11. Output Naming Convention
+
+Platform auto-generates all output paths from identifiers:
+
+### From These Inputs:
+```json
+{
+    "dataset_id": "aerial-imagery-2024",
+    "resource_id": "site-alpha",
+    "version_id": "v1.0"
+}
+```
+
+### These Outputs Are Generated:
+
+| Output Type | Generated Value |
+|-------------|-----------------|
+| **Output folder** | `aerial-imagery-2024/site-alpha/v1.0/` |
+| **STAC collection ID** | `aerial-imagery-2024` |
+| **STAC item ID** | `aerial-imagery-2024-site-alpha-v1.0` |
+| **COG path** | `silver-cogs/aerial-imagery-2024/site-alpha/v1.0/{filename}_cog_analysis.tif` |
+| **Vector table** | `geo.aerial_imagery_2024_site_alpha_v1_0` |
+
+---
+
+## 12. Idempotency
+
+Platform API is fully idempotent based on identifiers:
+
+```
+request_id = SHA256(dataset_id + resource_id + version_id)
+```
+
+| Scenario | Response |
+|----------|----------|
+| First submission | 202 Accepted, job created |
+| Duplicate submission (same IDs) | 200 OK, returns existing request |
+| Same file, different version_id | 202 Accepted, new job created |
+
+---
+
+## 13. Error Handling
+
+### Validation Error (400)
+
+```json
+{
+    "success": false,
+    "error": "Missing required parameter: dataset_id",
+    "error_type": "ValidationError"
+}
+```
+
+### Not Found (404)
+
+```json
+{
+    "success": false,
+    "error": "Request not found: abc123...",
+    "error_type": "NotFound"
+}
+```
+
+### Deprecated Endpoint (410)
+
+```json
+{
+    "success": false,
+    "error": "ENDPOINT_DEPRECATED",
+    "message": "This endpoint has been removed. Use POST /api/platform/submit instead.",
+    "migration": {
+        "old_endpoint": "POST /api/platform/raster",
+        "new_endpoint": "POST /api/platform/submit"
+    }
+}
+```
+
+### Server Error (500)
+
+```json
+{
+    "success": false,
+    "error": "Internal server error",
+    "error_type": "RuntimeError"
+}
+```
+
+---
+
+## 14. Deprecated Endpoints
+
+These endpoints return 410 Gone with migration instructions:
+
+| Deprecated | Replacement |
+|------------|-------------|
+| `POST /api/platform/raster` | `POST /api/platform/submit` |
+| `POST /api/platform/raster-collection` | `POST /api/platform/submit` (array file_name) |
+| `POST /api/platform/vector` | `POST /api/platform/submit` |
+
+---
+
+## Related Documentation
+
+- **Architecture**: See [TECHNICAL_OVERVIEW.md](../architecture/TECHNICAL_OVERVIEW.md) for system architecture
+- **OGC Features API**: See [OGC_FEATURES.md](OGC_FEATURES.md) for vector data access
+- **Service Layer**: See [SERVICE_LAYER.md](../architecture/SERVICE_LAYER.md) for TiTiler and data serving
+- **Error Reference**: See [ERRORS.md](ERRORS.md) for complete error codes
+
+---
+
+*End of Platform API Guide*

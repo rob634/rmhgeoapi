@@ -172,6 +172,95 @@ class ReDocInterface(BaseInterface):
         .api-info a:hover {{
             text-decoration: underline;
         }}
+
+        /* ReDoc typography overrides for consistent, readable text */
+
+        /* Main content area */
+        [data-role="redoc"] {{
+            font-size: 15px;
+        }}
+
+        /* API description text */
+        .api-content {{
+            font-size: 15px;
+            line-height: 1.7;
+        }}
+
+        /* Endpoint paths */
+        .http-verb {{
+            font-size: 13px !important;
+            font-weight: 700;
+        }}
+
+        /* Parameter names - fix size mismatch */
+        td[kind="field"] {{
+            font-size: 14px;
+        }}
+
+        /* Schema property names */
+        .property-name {{
+            font-size: 14px;
+            font-weight: 600;
+        }}
+
+        /* Type labels */
+        .property-type {{
+            font-size: 13px;
+        }}
+
+        /* Description text */
+        .property-description {{
+            font-size: 14px;
+            line-height: 1.6;
+        }}
+
+        /* Response status codes */
+        .response-status {{
+            font-size: 14px;
+            font-weight: 600;
+        }}
+
+        /* Code samples */
+        pre, code {{
+            font-size: 13px !important;
+            line-height: 1.5;
+        }}
+
+        /* Menu items in left sidebar */
+        .menu-item {{
+            font-size: 14px;
+        }}
+
+        /* Section headers */
+        h1 {{
+            font-size: 28px;
+        }}
+
+        h2 {{
+            font-size: 22px;
+        }}
+
+        h3 {{
+            font-size: 18px;
+        }}
+
+        h5 {{
+            font-size: 14px;
+        }}
+
+        /* Table of parameters */
+        table {{
+            font-size: 14px;
+        }}
+
+        th {{
+            font-size: 13px;
+            font-weight: 600;
+        }}
+
+        td {{
+            font-size: 14px;
+        }}
     </style>
 </head>
 <body>
@@ -199,11 +288,50 @@ class ReDocInterface(BaseInterface):
         // OpenAPI spec (inlined with current server URL)
         const spec = {spec_json};
 
-        // Initialize ReDoc with inlined spec
+        // Initialize ReDoc with inlined spec and custom theme
         Redoc.init(spec, {{
             scrollYOffset: 100,
             hideDownloadButton: false,
-            expandResponses: "200,201,202"
+            expandResponses: "200,201,202",
+            theme: {{
+                typography: {{
+                    fontSize: '15px',
+                    lineHeight: '1.6',
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+                    headings: {{
+                        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+                        fontWeight: '600'
+                    }},
+                    code: {{
+                        fontSize: '13px',
+                        fontFamily: '"SF Mono", Monaco, "Cascadia Code", Consolas, monospace',
+                        lineHeight: '1.5'
+                    }}
+                }},
+                sidebar: {{
+                    width: '280px',
+                    textColor: '#333',
+                    backgroundColor: '#fafafa'
+                }},
+                rightPanel: {{
+                    backgroundColor: '#1e2430'
+                }},
+                colors: {{
+                    primary: {{
+                        main: '#0071BC'
+                    }},
+                    text: {{
+                        primary: '#333',
+                        secondary: '#666'
+                    }},
+                    http: {{
+                        get: '#28a745',
+                        post: '#0071BC',
+                        put: '#fd7e14',
+                        delete: '#dc3545'
+                    }}
+                }}
+            }}
         }}, document.getElementById('redoc-container'));
     </script>
 </body>

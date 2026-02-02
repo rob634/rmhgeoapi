@@ -115,14 +115,193 @@ class SwaggerInterface(BaseInterface):
         /* Swagger UI CSS */
         {_SWAGGER_CSS}
 
-        /* Custom overrides */
+        /* Custom overrides for readable, consistent typography */
         body {{
             margin: 0;
             padding: 0;
+            font-size: 15px;
         }}
 
         .swagger-ui .topbar {{
             display: none;
+        }}
+
+        /* Base font sizing - make everything more readable */
+        .swagger-ui {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            font-size: 15px;
+            line-height: 1.6;
+        }}
+
+        /* Operation blocks - endpoint titles */
+        .swagger-ui .opblock-summary-method {{
+            font-size: 14px;
+            font-weight: 700;
+            min-width: 70px;
+        }}
+
+        .swagger-ui .opblock-summary-path {{
+            font-size: 15px;
+            font-weight: 600;
+        }}
+
+        .swagger-ui .opblock-summary-description {{
+            font-size: 14px;
+            color: #555;
+        }}
+
+        /* Parameter names and descriptions - FIX SIZE MISMATCH */
+        .swagger-ui .parameters-col_name {{
+            font-size: 14px;
+            font-weight: 600;
+            color: #333;
+        }}
+
+        .swagger-ui .parameters-col_description {{
+            font-size: 14px;
+            line-height: 1.5;
+        }}
+
+        .swagger-ui .parameters-col_description p {{
+            font-size: 14px;
+            margin: 4px 0;
+        }}
+
+        .swagger-ui .parameter__name {{
+            font-size: 14px;
+            font-weight: 600;
+        }}
+
+        .swagger-ui .parameter__type {{
+            font-size: 13px;
+            color: #666;
+        }}
+
+        .swagger-ui .parameter__in {{
+            font-size: 12px;
+            color: #888;
+        }}
+
+        /* Schema/Model properties */
+        .swagger-ui .model-box {{
+            font-size: 14px;
+        }}
+
+        .swagger-ui .model {{
+            font-size: 14px;
+        }}
+
+        .swagger-ui .model-title {{
+            font-size: 15px;
+            font-weight: 600;
+        }}
+
+        .swagger-ui .prop-name {{
+            font-size: 14px;
+            font-weight: 600;
+        }}
+
+        .swagger-ui .prop-type {{
+            font-size: 13px;
+        }}
+
+        /* Request/Response body */
+        .swagger-ui .body-param__text {{
+            font-size: 14px;
+        }}
+
+        .swagger-ui .response-col_status {{
+            font-size: 14px;
+            font-weight: 600;
+        }}
+
+        .swagger-ui .response-col_description {{
+            font-size: 14px;
+        }}
+
+        /* Code blocks and examples */
+        .swagger-ui .highlight-code {{
+            font-size: 13px;
+        }}
+
+        .swagger-ui pre {{
+            font-size: 13px;
+            line-height: 1.5;
+        }}
+
+        .swagger-ui code {{
+            font-size: 13px;
+        }}
+
+        /* Info section at top */
+        .swagger-ui .info {{
+            margin: 20px 0;
+        }}
+
+        .swagger-ui .info .title {{
+            font-size: 28px;
+            font-weight: 700;
+        }}
+
+        .swagger-ui .info .description {{
+            font-size: 15px;
+            line-height: 1.6;
+        }}
+
+        .swagger-ui .info .description p {{
+            font-size: 15px;
+            margin: 12px 0;
+        }}
+
+        .swagger-ui .info .description h2 {{
+            font-size: 20px;
+            margin-top: 24px;
+        }}
+
+        .swagger-ui .info .description h3 {{
+            font-size: 17px;
+            margin-top: 20px;
+        }}
+
+        .swagger-ui .info .description li {{
+            font-size: 15px;
+            margin: 6px 0;
+        }}
+
+        /* Tag sections */
+        .swagger-ui .opblock-tag {{
+            font-size: 18px;
+            font-weight: 600;
+            border-bottom: 2px solid #eee;
+            padding: 16px 0;
+        }}
+
+        .swagger-ui .opblock-tag small {{
+            font-size: 14px;
+            color: #666;
+        }}
+
+        /* Input fields */
+        .swagger-ui input[type=text],
+        .swagger-ui textarea {{
+            font-size: 14px;
+        }}
+
+        .swagger-ui select {{
+            font-size: 14px;
+        }}
+
+        /* Buttons */
+        .swagger-ui .btn {{
+            font-size: 14px;
+        }}
+
+        /* Table headers */
+        .swagger-ui table thead tr th {{
+            font-size: 13px;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: #666;
         }}
 
         .custom-header {{

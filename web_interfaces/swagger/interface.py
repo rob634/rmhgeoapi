@@ -233,6 +233,31 @@ class SwaggerInterface(BaseInterface):
             font-size: 13px;
         }}
 
+        /* INLINE CODE in descriptions - tone down the jarring purple */
+        .swagger-ui .markdown code,
+        .swagger-ui .renderedMarkdown code,
+        .swagger-ui .info .description code,
+        .swagger-ui .opblock-description code,
+        .swagger-ui .opblock-description-wrapper code,
+        .swagger-ui p code {{
+            font-size: 13px;
+            font-weight: 500;
+            color: #1a5276;
+            background: #eaf2f8;
+            padding: 1px 5px;
+            border-radius: 3px;
+            font-family: "SF Mono", Monaco, Consolas, monospace;
+        }}
+
+        /* Ensure inline code doesn't look bigger than surrounding text */
+        .swagger-ui .info .description p code {{
+            font-size: 14px;
+        }}
+
+        .swagger-ui .opblock-body .opblock-description code {{
+            font-size: 13px;
+        }}
+
         /* Info section at top */
         .swagger-ui .info {{
             margin: 20px 0;

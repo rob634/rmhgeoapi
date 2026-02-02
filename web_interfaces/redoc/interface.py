@@ -4,21 +4,22 @@
 # EPOCH: 4 - ACTIVE
 # STATUS: Web Interface - ReDoc API documentation
 # PURPOSE: Serve ReDoc documentation viewer for OpenAPI spec
-# LAST_REVIEWED: 16 JAN 2026
+# LAST_REVIEWED: 02 FEB 2026
 # EXPORTS: ReDocInterface
 # INTERFACES: BaseInterface (base.py), InterfaceRegistry (__init__.py)
 # DEPENDENCIES: azure.functions, json, pathlib
-# PATTERNS: InterfaceRegistry decorator, CDN-loaded assets
+# PATTERNS: InterfaceRegistry decorator, CDN-loaded ReDoc, inlined spec
 # ENTRY_POINTS: /api/interface/redoc
 # FEATURE: F12.8 API Documentation Hub
 # ============================================================================
 """
 ReDoc Interface.
 
-Serves ReDoc documentation viewer for the OpenAPI specification.
-Loads ReDoc from CDN and OpenAPI spec from /api/openapi.json.
+Serves ReDoc documentation viewer with the OpenAPI specification inlined.
+ReDoc JS loaded from CDN, spec embedded in page for correct server URL.
 
 Route: /api/interface/redoc
+Updated: 02 FEB 2026 - Inline spec instead of fetching from endpoint
 """
 
 import json
@@ -54,9 +55,9 @@ class ReDocInterface(BaseInterface):
 
     Features:
         - Clean, three-panel documentation layout
-        - ReDoc loaded from CDN (lightweight)
-        - OpenAPI spec inlined for performance
-        - Auto-detects current host for server URL
+        - ReDoc JS loaded from CDN (lightweight)
+        - OpenAPI spec inlined in page (correct server URL, no extra request)
+        - Displays API version from spec
         - Navigation links to other interfaces
     """
 
@@ -77,9 +78,12 @@ class ReDocInterface(BaseInterface):
             }
         ]
 
+        # Extract API version for display
+        api_version = spec.get('info', {}).get('version', '0.8')
+
         spec_json = json.dumps(spec, indent=2)
 
-        return self._generate_html(spec_json, base_url)
+        return self._generate_html(spec_json, base_url, api_version)
 
     def _get_fallback_spec(self) -> dict:
         """Return minimal fallback spec if loading failed."""
@@ -93,8 +97,8 @@ class ReDocInterface(BaseInterface):
             "paths": {}
         }
 
-    def _generate_html(self, spec_json: str, base_url: str) -> str:
-        """Generate complete HTML with ReDoc."""
+    def _generate_html(self, spec_json: str, base_url: str, api_version: str) -> str:
+        """Generate complete HTML with ReDoc and inlined spec."""
 
         return f"""<!DOCTYPE html>
 <html lang="en">
@@ -172,7 +176,7 @@ class ReDocInterface(BaseInterface):
 </head>
 <body>
     <div class="custom-header">
-        <h1>Geospatial APIs</h1>
+        <h1>Geospatial Platform API</h1>
         <div class="nav-links">
             <a href="/api/interface/home">Home</a>
             <a href="/api/interface/swagger">Swagger UI</a>
@@ -183,12 +187,24 @@ class ReDocInterface(BaseInterface):
 
     <div class="api-info">
         Base URL: <code>{base_url}</code> |
-        OpenAPI Version: <code>3.0.1</code> |
+        API Version: <code>{api_version}</code> |
         <a href="/api/openapi.json">Download OpenAPI JSON</a> |
         <a href="/api/interface/swagger">Try Interactive Swagger UI</a>
     </div>
 
-    <redoc spec-url='/api/openapi.json' hide-loading></redoc>
+    <div id="redoc-container"></div>
+
     <script src="https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js"></script>
+    <script>
+        // OpenAPI spec (inlined with current server URL)
+        const spec = {spec_json};
+
+        // Initialize ReDoc with inlined spec
+        Redoc.init(spec, {{
+            scrollYOffset: 100,
+            hideDownloadButton: false,
+            expandResponses: "200,201,202"
+        }}, document.getElementById('redoc-container'));
+    </script>
 </body>
 </html>"""

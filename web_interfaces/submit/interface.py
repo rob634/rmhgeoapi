@@ -139,11 +139,11 @@ class UnifiedSubmitInterface(BaseInterface):
         # Determine extensions based on data type
         if data_type == 'vector':
             extensions = VECTOR_EXTENSIONS
-            empty_msg = "No vector files found (.csv, .geojson, .gpkg, etc.)"
+            empty_msg = "No vector files found (.geojson, .gpkg, .zip, .csv, etc.)"
             icon = "📁"
         else:
             extensions = RASTER_EXTENSIONS
-            empty_msg = "No raster files found (.tif, .tiff, .img, .jp2, etc.)"
+            empty_msg = "No raster files found (.tif, .tiff)"
             icon = "🗺️"
 
         # Is this a collection (multi-select)?
@@ -931,7 +931,7 @@ class UnifiedSubmitInterface(BaseInterface):
                             <div class="icon" id="initial-icon">🗺️</div>
                             <h3>Select a Container</h3>
                             <p>Choose a container from the Bronze zone to browse files</p>
-                            <p class="supported-formats" id="supported-formats">Supported: .tif, .tiff, .img, .jp2, .ecw, .vrt</p>
+                            <p class="supported-formats" id="supported-formats">Supported: .tif, .tiff</p>
                         </div>
                     </div>
                 </div>
@@ -1969,15 +1969,15 @@ class UnifiedSubmitInterface(BaseInterface):
             if (type === 'vector') {{
                 hint.textContent = 'Select a vector file';
                 icon.textContent = '📁';
-                formats.textContent = 'Supported: .csv, .geojson, .json, .gpkg, .kml, .kmz';
+                formats.innerHTML = 'Supported: .geojson, .json, .gpkg, .kml, .kmz, .zip (Shapefile), .csv*<br><small style="color: #6b7280;">*CSV requires WKT column OR latitude+longitude columns</small>';
             }} else if (type === 'raster_collection') {{
                 hint.textContent = 'Select 2-{MAX_COLLECTION_FILES} raster files';
                 icon.textContent = '🗺️';
-                formats.textContent = 'Supported: .tif, .tiff, .img, .jp2, .ecw, .vrt';
+                formats.textContent = 'Supported: .tif, .tiff';
             }} else {{
                 hint.textContent = 'Select a raster file';
                 icon.textContent = '🗺️';
-                formats.textContent = 'Supported: .tif, .tiff, .img, .jp2, .ecw, .vrt';
+                formats.textContent = 'Supported: .tif, .tiff';
             }}
 
             // Show/hide options sections

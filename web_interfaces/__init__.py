@@ -175,6 +175,12 @@ def unified_interface_handler(req: func.HttpRequest) -> func.HttpResponse:
         # Instantiate interface
         interface = interface_class()
 
+        # Check for embed mode (for iframe integration) - 02 FEB 2026
+        embed_mode = req.params.get('embed', '').lower() == 'true'
+        if embed_mode:
+            interface.embed_mode = True
+            logger.info(f"📦 Embed mode enabled for: {interface_name}")
+
         # Check for HTMX partial request
         is_htmx = req.headers.get('HX-Request') == 'true'
         fragment = req.params.get('fragment')
@@ -187,7 +193,8 @@ def unified_interface_handler(req: func.HttpRequest) -> func.HttpResponse:
             return func.HttpResponse(
                 html,
                 mimetype="text/html",
-                status_code=200
+                status_code=200,
+                headers={"Content-Security-Policy": "frame-ancestors *"}
             )
 
         # Full page render
@@ -196,10 +203,18 @@ def unified_interface_handler(req: func.HttpRequest) -> func.HttpResponse:
 
         logger.info(f"✅ Successfully rendered interface: {interface_name}")
 
+        # Response headers - allow iframe embedding (02 FEB 2026)
+        # frame-ancestors * allows any domain to embed this interface
+        # To restrict: "frame-ancestors 'self' https://trusted-domain.com"
+        response_headers = {
+            "Content-Security-Policy": "frame-ancestors *"
+        }
+
         return func.HttpResponse(
             html,
             mimetype="text/html",
-            status_code=200
+            status_code=200,
+            headers=response_headers
         )
 
     except Exception as e:

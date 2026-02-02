@@ -26,10 +26,19 @@ class BaseInterface(ABC):
         - HTML document structure (wrap_html)
         - Navigation bar across all interfaces
         - Query parameter helpers
+        - Embed mode for iframe integration (02 FEB 2026)
 
     Each interface must implement:
         - render(request) -> str
+
+    Embed Mode:
+        When embed_mode=True (set by handler from ?embed=true query param),
+        wrap_html() automatically skips the navbar for cleaner iframe embedding.
     """
+
+    def __init__(self):
+        """Initialize interface with default settings."""
+        self.embed_mode = False  # Set by handler for iframe embedding
 
     # Common CSS used by all interfaces
     # Consolidated 23 DEC 2025 - S12.1.1
@@ -1909,7 +1918,9 @@ class BaseInterface(ABC):
                 custom_js="console.log('Hello');"
             )
         """
-        navbar_html = self._render_navbar() if include_navbar else ""
+        # Skip navbar in embed mode (for iframe integration) - 02 FEB 2026
+        show_navbar = include_navbar and not self.embed_mode
+        navbar_html = self._render_navbar() if show_navbar else ""
         htmx_script = f'<script src="https://unpkg.com/htmx.org@{self.HTMX_VERSION}"></script>' if include_htmx else ""
         status_bar_html = self.render_system_status_bar() if include_status_bar else ""
 

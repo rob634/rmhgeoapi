@@ -112,88 +112,6 @@
         }
       }
     },
-    "/api/platform/raster": {
-      "post": {
-        "summary": "Submit single raster",
-        "description": "Submit a single raster file for COG conversion and STAC cataloging.\n\n**Routes to:** process_raster_v2 (or process_large_raster_v2 for large files)",
-        "operationId": "platformRaster",
-        "tags": ["Platform"],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PlatformRasterRequest"
-              },
-              "example": {
-                "dataset_id": "aerial-imagery-2024",
-                "resource_id": "site-alpha",
-                "version_id": "v1.0",
-                "container_name": "bronze-rasters",
-                "file_name": "aerial-alpha.tif",
-                "service_name": "Aerial Imagery Site Alpha"
-              }
-            }
-          }
-        },
-        "responses": {
-          "202": {
-            "description": "Job accepted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PlatformResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid request (e.g., file_name is a list)"
-          }
-        }
-      }
-    },
-    "/api/platform/raster-collection": {
-      "post": {
-        "summary": "Submit raster collection",
-        "description": "Submit multiple raster files as a collection.\nCreates MosaicJSON for seamless tile access.\n\n**Minimum:** 2 files required",
-        "operationId": "platformRasterCollection",
-        "tags": ["Platform"],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PlatformRasterCollectionRequest"
-              },
-              "example": {
-                "dataset_id": "aerial-tiles-2024",
-                "resource_id": "site-alpha",
-                "version_id": "v1.0",
-                "container_name": "bronze-rasters",
-                "file_name": ["tile1.tif", "tile2.tif", "tile3.tif"],
-                "service_name": "Aerial Tiles Site Alpha"
-              }
-            }
-          }
-        },
-        "responses": {
-          "202": {
-            "description": "Job accepted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PlatformResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid request (e.g., file_name is not a list or has <2 files)"
-          }
-        }
-      }
-    },
     "/api/platform/status/{request_id}": {
       "get": {
         "summary": "Get request status",
@@ -632,96 +550,6 @@
         }
       }
     },
-    "/api/platform/unpublish/vector": {
-      "post": {
-        "summary": "Unpublish vector data (deprecated)",
-        "description": "**DEPRECATED:** Use `/api/platform/unpublish` instead.\n\nRemove vector data from the platform.\nDrops PostGIS table, deletes metadata, and optionally removes STAC item.\n\n**Identification Options:**\n- DDH identifiers (dataset_id, resource_id, version_id)\n- request_id from original submission\n- Direct table_name (cleanup mode)\n\n**Note:** dry_run=true by default (preview mode)",
-        "operationId": "platformUnpublishVector",
-        "tags": ["Platform"],
-        "deprecated": true,
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UnpublishVectorRequest"
-              },
-              "examples": {
-                "by_ddh_ids": {
-                  "summary": "By DDH Identifiers",
-                  "value": {
-                    "dataset_id": "parcels-2024",
-                    "resource_id": "downtown",
-                    "version_id": "v1.0",
-                    "dry_run": true
-                  }
-                },
-                "by_request_id": {
-                  "summary": "By Request ID",
-                  "value": {
-                    "request_id": "a3f2c1b8e9d7f6a5...",
-                    "dry_run": true
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Unpublish result (dry_run shows what would be deleted)"
-          },
-          "404": {
-            "description": "Data not found"
-          }
-        }
-      }
-    },
-    "/api/platform/unpublish/raster": {
-      "post": {
-        "summary": "Unpublish raster data (deprecated)",
-        "description": "**DEPRECATED:** Use `/api/platform/unpublish` instead.\n\nRemove raster data from the platform.\nDeletes STAC item and associated COG/MosaicJSON blobs from storage.\n\n**Identification Options:**\n- DDH identifiers (dataset_id, resource_id, version_id)\n- request_id from original submission\n- Direct STAC identifiers (cleanup mode)\n\n**Note:** dry_run=true by default (preview mode)",
-        "operationId": "platformUnpublishRaster",
-        "tags": ["Platform"],
-        "deprecated": true,
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UnpublishRasterRequest"
-              },
-              "examples": {
-                "by_ddh_ids": {
-                  "summary": "By DDH Identifiers",
-                  "value": {
-                    "dataset_id": "aerial-imagery-2024",
-                    "resource_id": "site-alpha",
-                    "version_id": "v1.0",
-                    "dry_run": true
-                  }
-                },
-                "by_request_id": {
-                  "summary": "By Request ID",
-                  "value": {
-                    "request_id": "b4e5d6c7...",
-                    "dry_run": true
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Unpublish result (dry_run shows what would be deleted)"
-          },
-          "404": {
-            "description": "Data not found"
-          }
-        }
-      }
-    },
     "/api/platform/catalog/lookup": {
       "get": {
         "summary": "Lookup catalog item by DDH identifiers",
@@ -1121,7 +949,7 @@
           },
           "previous_version_id": {
             "type": "string",
-            "description": "Request ID of previous version for lineage tracking (v1.5.0+)"
+            "description": "Request ID of previous version for lineage tracking "
           },
           "operation": {
             "type": "string",
@@ -1141,25 +969,13 @@
           },
           "title": {
             "type": "string",
-            "description": "Human-readable title for the dataset (optional, replaces service_name)"
-          },
-          "service_name": {
-            "type": "string",
-            "description": "DEPRECATED: Use 'title' instead. Human-readable service name",
-            "deprecated": true
+            "description": "Human-readable title for the dataset (optional)"
           },
           "clearance_level": {
             "type": "string",
             "enum": ["public", "internal", "restricted"],
             "default": "internal",
-            "description": "Data clearance level (v1.5.0+)"
-          },
-          "access_level": {
-            "type": "string",
-            "enum": ["public", "OUO", "restricted"],
-            "default": "OUO",
-            "description": "DEPRECATED: Use 'clearance_level' instead",
-            "deprecated": true
+            "description": "Data clearance level"
           },
           "description": {
             "type": "string"
@@ -1172,68 +988,6 @@
             "type": "object",
             "additionalProperties": true,
             "description": "Processing options (crs, nodata_value, overwrite, etc.)"
-          }
-        }
-      },
-      "PlatformRasterRequest": {
-        "type": "object",
-        "required": ["dataset_id", "resource_id", "container_name", "file_name"],
-        "properties": {
-          "dataset_id": {
-            "type": "string",
-            "description": "DDH dataset identifier"
-          },
-          "resource_id": {
-            "type": "string",
-            "description": "DDH resource identifier"
-          },
-          "version_id": {
-            "type": "string",
-            "description": "Version identifier (optional)"
-          },
-          "container_name": {
-            "type": "string",
-            "description": "Azure Blob Storage container"
-          },
-          "file_name": {
-            "type": "string",
-            "description": "Single file name (not a list)"
-          },
-          "service_name": {
-            "type": "string",
-            "description": "Human-readable service name"
-          }
-        }
-      },
-      "PlatformRasterCollectionRequest": {
-        "type": "object",
-        "required": ["dataset_id", "resource_id", "container_name", "file_name"],
-        "properties": {
-          "dataset_id": {
-            "type": "string",
-            "description": "DDH dataset identifier"
-          },
-          "resource_id": {
-            "type": "string",
-            "description": "DDH resource identifier"
-          },
-          "version_id": {
-            "type": "string",
-            "description": "Version identifier (optional)"
-          },
-          "container_name": {
-            "type": "string",
-            "description": "Azure Blob Storage container"
-          },
-          "file_name": {
-            "type": "array",
-            "items": {"type": "string"},
-            "minItems": 2,
-            "description": "List of file names (must have at least 2 files)"
-          },
-          "service_name": {
-            "type": "string",
-            "description": "Human-readable service name"
           }
         }
       },
@@ -1344,70 +1098,6 @@
           "result_data": {
             "type": "object",
             "description": "Job results (when completed)"
-          }
-        }
-      },
-      "UnpublishVectorRequest": {
-        "type": "object",
-        "properties": {
-          "dataset_id": {
-            "type": "string",
-            "description": "DDH dataset identifier (Option 1)"
-          },
-          "resource_id": {
-            "type": "string",
-            "description": "DDH resource identifier (Option 1)"
-          },
-          "version_id": {
-            "type": "string",
-            "description": "Version identifier (Option 1)"
-          },
-          "request_id": {
-            "type": "string",
-            "description": "Platform request ID (Option 2)"
-          },
-          "table_name": {
-            "type": "string",
-            "description": "Direct table name for cleanup mode (Option 3)"
-          },
-          "dry_run": {
-            "type": "boolean",
-            "default": true,
-            "description": "Preview mode - no deletions (default: true)"
-          }
-        }
-      },
-      "UnpublishRasterRequest": {
-        "type": "object",
-        "properties": {
-          "dataset_id": {
-            "type": "string",
-            "description": "DDH dataset identifier (Option 1)"
-          },
-          "resource_id": {
-            "type": "string",
-            "description": "DDH resource identifier (Option 1)"
-          },
-          "version_id": {
-            "type": "string",
-            "description": "Version identifier (Option 1)"
-          },
-          "request_id": {
-            "type": "string",
-            "description": "Platform request ID (Option 2)"
-          },
-          "stac_item_id": {
-            "type": "string",
-            "description": "STAC item ID for cleanup mode (Option 3)"
-          },
-          "collection_id": {
-            "type": "string",
-            "description": "STAC collection ID for cleanup mode (Option 3)"
-          },
-          "dry_run": {
-            "type": "boolean",
-            "default": true,
-            "description": "Preview mode - no deletions (default: true)"
           }
         }
       },
@@ -1640,7 +1330,7 @@
       },
       "DryRunResponse": {
         "type": "object",
-        "description": "Response from dry_run=true validation (v1.5.0+)",
+        "description": "Response from dry_run=true validation ",
         "properties": {
           "valid": {
             "type": "boolean",
@@ -1688,7 +1378,7 @@
       },
       "LineageState": {
         "type": "object",
-        "description": "Version lineage information (v1.5.0+)",
+        "description": "Version lineage information ",
         "properties": {
           "is_first_version": {
             "type": "boolean",
@@ -1724,7 +1414,7 @@
       },
       "UnpublishRequest": {
         "type": "object",
-        "description": "Unified unpublish request (v1.5.0+)",
+        "description": "Unified unpublish request ",
         "properties": {
           "dataset_id": {
             "type": "string",
@@ -1906,7 +1596,7 @@
       },
       "EntityState": {
         "type": "object",
-        "description": "Three-state entity model (v1.5.0+)",
+        "description": "Three-state entity model ",
         "properties": {
           "processing_status": {
             "type": "string",

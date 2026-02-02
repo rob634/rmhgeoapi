@@ -88,7 +88,7 @@ class BaseInterface(ABC):
         }
 
         /* ============================================================
-           DASHBOARD HEADER - Used by jobs, stac, vector, h3, etc.
+           DASHBOARD HEADER - Used by jobs, stac, vector, etc.
            ============================================================ */
         .dashboard-header {
             background: white;
@@ -675,7 +675,7 @@ class BaseInterface(ABC):
 
         /* ============================================================
            HEADER WITH COUNT - Collection browsers (S12.5.1 - 08 JAN 2026)
-           Used by: stac, vector, stac_map, h3
+           Used by: stac, vector, stac_map
            ============================================================ */
         .header-with-count {
             display: flex;
@@ -1950,9 +1950,9 @@ class BaseInterface(ABC):
             This is called automatically by wrap_html() unless
             include_navbar=False is specified.
 
-        Navigation structure (30 DEC 2025):
+        Navigation structure (02 FEB 2026):
             - System (includes links to Storage, Queues, Database)
-            - Pipelines (includes Submit Vector, Submit Raster, Jobs, Tasks, H3 Pipeline)
+            - Pipelines (includes Submit, Jobs, Tasks)
             - STAC
             - OGC Features (includes link to Promote Vector)
             - Gallery

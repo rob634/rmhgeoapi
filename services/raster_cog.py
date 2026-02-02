@@ -402,7 +402,7 @@ def _process_cog_disk_based(
         # Compute checksum from disk file
         if compute_checksum:
             logger.info(f"🔄 DISK STEP D: Computing checksum from disk...")
-            from util_checksum import compute_multihash
+            from utils.checksum import compute_multihash
             checksum_start = time.time()
             with open(temp_output_path, 'rb') as f:
                 file_checksum = compute_multihash(f.read(), log_performance=False)

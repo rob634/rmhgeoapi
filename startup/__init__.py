@@ -43,8 +43,8 @@ Exports:
     ValidationResult: Dataclass for individual check results
 """
 
-# Re-export from startup_state (remains in root for backward compatibility)
-from startup_state import STARTUP_STATE, ValidationResult, StartupState, ConfigWarning
+# Re-export from state module
+from .state import STARTUP_STATE, ValidationResult, StartupState, ConfigWarning
 
 # Import orchestrator
 from .orchestrator import run_startup_validation

@@ -679,6 +679,55 @@ az monitor autoscale rule create \
 
 ---
 
+## Service Bus Configuration (Critical Settings)
+
+Azure Service Bus is the message orchestration backbone. These settings are critical for reliable operation.
+
+### Queue Configuration
+
+| Setting | Value | Rationale |
+|---------|-------|-----------|
+| `lockDuration` | PT5M (5 minutes) | Maximum on Standard tier |
+| `maxDeliveryCount` | **1** | Disable Service Bus retries - application handles all retries |
+| `defaultMessageTimeToLive` | P7D (7 days) | Allow long-running workflows |
+
+**Why `maxDeliveryCount: 1`?** Service Bus automatic retries cause race conditions. When a lock expires, Service Bus redelivers the message while the original handler is still running. CoreMachine handles all retries with exponential backoff.
+
+### Queues (V0.8)
+
+| Queue | Purpose |
+|-------|---------|
+| `geospatial-jobs` | Job orchestration messages |
+| `container-tasks` | Docker Worker (heavy processing) |
+| `functionapp-tasks` | Function App Worker (lightweight) |
+
+### host.json Configuration
+
+```json
+{
+  "extensions": {
+    "serviceBus": {
+      "prefetchCount": 1,
+      "messageHandlerOptions": {
+        "autoComplete": true,
+        "maxConcurrentCalls": 1,
+        "maxAutoLockRenewalDuration": "00:30:00"
+      }
+    }
+  }
+}
+```
+
+| Setting | Value | Purpose |
+|---------|-------|---------|
+| `prefetchCount` | 1 | Fetch one message at a time |
+| `maxConcurrentCalls` | 1 | Process one message per instance |
+| `maxAutoLockRenewalDuration` | 00:30:00 | Auto-renew locks for 30 minutes |
+
+**Lock Renewal**: Azure Functions automatically renews message locks every ~4.5 minutes, allowing handlers to run up to 30 minutes without lock expiration.
+
+---
+
 ## Free & Open Source Software (FOSS) Stack
 
 ### Why FOSS for Geospatial?

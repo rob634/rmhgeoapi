@@ -13,7 +13,7 @@ Provides centralized Jinja2Templates instance and helper functions
 for rendering templates across all UI routers in the Docker app.
 
 Usage:
-    from templates_utils import render_template, templates
+    from ui.templates import render_template, templates
 
     @router.get("/health", response_class=HTMLResponse)
     async def health_page(request: Request):
@@ -33,8 +33,8 @@ from starlette.templating import Jinja2Templates
 
 from config import __version__, get_config
 
-# Initialize templates directory (relative to this file)
-_templates_dir = Path(__file__).parent / "templates"
+# Initialize templates directory (in project root, one level up from ui/)
+_templates_dir = Path(__file__).parent.parent / "templates"
 templates = Jinja2Templates(directory=_templates_dir)
 
 

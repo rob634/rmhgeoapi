@@ -184,7 +184,7 @@ class StartupHealthChecks(HealthCheckPlugin):
             Dict with startup validation status and any failures
         """
         def check_startup():
-            from startup_state import STARTUP_STATE
+            from startup import STARTUP_STATE
 
             # Check if validation has completed
             if not STARTUP_STATE.validation_complete:
@@ -231,7 +231,7 @@ class StartupHealthChecks(HealthCheckPlugin):
 
         # Override status based on STARTUP_STATE.all_passed
         try:
-            from startup_state import STARTUP_STATE
+            from startup import STARTUP_STATE
             if STARTUP_STATE.validation_complete and not STARTUP_STATE.all_passed:
                 component_result["status"] = "unhealthy"
                 failed = STARTUP_STATE.get_failed_checks()

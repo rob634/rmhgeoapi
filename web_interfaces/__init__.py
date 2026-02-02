@@ -320,11 +320,12 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Could not import Map interface: {e}")
 
-try:
-    from .h3 import interface as _h3
-    logger.info("✅ Imported H3 interface module")
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import H3 interface: {e}")
+# H3 interface removed from UI (02 FEB 2026)
+# try:
+#     from .h3 import interface as _h3
+#     logger.info("✅ Imported H3 interface module")
+# except ImportError as e:
+#     logger.warning(f"⚠️ Could not import H3 interface: {e}")
 
 try:
     from .queues import interface as _queues
@@ -422,11 +423,12 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Could not import FATHOM Viewer interface: {e}")
 
-try:
-    from .h3_map import interface as _h3_map
-    logger.info("✅ Imported H3 Map interface module")
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import H3 Map interface: {e}")
+# H3 Map interface removed from UI (02 FEB 2026)
+# try:
+#     from .h3_map import interface as _h3_map
+#     logger.info("✅ Imported H3 Map interface module")
+# except ImportError as e:
+#     logger.warning(f"⚠️ Could not import H3 Map interface: {e}")
 
 try:
     from .integration import interface as _integration

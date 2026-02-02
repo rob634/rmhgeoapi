@@ -40,7 +40,7 @@ import logging
 import socket
 from typing import List, Dict, Any, Optional, Tuple
 
-from startup_state import ValidationResult
+from .state import ValidationResult
 
 _logger = logging.getLogger("startup.service_bus_validator")
 

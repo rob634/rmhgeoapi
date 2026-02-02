@@ -48,7 +48,7 @@ from util_logger import LoggerFactory, ComponentType
 from config import get_config  # For TiTiler base URL and other config (17 NOV 2025)
 from infrastructure.pgstac_repository import PgStacRepository  # For collection/item operations (Phase 2B: 17 NOV 2025)
 from services.pgstac_search_registration import PgSTACSearchRegistration  # NEW (17 NOV 2025): Direct database registration (Option A)
-from services.stac_metadata_helper import RasterVisualizationMetadata  # BUG-006 (27 JAN 2026): For TiTiler bidx params
+from services.stac_metadata_helper import RasterVisualizationMetadata, AppMetadata  # BUG-006 (27 JAN 2026): For TiTiler bidx params, AppMetadata for job traceability
 
 
 # Logger
@@ -161,6 +161,12 @@ def create_stac_collection(
             if raster_type:
                 logger.info(f"   Raster type: {raster_type.get('detected_type')}, {raster_type.get('band_count')} bands")
 
+            # Job traceability (02 FEB 2026): Extract job_id and job_type
+            job_id = params.get("_job_id")
+            job_type = params.get("_job_type")
+            if job_id:
+                logger.info(f"   Job traceability: {job_id[:8]}... ({job_type})")
+
             # Call internal implementation WITHOUT MosaicJSON
             container = params.get("container", config.storage.silver.cogs)
             result = _create_stac_collection_impl(
@@ -173,7 +179,9 @@ def create_stac_collection(
                 license_val=license_val,
                 spatial_extent=spatial_extent,
                 temporal_extent=None,
-                raster_type=raster_type  # BUG-006: Pass for TiTiler URLs
+                raster_type=raster_type,  # BUG-006: Pass for TiTiler URLs
+                job_id=job_id,  # Job traceability (02 FEB 2026)
+                job_type=job_type  # Job traceability (02 FEB 2026)
             )
 
             return result
@@ -253,6 +261,12 @@ def create_stac_collection(
         logger.info(f"📊 Tile count: {len(tile_blobs)}")
         logger.info(f"📊 COG container: {cog_container}")
 
+        # Job traceability (02 FEB 2026): Extract job_id from params or job_parameters
+        job_id = params.get("_job_id") or job_parameters.get("_job_id")
+        job_type = params.get("_job_type") or job_parameters.get("_job_type")
+        if job_id:
+            logger.info(f"📊 Job traceability: {job_id[:8]}... ({job_type})")
+
         # Call internal implementation
         result = _create_stac_collection_impl(
             collection_id=final_collection_id,
@@ -263,7 +277,9 @@ def create_stac_collection(
             cog_container=cog_container,
             license_val=license_val,
             spatial_extent=spatial_extent,
-            temporal_extent=None
+            temporal_extent=None,
+            job_id=job_id,  # Job traceability (02 FEB 2026)
+            job_type=job_type  # Job traceability (02 FEB 2026)
         )
 
         return result
@@ -287,7 +303,9 @@ def _create_stac_collection_impl(
     license_val: str,
     spatial_extent: Optional[List[float]],
     temporal_extent: Optional[List[str]],
-    raster_type: Optional[Dict[str, Any]] = None  # BUG-006: For TiTiler bidx params
+    raster_type: Optional[Dict[str, Any]] = None,  # BUG-006: For TiTiler bidx params
+    job_id: Optional[str] = None,  # Job traceability (02 FEB 2026)
+    job_type: Optional[str] = None  # Job traceability (02 FEB 2026)
 ) -> dict:
     """
     Internal implementation: Create STAC collection with orthodox STAC Items.
@@ -319,6 +337,8 @@ def _create_stac_collection_impl(
         spatial_extent: Spatial bounds or None to calculate
         temporal_extent: Temporal range or None for current time
         raster_type: Raster type dict with band_count, data_type for TiTiler URLs
+        job_id: Job ID for STAC item traceability (02 FEB 2026)
+        job_type: Job type for STAC item traceability (02 FEB 2026)
 
     Returns:
         Dict with success=True and STAC collection details
@@ -445,6 +465,13 @@ def _create_stac_collection_impl(
             raster_meta = RasterVisualizationMetadata.from_raster_type_params(raster_type)
             logger.info(f"   Raster metadata: {raster_meta.band_count} bands, rgb_bands={raster_meta.rgb_bands}")
 
+        # Job traceability (02 FEB 2026): Create AppMetadata for STAC items
+        # Enables tracing STAC items back to the job that created them
+        app_meta = None
+        if job_id:
+            app_meta = AppMetadata(job_id=job_id, job_type=job_type or 'raster_collection')
+            logger.info(f"   Job traceability: job_id={job_id[:8]}..., job_type={job_type}")
+
         # ORTHODOX STAC (11 NOV 2025): Create STAC Items for each COG tile
         # Items are searchable with geometry, datetime, and properties
         # NOW collection partition exists, so Items can be inserted safely
@@ -463,12 +490,14 @@ def _create_stac_collection_impl(
 
                 # Create STAC Item using existing service (reuses process_raster logic)
                 # BUG-006: Pass raster_meta for TiTiler bidx params on multi-band tiles
+                # Job traceability (02 FEB 2026): Pass app_meta for job_id in STAC items
                 item = stac_service.extract_item_from_blob(
                     container=cog_container,
                     blob_name=tile_blob,
                     collection_id=collection_id,
                     item_id=item_id,
-                    raster_meta=raster_meta  # BUG-006: Enables smart TiTiler URLs
+                    raster_meta=raster_meta,  # BUG-006: Enables smart TiTiler URLs
+                    app_meta=app_meta  # Job traceability: Enables app:job_id in STAC items
                 )
 
                 # Insert Item into PgSTAC

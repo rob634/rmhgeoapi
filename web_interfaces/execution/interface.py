@@ -165,9 +165,11 @@ class ExecutionInterface(BaseInterface):
                                 hx-indicator="#table-spinner">
                             <option value="">All Types</option>
                             <option value="process_vector">Vector</option>
+                            <option value="process_vector_docker">Vector (Docker)</option>
                             <option value="process_raster_v2">Raster</option>
+                            <option value="process_raster_docker">Raster (Docker)</option>
                             <option value="process_raster_collection_v2">Collection</option>
-                            <option value="h3_raster_aggregation">H3 Aggregation</option>
+                            <option value="process_raster_collection_docker">Collection (Docker)</option>
                         </select>
                         <select id="limitFilter" class="filter-select"
                                 hx-get="/api/interface/execution?fragment=jobs-table"

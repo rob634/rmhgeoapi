@@ -117,7 +117,7 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
             # Compute content hash for change detection (optional)
             content_hash = None
             try:
-                from util_checksum import compute_multihash
+                from utils.checksum import compute_multihash
                 from infrastructure.blob import BlobRepository
                 blob_repo = BlobRepository.for_zone('bronze')
                 source_bytes = blob_repo.read_blob(container_name, blob_name)

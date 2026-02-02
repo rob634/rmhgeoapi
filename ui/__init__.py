@@ -90,6 +90,14 @@ from .features import (
     FEATURES,
 )
 
+# Template utilities
+from .templates import (
+    templates,
+    get_template_context,
+    render_template,
+    render_fragment,
+)
+
 __all__ = [
     # DTOs
     "JobStatusDTO",
@@ -120,4 +128,9 @@ __all__ = [
     "is_enabled",
     "get_enabled_features",
     "FEATURES",
+    # Templates
+    "templates",
+    "get_template_context",
+    "render_template",
+    "render_fragment",
 ]

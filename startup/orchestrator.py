@@ -33,7 +33,7 @@ import logging
 import os
 from typing import Optional
 
-from startup_state import STARTUP_STATE, ValidationResult
+from .state import STARTUP_STATE, ValidationResult
 
 # Create startup logger (minimal dependencies)
 _logger = logging.getLogger("startup.orchestrator")

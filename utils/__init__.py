@@ -15,14 +15,19 @@ Exports:
     ImportValidator: Module import validation
     validator: Singleton ImportValidator instance
     enforce_contract: Contract validation decorator
+    compute_multihash: Compute STAC-compliant SHA-256 multihash
+    verify_multihash: Verify bytes match expected multihash
 """
 
 # Make imports available at package level for convenience
 from .import_validator import ImportValidator, validator
 from .contract_validator import enforce_contract
+from .checksum import compute_multihash, verify_multihash
 
 __all__ = [
     'ImportValidator',
     'enforce_contract',
     'validator',
+    'compute_multihash',
+    'verify_multihash',
 ]

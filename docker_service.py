@@ -1190,7 +1190,7 @@ def interface_home(request: Request):
     Returns:
         HTML landing page with links to all UI sections
     """
-    from templates_utils import render_template
+    from ui.templates import render_template
 
     return render_template(
         request,
@@ -1211,7 +1211,7 @@ def interface_health(request: Request):
         HTML health dashboard with auto-loading status
     """
     import os
-    from templates_utils import render_template
+    from ui.templates import render_template
     from config import get_config, get_app_mode_config
 
     # Build dynamic tooltips from config
@@ -1298,7 +1298,7 @@ def interface_collections(request: Request):
     Returns:
         HTML collections browser
     """
-    from templates_utils import render_template
+    from ui.templates import render_template
     from config import get_config
 
     # Get API URLs for JavaScript
@@ -1345,7 +1345,7 @@ def interface_submit(request: Request):
     Returns:
         HTML submission form
     """
-    from templates_utils import render_template
+    from ui.templates import render_template
 
     return render_template(
         request,
@@ -1359,7 +1359,7 @@ def interface_submit(request: Request):
 @app.get("/interface/submit/partial/browser", response_class=HTMLResponse)
 def interface_submit_browser_partial(request: Request):
     """HTMX partial for file browser."""
-    from templates_utils import render_fragment
+    from ui.templates import render_fragment
 
     return render_fragment(
         request,
@@ -1370,7 +1370,7 @@ def interface_submit_browser_partial(request: Request):
 @app.get("/interface/submit/partial/upload", response_class=HTMLResponse)
 def interface_submit_upload_partial(request: Request):
     """HTMX partial for file upload."""
-    from templates_utils import render_fragment
+    from ui.templates import render_fragment
 
     return render_fragment(
         request,
@@ -1691,7 +1691,7 @@ async def interface_submit_process(request: Request):
 # JOB MONITOR INTERFACE (25 JAN 2026 - Job List and Detail)
 # ============================================================================
 
-from templates_utils import templates
+from ui.templates import templates
 from config import __version__
 
 @app.get("/interface/jobs", response_class=HTMLResponse)
@@ -2460,7 +2460,7 @@ async def interface_tasks_list(
         task_id: Optional specific task ID to highlight
     """
     try:
-        from templates_utils import render_template
+        from ui.templates import render_template
 
         # If no job_id, show the job selector
         if not job_id:
@@ -3028,7 +3028,7 @@ async def interface_logs(request: Request, job_id: str = None):
         job_id: Optional - pre-filter logs by job ID
     """
     try:
-        from templates_utils import render_template
+        from ui.templates import render_template
 
         return render_template(
             request,
@@ -3239,7 +3239,7 @@ def raster_viewer_page(
         HTML page with Leaflet map and sidebar controls
     """
     try:
-        from templates_utils import render_template
+        from ui.templates import render_template
         from config import get_config
 
         config = get_config()
@@ -3560,7 +3560,7 @@ def vector_viewer_page(
         HTML page with MapLibre map and sidebar controls
     """
     try:
-        from templates_utils import render_template
+        from ui.templates import render_template
         from config import get_config
 
         config = get_config()

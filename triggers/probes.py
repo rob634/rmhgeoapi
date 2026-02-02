@@ -40,7 +40,7 @@ import azure.functions as func
 from azure.functions import Blueprint
 
 # Import startup state - this module has zero dependencies
-from startup_state import STARTUP_STATE
+from startup import STARTUP_STATE
 
 # Create Blueprint for probe endpoints
 bp = Blueprint()

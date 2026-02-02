@@ -188,15 +188,7 @@ Pipeline workflow management:
 - Job stats by status (queued/processing/completed/failed)
 - Click to view task details
 
-### 6. H3 Grid Status (`/api/interface/h3`) ✅
-
-H3 hexagonal grid monitoring:
-- Cell counts for resolutions 2-7
-- Status indicators per resolution
-- Summary card with totals
-- H3 reference information table
-
-### 7. Queues (`/api/interface/queues`) ✅
+### 6. Queues (`/api/interface/queues`) ✅
 
 Service Bus queue monitoring:
 - Queue cards showing active/DLQ/scheduled counts
@@ -204,7 +196,7 @@ Service Bus queue monitoring:
 - Health status indicators
 - Quick actions to peek messages and view DLQ
 
-### 8. STAC Collections (`/api/interface/stac`) ✅
+### 7. STAC Collections (`/api/interface/stac`) ✅
 
 STAC metadata catalog dashboard:
 - Collection cards with metadata
@@ -213,7 +205,7 @@ STAC metadata catalog dashboard:
 - Clickable STAC links (self, items, parent, root)
 - Search and filter by name/type
 
-### 9. OGC Features (`/api/interface/vector`) ✅
+### 8. OGC Features (`/api/interface/vector`) ✅
 
 OGC API - Features viewer:
 - Collection selector dropdown
@@ -221,7 +213,7 @@ OGC API - Features viewer:
 - Click to view full feature properties
 - BBOX spatial filtering
 
-### 10. Tasks (`/api/interface/tasks?job_id={id}`) ✅
+### 9. Tasks (`/api/interface/tasks?job_id={id}`) ✅
 
 Workflow visualization for specific jobs:
 - Visual stage diagram with predefined workflows
@@ -237,14 +229,14 @@ Workflow visualization for specific jobs:
 - **C** (Green) = Completed - Success
 - **F** (Red) = Failed - Error
 
-### 11. Jobs (`/api/interface/jobs`) ✅
+### 10. Jobs (`/api/interface/jobs`) ✅
 
 Job monitor dashboard with:
 - Jobs table sorted by creation time
 - Status filtering
 - Click to view task details
 
-### 12. Map (`/api/interface/map`) ✅
+### 11. Map (`/api/interface/map`) ✅
 
 Full-page interactive Leaflet map:
 - Collection selector
@@ -253,7 +245,7 @@ Full-page interactive Leaflet map:
 - Hover highlighting
 - Zoom to features
 
-### 13. API Docs (`/api/interface/docs`) ✅
+### 12. API Docs (`/api/interface/docs`) ✅
 
 Interactive API documentation:
 - Endpoint reference

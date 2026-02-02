@@ -32,7 +32,7 @@ Usage:
 import logging
 from typing import List, Tuple
 
-from startup_state import ValidationResult
+from .state import ValidationResult
 
 _logger = logging.getLogger("startup.import_validator")
 

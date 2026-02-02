@@ -727,7 +727,7 @@ class BlobRepository(IBlobRepository):
 
             if compute_checksum:
                 import time
-                from util_checksum import compute_multihash
+                from utils.checksum import compute_multihash
 
                 # Convert stream to bytes if needed
                 if hasattr(data, 'read'):

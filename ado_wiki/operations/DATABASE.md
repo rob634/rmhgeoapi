@@ -1,12 +1,11 @@
 # PostgreSQL Database Setup and Configuration Guide
 
-> **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [Errors](WIKI_API_ERRORS.md) | [Glossary](WIKI_API_GLOSSARY.md)
+> **Navigation**: [Quick Start](../getting-started/QUICK_START.md) | [Platform API](../api-reference/PLATFORM_API.md) | [Errors](../api-reference/ERRORS.md) | [Glossary](../getting-started/GLOSSARY.md)
 
-**Date**: 24 NOV 2025
+**Last Updated**: 01 FEB 2026
 **Status**: Reference Documentation
-**Wiki**: Azure DevOps Wiki - Database configuration documentation
 **Purpose**: Developer guide for configuring PostgreSQL/PostGIS in the geospatial ETL pipeline
-**Audience**: Developers setting up or maintaining database infrastructure
+**Audience**: Developers and DevOps setting up or maintaining database infrastructure
 
 ---
 
@@ -479,7 +478,7 @@ Traditional connection pooling does NOT work effectively in Azure Functions due 
 2. Open ONE connection for fast bulk insert
 3. Release connection immediately
 
-**See [WIKI_TECHNICAL_OVERVIEW.md → Serverless Database Connection Pattern](WIKI_TECHNICAL_OVERVIEW.md#serverless-database-connection-pattern)** for the full explanation, code examples, and the 23 DEC 2025 incident that taught us this lesson.
+**See [TECHNICAL_OVERVIEW.md → Serverless Database Connection Pattern](../architecture/TECHNICAL_OVERVIEW.md#serverless-database-connection-pattern)** for the full explanation, code examples, and the 23 DEC 2025 incident that taught us this lesson.
 
 **Connection budget formula**:
 ```
@@ -971,11 +970,10 @@ EXPLAIN ANALYZE SELECT * FROM app.jobs WHERE status = 'processing';
 
 ## Related Documentation
 
-- **[WIKI_API_SERVICE_BUS.md](WIKI_API_SERVICE_BUS.md)** - Service Bus configuration
-- **[WIKI_API_STORAGE.md](WIKI_API_STORAGE.md)** - Azure Storage configuration
-- **[WIKI_TECHNICAL_OVERVIEW.md](WIKI_TECHNICAL_OVERVIEW.md)** - Architecture overview
-- **[docs_claude/CLAUDE_CONTEXT.md](docs_claude/CLAUDE_CONTEXT.md)** - Primary project context
+- **[STORAGE.md](STORAGE.md)** - Azure Storage configuration
+- **[TECHNICAL_OVERVIEW.md](../architecture/TECHNICAL_OVERVIEW.md)** - Architecture overview (includes Service Bus configuration)
+- **[DATABASE_IDENTITY_RUNBOOK.md](DATABASE_IDENTITY_RUNBOOK.md)** - Managed identity setup details
 
 ---
 
-**Last Updated**: 22 JAN 2026
+**Last Updated**: 01 FEB 2026

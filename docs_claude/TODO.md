@@ -2,8 +2,8 @@
 **This file contains high level items only**
 This file references other documents containing implementation details. This is to avoid a 50,000 line TODO.md. This file should not exceed 500 lines.
 
-**Last Updated**: 31 JAN 2026 (Platform Submit dry_run implementation added)
-**Source of Truth**: [docs/epics/README.md](/docs/epics/README.md) - Epic/Feature/Story definitions
+**Last Updated**: 02 FEB 2026
+**Source of Truth**: [ado_wiki/V0.8_ADO_WORKITEMS.md](/ado_wiki/V0.8_ADO_WORKITEMS.md) - Epic/Feature/Story definitions
 **Purpose**: Sprint-level task tracking and delegation (INDEX format)
 
 ---
@@ -576,7 +576,7 @@ Continue testing and validation.
 | [H3_REVIEW.md](./H3_REVIEW.md) | H3 aggregation implementation |
 | [TABLE_MAINTENANCE.md](./TABLE_MAINTENANCE.md) | pg_cron + autovacuum setup |
 | [ARCHITECTURE_REFERENCE.md](./ARCHITECTURE_REFERENCE.md) | Technical patterns |
-| [docs/epics/README.md](/docs/epics/README.md) | Master Epic/Feature/Story definitions |
+| [ado_wiki/V0.8_ADO_WORKITEMS.md](/ado_wiki/V0.8_ADO_WORKITEMS.md) | **Epic/Feature/Story definitions (single source of truth)** |
 
 ---
 

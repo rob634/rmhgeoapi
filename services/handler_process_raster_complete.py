@@ -142,7 +142,7 @@ def _compute_source_checksum(container_name: str, blob_name: str) -> str:
         Multihash hex string (e.g., "1220abcd...")
     """
     from infrastructure.blob import BlobRepository
-    from util_checksum import compute_multihash
+    from utils.checksum import compute_multihash
 
     blob_repo = BlobRepository.for_zone('bronze')
     source_bytes = blob_repo.read_blob(container_name, blob_name)
@@ -701,6 +701,9 @@ def _process_raster_tiled(
                 # BUG-006 FIX (27 JAN 2026): Pass raster_type for TiTiler bidx params
                 # Without this, multi-band tiles get 500 errors from TiTiler
                 'raster_type': raster_type,
+                # Job traceability (02 FEB 2026): Pass job_id for STAC item metadata
+                '_job_id': params.get('_job_id'),
+                '_job_type': 'process_raster_docker',
             }
 
             stac_response = create_stac_collection(stac_params)
@@ -1423,6 +1426,14 @@ def _process_raster_tiled_mount(
         collection_id = params.get('collection_id')
         blob_stem = Path(blob_name).stem
 
+        # Build raster_type from tiling metadata for TiTiler bidx params (02 FEB 2026)
+        raster_metadata = tiling_result.get('raster_metadata', {})
+        raster_type = {
+            'detected_type': 'raster',
+            'band_count': raster_metadata.get('band_count', 3),
+            'data_type': raster_metadata.get('dtype', 'uint8'),
+        }
+
         stac_params = {
             'collection_id': collection_id,
             'item_id': params.get('item_id') or blob_stem,
@@ -1434,6 +1445,11 @@ def _process_raster_tiled_mount(
             'resource_id': params.get('resource_id'),
             'version_id': params.get('version_id'),
             'access_level': params.get('access_level'),
+            # BUG-006 FIX (02 FEB 2026): Pass raster_type for TiTiler bidx params
+            'raster_type': raster_type,
+            # Job traceability (02 FEB 2026): Pass job_id for STAC item metadata
+            '_job_id': params.get('_job_id'),
+            '_job_type': 'process_raster_docker',
         }
 
         stac_response = create_stac_collection(stac_params)

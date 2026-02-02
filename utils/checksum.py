@@ -25,7 +25,7 @@ Standards:
     - Multihash spec: https://multiformats.io/multihash/
 
 Usage:
-    from util_checksum import compute_multihash, verify_multihash
+    from utils.checksum import compute_multihash, verify_multihash
 
     # Compute checksum (returns STAC-compliant multihash string)
     checksum = compute_multihash(cog_bytes)

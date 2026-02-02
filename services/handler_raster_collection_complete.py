@@ -519,6 +519,9 @@ def _create_stac_collection_from_cogs(
         'access_level': params.get('access_level'),
         # BUG-006: Pass raster_type for TiTiler bidx params
         'raster_type': raster_type,
+        # Job traceability (02 FEB 2026): Pass job_id for STAC item metadata
+        '_job_id': job_id,
+        '_job_type': 'process_raster_collection_docker',
     }
 
     stac_response = create_stac_collection(stac_params)

@@ -24,7 +24,8 @@ Exports:
     STARTUP_STATE: Global singleton instance
 
 Usage:
-    from startup_state import STARTUP_STATE, ValidationResult
+    from startup.state import STARTUP_STATE, ValidationResult
+    # Or via package: from startup import STARTUP_STATE, ValidationResult
 
     # Store a validation result
     STARTUP_STATE.env_vars = ValidationResult(

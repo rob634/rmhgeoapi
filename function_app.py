@@ -150,7 +150,7 @@ logging.getLogger("msal").setLevel(logging.WARNING)  # Microsoft Authentication 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
 # Import startup state (zero dependencies) and register probes IMMEDIATELY
-from startup_state import STARTUP_STATE, ValidationResult
+from startup import STARTUP_STATE, ValidationResult
 from triggers.probes import bp as probes_bp
 
 # Register probes BEFORE any validation - they must always be available

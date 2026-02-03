@@ -62,12 +62,14 @@ class MapInterface(BaseInterface):
         approval_id = request.params.get('approval_id', '')
         item_id = request.params.get('item_id', '')
         collection = request.params.get('collection', '')
+        # Allow force-showing QA for demos with show_qa=true
+        force_show_qa = request.params.get('show_qa', '').lower() == 'true'
 
         qa_context = {
             'approval_id': approval_id,
             'item_id': item_id,
             'collection': collection,
-            'show_qa': bool(approval_id or item_id)
+            'show_qa': bool(approval_id or item_id or force_show_qa)
         }
 
         return self._generate_full_page(tipg_base_url, qa_context)

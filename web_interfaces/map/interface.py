@@ -39,6 +39,11 @@ class MapInterface(BaseInterface):
         Note: This interface uses a custom HTML structure instead of wrap_html()
         because it requires external Leaflet CSS/JS resources and full-page map layout.
 
+        Query Parameters:
+            approval_id: Optional approval ID for QA workflow (shows approve/reject)
+            item_id: Optional STAC item ID (alternative to approval_id)
+            collection: Optional collection to pre-select
+
         Args:
             request: Azure Functions HttpRequest object
 
@@ -53,14 +58,27 @@ class MapInterface(BaseInterface):
             # Fallback for local dev
             tipg_base_url = 'https://rmhtitiler-ckdxapgkg4e2gtfp.eastus-01.azurewebsites.net/vector'
 
-        return self._generate_full_page(tipg_base_url)
+        # QA context for approval workflow (03 FEB 2026)
+        approval_id = request.params.get('approval_id', '')
+        item_id = request.params.get('item_id', '')
+        collection = request.params.get('collection', '')
 
-    def _generate_full_page(self, tipg_base_url: str) -> str:
+        qa_context = {
+            'approval_id': approval_id,
+            'item_id': item_id,
+            'collection': collection,
+            'show_qa': bool(approval_id or item_id)
+        }
+
+        return self._generate_full_page(tipg_base_url, qa_context)
+
+    def _generate_full_page(self, tipg_base_url: str, qa_context: dict = None) -> str:
         """Generate complete HTML page with Leaflet dependencies."""
+        qa_context = qa_context or {'approval_id': '', 'item_id': '', 'collection': '', 'show_qa': False}
         css_content = self._generate_css()
         navbar_content = self._generate_navbar()
-        html_content = self._generate_html_content()
-        js_content = self._generate_js(tipg_base_url)
+        html_content = self._generate_html_content(qa_context)
+        js_content = self._generate_js(tipg_base_url, qa_context)
 
         return f"""<!DOCTYPE html>
 <html lang="en">
@@ -109,7 +127,7 @@ class MapInterface(BaseInterface):
         </nav>
         """
 
-    def _generate_html_content(self) -> str:
+    def _generate_html_content(self, qa_context: dict = None) -> str:
         """Generate HTML content structure."""
         return """
         <!-- Map Container -->
@@ -158,6 +176,37 @@ class MapInterface(BaseInterface):
             <div class="status-section">
                 <div id="status" class="status-text">Ready</div>
                 <div id="feature-count" class="feature-count"></div>
+            </div>
+
+            <!-- QA Section (03 FEB 2026) -->
+            <div id="qa-section" class="qa-section" style="display: none;">
+                <div class="section-header">Data Curator QA</div>
+
+                <!-- Reviewer Email (Required) -->
+                <div class="qa-field">
+                    <label for="qa-reviewer">Reviewer Email <span class="required">*</span></label>
+                    <input type="email" class="qa-input" id="qa-reviewer" placeholder="your.email@worldbank.org" required>
+                </div>
+
+                <!-- Clearance Level (Required for Approve) -->
+                <div class="qa-field">
+                    <label for="qa-clearance">Clearance Level <span class="required">*</span></label>
+                    <select class="qa-input" id="qa-clearance">
+                        <option value="ouo" selected>OUO - Official Use Only</option>
+                        <option value="public">Public - External Access</option>
+                    </select>
+                </div>
+
+                <!-- Notes / Reason -->
+                <div class="qa-field">
+                    <label for="qa-notes">Notes <span id="notes-required" class="required" style="display:none;">*</span></label>
+                    <textarea class="qa-input" id="qa-notes" placeholder="QA notes (required for rejection)..." rows="2"></textarea>
+                </div>
+
+                <div class="qa-buttons">
+                    <button class="approve-button" onclick="handleApprove()">Approve</button>
+                    <button class="reject-button" onclick="handleReject()">Reject</button>
+                </div>
             </div>
         </div>
 
@@ -444,22 +493,124 @@ class MapInterface(BaseInterface):
             display: block;
             margin-top: 2px;
         }
+
+        /* QA Section (03 FEB 2026) */
+        .qa-section {
+            border-top: 1px solid #e9ecef;
+            padding-top: 16px;
+            margin-top: 16px;
+        }
+
+        .section-header {
+            font-size: 14px;
+            font-weight: 700;
+            color: #053657;
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #0071BC;
+        }
+
+        .qa-field {
+            margin-bottom: 12px;
+        }
+
+        .qa-field label {
+            display: block;
+            font-size: 12px;
+            font-weight: 600;
+            color: #4a5568;
+            margin-bottom: 4px;
+        }
+
+        .qa-field .required {
+            color: #e53e3e;
+        }
+
+        .qa-input {
+            width: 100%;
+            padding: 8px 10px;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            font-size: 13px;
+            font-family: inherit;
+            resize: vertical;
+        }
+
+        .qa-input:focus {
+            outline: none;
+            border-color: #0071BC;
+            box-shadow: 0 0 0 2px rgba(0, 113, 188, 0.1);
+        }
+
+        select.qa-input {
+            cursor: pointer;
+        }
+
+        .qa-buttons {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .approve-button, .reject-button {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 13px;
+        }
+
+        .approve-button {
+            background: #48bb78;
+            color: white;
+        }
+
+        .approve-button:hover { background: #38a169; }
+
+        .reject-button {
+            background: #f56565;
+            color: white;
+        }
+
+        .reject-button:hover { background: #e53e3e; }
+
+        .approve-button:disabled, .reject-button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
         """
 
-    def _generate_js(self, tipg_base_url: str) -> str:
+    def _generate_js(self, tipg_base_url: str, qa_context: dict = None) -> str:
         """Generate JavaScript code.
 
         Updated 23 JAN 2026: Use TiPG as primary endpoint for collections and features.
+        Updated 03 FEB 2026: Add QA approval handlers.
 
         Args:
             tipg_base_url: TiPG base URL for OGC Features (e.g., https://titiler.../vector)
+            qa_context: QA context for approval workflow
         """
+        qa_context = qa_context or {'approval_id': '', 'item_id': '', 'collection': '', 'show_qa': False}
+
+        # Build QA context JavaScript (03 FEB 2026)
+        qa_js = f"""
+        // QA Context for approval workflow (03 FEB 2026)
+        const QA_CONTEXT = {{
+            approval_id: '{qa_context.get("approval_id", "")}',
+            item_id: '{qa_context.get("item_id", "")}',
+            collection: '{qa_context.get("collection", "")}',
+            show_qa: {'true' if qa_context.get("show_qa") else 'false'}
+        }};
+        """
+
         return """
         // API Configuration
         const API_BASE_URL = window.location.origin;
         // TiPG endpoint for high-performance OGC Features (23 JAN 2026)
         const TIPG_BASE_URL = '""" + tipg_base_url + """';
-
+        """ + qa_js + """
         // Helper: Extract table name from schema-qualified ID (geo.table -> table)
         const getTableName = (id) => id.includes('.') ? id.split('.').pop() : id;
 
@@ -653,8 +804,165 @@ class MapInterface(BaseInterface):
             }
         }
 
+        // QA handlers - wired to Platform API (03 FEB 2026)
+        async function handleApprove() {
+            const reviewer = document.getElementById('qa-reviewer').value.trim();
+            const clearance = document.getElementById('qa-clearance').value;
+            const notes = document.getElementById('qa-notes').value.trim();
+            const approveBtn = document.querySelector('.approve-button');
+            const rejectBtn = document.querySelector('.reject-button');
+
+            // Validate required fields
+            if (!reviewer) {
+                setStatus('Reviewer email is required', 'error');
+                document.getElementById('qa-reviewer').focus();
+                return;
+            }
+
+            if (!reviewer.includes('@')) {
+                setStatus('Please enter a valid email address', 'error');
+                document.getElementById('qa-reviewer').focus();
+                return;
+            }
+
+            const approvalId = QA_CONTEXT.approval_id || QA_CONTEXT.item_id;
+            if (!approvalId) {
+                setStatus('Error: No approval_id or item_id provided', 'error');
+                return;
+            }
+
+            approveBtn.disabled = true;
+            rejectBtn.disabled = true;
+            setStatus('Submitting approval...', '');
+
+            try {
+                const payload = {
+                    reviewer: reviewer,
+                    clearance_level: clearance,
+                    notes: notes || 'Approved via Vector Map Viewer QA'
+                };
+                if (QA_CONTEXT.approval_id) {
+                    payload.approval_id = QA_CONTEXT.approval_id;
+                } else {
+                    payload.stac_item_id = QA_CONTEXT.item_id;
+                }
+
+                const response = await fetch(`${API_BASE_URL}/api/platform/approve`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json();
+
+                if (response.ok && result.success) {
+                    const msg = clearance === 'public'
+                        ? 'Approved for PUBLIC access!'
+                        : 'Approved (OUO - Internal only)';
+                    setStatus(msg, 'success');
+                    document.getElementById('qa-section').style.display = 'none';
+                } else {
+                    setStatus(`Approval failed: ${result.error || result.message || 'Unknown error'}`, 'error');
+                    approveBtn.disabled = false;
+                    rejectBtn.disabled = false;
+                }
+            } catch (error) {
+                console.error('Approve error:', error);
+                setStatus(`Error: ${error.message}`, 'error');
+                approveBtn.disabled = false;
+                rejectBtn.disabled = false;
+            }
+        }
+
+        async function handleReject() {
+            const reviewer = document.getElementById('qa-reviewer').value.trim();
+            const notes = document.getElementById('qa-notes').value.trim();
+            const approveBtn = document.querySelector('.approve-button');
+            const rejectBtn = document.querySelector('.reject-button');
+
+            if (!reviewer) {
+                setStatus('Reviewer email is required', 'error');
+                document.getElementById('qa-reviewer').focus();
+                return;
+            }
+
+            if (!reviewer.includes('@')) {
+                setStatus('Please enter a valid email address', 'error');
+                document.getElementById('qa-reviewer').focus();
+                return;
+            }
+
+            if (!notes) {
+                setStatus('Rejection reason is required', 'error');
+                document.getElementById('qa-notes').focus();
+                return;
+            }
+
+            const approvalId = QA_CONTEXT.approval_id || QA_CONTEXT.item_id;
+            if (!approvalId) {
+                setStatus('Error: No approval_id or item_id provided', 'error');
+                return;
+            }
+
+            approveBtn.disabled = true;
+            rejectBtn.disabled = true;
+            setStatus('Submitting rejection...', '');
+
+            try {
+                const payload = {
+                    reviewer: reviewer,
+                    reason: notes
+                };
+                if (QA_CONTEXT.approval_id) {
+                    payload.approval_id = QA_CONTEXT.approval_id;
+                } else {
+                    payload.stac_item_id = QA_CONTEXT.item_id;
+                }
+
+                const response = await fetch(`${API_BASE_URL}/api/platform/reject`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json();
+
+                if (response.ok && result.success) {
+                    setStatus('Dataset rejected', 'error');
+                    document.getElementById('qa-section').style.display = 'none';
+                } else {
+                    setStatus(`Rejection failed: ${result.error || result.message || 'Unknown error'}`, 'error');
+                    approveBtn.disabled = false;
+                    rejectBtn.disabled = false;
+                }
+            } catch (error) {
+                console.error('Reject error:', error);
+                setStatus(`Error: ${error.message}`, 'error');
+                approveBtn.disabled = false;
+                rejectBtn.disabled = false;
+            }
+        }
+
         // Initialize
-        window.addEventListener('load', loadCollections);
+        window.addEventListener('load', function() {
+            loadCollections();
+
+            // Show QA section if approval context provided (03 FEB 2026)
+            if (QA_CONTEXT.show_qa) {
+                document.getElementById('qa-section').style.display = 'block';
+                console.log('QA mode enabled:', QA_CONTEXT);
+            }
+
+            // Pre-select collection if provided
+            if (QA_CONTEXT.collection) {
+                setTimeout(() => {
+                    const select = document.getElementById('collection-select');
+                    if (select) {
+                        select.value = QA_CONTEXT.collection;
+                    }
+                }, 1000);
+            }
+        });
 
         // Enter key support
         document.addEventListener('keypress', function(e) {

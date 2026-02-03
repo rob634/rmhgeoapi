@@ -30,6 +30,7 @@ import azure.functions as func
 
 from web_interfaces import InterfaceRegistry
 from web_interfaces.base import BaseInterface
+from config import __version__
 
 logger = logging.getLogger(__name__)
 
@@ -113,39 +114,49 @@ class ReDocInterface(BaseInterface):
             padding: 0;
         }}
 
-        .custom-header {{
-            background: #053657;
-            color: white;
-            padding: 16px 24px;
+        /* Standard navbar - matches all other interfaces */
+        .site-navbar {{
+            background: white;
+            padding: 15px 30px;
+            border-radius: 3px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
             display: flex;
             justify-content: space-between;
             align-items: center;
-            font-family: "Montserrat", sans-serif;
+            border-bottom: 3px solid #0071BC;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
             position: sticky;
             top: 0;
             z-index: 1000;
         }}
 
-        .custom-header h1 {{
-            margin: 0;
+        .site-navbar .navbar-brand {{
             font-size: 20px;
-            font-weight: 600;
+            font-weight: 700;
+            color: #053657;
+            text-decoration: none;
+            transition: color 0.2s;
         }}
 
-        .custom-header .nav-links {{
+        .site-navbar .navbar-brand:hover {{
+            color: #0071BC;
+        }}
+
+        .site-navbar .navbar-links {{
             display: flex;
             gap: 20px;
         }}
 
-        .custom-header a {{
-            color: #00A3DA;
+        .site-navbar .navbar-links a {{
+            color: #0071BC;
             text-decoration: none;
-            font-size: 14px;
             font-weight: 600;
+            font-size: 14px;
+            transition: color 0.2s;
         }}
 
-        .custom-header a:hover {{
-            color: #FFC14D;
+        .site-navbar .navbar-links a:hover {{
+            color: #00A3DA;
         }}
 
         .api-info {{
@@ -264,15 +275,18 @@ class ReDocInterface(BaseInterface):
     </style>
 </head>
 <body>
-    <div class="custom-header">
-        <h1>Geospatial Platform API</h1>
-        <div class="nav-links">
-            <a href="/api/interface/home">Home</a>
-            <a href="/api/interface/swagger">Swagger UI</a>
-            <a href="/api/interface/docs">Platform Docs</a>
-            <a href="/api/health">Health Check</a>
+    <nav class="site-navbar">
+        <a href="/api/interface/home" class="navbar-brand">Geospatial API v{__version__}</a>
+        <div class="navbar-links">
+            <a href="/api/interface/health">System</a>
+            <a href="/api/interface/pipeline">Pipelines</a>
+            <a href="/api/interface/stac">STAC</a>
+            <a href="/api/interface/vector">OGC Features</a>
+            <a href="/api/interface/gallery">Gallery</a>
+            <a href="/api/interface/docs">API Docs</a>
+            <a href="/api/interface/integration">Integration</a>
         </div>
-    </div>
+    </nav>
 
     <div class="api-info">
         Base URL: <code>{base_url}</code> |

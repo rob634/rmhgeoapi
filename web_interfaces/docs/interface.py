@@ -63,34 +63,44 @@ class DocsInterface(BaseInterface):
             line-height: 1.6;
         }}
 
-        .header {{
-            background: #053657;
-            color: white;
-            padding: 20px 40px;
+        /* Standard navbar - matches all other interfaces */
+        .site-navbar {{
+            background: white;
+            padding: 15px 30px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
             display: flex;
             justify-content: space-between;
             align-items: center;
+            border-bottom: 3px solid #0071BC;
         }}
 
-        .header h1 {{
-            font-size: 22px;
-            font-weight: 600;
-        }}
-
-        .header-nav {{
-            display: flex;
-            gap: 24px;
-        }}
-
-        .header-nav a {{
-            color: #00A3DA;
+        .site-navbar .navbar-brand {{
+            font-size: 20px;
+            font-weight: 700;
+            color: #053657;
             text-decoration: none;
-            font-size: 14px;
-            font-weight: 500;
+            transition: color 0.2s;
         }}
 
-        .header-nav a:hover {{
-            color: #FFC14D;
+        .site-navbar .navbar-brand:hover {{
+            color: #0071BC;
+        }}
+
+        .site-navbar .navbar-links {{
+            display: flex;
+            gap: 20px;
+        }}
+
+        .site-navbar .navbar-links a {{
+            color: #0071BC;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 14px;
+            transition: color 0.2s;
+        }}
+
+        .site-navbar .navbar-links a:hover {{
+            color: #00A3DA;
         }}
 
         .container {{
@@ -365,15 +375,18 @@ class DocsInterface(BaseInterface):
     </style>
 </head>
 <body>
-    <div class="header">
-        <h1>Geospatial Platform API</h1>
-        <nav class="header-nav">
-            <a href="/api/interface/home">Home</a>
-            <a href="/api/interface/swagger">Swagger UI</a>
-            <a href="/api/interface/redoc">ReDoc</a>
-            <a href="/api/health">Health</a>
-        </nav>
-    </div>
+    <nav class="site-navbar">
+        <a href="/api/interface/home" class="navbar-brand">Geospatial API v{__version__}</a>
+        <div class="navbar-links">
+            <a href="/api/interface/health">System</a>
+            <a href="/api/interface/pipeline">Pipelines</a>
+            <a href="/api/interface/stac">STAC</a>
+            <a href="/api/interface/vector">OGC Features</a>
+            <a href="/api/interface/gallery">Gallery</a>
+            <a href="/api/interface/docs">API Docs</a>
+            <a href="/api/interface/integration">Integration</a>
+        </div>
+    </nav>
 
     <div class="container">
         <div class="hero">

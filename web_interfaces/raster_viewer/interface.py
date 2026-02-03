@@ -230,7 +230,28 @@ class RasterViewerInterface(BaseInterface):
         <!-- QA Section -->
         <div id="qa-section" class="qa-section" style="display: none;">
             <div class="section-header">Data Curator QA</div>
-            <textarea class="qa-input" id="qa-notes" placeholder="QA notes (optional)..." rows="3"></textarea>
+
+            <!-- Reviewer Email (Required) -->
+            <div class="qa-field">
+                <label for="qa-reviewer">Reviewer Email <span class="required">*</span></label>
+                <input type="email" class="qa-input" id="qa-reviewer" placeholder="your.email@worldbank.org" required>
+            </div>
+
+            <!-- Clearance Level (Required for Approve) -->
+            <div class="qa-field">
+                <label for="qa-clearance">Clearance Level <span class="required">*</span></label>
+                <select class="qa-input" id="qa-clearance">
+                    <option value="ouo" selected>OUO - Official Use Only</option>
+                    <option value="public">Public - External Access</option>
+                </select>
+            </div>
+
+            <!-- Notes / Reason -->
+            <div class="qa-field">
+                <label for="qa-notes">Notes <span id="notes-required" class="required" style="display:none;">*</span></label>
+                <textarea class="qa-input" id="qa-notes" placeholder="QA notes (required for rejection)..." rows="2"></textarea>
+            </div>
+
             <div class="qa-buttons">
                 <button class="approve-button" onclick="handleApprove()">Approve</button>
                 <button class="reject-button" onclick="handleReject()">Reject</button>
@@ -515,20 +536,46 @@ class RasterViewerInterface(BaseInterface):
             padding-top: 16px;
         }
 
+        .qa-field {
+            margin-bottom: 12px;
+        }
+
+        .qa-field label {
+            display: block;
+            font-size: 12px;
+            font-weight: 600;
+            color: #4a5568;
+            margin-bottom: 4px;
+        }
+
+        .qa-field .required {
+            color: #e53e3e;
+        }
+
         .qa-input {
             width: 100%;
-            padding: 10px;
+            padding: 8px 10px;
             border: 1px solid #e9ecef;
             border-radius: 4px;
             font-size: 13px;
             font-family: inherit;
             resize: vertical;
-            margin-bottom: 10px;
+        }
+
+        .qa-input:focus {
+            outline: none;
+            border-color: #0071BC;
+            box-shadow: 0 0 0 2px rgba(0, 113, 188, 0.1);
+        }
+
+        select.qa-input {
+            cursor: pointer;
         }
 
         .qa-buttons {
             display: flex;
             gap: 8px;
+            margin-top: 12px;
         }
 
         .approve-button, .reject-button {
@@ -554,6 +601,11 @@ class RasterViewerInterface(BaseInterface):
         }
 
         .reject-button:hover { background: #e53e3e; }
+
+        .approve-button:disabled, .reject-button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
 
         /* Buttons */
         .btn-primary {
@@ -1349,9 +1401,25 @@ class RasterViewerInterface(BaseInterface):
 
         // QA handlers - wired to Platform API (02 FEB 2026)
         async function handleApprove() {{
-            const notes = document.getElementById('qa-notes').value;
+            const reviewer = document.getElementById('qa-reviewer').value.trim();
+            const clearance = document.getElementById('qa-clearance').value;
+            const notes = document.getElementById('qa-notes').value.trim();
             const approveBtn = document.querySelector('.approve-button');
             const rejectBtn = document.querySelector('.reject-button');
+
+            // Validate required fields
+            if (!reviewer) {{
+                setStatus('Reviewer email is required', 'error');
+                document.getElementById('qa-reviewer').focus();
+                return;
+            }}
+
+            // Basic email validation
+            if (!reviewer.includes('@')) {{
+                setStatus('Please enter a valid email address', 'error');
+                document.getElementById('qa-reviewer').focus();
+                return;
+            }}
 
             // Determine which ID to use
             const approvalId = QA_CONTEXT.approval_id || QA_CONTEXT.item_id;
@@ -1367,6 +1435,8 @@ class RasterViewerInterface(BaseInterface):
 
             try {{
                 const payload = {{
+                    reviewer: reviewer,
+                    clearance_level: clearance,
                     notes: notes || 'Approved via Raster Viewer QA'
                 }};
                 // Use approval_id if provided, otherwise stac_item_id
@@ -1385,7 +1455,10 @@ class RasterViewerInterface(BaseInterface):
                 const result = await response.json();
 
                 if (response.ok && result.success) {{
-                    setStatus('Approved successfully!', 'success');
+                    const msg = clearance === 'public'
+                        ? 'Approved for PUBLIC access!'
+                        : 'Approved (OUO - Internal only)';
+                    setStatus(msg, 'success');
                     // Hide QA section after successful action
                     document.getElementById('qa-section').style.display = 'none';
                 }} else {{
@@ -1402,13 +1475,27 @@ class RasterViewerInterface(BaseInterface):
         }}
 
         async function handleReject() {{
-            const notes = document.getElementById('qa-notes').value;
+            const reviewer = document.getElementById('qa-reviewer').value.trim();
+            const notes = document.getElementById('qa-notes').value.trim();
             const approveBtn = document.querySelector('.approve-button');
             const rejectBtn = document.querySelector('.reject-button');
 
+            // Validate required fields
+            if (!reviewer) {{
+                setStatus('Reviewer email is required', 'error');
+                document.getElementById('qa-reviewer').focus();
+                return;
+            }}
+
+            if (!reviewer.includes('@')) {{
+                setStatus('Please enter a valid email address', 'error');
+                document.getElementById('qa-reviewer').focus();
+                return;
+            }}
+
             // Require rejection reason
-            if (!notes.trim()) {{
-                setStatus('Please provide a rejection reason in the notes field', 'error');
+            if (!notes) {{
+                setStatus('Rejection reason is required', 'error');
                 document.getElementById('qa-notes').focus();
                 return;
             }}
@@ -1427,7 +1514,8 @@ class RasterViewerInterface(BaseInterface):
 
             try {{
                 const payload = {{
-                    rejection_reason: notes
+                    reviewer: reviewer,
+                    reason: notes
                 }};
                 // Use approval_id if provided, otherwise stac_item_id
                 if (QA_CONTEXT.approval_id) {{
@@ -1445,7 +1533,7 @@ class RasterViewerInterface(BaseInterface):
                 const result = await response.json();
 
                 if (response.ok && result.success) {{
-                    setStatus('Rejected successfully', 'error');
+                    setStatus('Dataset rejected', 'error');
                     // Hide QA section after successful action
                     document.getElementById('qa-section').style.display = 'none';
                 }} else {{

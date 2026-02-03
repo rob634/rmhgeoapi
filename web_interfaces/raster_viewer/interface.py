@@ -50,6 +50,8 @@ class RasterViewerInterface(BaseInterface):
         Query Parameters:
             url: Optional COG URL to load on page open
             search_id: Optional PgSTAC search ID for mosaic view
+            approval_id: Optional approval ID for QA workflow (shows approve/reject)
+            item_id: Optional STAC item ID (alternative to approval_id)
 
         Args:
             request: Azure Functions HTTP request
@@ -60,12 +62,22 @@ class RasterViewerInterface(BaseInterface):
         # Get optional parameters
         cog_url = request.params.get('url', '')
         search_id = request.params.get('search_id', '')
+        approval_id = request.params.get('approval_id', '')
+        item_id = request.params.get('item_id', '')
 
-        return self._generate_full_page(cog_url, search_id)
+        return self._generate_full_page(cog_url, search_id, approval_id, item_id)
 
-    def _generate_full_page(self, initial_url: str = '', initial_search_id: str = '') -> str:
+    def _generate_full_page(self, initial_url: str = '', initial_search_id: str = '',
+                            approval_id: str = '', item_id: str = '') -> str:
         """Generate complete HTML document with Leaflet map and controls."""
         titiler_url = os.getenv('TITILER_BASE_URL', 'https://titiler.xyz')
+
+        # QA context for approval workflow
+        qa_context = {
+            'approval_id': approval_id,
+            'item_id': item_id,
+            'show_qa': bool(approval_id or item_id)
+        }
 
         return f"""<!DOCTYPE html>
 <html lang="en">
@@ -233,7 +245,7 @@ class RasterViewerInterface(BaseInterface):
     </div>
 
     <script>
-        {self._generate_javascript(titiler_url)}
+        {self._generate_javascript(titiler_url, qa_context)}
     </script>
 </body>
 </html>"""
@@ -683,12 +695,20 @@ class RasterViewerInterface(BaseInterface):
         }
         """
 
-    def _generate_javascript(self, titiler_url: str) -> str:
+    def _generate_javascript(self, titiler_url: str, qa_context: dict = None) -> str:
         """Generate JavaScript for map interaction."""
+        qa_context = qa_context or {'approval_id': '', 'item_id': '', 'show_qa': False}
         return f"""
         // Configuration
         const TITILER_URL = '{titiler_url}';
         const API_BASE = window.location.origin;
+
+        // QA Context for approval workflow (02 FEB 2026)
+        const QA_CONTEXT = {{
+            approval_id: '{qa_context.get("approval_id", "")}',
+            item_id: '{qa_context.get("item_id", "")}',
+            show_qa: {'true' if qa_context.get("show_qa") else 'false'}
+        }};
 
         // State
         let map = null;
@@ -1327,24 +1347,129 @@ class RasterViewerInterface(BaseInterface):
             }}
         }}
 
-        // QA handlers
-        function handleApprove() {{
+        // QA handlers - wired to Platform API (02 FEB 2026)
+        async function handleApprove() {{
             const notes = document.getElementById('qa-notes').value;
-            console.log('APPROVE:', currentCogUrl, notes);
-            setStatus('Approved! (Feature coming soon)', 'success');
-            setTimeout(() => setStatus('COG loaded successfully', 'success'), 3000);
+            const approveBtn = document.querySelector('.approve-button');
+            const rejectBtn = document.querySelector('.reject-button');
+
+            // Determine which ID to use
+            const approvalId = QA_CONTEXT.approval_id || QA_CONTEXT.item_id;
+            if (!approvalId) {{
+                setStatus('Error: No approval_id or item_id provided', 'error');
+                return;
+            }}
+
+            // Disable buttons during request
+            approveBtn.disabled = true;
+            rejectBtn.disabled = true;
+            setStatus('Submitting approval...', '');
+
+            try {{
+                const payload = {{
+                    notes: notes || 'Approved via Raster Viewer QA'
+                }};
+                // Use approval_id if provided, otherwise stac_item_id
+                if (QA_CONTEXT.approval_id) {{
+                    payload.approval_id = QA_CONTEXT.approval_id;
+                }} else {{
+                    payload.stac_item_id = QA_CONTEXT.item_id;
+                }}
+
+                const response = await fetch(`${{API_BASE}}/api/platform/approve`, {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify(payload)
+                }});
+
+                const result = await response.json();
+
+                if (response.ok && result.success) {{
+                    setStatus('Approved successfully!', 'success');
+                    // Hide QA section after successful action
+                    document.getElementById('qa-section').style.display = 'none';
+                }} else {{
+                    setStatus(`Approval failed: ${{result.error || result.message || 'Unknown error'}}`, 'error');
+                    approveBtn.disabled = false;
+                    rejectBtn.disabled = false;
+                }}
+            }} catch (error) {{
+                console.error('Approve error:', error);
+                setStatus(`Error: ${{error.message}}`, 'error');
+                approveBtn.disabled = false;
+                rejectBtn.disabled = false;
+            }}
         }}
 
-        function handleReject() {{
+        async function handleReject() {{
             const notes = document.getElementById('qa-notes').value;
-            console.log('REJECT:', currentCogUrl, notes);
-            setStatus('Rejected! (Feature coming soon)', 'error');
-            setTimeout(() => setStatus('COG loaded successfully', 'success'), 3000);
+            const approveBtn = document.querySelector('.approve-button');
+            const rejectBtn = document.querySelector('.reject-button');
+
+            // Require rejection reason
+            if (!notes.trim()) {{
+                setStatus('Please provide a rejection reason in the notes field', 'error');
+                document.getElementById('qa-notes').focus();
+                return;
+            }}
+
+            // Determine which ID to use
+            const approvalId = QA_CONTEXT.approval_id || QA_CONTEXT.item_id;
+            if (!approvalId) {{
+                setStatus('Error: No approval_id or item_id provided', 'error');
+                return;
+            }}
+
+            // Disable buttons during request
+            approveBtn.disabled = true;
+            rejectBtn.disabled = true;
+            setStatus('Submitting rejection...', '');
+
+            try {{
+                const payload = {{
+                    rejection_reason: notes
+                }};
+                // Use approval_id if provided, otherwise stac_item_id
+                if (QA_CONTEXT.approval_id) {{
+                    payload.approval_id = QA_CONTEXT.approval_id;
+                }} else {{
+                    payload.stac_item_id = QA_CONTEXT.item_id;
+                }}
+
+                const response = await fetch(`${{API_BASE}}/api/platform/reject`, {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify(payload)
+                }});
+
+                const result = await response.json();
+
+                if (response.ok && result.success) {{
+                    setStatus('Rejected successfully', 'error');
+                    // Hide QA section after successful action
+                    document.getElementById('qa-section').style.display = 'none';
+                }} else {{
+                    setStatus(`Rejection failed: ${{result.error || result.message || 'Unknown error'}}`, 'error');
+                    approveBtn.disabled = false;
+                    rejectBtn.disabled = false;
+                }}
+            }} catch (error) {{
+                console.error('Reject error:', error);
+                setStatus(`Error: ${{error.message}}`, 'error');
+                approveBtn.disabled = false;
+                rejectBtn.disabled = false;
+            }}
         }}
 
         // Initialize on page load
         window.onload = function() {{
             initMap();
+
+            // Show QA section if approval context provided (02 FEB 2026)
+            if (QA_CONTEXT.show_qa) {{
+                document.getElementById('qa-section').style.display = 'block';
+                console.log('QA mode enabled:', QA_CONTEXT);
+            }}
 
             // Check for search_id parameter first (mosaic mode)
             const searchInput = document.getElementById('search-id');

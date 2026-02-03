@@ -1,6 +1,6 @@
 # CLAUDE.md - Project Context
 
-**Last Updated**: 23 JAN 2026
+**Last Updated**: 02 FEB 2026
 
 ---
 
@@ -164,9 +164,57 @@ The Docker worker MUST use the same App Insights as Function App (`rmhazuregeoap
 
 See `docs_claude/DEPLOYMENT_GUIDE.md` → "Docker Worker Application Insights Setup" for full details and troubleshooting.
 
-### Deploy Command (Function App)
+### Deploy Script (RECOMMENDED)
+
+**Use `deploy.sh` for all deployments** - it handles versioning, health checks, and verification automatically.
+
 ```bash
+# Deploy Function App (default)
+./deploy.sh
+
+# Deploy Function App explicitly
+./deploy.sh function
+
+# Deploy Docker Worker
+./deploy.sh docker
+
+# Deploy both Function App and Docker Worker
+./deploy.sh both
+```
+
+**What the script does:**
+1. Reads version from `config/__init__.py`
+2. Deploys to the appropriate target
+3. Waits for restart (45s for Function App, 60s for Docker)
+4. Runs health check
+5. Verifies deployed version matches expected
+
+**Example output:**
+```
+================================================
+Geospatial API Deployment
+Version: 0.8.8.1
+================================================
+
+📦 Deploying Azure Function App (rmhazuregeoapi)...
+...
+✅ Health check passed (HTTP 200)
+📋 Deployed version: 0.8.8.1
+✅ Version matches expected (0.8.8.1)
+
+🎉 Function App deployment complete!
+```
+
+### Manual Deploy Commands (Reference)
+
+If deploy.sh is unavailable, use these commands directly:
+
+```bash
+# Function App
 func azure functionapp publish rmhazuregeoapi --python --build remote
+
+# Docker Worker (see Docker Worker section above for full commands)
+az acr build --registry rmhazureacr --image geospatial-worker:VERSION --file Dockerfile .
 ```
 
 ### Versioning Convention
@@ -190,7 +238,9 @@ Version format: `0.v.i.d` (defined 04 JAN 2026)
 
 ### Post-Deployment Validation (REQUIRED)
 
-**Claude MUST perform these steps after EVERY deployment:**
+> **Note**: If using `deploy.sh`, health check and version verification are automatic. The steps below are for manual deployments or troubleshooting.
+
+**Claude MUST perform these steps after EVERY manual deployment:**
 
 ```bash
 # Step 1: Wait for app restart (30-60 seconds)

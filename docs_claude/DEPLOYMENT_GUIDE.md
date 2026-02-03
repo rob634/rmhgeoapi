@@ -7,7 +7,26 @@
 
 ## Quick Deployment
 
-### Primary Command
+### Deploy Script (RECOMMENDED)
+
+**Use `deploy.sh` for all deployments** - handles versioning, health checks, and verification automatically.
+
+```bash
+# From project root
+./deploy.sh              # Deploy Function App (default)
+./deploy.sh function     # Deploy Function App explicitly
+./deploy.sh docker       # Deploy Docker Worker only
+./deploy.sh both         # Deploy both Function App and Docker Worker
+```
+
+**What the script does:**
+1. Reads version from `config/__init__.py`
+2. Deploys to the appropriate target (Function App or Docker Worker)
+3. Waits for restart (45s for Function App, 60s for Docker)
+4. Runs health check
+5. Verifies deployed version matches expected
+
+### Manual Command (if deploy.sh unavailable)
 ```bash
 func azure functionapp publish rmhazuregeoapi --python --build remote
 ```
@@ -613,4 +632,4 @@ AND m.rolname = 'migeoetldbadminqa';
 
 ---
 
-**Last Updated**: 21 JAN 2026
+**Last Updated**: 02 FEB 2026

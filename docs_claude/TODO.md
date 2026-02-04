@@ -2,7 +2,7 @@
 **This file contains high level items only**
 This file references other documents containing implementation details. This is to avoid a 50,000 line TODO.md. This file should not exceed 500 lines.
 
-**Last Updated**: 02 FEB 2026
+**Last Updated**: 04 FEB 2026
 **Source of Truth**: [ado_wiki/V0.8_ADO_WORKITEMS.md](/ado_wiki/V0.8_ADO_WORKITEMS.md) - Epic/Feature/Story definitions
 **Purpose**: Sprint-level task tracking and delegation (INDEX format)
 
@@ -29,6 +29,7 @@ This file references other documents containing implementation details. This is 
 | [/V0.8_DAG_READINESS.md](/V0.8_DAG_READINESS.md) | DAG orchestration readiness assessment (Epoch 5 prep) |
 | [/V0.8_DDH_MIGRATION.md](/V0.8_DDH_MIGRATION.md) | **DDH column removal - platform_refs migration** |
 | [DRY_RUN_IMPLEMENTATION.md](./DRY_RUN_IMPLEMENTATION.md) | **Platform Submit dry_run + previous_version_id (V0.8.4)** |
+| [SERVICE_LAYER_CLIENT.md](./SERVICE_LAYER_CLIENT.md) | **TiPG refresh webhook integration (F1.6)** |
 
 ---
 
@@ -84,6 +85,32 @@ Cascade deletes ALL user tables in geo schema:
 
 ## Active Work
 
+### Geo Schema Table Name Validation (F1.7) - CRITICAL
+**Status**: ✅ COMPLETE (04 FEB 2026)
+**Priority**: CRITICAL - PostgreSQL identifier requirement
+**Created**: 04 FEB 2026
+
+**Problem**: PostgreSQL identifiers (table names) must begin with a letter or underscore. If a vector ETL job receives parameters that produce a table name starting with a number (e.g., `2024_flood_data`), the table creation will fail or require quoting, which breaks TiPG/OGC Features discovery.
+
+**Solution**: Added numeric prefix check to `_slugify_for_postgres()` in `config/platform_config.py`.
+
+| Rule | Example Input | Output |
+|------|---------------|--------|
+| Starts with letter | `flood_data` | `flood_data` (unchanged) |
+| Starts with number | `2024_flood_data` | `t_2024_flood_data` |
+| Starts with number | `123abc` | `t_123abc` |
+
+**Fix applied**: `config/platform_config.py:469` - `_slugify_for_postgres()`
+```python
+# PostgreSQL identifiers must begin with a letter or underscore (04 FEB 2026)
+if slug and slug[0].isdigit():
+    slug = f"t_{slug}"
+```
+
+**Why this location**: This function is the single sanitization point for ALL table names generated from platform/submit. No need for separate validation - it's already in the critical path.
+
+---
+
 ### Raster Result Type Safety (F7.21) - CRITICAL
 **Status**: ✅ PHASE 1-2 COMPLETE - Core models + service wiring done
 **Details**: [RASTER_RESULT_MODELS.md](./RASTER_RESULT_MODELS.md)
@@ -131,6 +158,39 @@ Cascade deletes ALL user tables in geo schema:
 - `triggers/platform/submit.py` - Add dry_run logic
 
 **Related**: V0.8_RELEASE_CONTROL.md, V0.8_TESTING.md (Part 4)
+
+---
+
+### TiPG Collection Refresh Integration (F1.6)
+**Status**: PLANNED
+**Priority**: MEDIUM - Enables immediate TiPG visibility after vector ETL
+**Details**: [SERVICE_LAYER_CLIENT.md](./SERVICE_LAYER_CLIENT.md)
+**Created**: 04 FEB 2026
+**Prerequisite**: ✅ F1.7 (Geo Schema Table Name Validation) - DONE
+
+**Problem**: After vector ETL creates a PostGIS table, TiPG doesn't immediately see the new collection (cached). The Service Layer has a webhook (`POST /admin/refresh-collections`) but the ETL app doesn't call it.
+
+**Solution**: Create `ServiceLayerClient` repository to call the webhook after vector table creation.
+
+| Phase | Description | Status |
+|-------|-------------|--------|
+| Phase 1 | Create `core/models/service_layer.py` models | Pending |
+| Phase 2 | Create `infrastructure/service_layer_client.py` | Pending |
+| Phase 3 | Add `SERVICE_LAYER_TOKEN_SCOPE` to config | Pending |
+| Phase 4 | Wire to `handler_vector_docker_complete.py` | Pending |
+| Phase 5 | Documentation updates | Pending |
+
+**Files to create**:
+- `core/models/service_layer.py` - Pydantic models (CollectionRefreshResponse)
+- `infrastructure/service_layer_client.py` - HTTP client with Azure AD auth
+
+**Files to modify**:
+- `config/app_config.py` - Add `service_layer_token_scope`
+- `services/handler_vector_docker_complete.py` - Call refresh after table creation
+
+**Testing**: Manual webhook test first, then integration test with full ETL job.
+
+**Effort**: ~1.5 hours implementation + Azure AD config (if needed)
 
 ---
 

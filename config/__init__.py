@@ -38,7 +38,6 @@ Usage:
     from config import debug_config
     info = debug_config()  # Passwords masked
 
-Created: 20 NOV 2025 as part of config.py god object refactoring
 """
 
 # ============================================================================
@@ -46,7 +45,7 @@ Created: 20 NOV 2025 as part of config.py god object refactoring
 # ============================================================================
 # Semantic versioning follows MAJOR.MINOR.PATCH.BUILD
 # Criteria for advance to 0.9.0: DAG refactor, full ETL separation, deprecate legacy fallbacks
-__version__ = "0.8.8.8"
+__version__ = "0.8.9.2"
 
 from typing import Optional
 

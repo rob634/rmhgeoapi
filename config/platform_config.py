@@ -475,13 +475,28 @@ def _slugify_for_postgres(text: str) -> str:
     - Replace spaces and hyphens with underscores
     - Remove non-alphanumeric characters (except underscores)
     - Collapse multiple underscores
+    - Prefix with 't_' if starts with digit (PostgreSQL identifiers must start with letter/underscore)
     - Max 63 characters (PostgreSQL identifier limit)
+
+    Examples:
+        >>> _slugify_for_postgres("Flood Data")
+        'flood_data'
+        >>> _slugify_for_postgres("2024_flood_data")
+        't_2024_flood_data'
+        >>> _slugify_for_postgres("123")
+        't_123'
     """
     slug = text.lower()
     slug = slug.replace(' ', '_').replace('-', '_')
     slug = re.sub(r'[^a-z0-9_]', '', slug)
     slug = re.sub(r'_+', '_', slug)
     slug = slug.strip('_')
+
+    # PostgreSQL identifiers must begin with a letter or underscore (04 FEB 2026)
+    # Prefix with 't_' if name starts with a digit
+    if slug and slug[0].isdigit():
+        slug = f"t_{slug}"
+
     return slug[:63]
 
 

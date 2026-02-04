@@ -384,7 +384,6 @@ class DocsInterface(BaseInterface):
             <a href="/api/interface/vector">OGC Features</a>
             <a href="/api/interface/gallery">Gallery</a>
             <a href="/api/interface/docs">API Docs</a>
-            <a href="/api/interface/integration">Integration</a>
         </div>
     </nav>
 

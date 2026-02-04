@@ -282,7 +282,6 @@ class RasterViewerInterface(BaseInterface):
                 <a href="/api/interface/stac">STAC</a>
                 <a href="/api/interface/map">Vector Map</a>
                 <a href="/api/interface/stac-map">STAC Map</a>
-                <a href="/api/interface/gallery">Gallery</a>
             </div>
         </nav>"""
 

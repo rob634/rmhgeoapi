@@ -141,7 +141,6 @@ class StacMapInterface(BaseInterface):
             <div class="nav-links">
                 <a href="/api/interface/stac">STAC Browser</a>
                 <a href="/api/interface/map">OGC Map</a>
-                <a href="/api/interface/gallery">Gallery</a>
                 <a href="/api/interface/docs">API Docs</a>
             </div>
         </nav>"""

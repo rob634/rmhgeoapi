@@ -1966,7 +1966,6 @@ class BaseInterface(ABC):
             - Pipelines (includes Submit, Jobs, Tasks)
             - STAC
             - OGC Features (includes link to Promote Vector)
-            - Gallery
             - API Docs (includes link to Swagger)
         """
         return f"""
@@ -2009,13 +2008,6 @@ class BaseInterface(ABC):
                    onmouseover="this.style.color='#00A3DA'"
                    onmouseout="this.style.color='#0071BC'">
                     OGC Features
-                </a>
-                <a href="/api/interface/gallery"
-                   style="color: #0071BC; text-decoration: none; font-weight: 600;
-                          transition: color 0.2s;"
-                   onmouseover="this.style.color='#00A3DA'"
-                   onmouseout="this.style.color='#0071BC'">
-                    Gallery
                 </a>
                 <a href="/api/interface/docs"
                    style="color: #0071BC; text-decoration: none; font-weight: 600;

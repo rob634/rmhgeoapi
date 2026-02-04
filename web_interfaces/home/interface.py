@@ -83,13 +83,6 @@ class HomeInterface(BaseInterface):
             <section class="browse-section">
                 <h2 class="section-title">Browse Data</h2>
                 <div class="cards-grid">
-                    <a href="/api/interface/gallery" class="card featured">
-                        <div class="card-icon">🎨</div>
-                        <h3 class="card-title">Data Gallery</h3>
-                        <p class="card-description">Featured datasets with interactive visualizations</p>
-                        <div class="card-footer">Explore Gallery</div>
-                    </a>
-
                     <a href="/api/interface/stac" class="card">
                         <div class="card-icon">📦</div>
                         <h3 class="card-title">STAC Collections</h3>

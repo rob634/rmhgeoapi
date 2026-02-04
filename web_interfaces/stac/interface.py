@@ -65,8 +65,8 @@ class StacInterface(BaseInterface):
             <div id="collections-view">
                 <!-- Action Bar -->
                 <div class="action-bar">
-                    <a href="/api/interface/submit-raster" class="btn btn-primary">
-                        ➕ Create New Raster Collection
+                    <a href="/api/interface/submit" class="btn btn-primary">
+                        ➕ Submit New Job
                     </a>
                     <div class="filter-group">
                         <input type="text" class="search-input" id="search-filter"

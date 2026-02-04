@@ -79,8 +79,8 @@ class VectorInterface(BaseInterface):
 
             <!-- Action Bar -->
             <div class="action-bar">
-                <a href="/api/interface/submit-vector" class="btn btn-primary">
-                    ➕ Create New Feature Collection
+                <a href="/api/interface/submit" class="btn btn-primary">
+                    ➕ Submit New Job
                 </a>
                 <input
                     type="text"

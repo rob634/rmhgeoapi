@@ -475,8 +475,8 @@ class StorageInterface(BaseInterface):
                         <div class="job-placeholder">
                             <h4>Submit Processing Job</h4>
                             <p class="placeholder-text">Select a file to see job submission options</p>
-                            <a href="/api/interface/submit-vector" class="submit-button" style="display: block; text-align: center; text-decoration: none;">
-                                🚀 Go to Submit Vector
+                            <a href="/api/interface/submit" class="submit-button" style="display: block; text-align: center; text-decoration: none;">
+                                🚀 Submit New Job
                             </a>
                         </div>
                     </div>

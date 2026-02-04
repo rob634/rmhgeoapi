@@ -68,29 +68,11 @@ class HomeInterface(BaseInterface):
                         <div class="action-arrow">→</div>
                     </a>
 
-                    <a href="/api/interface/submit-vector" class="action-card vector">
-                        <div class="action-icon">📐</div>
+                    <a href="/api/interface/submit" class="action-card vector">
+                        <div class="action-icon">📤</div>
                         <div class="action-content">
-                            <h3>Submit Vector</h3>
-                            <p>Process GeoPackage, Shapefile, GeoJSON</p>
-                        </div>
-                        <div class="action-arrow">→</div>
-                    </a>
-
-                    <a href="/api/interface/submit-raster" class="action-card raster">
-                        <div class="action-icon">🖼️</div>
-                        <div class="action-content">
-                            <h3>Submit Raster</h3>
-                            <p>Process GeoTIFF to Cloud-Optimized</p>
-                        </div>
-                        <div class="action-arrow">→</div>
-                    </a>
-
-                    <a href="/api/interface/submit-raster-collection" class="action-card collection">
-                        <div class="action-icon">🗂️</div>
-                        <div class="action-content">
-                            <h3>Raster Collection</h3>
-                            <p>Process multiple rasters as collection</p>
+                            <h3>Submit Job</h3>
+                            <p>Vector, Raster, or Collection ETL</p>
                         </div>
                         <div class="action-arrow">→</div>
                     </a>

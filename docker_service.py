@@ -3233,7 +3233,7 @@ def raster_viewer_page(
     - QA approval workflow integration
 
     Args:
-        collection_id: Optional STAC collection ID to load
+        collection_id: Optional STAC collection ID to load (from path or ?collection= query param)
 
     Returns:
         HTML page with Leaflet map and sidebar controls
@@ -3241,6 +3241,12 @@ def raster_viewer_page(
     try:
         from ui.templates import render_template
         from config import get_config
+
+        # Support both path parameter and query parameter for collection_id
+        # Path: /interface/raster/viewer/{collection_id}
+        # Query: /interface/raster/viewer?collection={collection_id}
+        if not collection_id:
+            collection_id = request.query_params.get('collection')
 
         config = get_config()
         titiler_base_url = getattr(config, 'titiler_base_url', None) or ''

@@ -115,6 +115,33 @@ class TasksInterface(BaseInterface):
                 <div class="spinner"></div>
             </div>
 
+            <!-- Event Timeline Swimlane (03 FEB 2026) - Always Visible -->
+            <div id="events-section" class="events-section">
+                <div class="events-header">
+                    <div class="events-header-left">
+                        <h3>📊 Event Timeline</h3>
+                        <span class="events-count" id="events-count"></span>
+                    </div>
+                    <div class="events-header-right">
+                        <button id="refreshEventsBtn" class="events-refresh-btn" onclick="loadEvents()">
+                            Refresh
+                        </button>
+                    </div>
+                </div>
+                <div id="events-content" class="events-content">
+                    <div id="events-loading" class="events-loading hidden">
+                        <div class="spinner-small"></div>
+                        <span>Loading events...</span>
+                    </div>
+                    <div id="events-empty" class="events-empty hidden">
+                        <span>No events recorded yet</span>
+                    </div>
+                    <div id="swimlane-container" class="swimlane-container hidden">
+                        <!-- Swimlane will be rendered here by JavaScript -->
+                    </div>
+                </div>
+            </div>
+
             <!-- Processing Rate Banner -->
             <div id="processing-rate-banner" class="processing-rate-banner hidden">
                 <div class="rate-item">
@@ -145,34 +172,6 @@ class TasksInterface(BaseInterface):
             <!-- Tasks Detail Container -->
             <div id="tasks-container" class="tasks-container hidden">
                 <!-- Tasks will be inserted here -->
-            </div>
-
-            <!-- Event Timeline Swimlane (03 FEB 2026) -->
-            <div id="events-section" class="events-section">
-                <div class="events-header" onclick="toggleEventsSection()">
-                    <div class="events-header-left">
-                        <span class="events-toggle-icon" id="events-toggle-icon">▶</span>
-                        <h3>📊 Event Timeline</h3>
-                        <span class="events-count" id="events-count"></span>
-                    </div>
-                    <div class="events-header-right">
-                        <button id="refreshEventsBtn" class="events-refresh-btn" onclick="event.stopPropagation(); loadEvents()">
-                            Refresh
-                        </button>
-                    </div>
-                </div>
-                <div id="events-content" class="events-content hidden">
-                    <div id="events-loading" class="events-loading hidden">
-                        <div class="spinner-small"></div>
-                        <span>Loading events...</span>
-                    </div>
-                    <div id="events-empty" class="events-empty hidden">
-                        <span>No events recorded yet</span>
-                    </div>
-                    <div id="swimlane-container" class="swimlane-container hidden">
-                        <!-- Swimlane will be rendered here by JavaScript -->
-                    </div>
-                </div>
             </div>
 
             <!-- Logs Section (12 JAN 2026) -->

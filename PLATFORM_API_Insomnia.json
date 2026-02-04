@@ -21,7 +21,7 @@
       "created": 1706572800000,
       "name": "QA Environment",
       "data": {
-        "base_url": "https://gddatahubetlqa-qa.ocappsaseqa2.appserviceenvironment.net",
+        "base_url": "https://fngddatahubetlqa-qa.ocappsaseqa2.appserviceenvironment.net",
         "titiler_url": "https://gddatahubpyfeqa.ocappsaseqa2.appserviceenvironment.net",
         "bronze_container": "gddathub-bronze-qa",
         "dataset_id": "your-dataset-id",

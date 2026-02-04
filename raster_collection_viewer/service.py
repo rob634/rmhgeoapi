@@ -1125,7 +1125,7 @@ class RasterCollectionViewerService:
         }}
 
         // Load tile layer
-        function loadTileLayer() {{
+        async function loadTileLayer() {{
             if (!currentItem) return;
 
             showLoading();
@@ -1142,8 +1142,29 @@ class RasterCollectionViewerService:
             }}
 
             try {{
+                // Fetch TileJSON to get actual minzoom for this COG
+                // (03 FEB 2026: fixes issue where tiles don't appear if viewer zoom < COG minzoom)
+                const dataAsset = currentItem.assets?.data || currentItem.assets?.visual || Object.values(currentItem.assets || {{}})[0];
+                const cogUrl = dataAsset?.href;
+                let minZoom = 10;  // Default fallback
+
+                if (cogUrl) {{
+                    try {{
+                        const tileJsonUrl = `${{TITILER_BASE}}/cog/WebMercatorQuad/tilejson.json?url=${{encodeURIComponent(cogUrl)}}`;
+                        const tjResp = await fetch(tileJsonUrl);
+                        if (tjResp.ok) {{
+                            const tj = await tjResp.json();
+                            minZoom = tj.minzoom || 10;
+                            console.log(`COG minzoom from tilejson: ${{minZoom}}`);
+                        }}
+                    }} catch (e) {{
+                        console.warn('Could not fetch tilejson for minzoom:', e);
+                    }}
+                }}
+
                 tileLayer = L.tileLayer(tileUrl, {{
                     maxZoom: 22,
+                    minNativeZoom: minZoom,  // Prevent tile requests below this zoom
                     tileSize: 256,
                     attribution: 'TiTiler'
                 }}).addTo(map);
@@ -1162,7 +1183,16 @@ class RasterCollectionViewerService:
                 const itemBbox = currentItem.bbox;
                 if (itemBbox && itemBbox.length >= 4) {{
                     const bounds = [[itemBbox[1], itemBbox[0]], [itemBbox[3], itemBbox[2]]];
-                    map.fitBounds(bounds, {{ padding: [50, 50] }});
+                    map.fitBounds(bounds, {{ padding: [50, 50], maxZoom: 18 }});
+
+                    // Ensure we're zoomed in enough to see tiles
+                    // (minZoom from tilejson tells us the lowest zoom with valid tiles)
+                    setTimeout(() => {{
+                        if (map.getZoom() < minZoom) {{
+                            console.log(`Zoom ${{map.getZoom()}} < minzoom ${{minZoom}}, zooming in`);
+                            map.setZoom(minZoom);
+                        }}
+                    }}, 100);
                 }}
 
             }} catch (error) {{

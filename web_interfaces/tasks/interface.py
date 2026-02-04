@@ -142,6 +142,9 @@ class TasksInterface(BaseInterface):
                 </div>
             </div>
 
+            <!-- Job Details Container (moved below events) -->
+            <div id="job-details-container"></div>
+
             <!-- Processing Rate Banner -->
             <div id="processing-rate-banner" class="processing-rate-banner hidden">
                 <div class="rate-item">
@@ -584,52 +587,21 @@ class TasksInterface(BaseInterface):
         .job-summary-card {
             background: white;
             border: 1px solid #e9ecef;
-            padding: 20px 25px;
+            padding: 12px 20px;
             border-radius: 3px;
-            margin-bottom: 20px;
+            margin-bottom: 12px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-        }
-
-        .job-overall-progress {
-            margin-top: 20px;
-            padding-top: 20px;
-            border-top: 1px solid #e9ecef;
-        }
-
-        .overall-progress-label {
-            font-size: 12px;
-            font-weight: 600;
-            color: #626F86;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 10px;
-        }
-
-        .job-overall-progress .progress-bar-container {
-            height: 16px;
-        }
-
-        .job-overall-progress .progress-text {
-            margin-top: 8px;
-        }
-
-        .job-overall-progress .progress-percent {
-            font-size: 14px;
-        }
-
-        .job-overall-progress .progress-count {
-            font-size: 13px;
         }
 
         .job-summary-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-            gap: 15px;
+            grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+            gap: 10px;
         }
 
         .summary-item {
             text-align: center;
-            padding: 12px;
+            padding: 8px;
             background: #f8f9fa;
             border-radius: 3px;
         }
@@ -2426,12 +2398,15 @@ class TasksInterface(BaseInterface):
          * Expandable section for full job context
          * ============================================ */
 
+        #job-details-container {
+            margin-top: 16px;
+        }
+
         .job-details-toggle {
             display: flex;
             align-items: center;
             gap: 8px;
             padding: 12px 16px;
-            margin-top: 16px;
             background: #f8fafc;
             border: 1px solid #e2e8f0;
             border-radius: 8px;
@@ -2970,17 +2945,6 @@ class TasksInterface(BaseInterface):
             // Show processing rate if we have metrics
             window.currentJobSummary = {{ job, total, completed, failed, processing }};
 
-            // Add overall progress bar if there are tasks
-            if (total > 0) {{
-                const counts = {{ pending, queued, processing, completed, failed }};
-                html += `
-                    <div class="job-overall-progress">
-                        <div class="overall-progress-label">Overall Progress</div>
-                        ${{renderProgressBar(counts, total)}}
-                    </div>
-                `;
-            }}
-
             // Add results panel for completed jobs with URLs
             if (job.status === 'completed' && job.result_data) {{
                 const resultData = job.result_data;
@@ -3037,11 +3001,13 @@ class TasksInterface(BaseInterface):
                 }}
             }}
 
-            // Add Job Details toggle and panel (19 JAN 2026)
+            document.getElementById('job-summary-card').innerHTML = html;
+
+            // Add Job Details toggle and panel to separate container (below events)
             const jobParams = job.parameters || {{}};
             const hasParams = Object.keys(jobParams).length > 0;
 
-            html += `
+            const detailsHtml = `
                 <div id="job-details-toggle" class="job-details-toggle" onclick="toggleJobDetails()">
                     <span class="toggle-icon">▶</span>
                     <span>Job Details</span>
@@ -3083,7 +3049,7 @@ class TasksInterface(BaseInterface):
                 </div>
             `;
 
-            document.getElementById('job-summary-card').innerHTML = html;
+            document.getElementById('job-details-container').innerHTML = detailsHtml;
         }}
 
         // Update the processing rate banner at the top

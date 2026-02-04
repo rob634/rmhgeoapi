@@ -850,55 +850,6 @@ class TasksInterface(BaseInterface):
             font-family: 'Monaco', 'Courier New', monospace;
         }
 
-        /* Processing metrics panel */
-        .metrics-panel {
-            background: linear-gradient(135deg, #F0F9FF 0%, #E0F2FE 100%);
-            border: 1px solid #BAE6FD;
-            border-radius: 12px;
-            padding: 16px 20px;
-            margin-bottom: 20px;
-        }
-
-        .metrics-panel h3 {
-            font-size: 14px;
-            font-weight: 600;
-            color: #0369A1;
-            margin: 0 0 12px 0;
-        }
-
-        .metrics-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-            gap: 16px;
-        }
-
-        .metric-card {
-            background: white;
-            border-radius: 8px;
-            padding: 12px;
-            text-align: center;
-        }
-
-        .metric-card .metric-value {
-            font-size: 24px;
-            font-weight: 700;
-            color: #0284C7;
-        }
-
-        .metric-card .metric-label {
-            font-size: 11px;
-            color: #64748B;
-            margin-top: 4px;
-        }
-
-        .metric-card.rate .metric-value {
-            color: #10B981;
-        }
-
-        .metric-card.time .metric-value {
-            color: #0071BC;
-        }
-
         /* Results panel for completed jobs */
         .results-panel {
             margin-top: 20px;
@@ -1848,12 +1799,6 @@ class TasksInterface(BaseInterface):
             padding: 15px 20px;
             background: #f8f9fa;
             border-bottom: 1px solid #e9ecef;
-            cursor: pointer;
-            user-select: none;
-        }
-
-        .events-header:hover {
-            background: #f1f3f5;
         }
 
         .events-header-left {
@@ -1867,16 +1812,6 @@ class TasksInterface(BaseInterface):
             font-size: 14px;
             color: #053657;
             font-weight: 600;
-        }
-
-        .events-toggle-icon {
-            font-size: 10px;
-            color: #626F86;
-            transition: transform 0.2s;
-        }
-
-        .events-toggle-icon.expanded {
-            transform: rotate(90deg);
         }
 
         .events-count {
@@ -2888,8 +2823,11 @@ class TasksInterface(BaseInterface):
                 // Render job summary (pass tasks for Stage 1 metadata)
                 renderJobSummary(job, tasks);
 
-                // Render metrics panel if we have metrics
-                renderMetricsPanel(metrics, job);
+                // Update processing rate banner
+                updateProcessingRateBanner(metrics, job);
+
+                // Load events for swimlane (always visible)
+                loadEvents();
 
                 // Render workflow diagram (pass metrics for stage-level display)
                 renderWorkflowDiagram(job, tasks, metrics);
@@ -3190,80 +3128,6 @@ class TasksInterface(BaseInterface):
             }} else {{
                 document.getElementById('rate-eta').textContent = '--';
             }}
-        }}
-
-        // Render metrics panel with processing rate and execution time stats
-        function renderMetricsPanel(metrics, job) {{
-            // Update the processing rate banner first
-            updateProcessingRateBanner(metrics, job);
-
-            // Only show if we have meaningful metrics
-            const hasMetrics = Object.values(metrics).some(m => m.avg_execution_time_ms !== null);
-            if (!hasMetrics) {{
-                return; // No metrics to display yet
-            }}
-
-            // Find stage 2 metrics (the parallel upload stage with the most data)
-            const stage2Metrics = metrics[2] || null;
-            const currentStage = job.stage || 1;
-
-            let html = `
-                <div class="metrics-panel">
-                    <h3>📊 Processing Metrics</h3>
-                    <div class="metrics-grid">
-            `;
-
-            // Stage 2 metrics (most interesting for parallel processing)
-            if (stage2Metrics && stage2Metrics.avg_execution_time_ms) {{
-                html += `
-                    <div class="metric-card rate">
-                        <div class="metric-value">${{stage2Metrics.tasks_per_minute || '-'}}</div>
-                        <div class="metric-label">Tasks/Min (Stage 2)</div>
-                    </div>
-                    <div class="metric-card time">
-                        <div class="metric-value">${{stage2Metrics.avg_execution_time_formatted || '-'}}</div>
-                        <div class="metric-label">Avg Task Time</div>
-                    </div>
-                    <div class="metric-card">
-                        <div class="metric-value">${{(stage2Metrics.min_execution_time_ms/1000).toFixed(1)}}s - ${{(stage2Metrics.max_execution_time_ms/1000).toFixed(1)}}s</div>
-                        <div class="metric-label">Min - Max Time</div>
-                    </div>
-                `;
-
-                // Estimate time remaining if still processing
-                if (currentStage === 2 && stage2Metrics.pending > 0 && stage2Metrics.avg_execution_time_ms) {{
-                    const remainingMs = stage2Metrics.pending * stage2Metrics.avg_execution_time_ms;
-                    const remainingMin = Math.ceil(remainingMs / 60000);
-                    html += `
-                        <div class="metric-card">
-                            <div class="metric-value">~${{remainingMin}} min</div>
-                            <div class="metric-label">Est. Remaining</div>
-                        </div>
-                    `;
-                }}
-            }}
-
-            // Show Stage 1 metrics if available
-            const stage1Metrics = metrics[1] || null;
-            if (stage1Metrics && stage1Metrics.avg_execution_time_ms) {{
-                html += `
-                    <div class="metric-card time">
-                        <div class="metric-value">${{stage1Metrics.avg_execution_time_formatted || '-'}}</div>
-                        <div class="metric-label">Stage 1 Time</div>
-                    </div>
-                `;
-            }}
-
-            html += `
-                    </div>
-                </div>
-            `;
-
-            // Insert after workflow diagram
-            const workflowDiagram = document.getElementById('workflow-diagram');
-            const metricsDiv = document.createElement('div');
-            metricsDiv.innerHTML = html;
-            workflowDiagram.parentNode.insertBefore(metricsDiv.firstElementChild, workflowDiagram.nextSibling);
         }}
 
         // Helper: Get peak memory for a stage from tasks
@@ -4274,28 +4138,7 @@ class TasksInterface(BaseInterface):
         // EVENT TIMELINE SECTION (03 FEB 2026)
         // ============================================================
 
-        let eventsExpanded = false;
         let eventsData = null;
-
-        // Toggle events section visibility
-        function toggleEventsSection() {{
-            eventsExpanded = !eventsExpanded;
-            const content = document.getElementById('events-content');
-            const icon = document.getElementById('events-toggle-icon');
-
-            if (eventsExpanded) {{
-                content.classList.remove('hidden');
-                icon.classList.add('expanded');
-                // Load events on first expand
-                if (!content.dataset.loaded) {{
-                    loadEvents();
-                    content.dataset.loaded = 'true';
-                }}
-            }} else {{
-                content.classList.add('hidden');
-                icon.classList.remove('expanded');
-            }}
-        }}
 
         // Load events from API
         async function loadEvents() {{

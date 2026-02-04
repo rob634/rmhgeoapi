@@ -147,6 +147,34 @@ class TasksInterface(BaseInterface):
                 <!-- Tasks will be inserted here -->
             </div>
 
+            <!-- Event Timeline Swimlane (03 FEB 2026) -->
+            <div id="events-section" class="events-section">
+                <div class="events-header" onclick="toggleEventsSection()">
+                    <div class="events-header-left">
+                        <span class="events-toggle-icon" id="events-toggle-icon">▶</span>
+                        <h3>📊 Event Timeline</h3>
+                        <span class="events-count" id="events-count"></span>
+                    </div>
+                    <div class="events-header-right">
+                        <button id="refreshEventsBtn" class="events-refresh-btn" onclick="event.stopPropagation(); loadEvents()">
+                            Refresh
+                        </button>
+                    </div>
+                </div>
+                <div id="events-content" class="events-content hidden">
+                    <div id="events-loading" class="events-loading hidden">
+                        <div class="spinner-small"></div>
+                        <span>Loading events...</span>
+                    </div>
+                    <div id="events-empty" class="events-empty hidden">
+                        <span>No events recorded yet</span>
+                    </div>
+                    <div id="swimlane-container" class="swimlane-container hidden">
+                        <!-- Swimlane will be rendered here by JavaScript -->
+                    </div>
+                </div>
+            </div>
+
             <!-- Logs Section (12 JAN 2026) -->
             <div id="logs-section" class="logs-section">
                 <div class="logs-header" onclick="toggleLogsSection()">
@@ -1804,6 +1832,243 @@ class TasksInterface(BaseInterface):
             word-break: break-word;
             max-width: 500px;
         }
+
+        /* Event Timeline Section (03 FEB 2026) */
+        .events-section {
+            background: white;
+            border-radius: 3px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-top: 20px;
+            overflow: hidden;
+        }
+
+        .events-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 20px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .events-header:hover {
+            background: #f1f3f5;
+        }
+
+        .events-header-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .events-header-left h3 {
+            margin: 0;
+            font-size: 14px;
+            color: #053657;
+            font-weight: 600;
+        }
+
+        .events-toggle-icon {
+            font-size: 10px;
+            color: #626F86;
+            transition: transform 0.2s;
+        }
+
+        .events-toggle-icon.expanded {
+            transform: rotate(90deg);
+        }
+
+        .events-count {
+            background: #6366F1;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .events-header-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .events-refresh-btn {
+            padding: 6px 12px;
+            background: #6366F1;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .events-refresh-btn:hover {
+            background: #4F46E5;
+        }
+
+        .events-content {
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        .events-loading, .events-empty {
+            padding: 40px;
+            text-align: center;
+            color: #626F86;
+        }
+
+        .events-loading .spinner-small {
+            display: inline-block;
+            margin-right: 10px;
+        }
+
+        /* Swimlane Visualization */
+        .swimlane-container {
+            padding: 20px;
+        }
+
+        .swimlane-stage {
+            margin-bottom: 16px;
+        }
+
+        .swimlane-stage-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 8px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .swimlane-stage-num {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 12px;
+            flex-shrink: 0;
+        }
+
+        .swimlane-stage-num.completed {
+            background: #10B981;
+            color: white;
+        }
+
+        .swimlane-stage-num.processing {
+            background: #0071BC;
+            color: white;
+            animation: pulse-bg 1.5s ease-in-out infinite;
+        }
+
+        .swimlane-stage-num.pending {
+            background: #e9ecef;
+            color: #626F86;
+        }
+
+        .swimlane-stage-num.failed {
+            background: #DC2626;
+            color: white;
+        }
+
+        @keyframes pulse-bg {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        .swimlane-stage-name {
+            font-weight: 600;
+            color: #053657;
+            font-size: 13px;
+        }
+
+        .swimlane-stage-time {
+            color: #626F86;
+            font-size: 11px;
+            margin-left: auto;
+        }
+
+        /* Event chips flow */
+        .swimlane-events {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            padding-left: 40px;
+        }
+
+        .event-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 500;
+            white-space: nowrap;
+            transition: transform 0.1s;
+        }
+
+        .event-chip:hover {
+            transform: scale(1.02);
+        }
+
+        .event-chip-icon {
+            font-size: 10px;
+        }
+
+        /* Event type colors */
+        .event-chip.job_created { background: #DBEAFE; color: #1D4ED8; }
+        .event-chip.stage_started { background: #E0E7FF; color: #4338CA; }
+        .event-chip.stage_completed { background: #D1FAE5; color: #047857; }
+        .event-chip.task_queued { background: #FEF3C7; color: #B45309; }
+        .event-chip.task_started { background: #DBEAFE; color: #1D4ED8; }
+        .event-chip.task_completed { background: #D1FAE5; color: #047857; }
+        .event-chip.task_failed { background: #FEE2E2; color: #DC2626; }
+        .event-chip.checkpoint { background: #F3E8FF; color: #7C3AED; }
+        .event-chip.job_completed { background: #D1FAE5; color: #047857; border: 2px solid #10B981; }
+        .event-chip.job_failed { background: #FEE2E2; color: #DC2626; border: 2px solid #DC2626; }
+
+        /* Arrow connector */
+        .event-arrow {
+            color: #CBD5E1;
+            font-size: 12px;
+            padding: 0 2px;
+        }
+
+        /* Swimlane legend */
+        .swimlane-legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            padding: 12px 20px;
+            background: #f8f9fa;
+            border-top: 1px solid #e9ecef;
+            font-size: 11px;
+            color: #626F86;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .legend-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+
+        .legend-dot.checkpoint { background: #7C3AED; }
+        .legend-dot.task { background: #1D4ED8; }
+        .legend-dot.success { background: #10B981; }
+        .legend-dot.failed { background: #DC2626; }
 
         /* Resubmit Modal (12 JAN 2026) */
         .modal-overlay {
@@ -4004,6 +4269,223 @@ class TasksInterface(BaseInterface):
             if (memoryEl) {{
                 memoryEl.classList.toggle('hidden');
             }}
+        }}
+
+        // ============================================================
+        // EVENT TIMELINE SECTION (03 FEB 2026)
+        // ============================================================
+
+        let eventsExpanded = false;
+        let eventsData = null;
+
+        // Toggle events section visibility
+        function toggleEventsSection() {{
+            eventsExpanded = !eventsExpanded;
+            const content = document.getElementById('events-content');
+            const icon = document.getElementById('events-toggle-icon');
+
+            if (eventsExpanded) {{
+                content.classList.remove('hidden');
+                icon.classList.add('expanded');
+                // Load events on first expand
+                if (!content.dataset.loaded) {{
+                    loadEvents();
+                    content.dataset.loaded = 'true';
+                }}
+            }} else {{
+                content.classList.add('hidden');
+                icon.classList.remove('expanded');
+            }}
+        }}
+
+        // Load events from API
+        async function loadEvents() {{
+            const loading = document.getElementById('events-loading');
+            const empty = document.getElementById('events-empty');
+            const swimlane = document.getElementById('swimlane-container');
+            const countBadge = document.getElementById('events-count');
+
+            // Show loading
+            loading.classList.remove('hidden');
+            empty.classList.add('hidden');
+            swimlane.classList.add('hidden');
+
+            try {{
+                const response = await fetchJSON(
+                    `${{API_BASE_URL}}/api/jobs/${{JOB_ID}}/events`
+                );
+
+                loading.classList.add('hidden');
+
+                const events = response.events || [];
+                eventsData = events;
+                countBadge.textContent = `${{events.length}} events`;
+
+                if (events.length === 0) {{
+                    empty.classList.remove('hidden');
+                    return;
+                }}
+
+                // Render swimlane
+                renderEventsSwimlane(events);
+                swimlane.classList.remove('hidden');
+
+            }} catch (err) {{
+                loading.classList.add('hidden');
+                empty.classList.remove('hidden');
+                countBadge.textContent = 'error';
+                console.error('Failed to load events:', err);
+            }}
+        }}
+
+        // Render events as horizontal swimlane
+        function renderEventsSwimlane(events) {{
+            const container = document.getElementById('swimlane-container');
+
+            // Group events by stage
+            const stageEvents = {{}};
+            const jobEvents = [];
+
+            // Process events (they come in reverse chronological order)
+            const sortedEvents = [...events].reverse();
+
+            for (const event of sortedEvents) {{
+                if (event.stage) {{
+                    if (!stageEvents[event.stage]) {{
+                        stageEvents[event.stage] = [];
+                    }}
+                    stageEvents[event.stage].push(event);
+                }} else {{
+                    jobEvents.push(event);
+                }}
+            }}
+
+            // Get stage numbers
+            const stageNums = Object.keys(stageEvents).map(Number).sort((a, b) => a - b);
+
+            // Build HTML
+            let html = '<div class="swimlane-stages">';
+
+            // Job-level events first (if any)
+            if (jobEvents.length > 0) {{
+                html += `
+                    <div class="swimlane-stage">
+                        <div class="swimlane-stage-header">
+                            <div class="swimlane-stage-num completed">J</div>
+                            <span class="swimlane-stage-name">Job Events</span>
+                        </div>
+                        <div class="swimlane-events">
+                            ${{renderEventChips(jobEvents.filter(e => !e.event_type.startsWith('stage_')))}}
+                        </div>
+                    </div>
+                `;
+            }}
+
+            // Stage events
+            for (const stageNum of stageNums) {{
+                const stgEvents = stageEvents[stageNum];
+
+                // Determine stage status from events
+                const hasCompleted = stgEvents.some(e => e.event_type === 'stage_completed');
+                const hasFailed = stgEvents.some(e => e.event_type.includes('failed'));
+                const hasStarted = stgEvents.some(e => e.event_type === 'stage_started' || e.event_type === 'task_started');
+
+                let statusClass = 'pending';
+                if (hasCompleted) statusClass = 'completed';
+                else if (hasFailed) statusClass = 'failed';
+                else if (hasStarted) statusClass = 'processing';
+
+                // Get stage name from stage_started event
+                const startEvent = stgEvents.find(e => e.event_type === 'stage_started');
+                const stageName = startEvent?.event_data?.stage_name || `Stage ${{stageNum}}`;
+
+                // Calculate duration if we have start and end
+                const stageStart = stgEvents.find(e => e.event_type === 'stage_started');
+                const stageEnd = stgEvents.find(e => e.event_type === 'stage_completed' || e.event_type.includes('failed'));
+                let duration = '';
+                if (stageStart && stageEnd) {{
+                    const ms = new Date(stageEnd.timestamp) - new Date(stageStart.timestamp);
+                    duration = ms < 1000 ? `${{ms}}ms` : `${{(ms / 1000).toFixed(1)}}s`;
+                }}
+
+                html += `
+                    <div class="swimlane-stage">
+                        <div class="swimlane-stage-header">
+                            <div class="swimlane-stage-num ${{statusClass}}">
+                                ${{statusClass === 'completed' ? '✓' : stageNum}}
+                            </div>
+                            <span class="swimlane-stage-name">${{formatStageName(stageName)}}</span>
+                            ${{duration ? `<span class="swimlane-stage-time">${{duration}}</span>` : ''}}
+                        </div>
+                        <div class="swimlane-events">
+                            ${{renderEventChips(stgEvents)}}
+                        </div>
+                    </div>
+                `;
+            }}
+
+            html += '</div>';
+
+            // Legend
+            html += `
+                <div class="swimlane-legend">
+                    <div class="legend-item"><span class="legend-dot checkpoint"></span> Checkpoint</div>
+                    <div class="legend-item"><span class="legend-dot task"></span> Task</div>
+                    <div class="legend-item"><span class="legend-dot success"></span> Success</div>
+                    <div class="legend-item"><span class="legend-dot failed"></span> Failed</div>
+                </div>
+            `;
+
+            container.innerHTML = html;
+        }}
+
+        // Render event chips with arrows
+        function renderEventChips(events) {{
+            if (!events || events.length === 0) return '<span style="color:#626F86;font-size:11px;">No events</span>';
+
+            return events.map((event, idx) => {{
+                const icon = getEventIcon(event.event_type);
+                const label = event.checkpoint_name || event.event_type_display || event.event_type;
+                const shortLabel = label.length > 30 ? label.substring(0, 28) + '...' : label;
+                const arrow = idx < events.length - 1 ? '<span class="event-arrow">→</span>' : '';
+
+                // Add duration if available
+                const duration = event.duration_ms ? ` (${{event.duration_ms}}ms)` : '';
+
+                return `
+                    <span class="event-chip ${{event.event_type}}" title="${{label}}${{duration}}">
+                        <span class="event-chip-icon">${{icon}}</span>
+                        ${{shortLabel}}
+                    </span>
+                    ${{arrow}}
+                `;
+            }}).join('');
+        }}
+
+        // Get icon for event type
+        function getEventIcon(eventType) {{
+            const icons = {{
+                'job_created': '🆕',
+                'job_started': '▶️',
+                'job_completed': '✅',
+                'job_failed': '❌',
+                'stage_started': '📂',
+                'stage_completed': '✓',
+                'task_queued': '📤',
+                'task_started': '⚡',
+                'task_completed': '✓',
+                'task_failed': '✗',
+                'checkpoint': '📍',
+                'callback_started': '📞',
+                'callback_success': '📞',
+                'callback_failed': '📞'
+            }};
+            return icons[eventType] || '•';
+        }}
+
+        // Format stage name
+        function formatStageName(name) {{
+            return name.replace(/_/g, ' ').replace(/\\b\\w/g, l => l.toUpperCase());
         }}
 
         // ============================================================

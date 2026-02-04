@@ -118,21 +118,23 @@ class VectorInterface(BaseInterface):
         Updated 30 DEC 2025: Smaller cards, 4 per row, promoted badges, delete buttons.
         """
         return """
-        /* Smaller cards - 4 per row */
+        /* Compact 2-column grid (03 FEB 2026) */
         .collections-grid {
-            grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)) !important;
-            gap: 12px !important;
+            grid-template-columns: repeat(2, 1fr) !important;
+            gap: 10px !important;
         }
 
         .collection-card {
-            padding: 12px !important;
+            padding: 10px 14px !important;
             cursor: pointer;
             position: relative;
+            display: flex;
+            flex-direction: column;
         }
 
         .collection-card h3 {
             font-size: 13px !important;
-            margin-bottom: 6px !important;
+            margin-bottom: 4px !important;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -140,35 +142,29 @@ class VectorInterface(BaseInterface):
 
         .collection-card .description {
             font-size: 11px;
-            max-height: 32px;
+            max-height: 18px;
             overflow: hidden;
             text-overflow: ellipsis;
             display: -webkit-box;
-            -webkit-line-clamp: 2;
+            -webkit-line-clamp: 1;
             -webkit-box-orient: vertical;
             color: var(--ds-gray);
-            margin-bottom: 8px;
+            margin-bottom: 6px;
         }
 
-        /* Vector-specific: Card meta section with border */
+        /* Compact meta section - single line bbox only */
         .collection-card .meta {
-            margin-top: 8px;
-            padding-top: 8px;
+            margin-top: 4px;
+            padding-top: 6px;
             border-top: 1px solid var(--ds-gray-light);
             color: var(--ds-gray);
-            font-size: 11px;
+            font-size: 10px;
         }
 
         .collection-card .meta-item {
             display: flex;
             align-items: center;
             gap: 4px;
-            margin-bottom: 2px;
-        }
-
-        .collection-card .feature-count {
-            color: var(--ds-blue-primary);
-            font-weight: 600;
         }
 
         .collection-card .bbox {
@@ -178,40 +174,35 @@ class VectorInterface(BaseInterface):
         }
 
         .collection-card .links {
-            margin-top: 8px;
+            margin-top: 6px;
             display: flex;
-            gap: 6px;
+            gap: 4px;
             flex-wrap: wrap;
         }
 
         .collection-card .link-badge {
-            font-size: 11px !important;
-            padding: 3px 8px !important;
+            font-size: 10px !important;
+            padding: 2px 6px !important;
         }
 
-        /* Promoted badge */
+        /* Compact status badges (03 FEB 2026) */
+        .promoted-badge, .approved-badge {
+            display: inline-block;
+            color: white;
+            font-size: 9px;
+            font-weight: 600;
+            padding: 1px 4px;
+            border-radius: 3px;
+            margin-bottom: 3px;
+            margin-right: 3px;
+        }
+
         .promoted-badge {
-            display: inline-block;
             background: linear-gradient(135deg, #10B981 0%, #059669 100%);
-            color: white;
-            font-size: 10px;
-            font-weight: 600;
-            padding: 2px 6px;
-            border-radius: 4px;
-            margin-bottom: 6px;
         }
 
-        /* Approved badge (17 JAN 2026) */
         .approved-badge {
-            display: inline-block;
             background: linear-gradient(135deg, #3B82F6 0%, #2563EB 100%);
-            color: white;
-            font-size: 10px;
-            font-weight: 600;
-            padding: 2px 6px;
-            border-radius: 4px;
-            margin-bottom: 6px;
-            margin-right: 4px;
         }
 
         /* Disabled/protected button (17 JAN 2026) */
@@ -593,7 +584,7 @@ class VectorInterface(BaseInterface):
         // Helper: Extract table name from schema-qualified ID (geo.table -> table)
         const getTableName = (id) => id.includes('.') ? id.split('.').pop() : id;
 
-        // Render collections grid
+        // Render collections grid (03 FEB 2026: Compact cards, no feature count, no Promote)
         function renderCollections(collections) {
             const grid = document.getElementById('collections-grid');
 
@@ -601,10 +592,8 @@ class VectorInterface(BaseInterface):
                 // Get table name without schema for lookups and links
                 const tableName = getTableName(c.id);
 
-                // Extract feature count from description
+                // Description (truncated in CSS)
                 const desc = c.description || 'No description available';
-                const featureCount = desc.match(/\\((\\d+) features\\)/);
-                const count = featureCount ? parseInt(featureCount[1]).toLocaleString() : 'Unknown';
 
                 // Get bbox if available
                 const bbox = c.extent?.spatial?.bbox?.[0];
@@ -613,20 +602,17 @@ class VectorInterface(BaseInterface):
                     'No extent';
 
                 // Get links - use table name (without schema) for internal links
-                const selfLink = c.links?.find(l => l.rel === 'self')?.href || '';
                 const viewerLink = `${API_BASE_URL}/api/vector/viewer?collection=${encodeURIComponent(tableName)}`;
-                const promoteLink = `/api/interface/promote-vector?collection=${encodeURIComponent(tableName)}`;
 
                 // Check if promoted (use table name for lookup)
                 const isPromoted = promotedCollectionIds.has(tableName);
                 const title = c.title || tableName;
 
-                // Check approval status (17 JAN 2026) - use table name for lookup
+                // Check approval status - use table name for lookup
                 const approvalStatus = window.approvalStatuses?.[tableName] || {};
                 const isApproved = approvalStatus.is_approved === true;
 
-                // Build action buttons (13 JAN 2026: Added Vector Tiles viewer)
-                // Note: Tiles viewer handles schema qualification internally
+                // Build action buttons - Map and Tiles only (03 FEB 2026: removed Promote)
                 const tilesLink = `/api/interface/vector-tiles?collection=${encodeURIComponent(tableName)}`;
                 let actionButtons = `
                     <a href="${viewerLink}"
@@ -640,53 +626,31 @@ class VectorInterface(BaseInterface):
                        class="link-badge link-badge-tiles"
                        onclick="event.stopPropagation()"
                        target="_blank"
-                       title="MapLibre + MVT tiles (better for large datasets)">
+                       title="MapLibre + MVT tiles">
                         🧱 Tiles
                     </a>`;
 
-                if (isPromoted) {
-                    // No action buttons for promoted - just view
-                } else if (isApproved) {
-                    // Approved: Show promote but NO delete button (17 JAN 2026)
+                // Add delete button only for non-approved, non-promoted collections
+                if (!isPromoted && !isApproved) {
                     actionButtons += `
-                        <a href="${promoteLink}"
-                           class="link-badge link-badge-promote"
-                           onclick="event.stopPropagation()"
-                           title="Promote to gallery with styling">
-                            ⬆️ Promote
-                        </a>
-                        <span class="link-badge link-badge-disabled"
-                              title="Cannot delete: Dataset is approved. Use /api/platform/revoke first.">
-                            🔒 Protected
-                        </span>`;
-                } else {
-                    // Not promoted, not approved: Show promote and delete buttons
-                    actionButtons += `
-                        <a href="${promoteLink}"
-                           class="link-badge link-badge-promote"
-                           onclick="event.stopPropagation()"
-                           title="Promote to gallery with styling">
-                            ⬆️ Promote
-                        </a>
                         <button class="link-badge link-badge-delete"
                                 onclick="deleteCollection('${tableName}', event)"
-                                title="Delete this collection (unpublish)">
-                            🗑️ Delete
+                                title="Delete this collection">
+                            🗑️
                         </button>`;
+                } else if (isApproved && !isPromoted) {
+                    actionButtons += `
+                        <span class="link-badge link-badge-disabled" title="Protected">🔒</span>`;
                 }
 
                 return `
                     <div class="collection-card" onclick="showCollectionDetail('${c.id}', '${tableName}', event)" title="${title}">
-                        ${isApproved ? '<span class="approved-badge">✓ Approved</span>' : ''}
-                        ${isPromoted ? '<span class="promoted-badge">⭐ Promoted</span>' : ''}
+                        ${isApproved ? '<span class="approved-badge">✓</span>' : ''}
+                        ${isPromoted ? '<span class="promoted-badge">⭐</span>' : ''}
                         <h3>${title}</h3>
                         <div class="description">${desc}</div>
 
                         <div class="meta">
-                            <div class="meta-item">
-                                <span>📊</span>
-                                <span class="feature-count">${count} features</span>
-                            </div>
                             <div class="meta-item">
                                 <span>🗺️</span>
                                 <span class="bbox">${bboxStr}</span>

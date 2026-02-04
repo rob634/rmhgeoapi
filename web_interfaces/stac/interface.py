@@ -158,69 +158,71 @@ class StacInterface(BaseInterface):
             width: 200px;
         }
 
-        /* Smaller cards - 4 per row */
+        /* Compact 2-column grid - horizontal cards (03 FEB 2026) */
         .collections-grid {
-            grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)) !important;
-            gap: 12px !important;
+            grid-template-columns: repeat(2, 1fr) !important;
+            gap: 8px !important;
         }
 
         .collection-card {
-            padding: 12px !important;
+            padding: 8px 12px !important;
             cursor: pointer;
-            position: relative;
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 12px;
+        }
+
+        /* Left section: badges + title + description */
+        .collection-card .card-info {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .collection-card .card-badges {
+            display: flex;
+            gap: 3px;
+            margin-bottom: 2px;
         }
 
         .collection-card h3 {
             font-size: 13px !important;
-            margin-bottom: 6px !important;
+            margin: 0 !important;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
         }
 
         .collection-card .description {
-            font-size: 11px;
-            max-height: 32px;
+            font-size: 10px;
+            white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
-            display: -webkit-box;
-            -webkit-line-clamp: 2;
-            -webkit-box-orient: vertical;
             color: var(--ds-gray);
-            margin-bottom: 8px;
+            margin: 0;
         }
 
-        /* Card meta section with border - matches vector */
-        .collection-card .meta {
-            margin-top: 8px;
-            padding-top: 8px;
-            border-top: 1px solid var(--ds-gray-light);
+        /* Middle section: bbox */
+        .collection-card .bbox {
+            font-family: 'Courier New', monospace;
+            font-size: 9px;
             color: var(--ds-gray);
-            font-size: 11px;
+            white-space: nowrap;
+            flex-shrink: 0;
         }
 
-        .collection-card .meta-item {
-            display: flex;
-            align-items: center;
-            gap: 4px;
-            margin-bottom: 2px;
-        }
-
-        .collection-card .item-count {
-            color: var(--ds-blue-primary);
-            font-weight: 600;
-        }
-
+        /* Right section: action buttons */
         .collection-card .links {
-            margin-top: 8px;
             display: flex;
-            gap: 6px;
-            flex-wrap: wrap;
+            gap: 3px;
+            flex-shrink: 0;
         }
 
         .collection-card .link-badge {
-            font-size: 11px !important;
-            padding: 3px 8px !important;
+            font-size: 10px !important;
+            padding: 2px 5px !important;
         }
 
         /* Items button */
@@ -235,17 +237,6 @@ class StacInterface(BaseInterface):
             background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%) !important;
         }
 
-        /* Promote button */
-        .link-badge-promote {
-            background: linear-gradient(135deg, #10B981 0%, #059669 100%) !important;
-            color: white !important;
-            border-color: #059669 !important;
-        }
-
-        .link-badge-promote:hover {
-            background: linear-gradient(135deg, #059669 0%, #047857 100%) !important;
-        }
-
         /* Delete button */
         .link-badge-delete {
             background: linear-gradient(135deg, #EF4444 0%, #DC2626 100%) !important;
@@ -257,19 +248,18 @@ class StacInterface(BaseInterface):
             background: linear-gradient(135deg, #DC2626 0%, #B91C1C 100%) !important;
         }
 
-        /* Approved badge (17 JAN 2026) */
+        /* Compact status badges */
         .approved-badge {
             display: inline-block;
             background: linear-gradient(135deg, #3B82F6 0%, #2563EB 100%);
             color: white;
-            font-size: 10px;
+            font-size: 8px;
             font-weight: 600;
-            padding: 2px 6px;
-            border-radius: 4px;
-            margin-bottom: 6px;
+            padding: 1px 4px;
+            border-radius: 3px;
         }
 
-        /* Disabled/protected button (17 JAN 2026) */
+        /* Disabled/protected button */
         .link-badge-disabled {
             background: linear-gradient(135deg, #9CA3AF 0%, #6B7280 100%) !important;
             color: white !important;
@@ -687,12 +677,10 @@ class StacInterface(BaseInterface):
             }
         }
 
-        // Render collections grid - matches vector interface style
+        // Render collections grid - compact horizontal cards (03 FEB 2026)
         function renderCollections(collections) {
             const grid = document.getElementById('collections-grid');
             grid.innerHTML = collections.map(c => {
-                const itemCount = c.summaries?.total_items || 0;
-                const type = c.type || 'unknown';
                 const title = c.title || c.id;
                 const desc = c.description || 'No description available';
 
@@ -702,72 +690,52 @@ class StacInterface(BaseInterface):
                     `[${bbox.map(v => v.toFixed(2)).join(', ')}]` :
                     'No extent';
 
-                // Check approval status (17 JAN 2026)
+                // Check approval status
                 const approvalStatus = window.approvalStatuses?.[c.id] || {};
                 const isApproved = approvalStatus.is_approved === true;
 
-                // Build action buttons - Items, Map, Promote, Delete (conditional)
+                // Build action buttons - Items, Map, Delete only (no Promote)
                 let actionButtons = `
                     <a class="link-badge link-badge-info"
                        href="/api/interface/stac-collection?id=${c.id}"
                        onclick="event.stopPropagation()"
-                       title="View all items in collection">
-                        📄 Items
+                       title="View items">
+                        📄
                     </a>
                     <button class="link-badge link-badge-primary"
                             onclick="openMapView('${c.id}', event)"
-                            title="Open in raster viewer">
-                        🗺️ Map
-                    </button>
-                    <button class="link-badge link-badge-promote"
-                            onclick="promoteCollection('${c.id}', event)"
-                            title="Promote collection (coming soon)">
-                        ⬆️ Promote
-                    </button>
-                `;
+                            title="Open in viewer">
+                        🗺️
+                    </button>`;
 
                 // Show delete or protected based on approval status
                 if (isApproved) {
                     actionButtons += `
-                        <span class="link-badge link-badge-disabled"
-                              title="Cannot delete: Collection has approved items. Use /api/platform/revoke first.">
-                            🔒 Protected
-                        </span>
-                    `;
+                        <span class="link-badge link-badge-disabled" title="Protected">🔒</span>`;
                 } else {
                     actionButtons += `
                         <button class="link-badge link-badge-delete"
                                 onclick="deleteCollection('${c.id}', event)"
-                                title="Delete this collection (unpublish)">
-                            🗑️ Delete
-                        </button>
-                    `;
+                                title="Delete collection">
+                            🗑️
+                        </button>`;
                 }
+
+                // Build badges HTML
+                const badgesHtml = isApproved ? `
+                    <div class="card-badges">
+                        <span class="approved-badge">✓</span>
+                    </div>` : '';
 
                 return `
                     <div class="collection-card" onclick="showCollectionDetail('${c.id}')" title="${title}">
-                        ${isApproved ? '<span class="approved-badge">✓ Approved</span>' : ''}
-                        <h3>${title}</h3>
-                        <div class="description">${desc}</div>
-
-                        <div class="meta">
-                            <div class="meta-item">
-                                <span>📄</span>
-                                <span class="item-count">${itemCount.toLocaleString()} items</span>
-                            </div>
-                            <div class="meta-item">
-                                <span>${type === 'raster' ? '🌍' : '📐'}</span>
-                                <span>${type}</span>
-                            </div>
-                            <div class="meta-item">
-                                <span>🗺️</span>
-                                <span style="font-family: monospace; font-size: 10px;">${bboxStr}</span>
-                            </div>
+                        <div class="card-info">
+                            ${badgesHtml}
+                            <h3>${title}</h3>
+                            <div class="description">${desc}</div>
                         </div>
-
-                        <div class="links">
-                            ${actionButtons}
-                        </div>
+                        <span class="bbox">${bboxStr}</span>
+                        <div class="links">${actionButtons}</div>
                     </div>
                 `;
             }).join('');
@@ -857,17 +825,6 @@ class StacInterface(BaseInterface):
                     '❌'
                 );
             }
-        }
-
-        // Placeholder: Promote collection
-        function promoteCollection(collectionId, event) {
-            event.stopPropagation();
-            showResultModal(
-                'Promote Collection',
-                'Promote workflow for STAC raster collections is coming soon.',
-                { 'Collection': collectionId },
-                '⬆️'
-            );
         }
 
         // Show confirmation modal - returns Promise that resolves to true/false

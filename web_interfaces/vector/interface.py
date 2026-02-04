@@ -118,83 +118,81 @@ class VectorInterface(BaseInterface):
         Updated 30 DEC 2025: Smaller cards, 4 per row, promoted badges, delete buttons.
         """
         return """
-        /* Compact 2-column grid (03 FEB 2026) */
+        /* Compact 2-column grid - horizontal cards (03 FEB 2026) */
         .collections-grid {
             grid-template-columns: repeat(2, 1fr) !important;
-            gap: 10px !important;
+            gap: 8px !important;
         }
 
         .collection-card {
-            padding: 10px 14px !important;
+            padding: 8px 12px !important;
             cursor: pointer;
-            position: relative;
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 12px;
+        }
+
+        /* Left section: badges + title + description */
+        .collection-card .card-info {
+            flex: 1;
+            min-width: 0;
             display: flex;
             flex-direction: column;
         }
 
+        .collection-card .card-badges {
+            display: flex;
+            gap: 3px;
+            margin-bottom: 2px;
+        }
+
         .collection-card h3 {
             font-size: 13px !important;
-            margin-bottom: 4px !important;
+            margin: 0 !important;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
         }
 
         .collection-card .description {
-            font-size: 11px;
-            max-height: 18px;
+            font-size: 10px;
+            white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
-            display: -webkit-box;
-            -webkit-line-clamp: 1;
-            -webkit-box-orient: vertical;
             color: var(--ds-gray);
-            margin-bottom: 6px;
+            margin: 0;
         }
 
-        /* Compact meta section - single line bbox only */
-        .collection-card .meta {
-            margin-top: 4px;
-            padding-top: 6px;
-            border-top: 1px solid var(--ds-gray-light);
-            color: var(--ds-gray);
-            font-size: 10px;
-        }
-
-        .collection-card .meta-item {
-            display: flex;
-            align-items: center;
-            gap: 4px;
-        }
-
+        /* Middle section: bbox */
         .collection-card .bbox {
             font-family: 'Courier New', monospace;
-            font-size: 10px;
+            font-size: 9px;
             color: var(--ds-gray);
+            white-space: nowrap;
+            flex-shrink: 0;
         }
 
+        /* Right section: action buttons */
         .collection-card .links {
-            margin-top: 6px;
             display: flex;
-            gap: 4px;
-            flex-wrap: wrap;
+            gap: 3px;
+            flex-shrink: 0;
         }
 
         .collection-card .link-badge {
             font-size: 10px !important;
-            padding: 2px 6px !important;
+            padding: 2px 5px !important;
         }
 
-        /* Compact status badges (03 FEB 2026) */
+        /* Compact status badges */
         .promoted-badge, .approved-badge {
             display: inline-block;
             color: white;
-            font-size: 9px;
+            font-size: 8px;
             font-weight: 600;
             padding: 1px 4px;
             border-radius: 3px;
-            margin-bottom: 3px;
-            margin-right: 3px;
         }
 
         .promoted-badge {
@@ -643,23 +641,22 @@ class VectorInterface(BaseInterface):
                         <span class="link-badge link-badge-disabled" title="Protected">🔒</span>`;
                 }
 
-                return `
-                    <div class="collection-card" onclick="showCollectionDetail('${c.id}', '${tableName}', event)" title="${title}">
+                // Build badges HTML
+                const badgesHtml = (isApproved || isPromoted) ? `
+                    <div class="card-badges">
                         ${isApproved ? '<span class="approved-badge">✓</span>' : ''}
                         ${isPromoted ? '<span class="promoted-badge">⭐</span>' : ''}
-                        <h3>${title}</h3>
-                        <div class="description">${desc}</div>
+                    </div>` : '';
 
-                        <div class="meta">
-                            <div class="meta-item">
-                                <span>🗺️</span>
-                                <span class="bbox">${bboxStr}</span>
-                            </div>
+                return `
+                    <div class="collection-card" onclick="showCollectionDetail('${c.id}', '${tableName}', event)" title="${title}">
+                        <div class="card-info">
+                            ${badgesHtml}
+                            <h3>${title}</h3>
+                            <div class="description">${desc}</div>
                         </div>
-
-                        <div class="links">
-                            ${actionButtons}
-                        </div>
+                        <span class="bbox">${bboxStr}</span>
+                        <div class="links">${actionButtons}</div>
                     </div>
                 `;
             }).join('');

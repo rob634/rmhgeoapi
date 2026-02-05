@@ -292,6 +292,11 @@ def __getattr__(name: str):
         from .schema_analyzer import DriftType
         return DriftType
 
+    # Service Layer Client (05 FEB 2026 - F1.6 TiPG Refresh)
+    elif name == "ServiceLayerClient":
+        from .service_layer_client import ServiceLayerClient
+        return ServiceLayerClient
+
     else:
         raise AttributeError(f"module 'infrastructure' has no attribute '{name}'")
 
@@ -347,4 +352,6 @@ __all__ = [
     "SchemaReport",
     "DriftReport",
     "DriftType",
+    # Service Layer Client (05 FEB 2026 - F1.6 TiPG Refresh)
+    "ServiceLayerClient",
 ]

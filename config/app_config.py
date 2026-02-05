@@ -221,6 +221,18 @@ class AppConfig(BaseModel):
         description="Base URL for TiTiler-PgSTAC tile server (raster visualization, TiPG at /vector)"
     )
 
+    # Service Layer Authentication (05 FEB 2026 - F1.6 TiPG Refresh)
+    # ========================================================================
+    # OAuth scope for acquiring tokens to call Service Layer admin endpoints.
+    # Only needed when ADMIN_AUTH_ENABLED=true on the Service Layer.
+    # Format: api://<app-id>/.default
+    # Empty string = no auth (for local dev or ADMIN_AUTH_ENABLED=false)
+    # ========================================================================
+    service_layer_token_scope: str = Field(
+        default_factory=lambda: os.environ.get("SERVICE_LAYER_TOKEN_SCOPE", ""),
+        description="OAuth scope for Service Layer token acquisition"
+    )
+
     # ========================================================================
     # TiPG Configuration (13 JAN 2026 - E8 TiPG Integration)
     # ========================================================================

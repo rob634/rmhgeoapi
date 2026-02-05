@@ -250,6 +250,32 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
         checkpoint("stac_created", stac_result)
 
         # =====================================================================
+        # PHASE 5: Refresh TiPG Collection Catalog (05 FEB 2026 - F1.6)
+        # =====================================================================
+        # Notify the Service Layer to re-scan PostGIS so TiPG immediately
+        # discovers the new collection without waiting for cache TTL or restart.
+        # Non-fatal: if the webhook fails, TiPG will eventually pick it up.
+        # =====================================================================
+        try:
+            from infrastructure.service_layer_client import ServiceLayerClient
+
+            sl_client = ServiceLayerClient()
+            refresh_result = sl_client.refresh_tipg_collections()
+
+            if refresh_result.status == "success":
+                logger.info(
+                    f"[{job_id[:8]}] TiPG catalog refreshed: "
+                    f"{refresh_result.collections_before} -> {refresh_result.collections_after} "
+                    f"(new: {refresh_result.new_collections})"
+                )
+            else:
+                logger.warning(
+                    f"[{job_id[:8]}] TiPG refresh returned error: {refresh_result.error}"
+                )
+        except Exception as e:
+            logger.warning(f"[{job_id[:8]}] TiPG catalog refresh failed (non-fatal): {e}")
+
+        # =====================================================================
         # COMPLETE
         # =====================================================================
         elapsed = time.time() - start_time

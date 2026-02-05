@@ -163,6 +163,12 @@ from .platform_registry import (
     DDH_PLATFORM
 )
 
+# Service Layer integration models (05 FEB 2026 - F1.6)
+from .service_layer import (
+    CollectionRefreshResponse,
+    ServiceLayerHealth,
+)
+
 # Artifact registry models (20 JAN 2026)
 from .artifact import (
     Artifact,
@@ -359,4 +365,8 @@ __all__ = [
     'COGCreationResult',
     'STACCreationData',
     'STACCreationResult',
+
+    # Service Layer integration models (05 FEB 2026 - F1.6)
+    'CollectionRefreshResponse',
+    'ServiceLayerHealth',
 ]

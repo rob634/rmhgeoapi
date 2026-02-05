@@ -986,7 +986,7 @@ When enabled, metrics are buffered and flushed to blob storage:
 
 | Document | Purpose |
 |----------|---------|
-| `docs_claude/APIM_ARCHITECTURE.md` | Future microservices architecture with APIM |
+| `docs_claude/MICROSERVICES_ARCHITECTURE.md` | Queue-based decoupling, future Function App separation (NO APIM) |
 | `docs_claude/ZARR_TITILER_LESSONS.md` | Detailed zarr/TiTiler integration notes |
 | `docs_claude/ARCHITECTURE_REFERENCE.md` | Overall system architecture |
 | `docs_claude/OGC_FEATURES_METADATA_INTEGRATION.md` | Metadata integration guide |

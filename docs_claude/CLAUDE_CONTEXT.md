@@ -258,7 +258,7 @@ chmod +x /tmp/query_ai.sh && /tmp/query_ai.sh | python3 -m json.tool
 | **JOB_CREATION_QUICKSTART.md** | New job creation guide |
 | **OGC_FEATURES_METADATA_INTEGRATION.md** | OGC API integration |
 | **ZARR_TITILER_LESSONS.md** | Zarr/TiTiler lessons learned |
-| **APIM_ARCHITECTURE.md** | Future API Management plans |
+| **MICROSERVICES_ARCHITECTURE.md** | Queue-based decoupling, future Function App separation |
 
 ### Pipeline Projects
 | Document | Purpose |

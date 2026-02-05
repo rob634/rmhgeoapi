@@ -337,7 +337,7 @@ from triggers.schema_pydantic_deploy import pydantic_deploy_trigger
 #     schema_nuke_trigger  # Still used temporarily by db_maintenance.py
 # )
 
-# NOTE: analyze_container_trigger REMOVED (04 FEB 2026 - APP_MODE refactor)
+from triggers.analyze_container import analyze_container_trigger
 # NOTE: All STAC triggers moved to triggers/stac/stac_bp.py (24 JAN 2026 - V0.8 Phase 17.3)
 # stac_extract_trigger and stac_vector_trigger now called from blueprint
 
@@ -359,8 +359,10 @@ from triggers.admin.db_diagnostics import admin_db_diagnostics_trigger
 from triggers.admin.servicebus import servicebus_admin_trigger
 # NOTE: H3 admin triggers (h3_debug, h3_datasets) moved to admin_h3 blueprint (12 JAN 2026)
 
-# Curated Dataset Admin - DISABLED (04 FEB 2026) - In development
-# from triggers.curated.admin import curated_admin_trigger
+# Curated Dataset Admin (15 DEC 2025) - System-managed geospatial data
+from triggers.curated.admin import curated_admin_trigger
+# curated_scheduler_trigger import removed (23 JAN 2026 - APP_CLEANUP Phase 3)
+# Timer trigger now in triggers/timers/timer_bp.py blueprint
 
 # Platform Service Layer triggers moved to blueprint (23 JAN 2026 - APP_CLEANUP Phase 5)
 # triggers/platform/platform_bp.py now contains all 17 platform endpoints
@@ -374,11 +376,11 @@ from ogc_features import get_ogc_triggers
 # Vector Viewer - Standalone module (13 NOV 2025) - OGC Features API
 from vector_viewer import get_vector_viewer_triggers
 
-# Raster Collection Viewer - DISABLED (04 FEB 2026) - In development
-# from raster_collection_viewer import get_raster_collection_viewer_triggers
+# Raster Collection Viewer - STAC-integrated raster viewer (30 DEC 2025) - F2.9
+from raster_collection_viewer import get_raster_collection_viewer_triggers
 
-# Raster API - DISABLED (04 FEB 2026) - In development
-# from raster_api import get_raster_triggers
+# Raster API - Service Layer convenience wrappers for TiTiler (18 DEC 2025)
+from raster_api import get_raster_triggers
 
 # xarray API - Direct Zarr access for time-series (18 DEC 2025)
 from xarray_api import get_xarray_triggers
@@ -386,18 +388,18 @@ from xarray_api import get_xarray_triggers
 # OGC Styles API - CartoSym-JSON style storage and multi-format output (18 DEC 2025)
 from ogc_styles import get_styles_triggers
 
-# Raster Render Configs API - DISABLED (04 FEB 2026) - In development
-# from triggers.trigger_raster_renders import (
-#     list_renders, get_render, get_default_render,
-#     create_render, update_render, delete_render,
-#     set_default_render, create_default_render
-# )
+# Raster Render Configs API - TiTiler parameter storage (22 JAN 2026 - F2.11)
+from triggers.trigger_raster_renders import (
+    list_renders, get_render, get_default_render,
+    create_render, update_render, delete_render,
+    set_default_render, create_default_render
+)
 
-# Map State API - DISABLED (04 FEB 2026) - In development
-# from triggers.trigger_map_states import (
-#     list_maps, get_map, create_map, update_map, delete_map,
-#     list_snapshots, get_snapshot, restore_snapshot
-# )
+# Map State API - Saveable web map configurations (23 JAN 2026)
+from triggers.trigger_map_states import (
+    list_maps, get_map, create_map, update_map, delete_map,
+    list_snapshots, get_snapshot, restore_snapshot
+)
 
 # Pipeline Dashboard - Container blob browser (21 NOV 2025) - Read-only UI operations
 from triggers.list_container_blobs import list_container_blobs_handler
@@ -531,23 +533,54 @@ else:
 
 
 # ============================================================================
-# CURATED DATASET MANAGEMENT ENDPOINTS - DISABLED (04 FEB 2026)
+# CURATED DATASET MANAGEMENT ENDPOINTS (15 DEC 2025)
 # ============================================================================
-# In development - will be re-enabled later
 # CRUD operations for curated (system-managed) datasets.
+# These are official geospatial data sources that update automatically.
 # Examples: WDPA, Admin0 boundaries, other authoritative sources.
 # ============================================================================
-# @app.route(route="curated/datasets", methods=["GET", "POST"])
-# def curated_datasets(req: func.HttpRequest) -> func.HttpResponse:
-#     return curated_admin_trigger.handle_request(req)
-#
-# @app.route(route="curated/datasets/{dataset_id}", methods=["GET", "PUT", "DELETE"])
-# def curated_dataset_by_id(req: func.HttpRequest) -> func.HttpResponse:
-#     return curated_admin_trigger.handle_request(req)
-#
-# @app.route(route="curated/datasets/{dataset_id}/{action}", methods=["GET", "POST"])
-# def curated_dataset_action(req: func.HttpRequest) -> func.HttpResponse:
-#     return curated_admin_trigger.handle_request(req)
+
+@app.route(route="curated/datasets", methods=["GET", "POST"])
+def curated_datasets(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Curated datasets CRUD.
+
+    GET /api/curated/datasets - List all curated datasets
+    POST /api/curated/datasets - Create new dataset (body: JSON)
+    """
+    return curated_admin_trigger.handle_request(req)
+
+
+@app.route(route="curated/datasets/{dataset_id}", methods=["GET", "PUT", "DELETE"])
+def curated_dataset_by_id(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Single curated dataset operations.
+
+    GET /api/curated/datasets/{id} - Get dataset
+    PUT /api/curated/datasets/{id} - Update dataset
+    DELETE /api/curated/datasets/{id}?confirm=yes - Delete registry entry
+    """
+    return curated_admin_trigger.handle_request(req)
+
+
+# CONSOLIDATED (15 DEC 2025) - 4 action routes → 1 route
+# Trigger routes internally based on action path segment
+@app.route(route="curated/datasets/{dataset_id}/{action}", methods=["GET", "POST"])
+def curated_dataset_action(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Consolidated curated dataset actions.
+
+    Actions (via path):
+        POST /api/curated/datasets/{id}/update  - Trigger manual update
+        GET  /api/curated/datasets/{id}/history - Get update history
+        POST /api/curated/datasets/{id}/enable  - Enable scheduled updates
+        POST /api/curated/datasets/{id}/disable - Disable scheduled updates
+    """
+    return curated_admin_trigger.handle_request(req)
+
+
+# ============================================================================
+# END CURATED DATASET MANAGEMENT ENDPOINTS
 # ============================================================================
 
 
@@ -712,31 +745,75 @@ def job_delete_route(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # ============================================================================
-# PROMOTE API - DISABLED (04 FEB 2026)
+# PROMOTE API - Dataset Promotion System (22 DEC 2025)
 # ============================================================================
-# In development - will be re-enabled later
-# Dataset promotion system for galleries and featured datasets
-# ============================================================================
-# from triggers.promote import (
-#     handle_promote, handle_promote_item, handle_gallery,
-#     handle_gallery_list, handle_system_reserved
-# )
-#
-# @app.route(route="promote", methods=["GET", "POST"])
-# def promote_handler(req): return handle_promote(req)
-#
-# @app.route(route="promote/gallery", methods=["GET"])
-# def promote_gallery_list_handler(req): return handle_gallery_list(req)
-#
-# @app.route(route="promote/system", methods=["GET"])
-# def promote_system_reserved_handler(req): return handle_system_reserved(req)
-#
-# @app.route(route="promote/{promoted_id}", methods=["GET", "PUT", "DELETE"])
-# def promote_item_handler(req): return handle_promote_item(req)
-#
-# @app.route(route="promote/{promoted_id}/gallery", methods=["POST", "DELETE"])
-# def promote_gallery_handler(req): return handle_gallery(req)
-# ============================================================================
+# These endpoints manage the promoted datasets system:
+# - POST/GET /api/promote - Create promoted dataset or list all
+# - GET/PUT/DELETE /api/promote/{promoted_id} - CRUD for specific dataset
+# - POST/DELETE /api/promote/{promoted_id}/gallery - Gallery management
+# - GET /api/promote/gallery - List gallery items
+# - GET /api/promote/system - List system-reserved datasets (23 DEC 2025)
+
+from triggers.promote import (
+    handle_promote,
+    handle_promote_item,
+    handle_gallery,
+    handle_gallery_list,
+    handle_system_reserved
+)
+
+
+@app.route(route="promote", methods=["GET", "POST"])
+def promote_handler(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Promote a STAC collection/item or list all promoted datasets.
+
+    POST /api/promote - Create promoted dataset
+    GET /api/promote - List all promoted datasets
+    """
+    return handle_promote(req)
+
+
+@app.route(route="promote/gallery", methods=["GET"])
+def promote_gallery_list_handler(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    List gallery items in display order: GET /api/promote/gallery
+    """
+    return handle_gallery_list(req)
+
+
+@app.route(route="promote/system", methods=["GET"])
+def promote_system_reserved_handler(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    List system-reserved datasets: GET /api/promote/system
+
+    Query Parameters:
+        role: Filter by system_role (e.g., 'admin0_boundaries')
+    """
+    return handle_system_reserved(req)
+
+
+@app.route(route="promote/{promoted_id}", methods=["GET", "PUT", "DELETE"])
+def promote_item_handler(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Get, update, or demote a promoted dataset.
+
+    GET /api/promote/{promoted_id} - Get details
+    PUT /api/promote/{promoted_id} - Update
+    DELETE /api/promote/{promoted_id}?confirm_system=true - Demote
+    """
+    return handle_promote_item(req)
+
+
+@app.route(route="promote/{promoted_id}/gallery", methods=["POST", "DELETE"])
+def promote_gallery_handler(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Add or remove a promoted dataset from the gallery.
+
+    POST /api/promote/{promoted_id}/gallery - Add to gallery
+    DELETE /api/promote/{promoted_id}/gallery - Remove from gallery
+    """
+    return handle_gallery(req)
 
 
 # 🚨 NUCLEAR RED BUTTON - DEVELOPMENT ONLY (⚠️ DEPRECATED - COMMENTED OUT 16 NOV 2025)
@@ -761,10 +838,89 @@ def job_delete_route(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # ============================================================================
-# CONTAINER ANALYSIS ENDPOINTS - REMOVED (04 FEB 2026 - APP_MODE refactor)
+# CONTAINER ANALYSIS ENDPOINT - Post-processing for list_container_contents jobs
 # ============================================================================
-# Removed /api/analysis/container and /api/analysis/delivery
-# These were internal analysis tools, not B2B endpoints
+
+@app.route(route="analysis/container/{job_id}", methods=["GET"])
+def analyze_container(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Analyze a list_container_contents job: GET /api/analysis/container/{job_id}?save=true
+
+    Provides comprehensive analysis of blob container contents including:
+    - File categorization (vector, raster, metadata)
+    - Pattern detection (Maxar orders, Vivid basemaps, etc.)
+    - Duplicate file detection
+    - Size distribution and statistics
+    - Execution timing analysis
+
+    Query Parameters:
+        save: If 'true', saves results to inventory container (silver zone)
+    """
+    return analyze_container_trigger.handle_request(req)
+
+
+@app.route(route="analysis/delivery", methods=["POST"])
+def discover_delivery_structure(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Discover vendor delivery structure: POST /api/analysis/delivery
+
+    Analyzes a folder to detect:
+    - Manifest files (.MAN, .json, .xml, .til)
+    - Tile patterns (R{row}C{col}, X{x}_Y{y})
+    - Delivery type (Maxar, Vivid, simple folder)
+    - Recommended processing workflow
+
+    Request Body:
+        {
+            "blob_list": ["path/file1.tif", "path/file2.tif", ...],
+            "folder_path": "optional/folder/path/"
+        }
+
+    Returns:
+        {
+            "delivery_type": "maxar_tiles" | "vivid_basemap" | "simple_folder",
+            "manifest": {...},
+            "tile_pattern": {...},
+            "recommended_workflow": {...}
+        }
+    """
+    from services.delivery_discovery import analyze_delivery_structure
+    import json
+
+    try:
+        # Parse request body
+        req_body = req.get_json()
+
+        if not req_body or 'blob_list' not in req_body:
+            return func.HttpResponse(
+                json.dumps({"error": "blob_list required in request body"}),
+                mimetype="application/json",
+                status_code=400
+            )
+
+        blob_list = req_body['blob_list']
+        folder_path = req_body.get('folder_path')
+
+        # Analyze delivery structure
+        result = analyze_delivery_structure(blob_list, folder_path)
+
+        return func.HttpResponse(
+            json.dumps(result, indent=2),
+            mimetype="application/json",
+            status_code=200
+        )
+
+    except Exception as e:
+        import traceback
+        return func.HttpResponse(
+            json.dumps({
+                "error": str(e),
+                "traceback": traceback.format_exc()
+            }),
+            mimetype="application/json",
+            status_code=500
+        )
+
 
 # ============================================================================
 # STAC API v1.0.0 PORTABLE MODULE (10 NOV 2025)
@@ -915,66 +1071,145 @@ def ogc_styles_item(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # ============================================================================
-# RASTER RENDER CONFIG ENDPOINTS - DISABLED (04 FEB 2026)
+# RASTER RENDER CONFIG ENDPOINTS (22 JAN 2026 - F2.11)
 # ============================================================================
-# In development - will be re-enabled later
-# TiTiler render configuration storage for raster COG visualization
-# ============================================================================
-# @app.route(route="raster/{cog_id}/renders", methods=["GET"])
-# def raster_renders_list(req): return list_renders(req)
 #
-# @app.route(route="raster/{cog_id}/renders/default", methods=["GET"])
-# def raster_renders_default(req): return get_default_render(req)
+# TiTiler render configuration storage for raster COG visualization.
+# Source of truth for STAC Renders Extension embedding.
 #
-# @app.route(route="raster/{cog_id}/renders/auto-default", methods=["POST"])
-# def raster_renders_auto_default(req): return create_default_render(req)
+# Standards:
+#   - STAC Renders Extension: https://github.com/stac-extensions/render
+#   - TiTiler: https://developmentseed.org/titiler
 #
-# @app.route(route="raster/{cog_id}/renders/{render_id}", methods=["GET"])
-# def raster_renders_get(req): return get_render(req)
-#
-# @app.route(route="raster/{cog_id}/renders", methods=["POST"])
-# def raster_renders_create(req): return create_render(req)
-#
-# @app.route(route="raster/{cog_id}/renders/{render_id}", methods=["PUT"])
-# def raster_renders_update(req): return update_render(req)
-#
-# @app.route(route="raster/{cog_id}/renders/{render_id}", methods=["DELETE"])
-# def raster_renders_delete(req): return delete_render(req)
-#
-# @app.route(route="raster/{cog_id}/renders/{render_id}/default", methods=["POST"])
-# def raster_renders_set_default(req): return set_default_render(req)
-# ============================================================================
+# Endpoints:
+#   GET    /api/raster/{cog_id}/renders              - List render configs
+#   GET    /api/raster/{cog_id}/renders/default      - Get default render
+#   GET    /api/raster/{cog_id}/renders/{render_id}  - Get specific render
+#   POST   /api/raster/{cog_id}/renders              - Create render config
+#   PUT    /api/raster/{cog_id}/renders/{render_id}  - Update render config
+#   DELETE /api/raster/{cog_id}/renders/{render_id}  - Delete render config
+#   POST   /api/raster/{cog_id}/renders/{render_id}/default - Set as default
+#   POST   /api/raster/{cog_id}/renders/auto-default - Auto-generate default
+
+
+@app.route(route="raster/{cog_id}/renders", methods=["GET"])
+def raster_renders_list(req: func.HttpRequest) -> func.HttpResponse:
+    """List render configs: GET /api/raster/{cog_id}/renders"""
+    return list_renders(req)
+
+
+@app.route(route="raster/{cog_id}/renders/default", methods=["GET"])
+def raster_renders_default(req: func.HttpRequest) -> func.HttpResponse:
+    """Get default render: GET /api/raster/{cog_id}/renders/default"""
+    return get_default_render(req)
+
+
+@app.route(route="raster/{cog_id}/renders/auto-default", methods=["POST"])
+def raster_renders_auto_default(req: func.HttpRequest) -> func.HttpResponse:
+    """Auto-generate default render: POST /api/raster/{cog_id}/renders/auto-default"""
+    return create_default_render(req)
+
+
+@app.route(route="raster/{cog_id}/renders/{render_id}", methods=["GET"])
+def raster_renders_get(req: func.HttpRequest) -> func.HttpResponse:
+    """Get render config: GET /api/raster/{cog_id}/renders/{render_id}"""
+    return get_render(req)
+
+
+@app.route(route="raster/{cog_id}/renders", methods=["POST"])
+def raster_renders_create(req: func.HttpRequest) -> func.HttpResponse:
+    """Create render config: POST /api/raster/{cog_id}/renders"""
+    return create_render(req)
+
+
+@app.route(route="raster/{cog_id}/renders/{render_id}", methods=["PUT"])
+def raster_renders_update(req: func.HttpRequest) -> func.HttpResponse:
+    """Update render config: PUT /api/raster/{cog_id}/renders/{render_id}"""
+    return update_render(req)
+
+
+@app.route(route="raster/{cog_id}/renders/{render_id}", methods=["DELETE"])
+def raster_renders_delete(req: func.HttpRequest) -> func.HttpResponse:
+    """Delete render config: DELETE /api/raster/{cog_id}/renders/{render_id}"""
+    return delete_render(req)
+
+
+@app.route(route="raster/{cog_id}/renders/{render_id}/default", methods=["POST"])
+def raster_renders_set_default(req: func.HttpRequest) -> func.HttpResponse:
+    """Set as default: POST /api/raster/{cog_id}/renders/{render_id}/default"""
+    return set_default_render(req)
+
 
 # ============================================================================
-# MAP STATE API ENDPOINTS - DISABLED (04 FEB 2026)
+# MAP STATE API ENDPOINTS (23 JAN 2026)
 # ============================================================================
-# In development - will be re-enabled later
-# Saveable web map configurations with layer management and version history
-# ============================================================================
-# @app.route(route="maps", methods=["GET"])
-# def maps_list(req): return list_maps(req)
 #
-# @app.route(route="maps", methods=["POST"])
-# def maps_create(req): return create_map(req)
+# Saveable web map configurations with layer management and version history.
 #
-# @app.route(route="maps/{map_id}", methods=["GET"])
-# def maps_get(req): return get_map(req)
+# Features:
+#   - Save/restore map states (center, zoom, layers)
+#   - Layer symbology references (STAC renders, OGC styles)
+#   - Automatic snapshot versioning on updates
+#   - Support for multiple map container types (MapLibre, Leaflet, OpenLayers)
 #
-# @app.route(route="maps/{map_id}", methods=["PUT"])
-# def maps_update(req): return update_map(req)
-#
-# @app.route(route="maps/{map_id}", methods=["DELETE"])
-# def maps_delete(req): return delete_map(req)
-#
-# @app.route(route="maps/{map_id}/snapshots", methods=["GET"])
-# def maps_snapshots_list(req): return list_snapshots(req)
-#
-# @app.route(route="maps/{map_id}/snapshots/{version}", methods=["GET"])
-# def maps_snapshot_get(req): return get_snapshot(req)
-#
-# @app.route(route="maps/{map_id}/restore/{version}", methods=["POST"])
-# def maps_restore(req): return restore_snapshot(req)
-# ============================================================================
+# Available Endpoints:
+#   GET    /api/maps                              - List maps
+#   GET    /api/maps/{map_id}                     - Get map
+#   POST   /api/maps                              - Create map
+#   PUT    /api/maps/{map_id}                     - Update map
+#   DELETE /api/maps/{map_id}                     - Delete map
+#   GET    /api/maps/{map_id}/snapshots           - List snapshots
+#   GET    /api/maps/{map_id}/snapshots/{version} - Get snapshot
+#   POST   /api/maps/{map_id}/restore/{version}   - Restore from snapshot
+
+
+@app.route(route="maps", methods=["GET"])
+def maps_list(req: func.HttpRequest) -> func.HttpResponse:
+    """List maps: GET /api/maps"""
+    return list_maps(req)
+
+
+@app.route(route="maps", methods=["POST"])
+def maps_create(req: func.HttpRequest) -> func.HttpResponse:
+    """Create map: POST /api/maps"""
+    return create_map(req)
+
+
+@app.route(route="maps/{map_id}", methods=["GET"])
+def maps_get(req: func.HttpRequest) -> func.HttpResponse:
+    """Get map: GET /api/maps/{map_id}"""
+    return get_map(req)
+
+
+@app.route(route="maps/{map_id}", methods=["PUT"])
+def maps_update(req: func.HttpRequest) -> func.HttpResponse:
+    """Update map: PUT /api/maps/{map_id}"""
+    return update_map(req)
+
+
+@app.route(route="maps/{map_id}", methods=["DELETE"])
+def maps_delete(req: func.HttpRequest) -> func.HttpResponse:
+    """Delete map: DELETE /api/maps/{map_id}"""
+    return delete_map(req)
+
+
+@app.route(route="maps/{map_id}/snapshots", methods=["GET"])
+def maps_snapshots_list(req: func.HttpRequest) -> func.HttpResponse:
+    """List snapshots: GET /api/maps/{map_id}/snapshots"""
+    return list_snapshots(req)
+
+
+@app.route(route="maps/{map_id}/snapshots/{version}", methods=["GET"])
+def maps_snapshot_get(req: func.HttpRequest) -> func.HttpResponse:
+    """Get snapshot: GET /api/maps/{map_id}/snapshots/{version}"""
+    return get_snapshot(req)
+
+
+@app.route(route="maps/{map_id}/restore/{version}", methods=["POST"])
+def maps_restore(req: func.HttpRequest) -> func.HttpResponse:
+    """Restore from snapshot: POST /api/maps/{map_id}/restore/{version}"""
+    return restore_snapshot(req)
+
 
 # ============================================================================
 # STAC API v1.0.0 ENDPOINTS - MOVED TO BLUEPRINT (24 JAN 2026 - V0.8 Phase 17.3)
@@ -1022,21 +1257,75 @@ def vector_collection_viewer(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # ============================================================================
-# RASTER COLLECTION VIEWER - DISABLED (04 FEB 2026)
+# RASTER COLLECTION VIEWER (30 DEC 2025) - F2.9
 # ============================================================================
-# In development - will be re-enabled later
 # STAC-integrated raster viewer with TiTiler XYZ tiles
+# Provides interactive Leaflet map for browsing STAC raster collections
+# with smart TiTiler URL generation based on raster metadata (app:*)
 # ============================================================================
-# _raster_collection_viewer_triggers = get_raster_collection_viewer_triggers()
-# _raster_collection_viewer_handler = _raster_collection_viewer_triggers[0]['handler']
-# _raster_qa_handler = _raster_collection_viewer_triggers[1]['handler']
-#
-# @app.route(route="raster/viewer", methods=["GET"])
-# def raster_collection_viewer(req): return _raster_collection_viewer_handler(req)
-#
-# @app.route(route="raster/qa", methods=["POST"])
-# def raster_qa_status(req): return _raster_qa_handler(req)
-# ============================================================================
+
+# Get trigger configuration
+_raster_collection_viewer_triggers = get_raster_collection_viewer_triggers()
+_raster_collection_viewer_handler = _raster_collection_viewer_triggers[0]['handler']
+
+
+@app.route(route="raster/viewer", methods=["GET"])
+def raster_collection_viewer(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Raster collection viewer for data curators.
+
+    GET /api/raster/viewer?collection={collection_id}
+
+    Query Parameters:
+        collection (required): STAC collection ID
+
+    Returns:
+        HTML page with Leaflet map showing raster items via TiTiler XYZ tiles.
+        Includes band selection, rescale, and colormap controls.
+
+    Use Case:
+        Data curators can browse STAC raster collections with proper
+        visualization based on raster type (DEM, RGB, multi-band).
+        Uses app:* STAC properties for smart TiTiler URL generation.
+
+    Example:
+        https://rmhazuregeoapi-.../api/raster/viewer?collection=aerial-2024
+    """
+    return _raster_collection_viewer_handler(req)
+
+
+# QA Status endpoint for raster items
+_raster_qa_handler = _raster_collection_viewer_triggers[1]['handler']
+
+
+@app.route(route="raster/qa", methods=["POST"])
+def raster_qa_status(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Update QA status for STAC raster items.
+
+    POST /api/raster/qa
+
+    Request Body:
+        {
+            "item_id": "item-123",
+            "collection_id": "collection-abc",
+            "status": "approved" | "rejected" | "pending"
+        }
+
+    Returns:
+        JSON response with:
+        - success: boolean
+        - item_id: string
+        - collection_id: string
+        - status: string
+        - message: string
+
+    Use Case:
+        Data curators can approve or reject raster items from the viewer.
+        Sets app:qa_status and app:qa_updated properties on STAC item.
+    """
+    return _raster_qa_handler(req)
+
 
 # ============================================================================
 # PIPELINE DASHBOARD - CONTAINER BLOB BROWSER (21 NOV 2025)
@@ -1574,29 +1863,82 @@ app.register_functions(timer_bp)
 
 
 # ============================================================================
-# RASTER API - DISABLED (04 FEB 2026)
+# RASTER API - Service Layer Convenience Wrappers (18 DEC 2025)
 # ============================================================================
-# In development - will be re-enabled later
-# Convenience endpoints that proxy to TiTiler (extract, point, clip, preview)
+# Convenience endpoints that look up STAC items and proxy to TiTiler.
+# Simplifies raster access by accepting collection/item IDs instead of URLs.
+#
+# Endpoints:
+#   GET /api/raster/extract/{collection}/{item}  - Extract bbox as image
+#   GET /api/raster/point/{collection}/{item}    - Point value query
+#   GET /api/raster/clip/{collection}/{item}     - Clip to geometry (POST supported)
+#   GET /api/raster/preview/{collection}/{item}  - Quick preview image
 # ============================================================================
-# _raster_triggers = get_raster_triggers()
-# _raster_extract = _raster_triggers[0]['handler']
-# _raster_point = _raster_triggers[1]['handler']
-# _raster_clip = _raster_triggers[2]['handler']
-# _raster_preview = _raster_triggers[3]['handler']
-#
-# @app.route(route="raster/extract/{collection}/{item}", methods=["GET"])
-# def raster_api_extract(req): return _raster_extract(req)
-#
-# @app.route(route="raster/point/{collection}/{item}", methods=["GET"])
-# def raster_api_point(req): return _raster_point(req)
-#
-# @app.route(route="raster/clip/{collection}/{item}", methods=["GET", "POST"])
-# def raster_api_clip(req): return _raster_clip(req)
-#
-# @app.route(route="raster/preview/{collection}/{item}", methods=["GET"])
-# def raster_api_preview(req): return _raster_preview(req)
-# ============================================================================
+
+# Get trigger configurations
+_raster_triggers = get_raster_triggers()
+_raster_extract = _raster_triggers[0]['handler']
+_raster_point = _raster_triggers[1]['handler']
+_raster_clip = _raster_triggers[2]['handler']
+_raster_preview = _raster_triggers[3]['handler']
+
+
+@app.route(route="raster/extract/{collection}/{item}", methods=["GET"])
+def raster_api_extract(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Extract bbox from raster as image.
+
+    GET /api/raster/extract/{collection}/{item}?bbox={minx},{miny},{maxx},{maxy}
+        &format=tif|png|npy
+        &asset=data
+        &time_index=1
+        &colormap=viridis
+        &rescale=0,100
+    """
+    return _raster_extract(req)
+
+
+@app.route(route="raster/point/{collection}/{item}", methods=["GET"])
+def raster_api_point(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Get raster value at a point.
+
+    GET /api/raster/point/{collection}/{item}?location={name}|{lon},{lat}
+        &asset=data
+        &time_index=1
+    """
+    return _raster_point(req)
+
+
+@app.route(route="raster/clip/{collection}/{item}", methods=["GET", "POST"])
+def raster_api_clip(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Clip raster to geometry.
+
+    GET /api/raster/clip/{collection}/{item}?boundary_type=state&boundary_id=VA
+        &format=tif|png
+        &time_index=1
+
+    POST /api/raster/clip/{collection}/{item}
+        Body: GeoJSON geometry
+        ?format=tif|png
+    """
+    return _raster_clip(req)
+
+
+@app.route(route="raster/preview/{collection}/{item}", methods=["GET"])
+def raster_api_preview(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Get preview image of raster.
+
+    GET /api/raster/preview/{collection}/{item}?format=png|jpeg|webp
+        &asset=data
+        &time_index=1
+        &max_size=512
+        &colormap=viridis
+    """
+    return _raster_preview(req)
+
 
 # ============================================================================
 # XARRAY API - Direct Zarr Access for Time-Series (18 DEC 2025)

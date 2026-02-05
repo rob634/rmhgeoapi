@@ -782,16 +782,12 @@ class GeoTableOperations:
                             logger.warning(f"STAC batch delete failed: {stac_err}")
 
                     # =========================================================
-                    # STEP 5: Truncate catalog and ETL tracking
+                    # STEP 5: Truncate ETL tracking, then catalog
                     # =========================================================
-                    if catalog_exists:
-                        cur.execute("SELECT COUNT(*) FROM geo.table_catalog")
-                        catalog_count = cur.fetchone()['count']
-                        cur.execute("TRUNCATE TABLE geo.table_catalog")
-                        result["deleted"]["catalog_entries"] = catalog_count
-                        logger.info(f"🔥 NUKE GEO: Truncated geo.table_catalog ({catalog_count} rows)")
+                    # Order matters: app.vector_etl_tracking has FK to geo.table_catalog
+                    # Truncate child table first, then parent (04 FEB 2026)
 
-                    # Check and truncate ETL tracking
+                    # Check and truncate ETL tracking FIRST (child table)
                     cur.execute("""
                         SELECT EXISTS (
                             SELECT 1 FROM information_schema.tables
@@ -806,6 +802,14 @@ class GeoTableOperations:
                         cur.execute("TRUNCATE TABLE app.vector_etl_tracking")
                         result["deleted"]["etl_tracking_entries"] = etl_count
                         logger.info(f"🔥 NUKE GEO: Truncated app.vector_etl_tracking ({etl_count} rows)")
+
+                    # Truncate catalog SECOND (parent table)
+                    if catalog_exists:
+                        cur.execute("SELECT COUNT(*) FROM geo.table_catalog")
+                        catalog_count = cur.fetchone()['count']
+                        cur.execute("TRUNCATE TABLE geo.table_catalog CASCADE")
+                        result["deleted"]["catalog_entries"] = catalog_count
+                        logger.info(f"🔥 NUKE GEO: Truncated geo.table_catalog ({catalog_count} rows)")
 
                     # =========================================================
                     # STEP 6: Drop all user tables

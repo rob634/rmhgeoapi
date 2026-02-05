@@ -1,6 +1,6 @@
 # Architecture Reference
 
-**Date**: 15 OCT 2025 (Updated with Job Declaration Pattern)
+**Date**: 02 FEB 2026 (Updated with Platform Layer Architecture)
 **Purpose**: Deep technical specifications for the Azure Geospatial ETL Pipeline
 
 ## Table of Contents
@@ -16,6 +16,129 @@
 10. [Storage Architecture](#storage-architecture)
 11. [Error Handling Strategy](#error-handling-strategy)
 12. [Scalability Targets](#scalability-targets)
+
+---
+
+## Platform Layer Architecture (Critical Design Principle)
+
+**Updated**: 02 FEB 2026
+**Status**: Core architectural constraint
+
+### The Queue Contract
+
+**The Service Bus queue is the ONLY interface between Platform and CoreMachine.**
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    PLATFORM → QUEUE → COREMACHINE                           │
+│                    (The Fundamental Decoupling Pattern)                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+  External Client (DDH)
+       │
+       │  POST /api/platform/submit
+       │  {dataset_id, resource_id, version_id, ...}
+       ▼
+  ┌─────────────────────────────────────────────────────────────┐
+  │                    PLATFORM LAYER                            │
+  │                    (Thin, Stateless)                         │
+  │                                                              │
+  │  1. Validate DDH request format                             │
+  │  2. Translate to CoreMachine job parameters                 │
+  │  3. Generate deterministic request_id                       │
+  │  4. Create api_requests tracking record                     │
+  │  5. Enqueue job message to Service Bus ◄── BOUNDARY         │
+  │  6. Return immediately with request_id                      │
+  │                                                              │
+  │  Platform knows NOTHING about job execution.                │
+  │  It enqueues and exits. That's it.                          │
+  └─────────────────────────────────────────────────────────────┘
+                         │
+                         │  JobQueueMessage
+                         │  {job_id, job_type, parameters, stage=1}
+                         ▼
+            ┌────────────────────────────┐
+            │      SERVICE BUS QUEUE      │
+            │      "geospatial-jobs"      │
+            │                            │
+            │   THE CONTRACT BOUNDARY    │
+            │   - Durable message store  │
+            │   - Decouples components   │
+            │   - Enables independent    │
+            │     scaling & deployment   │
+            └────────────────────────────┘
+                         │
+                         │  (Async - Platform has already returned)
+                         ▼
+  ┌─────────────────────────────────────────────────────────────┐
+  │                    COREMACHINE LAYER                         │
+  │                    (Job Orchestration)                       │
+  │                                                              │
+  │  1. Consume job message from queue                          │
+  │  2. Load job definition from ALL_JOBS registry              │
+  │  3. Create tasks for current stage                          │
+  │  4. Route tasks to appropriate queue                        │
+  │  5. Execute tasks via handlers                              │
+  │  6. Detect stage completion ("last task turns out lights")  │
+  │  7. Advance to next stage or finalize job                   │
+  │                                                              │
+  │  CoreMachine knows NOTHING about Platform/DDH.              │
+  │  It processes generic jobs from the queue.                  │
+  └─────────────────────────────────────────────────────────────┘
+```
+
+### Why This Matters
+
+| Aspect | Benefit |
+|--------|---------|
+| **Independent Deployment** | Platform and CoreMachine can be separate Function Apps |
+| **Independent Scaling** | Scale CoreMachine workers without touching Platform |
+| **Fault Isolation** | Platform failure doesn't affect running jobs |
+| **Technology Freedom** | CoreMachine could be replaced without Platform changes |
+| **Testing** | Each layer can be tested independently |
+| **Migration Ready** | Split to microservices = routing change, not code change |
+
+### What Platform Does NOT Do
+
+```python
+# ❌ WRONG - Platform should NEVER do this
+def platform_submit(request):
+    job = create_job(request)
+    result = execute_job(job)  # NO! Platform doesn't execute
+    return result
+
+# ✅ CORRECT - Platform enqueues and exits
+def platform_submit(request):
+    params = translate_to_coremachine(request)
+    job_id = enqueue_job(params)  # Send to queue, don't wait
+    return {"request_id": request_id, "job_id": job_id, "status": "queued"}
+```
+
+### Status Queries
+
+Platform CAN read job status from the database for status queries:
+
+```
+GET /api/platform/status/{request_id}
+    │
+    ▼
+Platform reads from app.jobs table (read-only)
+    │
+    ▼
+Returns: {status, progress, result}
+```
+
+This is read-only access - Platform never writes to jobs/tasks tables directly.
+
+### Implementation Files
+
+| Component | File | Responsibility |
+|-----------|------|----------------|
+| Platform Submit | `services/platform_job_submit.py` | Validate, translate, enqueue |
+| Platform Translation | `services/platform_translation.py` | DDH → CoreMachine format |
+| Queue Message | `core/schema/queue.py` | `JobQueueMessage` schema |
+| CoreMachine | `core/machine.py` | Job/task orchestration |
+| Job Queue Consumer | `triggers/jobs/job_queue_trigger.py` | Service Bus trigger |
 
 ---
 

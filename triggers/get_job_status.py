@@ -40,7 +40,15 @@ class JobStatusTrigger(JobManagementTrigger):
 
     def __init__(self):
         super().__init__("get_job_status")
-        self.task_repository = TaskRepository()
+        # Lazy-load repository to avoid import-time database connection
+        self._task_repository = None
+
+    @property
+    def task_repository(self):
+        """Lazy-loaded task repository."""
+        if self._task_repository is None:
+            self._task_repository = TaskRepository()
+        return self._task_repository
 
     def get_allowed_methods(self) -> List[str]:
         """Job status only supports GET."""

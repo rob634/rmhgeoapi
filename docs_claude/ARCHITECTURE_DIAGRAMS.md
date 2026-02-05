@@ -1,6 +1,6 @@
 # Architecture Diagrams
 
-**Last Updated**: 21 DEC 2025
+**Last Updated**: 02 FEB 2026
 **Format**: Mermaid (renders in GitHub/VS Code)
 **Model**: C4 Architecture (Context → Container → Component → Code)
 
@@ -9,12 +9,13 @@
 ## Table of Contents
 
 1. [System Context (C1)](#1-system-context-c1)
-2. [Container View (C2)](#2-container-view-c2)
-3. [Core Orchestration (C3)](#3-core-orchestration-c3) ⭐ Primary
-4. [State Machines](#4-state-machines) ⭐ Primary
-5. [Job Execution Sequences](#5-job-execution-sequences)
-6. [Data Flow](#6-data-flow)
-7. [Registry Architecture](#7-registry-architecture)
+2. [Platform → Queue → CoreMachine](#2-platform--queue--coremachine) ⭐ **Critical**
+3. [Container View (C3)](#3-container-view-c3)
+4. [Core Orchestration (C4)](#4-core-orchestration-c4) ⭐ Primary
+5. [State Machines](#5-state-machines) ⭐ Primary
+6. [Job Execution Sequences](#6-job-execution-sequences)
+7. [Data Flow](#7-data-flow)
+8. [Registry Architecture](#8-registry-architecture)
 
 ---
 
@@ -81,7 +82,175 @@ flowchart TB
 
 ---
 
-## 2. Container View (C2)
+## 2. Platform → Queue → CoreMachine
+
+**This is the fundamental decoupling pattern.** The queue is the contract boundary.
+
+### 2.1 The Queue Contract (Critical)
+
+```mermaid
+flowchart TB
+    subgraph External["External Clients"]
+        DDH["DDH Platform"]
+        Future["Future B2B Apps"]
+    end
+
+    subgraph Platform["Platform Layer (Thin, Stateless)"]
+        Validate["1. Validate Request"]
+        Translate["2. Translate DDH → CoreMachine"]
+        Track["3. Create api_requests record"]
+        Enqueue["4. Enqueue to Service Bus"]
+        Return["5. Return request_id"]
+
+        Validate --> Translate --> Track --> Enqueue --> Return
+    end
+
+    subgraph Queue["SERVICE BUS QUEUE<br/>═══════════════════<br/>THE CONTRACT BOUNDARY"]
+        JobsQ["geospatial-jobs"]
+    end
+
+    subgraph CoreMachine["CoreMachine Layer (Job Orchestration)"]
+        Consume["1. Consume job message"]
+        LoadJob["2. Load job definition"]
+        CreateTasks["3. Create tasks for stage"]
+        Execute["4. Execute via handlers"]
+        Complete["5. Detect completion"]
+        Advance["6. Next stage or finalize"]
+
+        Consume --> LoadJob --> CreateTasks --> Execute --> Complete --> Advance
+    end
+
+    DDH -->|"POST /api/platform/submit"| Validate
+    Future -->|"POST /api/platform/submit"| Validate
+    Return -->|"Immediate response<br/>{request_id, status: queued}"| DDH
+
+    Enqueue -->|"JobQueueMessage"| JobsQ
+    JobsQ -->|"Async processing"| Consume
+
+    style Queue fill:#ff9,stroke:#333,stroke-width:3px
+    style JobsQ fill:#ffa,stroke:#333,stroke-width:2px
+```
+
+### 2.2 What Each Layer Knows
+
+```mermaid
+flowchart LR
+    subgraph PlatformKnows["Platform Knows"]
+        P1["DDH request format"]
+        P2["Translation rules"]
+        P3["Queue endpoint"]
+        P4["Request tracking"]
+    end
+
+    subgraph PlatformIgnores["Platform Does NOT Know"]
+        PI1["How jobs execute"]
+        PI2["Task orchestration"]
+        PI3["Handler implementations"]
+        PI4["Stage transitions"]
+    end
+
+    subgraph CoreKnows["CoreMachine Knows"]
+        C1["Job definitions"]
+        C2["Task handlers"]
+        C3["Stage orchestration"]
+        C4["Completion detection"]
+    end
+
+    subgraph CoreIgnores["CoreMachine Does NOT Know"]
+        CI1["DDH format"]
+        CI2["Platform API"]
+        CI3["B2B protocols"]
+        CI4["External clients"]
+    end
+
+    PlatformKnows -.->|"Decoupled by queue"| CoreKnows
+
+    style PlatformIgnores fill:#fee,stroke:#c00
+    style CoreIgnores fill:#fee,stroke:#c00
+```
+
+### 2.3 Sequence: Platform Submit Flow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant DDH as DDH Client
+    participant Platform as Platform API
+    participant DB as PostgreSQL
+    participant SB as Service Bus
+    participant CM as CoreMachine
+    participant Worker as Task Workers
+
+    DDH->>Platform: POST /api/platform/submit<br/>{dataset_id, resource_id, version_id}
+
+    Platform->>Platform: Validate DDH request
+    Platform->>Platform: Translate to CoreMachine params
+    Platform->>Platform: Generate deterministic request_id
+    Platform->>DB: INSERT INTO api_requests
+    Platform->>SB: send_message(JobQueueMessage)
+
+    Note over Platform,SB: Platform work complete here
+
+    Platform-->>DDH: 202 Accepted<br/>{request_id, job_id, status: "queued"}
+
+    Note over DDH: Client can poll status endpoint
+
+    rect rgb(200, 255, 200)
+        Note over SB,Worker: Async - Platform has exited
+        SB->>CM: Job message delivered
+        CM->>CM: Load job definition
+        CM->>CM: Create stage 1 tasks
+        CM->>Worker: Route tasks to queue
+        Worker->>Worker: Execute handlers
+        Worker->>CM: Task completion
+        CM->>DB: Update job status
+    end
+
+    DDH->>Platform: GET /api/platform/status/{request_id}
+    Platform->>DB: SELECT FROM jobs (read-only)
+    Platform-->>DDH: {status: "completed", result: {...}}
+```
+
+### 2.4 Migration Implication
+
+```mermaid
+flowchart TB
+    subgraph Current["Current: Monolith"]
+        M_Platform["Platform Code"]
+        M_Queue["Queue"]
+        M_Core["CoreMachine Code"]
+
+        M_Platform --> M_Queue --> M_Core
+    end
+
+    subgraph Future["Future: Microservices"]
+        subgraph App1["Platform Function App"]
+            F_Platform["Platform Code"]
+        end
+
+        F_Queue["Queue<br/>(unchanged)"]
+
+        subgraph App2["CoreMachine Function App"]
+            F_Core["CoreMachine Code"]
+        end
+
+        F_Platform --> F_Queue --> F_Core
+    end
+
+    Current -.->|"Split = routing change<br/>NOT code change"| Future
+
+    style F_Queue fill:#ff9,stroke:#333,stroke-width:2px
+    style M_Queue fill:#ff9,stroke:#333,stroke-width:2px
+```
+
+**Key Insight**: Because the queue is the contract, splitting to microservices requires:
+- Moving code to separate repos/apps
+- Updating APIM routing
+- NO changes to Platform or CoreMachine logic
+
+---
+
+## 3. Container View (C3)
 
 Deployable units and their interactions.
 
@@ -150,7 +319,7 @@ flowchart TB
 
 ---
 
-## 3. Core Orchestration (C3)
+## 4. Core Orchestration (C4)
 
 **This is the heart of the system** - the CoreMachine and its composition pattern.
 
@@ -283,7 +452,7 @@ sequenceDiagram
 
 ---
 
-## 4. State Machines
+## 5. State Machines
 
 ### 4.1 Job State Machine
 
@@ -392,7 +561,7 @@ flowchart LR
 
 ---
 
-## 5. Job Execution Sequences
+## 6. Job Execution Sequences
 
 ### 5.1 Complete Job Lifecycle
 
@@ -504,7 +673,7 @@ sequenceDiagram
 
 ---
 
-## 6. Data Flow
+## 7. Data Flow
 
 ### 6.1 Storage Tier Flow
 
@@ -595,7 +764,7 @@ erDiagram
 
 ---
 
-## 7. Registry Architecture
+## 8. Registry Architecture
 
 ### 7.1 Job Registry Pattern
 

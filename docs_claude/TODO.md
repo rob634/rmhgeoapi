@@ -2,7 +2,7 @@
 **This file contains high level items only**
 This file references other documents containing implementation details. This is to avoid a 50,000 line TODO.md. This file should not exceed 500 lines.
 
-**Last Updated**: 04 FEB 2026
+**Last Updated**: 05 FEB 2026
 **Source of Truth**: [ado_wiki/V0.8_ADO_WORKITEMS.md](/ado_wiki/V0.8_ADO_WORKITEMS.md) - Epic/Feature/Story definitions
 **Purpose**: Sprint-level task tracking and delegation (INDEX format)
 
@@ -30,6 +30,35 @@ This file references other documents containing implementation details. This is 
 | [/V0.8_DDH_MIGRATION.md](/V0.8_DDH_MIGRATION.md) | **DDH column removal - platform_refs migration** |
 | [DRY_RUN_IMPLEMENTATION.md](./DRY_RUN_IMPLEMENTATION.md) | **Platform Submit dry_run + previous_version_id (V0.8.4)** |
 | [SERVICE_LAYER_CLIENT.md](./SERVICE_LAYER_CLIENT.md) | **TiPG refresh webhook integration (F1.6)** |
+| [APP_MODE_ENDPOINT_REFACTOR.md](./APP_MODE_ENDPOINT_REFACTOR.md) | **APP_MODE endpoint restrictions (F12.11)** |
+
+---
+
+## Active Work
+
+### APP_MODE Endpoint Refactor (F12.11)
+**Status**: IN PROGRESS
+**Priority**: HIGH - Security/Architecture
+**Details**: [APP_MODE_ENDPOINT_REFACTOR.md](./APP_MODE_ENDPOINT_REFACTOR.md)
+
+**Goal**: Restrict endpoints per APP_MODE so each deployment only exposes intended endpoints.
+
+**APP_MODE=platform (Gateway) should only expose:**
+- `/api/livez`, `/api/readyz`, `/api/health` - Health probes
+- `/api/platform/*` - Platform API (B2B)
+- `/api/interface/*` - Web UI (calls platform API)
+
+**Current Progress:**
+- [x] Gateway deployed and healthy (rmhgeogateway)
+- [x] Implementation plan documented
+- [x] Phase 1: Add `has_*_endpoints` properties to app_mode_config.py (05 FEB 2026)
+- [x] Phase 2: Three-tier health endpoints (05 FEB 2026)
+  - `/api/health` - Instance health (triggers/probes.py, all modes)
+  - `/api/platform/health` - B2B system health (existing, unchanged)
+  - `/api/system-health` - Infrastructure admin (triggers/system_health.py, orchestrator only)
+- [ ] Phase 3: Wrap endpoint registration with mode checks
+- [ ] Phase 4: Deploy and test on rmhgeogateway
+- [ ] Phase 5: Apply to other APP_MODEs
 
 ---
 

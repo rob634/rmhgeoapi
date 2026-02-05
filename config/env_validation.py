@@ -334,8 +334,8 @@ ENV_VAR_RULES: Dict[str, EnvVarRule] = {
     # APP MODE & DOCKER WORKER (12 JAN 2026)
     # =========================================================================
     "APP_MODE": EnvVarRule(
-        pattern=re.compile(r"^(standalone|platform_only|platform_raster|platform_vector|worker_raster|worker_vector|worker_docker)$"),
-        pattern_description="Deployment mode (standalone, platform_only, worker_raster, worker_vector, worker_docker)",
+        pattern=re.compile(r"^(standalone|platform|orchestrator|worker_functionapp|worker_docker)$"),
+        pattern_description="Deployment mode (standalone, platform, orchestrator, worker_functionapp, worker_docker)",
         required=False,
         fix_suggestion="Set to 'standalone' for single-app deployment or specific mode for multi-app",
         example="standalone",

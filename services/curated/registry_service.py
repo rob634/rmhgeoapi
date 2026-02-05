@@ -398,10 +398,19 @@ class CuratedRegistryService:
         }
 
 
-# Module-level singleton access
-curated_registry_service = CuratedRegistryService.instance()
+# Lazy singleton accessor - avoids import-time database connection
+_curated_registry_service = None
+
+
+def get_curated_registry_service() -> CuratedRegistryService:
+    """Get the singleton CuratedRegistryService instance (lazy initialization)."""
+    global _curated_registry_service
+    if _curated_registry_service is None:
+        _curated_registry_service = CuratedRegistryService.instance()
+    return _curated_registry_service
+
 
 __all__ = [
     'CuratedRegistryService',
-    'curated_registry_service'
+    'get_curated_registry_service'
 ]

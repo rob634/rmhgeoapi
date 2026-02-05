@@ -3,7 +3,7 @@
 # ============================================================================
 # STATUS: Configuration - Multi-Function App deployment modes
 # PURPOSE: Control queue listening behavior and task routing per deployment
-# LAST_REVIEWED: 25 JAN 2026
+# LAST_REVIEWED: 05 FEB 2026
 # ============================================================================
 """
 Application Mode Configuration (V0.8 - 25 JAN 2026).
@@ -235,6 +235,69 @@ class AppModeConfig(BaseModel):
         ]
 
     @property
+    def has_interface_endpoints(self) -> bool:
+        """Whether this mode exposes /api/interface/* endpoints (Web UI)."""
+        return self.mode in [
+            AppMode.STANDALONE,
+            AppMode.PLATFORM,       # Gateway serves UI
+            AppMode.ORCHESTRATOR,   # Admin UI access
+        ]
+
+    @property
+    def has_ogc_endpoints(self) -> bool:
+        """Whether this mode exposes OGC Features API (/api/features/*)."""
+        return self.mode in [
+            AppMode.STANDALONE,
+            AppMode.ORCHESTRATOR,
+        ]
+
+    @property
+    def has_raster_endpoints(self) -> bool:
+        """Whether this mode exposes /api/raster/* endpoints."""
+        return self.mode in [
+            AppMode.STANDALONE,
+            AppMode.ORCHESTRATOR,
+        ]
+
+    @property
+    def has_storage_endpoints(self) -> bool:
+        """Whether this mode exposes /api/storage/* endpoints."""
+        return self.mode in [
+            AppMode.STANDALONE,
+            AppMode.ORCHESTRATOR,
+            AppMode.WORKER_FUNCTIONAPP,  # May need storage access
+        ]
+
+    @property
+    def has_maps_endpoints(self) -> bool:
+        """Whether this mode exposes /api/maps/* endpoints."""
+        return self.mode in [
+            AppMode.STANDALONE,
+            AppMode.ORCHESTRATOR,
+        ]
+
+    @property
+    def has_curated_endpoints(self) -> bool:
+        """Whether this mode exposes /api/curated/* endpoints."""
+        return self.mode in [
+            AppMode.STANDALONE,
+            AppMode.ORCHESTRATOR,
+        ]
+
+    @property
+    def has_system_health_endpoint(self) -> bool:
+        """
+        Whether this mode exposes /api/system-health (admin infrastructure view).
+
+        Only ORCHESTRATOR and STANDALONE - NOT exposed on PLATFORM (gateway).
+        Admins use orchestrator for infrastructure health monitoring.
+        """
+        return self.mode in [
+            AppMode.STANDALONE,
+            AppMode.ORCHESTRATOR,
+        ]
+
+    @property
     def listens_to_jobs_queue(self) -> bool:
         """Whether this mode processes the jobs queue (orchestration)."""
         return self.mode in [
@@ -442,6 +505,13 @@ class AppModeConfig(BaseModel):
                 "has_platform": self.has_platform_endpoints,
                 "has_jobs": self.has_jobs_endpoints,
                 "has_admin": self.has_admin_endpoints,
+                "has_interface": self.has_interface_endpoints,
+                "has_ogc": self.has_ogc_endpoints,
+                "has_raster": self.has_raster_endpoints,
+                "has_storage": self.has_storage_endpoints,
+                "has_maps": self.has_maps_endpoints,
+                "has_curated": self.has_curated_endpoints,
+                "has_system_health": self.has_system_health_endpoint,
             },
             "routing": {
                 "routes_tasks_externally": self.routes_tasks_externally,  # V0.8

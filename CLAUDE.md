@@ -579,7 +579,7 @@ app_mode_config.docker_worker_enabled
 | Architecture details | `docs_claude/ARCHITECTURE_REFERENCE.md` |
 | **Architecture diagrams** | `docs_claude/ARCHITECTURE_DIAGRAMS.md` |
 | Error handling patterns | `docs_claude/ARCHITECTURE_REFERENCE.md` → Error Handling Strategy |
-| APIM future plans | `docs_claude/APIM_ARCHITECTURE.md` |
+| Microservices architecture | `docs_claude/MICROSERVICES_ARCHITECTURE.md` |
 | Service Bus config | `docs_claude/SERVICE_BUS_HARMONIZATION.md` |
 | Schema design | `docs_claude/SCHEMA_ARCHITECTURE.md` |
 | Log queries | `docs_claude/APPLICATION_INSIGHTS.md` |

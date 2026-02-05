@@ -515,7 +515,7 @@ else:
     )
 
 
-# NOTE: /api/health served by triggers/probes.py (Phase 1 startup, always available - 05 FEB 2026)
+# NOTE: /api/health served by triggers/admin/admin_system.py (comprehensive, 20 plugin checks)
 # NOTE: /api/system/stats moved to triggers/admin/admin_system.py blueprint (12 JAN 2026)
 # NOTE: /api/livez is registered in Phase 1 via triggers/probes.py
 

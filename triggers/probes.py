@@ -16,7 +16,8 @@ even when startup validation fails.
 Endpoints:
     GET /api/livez  - Liveness probe (always 200 if process alive)
     GET /api/readyz - Readiness probe (200 if ready, 503 if not)
-    GET /api/health - Instance health (this app's status, all modes)
+
+NOTE: /api/health is in triggers/admin/admin_system.py (comprehensive check)
 
 Design Principles:
     1. ZERO dependencies on other project modules (except startup_state)
@@ -238,177 +239,17 @@ def get_probe_status() -> dict:
 
 
 # ============================================================================
-# INSTANCE HEALTH ENDPOINT (05 FEB 2026 - F12.11)
+# NOTE: /api/health is served by triggers/admin/admin_system.py (05 FEB 2026)
 # ============================================================================
-# /api/health - THIS app's health status (all modes)
-# Different from /api/platform/health (B2B system health) and
-# /api/system-health (infrastructure health, admin only)
+# The comprehensive health check (20 plugin checks via health_check_trigger)
+# is registered in the admin_system blueprint, NOT here in probes.
+# Probes blueprint only provides livez + readyz (always-available diagnostics).
+#
+# Three-tier health design:
+#   Tier 1: /api/health          - This app's comprehensive health (admin_system.py)
+#   Tier 2: /api/platform/health - B2B system readiness (platform_bp.py)
+#   Tier 3: /api/system-health   - Cross-app infrastructure (system_health.py)
 # ============================================================================
-
-class InstanceHealthProbe:
-    """
-    Instance Health Probe - This app's status.
-
-    Returns health information for THIS specific app instance:
-    - App name, mode, version
-    - Uptime and memory usage
-    - Local connectivity to database, service bus, storage
-
-    This is a fast, lightweight check (<100ms target) that runs
-    local checks only - no cross-app calls.
-
-    All modes expose this endpoint.
-    """
-
-    def handle(self, req: func.HttpRequest) -> func.HttpResponse:
-        """Handle GET /api/health request."""
-        import time
-        start_time = time.time()
-
-        try:
-            # Import here to avoid import-time failures
-            from datetime import datetime, timezone
-            from config import __version__, get_app_mode_config
-
-            app_mode = get_app_mode_config()
-
-            # Build response
-            health_data = {
-                "status": "healthy",
-                "instance": {
-                    "app_name": app_mode.app_name,
-                    "app_mode": app_mode.mode.value,
-                    "version": __version__,
-                    "uptime_seconds": self._get_uptime(),
-                    "memory_mb": self._get_memory_usage()
-                },
-                "connectivity": self._check_connectivity(),
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }
-
-            # Determine overall status based on connectivity
-            conn = health_data["connectivity"]
-            if conn.get("database") != "ok" or conn.get("storage") != "ok":
-                health_data["status"] = "degraded"
-
-            # Add response time
-            health_data["response_time_ms"] = round((time.time() - start_time) * 1000, 2)
-
-            return func.HttpResponse(
-                json.dumps(health_data, indent=2),
-                status_code=200,
-                mimetype="application/json"
-            )
-
-        except Exception as e:
-            return func.HttpResponse(
-                json.dumps({
-                    "status": "unhealthy",
-                    "error": str(e),
-                    "error_type": type(e).__name__,
-                    "response_time_ms": round((time.time() - start_time) * 1000, 2)
-                }, indent=2),
-                status_code=500,
-                mimetype="application/json"
-            )
-
-    def _get_uptime(self) -> int:
-        """Get process uptime in seconds."""
-        try:
-            import psutil
-            from datetime import datetime, timezone
-            process = psutil.Process()
-            create_time = datetime.fromtimestamp(process.create_time(), tz=timezone.utc)
-            return int((datetime.now(timezone.utc) - create_time).total_seconds())
-        except Exception:
-            return -1
-
-    def _get_memory_usage(self) -> int:
-        """Get current memory usage in MB."""
-        try:
-            import psutil
-            process = psutil.Process()
-            return int(process.memory_info().rss / (1024 * 1024))
-        except Exception:
-            return -1
-
-    def _check_connectivity(self) -> dict:
-        """
-        Check connectivity to core dependencies.
-
-        Returns dict with status for each dependency:
-        - "ok": Connected successfully
-        - "error": Connection failed (with reason)
-        - "skipped": Not applicable for this mode
-        """
-        connectivity = {}
-
-        # Database connectivity
-        try:
-            from infrastructure import get_connection_pool
-            pool = get_connection_pool()
-            with pool.connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("SELECT 1")
-            connectivity["database"] = "ok"
-        except Exception as e:
-            connectivity["database"] = f"error: {type(e).__name__}"
-
-        # Storage connectivity
-        try:
-            from config import get_config
-            config = get_config()
-            # Just check we can get config - actual blob check would be slow
-            if config.storage.bronze_account:
-                connectivity["storage"] = "ok"
-            else:
-                connectivity["storage"] = "error: no storage configured"
-        except Exception as e:
-            connectivity["storage"] = f"error: {type(e).__name__}"
-
-        # Service Bus connectivity (send capability)
-        try:
-            from config import get_config
-            config = get_config()
-            if config.queues.service_bus_fqdn:
-                connectivity["service_bus"] = "ok"
-            else:
-                connectivity["service_bus"] = "error: no service bus configured"
-        except Exception as e:
-            connectivity["service_bus"] = f"error: {type(e).__name__}"
-
-        return connectivity
-
-
-_instance_health_probe = InstanceHealthProbe()
-
-
-@bp.route(
-    route="health",
-    methods=["GET"],
-    auth_level=func.AuthLevel.ANONYMOUS
-)
-def health(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Instance health - THIS app's status.
-
-    Returns health information for this specific app instance including:
-    - App name, mode, version
-    - Uptime and memory usage
-    - Connectivity to database, storage, service bus
-
-    This is different from:
-    - /api/platform/health - B2B system health (can I submit jobs?)
-    - /api/system-health - Infrastructure health (admin view of all apps)
-
-    Returns:
-        200: {"status": "healthy|degraded", "instance": {...}, "connectivity": {...}}
-        500: {"status": "unhealthy", "error": "..."}
-
-    Example:
-        GET /api/health
-    """
-    return _instance_health_probe.handle(req)
 
 
 # ============================================================================

@@ -9,10 +9,10 @@
 """
 System Admin Blueprint - System-level administration routes.
 
-Routes (2 total):
-    GET /api/health        - Comprehensive system health check
+Routes (1 total):
     GET /api/system/stats  - Lightweight stats for UI widgets
 
+NOTE: /api/health is in triggers/probes.py (Phase 1 startup, 05 FEB 2026)
 NOTE: /api/livez and /api/readyz are in triggers/probes.py (Phase 1 startup)
 NOTE: /api/system/snapshot/* are in triggers/admin/snapshot.py
 """
@@ -26,25 +26,14 @@ bp = Blueprint()
 
 
 # ============================================================================
-# SYSTEM HEALTH & STATS (2 routes)
+# SYSTEM STATS (1 route)
 # ============================================================================
-
-@bp.route(route="health", methods=["GET"])
-def health(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Comprehensive system health check.
-
-    GET /api/health
-
-    Returns health status for all system components:
-    - Database connectivity
-    - Storage accounts
-    - Service Bus queues
-    - Runtime metrics
-    """
-    from triggers.health import health_check_trigger
-    return health_check_trigger.handle_request(req)
-
+# NOTE: /api/health REMOVED from this blueprint (05 FEB 2026)
+# It is now served by triggers/probes.py (InstanceHealthProbe) which is
+# registered in Phase 1 startup and is always available.
+# Having it here AND in probes.py caused "Function health does not have a
+# unique function name" ValueError during function indexing.
+# ============================================================================
 
 @bp.route(route="system/stats", methods=["GET"])
 def system_stats(req: func.HttpRequest) -> func.HttpResponse:

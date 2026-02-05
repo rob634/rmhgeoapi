@@ -55,12 +55,8 @@ class VectorTilesInterface(BaseInterface):
         collection_id = request.params.get('collection', '')
 
         # Get TiTiler base URL for TiPG endpoints
-        try:
-            config = get_config()
-            titiler_base_url = config.titiler_base_url.rstrip('/')
-        except Exception:
-            # Fallback for local dev
-            titiler_base_url = 'https://rmhtitiler-ckdxapgkg4e2gtfp.eastus-01.azurewebsites.net'
+        config = get_config()
+        titiler_base_url = config.titiler_base_url.rstrip('/')
 
         content = self._generate_html_content(collection_id, titiler_base_url)
 

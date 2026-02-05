@@ -43,13 +43,9 @@ class VectorInterface(BaseInterface):
         Returns:
             Complete HTML document string
         """
-        # Get TiPG base URL from config (23 JAN 2026)
-        try:
-            config = get_config()
-            tipg_base_url = config.tipg_base_url.rstrip('/')
-        except Exception:
-            # Fallback for local dev
-            tipg_base_url = 'https://rmhtitiler-ckdxapgkg4e2gtfp.eastus-01.azurewebsites.net/vector'
+        # Get TiPG base URL from config
+        config = get_config()
+        tipg_base_url = config.tipg_base_url.rstrip('/')
 
         content = self._generate_html_content()
         custom_css = self._generate_custom_css()

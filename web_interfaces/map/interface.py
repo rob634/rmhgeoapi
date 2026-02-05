@@ -50,13 +50,9 @@ class MapInterface(BaseInterface):
         Returns:
             Complete HTML document string
         """
-        # Get TiPG base URL from config (23 JAN 2026)
-        try:
-            config = get_config()
-            tipg_base_url = config.tipg_base_url.rstrip('/')
-        except Exception:
-            # Fallback for local dev
-            tipg_base_url = 'https://rmhtitiler-ckdxapgkg4e2gtfp.eastus-01.azurewebsites.net/vector'
+        # Get TiPG base URL from config
+        config = get_config()
+        tipg_base_url = config.tipg_base_url.rstrip('/')
 
         # QA context for approval workflow (03 FEB 2026)
         approval_id = request.params.get('approval_id', '')

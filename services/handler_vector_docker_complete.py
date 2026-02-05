@@ -256,24 +256,52 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
         # discovers the new collection without waiting for cache TTL or restart.
         # Non-fatal: if the webhook fails, TiPG will eventually pick it up.
         # =====================================================================
+        tipg_collection_id = f"{schema}.{table_name}"
+        tipg_refresh_data = {
+            "collection_id": tipg_collection_id,
+            "status": "pending"
+        }
+
         try:
             from infrastructure.service_layer_client import ServiceLayerClient
 
             sl_client = ServiceLayerClient()
+            logger.info(f"[{job_id[:8]}] Refreshing TiPG catalog for {tipg_collection_id}")
+
             refresh_result = sl_client.refresh_tipg_collections()
 
             if refresh_result.status == "success":
+                tipg_refresh_data = {
+                    "collection_id": tipg_collection_id,
+                    "status": "success",
+                    "collections_before": refresh_result.collections_before,
+                    "collections_after": refresh_result.collections_after,
+                    "new_collections": refresh_result.new_collections,
+                    "collection_discovered": tipg_collection_id in refresh_result.new_collections
+                }
                 logger.info(
-                    f"[{job_id[:8]}] TiPG catalog refreshed: "
+                    f"[{job_id[:8]}] TiPG catalog refreshed for {tipg_collection_id}: "
                     f"{refresh_result.collections_before} -> {refresh_result.collections_after} "
                     f"(new: {refresh_result.new_collections})"
                 )
             else:
+                tipg_refresh_data = {
+                    "collection_id": tipg_collection_id,
+                    "status": "error",
+                    "error": refresh_result.error
+                }
                 logger.warning(
-                    f"[{job_id[:8]}] TiPG refresh returned error: {refresh_result.error}"
+                    f"[{job_id[:8]}] TiPG refresh for {tipg_collection_id} returned error: {refresh_result.error}"
                 )
         except Exception as e:
-            logger.warning(f"[{job_id[:8]}] TiPG catalog refresh failed (non-fatal): {e}")
+            tipg_refresh_data = {
+                "collection_id": tipg_collection_id,
+                "status": "failed",
+                "error": str(e)
+            }
+            logger.warning(f"[{job_id[:8]}] TiPG catalog refresh for {tipg_collection_id} failed (non-fatal): {e}")
+
+        checkpoint("tipg_refresh", tipg_refresh_data)
 
         # =====================================================================
         # COMPLETE

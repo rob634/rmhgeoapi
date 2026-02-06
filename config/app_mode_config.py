@@ -195,6 +195,13 @@ class AppModeConfig(BaseModel):
                     "Used by health interface to fetch Docker worker status."
     )
 
+    # Orchestrator URL for platform mode (06 FEB 2026)
+    orchestrator_url: Optional[str] = Field(
+        default=None,
+        description="URL of the orchestrator app for API calls (e.g., https://rmhazuregeoapi-xxx.azurewebsites.net). "
+                    "Used by platform mode UI to fetch job data from orchestrator's dbadmin endpoints."
+    )
+
     # =========================================================================
     # QUEUE LISTENING PROPERTIES (V0.8 - 24 JAN 2026)
     # =========================================================================
@@ -472,6 +479,9 @@ class AppModeConfig(BaseModel):
         docker_worker_enabled = docker_worker_str in ("true", "1", "yes")
         docker_worker_url = os.environ.get("DOCKER_WORKER_URL")
 
+        # Orchestrator URL for platform mode (06 FEB 2026)
+        orchestrator_url = os.environ.get("ORCHESTRATOR_URL")
+
         return cls(
             mode=mode,
             app_name=os.environ.get("APP_NAME", AppModeDefaults.DEFAULT_APP_NAME),
@@ -479,6 +489,7 @@ class AppModeConfig(BaseModel):
             vector_app_url=os.environ.get("VECTOR_APP_URL"),
             docker_worker_enabled=docker_worker_enabled,
             docker_worker_url=docker_worker_url,
+            orchestrator_url=orchestrator_url,
         )
 
     # =========================================================================
@@ -528,6 +539,7 @@ class AppModeConfig(BaseModel):
                 "raster_app_url": self.raster_app_url,
                 "vector_app_url": self.vector_app_url,
                 "docker_worker_url": self.docker_worker_url,
+                "orchestrator_url": self.orchestrator_url,
             },
         }
 

@@ -1924,6 +1924,10 @@ class BaseInterface(ABC):
         htmx_script = f'<script src="https://unpkg.com/htmx.org@{self.HTMX_VERSION}"></script>' if include_htmx else ""
         status_bar_html = self.render_system_status_bar() if include_status_bar else ""
 
+        # Inject orchestrator URL for cross-app API calls (06 FEB 2026)
+        # Platform mode needs to call orchestrator's dbadmin endpoints
+        orchestrator_url_js = self._get_orchestrator_url_js()
+
         return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1943,12 +1947,39 @@ class BaseInterface(ABC):
     {content}
     {status_bar_html}
     <script>
+        {orchestrator_url_js}
         {self.COMMON_JS}
         {self.HTMX_JS}
         {custom_js}
     </script>
 </body>
 </html>"""
+
+    def _get_orchestrator_url_js(self) -> str:
+        """
+        Get JavaScript to set orchestrator URL for cross-app API calls.
+
+        When ORCHESTRATOR_URL is configured (platform mode), this returns JS that
+        sets window.API_BASE_URL to the orchestrator. Otherwise returns empty string
+        and API calls use relative paths (orchestrator/standalone modes).
+
+        Returns:
+            JavaScript string setting window.API_BASE_URL, or empty string
+        """
+        try:
+            from config import get_app_mode_config
+            app_mode_config = get_app_mode_config()
+            orchestrator_url = app_mode_config.orchestrator_url
+
+            if orchestrator_url:
+                # Strip trailing slash for consistency
+                orchestrator_url = orchestrator_url.rstrip('/')
+                return f"window.API_BASE_URL = '{orchestrator_url}';"
+            else:
+                return "window.API_BASE_URL = '';"
+        except Exception:
+            # Fail gracefully - use relative URLs
+            return "window.API_BASE_URL = '';"
 
     def _render_navbar(self) -> str:
         """

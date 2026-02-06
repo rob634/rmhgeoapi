@@ -2,7 +2,7 @@
 **This file contains high level items only**
 This file references other documents containing implementation details. This is to avoid a 50,000 line TODO.md. This file should not exceed 500 lines.
 
-**Last Updated**: 05 FEB 2026
+**Last Updated**: 06 FEB 2026
 **Source of Truth**: [ado_wiki/V0.8_ADO_WORKITEMS.md](/ado_wiki/V0.8_ADO_WORKITEMS.md) - Epic/Feature/Story definitions
 **Purpose**: Sprint-level task tracking and delegation (INDEX format)
 
@@ -31,6 +31,7 @@ This file references other documents containing implementation details. This is 
 | [DRY_RUN_IMPLEMENTATION.md](./DRY_RUN_IMPLEMENTATION.md) | **Platform Submit dry_run + previous_version_id (V0.8.4)** |
 | [SERVICE_LAYER_CLIENT.md](./SERVICE_LAYER_CLIENT.md) | **TiPG refresh webhook integration (F1.6)** |
 | [APP_MODE_ENDPOINT_REFACTOR.md](./APP_MODE_ENDPOINT_REFACTOR.md) | **APP_MODE endpoint restrictions (F12.11)** |
+| [B2B_REQUEST_CONTEXT.md](./B2B_REQUEST_CONTEXT.md) | **B2B request context tracking (F12.12)** |
 
 ---
 
@@ -56,9 +57,52 @@ This file references other documents containing implementation details. This is 
   - `/api/health` - Instance health (triggers/probes.py, all modes)
   - `/api/platform/health` - B2B system health (existing, unchanged)
   - `/api/system-health` - Infrastructure admin (triggers/system_health.py, orchestrator only)
+- [x] Phase 2b: Docker worker always checked in system-health (06 FEB 2026)
 - [ ] Phase 3: Wrap endpoint registration with mode checks
 - [ ] Phase 4: Deploy and test on rmhgeogateway
 - [ ] Phase 5: Apply to other APP_MODEs
+
+---
+
+### B2B Request Context Tracking (F12.12)
+**Status**: PLANNED
+**Priority**: MEDIUM - B2B attribution and audit
+**Details**: [B2B_REQUEST_CONTEXT.md](./B2B_REQUEST_CONTEXT.md)
+**Created**: 06 FEB 2026
+
+**Problem**: Cannot identify which B2B client submitted platform/submit requests. Need to distinguish DDH from internal UIs (Orchestrator vs Gateway) for audit trail.
+
+**Design Decisions:**
+- No API keys/tokens - identity-based auth only
+- Primary: Azure AD token `appid` claim (zero effort from DDH)
+- Fallback: `User-Agent` header pattern matching
+- Storage: Explicit columns on `api_requests` + JSONB overflow
+
+| Phase | Description | Status |
+|-------|-------------|--------|
+| Phase 1 | Extend `ApiRequest` model with new fields | Pending |
+| Phase 2 | Create `services/request_context.py` extractor | Pending |
+| Phase 3 | Wire to platform/submit endpoint | Pending |
+| Phase 4 | Wire to platform/validate endpoint | Pending |
+| Phase 5 | Update internal UI User-Agents | Pending |
+| Phase 6 | Database migration (action=ensure) | Pending |
+| Phase 7 | Documentation updates | Pending |
+
+**Internal Clients to Register:**
+| Client ID | Display Name | User-Agent Pattern |
+|-----------|--------------|-------------------|
+| `rmh_orchestrator_ui` | Orchestrator Admin UI | `RMH-Orchestrator-UI/*` |
+| `rmh_gateway_ui` | Gateway Platform UI | `RMH-Gateway-UI/*` |
+| `ddh` | Data Distribution Hub | DDH's agent or Azure AD appid |
+
+**Files to create:**
+- `services/request_context.py` - Context extraction helper
+
+**Files to modify:**
+- `core/models/platform.py` - Add fields to ApiRequest
+- `triggers/platform/submit.py` - Call extractor
+- `triggers/trigger_platform_status.py` - Wire to validate
+- `static/js/*.js` or base template - Set User-Agent headers
 
 ---
 

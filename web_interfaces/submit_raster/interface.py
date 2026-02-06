@@ -331,10 +331,8 @@ class SubmitRasterInterface(BaseInterface):
             if collection_id:
                 processing_options['collection_id'] = collection_id
 
-            # Docker processing mode (19 JAN 2026)
-            use_docker = get_param('use_docker')
-            if use_docker == 'on':  # HTML checkbox sends 'on' when checked
-                processing_options['processing_mode'] = 'docker'
+            # Docker worker always used for GDAL operations (06 FEB 2026)
+            processing_options['processing_mode'] = 'docker'
 
             # Overwrite existing data (22 JAN 2026)
             overwrite = get_param('overwrite')
@@ -750,25 +748,10 @@ class SubmitRasterInterface(BaseInterface):
                                     </label>
                                     <span class="field-hint">If enabled, existing STAC item and COG will be replaced</span>
                                 </div>
-                                <!-- Processing Mode Toggle (19 JAN 2026) -->
-                                <div class="form-group processing-mode-group">
-                                    <label>Processing Mode</label>
-                                    <div class="toggle-container">
-                                        <label class="toggle-switch">
-                                            <input type="checkbox" id="use_docker" name="use_docker" checked
-                                                   onchange="updateCurlPreview(); updateProcessingModeLabel()">
-                                            <span class="toggle-slider"></span>
-                                        </label>
-                                        <span id="processing-mode-label" class="toggle-label docker-active">
-                                            Docker Worker (recommended)
-                                        </span>
-                                    </div>
-                                    <div id="function-app-warning" class="function-app-warning hidden">
-                                        ⚠️ Function App processing has 10-minute timeout and limited memory.
-                                        Use only for small files (&lt;100MB) or quick tests.
-                                    </div>
-                                    <span class="field-hint docker-hint">
-                                        Docker worker is recommended for reliable processing with longer timeouts and more memory.
+                                <!-- Docker Worker is always used for GDAL operations (06 FEB 2026) -->
+                                <div class="form-group">
+                                    <span class="field-hint">
+                                        Processing uses Docker Worker for reliable GDAL operations with extended timeouts.
                                     </span>
                                 </div>
                             </div>
@@ -1662,23 +1645,6 @@ class SubmitRasterInterface(BaseInterface):
             }
         });
 
-        // Update processing mode label when toggle changes (19 JAN 2026)
-        function updateProcessingModeLabel() {
-            const useDocker = document.getElementById('use_docker').checked;
-            const label = document.getElementById('processing-mode-label');
-            const warning = document.getElementById('function-app-warning');
-
-            if (useDocker) {
-                label.textContent = 'Docker Worker (recommended)';
-                label.classList.add('docker-active');
-                warning.classList.add('hidden');
-            } else {
-                label.textContent = 'Function App (limited)';
-                label.classList.remove('docker-active');
-                warning.classList.remove('hidden');
-            }
-        }
-
         // Generate Platform API cURL command from form values
         function generateCurl() {
             const blobName = document.getElementById('blob_name').value;
@@ -1693,7 +1659,6 @@ class SubmitRasterInterface(BaseInterface):
             const rasterType = document.getElementById('raster_type').value;
             const outputTier = document.getElementById('output_tier').value;
             const inputCrs = document.getElementById('input_crs').value;
-            const useDocker = document.getElementById('use_docker').checked;
             const overwrite = document.getElementById('overwrite').checked;
 
             // Optional metadata
@@ -1738,8 +1703,8 @@ class SubmitRasterInterface(BaseInterface):
             if (inputCrs) processingOptions.crs = inputCrs;
             if (rasterType && rasterType !== 'auto') processingOptions.raster_type = rasterType;
             if (collectionId) processingOptions.collection_id = collectionId;
-            // Docker processing mode (19 JAN 2026)
-            if (useDocker) processingOptions.processing_mode = 'docker';
+            // Docker worker always used for GDAL operations (06 FEB 2026)
+            processingOptions.processing_mode = 'docker';
             // Overwrite existing data (22 JAN 2026)
             if (overwrite) processingOptions.overwrite = true;
 
@@ -1779,7 +1744,7 @@ class SubmitRasterInterface(BaseInterface):
         document.addEventListener('DOMContentLoaded', () => {
             const formInputs = ['dataset_id', 'resource_id', 'version_id', 'raster_type',
                                 'output_tier', 'input_crs', 'title', 'description',
-                                'access_level', 'tags', 'collection_id', 'use_docker', 'overwrite'];
+                                'access_level', 'tags', 'collection_id', 'overwrite'];
             formInputs.forEach(id => {
                 const el = document.getElementById(id);
                 if (el) {

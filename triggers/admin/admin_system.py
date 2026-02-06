@@ -2,19 +2,21 @@
 # SYSTEM ADMIN BLUEPRINT
 # ============================================================================
 # STATUS: Trigger layer - Blueprint for system-level admin routes
-# PURPOSE: System health, stats, and monitoring endpoints
+# PURPOSE: System stats and monitoring endpoints (admin modes only)
 # CREATED: 12 JAN 2026 (Consolidated from function_app.py)
+# UPDATED: 06 FEB 2026 - /api/health moved to probes.py (available all modes)
 # EXPORTS: bp (Blueprint)
 # ============================================================================
 """
 System Admin Blueprint - System-level administration routes.
 
-Routes (2 total):
-    GET /api/health        - Comprehensive system health check (20 plugin checks)
+Routes (1 total):
     GET /api/system/stats  - Lightweight stats for UI widgets
 
+NOTE: /api/health is now in triggers/probes.py (available on ALL app modes)
 NOTE: /api/livez and /api/readyz are in triggers/probes.py (Phase 1 startup)
 NOTE: /api/system/snapshot/* are in triggers/admin/snapshot.py
+NOTE: /api/system-health (cross-app) is in triggers/system_health.py (admin only)
 """
 
 import azure.functions as func
@@ -26,36 +28,8 @@ bp = Blueprint()
 
 
 # ============================================================================
-# SYSTEM HEALTH & STATS (2 routes)
+# SYSTEM STATS (1 route)
 # ============================================================================
-# /api/health uses the comprehensive health_check_trigger (20 plugin checks)
-# Function named 'system_health' to avoid conflict with probes.py 'health'
-# (Azure Functions requires unique function names across all blueprints)
-# ============================================================================
-
-@bp.route(route="health", methods=["GET"])
-def system_health(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Comprehensive system health check (Tier 1).
-
-    GET /api/health
-
-    Returns health status for all system components via 20 plugin checks:
-    - Database connectivity and performance
-    - Storage accounts across all zones
-    - Service Bus queues and connectivity
-    - Runtime metrics and configuration
-    - STAC catalog status
-    - External service health
-
-    Three-tier health design:
-        Tier 1: /api/health          - THIS endpoint (comprehensive, per-app)
-        Tier 2: /api/platform/health - B2B system readiness (selected checks)
-        Tier 3: /api/system-health   - Cross-app infrastructure (admin only)
-    """
-    from triggers.health import health_check_trigger
-    return health_check_trigger.handle_request(req)
-
 
 @bp.route(route="system/stats", methods=["GET"])
 def system_stats(req: func.HttpRequest) -> func.HttpResponse:

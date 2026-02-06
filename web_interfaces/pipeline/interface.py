@@ -670,6 +670,8 @@ class PipelineInterface(BaseInterface):
     def _generate_custom_js(self) -> str:
         """JavaScript for loading job data."""
         return """
+        const API_BASE_URL = window.API_BASE_URL || '';
+
         // Pipeline job types to track for stats (includes docker job types)
         const PIPELINE_TYPES = [
             'process_vector',
@@ -733,7 +735,7 @@ class PipelineInterface(BaseInterface):
                 params.append('hours', currentFilters.hours);  // Include hours filter
                 params.append('limit', currentFilters.limit);
 
-                const response = await fetch(`/api/dbadmin/jobs?${params.toString()}`);
+                const response = await fetch(`${API_BASE_URL}/api/dbadmin/jobs?${params.toString()}`);
                 const data = await response.json();
 
                 // Handle schema not deployed error (503)

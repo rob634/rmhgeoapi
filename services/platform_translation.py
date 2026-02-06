@@ -200,16 +200,9 @@ def translate_to_coremachine(
                 'wkt_column': opts.get('wkt_column')
             }
 
-        # V0.8: Docker routing parameter (default: true)
-        # Set docker=false to use Function App worker (retained for future size-based routing)
-        use_docker = opts.get('docker', True)
-
-        if use_docker:
-            job_type = 'vector_docker_etl'
-            logger.info(f"[PLATFORM] Routing vector ETL to Docker worker (docker=true)")
-        else:
-            job_type = 'process_vector'
-            logger.info(f"[PLATFORM] Routing vector ETL to Function App (docker=false)")
+        # Docker worker always used for GDAL operations (06 FEB 2026)
+        job_type = 'vector_docker_etl'
+        logger.info(f"[PLATFORM] Routing vector ETL to Docker worker")
 
         return job_type, {
             # File location
@@ -319,25 +312,9 @@ def translate_to_coremachine(
             # Determine processing mode (21 JAN 2026)
             # Default to Docker if docker_worker_enabled, else Function App
             # Explicit processing_mode in options overrides the default
-            app_mode_config = get_app_mode_config()
-
-            processing_mode = opts.get('processing_mode')
-            if processing_mode:
-                # Explicit override from client
-                processing_mode = processing_mode.lower()
-            elif app_mode_config.docker_worker_enabled:
-                # Default to Docker when worker is enabled (phasing out Function App raster processing)
-                processing_mode = 'docker'
-            else:
-                # Fallback to Function App when no Docker worker
-                processing_mode = 'function'
-
-            if processing_mode == 'docker':
-                job_type = 'process_raster_docker'
-            else:
-                job_type = 'process_raster_v2'
-
-            logger.info(f"  Raster processing mode: {processing_mode} → {job_type}")
+            # Docker worker always used for GDAL operations (06 FEB 2026)
+            job_type = 'process_raster_docker'
+            logger.info(f"  Raster processing → {job_type}")
 
             return job_type, {
                 # File location (required)
@@ -435,30 +412,9 @@ def translate_single_raster(
     # Determine processing mode (21 JAN 2026)
     # Default to Docker if docker_worker_enabled, else Function App
     # Explicit processing_mode in options overrides the default
-    app_mode_config = get_app_mode_config()
-
-    processing_mode = opts.get('processing_mode')
-    if processing_mode:
-        # Explicit override from client
-        processing_mode = processing_mode.lower()
-        if processing_mode not in ('docker', 'function'):
-            logger.warning(f"  Unknown processing_mode '{processing_mode}', using default")
-            processing_mode = None
-
-    if not processing_mode:
-        if app_mode_config.docker_worker_enabled:
-            # Default to Docker when worker is enabled (phasing out Function App raster processing)
-            processing_mode = 'docker'
-        else:
-            # Fallback to Function App when no Docker worker
-            processing_mode = 'function'
-
-    if processing_mode == 'docker':
-        job_type = 'process_raster_docker'
-    else:
-        job_type = 'process_raster_v2'
-
-    logger.info(f"  Raster processing mode: {processing_mode} → {job_type}")
+    # Docker worker always used for GDAL operations (06 FEB 2026)
+    job_type = 'process_raster_docker'
+    logger.info(f"  Raster processing → {job_type}")
 
     return job_type, {
         # File location (required)

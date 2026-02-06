@@ -393,10 +393,10 @@ class AppModeDefaults:
     # App name used for task tracking (INTENTIONALLY INVALID - set APP_NAME env var)
     DEFAULT_APP_NAME = "your-function-app-name"
 
-    # Docker worker integration (08 JAN 2026)
-    # When False, standalone mode skips container-tasks queue validation
-    # Set to True when a Docker worker is deployed and processing container-tasks
-    DOCKER_WORKER_ENABLED = False
+    # Docker worker integration (08 JAN 2026, updated 06 FEB 2026)
+    # Docker worker is REQUIRED infrastructure - all GDAL operations run there.
+    # App is degraded without a functional docker worker (limited to small files).
+    DOCKER_WORKER_ENABLED = True
 
 
 # =============================================================================

@@ -1,10 +1,11 @@
 # ============================================================================
-# SYSTEM HEALTH ENDPOINT (05 FEB 2026 - F12.11)
+# SYSTEM HEALTH ENDPOINT (06 FEB 2026 - F12.11)
 # ============================================================================
 # STATUS: Trigger - Infrastructure health for admins
 # PURPOSE: Comprehensive health view of all apps, queues, databases
-# LAST_REVIEWED: 05 FEB 2026
+# LAST_REVIEWED: 06 FEB 2026
 # EXPORTS: bp (Blueprint), system_health_route
+# NOTES: Docker worker checked unconditionally (required infrastructure)
 # ============================================================================
 """
 System Health Endpoint - Infrastructure Admin View.
@@ -71,9 +72,9 @@ class SystemHealthProbe:
                 if gateway_url:
                     self._app_urls['gateway'] = gateway_url
 
-                # Docker worker URL
-                if app_mode.docker_worker_url:
-                    self._app_urls['docker_worker'] = app_mode.docker_worker_url
+                # Docker worker URL - store even if None (checked unconditionally)
+                # Docker worker is REQUIRED infrastructure (06 FEB 2026)
+                self._app_urls['docker_worker'] = app_mode.docker_worker_url
 
                 # This app (self) - we'll check locally instead of HTTP
                 self._app_urls['_self'] = app_mode.app_name
@@ -175,6 +176,46 @@ class SystemHealthProbe:
             if app_name == '_self':
                 continue  # Already checked locally
 
+            # Docker worker is REQUIRED infrastructure (06 FEB 2026)
+            # Check URL configuration first - missing URL = degraded system
+            if app_name == 'docker_worker':
+                if not url:
+                    apps[app_name] = {
+                        "status": "not_configured",
+                        "error": "DOCKER_WORKER_URL not set - required infrastructure",
+                        "source": "config"
+                    }
+                    continue
+
+                # Docker worker: use /readyz for fast infrastructure check
+                try:
+                    readyz_url = f"{url.rstrip('/')}/readyz"
+                    response = requests.get(readyz_url, timeout=5)
+
+                    if response.status_code == 200:
+                        apps[app_name] = {
+                            "status": "healthy",
+                            "url": url,
+                            "source": "http",
+                            "check": "readyz"
+                        }
+                    else:
+                        apps[app_name] = {
+                            "status": "unhealthy",
+                            "http_status": response.status_code,
+                            "url": url,
+                            "source": "http",
+                            "check": "readyz"
+                        }
+                except requests.exceptions.Timeout:
+                    apps[app_name] = {"status": "timeout", "url": url, "source": "http"}
+                except requests.exceptions.ConnectionError:
+                    apps[app_name] = {"status": "unreachable", "url": url, "source": "http"}
+                except Exception as e:
+                    apps[app_name] = {"status": "error", "error": str(e), "url": url, "source": "http"}
+                continue
+
+            # Other apps: use /api/health for full status
             try:
                 health_url = f"{url.rstrip('/')}/api/health"
                 response = requests.get(health_url, timeout=5)
@@ -334,9 +375,10 @@ class SystemHealthProbe:
         # Check apps
         for app_name, app_health in apps.items():
             status = app_health.get("status", "unknown")
-            if status in ["error", "unreachable", "timeout"]:
+            if status in ["error", "unreachable", "timeout", "unhealthy"]:
                 has_error = True
-            elif status == "degraded":
+            elif status in ["degraded", "not_configured"]:
+                # not_configured = required infrastructure missing = degraded
                 has_warning = True
 
         # Check queues

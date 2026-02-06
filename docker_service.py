@@ -1637,8 +1637,8 @@ async def interface_submit_process(request: Request):
                 body['input_crs'] = form_dict['input_crs']
             if form_dict.get('raster_collection_id'):
                 body['collection_id'] = form_dict['raster_collection_id']
-            if form_dict.get('use_docker'):
-                body['processing_mode'] = 'docker'
+            # Docker worker always used for GDAL operations (06 FEB 2026)
+            body['processing_mode'] = 'docker'
 
         # Vector CSV-specific
         if form_dict.get('file_extension') == 'csv':

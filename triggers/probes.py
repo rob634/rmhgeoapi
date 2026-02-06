@@ -1,27 +1,29 @@
 # ============================================================================
-# KUBERNETES-STYLE HEALTH PROBES
+# HEALTH PROBES AND DIAGNOSTICS
 # ============================================================================
-# STATUS: Trigger - Diagnostic endpoints for startup validation
-# PURPOSE: Provide livez/readyz/health endpoints that work even when startup fails
-# LAST_REVIEWED: 05 FEB 2026
-# REVIEW_STATUS: Updated for three-tier health design (F12.11)
+# STATUS: Trigger - Core health endpoints available on ALL app modes
+# PURPOSE: Provide livez/readyz/health endpoints that work on all deployments
+# LAST_REVIEWED: 06 FEB 2026
+# REVIEW_STATUS: /api/health moved here from admin_system.py for universal access
 # ============================================================================
 """
-Kubernetes-Style Health Probes.
+Health Probes and Diagnostics.
 
-These endpoints have MINIMAL dependencies and are registered FIRST in
-function_app.py to ensure they're always available for diagnostics,
-even when startup validation fails.
+These endpoints are registered FIRST in function_app.py and are available
+on ALL app modes (PLATFORM, ORCHESTRATOR, WORKER, STANDALONE).
 
 Endpoints:
-    GET /api/livez  - Liveness probe (always 200 if process alive)
-    GET /api/readyz - Readiness probe (200 if ready, 503 if not)
+    GET /api/livez   - Liveness probe (always 200 if process alive)
+    GET /api/readyz  - Readiness probe (200 if ready, 503 if not)
+    GET /api/health  - Comprehensive health check (20 plugin checks)
 
-NOTE: /api/health is in triggers/admin/admin_system.py (comprehensive check)
+Two-tier health design:
+    Tier 1: /api/health        - THIS app's comprehensive health (this file)
+    Tier 2: /api/system-health - Cross-app infrastructure (admin only, 60s)
 
 Design Principles:
-    1. ZERO dependencies on other project modules (except startup_state)
-    2. Registered BEFORE any validation runs
+    1. Always available - registered before any conditional imports
+    2. Available on ALL app modes - not gated by has_admin_endpoints
     3. Never crash - always return a response
     4. Provide actionable error information
 
@@ -30,10 +32,8 @@ Usage in function_app.py:
     from triggers.probes import bp as probes_bp
     app.register_functions(probes_bp)
 
-See STARTUP_REFORM.md for full design documentation.
-
 Exports:
-    bp: Blueprint with livez/readyz routes
+    bp: Blueprint with livez/readyz/health routes
     get_probe_status(): Helper for health endpoint integration
 """
 
@@ -239,17 +239,44 @@ def get_probe_status() -> dict:
 
 
 # ============================================================================
-# NOTE: /api/health is served by triggers/admin/admin_system.py (05 FEB 2026)
+# HEALTH ENDPOINT (06 FEB 2026)
 # ============================================================================
-# The comprehensive health check (20 plugin checks via health_check_trigger)
-# is registered in the admin_system blueprint, NOT here in probes.
-# Probes blueprint only provides livez + readyz (always-available diagnostics).
+# /api/health - Comprehensive health check for THIS app instance.
+# Uses 20-plugin architecture via health_check_trigger.
+# Registered here in probes.py so it's available on ALL app modes.
 #
-# Three-tier health design:
-#   Tier 1: /api/health          - This app's comprehensive health (admin_system.py)
-#   Tier 2: /api/platform/health - B2B system readiness (platform_bp.py)
-#   Tier 3: /api/system-health   - Cross-app infrastructure (system_health.py)
+# Two-tier health design:
+#   Tier 1: /api/health        - This app's comprehensive health (THIS endpoint)
+#   Tier 2: /api/system-health - Cross-app infrastructure (admin only, 60s)
 # ============================================================================
+
+
+@bp.route(
+    route="health",
+    methods=["GET"],
+    auth_level=func.AuthLevel.ANONYMOUS
+)
+def health(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Comprehensive health check for this app instance.
+
+    Uses 20-plugin architecture to check:
+    - Startup/deployment status
+    - Application configuration
+    - Infrastructure (storage, service bus, network)
+    - Database connectivity (PostgreSQL, PgSTAC, DuckDB)
+    - External services (TiTiler, OGC Features, Docker worker)
+
+    Available on ALL app modes (PLATFORM, ORCHESTRATOR, WORKER, STANDALONE).
+
+    Returns:
+        200: {"status": "healthy/degraded", "components": {...}, ...}
+        503: {"status": "unhealthy", ...} when critical components fail
+
+    See triggers/health.py for full implementation details.
+    """
+    from triggers.health import health_check_trigger
+    return health_check_trigger.handle_request(req)
 
 
 # ============================================================================

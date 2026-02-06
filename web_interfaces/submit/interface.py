@@ -392,9 +392,8 @@ class UnifiedSubmitInterface(BaseInterface):
                 if input_crs:
                     processing_options['crs'] = input_crs
 
-                use_docker = get_param('use_docker')
-                if use_docker == 'on':
-                    processing_options['processing_mode'] = 'docker'
+                # Docker worker always used for GDAL operations (06 FEB 2026)
+                processing_options['processing_mode'] = 'docker'
 
             # Vector-specific (CSV columns)
             if data_type == 'vector':
@@ -670,9 +669,8 @@ class UnifiedSubmitInterface(BaseInterface):
                 if input_crs:
                     processing_options['crs'] = input_crs
 
-                use_docker = get_param('use_docker')
-                if use_docker == 'on':
-                    processing_options['processing_mode'] = 'docker'
+                # Docker worker always used for GDAL operations (06 FEB 2026)
+                processing_options['processing_mode'] = 'docker'
 
             if data_type == 'vector':
                 lat_name = get_param('lat_name')
@@ -845,9 +843,9 @@ class UnifiedSubmitInterface(BaseInterface):
                 </div>
             </div>
 
-            <div class="two-column-layout">
-                <!-- Left Column: File Browser -->
-                <div class="browser-section">
+            <div class="wizard-layout" id="main-layout">
+                <!-- Step 1: File Browser -->
+                <div class="browser-section" id="browser-section">
                     <div class="section-header">
                         <h2>1. Select Source File(s)</h2>
                         <p class="section-subtitle" id="file-browser-hint">Select a raster file</p>
@@ -934,13 +932,24 @@ class UnifiedSubmitInterface(BaseInterface):
                             <p class="supported-formats" id="supported-formats">Supported: .tif, .tiff</p>
                         </div>
                     </div>
+
+                    <!-- File selection prompt (shown after files load, before selection) -->
+                    <div id="file-select-prompt" class="file-select-prompt hidden">
+                        <span class="prompt-icon">👆</span>
+                        <span id="prompt-text">Click a file to continue to configuration</span>
+                    </div>
                 </div>
 
-                <!-- Right Column: Job Form -->
-                <div class="form-section">
-                    <div class="section-header">
-                        <h2>2. Configure Request</h2>
-                        <p class="section-subtitle">Set identifiers and options</p>
+                <!-- Step 2: Configuration Form (hidden until file selected) -->
+                <div class="form-section hidden" id="form-section">
+                    <div class="section-header-row">
+                        <div class="section-header">
+                            <h2>2. Configure Request</h2>
+                            <p class="section-subtitle">Set identifiers and options</p>
+                        </div>
+                        <button type="button" class="back-button" onclick="backToFileSelection()">
+                            <span class="back-icon">←</span> Change File
+                        </button>
                     </div>
 
                     <form id="submit-form">
@@ -1061,12 +1070,7 @@ class UnifiedSubmitInterface(BaseInterface):
                                     <input type="text" id="input_crs" name="input_crs"
                                            placeholder="e.g., EPSG:32618">
                                 </div>
-                                <div class="form-group checkbox-group">
-                                    <label>
-                                        <input type="checkbox" id="use_docker" name="use_docker" checked>
-                                        Use Docker Worker (recommended)
-                                    </label>
-                                </div>
+                                <!-- Docker Worker is always used for GDAL operations (06 FEB 2026) -->
                             </div>
                         </div>
 
@@ -1224,17 +1228,91 @@ class UnifiedSubmitInterface(BaseInterface):
             text-align: center;
         }
 
-        /* Two-column layout */
-        .two-column-layout {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
+        /* Single-column wizard layout */
+        .wizard-layout {
+            display: flex;
+            flex-direction: column;
             gap: 24px;
         }
 
-        @media (max-width: 1200px) {
-            .two-column-layout {
-                grid-template-columns: 1fr;
-            }
+        /* Both sections same width, centered */
+        .browser-section,
+        .form-section {
+            transition: opacity 0.3s ease, transform 0.3s ease;
+        }
+
+        /* Browser section */
+        .browser-section.hidden {
+            display: none;
+        }
+
+        /* File selection prompt */
+        .file-select-prompt {
+            background: linear-gradient(135deg, #f0f7ff 0%, #e8f4f8 100%);
+            border: 2px dashed var(--ds-blue-primary);
+            border-radius: 8px;
+            padding: 16px 24px;
+            text-align: center;
+            margin-top: 16px;
+            color: var(--ds-blue-primary);
+            font-weight: 500;
+        }
+
+        .file-select-prompt .prompt-icon {
+            font-size: 24px;
+            margin-right: 8px;
+        }
+
+        /* Form section */
+        .form-section {
+            opacity: 1;
+        }
+
+        .form-section.hidden {
+            display: none;
+            opacity: 0;
+        }
+
+        .form-section.visible {
+            display: block;
+            opacity: 1;
+        }
+
+        /* Back button - small and subtle */
+        .back-button {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 10px;
+            font-size: 12px;
+            color: var(--ds-gray);
+            background: transparent;
+            border: 1px solid var(--ds-gray-light);
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .back-button:hover {
+            color: var(--ds-blue-primary);
+            border-color: var(--ds-blue-primary);
+            background: #f8fafc;
+        }
+
+        .back-button .back-icon {
+            font-size: 10px;
+        }
+
+        /* Section header with back button */
+        .section-header-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 16px;
+        }
+
+        .section-header-row .section-header {
+            margin-bottom: 0;
         }
 
         /* Section styling */
@@ -1920,8 +1998,59 @@ class UnifiedSubmitInterface(BaseInterface):
         // State
         let currentDataType = 'raster';
         let selectedFiles = [];
+        let formRevealed = false;
         const MAX_FILES = {MAX_COLLECTION_FILES};
         const MIN_FILES = {MIN_COLLECTION_FILES};
+
+        // Reveal the configuration form (replaces file browser)
+        function revealConfigForm() {{
+            if (formRevealed) return;
+            formRevealed = true;
+
+            const browserSection = document.getElementById('browser-section');
+            const formSection = document.getElementById('form-section');
+            const prompt = document.getElementById('file-select-prompt');
+
+            // Hide the selection prompt and browser
+            if (prompt) prompt.classList.add('hidden');
+            browserSection.classList.add('hidden');
+
+            // Show the form
+            formSection.classList.remove('hidden');
+            formSection.classList.add('visible');
+        }}
+
+        // Go back to file selection (from form)
+        function backToFileSelection() {{
+            formRevealed = false;
+
+            const browserSection = document.getElementById('browser-section');
+            const formSection = document.getElementById('form-section');
+
+            // Hide form, show browser
+            formSection.classList.remove('visible');
+            formSection.classList.add('hidden');
+            browserSection.classList.remove('hidden');
+
+            // Note: file selection is preserved - user can pick a different file
+        }}
+
+        // Hide the configuration form (when changing data type or resetting)
+        function hideConfigForm() {{
+            formRevealed = false;
+
+            const browserSection = document.getElementById('browser-section');
+            const formSection = document.getElementById('form-section');
+            const prompt = document.getElementById('file-select-prompt');
+
+            // Hide form, show browser
+            formSection.classList.remove('visible');
+            formSection.classList.add('hidden');
+            browserSection.classList.remove('hidden');
+
+            // Also hide the prompt (will show again when files load)
+            if (prompt) prompt.classList.add('hidden');
+        }}
 
         // Initialize on load
         document.addEventListener('DOMContentLoaded', () => {{
@@ -1935,7 +2064,7 @@ class UnifiedSubmitInterface(BaseInterface):
             // Form input listeners
             const formInputs = ['dataset_id', 'resource_id', 'version_id', 'title',
                                 'description', 'access_level', 'tags', 'collection_id',
-                                'raster_type', 'output_tier', 'input_crs', 'use_docker',
+                                'raster_type', 'output_tier', 'input_crs',
                                 'lat_name', 'lon_name', 'wkt_column', 'overwrite'];
             formInputs.forEach(id => {{
                 const el = document.getElementById(id);
@@ -1998,11 +2127,14 @@ class UnifiedSubmitInterface(BaseInterface):
                 thead.innerHTML = '<tr><th>Name</th><th>Size</th><th>Modified</th><th>Type</th></tr>';
             }}
 
-            // Clear selection
+            // Clear selection and hide form
             selectedFiles = [];
             document.getElementById('blob_name').value = '';
             document.getElementById('blob_list').value = '[]';
             document.getElementById('selected-file').innerHTML = '<span class="placeholder">No file selected - click a file in the browser</span>';
+
+            // Hide the config form (reset progressive disclosure)
+            hideConfigForm();
 
             // Reload files if container is selected
             const container = document.getElementById('container-select').value;
@@ -2025,6 +2157,18 @@ class UnifiedSubmitInterface(BaseInterface):
             document.getElementById('files-table')?.classList.remove('hidden');
             selectedFiles = [];
             updateSelectionDisplay();
+
+            // Show the file selection prompt if form not yet revealed
+            const prompt = document.getElementById('file-select-prompt');
+            const promptText = document.getElementById('prompt-text');
+            if (prompt && !formRevealed) {{
+                if (currentDataType === 'raster_collection') {{
+                    promptText.textContent = `Select at least ${{MIN_FILES}} files, then configure your request`;
+                }} else {{
+                    promptText.textContent = 'Click a file to continue to configuration';
+                }}
+                prompt.classList.remove('hidden');
+            }}
         }}
 
         // Single file selection (click)
@@ -2058,6 +2202,9 @@ class UnifiedSubmitInterface(BaseInterface):
                 datasetInput.value = datasetId;
             }}
 
+            // Reveal the configuration form
+            revealConfigForm();
+
             updateFormState();
         }}
 
@@ -2078,6 +2225,11 @@ class UnifiedSubmitInterface(BaseInterface):
             document.querySelectorAll('.file-checkbox:not(:checked)').forEach(cb => {{
                 cb.closest('tr').classList.remove('selected');
             }});
+
+            // Reveal form when minimum files selected
+            if (selectedFiles.length >= MIN_FILES) {{
+                revealConfigForm();
+            }}
 
             updateSelectionDisplay(totalSize);
             updateFormState();
@@ -2189,6 +2341,9 @@ class UnifiedSubmitInterface(BaseInterface):
             document.getElementById('title').value = '';
             document.getElementById('description').value = '';
 
+            // Hide config form (reset progressive disclosure)
+            hideConfigForm();
+
             updateFormState();
         }}
 
@@ -2256,8 +2411,8 @@ class UnifiedSubmitInterface(BaseInterface):
                 const inputCrs = document.getElementById('input_crs').value;
                 if (inputCrs) processingOptions.crs = inputCrs;
 
-                const useDocker = document.getElementById('use_docker').checked;
-                if (useDocker) processingOptions.processing_mode = 'docker';
+                // Docker worker always used for GDAL operations (06 FEB 2026)
+                processingOptions.processing_mode = 'docker';
             }} else {{
                 const latName = document.getElementById('lat_name').value;
                 const lonName = document.getElementById('lon_name').value;

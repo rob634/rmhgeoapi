@@ -3,8 +3,8 @@
 # ============================================================================
 # STATUS: Service layer - Raster file validation and analysis
 # PURPOSE: Validate raster files before COG processing, determine output tiers
-# LAST_REVIEWED: 04 JAN 2026
-# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# LAST_REVIEWED: 06 FEB 2026
+# REVIEW_STATUS: Phase 4 BUG_REFORM - Enhanced data quality checks
 # EXPORTS: validate_raster
 # ============================================================================
 """
@@ -16,16 +16,27 @@ Validation Steps:
     1. File readability check
     2. CRS validation (file metadata, user override, sanity checks)
     3. Bit-depth efficiency analysis (flag 64-bit data as CRITICAL)
-    4. Raster type detection (RGB, RGBA, DEM, categorical, multispectral)
-    5. Type mismatch validation (user-specified vs detected)
-    6. Bounds sanity checks
-    7. Optimal COG settings recommendation
-    8. COG tier compatibility detection
+    4. Data quality checks (Phase 4 BUG_REFORM - 06 FEB 2026):
+       - Mostly-empty detection (RASTER_EMPTY: 99%+ nodata)
+       - Nodata conflict detection (RASTER_NODATA_CONFLICT)
+       - Extreme value detection (RASTER_EXTREME_VALUES: 1e38 in DEMs)
+    5. Raster type detection (RGB, RGBA, DEM, categorical, multispectral)
+    6. Type mismatch validation (user-specified vs detected)
+    7. Bounds sanity checks
+    8. Optimal COG settings recommendation
+    9. COG tier compatibility detection
 
 COG Tier Detection:
     VISUALIZATION (JPEG): RGB only (3 bands, uint8)
     ANALYSIS (DEFLATE): Universal (all raster types)
     ARCHIVE (LZW): Universal (all raster types)
+
+Error Codes (BUG_REFORM):
+    RASTER_EMPTY: File is 99%+ nodata - waste of resources
+    RASTER_NODATA_CONFLICT: Nodata value found in real data range
+    RASTER_EXTREME_VALUES: DEM with 1e38 values (unset nodata)
+    RASTER_64BIT_REJECTED: Policy violation (64-bit data types)
+    RASTER_TYPE_MISMATCH: User type doesn't match detected type
 
 Exports:
     validate_raster: Validation handler function
@@ -385,6 +396,42 @@ def validate_raster(params: dict) -> dict:
                     "container_name": container_name,
                     "traceback": traceback.format_exc()
                 }
+
+            # ================================================================
+            # STEP 6b: DATA QUALITY CHECKS (Phase 4 - 06 FEB 2026)
+            # ================================================================
+            # Enhanced validation: nodata conflicts, extreme values, empty files
+            # Uses new RASTER_* error codes from BUG_REFORM
+            try:
+                logger.info("🔄 STEP 6b: Performing data quality checks...")
+                from core.errors import ErrorCode, create_error_response
+
+                data_quality_result = _check_data_quality(
+                    src, nodata, dtype, blob_name, container_name, strict_mode
+                )
+
+                if not data_quality_result["success"]:
+                    # Data quality check failed - return error
+                    logger.error(f"❌ STEP 6b FAILED: {data_quality_result.get('error', 'DATA_QUALITY_ERROR')}")
+                    return data_quality_result
+
+                # Add any data quality warnings
+                for dq_warning in data_quality_result.get("warnings", []):
+                    warnings.append(dq_warning)
+                    logger.warning(f"   ⚠️  Data quality warning: {dq_warning.get('message', 'unknown')}")
+
+                logger.info(f"✅ STEP 6b: Data quality checks passed")
+                logger.debug(f"   Nodata coverage: {data_quality_result.get('nodata_percent', 0):.1f}%")
+                logger.debug(f"   Value range: {data_quality_result.get('value_range', 'unknown')}")
+
+            except Exception as e:
+                logger.error(f"❌ STEP 6b FAILED: Data quality check error: {e}\n{traceback.format_exc()}")
+                # Non-critical - continue with warning
+                warnings.append({
+                    "type": "DATA_QUALITY_CHECK_FAILED",
+                    "severity": "LOW",
+                    "message": f"Could not complete data quality checks: {e}"
+                })
 
             # ================================================================
             # STEP 7: RASTER TYPE DETECTION
@@ -1244,5 +1291,256 @@ def _estimate_memory_footprint(width: int, height: int, band_count: int, dtype: 
             "bytes_per_pixel": bytes_per_pixel,
             "peak_multiplier": peak_multiplier
         },
+        "warnings": warnings
+    }
+
+
+# ============================================================================
+# DATA QUALITY CHECKS (Phase 4 - 06 FEB 2026 - BUG_REFORM)
+# ============================================================================
+
+def _check_data_quality(
+    src,
+    nodata,
+    dtype: str,
+    blob_name: str,
+    container_name: str,
+    strict_mode: bool = False
+) -> dict:
+    """
+    Enhanced data quality checks for raster files (BUG_REFORM Phase 4).
+
+    Performs three critical quality checks:
+    1. Mostly-empty detection: Files that are 99%+ nodata waste resources
+    2. Nodata conflict detection: Nodata value appearing in real data causes holes
+    3. Extreme value detection: DEMs with 1e38 values indicate unset nodata
+
+    Args:
+        src: Open rasterio dataset
+        nodata: Nodata value from file metadata
+        dtype: Data type string
+        blob_name: Blob path for error messages
+        container_name: Container name for error messages
+        strict_mode: If True, fail on warnings; if False, return warnings
+
+    Returns:
+        dict: {
+            "success": True/False,
+            "nodata_percent": float,
+            "value_range": (min, max),
+            "warnings": [...],
+            "error": ErrorCode (if failed),
+            "message": str (if failed)
+        }
+
+    Error Codes Used:
+        RASTER_EMPTY: 99%+ nodata pixels
+        RASTER_NODATA_CONFLICT: Nodata value found in real data
+        RASTER_EXTREME_VALUES: DEM with 1e38 values
+    """
+    from core.errors import ErrorCode, create_error_response
+
+    np, rasterio, ColorInterp, Window = _lazy_imports()
+
+    warnings = []
+    nodata_percent = 0.0
+    value_range = (None, None)
+
+    # Sample a representative portion of the raster
+    try:
+        sample_width = min(2000, src.width)
+        sample_height = min(2000, src.height)
+        sample = src.read(1, window=Window(0, 0, sample_width, sample_height))
+
+        total_pixels = sample.size
+
+        # Create mask for nodata pixels
+        if nodata is not None:
+            if np.isnan(nodata):
+                nodata_mask = np.isnan(sample)
+            else:
+                nodata_mask = (sample == nodata)
+        else:
+            # No nodata defined - check for NaN
+            nodata_mask = np.isnan(sample)
+
+        nodata_count = np.sum(nodata_mask)
+        nodata_percent = (nodata_count / total_pixels) * 100
+
+        # Get valid data mask
+        valid_mask = ~nodata_mask
+        valid_data = sample[valid_mask]
+
+        if len(valid_data) > 0:
+            value_range = (float(np.nanmin(valid_data)), float(np.nanmax(valid_data)))
+        else:
+            value_range = (None, None)
+
+    except Exception as e:
+        from util_logger import LoggerFactory, ComponentType
+        logger = LoggerFactory.create_logger(ComponentType.SERVICE, "validate_raster")
+        logger.warning(f"⚠️ DATA_QUALITY: Could not sample data for quality checks: {e}")
+        return {
+            "success": True,
+            "nodata_percent": 0.0,
+            "value_range": (None, None),
+            "warnings": [{
+                "type": "DATA_QUALITY_SAMPLE_FAILED",
+                "severity": "LOW",
+                "message": f"Could not sample data for quality checks: {e}"
+            }]
+        }
+
+    # ========================================================================
+    # CHECK 1: MOSTLY-EMPTY DETECTION (RASTER_EMPTY)
+    # ========================================================================
+    # Files that are 99%+ nodata waste processing resources and storage
+    EMPTY_THRESHOLD_PERCENT = 99.0
+
+    if nodata_percent >= EMPTY_THRESHOLD_PERCENT:
+        from util_logger import LoggerFactory, ComponentType
+        logger = LoggerFactory.create_logger(ComponentType.SERVICE, "validate_raster")
+        logger.error(f"🚨 DATA_QUALITY: File is {nodata_percent:.1f}% nodata (threshold: {EMPTY_THRESHOLD_PERCENT}%)")
+
+        error_response = create_error_response(
+            ErrorCode.RASTER_EMPTY,
+            f"File '{blob_name}' is {nodata_percent:.1f}% nodata - effectively empty",
+            remediation=(
+                f"Provide a file with actual data pixels. This file contains almost no usable data "
+                f"({nodata_percent:.1f}% is nodata or empty). If this is expected, check that your "
+                f"source file was exported correctly and contains valid data."
+            ),
+            details={
+                "nodata_percent": round(nodata_percent, 1),
+                "threshold_percent": EMPTY_THRESHOLD_PERCENT,
+                "sample_size": f"{sample_width}x{sample_height}",
+                "valid_pixels": total_pixels - nodata_count
+            }
+        )
+        return error_response.model_dump()
+
+    # Warn if file is mostly empty but not over threshold
+    if nodata_percent >= 90.0:
+        warnings.append({
+            "type": "HIGH_NODATA_PERCENTAGE",
+            "severity": "MEDIUM",
+            "nodata_percent": round(nodata_percent, 1),
+            "message": f"File is {nodata_percent:.1f}% nodata. Consider checking source data quality."
+        })
+
+    # ========================================================================
+    # CHECK 2: NODATA CONFLICT DETECTION (RASTER_NODATA_CONFLICT)
+    # ========================================================================
+    # Nodata value appearing in real data creates visual holes
+    # Only check if we have both nodata defined and valid data to compare
+    if nodata is not None and len(valid_data) > 0 and not np.isnan(nodata):
+        # Check if nodata value appears in the valid data range
+        # This indicates the nodata value was poorly chosen and may mask real data
+        if value_range[0] is not None and value_range[1] is not None:
+            # If nodata is within 1% of the valid data range, it's a potential conflict
+            data_range = value_range[1] - value_range[0]
+            if data_range > 0:
+                nodata_in_range = value_range[0] <= nodata <= value_range[1]
+
+                if nodata_in_range:
+                    # Check if nodata value actually appears in the sample (edge case check)
+                    # This is a strong indicator of data loss
+                    # Count pixels that equal nodata but might be real data
+                    from util_logger import LoggerFactory, ComponentType
+                    logger = LoggerFactory.create_logger(ComponentType.SERVICE, "validate_raster")
+
+                    if strict_mode:
+                        logger.error(f"🚨 DATA_QUALITY: Nodata value {nodata} is within valid data range [{value_range[0]}, {value_range[1]}]")
+                        error_response = create_error_response(
+                            ErrorCode.RASTER_NODATA_CONFLICT,
+                            f"Nodata value ({nodata}) falls within the valid data range of this file",
+                            remediation=(
+                                f"Your file's nodata value ({nodata}) is within the actual data range "
+                                f"[{value_range[0]:.4f} to {value_range[1]:.4f}]. This may cause data loss "
+                                f"as real values matching {nodata} will be treated as empty. "
+                                f"Change the nodata value in your source file to a value outside the data range, "
+                                f"or set nodata to None if your file has no actual nodata pixels."
+                            ),
+                            details={
+                                "nodata_value": nodata,
+                                "value_range_min": value_range[0],
+                                "value_range_max": value_range[1],
+                                "blob_name": blob_name
+                            }
+                        )
+                        return error_response.model_dump()
+                    else:
+                        # Warning only in non-strict mode
+                        warnings.append({
+                            "type": "NODATA_IN_DATA_RANGE",
+                            "severity": "HIGH",
+                            "nodata_value": nodata,
+                            "value_range": value_range,
+                            "message": (
+                                f"Nodata value ({nodata}) is within valid data range "
+                                f"[{value_range[0]:.4f}, {value_range[1]:.4f}]. "
+                                f"This may cause real data to be treated as nodata."
+                            )
+                        })
+
+    # ========================================================================
+    # CHECK 3: EXTREME VALUE DETECTION (RASTER_EXTREME_VALUES)
+    # ========================================================================
+    # DEMs with values like 1e38 or 3.4e38 indicate uninitialized nodata
+    # These typically come from files where nodata wasn't properly set
+    EXTREME_THRESHOLD = 1e30  # Any value larger than this is suspicious
+
+    if value_range[1] is not None and abs(value_range[1]) >= EXTREME_THRESHOLD:
+        from util_logger import LoggerFactory, ComponentType
+        logger = LoggerFactory.create_logger(ComponentType.SERVICE, "validate_raster")
+
+        # Check if this looks like unset nodata (common pattern: 3.4028235e+38 for float32 max)
+        is_float_max = abs(value_range[1]) >= 3.4e38
+        dtype_lower = str(dtype).lower()
+        is_likely_dem = dtype_lower in ['float32', 'float64', 'int16', 'int32']
+
+        if is_likely_dem:
+            logger.error(f"🚨 DATA_QUALITY: Extreme value detected - max: {value_range[1]:.2e}")
+            error_response = create_error_response(
+                ErrorCode.RASTER_EXTREME_VALUES,
+                f"File contains extreme values (max: {value_range[1]:.2e}) suggesting corrupt or unset nodata",
+                remediation=(
+                    f"Your file contains extreme values (maximum: {value_range[1]:.2e}) that are likely "
+                    f"uninitialized pixels without a proper nodata value. "
+                    f"{'This appears to be the float32 maximum (3.4e38), a common placeholder for missing data. ' if is_float_max else ''}"
+                    f"Set a proper nodata value in your source file, or re-export with nodata correctly defined. "
+                    f"Values like 3.4e38 or 1e38 should not appear in valid elevation data."
+                ),
+                details={
+                    "max_value": value_range[1],
+                    "min_value": value_range[0],
+                    "dtype": dtype,
+                    "extreme_threshold": EXTREME_THRESHOLD,
+                    "is_float_max": is_float_max,
+                    "likely_raster_type": "DEM/elevation",
+                    "blob_name": blob_name
+                }
+            )
+            return error_response.model_dump()
+
+    # Also check for extremely negative values (can indicate unset nodata)
+    if value_range[0] is not None and value_range[0] <= -EXTREME_THRESHOLD:
+        warnings.append({
+            "type": "EXTREME_NEGATIVE_VALUE",
+            "severity": "MEDIUM",
+            "min_value": value_range[0],
+            "message": (
+                f"File contains extremely negative value ({value_range[0]:.2e}). "
+                f"This may indicate unset nodata or data corruption."
+            )
+        })
+
+    # Success - all checks passed
+    return {
+        "success": True,
+        "nodata_percent": round(nodata_percent, 1),
+        "value_range": value_range,
+        "valid_pixel_count": total_pixels - nodata_count if nodata is not None else total_pixels,
+        "sample_size": f"{sample_width}x{sample_height}",
         "warnings": warnings
     }

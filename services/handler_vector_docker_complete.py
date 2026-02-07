@@ -5,7 +5,8 @@
 # PURPOSE: Single-handler vector ETL with checkpoint progress tracking
 # CREATED: 24 JAN 2026
 # REFACTORED: 26 JAN 2026 - Use shared core.py, fix bugs
-# LAST_REVIEWED: 26 JAN 2026
+# UPDATED: 06 FEB 2026 - Phase 5 BUG_REFORM: Enhanced error responses
+# LAST_REVIEWED: 06 FEB 2026
 # EXPORTS: vector_docker_complete
 # DEPENDENCIES: geopandas, services.vector.core, infrastructure.blob
 # ============================================================================
@@ -347,14 +348,45 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
         error_msg = f"Vector Docker ETL failed: {type(e).__name__}: {e}"
         logger.error(f"[{job_id[:8]}] {error_msg}\n{traceback.format_exc()}")
 
+        # Phase 5 BUG_REFORM: Enhanced error response with ErrorResponse model
+        from core.errors import ErrorCode, create_error_response_v2, get_error_category
+
+        # Map exception type to appropriate ErrorCode
+        error_code = _map_exception_to_error_code(e)
+
+        # Create enhanced error response
+        response, debug = create_error_response_v2(
+            error_code=error_code,
+            message=error_msg,
+            remediation=_get_vector_remediation(error_code, e),
+            exception=e,
+            job_id=job_id,
+            handler="vector_docker_complete",
+            context={
+                "blob_name": blob_name,
+                "container_name": container_name,
+                "table_name": table_name,
+                "last_checkpoint": checkpoints[-1] if checkpoints else None,
+            }
+        )
+
         return {
             "success": False,
-            "error": error_msg,
+            "error": response.error_code,
+            "error_code": response.error_code,
+            "error_category": response.error_category,
+            "error_scope": response.error_scope,
+            "message": response.message,
+            "remediation": response.remediation,
+            "user_fixable": response.user_fixable,
+            "retryable": response.retryable,
+            "http_status": response.http_status,
+            "error_id": response.error_id,
             "error_type": type(e).__name__,
             "last_checkpoint": checkpoints[-1] if checkpoints else None,
             "checkpoint_data": checkpoint_data,
             "elapsed_seconds": round(elapsed, 2),
-            "traceback": traceback.format_exc()
+            "_debug": debug.model_dump(),  # Store for job record
         }
 
 
@@ -851,3 +883,154 @@ def _get_checkpoint_label(event_name: str, details: Dict[str, Any]) -> str:
 
     # Fallback: Convert snake_case to Title Case
     return event_name.replace('_', ' ').title()
+
+
+# =============================================================================
+# ERROR MAPPING HELPERS (Phase 5 - BUG_REFORM - 06 FEB 2026)
+# =============================================================================
+
+def _map_exception_to_error_code(e: Exception) -> 'ErrorCode':
+    """
+    Map exception type to appropriate ErrorCode for vector operations.
+
+    Uses the new VECTOR_* error codes from BUG_REFORM Phase 2.
+
+    Args:
+        e: The exception that occurred
+
+    Returns:
+        ErrorCode enum value
+    """
+    from core.errors import ErrorCode
+
+    error_str = str(e).lower()
+    error_type = type(e).__name__
+
+    # File/parsing errors
+    if 'unable to open' in error_str or 'no such file' in error_str:
+        return ErrorCode.FILE_NOT_FOUND
+    if 'cannot read' in error_str or 'parse error' in error_str or 'malformed' in error_str:
+        return ErrorCode.VECTOR_UNREADABLE
+    if 'encoding' in error_str or 'codec' in error_str or 'utf' in error_str:
+        return ErrorCode.VECTOR_ENCODING_ERROR
+
+    # Geometry errors
+    if 'geometry' in error_str and 'invalid' in error_str:
+        return ErrorCode.VECTOR_GEOMETRY_INVALID
+    if 'geometry' in error_str and ('null' in error_str or 'empty' in error_str):
+        return ErrorCode.VECTOR_GEOMETRY_EMPTY
+    if 'no features' in error_str or 'empty' in error_str and 'geodataframe' in error_str:
+        return ErrorCode.VECTOR_NO_FEATURES
+
+    # Coordinate/CRS errors
+    if 'crs' in error_str and ('missing' in error_str or 'none' in error_str):
+        return ErrorCode.CRS_MISSING
+    if 'coordinate' in error_str or 'lat' in error_str or 'lon' in error_str:
+        return ErrorCode.VECTOR_COORDINATE_ERROR
+
+    # Database errors
+    if 'database' in error_str or 'postgres' in error_str or 'connection' in error_str:
+        return ErrorCode.DATABASE_ERROR
+    if 'table' in error_str and ('exists' in error_str or 'invalid' in error_str):
+        return ErrorCode.VECTOR_TABLE_NAME_INVALID
+
+    # Column/attribute errors
+    if 'column' in error_str or 'attribute' in error_str or 'dtype' in error_str:
+        return ErrorCode.VECTOR_ATTRIBUTE_ERROR
+
+    # Storage errors
+    if 'storage' in error_str or 'blob' in error_str or 'container' in error_str:
+        return ErrorCode.STORAGE_ERROR
+    if 'download' in error_str:
+        return ErrorCode.DOWNLOAD_FAILED
+
+    # Memory/resource errors
+    if 'memory' in error_str or 'oom' in error_str:
+        return ErrorCode.MEMORY_ERROR
+
+    # Default to processing failed
+    return ErrorCode.PROCESSING_FAILED
+
+
+def _get_vector_remediation(error_code: 'ErrorCode', e: Exception) -> str:
+    """
+    Get user-friendly remediation guidance for vector error codes.
+
+    Args:
+        error_code: The ErrorCode for this error
+        e: The original exception
+
+    Returns:
+        Remediation string with actionable guidance
+    """
+    from core.errors import ErrorCode
+
+    remediation_map = {
+        ErrorCode.FILE_NOT_FOUND: (
+            "Verify the file path is correct and the file exists in the specified container. "
+            "Ensure the upload completed successfully before submitting the job."
+        ),
+        ErrorCode.VECTOR_UNREADABLE: (
+            "Your file could not be parsed. Ensure it is a valid GeoPackage, Shapefile, GeoJSON, "
+            "or CSV file. If using Shapefile, include all required files (.shp, .dbf, .shx, .prj). "
+            "Check for file corruption or truncation."
+        ),
+        ErrorCode.VECTOR_ENCODING_ERROR: (
+            "Your file contains invalid characters. Re-export the file using UTF-8 encoding. "
+            "Most GIS software has an option to specify encoding during export."
+        ),
+        ErrorCode.VECTOR_GEOMETRY_INVALID: (
+            "Some geometries in your file are invalid (self-intersecting, unclosed rings, etc.). "
+            "Use ST_MakeValid in PostGIS or Repair Geometry in ArcGIS/QGIS to fix them before upload."
+        ),
+        ErrorCode.VECTOR_GEOMETRY_EMPTY: (
+            "Your file contains features with null or empty geometry. Ensure all features "
+            "have valid geometry data. Remove empty features or populate geometry values."
+        ),
+        ErrorCode.VECTOR_NO_FEATURES: (
+            "After removing invalid geometries, no features remain. Check your source data "
+            "for valid geometry values. The file may be empty or all geometries may be null."
+        ),
+        ErrorCode.CRS_MISSING: (
+            "Your file has no coordinate reference system defined. Either embed a CRS in your "
+            "source file (e.g., .prj file for Shapefile) or provide the 'source_crs' parameter "
+            "in your job submission (e.g., 'EPSG:4326')."
+        ),
+        ErrorCode.VECTOR_COORDINATE_ERROR: (
+            "Could not parse coordinates from your file. If using CSV, ensure the lat/lon columns "
+            "contain valid numeric values. Check for text values, nulls, or invalid coordinate formats."
+        ),
+        ErrorCode.VECTOR_TABLE_NAME_INVALID: (
+            "The table name is invalid for PostGIS. Use lowercase letters, numbers, and underscores. "
+            "Table names cannot start with a number and must not use reserved SQL keywords."
+        ),
+        ErrorCode.VECTOR_ATTRIBUTE_ERROR: (
+            "Column data types could not be reconciled. Ensure each column has a consistent data type "
+            "(all text or all numeric). Mixed types in a single column cannot be uploaded."
+        ),
+        ErrorCode.DATABASE_ERROR: (
+            "A database error occurred. This may be a temporary issue. Please retry the job. "
+            "If the error persists, contact support with the error_id."
+        ),
+        ErrorCode.STORAGE_ERROR: (
+            "Could not access Azure storage. This may be a temporary issue. Please retry the job. "
+            "If the error persists, contact support."
+        ),
+        ErrorCode.DOWNLOAD_FAILED: (
+            "Failed to download the source file from storage. Verify the file exists and you have "
+            "permission to access it. This may be a temporary network issue - please retry."
+        ),
+        ErrorCode.MEMORY_ERROR: (
+            "The file is too large to process in memory. Consider splitting it into smaller files "
+            "or contact support for large file processing options."
+        ),
+        ErrorCode.PROCESSING_FAILED: (
+            "Vector processing failed unexpectedly. Please review the error details and contact "
+            "support with the error_id if the issue is not clear from the message."
+        ),
+    }
+
+    return remediation_map.get(error_code, (
+        "An unexpected error occurred. Please review the error details and contact support "
+        "with the error_id for assistance."
+    ))

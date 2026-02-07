@@ -5,6 +5,7 @@
 # STATUS: Services - Consolidated raster collection handler for Docker worker
 # PURPOSE: Process raster collection to COGs with checkpoint-based resume
 # CREATED: 30 JAN 2026
+# UPDATED: 06 FEB 2026 - Added homogeneity validation (BUG_REFORM Phase 3)
 # EXPORTS: raster_collection_complete
 # DEPENDENCIES: CheckpointManager, JobEvent, create_stac_collection
 # ============================================================================
@@ -16,9 +17,10 @@ Downloads all source files to temp storage first to avoid OOM issues.
 
 Phases:
     1. DOWNLOAD: Copy all blobs from bronze → temp mount storage
-    2. COG CREATION: Sequential processing with per-file checkpoints
-    3. STAC: Create collection and register items (direct call mode)
-    4. CLEANUP: Remove temp files (optional)
+    2. VALIDATE: Homogeneity check - all files must have compatible properties
+    3. COG CREATION: Sequential processing with per-file checkpoints
+    4. STAC: Create collection and register items (direct call mode)
+    5. CLEANUP: Remove temp files (optional)
 
 Resume Support:
     - CheckpointManager tracks phase completion
@@ -28,6 +30,13 @@ Resume Support:
 JobEvents:
     - Emits CHECKPOINT events for execution timeline visibility
     - Enables "last successful step" debugging in UI
+
+Homogeneity Validation (06 FEB 2026 - BUG_REFORM):
+    - All files must have same band count
+    - All files must have same data type
+    - All files must have same or compatible CRS
+    - Resolution must be within tolerance (±20%)
+    - Raster type must match (no mixing RGB with DEM)
 
 Input/Output:
     - N GeoTIFFs in → N COGs out (one-to-one mapping)
@@ -278,7 +287,349 @@ def _download_blobs_to_mount(
 
 
 # =============================================================================
-# PHASE 2: COG CREATION
+# PHASE 2: HOMOGENEITY VALIDATION (06 FEB 2026 - BUG_REFORM Phase 3)
+# =============================================================================
+
+def _validate_collection_homogeneity(
+    downloaded_files: List[Dict],
+    job_id: str,
+    task_id: str,
+    tolerance_percent: float = 20.0
+) -> Dict[str, Any]:
+    """
+    Validate all files in collection have compatible properties.
+
+    Checks:
+        - Band count: Must match exactly
+        - Data type: Must match exactly
+        - CRS: Must match (same EPSG code)
+        - Resolution: Must be within tolerance (default ±20%)
+        - Raster type: Must be same category (no RGB + DEM mixing)
+
+    Args:
+        downloaded_files: List of downloaded file info dicts with 'local_path'
+        job_id: Job ID for events
+        task_id: Task ID for events
+        tolerance_percent: Max resolution difference allowed (default 20%)
+
+    Returns:
+        {
+            "valid": True/False,
+            "reference_file": "first file name",
+            "properties": {...},  # Reference properties
+            "mismatches": [...],  # List of incompatibilities
+            "error_code": "COLLECTION_*" if invalid
+        }
+    """
+    import rasterio
+    from core.errors import ErrorCode
+    from services.raster_validation import _detect_raster_type
+
+    start_time = time.time()
+
+    _emit_job_event(job_id, task_id, 1, "homogeneity_started", {
+        'file_count': len(downloaded_files),
+    })
+
+    if len(downloaded_files) < 2:
+        logger.info("   Single file collection, skipping homogeneity check")
+        return {
+            "valid": True,
+            "message": "Single file, no homogeneity check needed",
+            "file_count": len(downloaded_files)
+        }
+
+    mismatches = []
+    reference = None
+    file_properties = []
+
+    for idx, file_info in enumerate(downloaded_files):
+        local_path = file_info['local_path']
+        blob_name = file_info.get('blob_name', Path(local_path).name)
+
+        try:
+            with rasterio.open(local_path) as src:
+                # Extract properties
+                props = {
+                    "file": blob_name,
+                    "local_path": local_path,
+                    "band_count": src.count,
+                    "dtype": str(src.dtypes[0]),
+                    "crs": str(src.crs) if src.crs else None,
+                    "crs_epsg": src.crs.to_epsg() if src.crs else None,
+                    "resolution": src.res,
+                    "bounds": src.bounds,
+                    "width": src.width,
+                    "height": src.height,
+                }
+
+                # Detect raster type (RGB, DEM, etc.)
+                try:
+                    raster_type = _detect_raster_type(src, props["dtype"])
+                    props["raster_type"] = raster_type.get("detected_type", "unknown")
+                except Exception:
+                    props["raster_type"] = "unknown"
+
+                file_properties.append(props)
+
+                if idx == 0:
+                    reference = props
+                    logger.info(f"   Reference: {blob_name} ({props['band_count']} bands, {props['dtype']}, {props['crs']})")
+                    continue
+
+                # Check band count
+                if props["band_count"] != reference["band_count"]:
+                    mismatches.append({
+                        "type": "BAND_COUNT",
+                        "error_code": ErrorCode.COLLECTION_BAND_MISMATCH.value,
+                        "file": blob_name,
+                        "file_index": idx,
+                        "expected": reference["band_count"],
+                        "found": props["band_count"],
+                        "reference_file": reference["file"],
+                        "message": f"Expected {reference['band_count']} bands, found {props['band_count']}"
+                    })
+
+                # Check dtype
+                if props["dtype"] != reference["dtype"]:
+                    mismatches.append({
+                        "type": "DTYPE",
+                        "error_code": ErrorCode.COLLECTION_DTYPE_MISMATCH.value,
+                        "file": blob_name,
+                        "file_index": idx,
+                        "expected": reference["dtype"],
+                        "found": props["dtype"],
+                        "reference_file": reference["file"],
+                        "message": f"Expected {reference['dtype']}, found {props['dtype']}"
+                    })
+
+                # Check CRS
+                if props["crs"] != reference["crs"]:
+                    mismatches.append({
+                        "type": "CRS",
+                        "error_code": ErrorCode.COLLECTION_CRS_MISMATCH.value,
+                        "file": blob_name,
+                        "file_index": idx,
+                        "expected": reference["crs"],
+                        "found": props["crs"],
+                        "reference_file": reference["file"],
+                        "message": f"Expected CRS {reference['crs']}, found {props['crs']}"
+                    })
+
+                # Check resolution (within tolerance)
+                if reference["resolution"] and props["resolution"]:
+                    ref_res = reference["resolution"][0]
+                    file_res = props["resolution"][0]
+                    if ref_res > 0:
+                        diff_pct = abs(file_res - ref_res) / ref_res * 100
+                        if diff_pct > tolerance_percent:
+                            mismatches.append({
+                                "type": "RESOLUTION",
+                                "error_code": ErrorCode.COLLECTION_RESOLUTION_MISMATCH.value,
+                                "file": blob_name,
+                                "file_index": idx,
+                                "expected": f"{ref_res:.4f}",
+                                "found": f"{file_res:.4f}",
+                                "difference_percent": round(diff_pct, 1),
+                                "tolerance_percent": tolerance_percent,
+                                "reference_file": reference["file"],
+                                "message": f"Resolution differs by {diff_pct:.1f}% (max {tolerance_percent}%)"
+                            })
+
+                # Check raster type (no RGB + DEM mixing)
+                if props["raster_type"] != reference["raster_type"]:
+                    # Allow unknown types to pass
+                    if props["raster_type"] != "unknown" and reference["raster_type"] != "unknown":
+                        mismatches.append({
+                            "type": "RASTER_TYPE",
+                            "error_code": ErrorCode.COLLECTION_TYPE_MISMATCH.value,
+                            "file": blob_name,
+                            "file_index": idx,
+                            "expected": reference["raster_type"],
+                            "found": props["raster_type"],
+                            "reference_file": reference["file"],
+                            "message": f"Expected {reference['raster_type']}, found {props['raster_type']}"
+                        })
+
+        except Exception as e:
+            logger.error(f"❌ Failed to read {blob_name} for homogeneity check: {e}")
+            # File read errors are NODE errors, not WORKFLOW errors
+            # Re-raise to be handled by the caller
+            raise
+
+    duration_ms = int((time.time() - start_time) * 1000)
+
+    if mismatches:
+        # Group mismatches by type for summary
+        mismatch_types = list(set(m["type"] for m in mismatches))
+        incompatible_files = list(set(m["file"] for m in mismatches))
+
+        # Use the first mismatch type for the primary error code
+        primary_error_code = mismatches[0]["error_code"]
+
+        _emit_job_event(job_id, task_id, 1, "homogeneity_failed", {
+            'mismatch_count': len(mismatches),
+            'mismatch_types': mismatch_types,
+            'incompatible_files': incompatible_files,
+        }, error_message=f"{len(mismatches)} incompatibilities found", duration_ms=duration_ms)
+
+        logger.warning(f"⚠️ Homogeneity check failed: {len(mismatches)} mismatches in {len(incompatible_files)} files")
+        for m in mismatches[:5]:  # Log first 5
+            logger.warning(f"   • {m['file']}: {m['message']}")
+        if len(mismatches) > 5:
+            logger.warning(f"   ... and {len(mismatches) - 5} more")
+
+        return {
+            "valid": False,
+            "reference_file": reference["file"],
+            "reference_properties": {
+                "band_count": reference["band_count"],
+                "dtype": reference["dtype"],
+                "crs": reference["crs"],
+                "resolution": reference["resolution"][0] if reference["resolution"] else None,
+                "raster_type": reference["raster_type"],
+            },
+            "mismatches": mismatches,
+            "mismatch_summary": {
+                "total_mismatches": len(mismatches),
+                "mismatch_types": mismatch_types,
+                "incompatible_files": incompatible_files,
+                "compatible_files": len(downloaded_files) - len(incompatible_files),
+            },
+            "error_code": primary_error_code,
+            "duration_ms": duration_ms,
+        }
+
+    _emit_job_event(job_id, task_id, 1, "homogeneity_passed", {
+        'file_count': len(downloaded_files),
+        'band_count': reference["band_count"],
+        'dtype': reference["dtype"],
+        'crs': reference["crs"],
+        'raster_type': reference["raster_type"],
+    }, duration_ms=duration_ms)
+
+    logger.info(f"✅ Homogeneity check passed: {len(downloaded_files)} files compatible")
+    logger.info(f"   Properties: {reference['band_count']} bands, {reference['dtype']}, {reference['crs']}, type={reference['raster_type']}")
+
+    return {
+        "valid": True,
+        "reference_file": reference["file"],
+        "reference_properties": {
+            "band_count": reference["band_count"],
+            "dtype": reference["dtype"],
+            "crs": reference["crs"],
+            "resolution": reference["resolution"][0] if reference["resolution"] else None,
+            "raster_type": reference["raster_type"],
+        },
+        "file_count": len(downloaded_files),
+        "message": f"All {len(downloaded_files)} files are compatible",
+        "duration_ms": duration_ms,
+    }
+
+
+def _create_homogeneity_error_response(
+    validation_result: Dict[str, Any],
+    job_id: str,
+    task_id: str
+) -> Dict[str, Any]:
+    """
+    Create user-friendly error response for homogeneity failure.
+
+    Uses the new ErrorResponse Pydantic model from core/errors.py.
+
+    Args:
+        validation_result: Result from _validate_collection_homogeneity
+        job_id: Job ID
+        task_id: Task ID
+
+    Returns:
+        Error response dict for return to caller
+    """
+    from core.errors import (
+        ErrorCode, ErrorResponse, ErrorDebug,
+        create_error_response_v2
+    )
+
+    mismatches = validation_result.get("mismatches", [])
+    summary = validation_result.get("mismatch_summary", {})
+    reference = validation_result.get("reference_properties", {})
+
+    # Determine primary error code from first mismatch
+    error_code_str = validation_result.get("error_code", "COLLECTION_BAND_MISMATCH")
+    error_code = ErrorCode(error_code_str)
+
+    # Build user-friendly message
+    mismatch_types = summary.get("mismatch_types", [])
+    incompatible_files = summary.get("incompatible_files", [])
+
+    if "BAND_COUNT" in mismatch_types:
+        message = f"Collection contains rasters with different band counts. Reference file '{validation_result.get('reference_file')}' has {reference.get('band_count')} bands."
+    elif "DTYPE" in mismatch_types:
+        message = f"Collection contains rasters with different data types. Reference file uses {reference.get('dtype')}."
+    elif "CRS" in mismatch_types:
+        message = f"Collection contains rasters with different coordinate systems. Reference file uses {reference.get('crs')}."
+    elif "RESOLUTION" in mismatch_types:
+        message = f"Collection contains rasters with incompatible resolutions (>{validation_result.get('tolerance_percent', 20)}% difference)."
+    elif "RASTER_TYPE" in mismatch_types:
+        message = f"Collection mixes incompatible raster types. Reference file is {reference.get('raster_type')}."
+    else:
+        message = "Collection contains incompatible rasters."
+
+    # Build remediation guidance
+    if len(incompatible_files) == 1:
+        remediation = f"Remove '{incompatible_files[0]}' from the collection or submit it as a separate job."
+    elif len(incompatible_files) <= 3:
+        files_str = "', '".join(incompatible_files)
+        remediation = f"Remove incompatible files ('{files_str}') from the collection or ensure all files have matching properties."
+    else:
+        remediation = f"{len(incompatible_files)} files are incompatible with the collection. Ensure all files have the same band count, data type, CRS, and resolution before resubmitting."
+
+    # Create structured details
+    details = {
+        "reference_file": validation_result.get("reference_file"),
+        "reference_properties": reference,
+        "total_files": validation_result.get("file_count", len(mismatches) + summary.get("compatible_files", 0)),
+        "compatible_files": summary.get("compatible_files", 0),
+        "incompatible_files": len(incompatible_files),
+        "mismatches": mismatches[:10],  # Limit to first 10 for response size
+    }
+
+    if len(mismatches) > 10:
+        details["additional_mismatches"] = len(mismatches) - 10
+
+    # Create ErrorResponse using v2 factory
+    response, debug = create_error_response_v2(
+        error_code=error_code,
+        message=message,
+        remediation=remediation,
+        details=details,
+        job_id=job_id,
+        task_id=task_id,
+        handler="raster_collection_complete",
+        stage=2,  # Validation is phase 2
+    )
+
+    # Return as dict for handler return format
+    return {
+        "success": False,
+        "error": response.error_code,
+        "error_code": response.error_code,
+        "error_category": response.error_category,
+        "error_scope": response.error_scope,
+        "message": response.message,
+        "remediation": response.remediation,
+        "user_fixable": response.user_fixable,
+        "retryable": response.retryable,
+        "http_status": response.http_status,
+        "error_id": response.error_id,
+        "details": details,
+        # Store full debug in result for job record
+        "_debug": debug.model_dump(),
+    }
+
+
+# =============================================================================
+# PHASE 3: COG CREATION
 # =============================================================================
 
 def _process_files_to_cogs(
@@ -337,9 +688,9 @@ def _process_files_to_cogs(
         local_path = file_info['local_path']
         original_blob = file_info['blob_name']
 
-        # Progress: 25-85% for COG phase
-        progress = 25 + int(((idx - start_index) / (total_files - start_index)) * 60) if total_files > start_index else 25
-        _report_progress(docker_context, progress, 2, 4, "Create COGs", f"{idx+1}/{total_files}")
+        # Progress: 25-80% for COG phase (phase 3 of 5)
+        progress = 25 + int(((idx - start_index) / (total_files - start_index)) * 55) if total_files > start_index else 25
+        _report_progress(docker_context, progress, 3, 5, "Create COGs", f"{idx+1}/{total_files}")
 
         logger.info(f"📦 COG {idx+1}/{total_files}: {Path(local_path).name}")
 
@@ -501,7 +852,7 @@ def _create_stac_collection_from_cogs(
         'collection_id': params.get('collection_id'),
     })
 
-    _report_progress(docker_context, 88, 3, 4, "STAC", "Creating collection")
+    _report_progress(docker_context, 85, 4, 5, "STAC", "Creating collection")
 
     collection_id = params.get('collection_id')
 
@@ -549,7 +900,7 @@ def _create_stac_collection_from_cogs(
         'item_count': stac_result.get('items_created', len(cog_blobs)),
     }, duration_ms=duration_ms)
 
-    _report_progress(docker_context, 95, 3, 4, "STAC", "Complete")
+    _report_progress(docker_context, 90, 4, 5, "STAC", "Complete")
 
     return stac_result
 
@@ -632,6 +983,7 @@ def raster_collection_complete(
 
     # Track results from each phase
     download_result = {}
+    validation_result = {}
     cog_result = {}
     stac_result = {}
     cleanup_result = {}
@@ -643,15 +995,15 @@ def raster_collection_complete(
         logger.info(f"   Mount base: {mount_paths['base']}")
 
         # =====================================================================
-        # PHASE 1: DOWNLOAD (0-25%)
+        # PHASE 1: DOWNLOAD (0-20%)
         # =====================================================================
         if checkpoint and checkpoint.should_skip(1):
             logger.info("⏭️ PHASE 1: Skipping download (checkpoint)")
-            _report_progress(docker_context, 25, 1, 4, "Download", "Skipped (resumed)")
+            _report_progress(docker_context, 20, 1, 5, "Download", "Skipped (resumed)")
             download_result = checkpoint.get_data('download_result', {})
         else:
             logger.info("🔄 PHASE 1: Downloading source files...")
-            _report_progress(docker_context, 2, 1, 4, "Download", f"Starting ({len(blob_list)} files)")
+            _report_progress(docker_context, 2, 1, 5, "Download", f"Starting ({len(blob_list)} files)")
 
             download_result = _download_blobs_to_mount(
                 blob_list=blob_list,
@@ -663,19 +1015,64 @@ def raster_collection_complete(
             )
 
             logger.info(f"✅ PHASE 1 complete: {download_result.get('total_mb', 0):.1f} MB downloaded")
-            _report_progress(docker_context, 25, 1, 4, "Download", "Complete")
+            _report_progress(docker_context, 20, 1, 5, "Download", "Complete")
 
             if checkpoint:
                 checkpoint.save(phase=1, data={'download_result': download_result})
 
         # =====================================================================
-        # PHASE 2: COG CREATION (25-85%)
+        # PHASE 2: HOMOGENEITY VALIDATION (20-25%) - BUG_REFORM Phase 3
         # =====================================================================
         downloaded_files = download_result.get('files', [])
 
-        if checkpoint and checkpoint.should_skip(2) and checkpoint.get_data('cog_last_index', -1) >= len(downloaded_files) - 1:
-            logger.info("⏭️ PHASE 2: Skipping COG creation (checkpoint)")
-            _report_progress(docker_context, 85, 2, 4, "Create COGs", "Skipped (resumed)")
+        if checkpoint and checkpoint.should_skip(2) and checkpoint.get_data('validation_passed'):
+            logger.info("⏭️ PHASE 2: Skipping validation (checkpoint)")
+            _report_progress(docker_context, 25, 2, 5, "Validate", "Skipped (resumed)")
+            validation_result = checkpoint.get_data('validation_result', {"valid": True})
+        else:
+            logger.info("🔄 PHASE 2: Validating collection homogeneity...")
+            _report_progress(docker_context, 22, 2, 5, "Validate", f"Checking {len(downloaded_files)} files")
+
+            validation_result = _validate_collection_homogeneity(
+                downloaded_files=downloaded_files,
+                job_id=job_id,
+                task_id=task_id,
+                tolerance_percent=parameters.get('resolution_tolerance_percent', 20.0)
+            )
+
+            if not validation_result.get("valid"):
+                # Collection is incompatible - return structured error
+                logger.error("❌ PHASE 2 failed: Collection homogeneity check failed")
+                _report_progress(docker_context, 25, 2, 5, "Validate", "FAILED - incompatible files")
+
+                error_response = _create_homogeneity_error_response(
+                    validation_result=validation_result,
+                    job_id=job_id,
+                    task_id=task_id
+                )
+
+                # Cleanup temp files before returning error
+                if parameters.get('cleanup_temp', True):
+                    _cleanup_mount_paths(mount_paths)
+
+                return error_response
+
+            logger.info(f"✅ PHASE 2 complete: All {len(downloaded_files)} files compatible")
+            _report_progress(docker_context, 25, 2, 5, "Validate", "Complete")
+
+            if checkpoint:
+                checkpoint.save(phase=2, data={
+                    'validation_result': validation_result,
+                    'validation_passed': True,
+                })
+
+        # =====================================================================
+        # PHASE 3: COG CREATION (25-80%)
+        # =====================================================================
+
+        if checkpoint and checkpoint.should_skip(3) and checkpoint.get_data('cog_last_index', -1) >= len(downloaded_files) - 1:
+            logger.info("⏭️ PHASE 3: Skipping COG creation (checkpoint)")
+            _report_progress(docker_context, 80, 3, 5, "Create COGs", "Skipped (resumed)")
 
             # BUG-012 FIX (01 FEB 2026): Re-derive raster_type if missing from older checkpoint
             cog_results_checkpoint = checkpoint.get_data('cog_results', [])
@@ -700,8 +1097,8 @@ def raster_collection_complete(
                 'raster_type': raster_type_checkpoint,
             }
         else:
-            logger.info(f"🔄 PHASE 2: Creating COGs for {len(downloaded_files)} files...")
-            _report_progress(docker_context, 27, 2, 4, "Create COGs", "Starting")
+            logger.info(f"🔄 PHASE 3: Creating COGs for {len(downloaded_files)} files...")
+            _report_progress(docker_context, 27, 3, 5, "Create COGs", "Starting")
 
             cog_result = _process_files_to_cogs(
                 downloaded_files=downloaded_files,
@@ -726,11 +1123,11 @@ def raster_collection_complete(
                     }
                 }
 
-            logger.info(f"✅ PHASE 2 complete: {cog_result.get('cog_count', 0)} COGs created")
-            _report_progress(docker_context, 85, 2, 4, "Create COGs", "Complete")
+            logger.info(f"✅ PHASE 3 complete: {cog_result.get('cog_count', 0)} COGs created")
+            _report_progress(docker_context, 80, 3, 5, "Create COGs", "Complete")
 
             if checkpoint:
-                checkpoint.save(phase=2, data={
+                checkpoint.save(phase=3, data={
                     'cog_blobs': cog_result.get('cog_blobs', []),
                     'cog_results': cog_result.get('cog_results', []),
                     'cog_last_index': len(downloaded_files) - 1,
@@ -738,17 +1135,17 @@ def raster_collection_complete(
                 })
 
         # =====================================================================
-        # PHASE 3: STAC COLLECTION (85-95%)
+        # PHASE 4: STAC COLLECTION (80-92%)
         # =====================================================================
         cog_blobs = cog_result.get('cog_blobs', [])
 
-        if checkpoint and checkpoint.should_skip(3):
-            logger.info("⏭️ PHASE 3: Skipping STAC (checkpoint)")
-            _report_progress(docker_context, 95, 3, 4, "STAC", "Skipped (resumed)")
+        if checkpoint and checkpoint.should_skip(4):
+            logger.info("⏭️ PHASE 4: Skipping STAC (checkpoint)")
+            _report_progress(docker_context, 92, 4, 5, "STAC", "Skipped (resumed)")
             stac_result = checkpoint.get_data('stac_result', {})
         else:
-            logger.info(f"🔄 PHASE 3: Creating STAC collection...")
-            _report_progress(docker_context, 87, 3, 4, "STAC", "Starting")
+            logger.info(f"🔄 PHASE 4: Creating STAC collection...")
+            _report_progress(docker_context, 82, 4, 5, "STAC", "Starting")
 
             stac_result = _create_stac_collection_from_cogs(
                 cog_blobs=cog_blobs,
@@ -759,28 +1156,28 @@ def raster_collection_complete(
                 task_id=task_id
             )
 
-            logger.info(f"✅ PHASE 3 complete: Collection {stac_result.get('collection_id')}")
-            _report_progress(docker_context, 95, 3, 4, "STAC", "Complete")
+            logger.info(f"✅ PHASE 4 complete: Collection {stac_result.get('collection_id')}")
+            _report_progress(docker_context, 92, 4, 5, "STAC", "Complete")
 
             if checkpoint:
-                checkpoint.save(phase=3, data={'stac_result': stac_result})
+                checkpoint.save(phase=4, data={'stac_result': stac_result})
 
         # =====================================================================
-        # PHASE 4: CLEANUP (95-100%)
+        # PHASE 5: CLEANUP (92-100%)
         # =====================================================================
         if parameters.get('cleanup_temp', True):
-            logger.info("🔄 PHASE 4: Cleaning up temp files...")
-            _report_progress(docker_context, 97, 4, 4, "Cleanup", "Removing temp files")
+            logger.info("🔄 PHASE 5: Cleaning up temp files...")
+            _report_progress(docker_context, 95, 5, 5, "Cleanup", "Removing temp files")
 
             cleanup_result = _cleanup_mount_paths(mount_paths)
 
             _emit_job_event(job_id, task_id, 1, "cleanup_complete", cleanup_result)
 
-            logger.info(f"✅ PHASE 4 complete: {cleanup_result.get('files_deleted', 0)} files cleaned")
-            _report_progress(docker_context, 100, 4, 4, "Cleanup", "Complete")
+            logger.info(f"✅ PHASE 5 complete: {cleanup_result.get('files_deleted', 0)} files cleaned")
+            _report_progress(docker_context, 100, 5, 5, "Cleanup", "Complete")
         else:
-            logger.info("⏭️ PHASE 4: Skipping cleanup (disabled)")
-            _report_progress(docker_context, 100, 4, 4, "Cleanup", "Skipped")
+            logger.info("⏭️ PHASE 5: Skipping cleanup (disabled)")
+            _report_progress(docker_context, 100, 5, 5, "Cleanup", "Skipped")
 
         # =====================================================================
         # SUCCESS
@@ -803,6 +1200,12 @@ def raster_collection_complete(
                     "files_downloaded": len(download_result.get('files', [])),
                     "total_mb": download_result.get('total_mb', 0),
                     "duration_seconds": download_result.get('duration_seconds', 0),
+                },
+                "validation": {
+                    "passed": True,
+                    "file_count": validation_result.get('file_count', len(downloaded_files)),
+                    "reference_properties": validation_result.get('reference_properties', {}),
+                    "duration_ms": validation_result.get('duration_ms', 0),
                 },
                 "cogs": {
                     "cog_count": cog_result.get('cog_count', 0),

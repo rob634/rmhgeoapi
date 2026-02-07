@@ -168,15 +168,15 @@ local_scripts/
 local_scripts*
 local*
 local/
-# Shell scripts
+# Shell scripts (except deploy.sh which is project infrastructure)
 *.sh
+!deploy.sh
 
 # Removed/redundant files
 logging_utils.py
 
-# Claude context file with sensitive info
-CLAUDE.md
-claude.md
+# Claude context with sensitive info - tracked now (no secrets)
+# CLAUDE.md is project documentation, safe to commit
 
 ancient_code/
 ancient_code*

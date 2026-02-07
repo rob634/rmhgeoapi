@@ -1,7 +1,23 @@
 # Deployment Guide
 
-**Date**: 05 DEC 2025
-**Purpose**: Complete deployment, monitoring, and authentication guide
+**Date**: 07 FEB 2026
+**Purpose**: Complete deployment, monitoring, and authentication guide for the 3-app architecture
+
+---
+
+## 3-App Architecture Overview
+
+| Role | App Name | APP_MODE | Purpose |
+|------|----------|----------|---------|
+| **Orchestrator** | `rmhazuregeoapi` | `standalone` | Job orchestration, all endpoints, queue listener |
+| **Gateway** | `rmhgeogateway` | `platform` | B2B API gateway, platform/* and interface/* only |
+| **Docker Worker** | `rmhheavyapi` | `worker_docker` | Heavy processing (GDAL, geopandas) |
+
+| URL | App |
+|-----|-----|
+| https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net | Orchestrator |
+| https://rmhgeogateway-gdc4hrafawfrcqak.eastus-01.azurewebsites.net | Gateway |
+| https://rmhheavyapi-ebdffqhkcsevg7f3.eastus-01.azurewebsites.net | Docker Worker |
 
 ---
 
@@ -13,30 +29,38 @@
 
 ```bash
 # From project root
-./deploy.sh              # Deploy Function App (default)
-./deploy.sh function     # Deploy Function App explicitly
-./deploy.sh docker       # Deploy Docker Worker only
-./deploy.sh both         # Deploy both Function App and Docker Worker
+./deploy.sh orchestrator   # Deploy Orchestrator (rmhazuregeoapi) - default
+./deploy.sh gateway        # Deploy Gateway (rmhgeogateway)
+./deploy.sh docker         # Deploy Docker Worker (rmhheavyapi)
+./deploy.sh all            # Deploy all 3 apps
 ```
 
 **What the script does:**
 1. Reads version from `config/__init__.py`
-2. Deploys to the appropriate target (Function App or Docker Worker)
-3. Waits for restart (45s for Function App, 60s for Docker)
+2. Deploys to the target app(s)
+3. Waits for restart (45s for Function Apps, 60s for Docker)
 4. Runs health check
 5. Verifies deployed version matches expected
 
-### Manual Command (if deploy.sh unavailable)
+### Manual Commands (if deploy.sh unavailable)
 ```bash
+# Orchestrator
 func azure functionapp publish rmhazuregeoapi --python --build remote
+
+# Gateway
+func azure functionapp publish rmhgeogateway --python --build remote
+
+# Docker Worker (see Docker Worker section below)
 ```
 
 ### Post-Deployment Verification
 ```bash
-# 1. Health Check
+# 1. Health Check (all apps)
 curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/health
+curl https://rmhgeogateway-gdc4hrafawfrcqak.eastus-01.azurewebsites.net/api/health
+curl https://rmhheavyapi-ebdffqhkcsevg7f3.eastus-01.azurewebsites.net/health
 
-# 2. Full Schema Rebuild (REQUIRED after deployment!)
+# 2. Full Schema Rebuild (REQUIRED after deployment - run on Orchestrator!)
 curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/maintenance/full-rebuild?confirm=yes"
 
 # 3. Submit Test Job
@@ -242,13 +266,23 @@ The `docker_service.py` configures Azure Monitor at startup:
 
 ## Azure Resources
 
-### Function App
+### Orchestrator (rmhazuregeoapi)
 - **Name**: rmhazuregeoapi
+- **APP_MODE**: standalone
 - **URL**: https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net
 - **Runtime**: Python 3.12
 - **Plan**: Basic B3 (App Service Plan: ASP-rmhazure)
 - **Tier**: Basic (4 vCPU, 7 GB RAM)
 - **Region**: East US
+- **Role**: Job orchestration, all endpoints, queue listener
+
+### Gateway (rmhgeogateway)
+- **Name**: rmhgeogateway
+- **APP_MODE**: platform
+- **URL**: https://rmhgeogateway-gdc4hrafawfrcqak.eastus-01.azurewebsites.net
+- **Runtime**: Python 3.12
+- **Region**: East US
+- **Role**: B2B API gateway, exposes only platform/* and interface/* endpoints
 
 ### Database
 - **Server**: rmhpostgres.postgres.database.azure.com
@@ -632,4 +666,4 @@ AND m.rolname = 'migeoetldbadminqa';
 
 ---
 
-**Last Updated**: 02 FEB 2026
+**Last Updated**: 07 FEB 2026

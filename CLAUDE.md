@@ -1,6 +1,6 @@
 # CLAUDE.md - Project Context
 
-**Last Updated**: 02 FEB 2026
+**Last Updated**: 07 FEB 2026
 
 ---
 
@@ -111,38 +111,56 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 
 ## 🚀 DEPLOYMENT
 
-### Active Environment
-| Resource | Value |
-|----------|-------|
-| **Function App** | `rmhazuregeoapi` (B3 Basic) |
-| **URL** | https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net |
+### 3-App Architecture (07 FEB 2026)
+
+| Role | App Name | APP_MODE | URL |
+|------|----------|----------|-----|
+| **Orchestrator** | `rmhazuregeoapi` | `standalone` | https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net |
+| **Gateway** | `rmhgeogateway` | `platform` | https://rmhgeogateway-gdc4hrafawfrcqak.eastus-01.azurewebsites.net |
+| **Docker Worker** | `rmhheavyapi` | `worker_docker` | https://rmhheavyapi-ebdffqhkcsevg7f3.eastus-01.azurewebsites.net |
+
+| Shared Resource | Value |
+|-----------------|-------|
 | **Database** | rmhpostgres.postgres.database.azure.com |
 | **Resource Group** | `rmhazure_rg` |
+| **ACR** | `rmhazureacr.azurecr.io` |
+| **App Insights** | All apps use `rmhazuregeoapi` App Insights |
 
 **DEPRECATED APPS** (never use): `rmhazurefn`, `rmhgeoapi`, `rmhgeoapifn`, `rmhgeoapibeta`
 
 **DEPRECATED DATABASE**: `rmhpgflex.postgres.database.azure.com` (decommissioned)
 
-### Docker Worker (Heavy API)
-| Resource | Value |
-|----------|-------|
-| **Web App** | `rmhheavyapi` |
-| **URL** | https://rmhheavyapi-ebdffqhkcsevg7f3.eastus-01.azurewebsites.net |
-| **ACR Repository** | `geospatial-worker` (ONLY use this) |
-| **ACR** | `rmhazureacr.azurecr.io` |
-| **App Insights** | MUST use `rmhazuregeoapi` (same as Function App) |
-
 **DEPRECATED ACR REPOS** (never use): `rmhgeoapi-worker`, `docker-worker`, `rmhheavyapi`
 
-```bash
-# Build and push Docker worker
-az acr build --registry rmhazureacr --image geospatial-worker:VERSION --file Dockerfile .
+### Deploy Script (RECOMMENDED)
 
-# Update container
+**Use `deploy.sh` for all deployments** - handles versioning, health checks, and verification.
+
+```bash
+./deploy.sh orchestrator   # Deploy Orchestrator (rmhazuregeoapi)
+./deploy.sh gateway        # Deploy Gateway (rmhgeogateway)
+./deploy.sh docker         # Deploy Docker Worker (rmhheavyapi)
+./deploy.sh all            # Deploy all 3 apps
+```
+
+**What the script does:**
+1. Reads version from `config/__init__.py`
+2. Deploys to the target app(s)
+3. Waits for restart (45s for Function Apps, 60s for Docker)
+4. Runs health check
+5. Verifies deployed version matches expected
+
+### Manual Commands (Reference)
+
+```bash
+# Function Apps (Orchestrator or Gateway)
+func azure functionapp publish rmhazuregeoapi --python --build remote
+func azure functionapp publish rmhgeogateway --python --build remote
+
+# Docker Worker
+az acr build --registry rmhazureacr --image geospatial-worker:VERSION --file Dockerfile .
 az webapp config container set --name rmhheavyapi --resource-group rmhazure_rg \
   --docker-custom-image-name "rmhazureacr.azurecr.io/geospatial-worker:VERSION"
-
-# Restart (stop/start required for env var changes)
 az webapp stop --name rmhheavyapi --resource-group rmhazure_rg && \
 az webapp start --name rmhheavyapi --resource-group rmhazure_rg
 

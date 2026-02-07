@@ -1,6 +1,6 @@
 # Dataset Approval Workflow (F4.AP)
 
-**Last Updated**: 24 JAN 2026
+**Last Updated**: 07 FEB 2026
 **Epic**: E4 Security Zones / Externalization
 **Goal**: QA workflow for reviewing datasets before STAC publication
 **Status**: IN PROGRESS
@@ -64,13 +64,18 @@ Values: `pending`, `approved`, `rejected`
 | S4.AP.7 | Register blueprint in `function_app.py` | Done |
 | S4.AP.8 | Deploy + rebuild schema | Pending |
 
-### Phase 2: Integration (Future)
+### Phase 2: Integration
 
 | Story | Description | Status |
 |-------|-------------|--------|
 | S4.AP.9 | Hook job completion to create approval records | Done (22 JAN) |
-| S4.AP.10 | Wire viewer UI approve/reject buttons | Pending |
+| S4.AP.10 | Wire viewer UI approve/reject buttons | Done (07 FEB) |
 | S4.AP.11 | ADF integration for public data | Pending |
+
+**Note**: Viewer UI (S4.AP.10) implemented in:
+- `templates/pages/raster/viewer.html` - QA Review section (Approve/Reject)
+- `templates/pages/vector/viewer.html` - QA Review section (Approve/Reject)
+- Iframe embedding via `?embed=true` for B2B apps
 
 ---
 

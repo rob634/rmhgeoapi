@@ -418,8 +418,6 @@ class PlatformInterface(BaseInterface):
     def _generate_js(self) -> str:
         """JavaScript for live status updates."""
         return """
-        const API_BASE_URL = window.API_BASE_URL || '';
-
         async function loadPlatformHealth() {
             const statusEl = document.getElementById('platform-status');
             const jobsEl = document.getElementById('jobs-count');

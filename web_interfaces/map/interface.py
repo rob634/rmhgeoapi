@@ -604,8 +604,6 @@ class MapInterface(BaseInterface):
         """
 
         return """
-        // API Configuration
-        const API_BASE_URL = window.location.origin;
         // TiPG endpoint for high-performance OGC Features (23 JAN 2026)
         const TIPG_BASE_URL = '""" + tipg_base_url + """';
         """ + qa_js + """

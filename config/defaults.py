@@ -883,9 +883,9 @@ class STACDefaults:
     # ==========================================================================
     # DEFAULT COLLECTION IDs BY DATA TYPE
     # ==========================================================================
-    VECTOR_COLLECTION = "system-vectors"      # PostGIS vector tables
+    # VECTOR_COLLECTION removed (07 FEB 2026) - collection_id now required, no default system collection
     # RASTER_COLLECTION removed (14 JAN 2026) - collection_id now required for all raster jobs
-    H3_COLLECTION = "system-h3-grids"         # H3 hexagonal grids
+    # H3_COLLECTION removed (07 FEB 2026) - H3 functionality on hold, hidden from STAC
     DEV_COLLECTION = "dev"                    # Development/testing
     COGS_COLLECTION = "cogs"                  # User-submitted COGs
     VECTORS_COLLECTION = "vectors"            # User-submitted vectors
@@ -895,7 +895,7 @@ class STACDefaults:
     # VALID COLLECTIONS (for job parameter validation)
     # ==========================================================================
     VALID_USER_COLLECTIONS = ["dev", "cogs", "vectors", "geoparquet"]
-    SYSTEM_COLLECTIONS = ["system-vectors", "system-h3-grids"]  # system-rasters removed
+    SYSTEM_COLLECTIONS = []  # All system collections removed (07 FEB 2026) - STAC is for discovery, not app logic
 
     # ==========================================================================
     # MEDIA TYPES
@@ -926,13 +926,8 @@ class STACDefaults:
     # COLLECTION METADATA (titles and descriptions)
     # ==========================================================================
     COLLECTION_METADATA = {
-        "system-vectors": {
-            "title": "System STAC - Vector Tables",
-            "description": "Operational tracking of PostGIS vector tables created by ETL",
-            "asset_type": "vector",
-            "media_type": "application/geo+json",
-        },
-        # system-rasters removed (14 JAN 2026) - collection_id now required for all raster jobs
+        # system-vectors removed (07 FEB 2026) - STAC is for discovery, not application logic
+        # Users specify collection_id explicitly; vectors can be added to any collection
         "cogs": {
             "title": "Cloud-Optimized GeoTIFFs",
             "description": "Raster data converted to COG format in EPSG:4326 for cloud-native access",
@@ -957,12 +952,7 @@ class STACDefaults:
             "asset_type": "mixed",
             "media_type": "application/octet-stream",
         },
-        "system-h3-grids": {
-            "title": "H3 Hexagonal Grids",
-            "description": "Pre-computed H3 spatial index grids for analytical queries",
-            "asset_type": "vector",
-            "media_type": "application/geo+json",
-        },
+        # system-h3-grids removed (07 FEB 2026) - H3 functionality on hold
     }
 
 

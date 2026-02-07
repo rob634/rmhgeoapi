@@ -2621,49 +2621,23 @@ def get_all_collections(repo: Optional['PostgreSQLRepository'] = None) -> Dict[s
 
 def get_system_stac_collections() -> List[Dict[str, Any]]:
     """
-    Get STAC collection definitions for system collections (system-vectors only).
+    Get STAC collection definitions for system collections.
 
-    This function returns the collection definitions needed to create the system
-    STAC collections after a full schema rebuild. These collections track operational
-    data created by ETL processes.
+    07 FEB 2026: No system collections are auto-created.
+    STAC is for discovery, not application logic. Users specify collection_id
+    explicitly when creating STAC items. This enables mixed raster/vector collections.
 
-    Note (14 JAN 2026): system-rasters removed - collection_id is now required for all raster jobs.
-    Rasters must be added to explicitly named collections.
+    History:
+        - 14 JAN 2026: system-rasters removed - collection_id required for rasters
+        - 07 FEB 2026: system-vectors removed - collection_id required for vectors
+        - 07 FEB 2026: system-h3-grids hidden - H3 functionality on hold
 
     Returns:
-        List of STAC collection dictionaries ready for insertion via pgstac.create_collection
+        Empty list - no system collections are auto-created
 
     Used by:
         - triggers/admin/db_maintenance.py full_rebuild endpoint (Step 6)
     """
-    system_collections = []
-
-    # Only create system-vectors on bootstrap (14 JAN 2026)
-    # - system-rasters removed: rasters require explicit collection_id
-    # - system-h3-grids: created on-demand by H3 jobs
-    # - Other collections (cogs, vectors, geoparquet, dev): created on-demand
-    system_collection_types = ["system-vectors"]  # Only vectors get auto-created
-
-    for collection_type in system_collection_types:
-        if collection_type in PgStacBootstrap.PRODUCTION_COLLECTIONS:
-            config = PgStacBootstrap.PRODUCTION_COLLECTIONS[collection_type]
-
-            collection = {
-                "id": collection_type,
-                "type": "Collection",
-                "stac_version": "1.0.0",
-                "title": config['title'],
-                "description": config['description'],
-                "license": STACDefaults.DEFAULT_LICENSE,
-                "extent": {
-                    "spatial": {"bbox": [[-180, -90, 180, 90]]},
-                    "temporal": {"interval": [[None, None]]}
-                },
-                "summaries": {
-                    "asset_type": [config['asset_type']],
-                    "media_type": [config['media_type']]
-                }
-            }
-            system_collections.append(collection)
-
-    return system_collections
+    # No system collections auto-created (07 FEB 2026)
+    # STAC collections are created on-demand when users specify collection_id
+    return []

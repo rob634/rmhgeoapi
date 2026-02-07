@@ -990,8 +990,9 @@ class BaseInterface(ABC):
         // COMMON UTILITIES - Consolidated JS (S12.1.2)
         // ============================================================
 
-        // API base URL (current origin)
-        const API_BASE_URL = window.location.origin;
+        // API base URL - uses injected ORCHESTRATOR_URL if set, otherwise current origin
+        // window.API_BASE_URL is set by _get_orchestrator_url_js() for cross-app calls
+        const API_BASE_URL = window.API_BASE_URL || window.location.origin;
 
         // ============================================================
         // ELEMENT VISIBILITY

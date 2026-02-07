@@ -74,7 +74,9 @@ def create_vector_stac(params: dict) -> dict[str, Any]:
     # Extract parameters
     schema = params.get("schema")
     table_name = params.get("table_name")
-    collection_id = params.get("collection_id", STACDefaults.VECTOR_COLLECTION)
+    # 07 FEB 2026: collection_id is now REQUIRED - no default system collection
+    # Users must explicitly specify which collection to add vector items to
+    collection_id = params.get("collection_id")
     source_file = params.get("source_file")
     source_format = params.get("source_format")
     job_id = params.get("job_id")
@@ -83,6 +85,16 @@ def create_vector_stac(params: dict) -> dict[str, Any]:
 
     if not schema or not table_name:
         error_msg = "Missing required parameters: schema and table_name"
+        logger.error(f"❌ {error_msg}")
+        return {
+            "success": False,
+            "error": error_msg,
+            "error_type": "ValidationError"
+        }
+
+    # 07 FEB 2026: collection_id is required - STAC is for discovery, not application logic
+    if not collection_id:
+        error_msg = "Missing required parameter: collection_id. STAC items must be added to an explicit collection."
         logger.error(f"❌ {error_msg}")
         return {
             "success": False,

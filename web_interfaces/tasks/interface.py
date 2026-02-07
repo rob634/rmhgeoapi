@@ -2557,7 +2557,6 @@ class TasksInterface(BaseInterface):
         """Generate custom JavaScript for Task Monitor with workflow visualization."""
         return f"""
         const JOB_ID = '{job_id}';
-        const API_BASE_URL = window.API_BASE_URL || '';
 
         // Auto-refresh state
         let autoRefreshInterval = null;

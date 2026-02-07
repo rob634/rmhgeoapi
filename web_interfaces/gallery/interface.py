@@ -655,7 +655,6 @@ class GalleryInterface(BaseInterface):
         return """
         // Fetch and render promoted datasets
         (function() {
-            const API_BASE_URL = window.location.origin;
             const promotedGrid = document.getElementById('promoted-grid');
             const promotedLoading = document.getElementById('promoted-loading');
             const featuredSection = document.getElementById('featured-section');

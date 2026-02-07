@@ -868,8 +868,6 @@ class PromoteVectorInterface(BaseInterface):
     def _generate_custom_js(self) -> str:
         """JavaScript for Promote interface."""
         return """
-        const API_BASE_URL = window.API_BASE_URL || '';
-
         // State
         let map = null;
         let featureLayer = null;

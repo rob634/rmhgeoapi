@@ -670,8 +670,6 @@ class PipelineInterface(BaseInterface):
     def _generate_custom_js(self) -> str:
         """JavaScript for loading job data."""
         return """
-        const API_BASE_URL = window.API_BASE_URL || '';
-
         // Pipeline job types to track for stats (includes docker job types)
         const PIPELINE_TYPES = [
             'process_vector',

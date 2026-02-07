@@ -586,8 +586,6 @@ class DatabaseInterface(BaseInterface):
     def _generate_custom_js(self) -> str:
         """Generate custom JavaScript for Database dashboard."""
         return """
-        const API_BASE_URL = window.API_BASE_URL || '';
-
         // Load data on page load
         document.addEventListener('DOMContentLoaded', () => {
             loadData();

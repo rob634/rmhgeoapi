@@ -583,7 +583,6 @@ class StacMapInterface(BaseInterface):
         """Generate JavaScript for map interaction."""
         return """
         // State
-        const API_BASE_URL = window.location.origin;
         let map = null;
         let allCollections = [];
         let collectionLayers = {};  // { collectionId: L.rectangle }

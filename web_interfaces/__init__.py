@@ -294,6 +294,12 @@ except ImportError as e:
     logger.warning(f"⚠️ Could not import Vector interface: {e}")
 
 try:
+    from .vector_viewer import interface as _vector_viewer
+    logger.info("✅ Imported Vector Viewer interface module")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import Vector Viewer interface: {e}")
+
+try:
     from .jobs import interface as _jobs
     logger.info("✅ Imported Jobs interface module")
 except ImportError as e:

@@ -270,6 +270,27 @@ class AppConfig(BaseModel):
         description="Base URL for ETL/Admin Function App (rmhazuregeoapi) - Hosts viewer, job submission, admin endpoints"
     )
 
+    # ========================================================================
+    # Platform URL (07 FEB 2026 - B2B Integration)
+    # ========================================================================
+    # Public URL for this app instance. Used for generating URLs in API responses
+    # that B2B clients will use (e.g., approval iframe URLs).
+    #
+    # In multi-app deployment:
+    #   - Gateway sets PLATFORM_URL to its own public URL
+    #   - Orchestrator sets PLATFORM_URL to its own public URL
+    #   - B2B apps only access Gateway, so Gateway's URLs are what matter
+    #
+    # Falls back to ETL_APP_URL for backward compatibility.
+    # ========================================================================
+    platform_url: str = Field(
+        default_factory=lambda: os.getenv(
+            "PLATFORM_URL",
+            os.getenv("ETL_APP_URL", AzureDefaults.ETL_APP_URL)
+        ),
+        description="Public URL for this app instance - used in B2B API responses (approval URLs, etc.)"
+    )
+
     titiler_mode: str = Field(
         default_factory=lambda: os.getenv("TITILER_MODE", AppDefaults.TITILER_MODE),
         description="TiTiler deployment mode (vanilla, pgstac, xarray)",
@@ -667,21 +688,24 @@ class AppConfig(BaseModel):
         """
         return f"{self.tipg_base_url}/collections/{collection_id}"
 
-    def generate_vector_viewer_url(self, collection_id: str) -> str:
+    def generate_vector_viewer_url(self, table_name: str, schema: str = "geo") -> str:
         """
         Generate interactive vector viewer URL for PostGIS collection.
 
-        Uses ETL app (rmhazuregeoapi) for viewer - admin/curation functionality.
+        Uses ETL app (rmhazuregeoapi) map interface for visualization.
         End-user queries go through TiPG (OGC Features API).
 
         Args:
-            collection_id: Collection name (same as PostGIS table name)
+            table_name: PostGIS table name (without schema prefix)
+            schema: Schema name (default: 'geo')
 
         Returns:
             Vector viewer URL for interactive map visualization (ETL app)
         """
-        # Viewer is hosted on ETL app, not OGC/STAC app (27 NOV 2025)
-        return f"{self.etl_app_base_url.rstrip('/')}/api/vector/viewer?collection={collection_id}"
+        # Updated 07 FEB 2026: Use /api/interface/map (Function App web interface)
+        # Previously used /api/vector/viewer (Docker UI, now archived)
+        collection_id = f"{schema}.{table_name}"
+        return f"{self.etl_app_base_url.rstrip('/')}/api/interface/map?collection={collection_id}"
 
     # ========================================================================
     # Vector Tile URL Generation (15 JAN 2026)
@@ -727,7 +751,7 @@ class AppConfig(BaseModel):
         return {
             "tilejson": f"{base}/tiles/WebMercatorQuad/tilejson.json",
             "tiles": f"{base}/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}.pbf",
-            "viewer": f"{self.etl_app_base_url.rstrip('/')}/api/interface/vector-tiles?collection={table_name}",
+            "viewer": f"{self.etl_app_base_url.rstrip('/')}/api/interface/vector-tiles?collection={collection_id}",
             "tipg_map": f"{base}/tiles/WebMercatorQuad/map",
             "collection": base
         }

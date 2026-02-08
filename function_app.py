@@ -371,8 +371,9 @@ from ogc_features import get_ogc_triggers
 
 # STAC API - Moved to triggers/stac/ blueprint (24 JAN 2026)
 
-# Vector Viewer - Standalone module (13 NOV 2025) - OGC Features API
-from vector_viewer import get_vector_viewer_triggers
+# Vector Viewer - MOVED to web_interfaces/vector_viewer (07 FEB 2026)
+# Now at /api/interface/vector-viewer instead of /api/vector/viewer
+# from vector_viewer import get_vector_viewer_triggers
 
 # Raster Collection Viewer - DISABLED (04 FEB 2026) - In development
 # from raster_collection_viewer import get_raster_collection_viewer_triggers
@@ -987,38 +988,17 @@ def ogc_styles_item(req: func.HttpRequest) -> func.HttpResponse:
 # ============================================================================
 # VECTOR VIEWER - QA Preview for Data Curators (13 NOV 2025)
 # ============================================================================
-# Simple HTML viewer for visual validation of PostGIS vector collections
-# Uses OGC Features API for geometry and metadata
-# Provides minimal Leaflet map with load buttons for QA purposes
+# VECTOR VIEWER - MOVED (07 FEB 2026)
 # ============================================================================
-
-# Get trigger configuration
-_vector_viewer_triggers = get_vector_viewer_triggers()
-_vector_viewer_handler = _vector_viewer_triggers[0]['handler']
-
-
-@app.route(route="vector/viewer", methods=["GET"])
-def vector_collection_viewer(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Vector collection preview viewer for data curators.
-
-    GET /api/vector/viewer?collection={collection_id}
-
-    Query Parameters:
-        collection (required): Collection ID (PostGIS table name)
-
-    Returns:
-        HTML page with Leaflet map showing vector features and metadata
-
-    Use Case:
-        Data curators can quickly validate vector ETL output by opening
-        this URL in a browser to see if geometry and metadata are correct.
-        Uses OGC Features API to fetch collection metadata and features.
-
-    Example:
-        https://rmhazuregeoapi-.../api/vector/viewer?collection=qa_test_chunk_5000
-    """
-    return _vector_viewer_handler(req)
+# Moved to web_interfaces/vector_viewer/ for consolidation under /api/interface/*
+# New route: /api/interface/vector-viewer?collection={collection_id}
+# Old route /api/vector/viewer is deprecated
+# ============================================================================
+# _vector_viewer_triggers = get_vector_viewer_triggers()
+# _vector_viewer_handler = _vector_viewer_triggers[0]['handler']
+# @app.route(route="vector/viewer", methods=["GET"])
+# def vector_collection_viewer(req: func.HttpRequest) -> func.HttpResponse:
+#     return _vector_viewer_handler(req)
 
 
 # ============================================================================

@@ -12,6 +12,66 @@ This document tracks completed architectural changes and improvements to the Azu
 
 ---
 
+## 07 FEB 2026: STAC Architecture - Optional Cataloging for Vectors ✅
+
+**Status**: ✅ **COMPLETE**
+**Epic**: E7 Pipeline Infrastructure
+**Impact**: STAC is now purely for discovery, not application logic
+
+### Architecture Decision
+
+**Before**: All vectors were automatically added to a `system-vectors` STAC collection, duplicating metadata from `geo.table_catalog`.
+
+**After**: STAC cataloging is optional. Users must explicitly provide `collection_id` to create STAC items. This enables:
+- Mixed raster/vector collections (future)
+- User-defined collection organization
+- STAC as pure discovery layer (not application logic)
+
+### Key Principle
+
+> **STAC is for discovery, not application logic.**
+> `geo.table_catalog` is the source of truth for vector metadata.
+> OGC Features API reads from `table_catalog`, not STAC.
+
+### Changes Made
+
+| File | Change |
+|------|--------|
+| `config/defaults.py` | Removed `VECTOR_COLLECTION`, `SYSTEM_COLLECTIONS = []`, removed `system-vectors` from `COLLECTION_METADATA` |
+| `infrastructure/pgstac_bootstrap.py` | `get_system_stac_collections()` now returns `[]` |
+| `services/stac_vector_catalog.py` | `collection_id` is now required (validation error if missing) |
+| `jobs/process_vector.py` | Stage 3 is conditional on `collection_id`, added `stac_item_id` parameter |
+
+### process_vector Job Changes
+
+**New Parameters**:
+- `collection_id` (optional) - STAC collection to add item to
+- `stac_item_id` (optional) - Custom STAC item ID
+
+**Stage 3 Behavior**:
+- If `collection_id` provided: Creates STAC item in specified collection
+- If `collection_id` omitted: Stage 3 skipped, no STAC item created
+
+**Job Result** (when STAC skipped):
+```json
+{
+  "stac": {
+    "stac_skipped": true,
+    "stac_item_created": false,
+    "reason": "No collection_id provided - STAC cataloging skipped (data accessible via OGC Features API)"
+  }
+}
+```
+
+### Data Access Without STAC
+
+Vector data remains fully accessible:
+- **OGC Features API**: `/api/features/collections/{schema}-{table}/items`
+- **Vector Tiles**: TiPG MVT endpoints
+- **Metadata**: `geo.table_catalog` (source of truth)
+
+---
+
 ## 21 JAN 2026: Docker Worker Application Insights AAD Auth Fix ✅
 
 **Status**: ✅ **COMPLETE**

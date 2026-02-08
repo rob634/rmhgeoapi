@@ -15,6 +15,8 @@ This document describes the integration between the OGC API - Features implement
 
 ## Architecture
 
+**Updated 07 FEB 2026**: Stage 3 (STAC) is now optional. STAC is for discovery, not application logic.
+
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                         ETL LAYER                                   │
@@ -22,8 +24,8 @@ This document describes the integration between the OGC API - Features implement
 │  process_vector Job                                                 │
 │  ├── Stage 1: CREATE TABLE + INSERT INTO geo.table_metadata         │
 │  ├── Stage 2: INSERT features (with etl_batch_id)                   │
-│  └── Stage 3: INSERT pgstac.items + UPDATE geo.table_metadata       │
-│               (adds stac_item_id, stac_collection_id backlink)      │
+│  └── Stage 3 (OPTIONAL): INSERT pgstac.items if collection_id given │
+│               Only runs if collection_id parameter is provided      │
 └─────────────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -46,9 +48,12 @@ This document describes the integration between the OGC API - Features implement
 │  Response includes:                                                 │
 │  ├── description: "Source: kba.shp (125,000 features)..."           │
 │  ├── extent.spatial.bbox: [from cached_bbox OR ST_Extent]           │
-│  └── properties: {etl:job_id, source:file, stac:item_id, ...}       │
+│  └── properties: {etl:job_id, source:file, ...}                     │
 └─────────────────────────────────────────────────────────────────────┘
 ```
+
+**Note**: OGC Features API reads from `geo.table_metadata`, NOT from STAC. STAC is purely
+optional for discovery. Data is fully accessible via OGC Features API without STAC.
 
 ---
 

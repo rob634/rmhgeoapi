@@ -596,7 +596,7 @@ class VectorInterface(BaseInterface):
                     'No extent';
 
                 // Get links - use table name (without schema) for internal links
-                const viewerLink = `${API_BASE_URL}/api/vector/viewer?collection=${encodeURIComponent(tableName)}`;
+                const viewerLink = `${API_BASE_URL}/api/interface/map?collection=${encodeURIComponent(tableName)}`;
 
                 // Check if promoted (use table name for lookup)
                 const isPromoted = promotedCollectionIds.has(tableName);
@@ -673,7 +673,7 @@ class VectorInterface(BaseInterface):
 
                 const selfLink = data.links?.find(l => l.rel === 'self')?.href || '';
                 const itemsLink = data.links?.find(l => l.rel === 'items')?.href || '';
-                const viewerLink = `${API_BASE_URL}/api/vector/viewer?collection=${encodeURIComponent(tableName)}`;
+                const viewerLink = `${API_BASE_URL}/api/interface/map?collection=${encodeURIComponent(tableName)}`;
 
                 // Format extent
                 const bbox = data.extent?.spatial?.bbox?.[0];

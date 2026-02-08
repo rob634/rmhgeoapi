@@ -348,9 +348,11 @@ curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.ne
 2. Drop `pgstac` schema (CASCADE)
 3. Deploy `app` schema from Pydantic models
 4. Deploy `pgstac` schema via `pypgstac migrate`
-5. Create system STAC collections
-6. Verify `app` schema (tables, functions, enums)
-7. Verify `pgstac` schema (version, hash functions)
+5. Verify `app` schema (tables, functions, enums)
+6. Verify `pgstac` schema (version, hash functions)
+
+**Note** (07 FEB 2026): No system STAC collections are auto-created. STAC is for discovery,
+not application logic. Users specify `collection_id` when creating STAC items.
 
 **Use Cases**:
 - Fresh development environment

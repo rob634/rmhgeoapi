@@ -3,7 +3,7 @@
 # ============================================================================
 # STATUS: Trigger layer - Platform status and diagnostic endpoints
 # PURPOSE: Query Platform request/job status and diagnostics for gateway integration
-# LAST_REVIEWED: 21 JAN 2026
+# LAST_REVIEWED: 07 FEB 2026
 # REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
 # EXPORTS: platform_request_status, platform_job_status, platform_health, platform_failures, platform_lineage, platform_validate
 # DEPENDENCIES: infrastructure.PlatformRepository, infrastructure.JobRepository
@@ -572,6 +572,13 @@ def _generate_data_access_urls(
     - STAC API: ETL_APP_URL/api/stac (on ETL Function App)
     - TiTiler: TITILER_BASE_URL (dedicated tile server)
     - Vector Viewer: ETL_APP_URL (admin/ETL app)
+    - Approval UI: PLATFORM_URL/api/interface/* with embed mode (07 FEB 2026)
+
+    URL Configuration:
+        PLATFORM_URL: Public URL for this app instance. Used for approval URLs
+                      that B2B clients will embed in iframes. Falls back to
+                      ETL_APP_URL if not set. Gateway and Orchestrator each
+                      set their own PLATFORM_URL.
 
     Args:
         platform_request: ApiRequest record
@@ -579,7 +586,7 @@ def _generate_data_access_urls(
         job_result: Job result data
 
     Returns:
-        Dictionary with OGC Features, STAC, TiTiler URLs as applicable
+        Dictionary with OGC Features, STAC, TiTiler, approval URLs as applicable
     """
     from config import get_config
     config = get_config()
@@ -594,10 +601,16 @@ def _generate_data_access_urls(
     # TiTiler for raster tiles
     titiler_base = config.titiler_base_url
 
+    # Platform URL for B2B-facing responses (07 FEB 2026)
+    # This is the public URL for THIS app instance (Gateway or Orchestrator)
+    # Used for approval iframe URLs that B2B apps will embed
+    platform_base = config.platform_url.rstrip('/')
+
     urls = {}
 
-    # Vector job → TiPG OGC Features URLs
-    if job_type == 'process_vector':
+    # Vector job → TiPG OGC Features URLs + approval UI
+    # Updated 07 FEB 2026: Added vector_docker_etl (current active job type)
+    if job_type in ['process_vector', 'vector_docker_etl']:
         table_name = job_result.get('table_name')
         if table_name:
             # TiPG requires schema-qualified names
@@ -609,14 +622,23 @@ def _generate_data_access_urls(
             urls['ogc_features'] = {
                 'collection': f"{tipg_base}/collections/{qualified_name}",
                 'items': f"{tipg_base}/collections/{qualified_name}/items",
-                'viewer': f"{etl_app_base}/api/vector/viewer?collection={table_name}"
+                'viewer': f"{etl_app_base}/api/interface/vector?collection={table_name}"
+            }
+            # Approval UI for B2B iframe embedding (07 FEB 2026)
+            # Uses platform_base (PLATFORM_URL) for B2B-accessible URLs
+            # Vector viewer at /api/interface/vector-viewer (consolidated 07 FEB 2026)
+            urls['approval'] = {
+                'viewer': f"{platform_base}/api/interface/vector-viewer?collection={table_name}",
+                'embed': f"{platform_base}/api/interface/vector-viewer?collection={table_name}&embed=true"
             }
 
-    # Raster job → STAC + TiTiler URLs
-    # Updated 04 DEC 2025: Added v2 job names (v1 jobs archived)
-    elif job_type in ['process_raster_v2', 'process_large_raster_v2', 'process_raster_collection_v2']:
+    # Raster job → STAC + TiTiler URLs + approval UI
+    # Updated 07 FEB 2026: Added process_raster_docker (current active job type)
+    elif job_type in ['process_raster_v2', 'process_large_raster_v2', 'process_raster_collection_v2',
+                      'process_raster_docker', 'process_large_raster_docker', 'process_raster_collection_docker']:
         collection_id = job_result.get('collection_id')
         cog_url = job_result.get('cog_url')
+        stac_item_id = job_result.get('stac_item_id')
 
         if collection_id:
             urls['stac'] = {
@@ -631,6 +653,20 @@ def _generate_data_access_urls(
                 'info': f"{titiler_base}/cog/info?url={cog_url}",
                 'tiles': f"{titiler_base}/cog/tiles/{{z}}/{{x}}/{{y}}?url={cog_url}"
             }
+
+            # Approval UI for B2B iframe embedding (07 FEB 2026)
+            # Uses platform_base (PLATFORM_URL) for B2B-accessible URLs
+            from urllib.parse import quote
+            encoded_url = quote(cog_url, safe='')
+            urls['approval'] = {
+                'viewer': f"{platform_base}/api/interface/raster-viewer?url={encoded_url}",
+                'embed': f"{platform_base}/api/interface/raster-viewer?url={encoded_url}&embed=true"
+            }
+
+            # If STAC item ID available, prefer that for approval workflow
+            if stac_item_id:
+                urls['approval']['viewer'] = f"{platform_base}/api/interface/raster-viewer?item_id={stac_item_id}"
+                urls['approval']['embed'] = f"{platform_base}/api/interface/raster-viewer?item_id={stac_item_id}&embed=true"
 
     return urls
 

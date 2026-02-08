@@ -1,9 +1,9 @@
 # ============================================================================
 # PROCESS VECTOR JOB
 # ============================================================================
-# STATUS: Jobs - 3-stage idempotent vector ETL pipeline
-# PURPOSE: Bronze→PostGIS+STAC with DELETE+INSERT idempotency pattern
-# LAST_REVIEWED: 15 JAN 2026
+# STATUS: Jobs - 2/3-stage idempotent vector ETL pipeline
+# PURPOSE: Bronze→PostGIS with DELETE+INSERT idempotency, optional STAC
+# LAST_REVIEWED: 07 FEB 2026
 # REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
 # ============================================================================
 """
@@ -11,10 +11,14 @@ Process Vector Job.
 
 Idempotent vector ETL workflow using DELETE+INSERT pattern.
 
-Three-stage workflow:
+Two/three-stage workflow:
     - Stage 1: Load, validate, chunk, create table
     - Stage 2: Fan-out DELETE+INSERT for each chunk
-    - Stage 3: Create STAC record
+    - Stage 3 (OPTIONAL): Create STAC record if collection_id provided
+
+07 FEB 2026: Stage 3 is now optional. STAC is for discovery, not application logic.
+Vector metadata is stored in geo.table_catalog (source of truth for OGC Features API).
+To create a STAC item, provide collection_id parameter - vectors can be added to any collection.
 
 Exports:
     ProcessVectorJob: Job class for vector ETL processing
@@ -177,6 +181,20 @@ class ProcessVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
             'min': 64,
             'max': 2048,
             'description': 'Max vertices per polygon in tile view (lower = more splits = faster tiles). 256 recommended for web.'
+        },
+        # STAC cataloging (07 FEB 2026 - now optional)
+        # If collection_id provided, Stage 3 creates STAC item in specified collection
+        # If omitted, no STAC item is created (data still accessible via OGC Features API)
+        'collection_id': {
+            'type': 'str',
+            'default': None,
+            'description': 'STAC collection ID to add vector item to. If omitted, no STAC item is created. Vectors can be added to any collection (including mixed raster/vector collections).'
+        },
+        # Custom STAC item ID (30 JAN 2026 - DDH format support)
+        'stac_item_id': {
+            'type': 'str',
+            'default': None,
+            'description': 'Custom STAC item ID. If omitted, auto-generated as {schema}-{table_name}.'
         }
     }
 
@@ -220,7 +238,7 @@ class ProcessVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
         }
     ]
 
-    # 3-stage pipeline
+    # 2/3-stage pipeline (Stage 3 is optional - only if collection_id provided)
     stages: List[Dict[str, Any]] = [
         {
             "number": 1,
@@ -241,7 +259,8 @@ class ProcessVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
             "name": "create_stac",
             "task_type": "vector_create_stac",  # REUSE existing handler (already idempotent)
             "parallelism": "single",
-            "description": "Create STAC catalog entry"
+            "description": "Create STAC catalog entry (only if collection_id provided)",
+            "conditional": "collection_id"  # 07 FEB 2026: Stage only runs if collection_id is set
         }
     ]
 
@@ -365,7 +384,15 @@ class ProcessVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
             return tasks
 
         elif stage == 3:
-            # Stage 3: Single STAC task - reuse existing vector_create_stac handler
+            # Stage 3: Single STAC task - OPTIONAL (07 FEB 2026)
+            # Only create STAC item if collection_id is explicitly provided
+            collection_id = job_params.get('collection_id')
+            if not collection_id:
+                # No collection_id = skip STAC, return empty task list
+                # Job will complete after Stage 2 (data still in PostGIS + geo.table_catalog)
+                logger.info(f"[{job_id[:8]}] Stage 3 skipped: no collection_id provided (STAC is optional)")
+                return []
+
             if not previous_results:
                 raise ValueError("Stage 3 requires previous results")
 
@@ -397,7 +424,8 @@ class ProcessVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                 'parameters': {
                     'schema': stage_1_result.get('schema', 'geo'),
                     'table_name': stage_1_result.get('table_name'),
-                    'collection_id': STACDefaults.VECTOR_COLLECTION,
+                    'collection_id': collection_id,  # User-specified collection
+                    'item_id': job_params.get('stac_item_id'),  # Optional custom item ID
                     'source_file': job_params.get('blob_name'),
                     'source_format': job_params.get('file_extension'),
                     'job_id': job_id,
@@ -455,11 +483,19 @@ class ProcessVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                 total_rows_deleted += result.get("rows_deleted", 0)
 
         # Extract STAC results from Stage 3 (with degraded mode detection - 6 DEC 2025)
+        # 07 FEB 2026: Stage 3 is now optional - only runs if collection_id was provided
         stac_summary = {}
         degraded_mode = False
         degraded_warnings = []
 
-        if stage_3_tasks and stage_3_tasks[0].result_data:
+        if not stage_3_tasks:
+            # No Stage 3 tasks = STAC was intentionally skipped (no collection_id provided)
+            stac_summary = {
+                "stac_skipped": True,
+                "stac_item_created": False,
+                "reason": "No collection_id provided - STAC cataloging skipped (data accessible via OGC Features API)"
+            }
+        elif stage_3_tasks[0].result_data:
             stac_data = stage_3_tasks[0].result_data
 
             # Check for degraded mode (pgSTAC unavailable)
@@ -476,7 +512,8 @@ class ProcessVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
             else:
                 stac_result = stac_data.get("result", {})
                 stac_summary = {
-                    "collection_id": stac_result.get("collection_id", "system-vectors"),
+                    "collection_id": stac_result.get("collection_id"),
+                    "item_id": stac_result.get("item_id"),
                     "stac_id": stac_result.get("stac_id"),
                     "pgstac_id": stac_result.get("pgstac_id"),
                     "inserted_to_pgstac": stac_result.get("inserted_to_pgstac", True),
@@ -490,9 +527,10 @@ class ProcessVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
         table_name = params.get("table_name")
         schema = params.get("schema", "geo")
 
-        # OGC Features URLs
-        ogc_features_url = config.generate_ogc_features_url(table_name)
-        viewer_url = config.generate_vector_viewer_url(table_name)
+        # OGC Features URLs (schema-qualified 08 FEB 2026)
+        collection_id = f"{schema}.{table_name}"
+        ogc_features_url = config.generate_ogc_features_url(collection_id)
+        viewer_url = config.generate_vector_viewer_url(table_name, schema)
 
         # Vector Tile URLs (15 JAN 2026) - TiPG MVT endpoints
         vector_tile_urls = config.generate_vector_tile_urls(table_name, schema)

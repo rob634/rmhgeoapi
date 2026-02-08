@@ -40,16 +40,19 @@ def vector_viewer_handler(req: func.HttpRequest) -> func.HttpResponse:
 
     Query Parameters:
         collection (required): Collection ID (PostGIS table name)
+        embed (optional): Set to 'true' for iframe embedding (hides navbar)
 
     Returns:
         HTML page with Leaflet map showing vector features and metadata
 
     Example:
         GET /api/vector/viewer?collection=qa_test_chunk_5000
+        GET /api/vector/viewer?collection=qa_test_chunk_5000&embed=true
     """
     try:
         # Parse query parameters
         collection_id = req.params.get('collection')
+        embed_mode = req.params.get('embed', '').lower() == 'true'
 
         # Validate required parameters
         if not collection_id:
@@ -77,16 +80,24 @@ def vector_viewer_handler(req: func.HttpRequest) -> func.HttpResponse:
         # Generate HTML viewer
         html = service.generate_viewer_html(
             collection_id=collection_id,
-            host_url=host_url
+            host_url=host_url,
+            embed_mode=embed_mode
         )
 
-        logger.info(f"Generated viewer for {collection_id} ({len(html)} bytes)")
+        logger.info(f"Generated viewer for {collection_id} ({len(html)} bytes, embed={embed_mode})")
+
+        # Response headers - allow iframe embedding (07 FEB 2026)
+        # frame-ancestors * allows any domain to embed this viewer
+        headers = {
+            "Content-Security-Policy": "frame-ancestors *"
+        }
 
         # Return HTML response
         return func.HttpResponse(
             html,
             mimetype="text/html",
-            status_code=200
+            status_code=200,
+            headers=headers
         )
 
     except ValueError as e:

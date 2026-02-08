@@ -129,6 +129,9 @@ class VectorViewerService:
             items_url = f"{self.ogc_api_base_url}/collections/{collection_id}/items"
             styles_url = f"{self.ogc_api_base_url}/collections/{collection_id}/styles"
 
+        # Body class for embed mode (07 FEB 2026)
+        body_class = "embed-mode" if embed_mode else ""
+
         # Generate HTML with 30/70 layout
         html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -166,6 +169,17 @@ class VectorViewerService:
             background: var(--ds-bg);
             height: 100vh;
             overflow: hidden;
+        }}
+
+        /* Embed mode - minimize header for iframe embedding (07 FEB 2026) */
+        body.embed-mode .sidebar-header {{
+            padding: 12px 16px;
+        }}
+        body.embed-mode .sidebar-header h1 {{
+            font-size: 16px;
+        }}
+        body.embed-mode .sidebar-header .collection-id {{
+            font-size: 11px;
         }}
 
         /* Main Layout - 30/70 split */
@@ -723,7 +737,7 @@ class VectorViewerService:
         }}
     </style>
 </head>
-<body>
+<body class="{body_class}">
     <div class="app-container">
         <!-- Map Container (Left - 70%) -->
         <div class="map-container">

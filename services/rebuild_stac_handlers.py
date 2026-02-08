@@ -25,7 +25,6 @@ from typing import Dict, Any, List
 from datetime import datetime, timezone
 
 from util_logger import LoggerFactory, ComponentType
-from config.defaults import STACDefaults
 
 logger = LoggerFactory.create_logger(ComponentType.SERVICE, "rebuild_stac")
 
@@ -82,9 +81,13 @@ def stac_rebuild_validate(params: Dict[str, Any]) -> Dict[str, Any]:
 
     if data_type == "vector":
         valid_items, invalid_items = _validate_vector_sources(items, schema)
-        # Default collection for vectors
+        # collection_id is required for vectors (07 FEB 2026)
         if not collection_id:
-            collection_id = STACDefaults.VECTOR_COLLECTION
+            return {
+                "success": False,
+                "error": "collection_id is required for vector STAC rebuild",
+                "error_type": "ValidationError"
+            }
 
     elif data_type == "raster":
         valid_items, invalid_items = _validate_raster_sources(items)

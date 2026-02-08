@@ -1,6 +1,6 @@
 # Working Backlog - ADO Aligned
 
-**Last Updated**: 06 FEB 2026
+**Last Updated**: 07 FEB 2026
 **Source of Truth**: [V0.8_ADO_WORKITEMS.md](/ado_wiki/V0.8_ADO_WORKITEMS.md)
 **Structure**: EPIC → FEATURE → User Story → Tasks
 
@@ -77,6 +77,9 @@ All User Stories complete (US 2.1, 2.2, 2.3).
 ## FEATURE 3: Vector Data Pipeline `[CLOSED]`
 
 All User Stories complete (US 3.1, 3.2, 3.3).
+
+**07 FEB 2026**: STAC cataloging is now optional for vectors. Provide `collection_id` to create STAC item.
+See [HISTORY.md](./HISTORY.md) for details.
 
 ---
 

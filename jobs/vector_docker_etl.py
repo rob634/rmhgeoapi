@@ -29,7 +29,6 @@ import logging
 
 from jobs.base import JobBase
 from jobs.mixins import JobBaseMixin
-from config.defaults import STACDefaults
 from util_logger import LoggerFactory, ComponentType
 
 # Component-specific logger
@@ -264,6 +263,13 @@ class VectorDockerETLJob(JobBaseMixin, JobBase):
             'description': 'Max vertices per polygon in tile view'
         },
 
+        # === STAC Catalog (optional) ===
+        'make_stac': {
+            'type': 'bool',
+            'default': False,
+            'description': 'Create STAC item for this vector (default: False, vectors use OGC Features API)'
+        },
+
         # === Internal (set by platform) ===
         '_platform_job_id': {
             'type': 'str',
@@ -390,6 +396,9 @@ class VectorDockerETLJob(JobBaseMixin, JobBase):
                 'create_tile_view': job_params.get('create_tile_view', False),
                 'max_tile_vertices': job_params.get('max_tile_vertices', 256),
 
+                # STAC (optional - default False)
+                'make_stac': job_params.get('make_stac', False),
+
                 # Platform tracking
                 '_platform_job_id': job_params.get('_platform_job_id'),
             }
@@ -443,9 +452,10 @@ class VectorDockerETLJob(JobBaseMixin, JobBase):
         table_name = result_data.get("table_name") or params.get("table_name")
         schema = result_data.get("schema") or params.get("schema", "geo")
 
-        # Generate URLs
-        ogc_features_url = config.generate_ogc_features_url(table_name)
-        viewer_url = config.generate_vector_viewer_url(table_name)
+        # Generate URLs (schema-qualified 08 FEB 2026)
+        collection_id = f"{schema}.{table_name}"
+        ogc_features_url = config.generate_ogc_features_url(collection_id)
+        viewer_url = config.generate_vector_viewer_url(table_name, schema)
         vector_tile_urls = config.generate_vector_tile_urls(table_name, schema)
 
         return {
@@ -459,11 +469,12 @@ class VectorDockerETLJob(JobBaseMixin, JobBase):
             "geometry_type": result_data.get("geometry_type"),
             "srid": result_data.get("srid"),
 
-            # STAC info - V0.8 FIX (31 JAN 2026): Use nested stac dict for catalog lookup
+            # STAC info - only included if make_stac=True was used (07 FEB 2026)
+            # Default is no STAC - vectors accessed via OGC Features API
             "stac": {
                 "item_id": result_data.get("stac_item_id"),
-                "collection_id": result_data.get("collection_id", STACDefaults.VECTOR_COLLECTION),
-            },
+                "collection_id": result_data.get("collection_id") or result_data.get("dataset_id"),
+            } if result_data.get("stac_item_id") else None,
 
             # Style info
             "style_id": result_data.get("style_id", "default"),

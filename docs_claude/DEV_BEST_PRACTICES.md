@@ -335,6 +335,30 @@ assert job_id_1 == job_id_2  # Same job, not duplicated
 
 ## STAC Patterns
 
+### STAC is Optional (07 FEB 2026)
+
+**Key Principle**: STAC is for discovery, not application logic.
+
+- No system collections are auto-created
+- Vector/raster metadata is stored in PostGIS (`geo.table_catalog`, `app.cog_metadata`)
+- OGC Features API reads from PostGIS, NOT from STAC
+- STAC items are created only when `collection_id` is explicitly provided
+
+```python
+# Without STAC cataloging (data still accessible via OGC Features API)
+submit_job("process_vector", {
+    "blob_name": "countries.gpkg",
+    "table_name": "countries"
+})
+
+# With STAC cataloging (adds to user-specified collection)
+submit_job("process_vector", {
+    "blob_name": "countries.gpkg",
+    "table_name": "countries",
+    "collection_id": "admin-boundaries"  # STAC item created
+})
+```
+
 ### STAC Item Properties
 
 Custom properties use `app:` prefix:
@@ -356,6 +380,7 @@ properties = {
 | Bronze | `bronze-{container}` | `bronze-uploads` |
 | Silver | Domain-specific | `admin-boundaries`, `flood-risk` |
 | Gold | Export format | `geoparquet-exports` |
+| Mixed | User-defined | `ethiopia-hazards` (can include raster + vector) |
 
 ### PgSTAC Repository
 

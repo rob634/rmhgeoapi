@@ -236,19 +236,25 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
         )
 
         # =====================================================================
-        # PHASE 4: Create STAC Item
+        # PHASE 4: Create STAC Item (OPTIONAL - 07 FEB 2026)
+        # Only runs if make_stac=True. Default is False (vectors use OGC Features API)
         # =====================================================================
-        logger.info(f"[{job_id[:8]}] Phase 4: Creating STAC item")
+        stac_result = {'item_id': None, 'collection_id': None}  # Default if skipped
 
-        stac_result = _create_stac_item(
-            table_name=table_name,
-            schema=schema,
-            parameters=parameters,
-            load_info=load_info,
-            job_id=job_id
-        )
+        if parameters.get('make_stac', False):
+            logger.info(f"[{job_id[:8]}] Phase 4: Creating STAC item (make_stac=True)")
 
-        checkpoint("stac_created", stac_result)
+            stac_result = _create_stac_item(
+                table_name=table_name,
+                schema=schema,
+                parameters=parameters,
+                load_info=load_info,
+                job_id=job_id
+            )
+
+            checkpoint("stac_created", stac_result)
+        else:
+            logger.info(f"[{job_id[:8]}] Phase 4: Skipped (make_stac=False, using OGC Features API)")
 
         # =====================================================================
         # PHASE 5: Refresh TiPG Collection Catalog (05 FEB 2026 - F1.6)
@@ -329,7 +335,7 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
                 "total_rows": total_rows,
                 "geometry_type": table_result['geometry_type'],
                 "srid": table_result.get('srid', 4326),
-                # V0.8 FIX (31 JAN 2026): _create_stac_item returns flat structure
+                # STAC optional (07 FEB 2026) - only populated if make_stac=True
                 "stac_item_id": stac_result.get('item_id'),
                 "collection_id": stac_result.get('collection_id'),
                 "style_id": style_result.get('style_id', 'default'),
@@ -744,10 +750,10 @@ def _create_stac_item(
     """
     try:
         from services.stac_vector_catalog import create_vector_stac
-        from config.defaults import STACDefaults
 
-        # Get collection_id from parameters or use default
-        collection_id = parameters.get('collection_id') or STACDefaults.VECTOR_COLLECTION
+        # Get collection_id from parameters, fall back to dataset_id (07 FEB 2026)
+        # VECTOR_COLLECTION constant removed - collection_id now derived from dataset_id
+        collection_id = parameters.get('collection_id') or parameters.get('dataset_id')
 
         stac_params = {
             'schema': schema,

@@ -360,7 +360,7 @@ class AssetApprovalService:
             List of GeospatialAsset in PENDING_REVIEW state
         """
         assets = self.asset_repo.list_by_approval_state(
-            approval_state=ApprovalState.PENDING_REVIEW,
+            state=ApprovalState.PENDING_REVIEW,
             limit=limit
         )
 
@@ -386,7 +386,7 @@ class AssetApprovalService:
             List of GeospatialAsset
         """
         return self.asset_repo.list_by_approval_state(
-            approval_state=approval_state,
+            state=approval_state,
             limit=limit
         )
 

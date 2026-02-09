@@ -137,6 +137,7 @@ def create_and_submit_job(
             job_id = hashlib.sha256(canonical.encode()).hexdigest()
 
             # Create job record with correct total_stages from job class
+            # V0.8.11: Set asset_id, platform_id, request_id at creation (08 FEB 2026)
             job_record = JobRecord(
                 job_id=job_id,
                 job_type=current_job_type,
@@ -144,6 +145,10 @@ def create_and_submit_job(
                 stage=1,
                 total_stages=len(job_class.stages),  # FIX: Set from job class stages definition
                 parameters=validated_params,
+                # FK linkage (08 FEB 2026) - GeospatialAsset-centric data model
+                asset_id=validated_params.get('asset_id'),  # From platform submit
+                platform_id=validated_params.get('_platform_id', 'ddh'),  # Default to DDH
+                request_id=platform_request_id,  # B2B request that triggered this job
                 metadata={
                     'platform_request': platform_request_id,
                     'created_by': 'platform_trigger'

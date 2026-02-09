@@ -1548,6 +1548,71 @@ class RasterViewerInterface(BaseInterface):
             }}
         }}
 
+        // Load STAC item by ID and extract COG URL (08 FEB 2026)
+        async function loadStacItem(itemId) {{
+            showSpinner('Loading STAC item...');
+            try {{
+                // Use direct item lookup endpoint (no collection required)
+                const itemUrl = `${{API_BASE}}/api/stac/items/${{encodeURIComponent(itemId)}}`;
+                const itemResp = await fetch(itemUrl);
+
+                if (!itemResp.ok) {{
+                    if (itemResp.status === 404) {{
+                        throw new Error(`STAC item not found: ${{itemId}}`);
+                    }}
+                    throw new Error(`STAC item lookup failed: ${{itemResp.status}}`);
+                }}
+
+                const item = await itemResp.json();
+
+                // Check for error in response
+                if (item.error) {{
+                    throw new Error(item.error);
+                }}
+
+                console.log('STAC Item:', item);
+
+                // Extract COG URL from assets
+                let cogUrl = null;
+
+                // Check common asset keys: data, visual, image, default
+                const assetKeys = ['data', 'visual', 'image', 'default', 'cog'];
+                for (const key of assetKeys) {{
+                    if (item.assets && item.assets[key] && item.assets[key].href) {{
+                        cogUrl = item.assets[key].href;
+                        break;
+                    }}
+                }}
+
+                // Fallback: use first asset with geotiff type
+                if (!cogUrl && item.assets) {{
+                    for (const [key, asset] of Object.entries(item.assets)) {{
+                        if (asset.type && asset.type.includes('geotiff') && asset.href) {{
+                            cogUrl = asset.href;
+                            break;
+                        }}
+                    }}
+                }}
+
+                if (!cogUrl) {{
+                    throw new Error('No COG URL found in STAC item assets');
+                }}
+
+                // Set the URL input and load
+                document.getElementById('cog-url').value = cogUrl;
+                hideSpinner();
+                loadCogInfo();
+
+                // Show item info in status
+                setStatus(`Loaded STAC item: ${{item.id}}`, 'success');
+
+            }} catch (error) {{
+                hideSpinner();
+                setStatus(`Error loading STAC item: ${{error.message}}`, 'error');
+                console.error('STAC item load error:', error);
+            }}
+        }}
+
         // Initialize on page load
         window.onload = function() {{
             initMap();
@@ -1558,7 +1623,13 @@ class RasterViewerInterface(BaseInterface):
                 console.log('QA mode enabled:', QA_CONTEXT);
             }}
 
-            // Check for search_id parameter first (mosaic mode)
+            // Check for item_id parameter first (STAC item mode - 08 FEB 2026)
+            if (QA_CONTEXT.item_id) {{
+                loadStacItem(QA_CONTEXT.item_id);
+                return;
+            }}
+
+            // Check for search_id parameter (mosaic mode)
             const searchInput = document.getElementById('search-id');
             if (searchInput.value) {{
                 // Switch to mosaic mode and load

@@ -51,16 +51,29 @@ class ApprovalState(str, Enum):
     """
     Approval workflow state for geospatial assets.
 
+    V0.8.11 Update (08 FEB 2026): Added REVOKED for unpublish workflow.
+
     Transitions:
     - PENDING_REVIEW -> APPROVED (approve with clearance_level)
     - PENDING_REVIEW -> REJECTED (reject with reason)
     - REJECTED -> PENDING_REVIEW (only via overwrite submit)
+    - APPROVED -> REVOKED (unpublish - requires audit trail)
 
-    Note: From rejected, user must submit with overwrite=true to reset.
+    State diagram:
+        PENDING_REVIEW ──approve──> APPROVED ──revoke──> REVOKED
+                       ╲                                   (terminal)
+                        reject
+                         ╲
+                          v
+                       REJECTED ──(overwrite submit)──> PENDING_REVIEW
+
+    Note: REVOKED is a terminal state for audit purposes.
+    To re-publish, submit new version (creates new asset in lineage).
     """
     PENDING_REVIEW = "pending_review"
     APPROVED = "approved"
     REJECTED = "rejected"
+    REVOKED = "revoked"  # V0.8.11: For unpublishing approved assets
 
 
 class ClearanceState(str, Enum):
@@ -341,6 +354,30 @@ class GeospatialAsset(BaseModel):
         default=None,
         description="Reason for rejection (required if rejected)"
     )
+    approval_notes: Optional[str] = Field(
+        default=None,
+        description="Optional reviewer notes on approval decision (V0.8.11)"
+    )
+
+    # =========================================================================
+    # REVOCATION AUDIT TRAIL (V0.8.11 - 08 FEB 2026)
+    # =========================================================================
+    # Tracks when approved assets are revoked (unpublished).
+    # REVOKED is a terminal state - to re-publish, submit new version.
+    # =========================================================================
+    revoked_at: Optional[datetime] = Field(
+        default=None,
+        description="When the asset was revoked (unpublished)"
+    )
+    revoked_by: Optional[str] = Field(
+        default=None,
+        max_length=200,
+        description="Who revoked the asset (user email or system identifier)"
+    )
+    revocation_reason: Optional[str] = Field(
+        default=None,
+        description="Reason for revocation (required for audit trail)"
+    )
 
     # =========================================================================
     # CLEARANCE STATE
@@ -613,6 +650,28 @@ class GeospatialAsset(BaseModel):
             and self.is_active()
         )
 
+    def can_revoke(self) -> bool:
+        """
+        Check if asset can be revoked (unpublished).
+
+        V0.8.11 (08 FEB 2026): Added for approval consolidation.
+
+        Revocation is allowed when:
+        - Asset is currently APPROVED
+        - Asset is not deleted
+
+        After revocation, asset cannot be re-approved.
+        To re-publish, submit a new version in the lineage.
+        """
+        return (
+            self.approval_state == ApprovalState.APPROVED
+            and self.is_active()
+        )
+
+    def is_revoked(self) -> bool:
+        """Check if asset has been revoked (V0.8.11)."""
+        return self.approval_state == ApprovalState.REVOKED
+
     def is_cleared(self) -> bool:
         """Check if asset has been cleared (not UNCLEARED)."""
         return self.clearance_state != ClearanceState.UNCLEARED
@@ -641,6 +700,11 @@ class GeospatialAsset(BaseModel):
             'reviewer': self.reviewer,
             'reviewed_at': self.reviewed_at.isoformat() if self.reviewed_at else None,
             'rejection_reason': self.rejection_reason,
+            'approval_notes': self.approval_notes,
+            # Revocation audit trail (V0.8.11 - 08 FEB 2026)
+            'revoked_at': self.revoked_at.isoformat() if self.revoked_at else None,
+            'revoked_by': self.revoked_by,
+            'revocation_reason': self.revocation_reason,
             'clearance_state': self.clearance_state.value if isinstance(self.clearance_state, Enum) else self.clearance_state,
             'adf_run_id': self.adf_run_id,
             'cleared_at': self.cleared_at.isoformat() if self.cleared_at else None,

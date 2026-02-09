@@ -1380,6 +1380,226 @@ class GeospatialAssetRepository(PostgreSQLRepository):
                 rows = cur.fetchall()
                 return [self._row_to_model(row) for row in rows]
 
+    # =========================================================================
+    # APPROVAL STATE METHODS (V0.8.11 - 08 FEB 2026)
+    # =========================================================================
+
+    def update_approval_state(
+        self,
+        asset_id: str,
+        approval_state: ApprovalState,
+        reviewer: str,
+        reviewed_at: datetime,
+        approval_notes: Optional[str] = None,
+        rejection_reason: Optional[str] = None,
+        clearance_state: Optional[ClearanceState] = None,
+        cleared_at: Optional[datetime] = None,
+        cleared_by: Optional[str] = None,
+        made_public_at: Optional[datetime] = None,
+        made_public_by: Optional[str] = None
+    ) -> bool:
+        """
+        Update asset approval state with audit fields.
+
+        V0.8.11 (08 FEB 2026): Added for approval consolidation.
+
+        Args:
+            asset_id: Asset to update
+            approval_state: New approval state
+            reviewer: Who made the decision
+            reviewed_at: When decision was made
+            approval_notes: Optional reviewer notes
+            rejection_reason: Required if REJECTED
+            clearance_state: Required if APPROVED
+            cleared_at: When cleared (if approving)
+            cleared_by: Who cleared (if approving)
+            made_public_at: When made public (if PUBLIC)
+            made_public_by: Who made public (if PUBLIC)
+
+        Returns:
+            True if updated, False if asset not found
+        """
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                # Build dynamic SET clause
+                set_parts = [
+                    "approval_state = %s",
+                    "reviewer = %s",
+                    "reviewed_at = %s",
+                    "updated_at = NOW()"
+                ]
+                params = [
+                    approval_state.value,
+                    reviewer,
+                    reviewed_at
+                ]
+
+                if approval_notes is not None:
+                    set_parts.append("approval_notes = %s")
+                    params.append(approval_notes)
+
+                if rejection_reason is not None:
+                    set_parts.append("rejection_reason = %s")
+                    params.append(rejection_reason)
+
+                if clearance_state is not None:
+                    set_parts.append("clearance_state = %s")
+                    params.append(clearance_state.value)
+
+                if cleared_at is not None:
+                    set_parts.append("cleared_at = %s")
+                    params.append(cleared_at)
+
+                if cleared_by is not None:
+                    set_parts.append("cleared_by = %s")
+                    params.append(cleared_by)
+
+                if made_public_at is not None:
+                    set_parts.append("made_public_at = %s")
+                    params.append(made_public_at)
+
+                if made_public_by is not None:
+                    set_parts.append("made_public_by = %s")
+                    params.append(made_public_by)
+
+                # Add asset_id to params
+                params.append(asset_id)
+
+                query = sql.SQL("""
+                    UPDATE {}.{}
+                    SET {}
+                    WHERE asset_id = %s AND deleted_at IS NULL
+                """).format(
+                    sql.Identifier(self.schema),
+                    sql.Identifier(self.table),
+                    sql.SQL(", ").join(sql.SQL(p) for p in set_parts)
+                )
+
+                cur.execute(query, params)
+                conn.commit()
+
+                updated = cur.rowcount > 0
+                if updated:
+                    logger.info(f"Updated approval state for {asset_id[:16]}... to {approval_state.value}")
+                return updated
+
+    def update_revocation(
+        self,
+        asset_id: str,
+        revoked_at: datetime,
+        revoked_by: str,
+        revocation_reason: str
+    ) -> bool:
+        """
+        Update asset with revocation (set approval_state=REVOKED).
+
+        V0.8.11 (08 FEB 2026): Added for approval consolidation.
+
+        Args:
+            asset_id: Asset to revoke
+            revoked_at: When revoked
+            revoked_by: Who revoked
+            revocation_reason: Why (required for audit)
+
+        Returns:
+            True if updated, False if asset not found
+        """
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL("""
+                        UPDATE {}.{}
+                        SET approval_state = %s,
+                            revoked_at = %s,
+                            revoked_by = %s,
+                            revocation_reason = %s,
+                            updated_at = NOW()
+                        WHERE asset_id = %s
+                          AND deleted_at IS NULL
+                          AND approval_state = %s
+                    """).format(
+                        sql.Identifier(self.schema),
+                        sql.Identifier(self.table)
+                    ),
+                    (
+                        ApprovalState.REVOKED.value,
+                        revoked_at,
+                        revoked_by,
+                        revocation_reason,
+                        asset_id,
+                        ApprovalState.APPROVED.value  # Can only revoke if currently approved
+                    )
+                )
+                conn.commit()
+
+                updated = cur.rowcount > 0
+                if updated:
+                    logger.warning(f"AUDIT: Asset {asset_id[:16]}... REVOKED by {revoked_by}")
+                return updated
+
+    def update_adf_run_id(self, asset_id: str, adf_run_id: str) -> bool:
+        """
+        Update asset with ADF pipeline run ID.
+
+        V0.8.11 (08 FEB 2026): Added for approval consolidation.
+
+        Args:
+            asset_id: Asset to update
+            adf_run_id: ADF pipeline run ID
+
+        Returns:
+            True if updated, False if asset not found
+        """
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL("""
+                        UPDATE {}.{}
+                        SET adf_run_id = %s, updated_at = NOW()
+                        WHERE asset_id = %s AND deleted_at IS NULL
+                    """).format(
+                        sql.Identifier(self.schema),
+                        sql.Identifier(self.table)
+                    ),
+                    (adf_run_id, asset_id)
+                )
+                conn.commit()
+                return cur.rowcount > 0
+
+    def count_by_approval_state(self) -> Dict[str, int]:
+        """
+        Get counts of assets grouped by approval_state.
+
+        V0.8.11 (08 FEB 2026): Added for approval consolidation.
+
+        Returns:
+            Dict like {'pending_review': 5, 'approved': 100, 'rejected': 2, 'revoked': 1}
+        """
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL("""
+                        SELECT approval_state, COUNT(*) as count
+                        FROM {}.{}
+                        WHERE deleted_at IS NULL
+                        GROUP BY approval_state
+                    """).format(
+                        sql.Identifier(self.schema),
+                        sql.Identifier(self.table)
+                    )
+                )
+                rows = cur.fetchall()
+
+                # Initialize all states with 0
+                counts = {state.value: 0 for state in ApprovalState}
+
+                # Update with actual counts
+                for row in rows:
+                    if row['approval_state'] in counts:
+                        counts[row['approval_state']] = row['count']
+
+                return counts
+
 
 # Module exports
 __all__ = ['GeospatialAssetRepository']

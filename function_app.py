@@ -515,6 +515,13 @@ else:
         _app_mode.mode.value
     )
 
+# Asset Approvals blueprint - Asset-centric approval endpoints (V0.8.11 - 08 FEB 2026)
+# GeospatialAsset is Aggregate Root - approvals on /api/assets/{id}/approve|reject|revoke
+if _app_mode.has_platform_endpoints:
+    from triggers.assets import asset_approvals_bp
+    app.register_functions(asset_approvals_bp)
+    logger.info("✅ Asset Approvals blueprint registered (APP_MODE=%s)", _app_mode.mode.value)
+
 
 # NOTE: /api/health served by triggers/admin/admin_system.py (comprehensive, 20 plugin checks)
 # NOTE: /api/system/stats moved to triggers/admin/admin_system.py blueprint (12 JAN 2026)

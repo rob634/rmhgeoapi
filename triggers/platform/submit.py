@@ -386,13 +386,16 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
             raise RuntimeError("Failed to create CoreMachine job")
 
         # Store thin tracking record (request_id → job_id)
+        # V0.8.11: Include asset_id and platform_id FKs (08 FEB 2026)
         api_request = ApiRequest(
             request_id=request_id,
             dataset_id=platform_req.dataset_id,
             resource_id=platform_req.resource_id,
             version_id=platform_req.version_id,
             job_id=job_id,
-            data_type=platform_req.data_type.value
+            data_type=platform_req.data_type.value,
+            asset_id=job_params.get('asset_id'),  # FK to GeospatialAsset
+            platform_id="ddh"  # FK to Platform registry
         )
         platform_repo.create_request(api_request)
 
@@ -501,13 +504,16 @@ def platform_raster_submit(req: func.HttpRequest) -> func.HttpResponse:
             raise RuntimeError("Failed to create CoreMachine job")
 
         # Store tracking record
+        # V0.8.11: Include asset_id and platform_id FKs (08 FEB 2026)
         api_request = ApiRequest(
             request_id=request_id,
             dataset_id=platform_req.dataset_id,
             resource_id=platform_req.resource_id,
             version_id=platform_req.version_id,
             job_id=job_id,
-            data_type='raster'
+            data_type='raster',
+            asset_id=job_params.get('asset_id'),  # FK to GeospatialAsset
+            platform_id="ddh"  # FK to Platform registry
         )
         platform_repo.create_request(api_request)
 
@@ -602,13 +608,16 @@ def platform_raster_collection_submit(req: func.HttpRequest) -> func.HttpRespons
             raise RuntimeError("Failed to create CoreMachine job")
 
         # Store tracking record
+        # V0.8.11: Include asset_id and platform_id FKs (08 FEB 2026)
         api_request = ApiRequest(
             request_id=request_id,
             dataset_id=platform_req.dataset_id,
             resource_id=platform_req.resource_id,
             version_id=platform_req.version_id,
             job_id=job_id,
-            data_type='raster'
+            data_type='raster',
+            asset_id=job_params.get('asset_id'),  # FK to GeospatialAsset
+            platform_id="ddh"  # FK to Platform registry
         )
         platform_repo.create_request(api_request)
 

@@ -84,6 +84,13 @@ class JobRecord(JobData):
         max_length=50,
         description="FK to platforms - identifies B2B platform that submitted"
     )
+    # V0.8.11: B2B request tracking (08 FEB 2026)
+    # Links job to the B2B request that triggered it (for callback routing)
+    request_id: Optional[str] = Field(
+        default=None,
+        max_length=64,
+        description="B2B request ID that triggered this job (for callback routing)"
+    )
 
     # Data fields (Database-specific)
     stage_results: Dict[str, Any] = Field(default_factory=dict, description="Results from completed stages")

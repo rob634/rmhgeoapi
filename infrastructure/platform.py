@@ -108,10 +108,11 @@ class ApiRequestRepository(PostgreSQLRepository):
 
             if is_retry:
                 # Retry mode: UPSERT with retry_count increment (01 JAN 2026)
+                # V0.8.11: Added asset_id, platform_id columns (08 FEB 2026)
                 query = sql.SQL("""
                     INSERT INTO {}.{}
-                    (request_id, dataset_id, resource_id, version_id, job_id, data_type, retry_count, created_at, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, 1, %s, %s)
+                    (request_id, dataset_id, resource_id, version_id, job_id, data_type, asset_id, platform_id, retry_count, created_at, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 1, %s, %s)
                     ON CONFLICT (request_id) DO UPDATE SET
                         retry_count = {}.{}.retry_count + 1,
                         updated_at = EXCLUDED.updated_at
@@ -124,10 +125,11 @@ class ApiRequestRepository(PostgreSQLRepository):
                 )
             else:
                 # Normal mode: INSERT only, no update on conflict
+                # V0.8.11: Added asset_id, platform_id columns (08 FEB 2026)
                 query = sql.SQL("""
                     INSERT INTO {}.{}
-                    (request_id, dataset_id, resource_id, version_id, job_id, data_type, retry_count, created_at, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, 0, %s, %s)
+                    (request_id, dataset_id, resource_id, version_id, job_id, data_type, asset_id, platform_id, retry_count, created_at, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 0, %s, %s)
                     ON CONFLICT (request_id) DO NOTHING
                     RETURNING *
                 """).format(
@@ -135,6 +137,7 @@ class ApiRequestRepository(PostgreSQLRepository):
                     sql.Identifier("api_requests")
                 )
 
+            # V0.8.11: Added asset_id, platform_id (08 FEB 2026)
             params = (
                 request.request_id,
                 request.dataset_id,
@@ -142,6 +145,8 @@ class ApiRequestRepository(PostgreSQLRepository):
                 request.version_id,
                 request.job_id,
                 request.data_type,
+                request.asset_id,  # FK to GeospatialAsset
+                request.platform_id,  # FK to Platform
                 request.created_at or now,
                 now  # updated_at
             )
@@ -299,6 +304,7 @@ class ApiRequestRepository(PostgreSQLRepository):
         Returns:
             ApiRequest Pydantic model
         """
+        # V0.8.11: Include asset_id and platform_id (08 FEB 2026)
         return ApiRequest(
             request_id=row['request_id'],
             dataset_id=row['dataset_id'],
@@ -306,6 +312,8 @@ class ApiRequestRepository(PostgreSQLRepository):
             version_id=row['version_id'],
             job_id=row['job_id'],
             data_type=row['data_type'],
+            asset_id=row.get('asset_id'),  # FK to GeospatialAsset
+            platform_id=row.get('platform_id'),  # FK to Platform
             retry_count=row.get('retry_count', 0),
             created_at=row.get('created_at'),
             updated_at=row.get('updated_at')

@@ -1488,19 +1488,22 @@ class PostgreSQLJobRepository(PostgreSQLRepository, IJobRepository):
             True if created, False if already exists
         """
         with self._error_context("job creation", job.job_id):
+            # V0.8.11: Added asset_id, platform_id, request_id columns (08 FEB 2026)
             query = sql.SQL("""
                 INSERT INTO {}.{} (
                     job_id, job_type, status, stage, total_stages,
                     parameters, stage_results, metadata, result_data, error_details,
+                    asset_id, platform_id, request_id,
                     created_at, updated_at
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 ) ON CONFLICT (job_id) DO NOTHING
             """).format(
                 sql.Identifier(self.schema_name),
                 sql.Identifier("jobs")
             )
-            
+
+            # V0.8.11: Include FK linkage fields (08 FEB 2026)
             params = (
                 job.job_id,
                 job.job_type,
@@ -1512,6 +1515,9 @@ class PostgreSQLJobRepository(PostgreSQLRepository, IJobRepository):
                 json.dumps(job.metadata if hasattr(job, 'metadata') else {}),
                 json.dumps(job.result_data) if job.result_data else None,
                 job.error_details,
+                job.asset_id,  # FK to GeospatialAsset
+                job.platform_id,  # FK to Platform
+                job.request_id,  # B2B request tracking
                 job.created_at or datetime.now(timezone.utc),
                 job.updated_at or datetime.now(timezone.utc)
             )
@@ -1541,9 +1547,11 @@ class PostgreSQLJobRepository(PostgreSQLRepository, IJobRepository):
             JobRecord if found, None otherwise
         """
         with self._error_context("job retrieval", job_id):
+            # V0.8.11: Added asset_id, platform_id, request_id columns (08 FEB 2026)
             query = sql.SQL("""
                 SELECT job_id, job_type, status, stage, total_stages,
                        parameters, stage_results, result_data, error_details,
+                       asset_id, platform_id, request_id,
                        created_at, updated_at
                 FROM {}.{}
                 WHERE job_id = %s
@@ -1551,15 +1559,16 @@ class PostgreSQLJobRepository(PostgreSQLRepository, IJobRepository):
                 sql.Identifier(self.schema_name),
                 sql.Identifier("jobs")
             )
-            
+
             row = self._execute_query(query, (job_id,), fetch='one')
-            
+
             if not row:
                 logger.debug(f"📋 Job not found: {job_id[:16]}...")
                 return None
-            
+
             # Convert row to JobRecord with explicit JSONB parsing (28 NOV 2025)
             # Uses _parse_jsonb_column helper for error handling instead of silent fallbacks
+            # V0.8.11: Include FK linkage fields (08 FEB 2026)
             job_data = {
                 'job_id': row['job_id'],
                 'job_type': row['job_type'],
@@ -1570,6 +1579,9 @@ class PostgreSQLJobRepository(PostgreSQLRepository, IJobRepository):
                 'stage_results': _parse_jsonb_column(row['stage_results'], 'stage_results', job_id, default={}),
                 'result_data': _parse_jsonb_column(row['result_data'], 'result_data', job_id, default=None),
                 'error_details': row['error_details'],
+                'asset_id': row.get('asset_id'),  # FK to GeospatialAsset
+                'platform_id': row.get('platform_id'),  # FK to Platform
+                'request_id': row.get('request_id'),  # B2B request tracking
                 'created_at': row['created_at'],
                 'updated_at': row['updated_at']
             }
@@ -1653,10 +1665,12 @@ class PostgreSQLJobRepository(PostgreSQLRepository, IJobRepository):
             List of JobRecords
         """
         with self._error_context("job listing"):
+            # V0.8.11: Added asset_id, platform_id, request_id columns (08 FEB 2026)
             if status_filter:
                 query = sql.SQL("""
                     SELECT job_id, job_type, status, stage, total_stages,
                            parameters, stage_results, result_data, error_details,
+                           asset_id, platform_id, request_id,
                            created_at, updated_at
                     FROM {}.{}
                     WHERE status = %s
@@ -1670,6 +1684,7 @@ class PostgreSQLJobRepository(PostgreSQLRepository, IJobRepository):
                 query = sql.SQL("""
                     SELECT job_id, job_type, status, stage, total_stages,
                            parameters, stage_results, result_data, error_details,
+                           asset_id, platform_id, request_id,
                            created_at, updated_at
                     FROM {}.{}
                     ORDER BY created_at DESC
@@ -1678,12 +1693,13 @@ class PostgreSQLJobRepository(PostgreSQLRepository, IJobRepository):
                     sql.Identifier("jobs")
                 )
                 params = None
-            
+
             rows = self._execute_query(query, params, fetch='all')
-            
+
             jobs = []
             for row in rows:
                 # Use _parse_jsonb_column helper for error handling (28 NOV 2025)
+                # V0.8.11: Include FK linkage fields (08 FEB 2026)
                 job_id = row['job_id']
                 job_data = {
                     'job_id': job_id,
@@ -1695,6 +1711,9 @@ class PostgreSQLJobRepository(PostgreSQLRepository, IJobRepository):
                     'stage_results': _parse_jsonb_column(row['stage_results'], 'stage_results', job_id, default={}),
                     'result_data': _parse_jsonb_column(row['result_data'], 'result_data', job_id, default=None),
                     'error_details': row['error_details'],
+                    'asset_id': row.get('asset_id'),  # FK to GeospatialAsset
+                    'platform_id': row.get('platform_id'),  # FK to Platform
+                    'request_id': row.get('request_id'),  # B2B request tracking
                     'created_at': row['created_at'],
                     'updated_at': row['updated_at']
                 }

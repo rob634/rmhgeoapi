@@ -63,7 +63,10 @@ class VectorViewerInterface(BaseInterface):
         if not collection_id:
             return self._error_page("Missing required parameter: collection")
 
-        logger.info(f"Vector Viewer request: collection={collection_id}, embed={self.embed_mode}")
+        # Optional asset_id for approve/reject workflow (09 FEB 2026)
+        asset_id = request.params.get('asset_id')
+
+        logger.info(f"Vector Viewer request: collection={collection_id}, embed={self.embed_mode}, asset_id={asset_id}")
 
         # Get host URL from request for absolute API paths
         host_url = None
@@ -79,7 +82,8 @@ class VectorViewerInterface(BaseInterface):
             html = service.generate_viewer_html(
                 collection_id=collection_id,
                 host_url=host_url,
-                embed_mode=self.embed_mode
+                embed_mode=self.embed_mode,
+                asset_id=asset_id
             )
 
             logger.info(f"Generated viewer for {collection_id} ({len(html)} bytes)")

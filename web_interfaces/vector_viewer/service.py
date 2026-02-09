@@ -34,7 +34,13 @@ class VectorViewerService:
         self.ogc_api_base_url = ogc_api_base_url or "/api/features"
         logger.info(f"VectorViewerService initialized with base URL: {self.ogc_api_base_url}")
 
-    def generate_viewer_html(self, collection_id: str, host_url: Optional[str] = None, embed_mode: bool = False) -> str:
+    def generate_viewer_html(
+        self,
+        collection_id: str,
+        host_url: Optional[str] = None,
+        embed_mode: bool = False,
+        asset_id: Optional[str] = None
+    ) -> str:
         """
         Generate HTML viewer page for a vector collection.
 
@@ -42,6 +48,7 @@ class VectorViewerService:
             collection_id: OGC Features collection ID (PostGIS table name)
             host_url: Optional host URL for absolute API paths
             embed_mode: If True, hide navbar for iframe embedding (07 FEB 2026)
+            asset_id: GeospatialAsset ID for approve/reject workflow (09 FEB 2026)
 
         Returns:
             Complete HTML page as string
@@ -53,13 +60,13 @@ class VectorViewerService:
         if not collection_id:
             raise ValueError("collection_id is required")
 
-        logger.info(f"Generating viewer for collection={collection_id}, embed={embed_mode}")
+        logger.info(f"Generating viewer for collection={collection_id}, embed={embed_mode}, asset_id={asset_id}")
 
         # Fetch collection metadata
         collection_data = self._fetch_collection_metadata(collection_id, host_url)
 
         # Generate HTML with embedded data
-        html = self._generate_html_template(collection_data, collection_id, host_url, embed_mode)
+        html = self._generate_html_template(collection_data, collection_id, host_url, embed_mode, asset_id)
 
         logger.info(f"Generated HTML viewer ({len(html)} bytes)")
         return html
@@ -94,7 +101,14 @@ class VectorViewerService:
             logger.error(f"Failed to fetch collection metadata: {e}")
             raise
 
-    def _generate_html_template(self, collection_data: Dict[str, Any], collection_id: str, host_url: Optional[str] = None, embed_mode: bool = False) -> str:
+    def _generate_html_template(
+        self,
+        collection_data: Dict[str, Any],
+        collection_id: str,
+        host_url: Optional[str] = None,
+        embed_mode: bool = False,
+        asset_id: Optional[str] = None
+    ) -> str:
         """
         Generate HTML template with embedded collection data.
 
@@ -103,6 +117,7 @@ class VectorViewerService:
             collection_id: Collection ID for display
             host_url: Optional host URL for API calls
             embed_mode: If True, hide navbar for iframe embedding (07 FEB 2026)
+            asset_id: GeospatialAsset ID for approve/reject (09 FEB 2026)
 
         Returns:
             Complete HTML page
@@ -897,6 +912,7 @@ class VectorViewerService:
         const STYLES_URL = '{styles_url}';
         const BBOX = {json.dumps(bbox)};
         const TOTAL_FEATURES = null; // Will be fetched
+        const ASSET_ID = {json.dumps(asset_id)};  // For approve/reject workflow (09 FEB 2026)
 
         // State
         let featureLayer = null;
@@ -1143,19 +1159,99 @@ class VectorViewerService:
             setStatus('Style feature coming soon...');
         }}
 
-        // QA Handlers
-        function handleApprove() {{
+        // QA Handlers (09 FEB 2026: Wired to platform/approve and platform/reject)
+        async function handleApprove() {{
+            if (!ASSET_ID) {{
+                setStatus('⚠️ No asset_id - cannot approve', 'error');
+                return;
+            }}
+
             const notes = document.getElementById('qa-notes').value;
-            console.log('APPROVE:', COLLECTION_ID, notes);
-            setStatus('✓ Approved! (Feature coming soon...)', 'success');
-            setTimeout(() => setStatus('Ready'), 3000);
+            const reviewer = prompt('Enter your email address for approval record:');
+            if (!reviewer) {{
+                setStatus('Approval cancelled - reviewer required', 'error');
+                return;
+            }}
+
+            // Ask for clearance level
+            const clearance = confirm('Approve as PUBLIC (OK) or OUO (Cancel)?') ? 'public' : 'ouo';
+
+            setStatus('Submitting approval...', 'info');
+
+            try {{
+                const response = await fetch('/api/platform/approve', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{
+                        asset_id: ASSET_ID,
+                        reviewer: reviewer,
+                        clearance_level: clearance,
+                        notes: notes || undefined
+                    }})
+                }});
+
+                const result = await response.json();
+
+                if (response.ok && result.success) {{
+                    setStatus(`✓ Approved as ${{clearance.toUpperCase()}}!`, 'success');
+                    // Disable buttons after approval
+                    document.querySelector('.btn-approve').disabled = true;
+                    document.querySelector('.btn-reject').disabled = true;
+                }} else {{
+                    setStatus(`✗ Approval failed: ${{result.error || 'Unknown error'}}`, 'error');
+                }}
+            }} catch (error) {{
+                console.error('Approval error:', error);
+                setStatus(`✗ Approval failed: ${{error.message}}`, 'error');
+            }}
         }}
 
-        function handleReject() {{
+        async function handleReject() {{
+            if (!ASSET_ID) {{
+                setStatus('⚠️ No asset_id - cannot reject', 'error');
+                return;
+            }}
+
             const notes = document.getElementById('qa-notes').value;
-            console.log('REJECT:', COLLECTION_ID, notes);
-            setStatus('✗ Rejected! (Feature coming soon...)', 'error');
-            setTimeout(() => setStatus('Ready'), 3000);
+            if (!notes.trim()) {{
+                setStatus('⚠️ Rejection requires notes explaining why', 'error');
+                document.getElementById('qa-notes').focus();
+                return;
+            }}
+
+            const reviewer = prompt('Enter your email address for rejection record:');
+            if (!reviewer) {{
+                setStatus('Rejection cancelled - reviewer required', 'error');
+                return;
+            }}
+
+            setStatus('Submitting rejection...', 'info');
+
+            try {{
+                const response = await fetch('/api/platform/reject', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{
+                        asset_id: ASSET_ID,
+                        reviewer: reviewer,
+                        notes: notes
+                    }})
+                }});
+
+                const result = await response.json();
+
+                if (response.ok && result.success) {{
+                    setStatus('✗ Rejected - feedback sent to submitter', 'success');
+                    // Disable buttons after rejection
+                    document.querySelector('.btn-approve').disabled = true;
+                    document.querySelector('.btn-reject').disabled = true;
+                }} else {{
+                    setStatus(`✗ Rejection failed: ${{result.error || 'Unknown error'}}`, 'error');
+                }}
+            }} catch (error) {{
+                console.error('Rejection error:', error);
+                setStatus(`✗ Rejection failed: ${{error.message}}`, 'error');
+            }}
         }}
 
         // Initialize

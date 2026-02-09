@@ -52,6 +52,7 @@ class RasterViewerInterface(BaseInterface):
             search_id: Optional PgSTAC search ID for mosaic view
             approval_id: Optional approval ID for QA workflow (shows approve/reject)
             item_id: Optional STAC item ID (alternative to approval_id)
+            asset_id: Optional GeospatialAsset ID for approval workflow (09 FEB 2026)
 
         Args:
             request: Azure Functions HTTP request
@@ -64,19 +65,21 @@ class RasterViewerInterface(BaseInterface):
         search_id = request.params.get('search_id', '')
         approval_id = request.params.get('approval_id', '')
         item_id = request.params.get('item_id', '')
+        asset_id = request.params.get('asset_id', '')  # V0.8.13: GeospatialAsset ID
 
-        return self._generate_full_page(cog_url, search_id, approval_id, item_id)
+        return self._generate_full_page(cog_url, search_id, approval_id, item_id, asset_id)
 
     def _generate_full_page(self, initial_url: str = '', initial_search_id: str = '',
-                            approval_id: str = '', item_id: str = '') -> str:
+                            approval_id: str = '', item_id: str = '', asset_id: str = '') -> str:
         """Generate complete HTML document with Leaflet map and controls."""
         titiler_url = os.getenv('TITILER_BASE_URL', 'https://titiler.xyz')
 
-        # QA context for approval workflow
+        # QA context for approval workflow (V0.8.13: added asset_id - 09 FEB 2026)
         qa_context = {
             'approval_id': approval_id,
             'item_id': item_id,
-            'show_qa': bool(approval_id or item_id)
+            'asset_id': asset_id,
+            'show_qa': bool(approval_id or item_id or asset_id)
         }
 
         return f"""<!DOCTYPE html>
@@ -231,31 +234,53 @@ class RasterViewerInterface(BaseInterface):
         <div id="qa-section" class="qa-section" style="display: none;">
             <div class="section-header">Data Curator QA</div>
 
-            <!-- Reviewer Email (Required) -->
-            <div class="qa-field">
-                <label for="qa-reviewer">Reviewer Email <span class="required">*</span></label>
-                <input type="email" class="qa-input" id="qa-reviewer" placeholder="your.email@worldbank.org" required>
+            <!-- Approval Status Display -->
+            <div id="qa-status-display" class="qa-status-display" style="display: none;">
+                <div id="qa-status-badge" class="qa-status-badge"></div>
+                <div id="qa-status-info" class="qa-status-info"></div>
             </div>
 
-            <!-- Clearance Level (Required for Approve) -->
-            <div class="qa-field">
-                <label for="qa-clearance">Clearance Level <span class="required">*</span></label>
-                <select class="qa-input" id="qa-clearance">
-                    <option value="ouo" selected>OUO - Official Use Only</option>
-                    <option value="public">Public - External Access</option>
-                </select>
+            <!-- Pending Approval Form (shown when not yet approved) -->
+            <div id="qa-pending-form" style="display: none;">
+                <!-- Reviewer Email (Required) -->
+                <div class="qa-field">
+                    <label for="qa-reviewer">Reviewer Email <span class="required">*</span></label>
+                    <input type="email" class="qa-input" id="qa-reviewer" placeholder="your.email@worldbank.org" required>
+                </div>
+
+                <!-- Clearance Level (Required for Approve) -->
+                <div class="qa-field">
+                    <label for="qa-clearance">Clearance Level <span class="required">*</span></label>
+                    <select class="qa-input" id="qa-clearance">
+                        <option value="ouo" selected>OUO - Official Use Only</option>
+                        <option value="public">Public - External Access</option>
+                    </select>
+                </div>
+
+                <!-- Notes / Reason -->
+                <div class="qa-field">
+                    <label for="qa-notes">Notes <span id="notes-required" class="required" style="display:none;">*</span></label>
+                    <textarea class="qa-input" id="qa-notes" placeholder="QA notes (required for rejection)..." rows="2"></textarea>
+                </div>
+
+                <div class="qa-buttons">
+                    <button class="approve-button" onclick="handleApprove()">Approve</button>
+                    <button class="reject-button" onclick="handleReject()">Reject</button>
+                </div>
             </div>
 
-            <!-- Notes / Reason -->
-            <div class="qa-field">
-                <label for="qa-notes">Notes <span id="notes-required" class="required" style="display:none;">*</span></label>
-                <textarea class="qa-input" id="qa-notes" placeholder="QA notes (required for rejection)..." rows="2"></textarea>
+            <!-- Revoke Section (shown when already approved) -->
+            <div id="qa-revoke-form" style="display: none;">
+                <div class="qa-revoke-warning">
+                    This asset has been approved. Revoking will remove it from publication.
+                </div>
+                <div class="qa-buttons">
+                    <button class="revoke-button" onclick="handleRevoke()">Revoke Approval</button>
+                </div>
             </div>
 
-            <div class="qa-buttons">
-                <button class="approve-button" onclick="handleApprove()">Approve</button>
-                <button class="reject-button" onclick="handleReject()">Reject</button>
-            </div>
+            <!-- Loading state -->
+            <div id="qa-loading" class="qa-loading">Checking approval status...</div>
         </div>
     </div>
 
@@ -601,9 +626,79 @@ class RasterViewerInterface(BaseInterface):
 
         .reject-button:hover { background: #e53e3e; }
 
-        .approve-button:disabled, .reject-button:disabled {
+        .approve-button:disabled, .reject-button:disabled, .revoke-button:disabled {
             opacity: 0.6;
             cursor: not-allowed;
+        }
+
+        .revoke-button {
+            flex: 1;
+            padding: 10px;
+            border: 2px solid #c53030;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 13px;
+            background: #fff5f5;
+            color: #c53030;
+        }
+
+        .revoke-button:hover {
+            background: #c53030;
+            color: white;
+        }
+
+        .qa-revoke-warning {
+            background: #fff5f5;
+            border: 1px solid #feb2b2;
+            border-radius: 4px;
+            padding: 10px;
+            margin-bottom: 12px;
+            font-size: 12px;
+            color: #c53030;
+        }
+
+        .qa-status-display {
+            margin-bottom: 12px;
+            padding: 10px;
+            background: #f7fafc;
+            border-radius: 4px;
+        }
+
+        .qa-status-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+
+        .qa-status-badge.approved {
+            background: #c6f6d5;
+            color: #276749;
+        }
+
+        .qa-status-badge.rejected {
+            background: #fed7d7;
+            color: #c53030;
+        }
+
+        .qa-status-badge.pending {
+            background: #feebc8;
+            color: #c05621;
+        }
+
+        .qa-status-info {
+            font-size: 11px;
+            color: #718096;
+        }
+
+        .qa-loading {
+            text-align: center;
+            padding: 20px;
+            color: #718096;
+            font-style: italic;
         }
 
         /* Buttons */
@@ -754,10 +849,11 @@ class RasterViewerInterface(BaseInterface):
         const TITILER_URL = '{titiler_url}';
         const API_BASE = window.location.origin;
 
-        // QA Context for approval workflow (02 FEB 2026)
+        // QA Context for approval workflow (02 FEB 2026, updated 09 FEB 2026)
         const QA_CONTEXT = {{
             approval_id: '{qa_context.get("approval_id", "")}',
             item_id: '{qa_context.get("item_id", "")}',
+            asset_id: '{qa_context.get("asset_id", "")}',
             show_qa: {'true' if qa_context.get("show_qa") else 'false'}
         }};
 
@@ -879,7 +975,10 @@ class RasterViewerInterface(BaseInterface):
                 document.getElementById('cog-info-section').style.display = 'block';
                 document.getElementById('rescale-section').style.display = 'block';
                 document.getElementById('point-section').style.display = 'block';
-                document.getElementById('qa-section').style.display = 'block';
+                // Only show QA section if approval context provided
+                if (QA_CONTEXT.show_qa) {{
+                    document.getElementById('qa-section').style.display = 'block';
+                }}
                 // Keep band section hidden for mosaic (uses default rendering)
                 document.getElementById('band-section').style.display = 'none';
 
@@ -1004,7 +1103,10 @@ class RasterViewerInterface(BaseInterface):
                 document.getElementById('rescale-section').style.display = 'block';
                 document.getElementById('colormap-section').style.display = 'block';
                 document.getElementById('point-section').style.display = 'block';
-                document.getElementById('qa-section').style.display = 'block';
+                // Only show QA section if approval context provided
+                if (QA_CONTEXT.show_qa) {{
+                    document.getElementById('qa-section').style.display = 'block';
+                }}
 
                 // Add tile layer
                 updateTileLayer();
@@ -1420,10 +1522,10 @@ class RasterViewerInterface(BaseInterface):
                 return;
             }}
 
-            // Determine which ID to use
-            const approvalId = QA_CONTEXT.approval_id || QA_CONTEXT.item_id;
+            // Determine which ID to use (V0.8.13: asset_id takes priority - 09 FEB 2026)
+            const approvalId = QA_CONTEXT.asset_id || QA_CONTEXT.approval_id || QA_CONTEXT.item_id;
             if (!approvalId) {{
-                setStatus('Error: No approval_id or item_id provided', 'error');
+                setStatus('Error: No asset_id, approval_id, or item_id provided', 'error');
                 return;
             }}
 
@@ -1438,8 +1540,10 @@ class RasterViewerInterface(BaseInterface):
                     clearance_level: clearance,
                     notes: notes || 'Approved via Raster Viewer QA'
                 }};
-                // Use approval_id if provided, otherwise stac_item_id
-                if (QA_CONTEXT.approval_id) {{
+                // Use asset_id if provided (V0.8.13), then approval_id, then stac_item_id
+                if (QA_CONTEXT.asset_id) {{
+                    payload.asset_id = QA_CONTEXT.asset_id;
+                }} else if (QA_CONTEXT.approval_id) {{
                     payload.approval_id = QA_CONTEXT.approval_id;
                 }} else {{
                     payload.stac_item_id = QA_CONTEXT.item_id;
@@ -1499,10 +1603,10 @@ class RasterViewerInterface(BaseInterface):
                 return;
             }}
 
-            // Determine which ID to use
-            const approvalId = QA_CONTEXT.approval_id || QA_CONTEXT.item_id;
+            // Determine which ID to use (V0.8.13: asset_id takes priority - 09 FEB 2026)
+            const approvalId = QA_CONTEXT.asset_id || QA_CONTEXT.approval_id || QA_CONTEXT.item_id;
             if (!approvalId) {{
-                setStatus('Error: No approval_id or item_id provided', 'error');
+                setStatus('Error: No asset_id, approval_id, or item_id provided', 'error');
                 return;
             }}
 
@@ -1516,8 +1620,10 @@ class RasterViewerInterface(BaseInterface):
                     reviewer: reviewer,
                     reason: notes
                 }};
-                // Use approval_id if provided, otherwise stac_item_id
-                if (QA_CONTEXT.approval_id) {{
+                // Use asset_id if provided (V0.8.13), then approval_id, then stac_item_id
+                if (QA_CONTEXT.asset_id) {{
+                    payload.asset_id = QA_CONTEXT.asset_id;
+                }} else if (QA_CONTEXT.approval_id) {{
                     payload.approval_id = QA_CONTEXT.approval_id;
                 }} else {{
                     payload.stac_item_id = QA_CONTEXT.item_id;
@@ -1613,6 +1719,144 @@ class RasterViewerInterface(BaseInterface):
             }}
         }}
 
+        // Check approval status and show appropriate form (07 FEB 2026)
+        async function checkApprovalStatus() {{
+            const assetId = QA_CONTEXT.asset_id;
+            if (!assetId) {{
+                // No asset_id - show pending form by default
+                document.getElementById('qa-loading').style.display = 'none';
+                document.getElementById('qa-pending-form').style.display = 'block';
+                return;
+            }}
+
+            try {{
+                const response = await fetch(`${{API_BASE}}/api/assets/${{assetId}}/approval`);
+                const data = await response.json();
+
+                document.getElementById('qa-loading').style.display = 'none';
+
+                if (!data.success) {{
+                    // Asset not found or error - show pending form
+                    document.getElementById('qa-pending-form').style.display = 'block';
+                    return;
+                }}
+
+                const state = data.approval_state;
+                const statusDisplay = document.getElementById('qa-status-display');
+                const statusBadge = document.getElementById('qa-status-badge');
+                const statusInfo = document.getElementById('qa-status-info');
+
+                if (state === 'approved') {{
+                    // Show approved status and revoke option
+                    statusDisplay.style.display = 'block';
+                    statusBadge.className = 'qa-status-badge approved';
+                    statusBadge.textContent = 'APPROVED';
+
+                    let infoHtml = '';
+                    if (data.reviewer) infoHtml += `Reviewer: ${{data.reviewer}}<br>`;
+                    if (data.reviewed_at) infoHtml += `Approved: ${{new Date(data.reviewed_at).toLocaleString()}}<br>`;
+                    if (data.clearance_state) infoHtml += `Clearance: ${{data.clearance_state.toUpperCase()}}`;
+                    statusInfo.innerHTML = infoHtml;
+
+                    if (data.can_revoke) {{
+                        document.getElementById('qa-revoke-form').style.display = 'block';
+                    }}
+                }} else if (state === 'rejected') {{
+                    // Show rejected status
+                    statusDisplay.style.display = 'block';
+                    statusBadge.className = 'qa-status-badge rejected';
+                    statusBadge.textContent = 'REJECTED';
+
+                    let infoHtml = '';
+                    if (data.reviewer) infoHtml += `Reviewer: ${{data.reviewer}}<br>`;
+                    if (data.reviewed_at) infoHtml += `Rejected: ${{new Date(data.reviewed_at).toLocaleString()}}<br>`;
+                    if (data.rejection_reason) infoHtml += `Reason: ${{data.rejection_reason}}`;
+                    statusInfo.innerHTML = infoHtml;
+
+                    // Allow re-approval if permitted
+                    if (data.can_approve) {{
+                        document.getElementById('qa-pending-form').style.display = 'block';
+                    }}
+                }} else {{
+                    // Pending review or other state - show approval form
+                    if (state) {{
+                        statusDisplay.style.display = 'block';
+                        statusBadge.className = 'qa-status-badge pending';
+                        statusBadge.textContent = state.toUpperCase().replace('_', ' ');
+                        statusInfo.innerHTML = 'Awaiting curator review';
+                    }}
+
+                    if (data.can_approve || data.can_reject) {{
+                        document.getElementById('qa-pending-form').style.display = 'block';
+                    }}
+                }}
+
+            }} catch (error) {{
+                console.error('Error checking approval status:', error);
+                document.getElementById('qa-loading').style.display = 'none';
+                document.getElementById('qa-pending-form').style.display = 'block';
+            }}
+        }}
+
+        // Handle revoke action (07 FEB 2026)
+        async function handleRevoke() {{
+            const assetId = QA_CONTEXT.asset_id;
+            if (!assetId) {{
+                setStatus('Error: No asset_id provided for revoke', 'error');
+                return;
+            }}
+
+            // Confirm revoke action
+            if (!confirm('Are you sure you want to revoke approval for this asset? This will remove it from publication.')) {{
+                return;
+            }}
+
+            const revokeBtn = document.querySelector('.revoke-button');
+            revokeBtn.disabled = true;
+            setStatus('Revoking approval...', '');
+
+            try {{
+                // Prompt for revoker email
+                const revoker = prompt('Enter your email address to revoke:');
+                if (!revoker || !revoker.includes('@')) {{
+                    setStatus('Valid email required for audit trail', 'error');
+                    revokeBtn.disabled = false;
+                    return;
+                }}
+
+                const revokeReason = prompt('Enter reason for revocation:');
+                if (!revokeReason || !revokeReason.trim()) {{
+                    setStatus('Reason required for audit trail', 'error');
+                    revokeBtn.disabled = false;
+                    return;
+                }}
+
+                const response = await fetch(`${{API_BASE}}/api/assets/${{assetId}}/revoke`, {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{
+                        reason: revokeReason,
+                        revoker: revoker  // Endpoint expects 'revoker' not 'reviewer'
+                    }})
+                }});
+
+                const data = await response.json();
+
+                if (response.ok && data.success) {{
+                    setStatus('Approval revoked successfully', 'success');
+                    // Refresh the approval status display
+                    setTimeout(() => checkApprovalStatus(), 1000);
+                }} else {{
+                    setStatus(`Revoke failed: ${{data.error || 'Unknown error'}}`, 'error');
+                    revokeBtn.disabled = false;
+                }}
+
+            }} catch (error) {{
+                setStatus(`Revoke error: ${{error.message}}`, 'error');
+                revokeBtn.disabled = false;
+            }}
+        }}
+
         // Initialize on page load
         window.onload = function() {{
             initMap();
@@ -1621,6 +1865,8 @@ class RasterViewerInterface(BaseInterface):
             if (QA_CONTEXT.show_qa) {{
                 document.getElementById('qa-section').style.display = 'block';
                 console.log('QA mode enabled:', QA_CONTEXT);
+                // Check approval status to show appropriate buttons
+                checkApprovalStatus();
             }}
 
             // Check for item_id parameter first (STAC item mode - 08 FEB 2026)

@@ -4,7 +4,7 @@
 # STATUS: Trigger layer - Platform anti-corruption layer for external apps
 # PURPOSE: Centralized platform endpoints using Azure Functions Blueprint
 # CREATED: 23 JAN 2026
-# UPDATED: 27 JAN 2026 - Added handler re-exports after trigger_platform.py split
+# UPDATED: 09 FEB 2026 - Removed deprecated raster endpoint re-exports
 # EPIC: APP_CLEANUP - Phase 5 Platform Blueprint
 # ============================================================================
 """
@@ -16,7 +16,7 @@ job requests from outside apps to our core orchestration.
 
 Endpoints (17 total):
     Submit/Status:
-        POST /platform/submit - Submit request from DDH
+        POST /platform/submit - Submit request from DDH (unified endpoint)
         GET  /platform/status/{id} - Get request/job status
         GET  /platform/status - List all requests
 
@@ -42,6 +42,11 @@ Endpoints (17 total):
         GET  /platform/catalog/assets/{c}/{i} - Get assets
         GET  /platform/catalog/dataset/{id} - List items for dataset
 
+    Deprecated (return 410 Gone):
+        POST /platform/raster - Use /platform/submit instead
+        POST /platform/raster-collection - Use /platform/submit instead
+        POST /platform/vector - Use /platform/submit instead
+
 Usage in function_app.py:
     from triggers.platform import platform_bp
     if _app_mode.has_platform_endpoints:
@@ -50,28 +55,20 @@ Usage in function_app.py:
 Exports:
     platform_bp: Azure Functions Blueprint with all platform endpoints
 
-Handler Re-exports (27 JAN 2026):
+Handler Re-exports:
     platform_request_submit: Generic submit handler
-    platform_raster_submit: Single raster submit handler
-    platform_raster_collection_submit: Collection submit handler
     platform_unpublish: Consolidated unpublish handler
 """
 
 from .platform_bp import bp as platform_bp
 
-# Re-export handlers (27 JAN 2026 - after trigger_platform.py split)
-from .submit import (
-    platform_request_submit,
-    platform_raster_submit,
-    platform_raster_collection_submit,
-)
+# Re-export handlers (09 FEB 2026 - removed deprecated raster handlers)
+from .submit import platform_request_submit
 from .unpublish import platform_unpublish
 
 __all__ = [
     'platform_bp',
     # Handler re-exports
     'platform_request_submit',
-    'platform_raster_submit',
-    'platform_raster_collection_submit',
     'platform_unpublish',
 ]

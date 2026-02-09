@@ -145,7 +145,8 @@ class GeospatialAsset(BaseModel):
            (DAG Orchestration - prepares for rmhdagmaster Epoch 5)
     """
     model_config = ConfigDict(
-        use_enum_values=True,
+        # Note: Do NOT use use_enum_values=True - we need enums as objects
+        # for .value access in endpoints. Enum serialization handled in to_dict().
         extra='ignore',
         str_strip_whitespace=True,
         json_encoders={datetime: lambda v: v.isoformat() if v else None}

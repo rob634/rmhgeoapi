@@ -343,6 +343,34 @@ class GeospatialAssetRepository(PostgreSQLRepository):
                 row = cur.fetchone()
                 return self._row_to_model(row) if row else None
 
+    def list_by_stac_collection(self, stac_collection_id: str) -> List['GeospatialAsset']:
+        """
+        List all assets belonging to a STAC collection.
+
+        Used by approval status endpoint to check if any items in a collection
+        are approved (for delete protection).
+
+        Args:
+            stac_collection_id: STAC collection identifier
+
+        Returns:
+            List of GeospatialAsset objects in the collection
+        """
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL("""
+                        SELECT * FROM {}.{}
+                        WHERE stac_collection_id = %s AND deleted_at IS NULL
+                    """).format(
+                        sql.Identifier(self.schema),
+                        sql.Identifier(self.table)
+                    ),
+                    (stac_collection_id,)
+                )
+                rows = cur.fetchall()
+                return [self._row_to_model(row) for row in rows]
+
     def get_by_job_id(self, job_id: str) -> Optional[GeospatialAsset]:
         """
         Get an asset by current job ID.

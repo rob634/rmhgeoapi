@@ -205,11 +205,14 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
             }
 
             # V0.8: Fetch asset info if not already populated (29 JAN 2026)
+            # V0.8.12: Capture asset_id for approval URLs (09 FEB 2026)
+            resolved_asset_id = None
             if not asset_info:
                 try:
                     asset_repo = GeospatialAssetRepository()
                     asset = asset_repo.get_by_job_id(platform_request.job_id)
                     if asset:
+                        resolved_asset_id = asset.asset_id
                         result["asset"] = {
                             "asset_id": asset.asset_id,
                             "revision": asset.revision,
@@ -218,13 +221,17 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
                         }
                 except Exception:
                     pass  # Non-fatal - asset info is optional
+            else:
+                # Asset info was pre-populated (from lookup by asset_id)
+                resolved_asset_id = asset_info.get('asset_id') if isinstance(asset_info, dict) else None
 
             # Add data access URLs if job completed
             if job_status == "completed" and job_result:
                 result["data_access"] = _generate_data_access_urls(
                     platform_request,
                     job_type,
-                    job_result
+                    job_result,
+                    asset_id=resolved_asset_id
                 )
 
             return func.HttpResponse(
@@ -562,7 +569,8 @@ def _get_task_summary(
 def _generate_data_access_urls(
     platform_request,
     job_type: str,
-    job_result: Dict[str, Any]
+    job_result: Dict[str, Any],
+    asset_id: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Generate data access URLs for completed jobs.
@@ -573,6 +581,7 @@ def _generate_data_access_urls(
     - TiTiler: TITILER_BASE_URL (dedicated tile server)
     - Vector Viewer: ETL_APP_URL (admin/ETL app)
     - Approval UI: PLATFORM_URL/api/interface/* with embed mode (07 FEB 2026)
+    - Approve Action: POST endpoint for B2B apps to approve (09 FEB 2026)
 
     URL Configuration:
         PLATFORM_URL: Public URL for this app instance. Used for approval URLs
@@ -584,6 +593,7 @@ def _generate_data_access_urls(
         platform_request: ApiRequest record
         job_type: Type of CoreMachine job
         job_result: Job result data
+        asset_id: GeospatialAsset ID for approval workflow (09 FEB 2026)
 
     Returns:
         Dictionary with OGC Features, STAC, TiTiler, approval URLs as applicable
@@ -624,21 +634,53 @@ def _generate_data_access_urls(
                 'items': f"{tipg_base}/collections/{qualified_name}/items",
                 'viewer': f"{etl_app_base}/api/interface/vector?collection={table_name}"
             }
-            # Approval UI for B2B iframe embedding (07 FEB 2026)
+            # Approval UI for B2B iframe embedding (07 FEB 2026, updated 09 FEB 2026)
             # Uses platform_base (PLATFORM_URL) for B2B-accessible URLs
-            # Vector viewer at /api/interface/vector-viewer (consolidated 07 FEB 2026)
-            urls['approval'] = {
-                'viewer': f"{platform_base}/api/interface/vector-viewer?collection={table_name}",
+            # Vector viewer at /api/interface/vector-viewer with asset_id for approve/reject
+            # Native viewer uses OGC Features endpoint (TiPG /vector)
+            approval_urls = {
+                'viewer': f"{tipg_base}/collections/{qualified_name}",  # Native OGC Features
                 'embed': f"{platform_base}/api/interface/vector-viewer?collection={table_name}&embed=true"
             }
+            # Add asset_id to viewer URLs if available (enables approve/reject buttons)
+            if asset_id:
+                approval_urls['embed'] = f"{platform_base}/api/interface/vector-viewer?collection={table_name}&asset_id={asset_id}&embed=true"
+                approval_urls['approve'] = f"{platform_base}/api/platform/approve"
+                approval_urls['approve_asset_id'] = asset_id  # B2B knows what to POST
+            urls['approval'] = approval_urls
 
     # Raster job → STAC + TiTiler URLs + approval UI
     # Updated 07 FEB 2026: Added process_raster_docker (current active job type)
+    # Updated 09 FEB 2026: Handle nested result structure (cog.cog_blob, stac.item_id)
     elif job_type in ['process_raster_v2', 'process_large_raster_v2', 'process_raster_collection_v2',
                       'process_raster_docker', 'process_large_raster_docker', 'process_raster_collection_docker']:
         collection_id = job_result.get('collection_id')
-        cog_url = job_result.get('cog_url')
-        stac_item_id = job_result.get('stac_item_id')
+
+        # Extract COG URL - try nested structure first (current), then flat (legacy)
+        cog_url = None
+        cog_data = job_result.get('cog', {})
+        if isinstance(cog_data, dict):
+            # Current nested structure: job_result.cog.cog_blob
+            cog_blob = cog_data.get('cog_blob') or cog_data.get('cog_url')
+            if cog_blob:
+                cog_url = cog_blob
+        if not cog_url:
+            # Legacy flat structure or fallback
+            cog_url = job_result.get('cog_url') or job_result.get('cog_blob')
+
+        # Extract STAC item ID - try nested structure first, then flat
+        stac_item_id = None
+        stac_data = job_result.get('stac', {})
+        if isinstance(stac_data, dict):
+            # Current nested structure: job_result.stac.item_id
+            stac_item_id = stac_data.get('item_id') or stac_data.get('stac_item_id')
+        if not stac_item_id:
+            # Legacy flat structure
+            stac_item_id = job_result.get('stac_item_id') or job_result.get('item_id')
+
+        # Also get collection_id from nested if not at top level
+        if not collection_id and isinstance(stac_data, dict):
+            collection_id = stac_data.get('collection_id')
 
         if collection_id:
             urls['stac'] = {
@@ -654,19 +696,29 @@ def _generate_data_access_urls(
                 'tiles': f"{titiler_base}/cog/tiles/{{z}}/{{x}}/{{y}}?url={cog_url}"
             }
 
-            # Approval UI for B2B iframe embedding (07 FEB 2026)
+            # Approval UI for B2B iframe embedding (07 FEB 2026, updated 09 FEB 2026)
             # Uses platform_base (PLATFORM_URL) for B2B-accessible URLs
+            # Native viewer uses TiTiler /cog endpoint
             from urllib.parse import quote
             encoded_url = quote(cog_url, safe='')
-            urls['approval'] = {
-                'viewer': f"{platform_base}/api/interface/raster-viewer?url={encoded_url}",
+            approval_urls = {
+                'viewer': f"{titiler_base}/cog/viewer?url={encoded_url}",  # Native COG viewer
                 'embed': f"{platform_base}/api/interface/raster-viewer?url={encoded_url}&embed=true"
             }
+            # Add asset_id for approve/reject workflow
+            if asset_id:
+                approval_urls['embed'] = f"{platform_base}/api/interface/raster-viewer?url={encoded_url}&asset_id={asset_id}&embed=true"
+                approval_urls['approve'] = f"{platform_base}/api/platform/approve"
+                approval_urls['approve_asset_id'] = asset_id
 
             # If STAC item ID available, prefer that for approval workflow
             if stac_item_id:
-                urls['approval']['viewer'] = f"{platform_base}/api/interface/raster-viewer?item_id={stac_item_id}"
-                urls['approval']['embed'] = f"{platform_base}/api/interface/raster-viewer?item_id={stac_item_id}&embed=true"
+                approval_urls['viewer'] = f"{titiler_base}/stac/viewer?item_id={stac_item_id}"  # Native STAC viewer
+                approval_urls['embed'] = f"{platform_base}/api/interface/raster-viewer?item_id={stac_item_id}&embed=true"
+                if asset_id:
+                    approval_urls['embed'] = f"{platform_base}/api/interface/raster-viewer?item_id={stac_item_id}&asset_id={asset_id}&embed=true"
+
+            urls['approval'] = approval_urls
 
     return urls
 
@@ -1165,22 +1217,39 @@ async def platform_lineage(req: func.HttpRequest) -> func.HttpResponse:
             "duration_minutes": duration_minutes
         }
 
-        # Build outputs info
+        # Build outputs info (09 FEB 2026: handle nested structure for raster jobs)
         outputs = {}
-        if result_data.get('cog_url'):
+
+        # COG URL - try nested structure first, then flat
+        cog_data = result_data.get('cog', {})
+        if isinstance(cog_data, dict) and (cog_data.get('cog_blob') or cog_data.get('cog_url')):
+            outputs['cog_url'] = cog_data.get('cog_blob') or cog_data.get('cog_url')
+        elif result_data.get('cog_url'):
             outputs['cog_url'] = result_data['cog_url']
-        if result_data.get('collection_id'):
+
+        # STAC collection/item - try nested structure first, then flat
+        stac_data = result_data.get('stac', {})
+        if isinstance(stac_data, dict):
+            if stac_data.get('collection_id'):
+                outputs['stac_collection'] = stac_data['collection_id']
+            if stac_data.get('item_id'):
+                outputs['stac_item'] = stac_data['item_id']
+        if not outputs.get('stac_collection') and result_data.get('collection_id'):
             outputs['stac_collection'] = result_data['collection_id']
-        if result_data.get('stac_item_id'):
+        if not outputs.get('stac_item') and result_data.get('stac_item_id'):
             outputs['stac_item'] = result_data['stac_item_id']
+
+        # Vector outputs
         if result_data.get('table_name'):
             outputs['table_name'] = result_data['table_name']
             outputs['schema'] = 'geo'
 
-        # Generate data access URLs
+        # Generate data access URLs (V0.8.12: include asset_id for approval - 09 FEB 2026)
         data_access = {}
         if job_status == "completed":
-            data_access = _generate_data_access_urls(platform_request, job.job_type, result_data)
+            # Get asset_id from job record if available
+            lineage_asset_id = getattr(job, 'asset_id', None)
+            data_access = _generate_data_access_urls(platform_request, job.job_type, result_data, asset_id=lineage_asset_id)
 
         lineage = {
             "request_id": request_id,

@@ -992,6 +992,14 @@ class UnifiedSubmitInterface(BaseInterface):
                                            placeholder="e.g., v1.0">
                                 </div>
                             </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="previous_version_id">Previous Version (optional)</label>
+                                    <input type="text" id="previous_version_id" name="previous_version_id"
+                                           placeholder="e.g., v1.0 (for version updates)">
+                                    <span class="field-hint">Required when updating an existing dataset/resource</span>
+                                </div>
+                            </div>
                         </div>
 
                         <!-- STAC Configuration -->
@@ -2062,8 +2070,8 @@ class UnifiedSubmitInterface(BaseInterface):
             }});
 
             // Form input listeners
-            const formInputs = ['dataset_id', 'resource_id', 'version_id', 'title',
-                                'description', 'access_level', 'tags', 'collection_id',
+            const formInputs = ['dataset_id', 'resource_id', 'version_id', 'previous_version_id',
+                                'title', 'description', 'access_level', 'tags', 'collection_id',
                                 'raster_type', 'output_tier', 'input_crs',
                                 'lat_name', 'lon_name', 'wkt_column', 'overwrite'];
             formInputs.forEach(id => {{
@@ -2337,6 +2345,7 @@ class UnifiedSubmitInterface(BaseInterface):
             document.getElementById('dataset_id').value = '';
             document.getElementById('resource_id').value = '';
             document.getElementById('version_id').value = 'v1.0';
+            document.getElementById('previous_version_id').value = '';
             document.getElementById('collection_id').value = '';
             document.getElementById('title').value = '';
             document.getElementById('description').value = '';
@@ -2380,6 +2389,10 @@ class UnifiedSubmitInterface(BaseInterface):
                 container_name: containerName,
                 file_name: fileName
             }};
+
+            // Previous version (for lineage tracking)
+            const previousVersionId = document.getElementById('previous_version_id').value;
+            if (previousVersionId) payload.previous_version_id = previousVersionId;
 
             // Optional fields
             const title = document.getElementById('title').value;

@@ -411,7 +411,7 @@ class DocsInterface(BaseInterface):
                     <div class="step-number">0</div>
                     <div class="step-title">Validate</div>
                     <div class="step-desc">Pre-flight check</div>
-                    <div class="step-endpoint">POST /submit?dry_run=true</div>
+                    <div class="step-endpoint">POST /api/platform/validate</div>
                 </div>
                 <div class="workflow-step">
                     <div class="step-number">1</div>
@@ -423,19 +423,19 @@ class DocsInterface(BaseInterface):
                     <div class="step-number">2</div>
                     <div class="step-title">Poll</div>
                     <div class="step-desc">Monitor progress</div>
-                    <div class="step-endpoint">GET /status/{{request_id}}</div>
+                    <div class="step-endpoint">GET /api/platform/status/{{request_id}}</div>
                 </div>
                 <div class="workflow-step">
                     <div class="step-number">3</div>
                     <div class="step-title">Review</div>
                     <div class="step-desc">QA verification</div>
-                    <div class="step-endpoint">GET /api/approvals</div>
+                    <div class="step-endpoint">GET /api/platform/approvals</div>
                 </div>
                 <div class="workflow-step">
                     <div class="step-number">4</div>
                     <div class="step-title">Approve</div>
                     <div class="step-desc">Publish dataset</div>
-                    <div class="step-endpoint">POST /approve</div>
+                    <div class="step-endpoint">POST /api/platform/approve</div>
                 </div>
             </div>
         </div>
@@ -445,9 +445,9 @@ class DocsInterface(BaseInterface):
                 <h3><span class="icon">📤</span> Submission Endpoints</h3>
                 <p>Submit data for processing with automatic type detection</p>
                 <ul>
-                    <li><code>POST /api/platform/submit</code> - Generic submission</li>
-                    <li><code>POST /api/platform/submit?dry_run=true</code> - Validate only</li>
-                    <li><code>POST /api/platform/resubmit</code> - Resubmit after rejection</li>
+                    <li><code>POST /api/platform/validate</code> - Pre-flight validation</li>
+                    <li><code>POST /api/platform/submit</code> - Create processing job</li>
+                    <li><code>POST /api/platform/resubmit</code> - Resubmit after failure</li>
                 </ul>
             </div>
 
@@ -457,6 +457,7 @@ class DocsInterface(BaseInterface):
                 <ul>
                     <li><code>GET /api/platform/status/{{request_id}}</code> - Request status</li>
                     <li><code>GET /api/platform/status</code> - List all requests</li>
+                    <li><code>GET /api/platform/failures</code> - List failed requests</li>
                     <li><code>GET /api/platform/lineage/{{request_id}}</code> - Version history</li>
                     <li><code>GET /api/platform/health</code> - System health</li>
                 </ul>
@@ -466,10 +467,11 @@ class DocsInterface(BaseInterface):
                 <h3><span class="icon">✅</span> Approval Workflow</h3>
                 <p>QA review and publication control</p>
                 <ul>
-                    <li><code>GET /api/platform/approvals</code> - List by state</li>
+                    <li><code>GET /api/platform/approvals</code> - List pending reviews</li>
                     <li><code>POST /api/platform/approve</code> - Approve with clearance</li>
                     <li><code>POST /api/platform/reject</code> - Reject with reason</li>
                     <li><code>POST /api/platform/revoke</code> - Revoke approval</li>
+                    <li><code>POST /api/platform/unpublish</code> - Unpublish asset</li>
                 </ul>
             </div>
 
@@ -479,8 +481,8 @@ class DocsInterface(BaseInterface):
                 <ul>
                     <li><code>GET /api/platform/catalog/lookup</code> - Find by DDH IDs</li>
                     <li><code>GET /api/platform/catalog/item/{{c}}/{{i}}</code> - STAC item</li>
+                    <li><code>GET /api/platform/catalog/dataset/{{dataset_id}}</code> - Dataset info</li>
                     <li><code>GET /api/platform/catalog/assets/{{c}}/{{i}}</code> - Asset URLs</li>
-                    <li><code>GET /api/platforms</code> - Platform registry</li>
                 </ul>
             </div>
         </div>
@@ -497,8 +499,8 @@ class DocsInterface(BaseInterface):
                     <p>Track data versions with <code>previous_version_id</code>. The system maintains a complete version chain for audit and rollback capabilities.</p>
                 </div>
                 <div class="concept">
-                    <h4>Dry Run Validation</h4>
-                    <p>Use <code>?dry_run=true</code> on submit to validate requests without creating jobs. Returns <code>lineage_state</code> and <code>suggested_params</code>.</p>
+                    <h4>Pre-flight Validation</h4>
+                    <p>Use <code>POST /api/platform/validate</code> to validate requests without creating jobs. Returns <code>lineage_state</code> and <code>suggested_params</code>.</p>
                 </div>
                 <div class="concept">
                     <h4>Idempotent Request IDs</h4>

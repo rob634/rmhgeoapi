@@ -243,130 +243,46 @@ class AdminDbDataTrigger:
                 "jobs": [...],
                 "query_info": {...}
             }
+
+        V0.8.16 (09 FEB 2026): Refactored to use JobRepository.list_jobs_with_task_counts()
         """
         logger.info("📊 Querying jobs with filters")
 
         try:
-            # Parse query parameters - increased defaults for better usability
+            # Parse query parameters
             limit = self._validate_limit(req.params.get('limit'), default=25)
             hours_param = req.params.get('hours')
             # Support hours=0 or hours=all to disable time filter
             if hours_param in ('0', 'all', 'none'):
-                hours = None  # No time filter
+                hours = None
             else:
-                hours = self._validate_hours(hours_param, default=168, max_hours=720)  # Default 7 days, max 30 days
+                hours = self._validate_hours(hours_param, default=168, max_hours=720)
             status_filter = req.params.get('status')
             job_type_filter = req.params.get('job_type')
 
             app_schema = self.config.app_schema
-            logger.info(f"📊 Querying schema: {app_schema}, hours={hours}, limit={limit}")
+            logger.info(f"📊 Querying via repository: hours={hours}, limit={limit}")
 
-            # Build query with task_counts subquery for each job
-            # This aggregates task status counts per job
-            query_parts = [
-                f"""SELECT j.job_id, j.job_type, j.status::text, j.stage, j.total_stages,
-                       j.parameters, j.result_data, j.error_details, j.created_at, j.updated_at,
-                       COALESCE(tc.queued, 0) as task_queued,
-                       COALESCE(tc.processing, 0) as task_processing,
-                       COALESCE(tc.completed, 0) as task_completed,
-                       COALESCE(tc.failed, 0) as task_failed
-                FROM {app_schema}.jobs j
-                LEFT JOIN (
-                    SELECT parent_job_id,
-                           COUNT(*) FILTER (WHERE status::text = 'queued') as queued,
-                           COUNT(*) FILTER (WHERE status::text = 'processing') as processing,
-                           COUNT(*) FILTER (WHERE status::text = 'completed') as completed,
-                           COUNT(*) FILTER (WHERE status::text = 'failed') as failed
-                    FROM {app_schema}.tasks
-                    GROUP BY parent_job_id
-                ) tc ON j.job_id = tc.parent_job_id
-                WHERE 1=1"""
-            ]
+            # V0.8.16: Use centralized repository method instead of hardcoded SQL
+            from infrastructure import JobRepository
+            from core.models import JobStatus
 
-            params = []
+            job_repo = JobRepository()
 
-            # Only add time filter if hours is specified
-            if hours is not None:
-                query_parts.append(f"AND j.created_at >= NOW() - INTERVAL '{hours} hours'")
-
+            # Convert status string to JobStatus enum if provided
+            status_enum = None
             if status_filter:
-                query_parts.append("AND j.status::text = %s")
-                params.append(status_filter)
+                try:
+                    status_enum = JobStatus(status_filter)
+                except ValueError:
+                    pass  # Invalid status, will be ignored
 
-            if job_type_filter:
-                query_parts.append("AND j.job_type = %s")
-                params.append(job_type_filter)
-
-            query_parts.extend([
-                "ORDER BY j.created_at DESC",
-                f"LIMIT %s"
-            ])
-            params.append(limit)
-
-            query = " ".join(query_parts)
-
-            # Execute query
-            if not isinstance(self.db_repo, PostgreSQLRepository):
-                raise ValueError("Database repository is not PostgreSQL")
-
-            with self.db_repo._get_connection() as conn:
-                with conn.cursor() as cursor:
-                    # First, check if the jobs table exists
-                    # Note: Using try/except for robust dict/tuple access
-                    cursor.execute("""
-                        SELECT EXISTS (
-                            SELECT 1 FROM information_schema.tables
-                            WHERE table_schema = %s AND table_name = 'jobs'
-                        )
-                    """, (app_schema,))
-                    result = cursor.fetchone()
-                    # Handle both dict and tuple row types
-                    if result is None:
-                        table_exists = False
-                    elif hasattr(result, 'keys'):
-                        # Dict-like row
-                        table_exists = list(result.values())[0]
-                    else:
-                        # Tuple row
-                        table_exists = result[0]
-
-                    if not table_exists:
-                        logger.warning(f"⚠️ Jobs table not found in schema: {app_schema}")
-                        return func.HttpResponse(
-                            body=json.dumps({
-                                'error': 'Schema not deployed',
-                                'message': f"Table '{app_schema}.jobs' does not exist",
-                                'hint': 'Run POST /api/dbadmin/maintenance/full-rebuild?confirm=yes to deploy schema',
-                                'schema': app_schema,
-                                'timestamp': datetime.now(timezone.utc).isoformat()
-                            }),
-                            status_code=503,
-                            mimetype='application/json'
-                        )
-
-                    cursor.execute(query, tuple(params))
-                    rows = cursor.fetchall()
-
-                    jobs = []
-                    for row in rows:
-                        jobs.append({
-                            'job_id': row['job_id'],
-                            'job_type': row['job_type'],
-                            'status': row['status'],
-                            'stage': row['stage'],
-                            'total_stages': row['total_stages'],
-                            'parameters': row['parameters'],
-                            'result_data': row['result_data'],
-                            'error_details': row['error_details'],
-                            'created_at': row['created_at'].isoformat() if row['created_at'] else None,
-                            'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None,
-                            'task_counts': {
-                                'queued': row['task_queued'],
-                                'processing': row['task_processing'],
-                                'completed': row['task_completed'],
-                                'failed': row['task_failed']
-                            }
-                        })
+            jobs = job_repo.list_jobs_with_task_counts(
+                status=status_enum,
+                job_type=job_type_filter,
+                hours=hours,
+                limit=limit
+            )
 
             result = {
                 'jobs': jobs,
@@ -381,7 +297,7 @@ class AdminDbDataTrigger:
                 'timestamp': datetime.now(timezone.utc).isoformat()
             }
 
-            logger.info(f"✅ Found {len(jobs)} jobs in {app_schema}")
+            logger.info(f"✅ Found {len(jobs)} jobs via repository")
 
             return func.HttpResponse(
                 body=json.dumps(result, indent=2),
@@ -414,6 +330,8 @@ class AdminDbDataTrigger:
             {
                 "job": {...}
             }
+
+        V0.8.16 (09 FEB 2026): Refactored to use JobRepository.get_job()
         """
         logger.info(f"📊 Getting job: {job_id}")
 
@@ -428,50 +346,46 @@ class AdminDbDataTrigger:
                     mimetype='application/json'
                 )
 
-            query = f"""
-                SELECT job_id, job_type, status::text, stage, total_stages,
-                       parameters, result_data, error_details, created_at, updated_at
-                FROM {self.config.app_schema}.jobs
-                WHERE job_id = %s
-            """
+            # V0.8.16: Use centralized repository method instead of hardcoded SQL
+            from infrastructure import JobRepository
 
-            if not isinstance(self.db_repo, PostgreSQLRepository):
-                raise ValueError("Database repository is not PostgreSQL")
+            job_repo = JobRepository()
+            job_record = job_repo.get_job(job_id)
 
-            with self.db_repo._get_connection() as conn:
-                with conn.cursor() as cursor:
-                    cursor.execute(query, (job_id,))
-                    row = cursor.fetchone()
+            if not job_record:
+                return func.HttpResponse(
+                    body=json.dumps({
+                        'error': 'Job not found',
+                        'job_id': job_id
+                    }),
+                    status_code=404,
+                    mimetype='application/json'
+                )
 
-                    if not row:
-                        return func.HttpResponse(
-                            body=json.dumps({
-                                'error': 'Job not found',
-                                'job_id': job_id
-                            }),
-                            status_code=404,
-                            mimetype='application/json'
-                        )
-
-                    job = {
-                        'job_id': row['job_id'],
-                        'job_type': row['job_type'],
-                        'status': row['status'],
-                        'stage': row['stage'],
-                        'total_stages': row['total_stages'],
-                        'parameters': row['parameters'],
-                        'result_data': row['result_data'],
-                        'error_details': row['error_details'],
-                        'created_at': row['created_at'].isoformat() if row['created_at'] else None,
-                        'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None
-                    }
+            # Convert JobRecord to dict for JSON response
+            job = {
+                'job_id': job_record.job_id,
+                'job_type': job_record.job_type,
+                'status': job_record.status.value if hasattr(job_record.status, 'value') else job_record.status,
+                'stage': job_record.stage,
+                'total_stages': job_record.total_stages,
+                'parameters': job_record.parameters,
+                'result_data': job_record.result_data,
+                'error_details': job_record.error_details,
+                'asset_id': job_record.asset_id,
+                'platform_id': job_record.platform_id,
+                'request_id': job_record.request_id,
+                'etl_version': getattr(job_record, 'etl_version', None),
+                'created_at': job_record.created_at.isoformat() if job_record.created_at else None,
+                'updated_at': job_record.updated_at.isoformat() if job_record.updated_at else None
+            }
 
             result = {
                 'job': job,
                 'timestamp': datetime.now(timezone.utc).isoformat()
             }
 
-            logger.info(f"✅ Found job: {job_id}")
+            logger.info(f"✅ Found job via repository: {job_id[:16]}...")
 
             return func.HttpResponse(
                 body=json.dumps(result, indent=2),
@@ -508,6 +422,8 @@ class AdminDbDataTrigger:
                 "tasks": [...],
                 "query_info": {...}
             }
+
+        V0.8.16 (09 FEB 2026): Refactored to use TaskRepository.list_tasks_with_filters()
         """
         logger.info("📊 Querying tasks with filters")
 
@@ -518,63 +434,23 @@ class AdminDbDataTrigger:
             status_filter = req.params.get('status')
             stage_filter = req.params.get('stage')
 
-            # Build query
-            query_parts = [
-                f"SELECT task_id, parent_job_id, task_type, status::text, stage, task_index,",
-                f"       parameters, result_data, error_details, last_pulse, retry_count,",
-                f"       created_at, updated_at",
-                f"FROM {self.config.app_schema}.tasks",
-                f"WHERE created_at >= NOW() - INTERVAL '{hours} hours'"
-            ]
-
-            params = []
-
-            if status_filter:
-                query_parts.append("AND status::text = %s")
-                params.append(status_filter)
-
+            # Convert stage to int if provided
+            stage_num = None
             if stage_filter:
                 try:
                     stage_num = int(stage_filter)
-                    query_parts.append("AND stage = %s")
-                    params.append(stage_num)
                 except ValueError:
                     pass  # Ignore invalid stage filter
 
-            query_parts.extend([
-                "ORDER BY created_at DESC",
-                f"LIMIT %s"
-            ])
-            params.append(limit)
+            # V0.8.16: Use centralized repository method instead of hardcoded SQL
+            from infrastructure import TaskRepository
 
-            query = " ".join(query_parts)
-
-            # Execute query
-            if not isinstance(self.db_repo, PostgreSQLRepository):
-                raise ValueError("Database repository is not PostgreSQL")
-
-            with self.db_repo._get_connection() as conn:
-                with conn.cursor() as cursor:
-                    cursor.execute(query, tuple(params))
-                    rows = cursor.fetchall()
-
-                    tasks = []
-                    for row in rows:
-                        tasks.append({
-                            'task_id': row['task_id'],
-                            'parent_job_id': row['parent_job_id'],
-                            'task_type': row['task_type'],
-                            'status': row['status'],
-                            'stage': row['stage'],
-                            'task_index': row['task_index'],
-                            'parameters': row['parameters'],
-                            'result_data': row['result_data'],
-                            'error_details': row['error_details'],
-                            'last_pulse': row['last_pulse'].isoformat() if row['last_pulse'] else None,
-                            'retry_count': row['retry_count'],
-                            'created_at': row['created_at'].isoformat() if row['created_at'] else None,
-                            'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None
-                        })
+            task_repo = TaskRepository()
+            tasks = task_repo.list_tasks_with_filters(
+                status=status_filter,
+                stage=stage_num,
+                limit=limit
+            )
 
             result = {
                 'tasks': tasks,
@@ -588,7 +464,7 @@ class AdminDbDataTrigger:
                 'timestamp': datetime.now(timezone.utc).isoformat()
             }
 
-            logger.info(f"✅ Found {len(tasks)} tasks")
+            logger.info(f"✅ Found {len(tasks)} tasks via repository")
 
             return func.HttpResponse(
                 body=json.dumps(result, indent=2),
@@ -764,11 +640,6 @@ class AdminDbDataTrigger:
 
         GET /api/dbadmin/platform/requests?limit=100&dataset_id=xyz
 
-        UPDATED 26 NOV 2025: Simplified to match thin tracking pattern.
-        - api_requests now in app schema (not platform schema)
-        - status column REMOVED (delegate to CoreMachine job status)
-        - Columns: request_id, dataset_id, resource_id, version_id, job_id, data_type, created_at
-
         Query Parameters:
             limit: Number of results (default: 10, max: 1000)
             hours: Only show requests from last N hours (default: 24, max: 168)
@@ -779,8 +650,10 @@ class AdminDbDataTrigger:
                 "api_requests": [...],
                 "query_info": {...}
             }
+
+        V0.8.16 (09 FEB 2026): Refactored to use ApiRequestRepository.get_all_requests()
         """
-        logger.info("📊 Querying Platform API requests (thin tracking)")
+        logger.info("📊 Querying Platform API requests via repository")
 
         try:
             # Parse query parameters
@@ -788,49 +661,14 @@ class AdminDbDataTrigger:
             hours = self._validate_hours(req.params.get('hours'))
             dataset_filter = req.params.get('dataset_id')
 
-            # Build query - UPDATED for simplified schema (26 NOV 2025)
-            # Platform tables now in app schema, not platform schema
-            query_parts = [
-                f"SELECT request_id, dataset_id, resource_id, version_id,",
-                f"       job_id, data_type, created_at",
-                f"FROM {self.config.app_schema}.api_requests",
-                f"WHERE created_at >= NOW() - INTERVAL '{hours} hours'"
-            ]
+            # V0.8.16: Use centralized repository method instead of hardcoded SQL
+            from infrastructure.platform import ApiRequestRepository
 
-            params = []
-
-            if dataset_filter:
-                query_parts.append("AND dataset_id = %s")
-                params.append(dataset_filter)
-
-            query_parts.extend([
-                "ORDER BY created_at DESC",
-                f"LIMIT %s"
-            ])
-            params.append(limit)
-
-            query = " ".join(query_parts)
-
-            # Execute query
-            if not isinstance(self.db_repo, PostgreSQLRepository):
-                raise ValueError("Database repository is not PostgreSQL")
-
-            with self.db_repo._get_connection() as conn:
-                with conn.cursor() as cursor:
-                    cursor.execute(query, tuple(params))
-                    rows = cursor.fetchall()
-
-                    api_requests = []
-                    for row in rows:
-                        api_requests.append({
-                            'request_id': row['request_id'],
-                            'dataset_id': row['dataset_id'],
-                            'resource_id': row['resource_id'],
-                            'version_id': row['version_id'],
-                            'job_id': row['job_id'],
-                            'data_type': row['data_type'],
-                            'created_at': row['created_at'].isoformat() if row['created_at'] else None
-                        })
+            api_repo = ApiRequestRepository()
+            api_requests = api_repo.get_all_requests(
+                limit=limit,
+                dataset_id=dataset_filter
+            )
 
             result = {
                 'api_requests': api_requests,
@@ -844,7 +682,7 @@ class AdminDbDataTrigger:
                 'timestamp': datetime.now(timezone.utc).isoformat()
             }
 
-            logger.info(f"✅ Found {len(api_requests)} API requests")
+            logger.info(f"✅ Found {len(api_requests)} API requests via repository")
 
             return func.HttpResponse(
                 body=json.dumps(result, indent=2),
@@ -870,10 +708,6 @@ class AdminDbDataTrigger:
 
         GET /api/dbadmin/platform/requests/{request_id}
 
-        UPDATED 26 NOV 2025: Simplified to match thin tracking pattern.
-        - api_requests now in app schema (not platform schema)
-        - Columns: request_id, dataset_id, resource_id, version_id, job_id, data_type, created_at
-
         Args:
             request_id: Request ID (32-char hex SHA256 hash)
 
@@ -881,6 +715,8 @@ class AdminDbDataTrigger:
             {
                 "api_request": {...}
             }
+
+        V0.8.16 (09 FEB 2026): Refactored to use ApiRequestRepository.get_request()
         """
         logger.info(f"📊 Getting API request: {request_id}")
 
@@ -895,50 +731,42 @@ class AdminDbDataTrigger:
                     mimetype='application/json'
                 )
 
-            # UPDATED for simplified schema (26 NOV 2025)
-            # Platform tables now in app schema, not platform schema
-            query = f"""
-                SELECT request_id, dataset_id, resource_id, version_id,
-                       job_id, data_type, created_at
-                FROM {self.config.app_schema}.api_requests
-                WHERE request_id = %s
-            """
+            # V0.8.16: Use centralized repository method instead of hardcoded SQL
+            from infrastructure.platform import ApiRequestRepository
 
-            if not isinstance(self.db_repo, PostgreSQLRepository):
-                raise ValueError("Database repository is not PostgreSQL")
+            api_repo = ApiRequestRepository()
+            api_request_record = api_repo.get_request(request_id)
 
-            with self.db_repo._get_connection() as conn:
-                with conn.cursor() as cursor:
-                    cursor.execute(query, (request_id,))
-                    row = cursor.fetchone()
+            if not api_request_record:
+                return func.HttpResponse(
+                    body=json.dumps({
+                        'error': 'API request not found',
+                        'request_id': request_id
+                    }),
+                    status_code=404,
+                    mimetype='application/json'
+                )
 
-                    if not row:
-                        return func.HttpResponse(
-                            body=json.dumps({
-                                'error': 'API request not found',
-                                'request_id': request_id
-                            }),
-                            status_code=404,
-                            mimetype='application/json'
-                        )
-
-                    api_request = {
-                        'request_id': row['request_id'],
-                        'dataset_id': row['dataset_id'],
-                        'resource_id': row['resource_id'],
-                        'version_id': row['version_id'],
-                        'job_id': row['job_id'],
-                        'data_type': row['data_type'],
-                        'created_at': row['created_at'].isoformat() if row['created_at'] else None,
-                        'note': 'Thin tracking - status via job_id lookup to CoreMachine'
-                    }
+            # Convert ApiRequest model to dict for JSON response
+            api_request = {
+                'request_id': api_request_record.request_id,
+                'dataset_id': api_request_record.dataset_id,
+                'resource_id': api_request_record.resource_id,
+                'version_id': api_request_record.version_id,
+                'job_id': api_request_record.job_id,
+                'data_type': api_request_record.data_type,
+                'asset_id': api_request_record.asset_id,
+                'platform_id': api_request_record.platform_id,
+                'created_at': api_request_record.created_at.isoformat() if api_request_record.created_at else None,
+                'note': 'Thin tracking - status via job_id lookup to CoreMachine'
+            }
 
             result = {
                 'api_request': api_request,
                 'timestamp': datetime.now(timezone.utc).isoformat()
             }
 
-            logger.info(f"✅ Found API request: {request_id}")
+            logger.info(f"✅ Found API request via repository: {request_id}")
 
             return func.HttpResponse(
                 body=json.dumps(result, indent=2),

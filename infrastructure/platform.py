@@ -279,6 +279,7 @@ class ApiRequestRepository(PostgreSQLRepository):
 
             rows = self._execute_query(query, params, fetch='all')
 
+            # V0.8.16: Include asset_id, platform_id FK columns (09 FEB 2026)
             return [
                 {
                     'request_id': row['request_id'],
@@ -287,6 +288,8 @@ class ApiRequestRepository(PostgreSQLRepository):
                     'version_id': row['version_id'],
                     'job_id': row['job_id'],
                     'data_type': row['data_type'],
+                    'asset_id': row.get('asset_id'),
+                    'platform_id': row.get('platform_id'),
                     'retry_count': row.get('retry_count', 0),
                     'created_at': row['created_at'].isoformat() if row['created_at'] else None,
                     'updated_at': row['updated_at'].isoformat() if row.get('updated_at') else None

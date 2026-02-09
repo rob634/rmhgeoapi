@@ -416,6 +416,248 @@ class JobRepository(PostgreSQLJobRepository):
                     "previous_error": previous_error
                 }
 
+    # ========================================================================
+    # CENTRALIZED QUERY METHODS (09 FEB 2026)
+    # These methods replace hardcoded SQL in admin endpoints and web interfaces
+    # ========================================================================
+
+    def list_jobs_with_filters(
+        self,
+        status: Optional[JobStatus] = None,
+        job_type: Optional[str] = None,
+        hours: Optional[int] = None,
+        limit: int = 100
+    ) -> List[JobRecord]:
+        """
+        List jobs with flexible filtering options.
+
+        Replaces hardcoded queries in:
+        - triggers/admin/db_data.py:_get_jobs()
+        - web_interfaces/execution/interface.py:_query_jobs()
+
+        Args:
+            status: Filter by job status (optional)
+            job_type: Filter by job type (optional)
+            hours: Only include jobs from last N hours (optional, None=all)
+            limit: Maximum results (default 100)
+
+        Returns:
+            List of JobRecord objects
+        """
+        from psycopg import sql
+
+        with self._error_context("list jobs with filters"):
+            # Build dynamic query
+            query_parts = [
+                sql.SQL("""
+                    SELECT job_id, job_type, status, stage, total_stages,
+                           parameters, stage_results, result_data, error_details,
+                           asset_id, platform_id, request_id, etl_version,
+                           created_at, updated_at
+                    FROM {}.{}
+                    WHERE 1=1
+                """).format(
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier("jobs")
+                )
+            ]
+            params = []
+
+            if hours is not None:
+                query_parts.append(sql.SQL(" AND created_at >= NOW() - INTERVAL '{} hours'").format(
+                    sql.Literal(hours)
+                ))
+
+            if status is not None:
+                query_parts.append(sql.SQL(" AND status = %s"))
+                params.append(status.value if hasattr(status, 'value') else status)
+
+            if job_type is not None:
+                query_parts.append(sql.SQL(" AND job_type = %s"))
+                params.append(job_type)
+
+            query_parts.append(sql.SQL(" ORDER BY created_at DESC LIMIT %s"))
+            params.append(limit)
+
+            query = sql.Composed(query_parts)
+            rows = self._execute_query(query, tuple(params) if params else None, fetch='all')
+
+            jobs = []
+            for row in rows:
+                job_data = self._row_to_job_record(row)
+                jobs.append(JobRecord(**job_data))
+
+            logger.debug(f"📋 Listed {len(jobs)} jobs with filters")
+            return jobs
+
+    def list_jobs_with_task_counts(
+        self,
+        status: Optional[JobStatus] = None,
+        job_type: Optional[str] = None,
+        hours: Optional[int] = 168,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        List jobs with aggregated task status counts.
+
+        Replaces hardcoded queries in:
+        - triggers/admin/db_data.py:_get_jobs() (with task_counts)
+        - web_interfaces/jobs/interface.py:_query_jobs_with_task_counts()
+
+        Args:
+            status: Filter by job status (optional)
+            job_type: Filter by job type (optional)
+            hours: Only include jobs from last N hours (default 168/7 days, None=all)
+            limit: Maximum results (default 100)
+
+        Returns:
+            List of dicts with job data + task_counts
+        """
+        from psycopg import sql
+
+        with self._error_context("list jobs with task counts"):
+            # Build query with task counts subquery
+            base_query = sql.SQL("""
+                SELECT j.job_id, j.job_type, j.status::text as status, j.stage, j.total_stages,
+                       j.parameters, j.result_data, j.error_details,
+                       j.asset_id, j.platform_id, j.request_id, j.etl_version,
+                       j.created_at, j.updated_at,
+                       COALESCE(tc.queued, 0) as task_queued,
+                       COALESCE(tc.processing, 0) as task_processing,
+                       COALESCE(tc.completed, 0) as task_completed,
+                       COALESCE(tc.failed, 0) as task_failed
+                FROM {schema}.jobs j
+                LEFT JOIN (
+                    SELECT parent_job_id,
+                           COUNT(*) FILTER (WHERE status::text = 'queued') as queued,
+                           COUNT(*) FILTER (WHERE status::text = 'processing') as processing,
+                           COUNT(*) FILTER (WHERE status::text = 'completed') as completed,
+                           COUNT(*) FILTER (WHERE status::text = 'failed') as failed
+                    FROM {schema}.tasks
+                    GROUP BY parent_job_id
+                ) tc ON j.job_id = tc.parent_job_id
+                WHERE 1=1
+            """).format(schema=sql.Identifier(self.schema_name))
+
+            query_parts = [base_query]
+            params = []
+
+            if hours is not None:
+                query_parts.append(sql.SQL(" AND j.created_at >= NOW() - INTERVAL '{} hours'").format(
+                    sql.Literal(hours)
+                ))
+
+            if status is not None:
+                query_parts.append(sql.SQL(" AND j.status::text = %s"))
+                params.append(status.value if hasattr(status, 'value') else status)
+
+            if job_type is not None:
+                query_parts.append(sql.SQL(" AND j.job_type = %s"))
+                params.append(job_type)
+
+            query_parts.append(sql.SQL(" ORDER BY j.created_at DESC LIMIT %s"))
+            params.append(limit)
+
+            query = sql.Composed(query_parts)
+            rows = self._execute_query(query, tuple(params) if params else None, fetch='all')
+
+            jobs = []
+            for row in rows:
+                jobs.append({
+                    'job_id': row['job_id'],
+                    'job_type': row['job_type'],
+                    'status': row['status'],
+                    'stage': row['stage'],
+                    'total_stages': row['total_stages'],
+                    'parameters': row['parameters'],
+                    'result_data': row['result_data'],
+                    'error_details': row['error_details'],
+                    'asset_id': row['asset_id'],
+                    'platform_id': row['platform_id'],
+                    'request_id': row['request_id'],
+                    'etl_version': row['etl_version'],
+                    'created_at': row['created_at'].isoformat() if row['created_at'] else None,
+                    'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None,
+                    'task_counts': {
+                        'queued': row['task_queued'],
+                        'processing': row['task_processing'],
+                        'completed': row['task_completed'],
+                        'failed': row['task_failed']
+                    }
+                })
+
+            logger.debug(f"📋 Listed {len(jobs)} jobs with task counts")
+            return jobs
+
+    def get_job_summary(self, job_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get lightweight job info without heavy JSONB fields.
+
+        Replaces hardcoded queries in:
+        - web_interfaces/execution/interface.py:_get_job_info()
+
+        Args:
+            job_id: Job ID to retrieve
+
+        Returns:
+            Dict with job summary (no parameters/results), or None
+        """
+        from psycopg import sql
+
+        with self._error_context("get job summary", job_id):
+            query = sql.SQL("""
+                SELECT job_id, job_type, status::text as status, stage, total_stages,
+                       asset_id, platform_id, request_id, etl_version,
+                       created_at, updated_at
+                FROM {}.{}
+                WHERE job_id = %s
+            """).format(
+                sql.Identifier(self.schema_name),
+                sql.Identifier("jobs")
+            )
+
+            row = self._execute_query(query, (job_id,), fetch='one')
+
+            if not row:
+                return None
+
+            return {
+                'job_id': row['job_id'],
+                'job_type': row['job_type'],
+                'status': row['status'],
+                'stage': row['stage'],
+                'total_stages': row['total_stages'],
+                'asset_id': row['asset_id'],
+                'platform_id': row['platform_id'],
+                'request_id': row['request_id'],
+                'etl_version': row['etl_version'],
+                'created_at': row['created_at'].isoformat() if row['created_at'] else None,
+                'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None
+            }
+
+    def _row_to_job_record(self, row) -> Dict[str, Any]:
+        """Convert database row to JobRecord-compatible dict."""
+        from infrastructure.postgresql import _parse_jsonb_column
+
+        job_id = row['job_id']
+        return {
+            'job_id': job_id,
+            'job_type': row['job_type'],
+            'status': row['status'],
+            'stage': row['stage'],
+            'total_stages': row['total_stages'],
+            'parameters': _parse_jsonb_column(row['parameters'], 'parameters', job_id, default={}),
+            'stage_results': _parse_jsonb_column(row.get('stage_results'), 'stage_results', job_id, default={}),
+            'result_data': _parse_jsonb_column(row.get('result_data'), 'result_data', job_id, default=None),
+            'error_details': row.get('error_details'),
+            'asset_id': row.get('asset_id'),
+            'platform_id': row.get('platform_id'),
+            'request_id': row.get('request_id'),
+            'etl_version': row.get('etl_version'),
+            'created_at': row['created_at'],
+            'updated_at': row['updated_at']
+        }
+
 
 # ============================================================================
 # EXTENDED TASK REPOSITORY - Business logic on top of PostgreSQL
@@ -1056,6 +1298,155 @@ class TaskRepository(PostgreSQLTaskRepository):
 
         # No recognized progress data found
         return None
+
+    # ========================================================================
+    # CENTRALIZED QUERY METHODS (09 FEB 2026)
+    # These methods replace hardcoded SQL in admin endpoints and web interfaces
+    # ========================================================================
+
+    def get_task_counts_for_job(self, job_id: str) -> Dict[str, int]:
+        """
+        Get aggregated task counts by status for a job.
+
+        Replaces hardcoded queries in:
+        - web_interfaces/execution/interface.py:_get_task_counts()
+
+        Args:
+            job_id: Job ID to get task counts for
+
+        Returns:
+            Dict with status -> count mapping
+        """
+        from psycopg import sql
+
+        with self._error_context("get task counts for job", job_id):
+            query = sql.SQL("""
+                SELECT status::text as status, COUNT(*) as count
+                FROM {schema}.tasks
+                WHERE parent_job_id = %s
+                GROUP BY status
+            """).format(schema=sql.Identifier(self.schema_name))
+
+            rows = self._execute_query(query, (job_id,), fetch='all')
+
+            counts = {'queued': 0, 'processing': 0, 'completed': 0, 'failed': 0}
+            for row in rows:
+                status = row['status']
+                if status in counts:
+                    counts[status] = row['count']
+
+            return counts
+
+    def get_task_counts_by_stage(self, job_id: str) -> List[Dict[str, Any]]:
+        """
+        Get task counts grouped by stage and status for a job.
+
+        Replaces hardcoded queries in:
+        - web_interfaces/execution/interface.py:_get_task_counts_by_stage()
+
+        Args:
+            job_id: Job ID to get task counts for
+
+        Returns:
+            List of dicts with stage, status, count
+        """
+        from psycopg import sql
+
+        with self._error_context("get task counts by stage", job_id):
+            query = sql.SQL("""
+                SELECT stage, status::text as status, COUNT(*) as count
+                FROM {schema}.tasks
+                WHERE parent_job_id = %s
+                GROUP BY stage, status
+                ORDER BY stage, status
+            """).format(schema=sql.Identifier(self.schema_name))
+
+            rows = self._execute_query(query, (job_id,), fetch='all')
+
+            return [
+                {
+                    'stage': row['stage'],
+                    'status': row['status'],
+                    'count': row['count']
+                }
+                for row in rows
+            ]
+
+    def list_tasks_with_filters(
+        self,
+        job_id: Optional[str] = None,
+        status: Optional[str] = None,
+        stage: Optional[int] = None,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        List tasks with flexible filtering options.
+
+        Replaces hardcoded queries in:
+        - triggers/admin/db_data.py:_get_tasks()
+        - triggers/admin/db_data.py:_get_tasks_for_job()
+        - web_interfaces/execution/interface.py:_query_tasks()
+
+        Args:
+            job_id: Filter by parent job ID (optional)
+            status: Filter by task status (optional)
+            stage: Filter by stage number (optional)
+            limit: Maximum results (default 100)
+
+        Returns:
+            List of task dicts
+        """
+        from psycopg import sql
+
+        with self._error_context("list tasks with filters"):
+            query_parts = [
+                sql.SQL("""
+                    SELECT task_id, parent_job_id, job_type, task_type,
+                           status::text as status, stage, task_index,
+                           parameters, result_data, error_details,
+                           retry_count, created_at, updated_at
+                    FROM {schema}.tasks
+                    WHERE 1=1
+                """).format(schema=sql.Identifier(self.schema_name))
+            ]
+            params = []
+
+            if job_id is not None:
+                query_parts.append(sql.SQL(" AND parent_job_id = %s"))
+                params.append(job_id)
+
+            if status is not None:
+                query_parts.append(sql.SQL(" AND status::text = %s"))
+                params.append(status)
+
+            if stage is not None:
+                query_parts.append(sql.SQL(" AND stage = %s"))
+                params.append(stage)
+
+            query_parts.append(sql.SQL(" ORDER BY created_at DESC LIMIT %s"))
+            params.append(limit)
+
+            query = sql.Composed(query_parts)
+            rows = self._execute_query(query, tuple(params), fetch='all')
+
+            return [
+                {
+                    'task_id': row['task_id'],
+                    'parent_job_id': row['parent_job_id'],
+                    'job_type': row['job_type'],
+                    'task_type': row['task_type'],
+                    'status': row['status'],
+                    'stage': row['stage'],
+                    'task_index': row['task_index'],
+                    'parameters': row['parameters'],
+                    'result_data': row['result_data'],
+                    'error_details': row['error_details'],
+                    'retry_count': row['retry_count'],
+                    'created_at': row['created_at'].isoformat() if row['created_at'] else None,
+                    'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None
+                }
+                for row in rows
+            ]
 
 
 # ============================================================================

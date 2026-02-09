@@ -243,90 +243,27 @@ class JobsInterface(BaseInterface):
         """
         Query jobs with task counts from database.
 
-        Mirrors the dbadmin endpoint query but returns dicts for rendering.
+        V0.8.16 (09 FEB 2026): Refactored to use JobRepository.list_jobs_with_task_counts()
         """
-        from config import get_config
-        from infrastructure.postgresql import PostgreSQLRepository
+        from infrastructure import JobRepository
+        from core.models import JobStatus
 
-        config = get_config()
-        repo = PostgreSQLRepository()
-        app_schema = config.database.app_schema
+        job_repo = JobRepository()
 
-        # Build query with task_counts subquery
-        query_parts = [
-            f"""SELECT j.job_id, j.job_type, j.status::text as status, j.stage, j.total_stages,
-                   j.created_at, j.updated_at,
-                   COALESCE(tc.queued, 0) as task_queued,
-                   COALESCE(tc.processing, 0) as task_processing,
-                   COALESCE(tc.completed, 0) as task_completed,
-                   COALESCE(tc.failed, 0) as task_failed
-            FROM {app_schema}.jobs j
-            LEFT JOIN (
-                SELECT parent_job_id,
-                       COUNT(*) FILTER (WHERE status::text = 'queued') as queued,
-                       COUNT(*) FILTER (WHERE status::text = 'processing') as processing,
-                       COUNT(*) FILTER (WHERE status::text = 'completed') as completed,
-                       COUNT(*) FILTER (WHERE status::text = 'failed') as failed
-                FROM {app_schema}.tasks
-                GROUP BY parent_job_id
-            ) tc ON j.job_id = tc.parent_job_id
-            WHERE 1=1"""
-        ]
-
-        params = []
-
-        # Add 7-day time filter by default for performance
-        query_parts.append("AND j.created_at >= NOW() - INTERVAL '168 hours'")
-
+        # Convert status string to enum if provided
+        status_enum = None
         if status:
-            query_parts.append("AND j.status::text = %s")
-            params.append(status)
+            try:
+                status_enum = JobStatus(status)
+            except ValueError:
+                pass
 
-        query_parts.extend([
-            "ORDER BY j.created_at DESC",
-            "LIMIT %s"
-        ])
-        params.append(limit)
-
-        query = " ".join(query_parts)
-
-        # Execute query using repository connection
-        with repo._get_connection() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(query, params if params else None)
-                rows = cursor.fetchall()
-
-                jobs = []
-                for row in rows:
-                    # Handle both dict-like and tuple rows
-                    if hasattr(row, 'keys'):
-                        job = dict(row)
-                    else:
-                        # Tuple row - map by position
-                        job = {
-                            'job_id': row[0],
-                            'job_type': row[1],
-                            'status': row[2],
-                            'stage': row[3],
-                            'total_stages': row[4],
-                            'created_at': row[5],
-                            'updated_at': row[6],
-                            'task_queued': row[7],
-                            'task_processing': row[8],
-                            'task_completed': row[9],
-                            'task_failed': row[10]
-                        }
-
-                    # Restructure task counts
-                    job['task_counts'] = {
-                        'queued': job.pop('task_queued', 0),
-                        'processing': job.pop('task_processing', 0),
-                        'completed': job.pop('task_completed', 0),
-                        'failed': job.pop('task_failed', 0)
-                    }
-                    jobs.append(job)
-
-                return jobs
+        # Use centralized repository method
+        return job_repo.list_jobs_with_task_counts(
+            status=status_enum,
+            hours=168,  # 7-day default
+            limit=limit
+        )
 
     def _generate_html_content(self) -> str:
         """Generate HTML content for Job Monitor dashboard with HTMX."""

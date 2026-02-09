@@ -204,23 +204,33 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
                 }
             }
 
-            # V0.8: Fetch asset info if not already populated (29 JAN 2026)
-            # V0.8.12: Capture asset_id for approval URLs (09 FEB 2026)
+            # V0.8.16: Get asset_id from direct FKs (09 FEB 2026)
+            # Use forward FKs (ApiRequest.asset_id or Job.asset_id) instead of
+            # reverse lookup via current_job_id. Forward FKs are always set at
+            # job creation time and don't depend on job completion.
             resolved_asset_id = None
             if not asset_info:
-                try:
-                    asset_repo = GeospatialAssetRepository()
-                    asset = asset_repo.get_by_job_id(platform_request.job_id)
-                    if asset:
-                        resolved_asset_id = asset.asset_id
-                        result["asset"] = {
-                            "asset_id": asset.asset_id,
-                            "revision": asset.revision,
-                            "approval_state": asset.approval_state.value if hasattr(asset.approval_state, 'value') else str(asset.approval_state),
-                            "clearance_state": asset.clearance_state.value if hasattr(asset.clearance_state, 'value') else str(asset.clearance_state),
-                        }
-                except Exception:
-                    pass  # Non-fatal - asset info is optional
+                # Try ApiRequest.asset_id first (set at submit time)
+                resolved_asset_id = platform_request.asset_id
+
+                # Fallback to Job.asset_id if ApiRequest doesn't have it
+                if not resolved_asset_id and job:
+                    resolved_asset_id = job.asset_id
+
+                # Fetch full asset info for response
+                if resolved_asset_id:
+                    try:
+                        asset_repo = GeospatialAssetRepository()
+                        asset = asset_repo.get_by_id(resolved_asset_id)
+                        if asset:
+                            result["asset"] = {
+                                "asset_id": asset.asset_id,
+                                "revision": asset.revision,
+                                "approval_state": asset.approval_state.value if hasattr(asset.approval_state, 'value') else str(asset.approval_state),
+                                "clearance_state": asset.clearance_state.value if hasattr(asset.clearance_state, 'value') else str(asset.clearance_state),
+                            }
+                    except Exception:
+                        pass  # Non-fatal - asset info is optional
             else:
                 # Asset info was pre-populated (from lookup by asset_id)
                 resolved_asset_id = asset_info.get('asset_id') if isinstance(asset_info, dict) else None

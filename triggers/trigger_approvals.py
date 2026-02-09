@@ -82,18 +82,20 @@ def _resolve_asset_id(
             "error_type": "NotFound"
         }
 
-    # By job ID
+    # By job ID - use direct FK on JobRecord (V0.8.16 - 09 FEB 2026)
     if job_id:
-        asset = asset_repo.get_by_job_id(job_id)
-        if asset:
-            return asset.asset_id, None
+        from infrastructure import JobRepository
+        job_repo = JobRepository()
+        job = job_repo.get_job(job_id)
+        if job and job.asset_id:
+            return job.asset_id, None
         return None, {
             "success": False,
             "error": f"No asset found for job: {job_id}",
             "error_type": "NotFound"
         }
 
-    # By platform request ID
+    # By platform request ID - use direct FK on ApiRequest (V0.8.16 - 09 FEB 2026)
     if request_id:
         from infrastructure import PlatformRepository
         platform_repo = PlatformRepository()
@@ -104,13 +106,18 @@ def _resolve_asset_id(
                 "error": f"No platform request found: {request_id}",
                 "error_type": "NotFound"
             }
-        # Resolve request → job → asset
-        asset = asset_repo.get_by_job_id(platform_request.job_id)
-        if asset:
-            return asset.asset_id, None
+        # Use direct FK on ApiRequest first, then Job
+        if platform_request.asset_id:
+            return platform_request.asset_id, None
+        # Fallback to Job.asset_id
+        from infrastructure import JobRepository
+        job_repo = JobRepository()
+        job = job_repo.get_job(platform_request.job_id)
+        if job and job.asset_id:
+            return job.asset_id, None
         return None, {
             "success": False,
-            "error": f"No asset found for request: {request_id} (job: {platform_request.job_id})",
+            "error": f"No asset found for request: {request_id}",
             "error_type": "NotFound"
         }
 

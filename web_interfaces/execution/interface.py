@@ -823,53 +823,58 @@ class ExecutionInterface(BaseInterface):
             return None
 
     def _query_jobs(self, status: str = '', job_type: str = '', limit: int = 25) -> List[Dict[str, Any]]:
-        """Query jobs from database."""
+        """
+        Query jobs from database.
+
+        V0.8.16 (09 FEB 2026): Refactored to use JobRepository.list_jobs_with_filters()
+        """
         try:
-            from infrastructure.postgresql_repository import PostgreSQLRepository
-            repo = PostgreSQLRepository()
+            from infrastructure import JobRepository
+            from core.models import JobStatus
 
-            # Build query
-            conditions = []
-            params = []
+            job_repo = JobRepository()
 
+            # Convert status string to enum if provided
+            status_enum = None
             if status:
-                conditions.append("status = %s")
-                params.append(status)
-            if job_type:
-                conditions.append("job_type = %s")
-                params.append(job_type)
+                try:
+                    status_enum = JobStatus(status)
+                except ValueError:
+                    pass
 
-            where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-            params.append(limit)
+            jobs = job_repo.list_jobs_with_filters(
+                status=status_enum,
+                job_type=job_type if job_type else None,
+                limit=limit
+            )
 
-            query = f"""
-                SELECT job_id, job_type, status, created_at, parameters
-                FROM app.jobs
-                {where_clause}
-                ORDER BY created_at DESC
-                LIMIT %s
-            """
-
-            result = repo.execute_query(query, tuple(params))
-            return [dict(row) for row in result] if result else []
+            # Convert JobRecord objects to dicts
+            return [
+                {
+                    'job_id': j.job_id,
+                    'job_type': j.job_type,
+                    'status': j.status.value if hasattr(j.status, 'value') else j.status,
+                    'created_at': j.created_at,
+                    'parameters': j.parameters
+                }
+                for j in jobs
+            ]
 
         except Exception as e:
             logger.error(f"Error querying jobs: {e}")
             return []
 
     def _get_job_info(self, job_id: str) -> Optional[Dict[str, Any]]:
-        """Get job info from database."""
-        try:
-            from infrastructure.postgresql_repository import PostgreSQLRepository
-            repo = PostgreSQLRepository()
+        """
+        Get job info from database.
 
-            query = """
-                SELECT job_id, job_type, status, created_at, parameters
-                FROM app.jobs
-                WHERE job_id = %s
-            """
-            result = repo.execute_query(query, (job_id,))
-            return dict(result[0]) if result else None
+        V0.8.16 (09 FEB 2026): Refactored to use JobRepository.get_job_summary()
+        """
+        try:
+            from infrastructure import JobRepository
+
+            job_repo = JobRepository()
+            return job_repo.get_job_summary(job_id)
 
         except Exception as e:
             logger.error(f"Error getting job info: {e}")
@@ -898,40 +903,36 @@ class ExecutionInterface(BaseInterface):
             return []
 
     def _get_task_counts(self, job_id: str) -> Dict[str, int]:
-        """Get task counts by status for a job."""
-        try:
-            from infrastructure.postgresql_repository import PostgreSQLRepository
-            repo = PostgreSQLRepository()
+        """
+        Get task counts by status for a job.
 
-            query = """
-                SELECT status, COUNT(*) as count
-                FROM app.tasks
-                WHERE job_id = %s
-                GROUP BY status
-            """
-            result = repo.execute_query(query, (job_id,))
-            return {row['status']: row['count'] for row in result} if result else {}
+        V0.8.16 (09 FEB 2026): Refactored to use TaskRepository.get_task_counts_for_job()
+        """
+        try:
+            from infrastructure import TaskRepository
+
+            task_repo = TaskRepository()
+            return task_repo.get_task_counts_for_job(job_id)
 
         except Exception as e:
             logger.error(f"Error getting task counts: {e}")
             return {}
 
     def _get_task_counts_by_stage(self, job_id: str) -> Dict[int, Dict[str, int]]:
-        """Get task counts by stage and status."""
+        """
+        Get task counts by stage and status.
+
+        V0.8.16 (09 FEB 2026): Refactored to use TaskRepository.get_task_counts_by_stage()
+        """
         try:
-            from infrastructure.postgresql_repository import PostgreSQLRepository
-            repo = PostgreSQLRepository()
+            from infrastructure import TaskRepository
 
-            query = """
-                SELECT stage, status, COUNT(*) as count
-                FROM app.tasks
-                WHERE job_id = %s
-                GROUP BY stage, status
-            """
-            result = repo.execute_query(query, (job_id,))
+            task_repo = TaskRepository()
+            rows = task_repo.get_task_counts_by_stage(job_id)
 
+            # Convert list to nested dict format expected by caller
             counts = {}
-            for row in result or []:
+            for row in rows:
                 stage = row.get('stage', 0)
                 status = row.get('status', 'unknown')
                 count = row.get('count', 0)
@@ -947,33 +948,27 @@ class ExecutionInterface(BaseInterface):
             return {}
 
     def _query_tasks(self, job_id: str, stage: str = '', status: str = '') -> List[Dict[str, Any]]:
-        """Query tasks for a job."""
+        """
+        Query tasks for a job.
+
+        V0.8.16 (09 FEB 2026): Refactored to use TaskRepository.list_tasks_with_filters()
+        """
         try:
-            from infrastructure.postgresql_repository import PostgreSQLRepository
-            repo = PostgreSQLRepository()
+            from infrastructure import TaskRepository
 
-            conditions = ["job_id = %s"]
-            params = [job_id]
+            task_repo = TaskRepository()
 
-            if stage:
-                conditions.append("stage = %s")
-                params.append(int(stage))
-            if status:
-                conditions.append("status = %s")
-                params.append(status)
+            # Convert stage to int if provided
+            stage_num = int(stage) if stage else None
 
-            where_clause = " AND ".join(conditions)
+            tasks = task_repo.list_tasks_with_filters(
+                job_id=job_id,
+                status=status if status else None,
+                stage=stage_num,
+                limit=100
+            )
 
-            query = f"""
-                SELECT task_id, stage, task_type, status, error_message,
-                       EXTRACT(EPOCH FROM (completed_at - started_at)) as duration_seconds
-                FROM app.tasks
-                WHERE {where_clause}
-                ORDER BY stage, created_at
-                LIMIT 100
-            """
-            result = repo.execute_query(query, tuple(params))
-            return [dict(row) for row in result] if result else []
+            return tasks
 
         except Exception as e:
             logger.error(f"Error querying tasks: {e}")

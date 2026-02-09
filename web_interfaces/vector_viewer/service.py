@@ -522,6 +522,82 @@ class VectorViewerService:
             background: #b91c1c;
         }}
 
+        .btn-approve:disabled, .btn-reject:disabled, .btn-revoke:disabled {{
+            opacity: 0.6;
+            cursor: not-allowed;
+        }}
+
+        /* QA Status Display (09 FEB 2026) */
+        .qa-status-display {{
+            margin-bottom: 12px;
+            padding: 12px;
+            background: var(--ds-bg);
+            border-radius: 6px;
+        }}
+
+        .qa-status-badge {{
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-bottom: 6px;
+        }}
+
+        .qa-status-badge.approved {{
+            background: #c6f6d5;
+            color: #276749;
+        }}
+
+        .qa-status-badge.rejected {{
+            background: #fed7d7;
+            color: #c53030;
+        }}
+
+        .qa-status-badge.pending {{
+            background: #feebc8;
+            color: #c05621;
+        }}
+
+        .qa-status-info {{
+            font-size: 11px;
+            color: var(--ds-gray);
+        }}
+
+        .qa-revoke-warning {{
+            background: #fff5f5;
+            border: 1px solid #feb2b2;
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 12px;
+            font-size: 12px;
+            color: #c53030;
+        }}
+
+        .btn-revoke {{
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #c53030;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 13px;
+            background: #fff5f5;
+            color: #c53030;
+        }}
+
+        .btn-revoke:hover {{
+            background: #c53030;
+            color: white;
+        }}
+
+        .qa-loading {{
+            text-align: center;
+            padding: 20px;
+            color: var(--ds-gray);
+            font-style: italic;
+        }}
+
         /* Style Dialog Placeholder */
         .style-selector {{
             display: flex;
@@ -867,15 +943,56 @@ class VectorViewerService:
                 </div>
 
                 <!-- QA Section -->
-                <div class="section-card">
+                <div class="section-card" id="qa-section">
                     <div class="section-header">Data Curator QA</div>
                     <div class="section-body">
-                        <textarea class="qa-textarea" id="qa-notes"
-                                  placeholder="Enter QA notes, observations, or issues..."></textarea>
-                        <div class="qa-buttons">
-                            <button class="btn btn-approve" onclick="handleApprove()">✓ Approve</button>
-                            <button class="btn btn-reject" onclick="handleReject()">✗ Reject</button>
+                        <!-- Approval Status Display (09 FEB 2026) -->
+                        <div id="qa-status-display" class="qa-status-display" style="display: none;">
+                            <div id="qa-status-badge" class="qa-status-badge"></div>
+                            <div id="qa-status-info" class="qa-status-info"></div>
                         </div>
+
+                        <!-- Pending Approval Form (shown when not yet approved) -->
+                        <div id="qa-pending-form" style="display: none;">
+                            <!-- Reviewer Email (Required) -->
+                            <div class="control-row">
+                                <label class="control-label">Reviewer Email <span style="color: var(--ds-error);">*</span></label>
+                                <input type="email" class="number-input" id="qa-reviewer"
+                                       placeholder="your.email@example.org" style="text-align: left;">
+                            </div>
+
+                            <!-- Clearance Level (Required for Approve) -->
+                            <div class="control-row">
+                                <label class="control-label">Clearance Level <span style="color: var(--ds-error);">*</span></label>
+                                <select class="style-select" id="qa-clearance">
+                                    <option value="ouo" selected>OUO - Official Use Only</option>
+                                    <option value="public">Public - External Access</option>
+                                </select>
+                            </div>
+
+                            <!-- Notes -->
+                            <div class="control-row">
+                                <label class="control-label">Notes <span id="notes-required" style="color: var(--ds-error); display:none;">*</span></label>
+                                <textarea class="qa-textarea" id="qa-notes"
+                                          placeholder="QA notes (required for rejection)..."></textarea>
+                            </div>
+
+                            <div class="qa-buttons">
+                                <button class="btn btn-approve" onclick="handleApprove()">✓ Approve</button>
+                                <button class="btn btn-reject" onclick="handleReject()">✗ Reject</button>
+                            </div>
+                        </div>
+
+                        <!-- Revoke Section (shown when already approved) -->
+                        <div id="qa-revoke-form" style="display: none;">
+                            <div class="qa-revoke-warning">
+                                This asset has been approved. Revoking will remove it from publication.
+                            </div>
+                            <button class="btn btn-revoke" onclick="handleRevoke()">Revoke Approval</button>
+                        </div>
+
+                        <!-- Loading state -->
+                        <div id="qa-loading" class="qa-loading">Checking approval status...</div>
                     </div>
                 </div>
             </div>
@@ -1159,6 +1276,142 @@ class VectorViewerService:
             setStatus('Style feature coming soon...');
         }}
 
+        // Check approval status and show appropriate form (09 FEB 2026)
+        async function checkApprovalStatus() {{
+            if (!ASSET_ID) {{
+                // No asset_id - show pending form by default
+                document.getElementById('qa-loading').style.display = 'none';
+                document.getElementById('qa-pending-form').style.display = 'block';
+                return;
+            }}
+
+            try {{
+                const response = await fetch(`/api/assets/${{ASSET_ID}}/approval`);
+                const data = await response.json();
+
+                document.getElementById('qa-loading').style.display = 'none';
+
+                if (!data.success) {{
+                    // Asset not found or error - show pending form
+                    document.getElementById('qa-pending-form').style.display = 'block';
+                    return;
+                }}
+
+                const state = data.approval_state;
+                const statusDisplay = document.getElementById('qa-status-display');
+                const statusBadge = document.getElementById('qa-status-badge');
+                const statusInfo = document.getElementById('qa-status-info');
+
+                if (state === 'approved') {{
+                    // Show approved status and revoke option
+                    statusDisplay.style.display = 'block';
+                    statusBadge.className = 'qa-status-badge approved';
+                    statusBadge.textContent = 'APPROVED';
+
+                    let infoHtml = '';
+                    if (data.reviewer) infoHtml += `Reviewer: ${{data.reviewer}}<br>`;
+                    if (data.reviewed_at) infoHtml += `Approved: ${{new Date(data.reviewed_at).toLocaleString()}}<br>`;
+                    if (data.clearance_state) infoHtml += `Clearance: ${{data.clearance_state.toUpperCase()}}`;
+                    statusInfo.innerHTML = infoHtml;
+
+                    if (data.can_revoke) {{
+                        document.getElementById('qa-revoke-form').style.display = 'block';
+                    }}
+                }} else if (state === 'rejected') {{
+                    // Show rejected status
+                    statusDisplay.style.display = 'block';
+                    statusBadge.className = 'qa-status-badge rejected';
+                    statusBadge.textContent = 'REJECTED';
+
+                    let infoHtml = '';
+                    if (data.reviewer) infoHtml += `Reviewer: ${{data.reviewer}}<br>`;
+                    if (data.reviewed_at) infoHtml += `Rejected: ${{new Date(data.reviewed_at).toLocaleString()}}<br>`;
+                    if (data.rejection_reason) infoHtml += `Reason: ${{data.rejection_reason}}`;
+                    statusInfo.innerHTML = infoHtml;
+
+                    // Allow re-approval if permitted
+                    if (data.can_approve) {{
+                        document.getElementById('qa-pending-form').style.display = 'block';
+                    }}
+                }} else {{
+                    // Pending review or other state - show approval form
+                    if (state) {{
+                        statusDisplay.style.display = 'block';
+                        statusBadge.className = 'qa-status-badge pending';
+                        statusBadge.textContent = state.toUpperCase().replace('_', ' ');
+                        statusInfo.innerHTML = 'Awaiting curator review';
+                    }}
+
+                    if (data.can_approve || data.can_reject) {{
+                        document.getElementById('qa-pending-form').style.display = 'block';
+                    }}
+                }}
+
+            }} catch (error) {{
+                console.error('Error checking approval status:', error);
+                document.getElementById('qa-loading').style.display = 'none';
+                document.getElementById('qa-pending-form').style.display = 'block';
+            }}
+        }}
+
+        // Handle revoke action (09 FEB 2026)
+        async function handleRevoke() {{
+            if (!ASSET_ID) {{
+                setStatus('⚠️ No asset_id provided for revoke', 'error');
+                return;
+            }}
+
+            // Confirm revoke action
+            if (!confirm('Are you sure you want to revoke approval for this asset? This will remove it from publication.')) {{
+                return;
+            }}
+
+            const revokeBtn = document.querySelector('.btn-revoke');
+            revokeBtn.disabled = true;
+            setStatus('Revoking approval...', 'info');
+
+            try {{
+                // Prompt for revoker email
+                const revoker = prompt('Enter your email address to revoke:');
+                if (!revoker || !revoker.includes('@')) {{
+                    setStatus('Valid email required for audit trail', 'error');
+                    revokeBtn.disabled = false;
+                    return;
+                }}
+
+                const revokeReason = prompt('Enter reason for revocation:');
+                if (!revokeReason || !revokeReason.trim()) {{
+                    setStatus('Reason required for audit trail', 'error');
+                    revokeBtn.disabled = false;
+                    return;
+                }}
+
+                const response = await fetch(`/api/assets/${{ASSET_ID}}/revoke`, {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{
+                        reason: revokeReason,
+                        revoker: revoker
+                    }})
+                }});
+
+                const data = await response.json();
+
+                if (response.ok && data.success) {{
+                    setStatus('Approval revoked successfully', 'success');
+                    // Refresh the approval status display
+                    setTimeout(() => checkApprovalStatus(), 1000);
+                }} else {{
+                    setStatus(`Revoke failed: ${{data.error || 'Unknown error'}}`, 'error');
+                    revokeBtn.disabled = false;
+                }}
+
+            }} catch (error) {{
+                setStatus(`Revoke error: ${{error.message}}`, 'error');
+                revokeBtn.disabled = false;
+            }}
+        }}
+
         // QA Handlers (09 FEB 2026: Wired to platform/approve and platform/reject)
         async function handleApprove() {{
             if (!ASSET_ID) {{
@@ -1166,15 +1419,23 @@ class VectorViewerService:
                 return;
             }}
 
+            const reviewer = document.getElementById('qa-reviewer').value.trim();
+            const clearance = document.getElementById('qa-clearance').value;
             const notes = document.getElementById('qa-notes').value;
-            const reviewer = prompt('Enter your email address for approval record:');
+
+            // Validate required fields
             if (!reviewer) {{
-                setStatus('Approval cancelled - reviewer required', 'error');
+                setStatus('⚠️ Reviewer email is required', 'error');
+                document.getElementById('qa-reviewer').focus();
                 return;
             }}
 
-            // Ask for clearance level
-            const clearance = confirm('Approve as PUBLIC (OK) or OUO (Cancel)?') ? 'public' : 'ouo';
+            // Basic email validation
+            if (!reviewer.includes('@')) {{
+                setStatus('⚠️ Please enter a valid email address', 'error');
+                document.getElementById('qa-reviewer').focus();
+                return;
+            }}
 
             setStatus('Submitting approval...', 'info');
 
@@ -1194,9 +1455,8 @@ class VectorViewerService:
 
                 if (response.ok && result.success) {{
                     setStatus(`✓ Approved as ${{clearance.toUpperCase()}}!`, 'success');
-                    // Disable buttons after approval
-                    document.querySelector('.btn-approve').disabled = true;
-                    document.querySelector('.btn-reject').disabled = true;
+                    // Refresh to show approved state with revoke option
+                    setTimeout(() => checkApprovalStatus(), 500);
                 }} else {{
                     setStatus(`✗ Approval failed: ${{result.error || 'Unknown error'}}`, 'error');
                 }}
@@ -1212,16 +1472,26 @@ class VectorViewerService:
                 return;
             }}
 
+            const reviewer = document.getElementById('qa-reviewer').value.trim();
             const notes = document.getElementById('qa-notes').value;
-            if (!notes.trim()) {{
-                setStatus('⚠️ Rejection requires notes explaining why', 'error');
-                document.getElementById('qa-notes').focus();
+
+            // Validate required fields
+            if (!reviewer) {{
+                setStatus('⚠️ Reviewer email is required', 'error');
+                document.getElementById('qa-reviewer').focus();
                 return;
             }}
 
-            const reviewer = prompt('Enter your email address for rejection record:');
-            if (!reviewer) {{
-                setStatus('Rejection cancelled - reviewer required', 'error');
+            if (!reviewer.includes('@')) {{
+                setStatus('⚠️ Please enter a valid email address', 'error');
+                document.getElementById('qa-reviewer').focus();
+                return;
+            }}
+
+            // Require rejection reason
+            if (!notes.trim()) {{
+                setStatus('⚠️ Rejection requires notes explaining why', 'error');
+                document.getElementById('qa-notes').focus();
                 return;
             }}
 
@@ -1234,7 +1504,7 @@ class VectorViewerService:
                     body: JSON.stringify({{
                         asset_id: ASSET_ID,
                         reviewer: reviewer,
-                        notes: notes
+                        reason: notes
                     }})
                 }});
 
@@ -1242,9 +1512,8 @@ class VectorViewerService:
 
                 if (response.ok && result.success) {{
                     setStatus('✗ Rejected - feedback sent to submitter', 'success');
-                    // Disable buttons after rejection
-                    document.querySelector('.btn-approve').disabled = true;
-                    document.querySelector('.btn-reject').disabled = true;
+                    // Refresh to show rejected state
+                    setTimeout(() => checkApprovalStatus(), 500);
                 }} else {{
                     setStatus(`✗ Rejection failed: ${{result.error || 'Unknown error'}}`, 'error');
                 }}
@@ -1264,10 +1533,14 @@ class VectorViewerService:
                 const bounds = [[BBOX[1], BBOX[0]], [BBOX[3], BBOX[2]]];
                 map.fitBounds(bounds, {{ padding: [50, 50] }});
             }}
+
+            // Check approval status for QA section (09 FEB 2026)
+            checkApprovalStatus();
         }});
 
         console.log('Vector Viewer initialized');
         console.log('Collection:', COLLECTION_ID);
+        console.log('Asset ID:', ASSET_ID);
     </script>
 </body>
 </html>"""

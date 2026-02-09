@@ -657,38 +657,6 @@
         }
       }
     },
-    "/api/platforms": {
-      "get": {
-        "summary": "List registered platforms",
-        "description": "List all registered B2B platforms that can submit data.\n\n**Use case:**\n- Verify platform registration before submission\n- Get platform-specific configuration\n- Audit platform access",
-        "operationId": "platformsList",
-        "tags": ["Platform"],
-        "responses": {
-          "200": {
-            "description": "List of registered platforms",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PlatformRegistryResponse"
-                },
-                "example": {
-                  "platforms": [
-                    {
-                      "platform_id": "ddh",
-                      "name": "Development Data Hub",
-                      "status": "active",
-                      "capabilities": ["raster", "vector"],
-                      "registered_at": "2025-01-01T00:00:00Z"
-                    }
-                  ],
-                  "count": 1
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/platform/catalog/lookup": {
       "get": {
         "summary": "Lookup catalog item by DDH identifiers",
@@ -1412,43 +1380,6 @@
           },
           "message": {
             "type": "string"
-          }
-        }
-      },
-      "PlatformRegistryResponse": {
-        "type": "object",
-        "properties": {
-          "platforms": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "platform_id": {
-                  "type": "string",
-                  "description": "Unique platform identifier"
-                },
-                "name": {
-                  "type": "string",
-                  "description": "Human-readable platform name"
-                },
-                "status": {
-                  "type": "string",
-                  "enum": ["active", "inactive", "suspended"]
-                },
-                "capabilities": {
-                  "type": "array",
-                  "items": {"type": "string"},
-                  "description": "Supported data types"
-                },
-                "registered_at": {
-                  "type": "string",
-                  "format": "date-time"
-                }
-              }
-            }
-          },
-          "count": {
-            "type": "integer"
           }
         }
       },

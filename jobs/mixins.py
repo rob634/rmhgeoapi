@@ -292,6 +292,8 @@ import hashlib
 import json
 import uuid
 
+from config import __version__ as etl_version
+
 
 class JobBaseMixin(ABC):
     """
@@ -344,11 +346,15 @@ class JobBaseMixin(ABC):
     @classmethod
     def validate_job_parameters(cls, params: dict) -> dict:
         """
-        Default parameter validation using parameters_schema.
+        Validate both system and job parameters.
+
+        Two-phase validation:
+        1. System params (asset_id, platform_id, etc.) - core data model
+        2. Job params - business logic specific to each job type
 
         Override for complex validation logic (cross-field validation, etc).
 
-        Schema format:
+        Schema format for job params:
             {
                 'param_name': {
                     'type': 'int'|'str'|'float'|'bool'|'list'|'dict',
@@ -371,17 +377,32 @@ class JobBaseMixin(ABC):
             params: Raw parameters from job submission
 
         Returns:
-            Validated parameters with defaults applied
+            Validated parameters (system + job) with defaults applied
 
         Raises:
             ValueError: If validation fails
         """
         from util_logger import LoggerFactory, ComponentType
+        from core.schema.system_params import validate_system_params
 
         logger = LoggerFactory.create_logger(
             ComponentType.CONTROLLER,
             f"{cls.__name__}.validate_job_parameters"
         )
+
+        # ====================================================================
+        # STEP 1: System Parameters Validation (08 FEB 2026)
+        # Validates core data model params: asset_id, platform_id, request_id
+        # These are independent of job type and represent execution context.
+        # ====================================================================
+        system_params = validate_system_params(params)
+        if system_params:
+            logger.debug(f"✅ System params validated: {list(system_params.keys())}")
+
+        # ====================================================================
+        # STEP 2: Job Parameters Validation (Schema-based)
+        # Validates job-specific params against parameters_schema
+        # ====================================================================
 
         # Safety check: Ensure parameters_schema is defined
         if not hasattr(cls, 'parameters_schema') or cls.parameters_schema is None:
@@ -390,7 +411,7 @@ class JobBaseMixin(ABC):
                 f"Example: parameters_schema = {{'param': {{'type': 'int', 'default': 10}}}}"
             )
 
-        validated = {}
+        job_params = {}
 
         for param_name, schema in cls.parameters_schema.items():
             # Get value from params or use default
@@ -421,12 +442,12 @@ class JobBaseMixin(ABC):
             else:
                 raise ValueError(f"Unknown type '{param_type}' for parameter '{param_name}'")
 
-            validated[param_name] = value
+            job_params[param_name] = value
 
-        logger.debug(f"✅ Schema validation passed: {list(validated.keys())}")
+        logger.debug(f"✅ Job params validated: {list(job_params.keys())}")
 
         # ====================================================================
-        # STEP 2: Resource Validation (28 NOV 2025)
+        # STEP 3: Resource Validation (28 NOV 2025)
         # Optional - only runs if job declares resource_validators
         # Validates external resources (blobs, containers, tables) BEFORE
         # job creation. Fail-fast pattern prevents wasted DB records/queue
@@ -445,7 +466,7 @@ class JobBaseMixin(ABC):
                 "submission_endpoint": f"/api/jobs/submit/{cls.job_type}"
             }
 
-            result = run_validators(cls.resource_validators, validated, job_context)
+            result = run_validators(cls.resource_validators, job_params, job_context)
 
             if not result['valid']:
                 error_msg = f"Pre-flight validation failed: {result['message']}"
@@ -453,6 +474,13 @@ class JobBaseMixin(ABC):
                 raise ValueError(error_msg)
 
             logger.debug(f"✅ All resource validators passed")
+
+        # ====================================================================
+        # STEP 4: Merge and Return (08 FEB 2026)
+        # System params + Job params = Complete validated params
+        # System params take precedence if there's any overlap (shouldn't be)
+        # ====================================================================
+        validated = {**job_params, **system_params}
 
         return validated
 
@@ -617,6 +645,7 @@ class JobBaseMixin(ABC):
         )
 
         # Create job record object
+        # V0.8.12: Add etl_version tracking (08 FEB 2026)
         job_record = JobRecord(
             job_id=job_id,
             job_type=cls.job_type,
@@ -625,6 +654,7 @@ class JobBaseMixin(ABC):
             stage=1,
             total_stages=len(cls.stages),
             stage_results={},
+            etl_version=etl_version,  # Track which ETL version ran this job
             metadata={
                 'description': cls.description,
                 'created_by': cls.__name__

@@ -40,6 +40,7 @@ from core.utils import generate_job_id  # ID generation utility
 from core.schema.updates import TaskUpdateModel, JobUpdateModel
 # Task ID generation moved to Controller layer (hierarchically correct)
 # Repository no longer generates IDs - Controller provides them
+from config import __version__ as etl_version  # V0.8.12: ETL version tracking
 from .postgresql import (
     PostgreSQLRepository,
     PostgreSQLJobRepository,
@@ -124,6 +125,7 @@ class JobRepository(PostgreSQLJobRepository):
                 return existing_job
 
             # Create job record using Pydantic model
+            # V0.8.12: Add etl_version tracking (08 FEB 2026)
             now = datetime.now(timezone.utc)
             job = JobRecord(
                 job_id=job_id,
@@ -134,6 +136,7 @@ class JobRepository(PostgreSQLJobRepository):
                 parameters=parameters.copy(),  # Defensive copy
                 stage_results={},  # Will have string keys per contract
                 metadata={},  # Required by database NOT NULL constraint
+                etl_version=etl_version,  # Track which ETL version ran this job
                 created_at=now,
                 updated_at=now
             )

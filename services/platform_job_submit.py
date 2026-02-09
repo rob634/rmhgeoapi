@@ -29,7 +29,7 @@ from util_logger import LoggerFactory, ComponentType
 logger = LoggerFactory.create_logger(ComponentType.SERVICE, "platform_job_submit")
 
 # Import config
-from config import get_config
+from config import get_config, __version__ as etl_version
 
 # Import infrastructure
 from infrastructure import JobRepository
@@ -149,6 +149,8 @@ def create_and_submit_job(
                 asset_id=validated_params.get('asset_id'),  # From platform submit
                 platform_id=validated_params.get('_platform_id', 'ddh'),  # Default to DDH
                 request_id=platform_request_id,  # B2B request that triggered this job
+                # V0.8.12: ETL version tracking (08 FEB 2026)
+                etl_version=etl_version,  # Records which version executed this job
                 metadata={
                     'platform_request': platform_request_id,
                     'created_by': 'platform_trigger'

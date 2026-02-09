@@ -53,6 +53,14 @@ from .updates import (
     StageCompletionUpdateModel
 )
 
+# Export system parameters schema (08 FEB 2026)
+from .system_params import (
+    SYSTEM_PARAMETERS_SCHEMA,
+    SYSTEM_PARAM_NAMES,
+    validate_system_params,
+    is_system_param
+)
+
 __all__ = [
     # Schema management
     'PydanticToSQL',
@@ -79,5 +87,11 @@ __all__ = [
     # Update models
     'TaskUpdateModel',
     'JobUpdateModel',
-    'StageCompletionUpdateModel'
+    'StageCompletionUpdateModel',
+
+    # System parameters (08 FEB 2026)
+    'SYSTEM_PARAMETERS_SCHEMA',
+    'SYSTEM_PARAM_NAMES',
+    'validate_system_params',
+    'is_system_param',
 ]

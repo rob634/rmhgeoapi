@@ -92,6 +92,15 @@ class JobRecord(JobData):
         description="B2B request ID that triggered this job (for callback routing)"
     )
 
+    # V0.8.12: ETL Version Tracking (08 FEB 2026)
+    # Records which version of the ETL executed this job instance
+    # Set at job creation time - immutable record of which code ran
+    etl_version: Optional[str] = Field(
+        default=None,
+        max_length=20,
+        description="Version of ETL app that executed this job (e.g., '0.8.11.3')"
+    )
+
     # Data fields (Database-specific)
     stage_results: Dict[str, Any] = Field(default_factory=dict, description="Results from completed stages")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Job metadata")

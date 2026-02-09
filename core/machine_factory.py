@@ -254,45 +254,14 @@ def _default_platform_callback(job_id: str, job_type: str, status: str, result: 
         # Non-fatal: asset update failure should not affect job completion
         logger.warning(f"[ASSET] Failed to update asset for job {job_id[:8]}... (non-fatal): {e}")
 
-    # Skip job types that don't produce datasets requiring approval
-    if job_type not in APPROVAL_REQUIRED_JOB_TYPES:
-        logger.debug(f"[APPROVAL] Skipping approval for job type '{job_type}' (not in APPROVAL_REQUIRED_JOB_TYPES)")
-        return
-
-    # Create approval record for dataset-producing jobs
-    # job_id is the source of truth; STAC IDs are optional enrichment
-    try:
-        from services.approval_service import ApprovalService
-        from core.models.stac import AccessLevel
-
-        # Extract STAC IDs if available (optional enrichment, not required)
-        stac_item_id = extract_stac_item_id(result)
-        stac_collection_id = extract_stac_collection_id(result)
-
-        # Extract classification from job parameters (default: OUO)
-        # NOTE: RESTRICTED is not yet supported (future enhancement)
-        classification_str = extract_classification(result)
-        classification = AccessLevel.PUBLIC if classification_str == 'public' else AccessLevel.OUO
-
-        approval_service = ApprovalService()
-        approval = approval_service.create_approval_for_job(
-            job_id=job_id,
-            job_type=job_type,
-            classification=classification,
-            stac_item_id=stac_item_id,          # Optional enrichment
-            stac_collection_id=stac_collection_id  # Optional enrichment
-        )
-
-        # Log with or without STAC info
-        stac_info = f", STAC: {stac_item_id}" if stac_item_id else " (no STAC link yet)"
-        logger.info(
-            f"[APPROVAL] Created approval {approval.approval_id[:12]}... "
-            f"for job {job_id[:8]}... (type: {job_type}{stac_info}, status: PENDING)"
-        )
-
-    except Exception as e:
-        # Non-fatal: approval creation failure should not affect job completion
-        logger.warning(f"[APPROVAL] Failed to create approval for job {job_id[:8]}... (non-fatal): {e}")
+    # =========================================================================
+    # V0.8.11: DatasetApproval creation removed (08 FEB 2026)
+    # =========================================================================
+    # Legacy: Created separate DatasetApproval records for each job.
+    # New: GeospatialAsset is created at platform/submit with approval_state=PENDING_REVIEW
+    # Approval state is now managed directly on GeospatialAsset (single source of truth)
+    # See: services/asset_approval_service.py, triggers/trigger_approvals.py
+    # =========================================================================
 
 
 # ============================================================================

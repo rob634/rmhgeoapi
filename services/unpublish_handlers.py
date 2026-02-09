@@ -87,29 +87,29 @@ def inventory_raster_item(params: Dict[str, Any], context: Optional[Dict[str, An
                 "error_type": "ValidationError"
             }
 
-        # Check if this item has an APPROVED approval (16 JAN 2026)
+        # Check if this item has an APPROVED asset (V0.8.11 - 08 FEB 2026)
         # Approved items require force_approved=true to unpublish
         force_approved = params.get('force_approved', False)
         try:
-            from services.approval_service import ApprovalService
-            from core.models.approval import ApprovalStatus
+            from infrastructure.asset_repository import GeospatialAssetRepository
+            from core.models.asset import ApprovalState
 
-            approval_service = ApprovalService()
-            approval = approval_service.get_approval_for_stac_item(stac_item_id)
+            asset_repo = GeospatialAssetRepository()
+            asset = asset_repo.get_by_stac_item_id(stac_item_id)
 
-            if approval and approval.status == ApprovalStatus.APPROVED:
+            if asset and asset.approval_state == ApprovalState.APPROVED:
                 if not force_approved:
                     return {
                         "success": False,
                         "error": f"Cannot unpublish: STAC item '{stac_item_id}' has APPROVED status",
                         "error_type": "ApprovalBlocksUnpublish",
-                        "approval_id": approval.approval_id,
-                        "approval_status": approval.status.value,
+                        "asset_id": asset.asset_id,
+                        "approval_state": asset.approval_state.value,
                         "hint": "Use force_approved=true to revoke approval and unpublish"
                     }
                 logger.warning(
                     f"Force unpublishing APPROVED item {stac_item_id} "
-                    f"(approval: {approval.approval_id}, force_approved=true)"
+                    f"(asset: {asset.asset_id[:16]}..., force_approved=true)"
                 )
         except Exception as e:
             # Approval check is best-effort - log and continue if service unavailable
@@ -307,31 +307,31 @@ def inventory_vector_item(params: Dict[str, Any], context: Optional[Dict[str, An
                         f"(created outside ETL). Table will still be dropped."
                     )
 
-        # Check if linked STAC item has an APPROVED approval (16 JAN 2026)
+        # Check if linked STAC item has an APPROVED asset (V0.8.11 - 08 FEB 2026)
         # Approved items require force_approved=true to unpublish
         force_approved = params.get('force_approved', False)
         if stac_item_id:
             try:
-                from services.approval_service import ApprovalService
-                from core.models.approval import ApprovalStatus
+                from infrastructure.asset_repository import GeospatialAssetRepository
+                from core.models.asset import ApprovalState
 
-                approval_service = ApprovalService()
-                approval = approval_service.get_approval_for_stac_item(stac_item_id)
+                asset_repo = GeospatialAssetRepository()
+                asset = asset_repo.get_by_stac_item_id(stac_item_id)
 
-                if approval and approval.status == ApprovalStatus.APPROVED:
+                if asset and asset.approval_state == ApprovalState.APPROVED:
                     if not force_approved:
                         return {
                             "success": False,
                             "error": f"Cannot unpublish: Linked STAC item '{stac_item_id}' has APPROVED status",
                             "error_type": "ApprovalBlocksUnpublish",
-                            "approval_id": approval.approval_id,
-                            "approval_status": approval.status.value,
+                            "asset_id": asset.asset_id,
+                            "approval_state": asset.approval_state.value,
                             "table_name": table_name,
                             "hint": "Use force_approved=true to revoke approval and unpublish"
                         }
                     logger.warning(
                         f"Force unpublishing vector table {table_name} with APPROVED STAC item {stac_item_id} "
-                        f"(approval: {approval.approval_id}, force_approved=true)"
+                        f"(asset: {asset.asset_id[:16]}..., force_approved=true)"
                     )
             except Exception as e:
                 # Approval check is best-effort - log and continue if service unavailable
@@ -726,31 +726,34 @@ def delete_stac_and_audit(params: Dict[str, Any], context: Optional[Dict[str, An
                     if stac_deleted:
                         logger.info(f"Deleted STAC item: {collection_id}/{stac_item_id}")
 
-                        # Revoke approval if it exists and was APPROVED (16 JAN 2026)
+                        # Revoke asset if it exists and was APPROVED (V0.8.11 - 08 FEB 2026)
                         try:
-                            from services.approval_service import ApprovalService
+                            from infrastructure.asset_repository import GeospatialAssetRepository
+                            from services.asset_approval_service import AssetApprovalService
+                            from core.models.asset import ApprovalState
 
-                            approval_service = ApprovalService()
-                            approval = approval_service.get_approval_for_stac_item(stac_item_id)
+                            asset_repo = GeospatialAssetRepository()
+                            asset = asset_repo.get_by_stac_item_id(stac_item_id)
 
-                            if approval and approval.status.value == 'approved':
-                                revoke_result = approval_service.revoke(
-                                    approval_id=approval.approval_id,
+                            if asset and asset.approval_state == ApprovalState.APPROVED:
+                                approval_service = AssetApprovalService()
+                                revoke_result = approval_service.revoke_asset(
+                                    asset_id=asset.asset_id,
                                     revoker=f"unpublish_job:{unpublish_job_id}",
                                     reason=f"Data unpublished via {unpublish_type} unpublish job"
                                 )
                                 if revoke_result.get('success'):
                                     logger.info(
-                                        f"AUDIT: Revoked approval {approval.approval_id} during unpublish "
+                                        f"AUDIT: Revoked asset {asset.asset_id[:16]}... during unpublish "
                                         f"(job: {unpublish_job_id})"
                                     )
                                 else:
                                     logger.warning(
-                                        f"Failed to revoke approval {approval.approval_id}: "
+                                        f"Failed to revoke asset {asset.asset_id[:16]}...: "
                                         f"{revoke_result.get('error')}"
                                     )
                         except Exception as e:
-                            logger.warning(f"Could not check/revoke approval for {stac_item_id}: {e}")
+                            logger.warning(f"Could not check/revoke asset for {stac_item_id}: {e}")
                     else:
                         logger.warning(f"STAC item not found (already deleted?): {collection_id}/{stac_item_id}")
 

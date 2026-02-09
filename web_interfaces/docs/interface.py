@@ -423,7 +423,7 @@ class DocsInterface(BaseInterface):
                     <div class="step-number">2</div>
                     <div class="step-title">Poll</div>
                     <div class="step-desc">Monitor progress</div>
-                    <div class="step-endpoint">GET /status/{{id}}</div>
+                    <div class="step-endpoint">GET /status/{{request_id}}</div>
                 </div>
                 <div class="workflow-step">
                     <div class="step-number">3</div>
@@ -455,9 +455,9 @@ class DocsInterface(BaseInterface):
                 <h3><span class="icon">📊</span> Status & Monitoring</h3>
                 <p>Track processing progress and system health</p>
                 <ul>
-                    <li><code>GET /api/platform/status/{{id}}</code> - Request status</li>
+                    <li><code>GET /api/platform/status/{{request_id}}</code> - Request status</li>
                     <li><code>GET /api/platform/status</code> - List all requests</li>
-                    <li><code>GET /api/platform/lineage/{{id}}</code> - Version history</li>
+                    <li><code>GET /api/platform/lineage/{{request_id}}</code> - Version history</li>
                     <li><code>GET /api/platform/health</code> - System health</li>
                 </ul>
             </div>
@@ -466,8 +466,8 @@ class DocsInterface(BaseInterface):
                 <h3><span class="icon">✅</span> Approval Workflow</h3>
                 <p>QA review and publication control</p>
                 <ul>
-                    <li><code>GET /api/approvals</code> - List pending approvals</li>
-                    <li><code>POST /api/approvals/{{id}}/approve</code> - Approve</li>
+                    <li><code>GET /api/platform/approvals</code> - List by state</li>
+                    <li><code>POST /api/platform/approve</code> - Approve with clearance</li>
                     <li><code>POST /api/platform/reject</code> - Reject with reason</li>
                     <li><code>POST /api/platform/revoke</code> - Revoke approval</li>
                 </ul>

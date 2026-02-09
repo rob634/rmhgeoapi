@@ -115,7 +115,7 @@
     "/api/platform/status/{request_id}": {
       "get": {
         "summary": "Get request status",
-        "description": "Get status of a platform request by request_id.\nIncludes DDH identifiers, job progress, and data access URLs when complete.",
+        "description": "Get status of a platform request.\n\n**IMPORTANT:** Use `request_id` as the primary identifier. The `request_id` is returned from `/api/platform/submit` and is deterministic (SHA256 of DDH identifiers).\n\n**Backward Compatibility:**\nThis endpoint also accepts `job_id` or `asset_id` and auto-detects the ID type. However, `request_id` is preferred because:\n- It's stable and deterministic\n- It maps directly to DDH identifiers\n- It survives job recreation (e.g., resubmit after rejection)\n\nIncludes DDH identifiers, job progress, and data access URLs when complete.",
         "operationId": "platformStatus",
         "tags": ["Platform"],
         "parameters": [
@@ -123,6 +123,7 @@
             "name": "request_id",
             "in": "path",
             "required": true,
+            "description": "Platform request ID (preferred), job ID, or asset ID",
             "schema": {
               "type": "string"
             }
@@ -181,47 +182,6 @@
         "responses": {
           "200": {
             "description": "List of platform requests"
-          }
-        }
-      }
-    },
-    "/api/platform/jobs/{job_id}/status": {
-      "get": {
-        "summary": "Get job status by job_id",
-        "description": "Get status of a CoreMachine job directly by job_id.\nUseful when only job_id is available (from webhook callbacks, etc.).",
-        "operationId": "platformJobStatus",
-        "tags": ["Platform"],
-        "parameters": [
-          {
-            "name": "job_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "verbose",
-            "in": "query",
-            "schema": {
-              "type": "boolean",
-              "default": false
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Job status with task summary",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PlatformJobStatus"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Job not found"
           }
         }
       }
@@ -394,23 +354,189 @@
         }
       }
     },
-    "/api/platform/reject": {
+    "/api/platform/approve": {
       "post": {
-        "summary": "Reject a platform request",
-        "description": "Reject a processing request with a required reason.\nSets approval_state to REJECTED with audit trail.\n\n**When to use:**\n- Data quality issues found during QA\n- Incorrect metadata or classification\n- Request should not be published\n\n**After rejection:**\n- Item remains in system but marked as rejected\n- Can be resubmitted with corrections via /api/platform/resubmit",
-        "operationId": "platformReject",
-        "tags": ["Platform"],
+        "summary": "Approve a dataset for publication",
+        "description": "Approve a dataset for publication. Updates GeospatialAsset.approval_state to APPROVED and STAC item with app:published=true.\n\n**Identification Options (in order of preference):**\n- `asset_id`: GeospatialAsset ID (preferred)\n- `stac_item_id`: STAC item ID\n- `job_id`: CoreMachine job ID\n- `request_id`: Platform request ID\n\n**Clearance Levels:**\n- `ouo`: Official Use Only - internal access, no external export\n- `public`: Public access - triggers ADF pipeline for external zone export\n\n**Note:** The `asset_id` is the primary identifier in v0.8. Use `request_id` for backward compatibility.",
+        "operationId": "platformApprove",
+        "tags": ["Approvals"],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RejectRequest"
+                "$ref": "#/components/schemas/PlatformApproveRequest"
               },
-              "example": {
-                "request_id": "a3f2c1b8e9d7f6a5...",
-                "reviewer": "qa@example.com",
-                "reason": "Data quality issues - missing attribute values in 15% of records"
+              "examples": {
+                "byAssetId": {
+                  "summary": "By Asset ID (preferred)",
+                  "value": {
+                    "asset_id": "abc123def456...",
+                    "reviewer": "user@example.com",
+                    "clearance_level": "ouo",
+                    "notes": "Reviewed and approved for internal use"
+                  }
+                },
+                "byRequestId": {
+                  "summary": "By Request ID (backward compatibility)",
+                  "value": {
+                    "request_id": "a3f2c1b8e9d7f6a5...",
+                    "reviewer": "user@example.com",
+                    "clearance_level": "public",
+                    "notes": "Approved for public release"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Dataset approved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformApprovalResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (reviewer and clearance_level required)"
+          },
+          "404": {
+            "description": "Asset not found"
+          }
+        }
+      }
+    },
+    "/api/platform/approvals": {
+      "get": {
+        "summary": "List assets by approval state",
+        "description": "List GeospatialAssets filtered by approval_state.\n\n**Query Parameters:**\n- `status`: Filter by approval state (pending_review, approved, rejected, revoked)\n- `clearance`: Filter by clearance state (uncleared, ouo, public)\n- `limit`: Max results (default: 100)\n\n**Note:** Default behavior returns pending_review assets if no status filter specified.",
+        "operationId": "platformApprovalsList",
+        "tags": ["Approvals"],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Filter by approval state",
+            "schema": {
+              "type": "string",
+              "enum": ["pending_review", "approved", "rejected", "revoked"]
+            }
+          },
+          {
+            "name": "clearance",
+            "in": "query",
+            "description": "Filter by clearance state",
+            "schema": {
+              "type": "string",
+              "enum": ["uncleared", "ouo", "public"]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of assets with approval info",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformApprovalsList"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/platform/approvals/status": {
+      "get": {
+        "summary": "Batch approval status lookup",
+        "description": "Get approval statuses for multiple items in a single request.\nUseful for UI components that need to show approval badges.\n\n**Query Parameters (at least one required):**\n- `stac_item_ids`: Comma-separated STAC item IDs\n- `stac_collection_ids`: Comma-separated STAC collection IDs\n- `table_names`: Comma-separated table names (for OGC Features)\n\n**Response:** Map of ID -> approval status for quick lookups.",
+        "operationId": "platformApprovalsStatus",
+        "tags": ["Approvals"],
+        "parameters": [
+          {
+            "name": "stac_item_ids",
+            "in": "query",
+            "description": "Comma-separated STAC item IDs",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "stac_collection_ids",
+            "in": "query",
+            "description": "Comma-separated STAC collection IDs",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "table_names",
+            "in": "query",
+            "description": "Comma-separated table names",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Map of ID to approval status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalStatusMap"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No identifiers provided"
+          }
+        }
+      }
+    },
+    "/api/platform/reject": {
+      "post": {
+        "summary": "Reject a dataset",
+        "description": "Reject a pending dataset with a required reason.\nSets approval_state to REJECTED with audit trail.\n\n**Identification Options (in order of preference):**\n- `asset_id`: GeospatialAsset ID (preferred)\n- `stac_item_id`: STAC item ID\n- `job_id`: CoreMachine job ID\n- `request_id`: Platform request ID\n\n**When to use:**\n- Data quality issues found during QA\n- Incorrect metadata or classification\n- Request should not be published\n\n**After rejection:**\n- Item remains in system but marked as rejected\n- Can be resubmitted with corrections via /api/platform/resubmit",
+        "operationId": "platformReject",
+        "tags": ["Approvals"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlatformRejectRequest"
+              },
+              "examples": {
+                "byAssetId": {
+                  "summary": "By Asset ID (preferred)",
+                  "value": {
+                    "asset_id": "abc123def456...",
+                    "reviewer": "qa@example.com",
+                    "reason": "Data quality issues - missing attribute values in 15% of records"
+                  }
+                },
+                "byRequestId": {
+                  "summary": "By Request ID",
+                  "value": {
+                    "request_id": "a3f2c1b8e9d7f6a5...",
+                    "reviewer": "qa@example.com",
+                    "reason": "Data quality issues - missing attribute values in 15% of records"
+                  }
+                }
               }
             }
           }
@@ -437,21 +563,34 @@
     },
     "/api/platform/revoke": {
       "post": {
-        "summary": "Revoke an approved request",
-        "description": "Revoke a previously approved request.\nSets approval_state from APPROVED back to PENDING or REVOKED.\n\n**When to use:**\n- Issues discovered after approval\n- Need to re-review before publication\n- Temporary unpublishing without full deletion\n\n**After revocation:**\n- Data remains but is no longer publicly visible\n- Can be re-approved after review",
+        "summary": "Revoke an approved dataset",
+        "description": "Revoke a previously approved dataset. Sets approval_state to REVOKED (terminal state).\n\n**IMPORTANT:** This is a significant action with audit trail. REVOKED is a terminal state - the asset cannot be re-approved.\n\n**Identification Options (in order of preference):**\n- `asset_id`: GeospatialAsset ID (preferred)\n- `stac_item_id`: STAC item ID\n- `job_id`: CoreMachine job ID\n- `request_id`: Platform request ID\n\n**When to use:**\n- Critical issues discovered after approval\n- Data was approved in error\n- Compliance or security concerns\n\n**After revocation:**\n- Asset marked as REVOKED with full audit trail\n- STAC item updated with revocation properties\n- Cannot be re-approved (must resubmit if correction needed)",
         "operationId": "platformRevoke",
-        "tags": ["Platform"],
+        "tags": ["Approvals"],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RevokeRequest"
+                "$ref": "#/components/schemas/PlatformRevokeRequest"
               },
-              "example": {
-                "request_id": "a3f2c1b8e9d7f6a5...",
-                "reviewer": "admin@example.com",
-                "reason": "Re-review required after classification policy update"
+              "examples": {
+                "byAssetId": {
+                  "summary": "By Asset ID (preferred)",
+                  "value": {
+                    "asset_id": "abc123def456...",
+                    "revoker": "admin@example.com",
+                    "reason": "Critical data quality issue discovered post-approval"
+                  }
+                },
+                "byRequestId": {
+                  "summary": "By Request ID",
+                  "value": {
+                    "request_id": "a3f2c1b8e9d7f6a5...",
+                    "revoker": "admin@example.com",
+                    "reason": "Re-review required after classification policy update"
+                  }
+                }
               }
             }
           }
@@ -765,166 +904,6 @@
         }
       }
     },
-    "/api/approvals": {
-      "get": {
-        "summary": "List dataset approvals",
-        "description": "List dataset approvals with optional filtering.\n\n**Query Parameters:**\n- `status`: Filter by status (pending, approved, rejected)\n- `limit`: Max results (default: 50)",
-        "operationId": "approvalsList",
-        "tags": ["Approvals"],
-        "parameters": [
-          {
-            "name": "status",
-            "in": "query",
-            "description": "Filter by approval status",
-            "schema": {
-              "type": "string",
-              "enum": ["pending", "approved", "rejected"]
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer",
-              "default": 50
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "List of approvals",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApprovalList"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/approvals/{approval_id}": {
-      "get": {
-        "summary": "Get approval details",
-        "description": "Get details of a specific dataset approval.",
-        "operationId": "approvalsGet",
-        "tags": ["Approvals"],
-        "parameters": [
-          {
-            "name": "approval_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Approval details",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DatasetApproval"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Approval not found"
-          }
-        }
-      }
-    },
-    "/api/approvals/{approval_id}/approve": {
-      "post": {
-        "summary": "Approve dataset",
-        "description": "Approve a dataset for publishing.\nUpdates STAC item with published=true.",
-        "operationId": "approvalsApprove",
-        "tags": ["Approvals"],
-        "parameters": [
-          {
-            "name": "approval_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ApprovalAction"
-              },
-              "example": {
-                "reviewer": "user@example.com",
-                "notes": "Reviewed and approved for publication"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Dataset approved",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DatasetApproval"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/approvals/{approval_id}/reject": {
-      "post": {
-        "summary": "Reject dataset",
-        "description": "Reject a dataset with required reason.",
-        "operationId": "approvalsReject",
-        "tags": ["Approvals"],
-        "parameters": [
-          {
-            "name": "approval_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RejectionAction"
-              },
-              "example": {
-                "reviewer": "user@example.com",
-                "reason": "Data quality issues - missing attribute values"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Dataset rejected",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DatasetApproval"
-                }
-              }
-            }
-          }
-        }
-      }
-    }
   },
   "components": {
     "schemas": {
@@ -1067,40 +1046,6 @@
           }
         }
       },
-      "PlatformJobStatus": {
-        "type": "object",
-        "properties": {
-          "job_id": {
-            "type": "string"
-          },
-          "job_type": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string",
-            "enum": ["queued", "processing", "completed", "failed", "completed_with_errors"]
-          },
-          "stage": {
-            "type": "integer"
-          },
-          "total_stages": {
-            "type": "integer"
-          },
-          "task_summary": {
-            "type": "object",
-            "properties": {
-              "total": {"type": "integer"},
-              "completed": {"type": "integer"},
-              "failed": {"type": "integer"},
-              "pending": {"type": "integer"}
-            }
-          },
-          "result_data": {
-            "type": "object",
-            "description": "Job results (when completed)"
-          }
-        }
-      },
       "HealthResponse": {
         "type": "object",
         "properties": {
@@ -1238,93 +1183,6 @@
               "preview": {"type": "string"},
               "info": {"type": "string"}
             }
-          }
-        }
-      },
-      "ApprovalList": {
-        "type": "object",
-        "properties": {
-          "approvals": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/DatasetApproval"
-            }
-          },
-          "count": {
-            "type": "integer"
-          }
-        }
-      },
-      "DatasetApproval": {
-        "type": "object",
-        "properties": {
-          "approval_id": {
-            "type": "string"
-          },
-          "job_id": {
-            "type": "string"
-          },
-          "job_type": {
-            "type": "string"
-          },
-          "classification": {
-            "type": "string",
-            "enum": ["public", "ouo"]
-          },
-          "status": {
-            "type": "string",
-            "enum": ["pending", "approved", "rejected"]
-          },
-          "stac_item_id": {
-            "type": "string"
-          },
-          "stac_collection_id": {
-            "type": "string"
-          },
-          "reviewer": {
-            "type": "string"
-          },
-          "notes": {
-            "type": "string"
-          },
-          "rejection_reason": {
-            "type": "string"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "reviewed_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
-      },
-      "ApprovalAction": {
-        "type": "object",
-        "required": ["reviewer"],
-        "properties": {
-          "reviewer": {
-            "type": "string",
-            "description": "Email of the reviewer"
-          },
-          "notes": {
-            "type": "string",
-            "description": "Optional approval notes"
-          }
-        }
-      },
-      "RejectionAction": {
-        "type": "object",
-        "required": ["reviewer", "reason"],
-        "properties": {
-          "reviewer": {
-            "type": "string",
-            "description": "Email of the reviewer"
-          },
-          "reason": {
-            "type": "string",
-            "description": "Required rejection reason"
           }
         }
       },
@@ -1596,7 +1454,7 @@
       },
       "EntityState": {
         "type": "object",
-        "description": "Three-state entity model ",
+        "description": "Three-state entity model",
         "properties": {
           "processing_status": {
             "type": "string",
@@ -1605,13 +1463,254 @@
           },
           "approval_state": {
             "type": "string",
-            "enum": ["PENDING", "APPROVED", "REJECTED", "REVOKED"],
+            "enum": ["pending_review", "approved", "rejected", "revoked"],
             "description": "QA approval state"
           },
           "clearance_state": {
             "type": "string",
-            "enum": ["PUBLIC", "INTERNAL", "RESTRICTED"],
+            "enum": ["uncleared", "ouo", "public"],
             "description": "Data access clearance level"
+          }
+        }
+      },
+      "PlatformApproveRequest": {
+        "type": "object",
+        "description": "Request to approve a dataset for publication",
+        "required": ["reviewer", "clearance_level"],
+        "properties": {
+          "asset_id": {
+            "type": "string",
+            "description": "GeospatialAsset ID (preferred identifier)"
+          },
+          "stac_item_id": {
+            "type": "string",
+            "description": "STAC item ID (alternative identifier)"
+          },
+          "job_id": {
+            "type": "string",
+            "description": "CoreMachine job ID (alternative identifier)"
+          },
+          "request_id": {
+            "type": "string",
+            "description": "Platform request ID (alternative identifier)"
+          },
+          "reviewer": {
+            "type": "string",
+            "description": "Email of the reviewer (required)"
+          },
+          "clearance_level": {
+            "type": "string",
+            "enum": ["ouo", "public"],
+            "description": "Clearance level to grant (required)"
+          },
+          "notes": {
+            "type": "string",
+            "description": "Optional approval notes"
+          }
+        }
+      },
+      "PlatformRejectRequest": {
+        "type": "object",
+        "description": "Request to reject a pending dataset",
+        "required": ["reviewer", "reason"],
+        "properties": {
+          "asset_id": {
+            "type": "string",
+            "description": "GeospatialAsset ID (preferred identifier)"
+          },
+          "stac_item_id": {
+            "type": "string",
+            "description": "STAC item ID (alternative identifier)"
+          },
+          "job_id": {
+            "type": "string",
+            "description": "CoreMachine job ID (alternative identifier)"
+          },
+          "request_id": {
+            "type": "string",
+            "description": "Platform request ID (alternative identifier)"
+          },
+          "reviewer": {
+            "type": "string",
+            "description": "Email of the reviewer (required)"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Reason for rejection (required for audit trail)"
+          }
+        }
+      },
+      "PlatformRevokeRequest": {
+        "type": "object",
+        "description": "Request to revoke an approved dataset",
+        "required": ["revoker", "reason"],
+        "properties": {
+          "asset_id": {
+            "type": "string",
+            "description": "GeospatialAsset ID (preferred identifier)"
+          },
+          "stac_item_id": {
+            "type": "string",
+            "description": "STAC item ID (alternative identifier)"
+          },
+          "job_id": {
+            "type": "string",
+            "description": "CoreMachine job ID (alternative identifier)"
+          },
+          "request_id": {
+            "type": "string",
+            "description": "Platform request ID (alternative identifier)"
+          },
+          "revoker": {
+            "type": "string",
+            "description": "Email of the person revoking (required)"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Reason for revocation (required for audit trail)"
+          }
+        }
+      },
+      "PlatformApprovalResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "asset_id": {
+            "type": "string"
+          },
+          "approval_state": {
+            "type": "string",
+            "enum": ["approved", "rejected", "revoked"]
+          },
+          "clearance_state": {
+            "type": "string",
+            "enum": ["ouo", "public"]
+          },
+          "action": {
+            "type": "string",
+            "description": "Action taken (e.g., approved_ouo, approved_public)"
+          },
+          "stac_updated": {
+            "type": "boolean",
+            "description": "Whether STAC item was updated"
+          },
+          "adf_run_id": {
+            "type": "string",
+            "description": "ADF pipeline run ID (for public approvals)"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "PlatformApprovalsList": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "assets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GeospatialAssetSummary"
+            }
+          },
+          "count": {
+            "type": "integer"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "status_counts": {
+            "type": "object",
+            "properties": {
+              "pending_review": {"type": "integer"},
+              "approved": {"type": "integer"},
+              "rejected": {"type": "integer"},
+              "revoked": {"type": "integer"}
+            }
+          }
+        }
+      },
+      "GeospatialAssetSummary": {
+        "type": "object",
+        "description": "Summary of a GeospatialAsset for approval workflows",
+        "properties": {
+          "asset_id": {
+            "type": "string"
+          },
+          "data_type": {
+            "type": "string",
+            "enum": ["raster", "vector"]
+          },
+          "stac_item_id": {
+            "type": "string"
+          },
+          "stac_collection_id": {
+            "type": "string"
+          },
+          "approval_state": {
+            "type": "string",
+            "enum": ["pending_review", "approved", "rejected", "revoked"]
+          },
+          "clearance_state": {
+            "type": "string",
+            "enum": ["uncleared", "ouo", "public"]
+          },
+          "reviewer": {
+            "type": "string"
+          },
+          "reviewed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ApprovalStatusMap": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "statuses": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "has_asset": {
+                  "type": "boolean"
+                },
+                "asset_id": {
+                  "type": "string"
+                },
+                "approval_state": {
+                  "type": "string",
+                  "enum": ["pending_review", "approved", "rejected", "revoked"]
+                },
+                "is_approved": {
+                  "type": "boolean"
+                },
+                "clearance_state": {
+                  "type": "string"
+                },
+                "reviewer": {
+                  "type": "string"
+                },
+                "reviewed_at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
           }
         }
       }

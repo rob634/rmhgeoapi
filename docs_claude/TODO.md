@@ -16,16 +16,20 @@
 
 | Task | Status | Details |
 |------|--------|---------|
-| T4.2.1.1: Pass overwrite to validate_version_lineage() | ✅ Done | submit.py line 299 |
+| T4.2.1.1: Pass overwrite to validate_version_lineage() | ✅ Done | submit.py line 302 |
 | T4.2.1.2: Block overwrite if APPROVED | ✅ Done | platform_validation.py |
-| T4.2.1.3: Reset approval on overwrite (REJECTED/REVOKED) | ✅ Done | asset_service.py |
+| T4.2.1.3: Reset approval on overwrite (REJECTED/REVOKED) | ✅ Fixed | **V0.8.16.7**: Moved from submit-time to handler completion |
 | T4.2.1.4: Require approved previous for semantic versions | ✅ Done | platform_validation.py |
 | T4.2.1.5: Include approval_state in lineage state | ✅ Done | asset_service.py |
-| T4.2.1.6: Test revocation flow | 🔲 Ready | First test priority |
+| T4.2.1.6: Test revocation flow | ✅ Tested | 10 FEB 2026 |
+| T4.2.1.7: Test overwrite blocked on APPROVED | ✅ Tested | 10 FEB 2026 |
+| T4.2.1.8: Test semantic version requires approved | ✅ Tested | 10 FEB 2026 |
+
+**Bug Fix V0.8.16.7** (10 FEB 2026): Approval reset was happening at submit time, not job completion. If job failed, approval state was reset but no new data existed. Fixed by moving reset to handler success callback.
 
 **Testing Order**: Revocation → Overwrite blocked → Overwrite after revoke → Semantic version chain
 
-**Awaiting**: Deploy + Testing
+**Awaiting**: Re-deploy + Re-test overwrite reset timing
 
 ---
 

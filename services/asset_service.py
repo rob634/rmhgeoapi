@@ -201,19 +201,6 @@ class AssetService:
         # Generate deterministic asset_id
         asset_id = GeospatialAsset.generate_asset_id(platform_id, platform_refs)
 
-        # V0.8.16: Check existing asset for approval reset on overwrite (09 FEB 2026)
-        # If overwriting REJECTED or REVOKED asset, we'll reset to PENDING_REVIEW
-        existing_asset = self._asset_repo.get_by_id(asset_id) if overwrite else None
-        reset_approval_after_overwrite = False
-        if existing_asset and overwrite:
-            old_approval_state = existing_asset.approval_state
-            if old_approval_state in (ApprovalState.REJECTED, ApprovalState.REVOKED):
-                reset_approval_after_overwrite = True
-                logger.info(
-                    f"Will reset approval state from {old_approval_state.value} to pending_review "
-                    f"after overwrite for {asset_id[:16]}"
-                )
-
         # If this is a new version in an existing lineage, flip is_latest on current latest
         current_latest = None
         if lineage_id and (is_latest is None or is_latest):
@@ -254,28 +241,9 @@ class AssetService:
         if not asset:
             raise RuntimeError(f"Asset {asset_id} not found after upsert (operation={operation})")
 
-        # V0.8.16: Reset approval state on overwrite (09 FEB 2026)
-        # If overwriting REJECTED or REVOKED asset, reset to PENDING_REVIEW
-        if reset_approval_after_overwrite and operation == 'updated':
-            reset_updates = {
-                'approval_state': ApprovalState.PENDING_REVIEW,
-                'reviewer': None,
-                'reviewed_at': None,
-                'rejection_reason': None,
-                'revoked_at': None,
-                'revoked_by': None,
-                'revocation_reason': None,
-                # Keep clearance_state as UNCLEARED for fresh review
-                'clearance_state': ClearanceState.UNCLEARED,
-                'cleared_at': None,
-                'cleared_by': None,
-                'made_public_at': None,
-                'made_public_by': None,
-                'adf_run_id': None
-            }
-            self._asset_repo.update(asset_id, reset_updates)
-            asset = self._asset_repo.get_by_id(asset_id)
-            logger.info(f"Reset approval state to PENDING_REVIEW for {asset_id[:16]} after overwrite")
+        # NOTE: Approval state reset for overwrite of REJECTED/REVOKED assets
+        # is handled by the job handler AFTER successful completion, not here.
+        # See reset_approval_for_overwrite() method.
 
         # Apply optional clearance level if provided at submit time
         # This is rare - most assets start as UNCLEARED and are cleared at approval
@@ -995,6 +963,58 @@ class AssetService:
             List of GeospatialAsset models ordered by version_ordinal DESC
         """
         return self._asset_repo.get_version_history(lineage_id, include_retired)
+
+    def reset_approval_for_overwrite(self, asset_id: str) -> bool:
+        """
+        Reset approval state to PENDING_REVIEW after successful overwrite.
+
+        V0.8.16.7 (10 FEB 2026):
+        Called by handlers AFTER job completes successfully when overwriting
+        a REJECTED or REVOKED asset. This ensures approval state is only reset
+        when new data actually exists.
+
+        Args:
+            asset_id: Asset to reset
+
+        Returns:
+            True if reset was performed, False if not needed or asset not found
+        """
+        asset = self._asset_repo.get_by_id(asset_id)
+        if not asset:
+            logger.warning(f"reset_approval_for_overwrite: asset {asset_id[:16]} not found")
+            return False
+
+        # Only reset if currently REJECTED or REVOKED
+        if asset.approval_state not in (ApprovalState.REJECTED, ApprovalState.REVOKED):
+            logger.debug(
+                f"reset_approval_for_overwrite: asset {asset_id[:16]} is {asset.approval_state.value}, "
+                f"no reset needed"
+            )
+            return False
+
+        old_state = asset.approval_state.value
+        reset_updates = {
+            'approval_state': ApprovalState.PENDING_REVIEW,
+            'reviewer': None,
+            'reviewed_at': None,
+            'rejection_reason': None,
+            'revoked_at': None,
+            'revoked_by': None,
+            'revocation_reason': None,
+            # Reset clearance to UNCLEARED for fresh review
+            'clearance_state': ClearanceState.UNCLEARED,
+            'cleared_at': None,
+            'cleared_by': None,
+            'made_public_at': None,
+            'made_public_by': None,
+            'adf_run_id': None
+        }
+        self._asset_repo.update(asset_id, reset_updates)
+        logger.info(
+            f"Reset approval state from {old_state} to pending_review for {asset_id[:16]} "
+            f"after successful overwrite"
+        )
+        return True
 
     def get_lineage_state(
         self,

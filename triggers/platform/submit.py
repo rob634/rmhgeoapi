@@ -372,6 +372,12 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
             # Add asset_id to job params for handler to link back
             job_params['asset_id'] = asset.asset_id
 
+            # V0.8.16.7: Pass reset_approval flag for handler to reset after success (10 FEB 2026)
+            # This is set when overwriting a REJECTED or REVOKED asset
+            if validation_result.suggested_params.get('reset_approval'):
+                job_params['reset_approval'] = True
+                logger.info(f"  Will reset approval to PENDING_REVIEW after job success")
+
         except AssetExistsError as asset_err:
             # Asset exists and overwrite=False - this shouldn't happen if we handled
             # overwrite above, but log and continue with existing asset

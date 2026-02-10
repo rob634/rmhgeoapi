@@ -427,7 +427,7 @@ class PlatformCatalogService:
         return titiler_urls
 
     # =========================================================================
-    # COLLECTION OPERATIONS
+    # COLLECTION OPERATIONS (STAC-based, legacy)
     # =========================================================================
 
     def list_items_for_dataset(
@@ -466,6 +466,379 @@ class PlatformCatalogService:
                 }
                 for item in items
             ]
+        }
+
+    # =========================================================================
+    # UNIFIED CATALOG OPERATIONS (10 FEB 2026 - Bypasses STAC/OGC APIs)
+    # =========================================================================
+    # These methods query app.geospatial_assets directly (source of truth) and
+    # JOIN to metadata tables for bbox. Works for both vectors AND rasters.
+    # See: docs_claude/UNIFIED_B2B_CATALOG.md
+
+    def lookup_unified(
+        self,
+        dataset_id: str,
+        resource_id: str,
+        version_id: str
+    ) -> Dict[str, Any]:
+        """
+        Unified lookup - works for both raster and vector data.
+
+        Queries GeospatialAsset directly, bypasses STAC/OGC APIs.
+        This is the recommended B2B lookup method for V0.8+.
+
+        Args:
+            dataset_id: DDH dataset identifier
+            resource_id: DDH resource identifier
+            version_id: DDH version identifier
+
+        Returns:
+            Dict with unified response format including bbox and service URLs
+
+        Example:
+            >>> result = service.lookup_unified("eleventhhourtest", "v8_testing", "v1.0")
+            >>> if result["found"]:
+            ...     print(f"Type: {result['data_type']}, bbox: {result['metadata']['bbox']}")
+        """
+        from datetime import datetime, timezone
+        from infrastructure import GeospatialAssetRepository
+
+        logger.info(
+            f"🔍 Unified catalog lookup: dataset={dataset_id}, "
+            f"resource={resource_id}, version={version_id}"
+        )
+
+        # Query GeospatialAsset with metadata JOIN
+        repo = GeospatialAssetRepository()
+        platform_refs = {
+            "dataset_id": dataset_id,
+            "resource_id": resource_id,
+            "version_id": version_id
+        }
+
+        result = repo.get_with_metadata("ddh", platform_refs)
+
+        if not result:
+            logger.debug("   No asset found for these DDH identifiers")
+            return {
+                "found": False,
+                "reason": "asset_not_found",
+                "message": "No asset found for these DDH identifiers. "
+                           "The data may not have been submitted through the Platform API.",
+                "suggestion": "Submit the data via POST /api/platform/submit",
+                "ddh_refs": platform_refs,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+
+        # Build response based on data_type
+        data_type = result.get('data_type')
+
+        if data_type == 'vector':
+            response = self._build_vector_response(result)
+        elif data_type == 'raster':
+            response = self._build_raster_response(result)
+        else:
+            logger.warning(f"   Unknown data_type: {data_type}")
+            response = self._build_generic_response(result)
+
+        logger.info(f"   ✅ Found {data_type}: {result.get('asset_id', '')[:16]}...")
+        return response
+
+    def _build_vector_response(self, asset: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Build vector-specific response with TiPG URLs.
+
+        Args:
+            asset: Asset dict from get_with_metadata()
+
+        Returns:
+            Unified response format with vector-specific fields
+        """
+        from datetime import datetime, timezone
+
+        table_name = asset.get('table_name')
+        vector_meta = asset.get('vector', {})
+
+        # Generate TiPG URLs
+        tile_urls = self._config.generate_vector_tile_urls(table_name, schema="geo") if table_name else {}
+
+        return {
+            "found": True,
+            "asset_id": asset.get('asset_id'),
+            "data_type": "vector",
+
+            "status": {
+                "processing": asset.get('processing_status', 'pending'),
+                "approval": asset.get('approval_state', 'pending_review'),
+                "clearance": asset.get('clearance_state', 'uncleared')
+            },
+
+            "metadata": {
+                "bbox": asset.get('bbox'),
+                "title": vector_meta.get('title'),
+                "description": vector_meta.get('description'),
+                "created_at": asset.get('created_at').isoformat() if asset.get('created_at') else None
+            },
+
+            "vector": {
+                "table_name": table_name,
+                "schema": "geo",
+                "feature_count": vector_meta.get('feature_count'),
+                "geometry_type": vector_meta.get('geometry_type'),
+                "endpoints": {
+                    "features": f"/api/features/collections/{table_name}/items" if table_name else None,
+                    "collection": f"/api/features/collections/{table_name}" if table_name else None
+                },
+                "tiles": {
+                    "mvt": tile_urls.get('mvt'),
+                    "tilejson": tile_urls.get('tilejson'),
+                    "viewer": f"/api/interface/vector-tiles?collection=geo.{table_name}" if table_name else None
+                }
+            },
+
+            "ddh_refs": asset.get('platform_refs', {}),
+
+            "lineage": {
+                "lineage_id": asset.get('lineage_id'),
+                "version_ordinal": asset.get('version_ordinal'),
+                "is_latest": asset.get('is_latest'),
+                "is_served": asset.get('is_served')
+            },
+
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+    def _build_raster_response(self, asset: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Build raster-specific response with TiTiler URLs.
+
+        Args:
+            asset: Asset dict from get_with_metadata()
+
+        Returns:
+            Unified response format with raster-specific fields
+        """
+        from datetime import datetime, timezone
+        from urllib.parse import quote_plus
+
+        blob_path = asset.get('blob_path')
+        raster_meta = asset.get('raster', {})
+        stac_collection_id = asset.get('stac_collection_id')
+        stac_item_id = asset.get('stac_item_id')
+
+        # Generate TiTiler URLs if we have blob_path
+        titiler_urls = {}
+        if blob_path:
+            # Build full blob URL
+            storage_account = self._config.storage.account_name
+            container = "silver-cogs"  # COGs are stored in silver container
+            cog_url = f"https://{storage_account}.blob.core.windows.net/{container}/{blob_path}"
+            encoded_url = quote_plus(cog_url)
+
+            titiler_base = self._config.titiler_base_url
+
+            titiler_urls = {
+                "xyz": f"{titiler_base}/cog/tiles/{{z}}/{{x}}/{{y}}?url={encoded_url}",
+                "tilejson": f"{titiler_base}/cog/tilejson.json?url={encoded_url}",
+                "preview": f"{titiler_base}/cog/preview?url={encoded_url}",
+                "info": f"{titiler_base}/cog/info?url={encoded_url}",
+                "statistics": f"{titiler_base}/cog/statistics?url={encoded_url}",
+                "viewer": f"/api/interface/raster-viewer?url={encoded_url}"
+            }
+
+        return {
+            "found": True,
+            "asset_id": asset.get('asset_id'),
+            "data_type": "raster",
+
+            "status": {
+                "processing": asset.get('processing_status', 'pending'),
+                "approval": asset.get('approval_state', 'pending_review'),
+                "clearance": asset.get('clearance_state', 'uncleared')
+            },
+
+            "metadata": {
+                "bbox": asset.get('bbox'),
+                "created_at": asset.get('created_at').isoformat() if asset.get('created_at') else None
+            },
+
+            "raster": {
+                "blob_path": blob_path,
+                "container": "silver-cogs",
+                "band_count": raster_meta.get('band_count'),
+                "dtype": raster_meta.get('dtype'),
+                "dimensions": {
+                    "width": raster_meta.get('width'),
+                    "height": raster_meta.get('height')
+                } if raster_meta.get('width') else None,
+                "stac": {
+                    "collection_id": stac_collection_id,
+                    "item_id": stac_item_id
+                } if stac_item_id else None,
+                "tiles": titiler_urls
+            },
+
+            "ddh_refs": asset.get('platform_refs', {}),
+
+            "lineage": {
+                "lineage_id": asset.get('lineage_id'),
+                "version_ordinal": asset.get('version_ordinal'),
+                "is_latest": asset.get('is_latest'),
+                "is_served": asset.get('is_served')
+            },
+
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+    def _build_generic_response(self, asset: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Build generic response for unknown data types.
+
+        Args:
+            asset: Asset dict from get_with_metadata()
+
+        Returns:
+            Basic response with available fields
+        """
+        from datetime import datetime, timezone
+
+        return {
+            "found": True,
+            "asset_id": asset.get('asset_id'),
+            "data_type": asset.get('data_type'),
+
+            "status": {
+                "processing": asset.get('processing_status', 'pending'),
+                "approval": asset.get('approval_state', 'pending_review'),
+                "clearance": asset.get('clearance_state', 'uncleared')
+            },
+
+            "metadata": {
+                "bbox": asset.get('bbox'),
+                "created_at": asset.get('created_at').isoformat() if asset.get('created_at') else None
+            },
+
+            "ddh_refs": asset.get('platform_refs', {}),
+
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+    def get_unified_urls(self, asset_id: str) -> Dict[str, Any]:
+        """
+        Get service URLs by asset_id.
+
+        Retrieves an asset by its ID and returns appropriate service URLs
+        based on data_type.
+
+        Args:
+            asset_id: GeospatialAsset identifier
+
+        Returns:
+            Dict with service URLs for the asset
+        """
+        from datetime import datetime, timezone
+        from infrastructure import GeospatialAssetRepository
+
+        logger.info(f"🔗 Getting URLs for asset: {asset_id[:16]}...")
+
+        repo = GeospatialAssetRepository()
+        asset = repo.get_active_by_id(asset_id)
+
+        if not asset:
+            return {
+                "found": False,
+                "reason": "asset_not_found",
+                "message": f"Asset '{asset_id}' not found",
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+
+        # Convert to dict for building response
+        asset_dict = {
+            'asset_id': asset.asset_id,
+            'data_type': asset.data_type,
+            'table_name': asset.table_name,
+            'blob_path': asset.blob_path,
+            'stac_item_id': asset.stac_item_id,
+            'stac_collection_id': asset.stac_collection_id,
+            'platform_refs': asset.platform_refs,
+            'processing_status': asset.processing_status.value if hasattr(asset.processing_status, 'value') else asset.processing_status,
+            'approval_state': asset.approval_state.value if hasattr(asset.approval_state, 'value') else asset.approval_state,
+            'clearance_state': asset.clearance_state.value if hasattr(asset.clearance_state, 'value') else asset.clearance_state,
+            'created_at': asset.created_at,
+            'lineage_id': asset.lineage_id,
+            'version_ordinal': asset.version_ordinal,
+            'is_latest': asset.is_latest,
+            'is_served': asset.is_served,
+            'vector': {},  # Will be populated if needed
+            'raster': {},  # Will be populated if needed
+            'bbox': None   # Would need metadata JOIN for this
+        }
+
+        if asset.data_type == 'vector':
+            return self._build_vector_response(asset_dict)
+        elif asset.data_type == 'raster':
+            return self._build_raster_response(asset_dict)
+        else:
+            return self._build_generic_response(asset_dict)
+
+    def list_dataset_unified(
+        self,
+        dataset_id: str,
+        limit: int = 100,
+        offset: int = 0
+    ) -> Dict[str, Any]:
+        """
+        List all assets for a dataset with metadata.
+
+        Queries GeospatialAsset directly, returns all assets (rasters and vectors)
+        for the specified dataset.
+
+        Args:
+            dataset_id: DDH dataset identifier
+            limit: Maximum items to return
+            offset: Number of items to skip
+
+        Returns:
+            Dict with assets list and count
+        """
+        from datetime import datetime, timezone
+        from infrastructure import GeospatialAssetRepository
+
+        logger.info(f"📋 Unified listing for dataset: {dataset_id}")
+
+        repo = GeospatialAssetRepository()
+        assets = repo.list_by_dataset_with_metadata("ddh", dataset_id, limit, offset)
+
+        items = []
+        for asset in assets:
+            data_type = asset.get('data_type')
+            item = {
+                "asset_id": asset.get('asset_id'),
+                "data_type": data_type,
+                "bbox": asset.get('bbox'),
+                "processing_status": asset.get('processing_status'),
+                "approval_state": asset.get('approval_state'),
+                "created_at": asset.get('created_at').isoformat() if asset.get('created_at') else None,
+                "ddh_refs": asset.get('platform_refs', {})
+            }
+
+            # Add type-specific identifiers
+            if data_type == 'vector':
+                item["table_name"] = asset.get('table_name')
+                item["feature_count"] = asset.get('vector', {}).get('feature_count')
+            elif data_type == 'raster':
+                item["stac_item_id"] = asset.get('stac_item_id')
+                item["stac_collection_id"] = asset.get('stac_collection_id')
+
+            items.append(item)
+
+        return {
+            "dataset_id": dataset_id,
+            "count": len(items),
+            "limit": limit,
+            "offset": offset,
+            "items": items,
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
 

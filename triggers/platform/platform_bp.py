@@ -610,21 +610,38 @@ def platform_approvals_status_route(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # ============================================================================
-# CATALOG ENDPOINTS - B2B STAC Access (16 JAN 2026 - F12.8)
+# CATALOG ENDPOINTS - B2B Unified Access (10 FEB 2026 - UNIFIED_B2B_CATALOG)
 # ============================================================================
+# V0.8 UNIFIED: These endpoints now query app.geospatial_assets directly
+# (source of truth), bypassing STAC and OGC Features APIs.
+# Works for BOTH rasters and vectors.
 
 @bp.route(route="platform/catalog/lookup", methods=["GET"])
 async def platform_catalog_lookup_route(req: func.HttpRequest) -> func.HttpResponse:
     """
-    Lookup STAC item by DDH identifiers.
+    Unified lookup by DDH identifiers - works for BOTH raster and vector.
 
     GET /api/platform/catalog/lookup?dataset_id=X&resource_id=Y&version_id=Z
 
-    Verifies that a STAC item exists for the given DDH identifiers.
-    Returns STAC collection/item IDs and metadata if found.
+    V0.8 UNIFIED (10 FEB 2026): Queries app.geospatial_assets directly.
+    Returns asset details with bbox and appropriate service URLs.
     """
     from triggers.trigger_platform_catalog import platform_catalog_lookup
     return await platform_catalog_lookup(req)
+
+
+@bp.route(route="platform/catalog/asset/{asset_id}", methods=["GET"])
+async def platform_catalog_asset_route(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Get asset details and service URLs by asset_id.
+
+    GET /api/platform/catalog/asset/{asset_id}
+
+    V0.8 UNIFIED (10 FEB 2026): New endpoint for direct asset lookup.
+    Returns asset details with appropriate service URLs based on data_type.
+    """
+    from triggers.trigger_platform_catalog import platform_catalog_asset_by_id
+    return await platform_catalog_asset_by_id(req)
 
 
 @bp.route(route="platform/catalog/item/{collection_id}/{item_id}", methods=["GET"])
@@ -657,11 +674,12 @@ async def platform_catalog_assets_route(req: func.HttpRequest) -> func.HttpRespo
 @bp.route(route="platform/catalog/dataset/{dataset_id}", methods=["GET"])
 async def platform_catalog_dataset_route(req: func.HttpRequest) -> func.HttpResponse:
     """
-    List all STAC items for a DDH dataset.
+    List all assets for a DDH dataset - works for BOTH raster and vector.
 
-    GET /api/platform/catalog/dataset/{dataset_id}?limit=100
+    GET /api/platform/catalog/dataset/{dataset_id}?limit=100&offset=0
 
-    Returns all STAC items with the specified platform:dataset_id.
+    V0.8 UNIFIED (10 FEB 2026): Queries app.geospatial_assets directly.
+    Returns all assets (rasters AND vectors) for the specified dataset.
     """
     from triggers.trigger_platform_catalog import platform_catalog_dataset
     return await platform_catalog_dataset(req)

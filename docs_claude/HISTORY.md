@@ -1,6 +1,6 @@
 # Project History
 
-**Last Updated**: 09 FEB 2026
+**Last Updated**: 10 FEB 2026
 **Active Log**: Dec 2025 - Present
 **Rolling Archive**: When this file exceeds ~600 lines, older content is archived with a UUID filename.
 
@@ -9,6 +9,77 @@
 - [HISTORY_ARCHIVE_DEC2025.md](./HISTORY_ARCHIVE_DEC2025.md) - TODO.md cleanup archive
 
 This document tracks completed architectural changes and improvements to the Azure Geospatial ETL Pipeline.
+
+---
+
+## 10 FEB 2026: US 4.2.1 Approval-Aware Overwrite & Version Validation ✅
+
+**Status**: ✅ **COMPLETE**
+**Epic**: E4 Data Governance
+**Version**: 0.8.16.7 - 0.8.16.8
+
+### Achievement
+
+Implemented approval-aware validation for overwrites and semantic versioning:
+- Block overwrite if asset is APPROVED (must revoke first)
+- Reset approval to pending_review on successful overwrite (not at submit time)
+- Require approved predecessor for semantic version advances
+
+### Bug Fixes
+
+| Version | Issue | Fix |
+|---------|-------|-----|
+| V0.8.16.7 | Approval reset at submit time (before job success) | Moved reset to handler completion |
+| V0.8.16.8 | `idx_single_latest_per_lineage` constraint violation | Clear `is_latest` on previous version BEFORE insert |
+
+### All Tests Passed
+
+| Test | Result |
+|------|--------|
+| Revocation Flow | ✅ Asset revoked, STAC updated |
+| Overwrite Blocked on APPROVED | ✅ Correctly blocked |
+| Overwrite After Revoke | ✅ Reset to pending_review after job success |
+| Semantic Version Blocked | ✅ Blocked when previous not approved |
+| Semantic Version Allowed | ✅ v2.0 created after v1.0 approved |
+
+---
+
+## 09 FEB 2026: V0.8.16 Forward FK Architecture ✅
+
+**Status**: ✅ **COMPLETE**
+**Epic**: E7 Pipeline Infrastructure
+**Version**: 0.8.16.0 - 0.8.16.5
+
+### Achievement
+
+Refactored platform status and approval workflows to use forward foreign keys instead of reverse lookups via `current_job_id`. Forward FKs are set at job creation time and don't depend on job completion.
+
+### Key Changes
+
+| Component | Before | After |
+|-----------|--------|-------|
+| Platform status asset resolution | `asset_repo.get_by_job_id(current_job_id)` | `platform_request.asset_id` or `job.asset_id` |
+| Approval trigger asset resolution | `get_by_job_id()` reverse lookup | Direct FK from JobRecord |
+| Handler asset linking code | Dead code in handlers | Removed (CoreMachine factory handles it) |
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `triggers/trigger_platform_status.py` | Use forward FKs for asset_id resolution |
+| `triggers/trigger_approvals.py` | Use forward FKs in `_resolve_asset_id()` |
+| `services/handler_vector_docker_complete.py` | Removed dead asset linking code |
+| `services/handler_process_raster_complete.py` | Removed dead asset linking code |
+
+### Query Param Deprecation (V0.8.16.5)
+
+Deprecated query parameter lookups on `/api/platform/status`:
+
+| Pattern | Response |
+|---------|----------|
+| `?job_id=xxx` | 400 - "Use /api/platform/status/{id} instead" |
+| `?request_id=xxx` | 400 - "Use /api/platform/status/{id} instead" |
+| `/status/{id}` | 200 - Auto-detects request_id, job_id, or asset_id |
 
 ---
 

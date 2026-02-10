@@ -1074,6 +1074,250 @@ class GeospatialAssetRepository(PostgreSQLRepository):
                 return [self._row_to_model(row) for row in rows]
 
     # =========================================================================
+    # UNIFIED CATALOG QUERIES (B2B Integration - 10 FEB 2026)
+    # =========================================================================
+    # These methods query geospatial_assets directly and JOIN to metadata tables
+    # (geo.table_catalog for vectors, app.cog_metadata for rasters) to get bbox
+    # and other metadata. Bypasses STAC/OGC Features APIs entirely.
+    # See: docs_claude/UNIFIED_B2B_CATALOG.md
+
+    def get_with_metadata(
+        self,
+        platform_id: str,
+        platform_refs: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get asset with joined metadata (bbox, etc.) based on data_type.
+
+        Queries geospatial_assets and JOINs to:
+        - geo.table_catalog for vectors (bbox, feature_count, geometry_type)
+        - app.cog_metadata for rasters (bbox, band_count, dtype, dimensions)
+
+        This is the primary method for B2B catalog lookups, bypassing STAC.
+
+        Args:
+            platform_id: Platform identifier (e.g., "ddh")
+            platform_refs: Platform-specific identifiers dict
+
+        Returns:
+            Combined dict with asset fields + metadata fields, or None if not found
+
+        Example:
+            result = repo.get_with_metadata("ddh", {
+                "dataset_id": "eleventhhourtest",
+                "resource_id": "v8_testing",
+                "version_id": "v1.0"
+            })
+            # Returns: {
+            #   "asset_id": "...",
+            #   "data_type": "vector",
+            #   "table_name": "eleventhhourtest_v8_testing_v10",
+            #   "bbox": [-66.45, -56.32, -64.77, -54.68],
+            #   "feature_count": 3301,
+            #   "geometry_type": "MultiPolygon",
+            #   ...
+            # }
+        """
+        import json
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL("""
+                        SELECT
+                            a.*,
+                            -- Vector metadata (geo.table_catalog)
+                            tc.bbox_minx as v_bbox_minx,
+                            tc.bbox_miny as v_bbox_miny,
+                            tc.bbox_maxx as v_bbox_maxx,
+                            tc.bbox_maxy as v_bbox_maxy,
+                            tc.feature_count,
+                            tc.geometry_type,
+                            tc.title as v_title,
+                            tc.description as v_description,
+                            -- Raster metadata (app.cog_metadata)
+                            cm.bbox_minx as r_bbox_minx,
+                            cm.bbox_miny as r_bbox_miny,
+                            cm.bbox_maxx as r_bbox_maxx,
+                            cm.bbox_maxy as r_bbox_maxy,
+                            cm.band_count,
+                            cm.dtype,
+                            cm.width,
+                            cm.height
+                        FROM {schema}.{table} a
+                        LEFT JOIN geo.table_catalog tc
+                            ON a.data_type = 'vector' AND a.table_name = tc.table_name
+                        LEFT JOIN {schema}.cog_metadata cm
+                            ON a.data_type = 'raster' AND a.stac_item_id = cm.cog_id
+                        WHERE a.platform_id = %s
+                          AND a.platform_refs @> %s
+                          AND a.deleted_at IS NULL
+                    """).format(
+                        schema=sql.Identifier(self.schema),
+                        table=sql.Identifier(self.table)
+                    ),
+                    (platform_id, json.dumps(platform_refs))
+                )
+                row = cur.fetchone()
+
+                if not row:
+                    return None
+
+                return self._row_to_catalog_dict(row)
+
+    def list_by_dataset_with_metadata(
+        self,
+        platform_id: str,
+        dataset_id: str,
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """
+        List all assets for a dataset with joined metadata.
+
+        Uses JSONB containment to find all assets with matching dataset_id,
+        regardless of resource_id or version_id.
+
+        Args:
+            platform_id: Platform identifier (e.g., "ddh")
+            dataset_id: Dataset identifier to filter by
+            limit: Maximum number of results
+            offset: Number of results to skip
+
+        Returns:
+            List of dicts with asset fields + metadata fields
+
+        Example:
+            results = repo.list_by_dataset_with_metadata("ddh", "eleventhhourtest")
+            # Returns list of all assets (all resources/versions) for that dataset
+        """
+        import json
+
+        refs_filter = {"dataset_id": dataset_id}
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL("""
+                        SELECT
+                            a.*,
+                            -- Vector metadata (geo.table_catalog)
+                            tc.bbox_minx as v_bbox_minx,
+                            tc.bbox_miny as v_bbox_miny,
+                            tc.bbox_maxx as v_bbox_maxx,
+                            tc.bbox_maxy as v_bbox_maxy,
+                            tc.feature_count,
+                            tc.geometry_type,
+                            tc.title as v_title,
+                            tc.description as v_description,
+                            -- Raster metadata (app.cog_metadata)
+                            cm.bbox_minx as r_bbox_minx,
+                            cm.bbox_miny as r_bbox_miny,
+                            cm.bbox_maxx as r_bbox_maxx,
+                            cm.bbox_maxy as r_bbox_maxy,
+                            cm.band_count,
+                            cm.dtype,
+                            cm.width,
+                            cm.height
+                        FROM {schema}.{table} a
+                        LEFT JOIN geo.table_catalog tc
+                            ON a.data_type = 'vector' AND a.table_name = tc.table_name
+                        LEFT JOIN {schema}.cog_metadata cm
+                            ON a.data_type = 'raster' AND a.stac_item_id = cm.cog_id
+                        WHERE a.platform_id = %s
+                          AND a.platform_refs @> %s
+                          AND a.deleted_at IS NULL
+                        ORDER BY a.created_at DESC
+                        LIMIT %s OFFSET %s
+                    """).format(
+                        schema=sql.Identifier(self.schema),
+                        table=sql.Identifier(self.table)
+                    ),
+                    (platform_id, json.dumps(refs_filter), limit, offset)
+                )
+                rows = cur.fetchall()
+
+                return [self._row_to_catalog_dict(row) for row in rows]
+
+    def _row_to_catalog_dict(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Convert joined query row to unified catalog dict.
+
+        Normalizes the prefixed metadata columns (v_* for vector, r_* for raster)
+        into a consistent structure based on data_type.
+
+        Args:
+            row: Database row with asset + metadata columns
+
+        Returns:
+            Dict with unified structure including bbox, type-specific metadata
+        """
+        data_type = row['data_type']
+
+        # Build base asset dict
+        result = {
+            'asset_id': row['asset_id'],
+            'platform_id': row.get('platform_id', 'ddh'),
+            'platform_refs': row.get('platform_refs', {}),
+            'data_type': data_type,
+            'table_name': row.get('table_name'),
+            'blob_path': row.get('blob_path'),
+            'stac_item_id': row.get('stac_item_id'),
+            'stac_collection_id': row.get('stac_collection_id'),
+            'processing_status': row.get('processing_status', 'pending'),
+            'approval_state': row.get('approval_state', 'pending_review'),
+            'clearance_state': row.get('clearance_state', 'uncleared'),
+            'created_at': row.get('created_at'),
+            'updated_at': row.get('updated_at'),
+            # Lineage fields
+            'lineage_id': row.get('lineage_id'),
+            'version_ordinal': row.get('version_ordinal', 1),
+            'is_latest': row.get('is_latest', True),
+            'is_served': row.get('is_served', True),
+        }
+
+        # Add bbox and type-specific metadata based on data_type
+        if data_type == 'vector':
+            # Vector metadata from geo.table_catalog
+            bbox_minx = row.get('v_bbox_minx')
+            bbox_miny = row.get('v_bbox_miny')
+            bbox_maxx = row.get('v_bbox_maxx')
+            bbox_maxy = row.get('v_bbox_maxy')
+
+            if all(v is not None for v in [bbox_minx, bbox_miny, bbox_maxx, bbox_maxy]):
+                result['bbox'] = [bbox_minx, bbox_miny, bbox_maxx, bbox_maxy]
+            else:
+                result['bbox'] = None
+
+            result['vector'] = {
+                'feature_count': row.get('feature_count'),
+                'geometry_type': row.get('geometry_type'),
+                'title': row.get('v_title'),
+                'description': row.get('v_description'),
+            }
+
+        elif data_type == 'raster':
+            # Raster metadata from app.cog_metadata
+            bbox_minx = row.get('r_bbox_minx')
+            bbox_miny = row.get('r_bbox_miny')
+            bbox_maxx = row.get('r_bbox_maxx')
+            bbox_maxy = row.get('r_bbox_maxy')
+
+            if all(v is not None for v in [bbox_minx, bbox_miny, bbox_maxx, bbox_maxy]):
+                result['bbox'] = [bbox_minx, bbox_miny, bbox_maxx, bbox_maxy]
+            else:
+                result['bbox'] = None
+
+            result['raster'] = {
+                'band_count': row.get('band_count'),
+                'dtype': row.get('dtype'),
+                'width': row.get('width'),
+                'height': row.get('height'),
+            }
+
+        return result
+
+    # =========================================================================
     # HELPERS
     # =========================================================================
 

@@ -48,41 +48,50 @@ logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "trigger_platform_ca
 
 
 # ============================================================================
-# CATALOG LOOKUP
+# CATALOG LOOKUP (UNIFIED - 10 FEB 2026)
 # ============================================================================
 
 async def platform_catalog_lookup(req: func.HttpRequest) -> func.HttpResponse:
     """
-    Lookup STAC item by DDH identifiers.
+    Unified lookup by DDH identifiers - works for BOTH raster and vector.
 
     GET /api/platform/catalog/lookup?dataset_id=X&resource_id=Y&version_id=Z
 
-    Verifies that a STAC item exists for the given DDH identifiers and
-    returns its location in the catalog. This is the primary endpoint
-    for DDH to verify processing completed.
+    V0.8 UNIFIED (10 FEB 2026):
+    This endpoint now queries app.geospatial_assets directly (source of truth),
+    bypassing STAC and OGC Features APIs. Works for both rasters AND vectors.
 
     Query Parameters:
         dataset_id (required): DDH dataset identifier
         resource_id (required): DDH resource identifier
         version_id (required): DDH version identifier
 
-    Response (found):
+    Response (found - vector):
         {
             "found": true,
-            "stac": {
-                "collection_id": "flood-hazard-2024",
-                "item_id": "magallanes-region-flood",
-                "item_url": "/api/platform/catalog/item/...",
-                "assets_url": "/api/platform/catalog/assets/..."
+            "asset_id": "a7803a5e9160779290f54877fc65fbe0",
+            "data_type": "vector",
+            "status": {"processing": "completed", "approval": "approved", ...},
+            "metadata": {"bbox": [...], "title": "...", ...},
+            "vector": {
+                "table_name": "eleventhhourtest_v8_testing_v10",
+                "feature_count": 3301,
+                "geometry_type": "MultiPolygon",
+                "tiles": {"mvt": "...", "tilejson": "..."}
             },
-            "processing": {
-                "request_id": "a3f2c1b8...",
-                "job_id": "abc123...",
-                "completed_at": "2026-01-15T10:00:00Z"
-            },
-            "metadata": {
-                "bbox": [-75.5, -56.5, -66.5, -49.0],
-                "datetime": "2026-01-15T00:00:00Z"
+            "ddh_refs": {...}
+        }
+
+    Response (found - raster):
+        {
+            "found": true,
+            "asset_id": "...",
+            "data_type": "raster",
+            "metadata": {"bbox": [...], ...},
+            "raster": {
+                "blob_path": "...",
+                "band_count": 3,
+                "tiles": {"xyz": "...", "preview": "..."}
             },
             "ddh_refs": {...}
         }
@@ -90,12 +99,12 @@ async def platform_catalog_lookup(req: func.HttpRequest) -> func.HttpResponse:
     Response (not found):
         {
             "found": false,
-            "reason": "job_not_completed",
-            "message": "Job is processing...",
-            "status_url": "/api/platform/status/..."
+            "reason": "asset_not_found",
+            "message": "No asset found for these DDH identifiers...",
+            "suggestion": "Submit the data via POST /api/platform/submit"
         }
     """
-    logger.info("Platform catalog lookup endpoint called")
+    logger.info("Platform catalog lookup endpoint called (unified)")
 
     try:
         # Extract required parameters
@@ -124,19 +133,11 @@ async def platform_catalog_lookup(req: func.HttpRequest) -> func.HttpResponse:
                 headers={"Content-Type": "application/json"}
             )
 
-        # Perform lookup
+        # Perform unified lookup (works for both raster and vector)
         from services.platform_catalog_service import get_platform_catalog_service
         service = get_platform_catalog_service()
 
-        result = service.lookup_by_ddh_ids(dataset_id, resource_id, version_id)
-
-        # Add DDH refs to response
-        result["ddh_refs"] = {
-            "dataset_id": dataset_id,
-            "resource_id": resource_id,
-            "version_id": version_id
-        }
-        result["timestamp"] = datetime.now(timezone.utc).isoformat()
+        result = service.lookup_unified(dataset_id, resource_id, version_id)
 
         return func.HttpResponse(
             json.dumps(result, indent=2, default=str),
@@ -149,6 +150,93 @@ async def platform_catalog_lookup(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             json.dumps({
                 "error": "lookup_failed",
+                "message": str(e),
+                "error_type": type(e).__name__,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }, indent=2),
+            status_code=500,
+            headers={"Content-Type": "application/json"}
+        )
+
+
+# ============================================================================
+# CATALOG LOOKUP BY ASSET ID (NEW - 10 FEB 2026)
+# ============================================================================
+
+async def platform_catalog_asset_by_id(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Get asset details and service URLs by asset_id.
+
+    GET /api/platform/catalog/asset/{asset_id}
+
+    V0.8 UNIFIED (10 FEB 2026):
+    Returns asset details with appropriate service URLs based on data_type.
+
+    Path Parameters:
+        asset_id: GeospatialAsset identifier (SHA256 hash)
+
+    Response (vector):
+        {
+            "found": true,
+            "asset_id": "a7803a5e9160779290f54877fc65fbe0",
+            "data_type": "vector",
+            "vector": {"table_name": "...", "tiles": {...}},
+            "ddh_refs": {...}
+        }
+
+    Response (raster):
+        {
+            "found": true,
+            "asset_id": "...",
+            "data_type": "raster",
+            "raster": {"blob_path": "...", "tiles": {...}},
+            "ddh_refs": {...}
+        }
+    """
+    logger.info("Platform catalog asset by ID endpoint called")
+
+    try:
+        # Extract path parameter
+        asset_id = req.route_params.get('asset_id')
+
+        if not asset_id:
+            return func.HttpResponse(
+                json.dumps({
+                    "error": "missing_parameters",
+                    "message": "asset_id is required in path",
+                    "example": "/api/platform/catalog/asset/{asset_id}"
+                }, indent=2),
+                status_code=400,
+                headers={"Content-Type": "application/json"}
+            )
+
+        logger.debug(f"Getting asset by ID: {asset_id[:16]}...")
+
+        # Get asset URLs from service
+        from services.platform_catalog_service import get_platform_catalog_service
+        service = get_platform_catalog_service()
+
+        result = service.get_unified_urls(asset_id)
+
+        # Check if not found
+        if not result.get("found", True):
+            return func.HttpResponse(
+                json.dumps(result, indent=2),
+                status_code=404,
+                headers={"Content-Type": "application/json"}
+            )
+
+        return func.HttpResponse(
+            json.dumps(result, indent=2, default=str),
+            status_code=200,
+            headers={"Content-Type": "application/json"}
+        )
+
+    except Exception as e:
+        logger.error(f"Platform catalog asset by ID failed: {e}", exc_info=True)
+        return func.HttpResponse(
+            json.dumps({
+                "error": "get_asset_failed",
                 "message": str(e),
                 "error_type": type(e).__name__,
                 "timestamp": datetime.now(timezone.utc).isoformat()
@@ -366,44 +454,57 @@ async def platform_catalog_assets(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # ============================================================================
-# LIST ITEMS FOR DATASET
+# LIST ASSETS FOR DATASET (UNIFIED - 10 FEB 2026)
 # ============================================================================
 
 async def platform_catalog_dataset(req: func.HttpRequest) -> func.HttpResponse:
     """
-    List all STAC items for a DDH dataset.
+    List all assets for a DDH dataset - works for BOTH raster and vector.
 
     GET /api/platform/catalog/dataset/{dataset_id}
-    GET /api/platform/catalog/dataset/{dataset_id}?limit=50
+    GET /api/platform/catalog/dataset/{dataset_id}?limit=50&offset=0
 
-    Returns all STAC items that have the specified platform:dataset_id.
-    Useful for DDH to see all versions/resources within a dataset.
+    V0.8 UNIFIED (10 FEB 2026):
+    This endpoint now queries app.geospatial_assets directly (source of truth),
+    returning all assets (rasters AND vectors) for a dataset.
 
     Path Parameters:
         dataset_id: DDH dataset identifier
 
     Query Parameters:
         limit: Maximum items to return (default: 100, max: 1000)
+        offset: Pagination offset (default: 0)
 
     Response:
         {
-            "dataset_id": "flood-data",
-            "count": 5,
+            "dataset_id": "eleventhhourtest",
+            "count": 3,
+            "limit": 100,
+            "offset": 0,
             "items": [
                 {
-                    "item_id": "flood-item-1",
-                    "collection_id": "flood-collection",
-                    "bbox": [...],
-                    "datetime": "2026-01-15T00:00:00Z",
-                    "resource_id": "res-001",
-                    "version_id": "v1.0"
+                    "asset_id": "a7803a5e9160779290f54877fc65fbe0",
+                    "data_type": "vector",
+                    "bbox": [-66.45, -56.32, -64.77, -54.68],
+                    "processing_status": "completed",
+                    "approval_state": "approved",
+                    "table_name": "eleventhhourtest_v8_testing_v10",
+                    "feature_count": 3301,
+                    "ddh_refs": {"dataset_id": "...", "resource_id": "...", "version_id": "..."}
                 },
-                ...
+                {
+                    "asset_id": "b8914b6f0271880391e65988gd76gcf1",
+                    "data_type": "raster",
+                    "bbox": [...],
+                    "stac_item_id": "...",
+                    "stac_collection_id": "...",
+                    "ddh_refs": {...}
+                }
             ],
-            "timestamp": "..."
+            "timestamp": "2026-02-10T21:05:59Z"
         }
     """
-    logger.info("Platform catalog dataset endpoint called")
+    logger.info("Platform catalog dataset endpoint called (unified)")
 
     try:
         # Extract path parameter
@@ -420,20 +521,24 @@ async def platform_catalog_dataset(req: func.HttpRequest) -> func.HttpResponse:
                 headers={"Content-Type": "application/json"}
             )
 
-        # Parse optional limit
+        # Parse optional limit and offset
         try:
             limit = min(int(req.params.get('limit', '100')), 1000)
         except ValueError:
             limit = 100
 
-        logger.debug(f"Listing items for dataset: {dataset_id}, limit={limit}")
+        try:
+            offset = max(int(req.params.get('offset', '0')), 0)
+        except ValueError:
+            offset = 0
 
-        # Get items from service
+        logger.debug(f"Listing assets for dataset: {dataset_id}, limit={limit}, offset={offset}")
+
+        # Get items from unified service
         from services.platform_catalog_service import get_platform_catalog_service
         service = get_platform_catalog_service()
 
-        result = service.list_items_for_dataset(dataset_id, limit)
-        result["timestamp"] = datetime.now(timezone.utc).isoformat()
+        result = service.list_dataset_unified(dataset_id, limit, offset)
 
         return func.HttpResponse(
             json.dumps(result, indent=2, default=str),
@@ -461,7 +566,8 @@ async def platform_catalog_dataset(req: func.HttpRequest) -> func.HttpResponse:
 
 __all__ = [
     'platform_catalog_lookup',
-    'platform_catalog_item',
-    'platform_catalog_assets',
+    'platform_catalog_asset_by_id',  # NEW: Get by asset_id (10 FEB 2026)
+    'platform_catalog_item',         # STAC item access (preserved for backward compat)
+    'platform_catalog_assets',       # STAC assets access (preserved for backward compat)
     'platform_catalog_dataset'
 ]

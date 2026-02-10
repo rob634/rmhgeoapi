@@ -103,11 +103,11 @@ app.geospatial_assets  ◄── Single source of truth
 
 ## Implementation Phases
 
-### Phase 1: Repository Method ⬜ (~1 hour)
+### Phase 1: Repository Method ✅ COMPLETE (10 FEB 2026)
 
 **File**: `infrastructure/asset_repository.py`
 
-Add method to query asset with metadata JOIN:
+Added methods to query asset with metadata JOIN:
 
 ```python
 def get_with_metadata(
@@ -145,17 +145,18 @@ WHERE a.platform_id = %s
 ```
 
 **Checklist**:
-- [ ] Add `get_with_metadata()` method
-- [ ] Add `list_by_dataset_with_metadata()` for listing all assets in a dataset
+- [x] Add `get_with_metadata()` method
+- [x] Add `list_by_dataset_with_metadata()` for listing all assets in a dataset
+- [x] Add `_row_to_catalog_dict()` helper for response normalization
 - [ ] Unit test with mock data
 
 ---
 
-### Phase 2: Service Layer ⬜ (~2 hours)
+### Phase 2: Service Layer ✅ COMPLETE (10 FEB 2026)
 
 **File**: `services/platform_catalog_service.py`
 
-Add unified lookup methods:
+Added unified lookup methods:
 
 ```python
 def lookup_unified(
@@ -183,20 +184,21 @@ def list_dataset_unified(self, dataset_id: str, limit: int = 100) -> Dict[str, A
 ```
 
 **Checklist**:
-- [ ] Add `lookup_unified()` method
-- [ ] Add `_build_vector_response()` helper
-- [ ] Add `_build_raster_response()` helper
-- [ ] Add `get_unified_urls()` method
-- [ ] Add `list_dataset_unified()` method
-- [ ] Preserve existing STAC-based methods for backward compatibility
+- [x] Add `lookup_unified()` method
+- [x] Add `_build_vector_response()` helper
+- [x] Add `_build_raster_response()` helper
+- [x] Add `_build_generic_response()` helper (bonus)
+- [x] Add `get_unified_urls()` method
+- [x] Add `list_dataset_unified()` method
+- [x] Preserve existing STAC-based methods for backward compatibility
 
 ---
 
-### Phase 3: HTTP Triggers ⬜ (~1 hour)
+### Phase 3: HTTP Triggers ✅ COMPLETE (10 FEB 2026)
 
 **File**: `triggers/trigger_platform_catalog.py`
 
-Update/add endpoints:
+Updated/added endpoints:
 
 | Endpoint | Method | Change |
 |----------|--------|--------|
@@ -207,10 +209,11 @@ Update/add endpoints:
 | `/api/platform/catalog/dataset/{dataset_id}` | GET | **Update**: Use `list_dataset_unified()` |
 
 **Checklist**:
-- [ ] Update `platform_catalog_lookup()` to use unified method
-- [ ] Add `platform_catalog_asset()` endpoint
-- [ ] Update `platform_catalog_dataset()` to use unified method
-- [ ] Register new routes in `triggers/platform/platform_bp.py`
+- [x] Update `platform_catalog_lookup()` to use unified method
+- [x] Add `platform_catalog_asset_by_id()` endpoint (NEW)
+- [x] Update `platform_catalog_dataset()` to use unified method
+- [x] Register new routes in `triggers/platform/platform_bp.py`
+- [x] Preserve STAC endpoints (`platform_catalog_item`, `platform_catalog_assets`) for backward compat
 
 ---
 
@@ -327,9 +330,9 @@ For rasters, `"vector"` block is replaced with:
 
 | Phase | Time | Status |
 |-------|------|--------|
-| Phase 1: Repository | ~1 hour | ⬜ |
-| Phase 2: Service | ~2 hours | ⬜ |
-| Phase 3: Triggers | ~1 hour | ⬜ |
+| Phase 1: Repository | ~1 hour | ✅ |
+| Phase 2: Service | ~2 hours | ✅ |
+| Phase 3: Triggers | ~1 hour | ✅ |
 | Phase 4: Response | ~30 min | ⬜ |
 | Phase 5: Testing | ~1 hour | ⬜ |
 | Phase 6: Documentation | ~30 min | ⬜ |

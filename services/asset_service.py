@@ -201,13 +201,16 @@ class AssetService:
         # Generate deterministic asset_id
         asset_id = GeospatialAsset.generate_asset_id(platform_id, platform_refs)
 
-        # If this is a new version in an existing lineage, flip is_latest on current latest
+        # V0.8.16.8: If this is a new version in an existing lineage, flip is_latest BEFORE insert
+        # The unique constraint idx_single_latest_per_lineage requires only one is_latest=True per lineage.
+        # We must clear is_latest on the current latest BEFORE inserting the new one.
         current_latest = None
         if lineage_id and (is_latest is None or is_latest):
             current_latest = self._asset_repo.get_latest_in_lineage(lineage_id)
             if current_latest and current_latest.asset_id != asset_id:
-                # We'll flip is_latest after the new asset is created
-                logger.info(f"Will flip is_latest from {current_latest.asset_id} to {asset_id}")
+                # Flip is_latest BEFORE creating new asset to avoid unique constraint violation
+                self._asset_repo.update(current_latest.asset_id, {'is_latest': False})
+                logger.info(f"Cleared is_latest on {current_latest.asset_id} (preparing for {asset_id})")
 
         # Use upsert function (handles advisory locks internally)
         operation, new_revision, error_message = self._asset_repo.upsert(
@@ -231,10 +234,8 @@ class AssetService:
             # Asset exists and overwrite=False
             raise AssetExistsError(asset_id, platform_id, platform_refs)
 
-        # Flip is_latest on previous latest if needed
-        if current_latest and current_latest.asset_id != asset_id and operation == 'created':
-            self._asset_repo.flip_is_latest(current_latest.asset_id, asset_id)
-            logger.info(f"Flipped is_latest: {current_latest.asset_id} -> {asset_id}")
+        # V0.8.16.8: is_latest flip now happens BEFORE upsert (see above)
+        # No post-upsert flip needed since we cleared it before insert
 
         # Fetch the created/updated asset
         asset = self._asset_repo.get_by_id(asset_id)

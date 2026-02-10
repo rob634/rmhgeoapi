@@ -4,7 +4,7 @@
 # EPOCH: 4 - ACTIVE
 # STATUS: Service - Business logic for geospatial assets
 # PURPOSE: Orchestrate asset lifecycle: create, approve, reject, delete
-# LAST_REVIEWED: 30 JAN 2026 (DDH column migration)
+# LAST_REVIEWED: 09 FEB 2026 (Approval-aware overwrite validation)
 # EXPORTS: AssetService, AssetExistsError
 # DEPENDENCIES: infrastructure.asset_repository, infrastructure.revision_repository
 # ============================================================================
@@ -201,6 +201,19 @@ class AssetService:
         # Generate deterministic asset_id
         asset_id = GeospatialAsset.generate_asset_id(platform_id, platform_refs)
 
+        # V0.8.16: Check existing asset for approval reset on overwrite (09 FEB 2026)
+        # If overwriting REJECTED or REVOKED asset, we'll reset to PENDING_REVIEW
+        existing_asset = self._asset_repo.get_by_id(asset_id) if overwrite else None
+        reset_approval_after_overwrite = False
+        if existing_asset and overwrite:
+            old_approval_state = existing_asset.approval_state
+            if old_approval_state in (ApprovalState.REJECTED, ApprovalState.REVOKED):
+                reset_approval_after_overwrite = True
+                logger.info(
+                    f"Will reset approval state from {old_approval_state.value} to pending_review "
+                    f"after overwrite for {asset_id[:16]}"
+                )
+
         # If this is a new version in an existing lineage, flip is_latest on current latest
         current_latest = None
         if lineage_id and (is_latest is None or is_latest):
@@ -240,6 +253,29 @@ class AssetService:
         asset = self._asset_repo.get_by_id(asset_id)
         if not asset:
             raise RuntimeError(f"Asset {asset_id} not found after upsert (operation={operation})")
+
+        # V0.8.16: Reset approval state on overwrite (09 FEB 2026)
+        # If overwriting REJECTED or REVOKED asset, reset to PENDING_REVIEW
+        if reset_approval_after_overwrite and operation == 'updated':
+            reset_updates = {
+                'approval_state': ApprovalState.PENDING_REVIEW,
+                'reviewer': None,
+                'reviewed_at': None,
+                'rejection_reason': None,
+                'revoked_at': None,
+                'revoked_by': None,
+                'revocation_reason': None,
+                # Keep clearance_state as UNCLEARED for fresh review
+                'clearance_state': ClearanceState.UNCLEARED,
+                'cleared_at': None,
+                'cleared_by': None,
+                'made_public_at': None,
+                'made_public_by': None,
+                'adf_run_id': None
+            }
+            self._asset_repo.update(asset_id, reset_updates)
+            asset = self._asset_repo.get_by_id(asset_id)
+            logger.info(f"Reset approval state to PENDING_REVIEW for {asset_id[:16]} after overwrite")
 
         # Apply optional clearance level if provided at submit time
         # This is rare - most assets start as UNCLEARED and are cleared at approval
@@ -1024,6 +1060,8 @@ class AssetService:
                 'version_id': existing_version.platform_refs.get('version_id'),
                 'asset_id': existing_version.asset_id,
                 'processing_status': existing_version.processing_status.value if hasattr(existing_version.processing_status, 'value') else existing_version.processing_status,
+                # V0.8.16: Include approval_state for overwrite validation (09 FEB 2026)
+                'approval_state': existing_version.approval_state.value if hasattr(existing_version.approval_state, 'value') else existing_version.approval_state,
                 'is_latest': existing_version.is_latest,
                 'is_served': existing_version.is_served
             }
@@ -1038,6 +1076,8 @@ class AssetService:
                 'version_ordinal': current_latest.version_ordinal,
                 'asset_id': current_latest.asset_id,
                 'is_served': current_latest.is_served,
+                # V0.8.16: Include approval_state for semantic version validation (09 FEB 2026)
+                'approval_state': current_latest.approval_state.value if hasattr(current_latest.approval_state, 'value') else current_latest.approval_state,
                 'created_at': current_latest.created_at.isoformat() if current_latest.created_at else None
             }
 

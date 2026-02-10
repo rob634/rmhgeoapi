@@ -1,8 +1,31 @@
 # Working Backlog - ADO Aligned
 
-**Last Updated**: 07 FEB 2026
+**Last Updated**: 09 FEB 2026
 **Source of Truth**: [V0.8_ADO_WORKITEMS.md](/ado_wiki/V0.8_ADO_WORKITEMS.md)
 **Structure**: EPIC → FEATURE → User Story → Tasks
+
+---
+
+## IMMEDIATE PRIORITY
+
+### US 4.2.1: Approval-Aware Overwrite & Version Validation `[IMPLEMENTED]`
+
+**Implementation Plan**: [APPROVAL_OVERWRITE_VALIDATION.md](./APPROVAL_OVERWRITE_VALIDATION.md)
+
+**Problem**: `overwrite=True` fails validation because approval state not checked. Version lineage doesn't enforce approved predecessor.
+
+| Task | Status | Details |
+|------|--------|---------|
+| T4.2.1.1: Pass overwrite to validate_version_lineage() | ✅ Done | submit.py line 299 |
+| T4.2.1.2: Block overwrite if APPROVED | ✅ Done | platform_validation.py |
+| T4.2.1.3: Reset approval on overwrite (REJECTED/REVOKED) | ✅ Done | asset_service.py |
+| T4.2.1.4: Require approved previous for semantic versions | ✅ Done | platform_validation.py |
+| T4.2.1.5: Include approval_state in lineage state | ✅ Done | asset_service.py |
+| T4.2.1.6: Test revocation flow | 🔲 Ready | First test priority |
+
+**Testing Order**: Revocation → Overwrite blocked → Overwrite after revoke → Semantic version chain
+
+**Awaiting**: Deploy + Testing
 
 ---
 
@@ -11,6 +34,7 @@
 | Document | Purpose |
 |----------|---------|
 | [V0.8_ADO_WORKITEMS.md](/ado_wiki/V0.8_ADO_WORKITEMS.md) | **ADO work item definitions** |
+| [APPROVAL_OVERWRITE_VALIDATION.md](./APPROVAL_OVERWRITE_VALIDATION.md) | **US 4.2.1 - IMMEDIATE PRIORITY** |
 | [B2B_REQUEST_CONTEXT.md](./B2B_REQUEST_CONTEXT.md) | US 7.x B2B request tracking |
 | [APP_MODE_ENDPOINT_REFACTOR.md](./APP_MODE_ENDPOINT_REFACTOR.md) | US 6.1 multi-app deployment |
 | [DRY_RUN_IMPLEMENTATION.md](./DRY_RUN_IMPLEMENTATION.md) | US 1.x dry_run validation |
@@ -93,9 +117,11 @@ See [HISTORY.md](./HISTORY.md) for details.
 | T4.1.2: Pydantic validator on PlatformRequest | ✅ Done | 26 JAN 2026 |
 | T4.1.3: Fail-fast in pipeline tasks | 🔲 Optional | Defense-in-depth |
 
-### US 4.2: Approval Workflow `[CLOSED]`
+### US 4.2: Approval Workflow `[ACTIVE]`
 
-All tasks complete: approval records, approve/reject endpoints, STAC update, revocation.
+Core approval complete. Sub-story US 4.2.1 (approval-aware validation) is **IMMEDIATE PRIORITY**.
+
+See: [APPROVAL_OVERWRITE_VALIDATION.md](./APPROVAL_OVERWRITE_VALIDATION.md)
 
 ### US 4.3: Governed External Delivery `[ACTIVE]`
 

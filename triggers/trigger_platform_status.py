@@ -109,6 +109,29 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
         lookup_id = req.route_params.get('request_id')
         verbose = req.params.get('verbose', 'false').lower() == 'true'
 
+        # V0.8.16.1: Reject deprecated query param lookups (09 FEB 2026)
+        # Query params like ?job_id=xxx or ?request_id=xxx are not supported.
+        # The correct pattern is /api/platform/status/{id} where {id} is auto-detected.
+        deprecated_query_params = ['job_id', 'request_id', 'asset_id']
+        used_deprecated = [p for p in deprecated_query_params if req.params.get(p)]
+        if used_deprecated and not lookup_id:
+            param_name = used_deprecated[0]
+            param_value = req.params.get(param_name)
+            return func.HttpResponse(
+                json.dumps({
+                    "success": False,
+                    "error": f"Query parameter '{param_name}' is not supported for lookups",
+                    "hint": f"Use path-based lookup instead: /api/platform/status/{param_value}",
+                    "correct_usage": {
+                        "single_lookup": "/api/platform/status/{id}  (id auto-detected as request_id, job_id, or asset_id)",
+                        "list_all": "/api/platform/status  (optional: ?limit=N&dataset_id=X)"
+                    },
+                    "deprecated": f"?{param_name}=... query parameter"
+                }),
+                status_code=400,
+                headers={"Content-Type": "application/json"}
+            )
+
         if lookup_id:
             # ================================================================
             # Single request lookup with auto-detect ID type (21 JAN 2026)

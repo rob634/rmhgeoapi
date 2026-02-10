@@ -4,7 +4,7 @@
 # STATUS: Trigger layer - POST /api/platform/submit (unified endpoint)
 # PURPOSE: Anti-Corruption Layer translating DDH requests to CoreMachine jobs
 # CREATED: 27 JAN 2026 (extracted from trigger_platform.py)
-# UPDATED: 09 FEB 2026 - Removed deprecated /raster and /raster-collection handlers
+# UPDATED: 09 FEB 2026 - Approval-aware overwrite validation
 # EXPORTS: platform_request_submit
 # DEPENDENCIES: services.platform_translation, services.platform_job_submit
 # ============================================================================
@@ -289,14 +289,17 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
 
             # =====================================================================
             # V0.8 RELEASE CONTROL: Version Lineage Validation (31 JAN 2026)
+            # V0.8.16: Approval-aware overwrite validation (09 FEB 2026)
             # Validate previous_version_id before allowing job creation.
             # Prevents race conditions where two clients submit v2.0 concurrently.
+            # Blocks overwrite if asset is APPROVED (must revoke first).
             # =====================================================================
             validation_result = validate_version_lineage(
                 platform_id="ddh",
                 platform_refs=platform_refs,
                 previous_version_id=platform_req.previous_version_id,
-                asset_service=asset_service
+                asset_service=asset_service,
+                overwrite=overwrite  # V0.8.16: Pass overwrite for approval check
             )
 
             if dry_run:

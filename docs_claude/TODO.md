@@ -1,6 +1,6 @@
 # Working Backlog - ADO Aligned
 
-**Last Updated**: 10 FEB 2026
+**Last Updated**: 11 FEB 2026
 **Source of Truth**: [V0.8_ADO_WORKITEMS.md](/ado_wiki/V0.8_ADO_WORKITEMS.md)
 **Structure**: EPIC → FEATURE → User Story → Tasks
 
@@ -164,11 +164,15 @@ Items below are tracked here but not yet added to ADO. Add to ADO when prioritiz
 
 ## Technical Debt
 
-| Item | Status | Notes |
-|------|--------|-------|
-| Refactor trigger_platform.py | Planned | [REFACTOR_TRIGGER_PLATFORM.md](./REFACTOR_TRIGGER_PLATFORM.md) |
-| Vector revision tracking | Planned | app.vector_revisions table |
-| Job version tracking | Planned | Capture app version in job metadata |
+**All items resolved** - see below.
+
+### Resolved Technical Debt (10 FEB 2026)
+
+| Item | Resolution |
+|------|------------|
+| Refactor trigger_platform.py | ✅ Done 27 JAN 2026 - Split from 2,414 lines to 53-line facade + `triggers/platform/` submodules |
+| Job version tracking | ✅ Implemented V0.8.12 - `etl_version` field on JobRecord |
+| Vector revision tracking | ✅ Not needed - all vectors go through Platform API, revision tracking handled by GeospatialAsset + asset_revisions |
 
 ---
 
@@ -187,6 +191,7 @@ Items below are tracked here but not yet added to ADO. Add to ADO when prioritiz
 
 | Date | Feature | Task |
 |------|---------|------|
+| 11 FEB 2026 | US 4.2 | Approval consolidation COMPLETE - all 5 phases + post-migration docs verified |
 | 10 FEB 2026 | US 4.2.1 | Approval-aware overwrite & version validation |
 | 09 FEB 2026 | F7 | Forward FK architecture (V0.8.16) |
 | 09 FEB 2026 | F7 | Query param deprecation on platform/status |

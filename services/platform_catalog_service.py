@@ -629,8 +629,8 @@ class PlatformCatalogService:
         # Generate TiTiler URLs if we have blob_path
         titiler_urls = {}
         if blob_path:
-            # Build full blob URL
-            storage_account = self._config.storage.account_name
+            # Build full blob URL (COGs are stored in silver zone)
+            storage_account = self._config.storage.silver.account_name
             container = "silver-cogs"  # COGs are stored in silver container
             cog_url = f"https://{storage_account}.blob.core.windows.net/{container}/{blob_path}"
             encoded_url = quote_plus(cog_url)

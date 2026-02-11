@@ -361,15 +361,6 @@ class ExpectedSchemaRegistry:
                 "stac_item_id": "VARCHAR",
                 "created_at": "TIMESTAMP",
             },
-            "dataset_approvals": {
-                "approval_id": "VARCHAR",
-                "job_id": "VARCHAR",
-                "dataset_name": "VARCHAR",
-                "status": "approval_status",  # enum
-                "classification": "VARCHAR",
-                "created_at": "TIMESTAMP",
-                "reviewed_at": "TIMESTAMP",
-            },
             "artifacts": {
                 "artifact_id": "UUID",
                 "client_type": "VARCHAR",

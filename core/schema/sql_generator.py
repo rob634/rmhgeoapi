@@ -83,7 +83,6 @@ from ..models.stac import AccessLevel  # Data classification (25 JAN 2026 - S4.D
 from ..models.system_snapshot import SystemSnapshotRecord, SnapshotTriggerType  # System snapshots (04 JAN 2026)
 from ..models.external_refs import DatasetRefRecord  # External references (09 JAN 2026 - F7.8)
 from ..models.raster_metadata import CogMetadataRecord  # Raster metadata (09 JAN 2026 - F7.9)
-from ..models.approval import DatasetApproval, ApprovalStatus  # Dataset approvals (16 JAN 2026 - F4.AP)
 from ..models.asset import GeospatialAsset, AssetRevision, ApprovalState, ClearanceState, ProcessingStatus  # Geospatial assets (29 JAN 2026 - V0.8)
 from ..models.platform_registry import Platform, DDH_PLATFORM  # Platform registry (29 JAN 2026 - V0.8)
 from ..models.artifact import Artifact, ArtifactStatus  # Artifact registry (20 JAN 2026)
@@ -1029,11 +1028,6 @@ class PydanticToSQL:
             constraints.append(
                 sql.SQL("PRIMARY KEY ({})").format(sql.Identifier("cog_id"))
             )
-        elif table_name == "dataset_approvals":
-            # Dataset approvals table (16 JAN 2026 - F4.AP)
-            constraints.append(
-                sql.SQL("PRIMARY KEY ({})").format(sql.Identifier("approval_id"))
-            )
         elif table_name == "artifacts":
             # Artifact registry table (20 JAN 2026)
             constraints.append(
@@ -1209,20 +1203,6 @@ class PydanticToSQL:
                                               partial_where="etl_job_id IS NOT NULL"))
             indexes.append(IndexBuilder.btree(s, "cog_metadata", "container", name="idx_cog_metadata_container"))
             indexes.append(IndexBuilder.btree(s, "cog_metadata", "created_at", name="idx_cog_metadata_created_at", descending=True))
-
-        elif table_name == "dataset_approvals":
-            # Dataset approvals table (16 JAN 2026 - F4.AP)
-            # Indexes for approval workflow queries
-            indexes.append(IndexBuilder.btree(s, "dataset_approvals", "status", name="idx_dataset_approvals_status"))
-            indexes.append(IndexBuilder.btree(s, "dataset_approvals", "job_id", name="idx_dataset_approvals_job_id"))
-            indexes.append(IndexBuilder.btree(s, "dataset_approvals", "created_at", name="idx_dataset_approvals_created_at", descending=True))
-            indexes.append(IndexBuilder.btree(s, "dataset_approvals", "classification", name="idx_dataset_approvals_classification"))
-            # Partial index for pending approvals (most common query)
-            indexes.append(IndexBuilder.btree(s, "dataset_approvals", "created_at", name="idx_dataset_approvals_pending",
-                                              partial_where="status = 'pending'", descending=True))
-            # Reviewer lookup
-            indexes.append(IndexBuilder.btree(s, "dataset_approvals", "reviewer", name="idx_dataset_approvals_reviewer",
-                                              partial_where="reviewer IS NOT NULL"))
 
         elif table_name == "artifacts":
             # Artifact registry table (20 JAN 2026)
@@ -1808,7 +1788,6 @@ INSERT INTO {schema}.{table} (
         # NOTE: RESTRICTED is defined but NOT YET SUPPORTED
         composed.extend(self.generate_enum("access_level", AccessLevel))
         composed.extend(self.generate_enum("snapshot_trigger_type", SnapshotTriggerType))  # System snapshots (04 JAN 2026)
-        composed.extend(self.generate_enum("approval_status", ApprovalStatus))  # Dataset approvals (16 JAN 2026 - F4.AP)
         composed.extend(self.generate_enum("artifact_status", ArtifactStatus))  # Artifact registry (20 JAN 2026)
         composed.extend(self.generate_enum("service_type", ServiceType))  # External service registry (22 JAN 2026)
         composed.extend(self.generate_enum("service_status", ServiceStatus))  # External service registry (22 JAN 2026)
@@ -1837,7 +1816,6 @@ INSERT INTO {schema}.{table} (
         composed.append(self.generate_table_composed(SystemSnapshotRecord, "system_snapshots"))  # System snapshots (04 JAN 2026)
         composed.append(self.generate_table_composed(DatasetRefRecord, "dataset_refs"))  # External references (09 JAN 2026 - F7.8)
         composed.append(self.generate_table_composed(CogMetadataRecord, "cog_metadata"))  # Raster metadata (09 JAN 2026 - F7.9)
-        composed.append(self.generate_table_composed(DatasetApproval, "dataset_approvals"))  # Dataset approvals (16 JAN 2026 - F4.AP)
         composed.append(self.generate_table_composed(Artifact, "artifacts"))  # Artifact registry (20 JAN 2026)
         composed.append(self.generate_table_from_model(ExternalService))  # External service registry (22 JAN 2026)
         composed.append(self.generate_table_from_model(MapState))  # Map states (23 JAN 2026)
@@ -1860,7 +1838,6 @@ INSERT INTO {schema}.{table} (
         composed.extend(self.generate_indexes_composed("system_snapshots", SystemSnapshotRecord))  # System snapshots (04 JAN 2026)
         composed.extend(self.generate_indexes_composed("dataset_refs", DatasetRefRecord))  # External references (09 JAN 2026 - F7.8)
         composed.extend(self.generate_indexes_composed("cog_metadata", CogMetadataRecord))  # Raster metadata (09 JAN 2026 - F7.9)
-        composed.extend(self.generate_indexes_composed("dataset_approvals", DatasetApproval))  # Dataset approvals (16 JAN 2026 - F4.AP)
         composed.extend(self.generate_indexes_composed("artifacts", Artifact))  # Artifact registry (20 JAN 2026)
         composed.extend(self.generate_indexes_from_model(ExternalService))  # External service registry (22 JAN 2026)
         composed.extend(self.generate_indexes_from_model(MapState))  # Map states (23 JAN 2026)

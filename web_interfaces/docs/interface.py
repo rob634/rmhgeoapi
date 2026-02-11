@@ -471,6 +471,7 @@ class DocsInterface(BaseInterface):
                     <li><code>POST /api/platform/approve</code> - Approve with clearance</li>
                     <li><code>POST /api/platform/reject</code> - Reject with reason</li>
                     <li><code>POST /api/platform/revoke</code> - Revoke approval</li>
+                    <li><code>GET /api/platform/approvals/status</code> - Batch status lookup</li>
                     <li><code>POST /api/platform/unpublish</code> - Unpublish asset</li>
                 </ul>
             </div>

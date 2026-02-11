@@ -1,6 +1,6 @@
 # Project History
 
-**Last Updated**: 10 FEB 2026
+**Last Updated**: 11 FEB 2026
 **Active Log**: Dec 2025 - Present
 **Rolling Archive**: When this file exceeds ~600 lines, older content is archived with a UUID filename.
 
@@ -9,6 +9,68 @@
 - [HISTORY_ARCHIVE_DEC2025.md](./HISTORY_ARCHIVE_DEC2025.md) - TODO.md cleanup archive
 
 This document tracks completed architectural changes and improvements to the Azure Geospatial ETL Pipeline.
+
+---
+
+## 11 FEB 2026: V0.8 Approval Consolidation Complete ✅
+
+**Status**: ✅ **COMPLETE** (All 5 Phases + Post-Migration)
+**Epic**: E4 Data Governance
+**User Story**: US 4.2
+
+### Achievement
+
+Consolidated approval state into GeospatialAsset as the single source of truth, eliminating the legacy DatasetApproval system. GeospatialAsset now serves as the DDD Aggregate Root with four orthogonal state dimensions: Revision, Approval, Clearance, Processing.
+
+### Phases Completed
+
+| Phase | Description | Date |
+|-------|-------------|------|
+| Phase 1 | Enhanced GeospatialAsset (REVOKED state, approval_notes, revocation audit fields) | 08 FEB 2026 |
+| Phase 2 | Created AssetApprovalService (approve/reject/revoke/list/stats) | 08 FEB 2026 |
+| Phase 3 | New /api/assets/{id}/approve\|reject\|revoke endpoints + query routes | 08 FEB 2026 |
+| Phase 4 | Updated all active code paths; removed DatasetApproval from machine_factory | 08 FEB 2026 |
+| Phase 5 | Schema cleanup - removed legacy DDL, archived legacy files, cleaned imports | 11 FEB 2026 |
+| Post-Migration | Verified OpenAPI spec + docs landing page up to date | 11 FEB 2026 |
+
+### Legacy Code Archived
+
+Moved to `docs/archive/v0.7_approval/`:
+- `approval_model.py` (DatasetApproval, ApprovalStatus)
+- `approval_repository.py` (ApprovalRepository)
+- `approval_service.py` (ApprovalService)
+
+### Code Cleanup
+
+- Removed `dataset_approvals` DDL from `sql_generator.py`
+- Removed from `schema_analyzer.py` expected schema
+- Removed exports from `core/models/__init__.py` and `infrastructure/__init__.py`
+- Added missing `GET /api/platform/approvals/status` to docs landing page
+
+### Design Document
+
+Full plan: `docs_claude/V0.8_APPROVAL_CONSOLIDATION.md`
+
+---
+
+## 10 FEB 2026: Technical Debt Assessment ✅
+
+**Status**: ✅ **RESOLVED**
+
+### Job Version Tracking
+Already implemented as of V0.8.12 (08 FEB 2026). The `etl_version` field on `JobRecord` captures app version at job creation across all three paths:
+- Platform submissions (`platform_job_submit.py`)
+- Mixin-based jobs (`jobs/mixins.py`)
+- Direct repository (`infrastructure/jobs_tasks.py`)
+
+### Vector Revision Tracking
+**Not needed** - architectural decision confirmed:
+- All vector ingestion goes through Platform API
+- Platform API creates GeospatialAsset with revision tracking
+- `app.asset_revisions` provides audit trail for superseded versions
+- ETL layer is execution-only, doesn't need its own revision concept
+
+**Key Principle**: Revision tracking lives at the Platform/Asset layer, not ETL layer.
 
 ---
 

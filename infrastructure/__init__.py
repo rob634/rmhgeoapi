@@ -88,7 +88,6 @@ if TYPE_CHECKING:
     from .curated_repository import CuratedDatasetRepository as _CuratedDatasetRepository
     from .curated_repository import CuratedUpdateLogRepository as _CuratedUpdateLogRepository
     from .promoted_repository import PromotedDatasetRepository as _PromotedDatasetRepository
-    from .approval_repository import ApprovalRepository as _ApprovalRepository
     from .job_event_repository import JobEventRepository as _JobEventRepository
     from .asset_repository import GeospatialAssetRepository as _GeospatialAssetRepository
     from .revision_repository import AssetRevisionRepository as _AssetRevisionRepository
@@ -205,11 +204,6 @@ def __getattr__(name: str):
         from .promoted_repository import PromotedDatasetRepository
         return PromotedDatasetRepository
 
-    # Dataset approvals (F4.AP)
-    elif name == "ApprovalRepository":
-        from .approval_repository import ApprovalRepository
-        return ApprovalRepository
-
     # Job Event Tracking (23 JAN 2026 - Execution Timeline)
     elif name == "JobEventRepository":
         from .job_event_repository import JobEventRepository
@@ -325,7 +319,6 @@ __all__ = [
     "CuratedDatasetRepository",
     "CuratedUpdateLogRepository",
     "PromotedDatasetRepository",
-    "ApprovalRepository",
     # Job Event Tracking (23 JAN 2026 - Execution Timeline)
     "JobEventRepository",
     # Geospatial Asset Entity (29 JAN 2026 - V0.8 Entity Architecture)

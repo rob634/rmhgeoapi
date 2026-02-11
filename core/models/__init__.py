@@ -142,12 +142,6 @@ from .raster_metadata import (
     CogMetadataRecord
 )
 
-# Dataset approval models (F4.AP)
-from .approval import (
-    DatasetApproval,
-    ApprovalStatus
-)
-
 # Geospatial asset entity models (V0.8 Entity Architecture - 29 JAN 2026)
 from .asset import (
     ApprovalState,
@@ -311,10 +305,6 @@ __all__ = [
 
     # Raster metadata models (F7.9)
     'CogMetadataRecord',
-
-    # Dataset approval models (F4.AP)
-    'DatasetApproval',
-    'ApprovalStatus',
 
     # Geospatial asset entity models (V0.8 Entity Architecture - 29 JAN 2026)
     'ApprovalState',

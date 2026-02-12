@@ -2,8 +2,8 @@
 # PROCESS RASTER COMPLETE HANDLER (Docker)
 # ============================================================================
 # STATUS: Services - Consolidated raster handler for Docker worker
-# PURPOSE: Single handler that does validate → COG → STAC in one execution
-# LAST_REVIEWED: 27 JAN 2026
+# PURPOSE: Single handler that does validate → COG → persist → STAC in one execution
+# LAST_REVIEWED: 12 FEB 2026
 # F7.18: Integrated with Docker Orchestration Framework (graceful shutdown)
 # F7.19: Real-time progress reporting for Workflow Monitor (19 JAN 2026)
 # F7.20: Resource metrics tracking (peak memory, CPU) for capacity planning
@@ -25,7 +25,8 @@ V0.8 Architecture (24 JAN 2026):
 Single COG Mode (files <= threshold):
     1. Validation (CRS, type detection)
     2. COG creation (reproject + compress)
-    3. STAC metadata (catalog registration)
+    3. Persist app tables (cog_metadata + render_config — source of truth)
+    4. STAC metadata (catalog registration — derived from app tables)
 
 Tiled Mode (files > threshold):
     1. Generate tiling scheme
@@ -121,6 +122,59 @@ def _report_progress(
     except Exception as e:
         # Progress reporting is non-critical - log and continue
         logger.debug(f"Progress report failed (non-critical): {e}")
+
+
+# =============================================================================
+# JOBEVENT HELPER (12 FEB 2026)
+# =============================================================================
+
+def _emit_job_event(
+    job_id: str,
+    task_id: str,
+    stage: int,
+    checkpoint_name: str,
+    event_data: Optional[Dict[str, Any]] = None,
+    error_message: Optional[str] = None,
+    duration_ms: Optional[int] = None
+) -> None:
+    """
+    Emit a JobEvent for checkpoint visibility.
+
+    Pattern copied from handler_raster_collection_complete.py.
+    All events are non-fatal — failures are logged but never block processing.
+
+    Args:
+        job_id: Parent job ID
+        task_id: Task ID
+        stage: Stage number
+        checkpoint_name: Checkpoint identifier (e.g., 'raster_validation_started')
+        event_data: Additional event data
+        error_message: Error message if failure
+        duration_ms: Duration of operation
+    """
+    try:
+        from core.models.job_event import JobEvent, JobEventType, JobEventStatus
+        from infrastructure.job_event_repository import JobEventRepository
+
+        event = JobEvent.create_task_event(
+            job_id=job_id,
+            task_id=task_id,
+            stage=stage,
+            event_type=JobEventType.CHECKPOINT,
+            event_status=JobEventStatus.SUCCESS if not error_message else JobEventStatus.FAILURE,
+            checkpoint_name=checkpoint_name,
+            event_data=event_data or {},
+            error_message=error_message,
+            duration_ms=duration_ms
+        )
+
+        repo = JobEventRepository()
+        repo.create_event(event)
+        logger.debug(f"📌 JobEvent: {checkpoint_name}")
+
+    except Exception as e:
+        # JobEvents are non-critical - log and continue
+        logger.warning(f"Failed to emit JobEvent '{checkpoint_name}': {e}")
 
 
 # =============================================================================
@@ -1584,7 +1638,7 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
 
     Output Mode:
         If _file_size_mb <= raster_tiling_threshold_mb (or not provided):
-            Single COG output (3 phases: validate → COG → STAC)
+            Single COG output (4 phases: validate → COG → persist app tables → STAC)
         If _file_size_mb > raster_tiling_threshold_mb:
             Tiled output (4 phases: tiling → extract → COGs → STAC)
     """
@@ -1713,11 +1767,13 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
     validation_result = {}
     cog_result = {}
     stac_result = {}
+    render_config = None  # Phase 3b: persisted render config (source of truth for STAC)
 
     # Track timing (may be partial on resume)
     phase1_duration = 0.0
     phase2_duration = 0.0
     phase3_duration = 0.0
+    phase4_duration = 0.0
 
     # F7.20: Resource tracking for Docker jobs (19 JAN 2026)
     # Captures initial/peak/final memory + CPU for capacity planning
@@ -1731,11 +1787,11 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
 
     try:
         # =====================================================================
-        # PHASE 1: VALIDATION (0-20%)
+        # PHASE 1: VALIDATION (0-15%)
         # =====================================================================
         if checkpoint and checkpoint.should_skip(1):
             logger.info("⏭️ PHASE 1: Skipping validation (already completed)")
-            _report_progress(docker_context, 20, 1, 3, "Validation", "Skipped (resumed)")
+            _report_progress(docker_context, 15, 1, 4, "Validation", "Skipped (resumed)")
             # Restore validation result from checkpoint
             validation_result = checkpoint.get_data('validation_result', {})
             source_crs = checkpoint.get_data('source_crs')
@@ -1749,8 +1805,11 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                 }
         else:
             logger.info("🔄 PHASE 1: Validating raster...")
-            _report_progress(docker_context, 5, 1, 3, "Validation", "Starting validation")
+            _report_progress(docker_context, 5, 1, 4, "Validation", "Starting validation")
             phase1_start = time.time()
+
+            _emit_job_event(job_id, task_id, 1, 'raster_validation_started',
+                            {'blob_name': blob_name, 'raster_type_param': params.get('raster_type', 'auto')})
 
             from .raster_validation import validate_raster
 
@@ -1789,10 +1848,18 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                 }
 
             phase1_duration = time.time() - phase1_start
+            raster_type_info = validation_result.get('raster_type', {})
             logger.info(f"✅ PHASE 1 complete: {phase1_duration:.2f}s")
             logger.info(f"   Source CRS: {source_crs}")
-            logger.info(f"   Raster type: {validation_result.get('raster_type', {}).get('detected_type')}")
-            _report_progress(docker_context, 20, 1, 3, "Validation", f"Complete ({phase1_duration:.1f}s)")
+            logger.info(f"   Raster type: {raster_type_info.get('detected_type')}")
+            _report_progress(docker_context, 15, 1, 4, "Validation", f"Complete ({phase1_duration:.1f}s)")
+
+            _emit_job_event(job_id, task_id, 1, 'raster_validation_complete', {
+                'detected_type': raster_type_info.get('detected_type'),
+                'confidence': raster_type_info.get('confidence'),
+                'band_count': raster_type_info.get('band_count'),
+                'dtype': raster_type_info.get('data_type'),
+            }, duration_ms=int(phase1_duration * 1000))
 
             # Save checkpoint after phase 1
             if checkpoint:
@@ -1810,7 +1877,7 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             logger.warning("🛑 GRACEFUL SHUTDOWN - Handler Interrupted")
             logger.warning(f"   Task ID: {task_id[:16] if task_id else 'unknown'}...")
             logger.warning(f"   Phase completed: 1 (validation)")
-            logger.warning(f"   Phase skipped: 2 (COG creation), 3 (STAC)")
+            logger.warning(f"   Phase skipped: -4 (STAC)")
             logger.warning(f"   Source CRS saved: {source_crs}")
             logger.warning("   Returning interrupted=True for message abandonment")
             logger.warning("=" * 70)
@@ -1823,14 +1890,14 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             }
 
         # =====================================================================
-        # PHASE 2: COG CREATION (20-80%)
+        # PHASE 2: COG CREATION (15-70%)
         # =====================================================================
         from config import get_config
         config = get_config()
 
         if checkpoint and checkpoint.should_skip(2):
             logger.info("⏭️ PHASE 2: Skipping COG creation (already completed)")
-            _report_progress(docker_context, 80, 2, 3, "COG Creation", "Skipped (resumed)")
+            _report_progress(docker_context, 70, 2, 4, "COG Creation", "Skipped (resumed)")
             # Restore COG result from checkpoint
             cog_result = checkpoint.get_data('cog_result', {})
             cog_blob = checkpoint.get_data('cog_blob')
@@ -1845,8 +1912,13 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                 }
         else:
             logger.info("🔄 PHASE 2: Creating COG...")
-            _report_progress(docker_context, 25, 2, 3, "COG Creation", "Starting COG conversion")
+            _report_progress(docker_context, 20, 2, 4, "COG Creation", "Starting COG conversion")
             phase2_start = time.time()
+
+            _emit_job_event(job_id, task_id, 1, 'raster_cog_started', {
+                'target_crs': params.get('target_crs') or config.raster.target_crs,
+                'output_tier': params.get('output_tier', 'analysis'),
+            })
 
             from .raster_cog import create_cog
 
@@ -1914,9 +1986,15 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             logger.info(f"   COG blob: {cog_blob}")
             logger.info(f"   Size: {cog_size_mb:.1f} MB")
             _report_progress(
-                docker_context, 80, 2, 3, "COG Creation",
+                docker_context, 70, 2, 4, "COG Creation",
                 f"Complete ({phase2_duration:.1f}s, {cog_size_mb:.1f} MB)"
             )
+
+            _emit_job_event(job_id, task_id, 1, 'raster_cog_complete', {
+                'cog_blob': cog_blob,
+                'size_mb': cog_size_mb,
+                'compression': cog_result.get('compression'),
+            }, duration_ms=int(phase2_duration * 1000))
 
             # Save checkpoint after phase 2 with artifact validation
             if checkpoint:
@@ -1947,7 +2025,7 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             logger.warning("🛑 GRACEFUL SHUTDOWN - Handler Interrupted")
             logger.warning(f"   Task ID: {task_id[:16] if task_id else 'unknown'}...")
             logger.warning(f"   Phase completed: 2 (COG creation)")
-            logger.warning(f"   Phase skipped: 3 (STAC metadata)")
+            logger.warning(f"   Phase skipped: 3 (persist), 4 (STAC)")
             logger.warning(f"   COG blob saved: {cog_blob}")
             logger.warning(f"   COG container: {cog_container}")
             logger.warning("   Returning interrupted=True for message abandonment")
@@ -1963,24 +2041,127 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             }
 
         # =====================================================================
-        # PHASE 3: STAC METADATA (80-100%)
+        # PHASE 3: PERSIST APP TABLES (70-80%) — Source of Truth
         # =====================================================================
-        if checkpoint and checkpoint.should_skip(3):
-            logger.info("⏭️ PHASE 3: Skipping STAC metadata (already completed)")
-            _report_progress(docker_context, 100, 3, 3, "STAC Registration", "Skipped (resumed)")
+        # Write cog_metadata and render_config BEFORE STAC so that:
+        # 1. App schema tables are source of truth for all STAC metadata
+        # 2. STAC properties (app:colormap, etc.) are derived from persisted config
+        # 3. If STAC fails, app tables still have the data
+        # These are idempotent upserts — safe on resume, no checkpoint needed.
+        logger.info("🔄 PHASE 3: Persisting app tables (source of truth)...")
+        _report_progress(docker_context, 72, 3, 4, "Persist Metadata", "Writing app tables")
+        phase3_start = time.time()
+
+        # Pre-compute STAC item_id (deterministic, matches what stac_catalog would generate)
+        collection_id = params.get('collection_id') or 'cogs'
+        stac_item_id = params.get('stac_item_id') or params.get('item_id')
+        if not stac_item_id:
+            safe_name = cog_blob.replace('/', '-').replace('.', '-')
+            stac_item_id = f"{collection_id}-{safe_name}"
+
+        raster_type_info = validation_result.get('raster_type', {})
+
+        # --- Phase 3a: app.cog_metadata ---
+        try:
+            from infrastructure.raster_metadata_repository import get_raster_metadata_repository
+
+            cog_repo = get_raster_metadata_repository()
+
+            cog_url = f"https://{config.storage.silver.account_name}.blob.core.windows.net/{cog_container}/{cog_blob}"
+            cog_repo.upsert(
+                cog_id=stac_item_id,
+                container=cog_container,
+                blob_path=cog_blob,
+                cog_url=cog_url,
+                band_count=raster_type_info.get('band_count'),
+                dtype=raster_type_info.get('data_type', 'unknown'),
+                nodata=validation_result.get('nodata'),
+                crs=f"EPSG:{validation_result.get('epsg', 4326)}",
+                is_cog=True,
+                stac_item_id=stac_item_id,
+                stac_collection_id=collection_id,
+                etl_job_id=job_id,
+                source_file=blob_name,
+            )
+            logger.info(f"✅ Phase 3a: app.cog_metadata persisted for {stac_item_id}")
+
+            _emit_job_event(job_id, task_id, 1, 'raster_cog_metadata_persisted', {
+                'cog_id': stac_item_id,
+                'band_count': raster_type_info.get('band_count'),
+                'dtype': raster_type_info.get('data_type'),
+            })
+
+        except Exception as cog_meta_err:
+            # Non-fatal — cog_metadata is supplementary
+            logger.warning(f"⚠️ Phase 3a: cog_metadata upsert failed (non-fatal): {cog_meta_err}")
+
+        # --- Phase 3b: app.raster_render_configs ---
+        try:
+            from infrastructure.raster_render_repository import get_raster_render_repository
+            from core.models.raster_render_config import RasterRenderConfig
+
+            render_config = RasterRenderConfig.create_default_for_cog(
+                cog_id=stac_item_id,
+                dtype=raster_type_info.get('data_type', 'float32'),
+                band_count=raster_type_info.get('band_count', 1),
+                nodata=validation_result.get('nodata'),
+                detected_type=raster_type_info.get('detected_type'),
+                default_ramp=params.get('default_ramp'),
+            )
+            render_repo = get_raster_render_repository()
+            render_repo.create_from_model(render_config)
+
+            logger.info(f"✅ Phase 3b: render_config persisted for {stac_item_id} "
+                        f"(colormap={render_config.render_spec.get('colormap_name', 'none')})")
+
+            _emit_job_event(job_id, task_id, 1, 'raster_render_config_persisted', {
+                'cog_id': stac_item_id,
+                'render_id': 'default',
+                'colormap_name': render_config.render_spec.get('colormap_name'),
+            })
+
+        except Exception as render_err:
+            # Non-fatal — render config is supplementary
+            logger.warning(f"⚠️ Phase 3b: render_config creation failed (non-fatal): {render_err}")
+            render_config = None
+
+        phase3_duration = time.time() - phase3_start
+        logger.info(f"✅ PHASE 3 complete: {phase3_duration:.2f}s")
+        _report_progress(docker_context, 80, 3, 4, "Persist Metadata", f"Complete ({phase3_duration:.1f}s)")
+
+        # =====================================================================
+        # PHASE 4: STAC METADATA (80-100%) — Derived from app tables
+        # =====================================================================
+        if checkpoint and checkpoint.should_skip(4):
+            logger.info("⏭️ PHASE 4: Skipping STAC metadata (already completed)")
+            _report_progress(docker_context, 100, 4, 4, "STAC Registration", "Skipped (resumed)")
             # Restore STAC result from checkpoint
             stac_result = checkpoint.get_data('stac_result', {})
         else:
-            logger.info("🔄 PHASE 3: Creating STAC metadata...")
-            _report_progress(docker_context, 85, 3, 3, "STAC Registration", "Registering with catalog")
-            phase3_start = time.time()
+            logger.info("🔄 PHASE 4: Creating STAC metadata...")
+            _report_progress(docker_context, 85, 4, 4, "STAC Registration", "Registering with catalog")
+            phase4_start = time.time()
+
+            _emit_job_event(job_id, task_id, 1, 'raster_stac_started', {
+                'collection_id': collection_id,
+            })
 
             from .stac_catalog import extract_stac_metadata
+
+            # Build raster_type for STAC: prefer render_config (source of truth)
+            stac_raster_type = cog_result.get('raster_type')
+            if render_config:
+                # Inject render_config so stac_catalog can use from_render_config()
+                stac_raster_type = stac_raster_type or raster_type_info
+                # Pass render_config through params for stac_catalog to use
+                stac_render_config = render_config
+            else:
+                stac_render_config = None
 
             stac_params = {
                 'container_name': cog_container,
                 'blob_name': cog_blob,
-                'collection_id': params.get('collection_id') or config.raster.stac_default_collection,
+                'collection_id': collection_id,
                 # 30 JAN 2026: Use stac_item_id from Platform (DDH format) if available
                 'item_id': params.get('stac_item_id') or params.get('item_id'),
                 # Platform passthrough
@@ -1989,7 +2170,9 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                 'version_id': params.get('version_id'),
                 'access_level': params.get('access_level'),
                 # Raster type for visualization
-                'raster_type': cog_result.get('raster_type'),
+                'raster_type': stac_raster_type,
+                # Pass render config so STAC derives from source of truth
+                '_render_config': stac_render_config,
                 # STAC file extension: checksum and size (21 JAN 2026)
                 'file_checksum': cog_result.get('file_checksum'),
                 'file_size': cog_result.get('file_size'),
@@ -2008,16 +2191,21 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             else:
                 stac_result = stac_response.get('result', {})
 
-            phase3_duration = time.time() - phase3_start
-            logger.info(f"✅ PHASE 3 complete: {phase3_duration:.2f}s")
+            phase4_duration = time.time() - phase4_start
+            logger.info(f"✅ PHASE 4 complete: {phase4_duration:.2f}s")
             if stac_result.get('item_id'):
                 logger.info(f"   STAC item: {stac_result.get('item_id')}")
-            _report_progress(docker_context, 100, 3, 3, "STAC Registration", f"Complete ({phase3_duration:.1f}s)")
+            _report_progress(docker_context, 100, 4, 4, "STAC Registration", f"Complete ({phase4_duration:.1f}s)")
 
-            # Save checkpoint after phase 3 (all phases complete)
+            _emit_job_event(job_id, task_id, 1, 'raster_stac_complete', {
+                'collection_id': collection_id,
+                'item_id': stac_result.get('item_id'),
+            }, duration_ms=int(phase4_duration * 1000))
+
+            # Save checkpoint after phase 4 (all phases complete)
             if checkpoint:
                 checkpoint.save(
-                    phase=3,
+                    phase=4,
                     data={
                         'stac_result': stac_result,
                     }
@@ -2037,6 +2225,8 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             if resumed_from_phase >= 2:
                 phases_skipped.append("cog_creation")
             if resumed_from_phase >= 3:
+                phases_skipped.append("persist_app_tables")
+            if resumed_from_phase >= 4:
                 phases_skipped.append("stac_metadata")
 
         # F7.20: Capture final resource stats
@@ -2053,7 +2243,9 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
         if phase2_duration > 0:
             logger.info(f"   COG creation: {phase2_duration:.2f}s")
         if phase3_duration > 0:
-            logger.info(f"   STAC metadata: {phase3_duration:.2f}s")
+            logger.info(f"   Persist app tables: {phase3_duration:.2f}s")
+        if phase4_duration > 0:
+            logger.info(f"   STAC metadata: {phase4_duration:.2f}s")
         # Log resource summary
         if resource_stats.get("peak_memory_mb"):
             logger.info(f"   📊 Peak memory (COG): {resource_stats['peak_memory_mb']} MB")
@@ -2124,6 +2316,11 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                 artifact_id = str(artifact.artifact_id)
                 logger.info(f"📦 Artifact created: {artifact_id} (revision {artifact.revision})")
 
+                _emit_job_event(job_id, task_id, 1, 'raster_artifact_created', {
+                    'artifact_id': artifact_id,
+                    'content_hash': cog_result.get('file_checksum'),
+                })
+
                 # Delete old COG if this was an overwrite with different source data (28 JAN 2026)
                 if overwrite_result and overwrite_result.get('old_cog_path'):
                     old_path = overwrite_result['old_cog_path']
@@ -2177,7 +2374,8 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                     "total_seconds": total_duration,
                     "validation_seconds": phase1_duration,
                     "cog_seconds": phase2_duration,
-                    "stac_seconds": phase3_duration,
+                    "persist_seconds": phase3_duration,
+                    "stac_seconds": phase4_duration,
                     "mode": "docker_single_stage",
                     "resumed": resumed_from_phase is not None,
                     "resumed_from_phase": resumed_from_phase,

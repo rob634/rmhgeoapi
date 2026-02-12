@@ -264,13 +264,18 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
                     job_id=params.get('_job_id'),
                     job_type=params.get('_job_type', 'stac_catalog_container')
                 )
-                # Create raster visualization metadata from raster_type (04 JAN 2026)
-                # Uses factory method to properly extract band_count and set rgb_bands
-                # Critical for multi-band rasters (>3 bands) to generate bidx params in TiTiler URLs
+                # Create raster visualization metadata (12 FEB 2026)
+                # Prefer persisted render_config (source of truth) when provided by handler.
+                # Falls back to transient from_raster_type_params() for backward compatibility.
+                render_config = params.get('_render_config')
                 raster_type_info = params.get('raster_type')
-                if raster_type_info and isinstance(raster_type_info, dict):
+                if render_config and raster_type_info and isinstance(raster_type_info, dict):
+                    raster_meta = RasterVisualizationMetadata.from_render_config(render_config, raster_type_info)
+                    logger.debug(f"   Step 3A: Raster metadata from render_config - type={raster_meta.raster_type}, "
+                                f"colormap={raster_meta.colormap}, rgb_bands={raster_meta.rgb_bands}")
+                elif raster_type_info and isinstance(raster_type_info, dict):
                     raster_meta = RasterVisualizationMetadata.from_raster_type_params(raster_type_info)
-                    logger.debug(f"   Step 3A: Raster metadata created - type={raster_meta.raster_type}, "
+                    logger.debug(f"   Step 3A: Raster metadata from params - type={raster_meta.raster_type}, "
                                 f"bands={raster_meta.band_count}, rgb_bands={raster_meta.rgb_bands}")
                 logger.debug(f"   Step 3A: Platform/App metadata extracted - job_id={params.get('_job_id')}")
             except Exception as meta_err:
@@ -521,78 +526,11 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
             # Non-fatal - STAC item was created
             logger.warning(f"⚠️ STEP 7: Failed to upsert dataset_refs: {refs_error}")
 
-        # STEP 7.5: Populate app.cog_metadata (12 JAN 2026 - F7.9 Phase 2)
-        # This enables:
-        # - Raster STAC rebuild (F7.11.5) - rebuild STAC from cog_metadata
-        # - Metadata consistency checks - detect orphaned STAC items
-        # - DDH dataset linkage queries - find all COGs for a dataset
-        try:
-            from infrastructure.raster_metadata_repository import get_raster_metadata_repository
-
-            cog_repo = get_raster_metadata_repository()
-
-            # Extract raster properties from STAC item
-            # proj:shape is [height, width] per STAC spec
-            proj_shape = item_dict.get('properties', {}).get('proj:shape', [0, 0])
-            height = proj_shape[0] if len(proj_shape) > 0 else 0
-            width = proj_shape[1] if len(proj_shape) > 1 else 0
-
-            # Extract transform from proj:transform (6-element affine)
-            proj_transform = item_dict.get('properties', {}).get('proj:transform')
-
-            # Extract raster:bands from data asset
-            data_asset = item_dict.get('assets', {}).get('data', {})
-            raster_bands = data_asset.get('raster:bands', [])
-
-            # Extract dtype from first band if available
-            dtype = 'unknown'
-            nodata_value = None
-            if raster_bands:
-                dtype = raster_bands[0].get('data_type', 'unknown')
-                nodata_value = raster_bands[0].get('nodata')
-
-            # Build COG URL
-            cog_url = f"https://{config.storage.silver.account_name}.blob.core.windows.net/{container_name}/{blob_name}"
-
-            # Extract band names if available
-            band_names = None
-            if raster_bands:
-                band_names = [b.get('description', f'band_{i+1}') for i, b in enumerate(raster_bands)]
-
-            # Extract compression from asset
-            compression = data_asset.get('file:header_size') and 'DEFLATE'  # Approximation
-
-            cog_repo.upsert(
-                cog_id=item.id,
-                container=container_name,
-                blob_path=blob_name,
-                cog_url=cog_url,
-                width=width,
-                height=height,
-                band_count=bands_count,
-                dtype=dtype,
-                nodata=nodata_value,
-                crs=f"EPSG:{epsg}" if epsg else "EPSG:4326",
-                transform=proj_transform,
-                bbox_minx=bbox[0] if bbox and len(bbox) >= 4 else None,
-                bbox_miny=bbox[1] if bbox and len(bbox) >= 4 else None,
-                bbox_maxx=bbox[2] if bbox and len(bbox) >= 4 else None,
-                bbox_maxy=bbox[3] if bbox and len(bbox) >= 4 else None,
-                is_cog=True,
-                raster_bands=raster_bands if raster_bands else None,
-                band_names=band_names,
-                stac_item_id=item.id,
-                stac_collection_id=collection_id,
-                etl_job_id=params.get('_job_id'),
-                source_file=params.get('blob_name'),
-            )
-            logger.info(f"✅ STEP 7.5: Populated app.cog_metadata for {item.id}")
-
-        except Exception as cog_error:
-            # Non-fatal - STAC item was created, cog_metadata is supplementary
-            logger.warning(f"⚠️ STEP 7.5: Failed to populate cog_metadata: {cog_error}")
-            import traceback as tb
-            logger.debug(f"   Traceback: {tb.format_exc()}")
+        # STEP 7.5: REMOVED (12 FEB 2026)
+        # cog_metadata population moved to handler Phase 3a (source of truth).
+        # When called from handler_process_raster_complete, cog_metadata is already
+        # persisted BEFORE STAC. For backward-compatible callers that don't
+        # pre-persist, cog_metadata will be empty but STAC still works.
 
         # SUCCESS - STAC metadata extracted (and inserted to pgstac if available)
         mode_msg = "degraded mode (JSON only)" if not pgstac_available else "full mode"

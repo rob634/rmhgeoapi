@@ -3,7 +3,7 @@
 # ============================================================================
 # STATUS: Jobs - Single-stage raster to COG pipeline for Docker worker
 # PURPOSE: Process rasters in Docker container (no timeout constraints)
-# LAST_REVIEWED: 11 JAN 2026
+# LAST_REVIEWED: 12 FEB 2026
 # ============================================================================
 """
 Process Raster Docker - Consolidated Single-Stage Job.
@@ -65,12 +65,18 @@ class ProcessRasterDockerJob(JobBaseMixin, JobBase):
         'input_crs': {'type': 'str', 'default': None},
         'target_crs': {'type': 'str', 'default': None},
 
-        # Raster type
+        # Raster type (12 FEB 2026: expanded with domain types)
         'raster_type': {
             'type': 'str',
             'default': 'auto',
-            'allowed': ['auto', 'rgb', 'rgba', 'dem', 'categorical', 'multispectral', 'nir']
+            'allowed': ['auto', 'rgb', 'rgba', 'dem', 'categorical', 'multispectral', 'nir',
+                        'continuous', 'vegetation_index', 'flood_depth', 'flood_probability',
+                        'hydrology', 'temporal', 'population']
         },
+
+        # Visualization colormap override (12 FEB 2026)
+        # Overrides type-based default colormap in render config
+        'default_ramp': {'type': 'str', 'default': None},
 
         # COG output
         'output_tier': {
@@ -178,8 +184,9 @@ class ProcessRasterDockerJob(JobBaseMixin, JobBase):
                 'input_crs': job_params.get('input_crs'),
                 'target_crs': target_crs,
 
-                # Raster type
+                # Raster type + visualization
                 'raster_type': job_params.get('raster_type', 'auto'),
+                'default_ramp': job_params.get('default_ramp'),
 
                 # COG output
                 'output_blob_name': output_blob,

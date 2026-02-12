@@ -4,7 +4,7 @@
 # EPOCH: 4 - ACTIVE
 # STATUS: Core - Render configuration for raster visualization
 # PURPOSE: Pydantic model for app.raster_render_configs table (IaC DDL)
-# LAST_REVIEWED: 22 JAN 2026
+# LAST_REVIEWED: 12 FEB 2026
 # EXPORTS: RasterRenderConfig
 # DEPENDENCIES: pydantic
 # ============================================================================
@@ -211,10 +211,17 @@ class RasterRenderConfig(BaseModel):
         band_count: int = 1,
         nodata: Optional[float] = None,
         data_min: Optional[float] = None,
-        data_max: Optional[float] = None
+        data_max: Optional[float] = None,
+        detected_type: Optional[str] = None,
+        default_ramp: Optional[str] = None,
     ) -> "RasterRenderConfig":
         """
         Generate sensible default render config based on raster properties.
+
+        Uses detected_type (from raster validation) for smart colormap selection,
+        consolidating logic previously duplicated in RasterVisualizationMetadata.
+
+        Colormap priority: default_ramp (user override) > type-based default.
 
         Args:
             cog_id: COG identifier
@@ -223,6 +230,8 @@ class RasterRenderConfig(BaseModel):
             nodata: NoData value
             data_min: Actual data minimum (if known)
             data_max: Actual data maximum (if known)
+            detected_type: Raster type from validation (dem, flood_depth, rgb, etc.)
+            default_ramp: User-specified colormap override (ColorRamp enum value)
 
         Returns:
             RasterRenderConfig with sensible defaults
@@ -241,12 +250,30 @@ class RasterRenderConfig(BaseModel):
         elif dtype in ("float32", "float64"):
             render_spec["rescale"] = [[0, 1]]  # Assume normalized
 
-        # Default colormap for single-band
-        if band_count == 1:
-            render_spec["colormap_name"] = "viridis"
-        elif band_count >= 3:
-            # RGB - select first 3 bands, no colormap
+        # Colormap selection: user override > type-based default
+        # 12 FEB 2026: Expanded with domain types + default_ramp override
+        if band_count >= 3:
+            # RGB/RGBA/multispectral - select first 3 bands, no colormap
             render_spec["bidx"] = [1, 2, 3]
+        elif default_ramp:
+            # User explicitly chose a colormap — honor it
+            render_spec["colormap_name"] = default_ramp
+        elif detected_type == 'dem':
+            render_spec["colormap_name"] = "terrain"
+        elif detected_type in ('vegetation_index',):
+            render_spec["colormap_name"] = "rdylgn"
+        elif detected_type in ('flood_depth', 'flood_probability'):
+            render_spec["colormap_name"] = "blues"
+        elif detected_type == 'hydrology':
+            render_spec["colormap_name"] = "ylgnbu"
+        elif detected_type == 'temporal':
+            render_spec["colormap_name"] = "spectral"
+        elif detected_type == 'population':
+            render_spec["colormap_name"] = "inferno"
+        elif detected_type == 'categorical':
+            render_spec["colormap_name"] = "viridis"
+        elif band_count == 1:
+            render_spec["colormap_name"] = "viridis"
         else:
             # 2 bands - just use first band with colormap
             render_spec["bidx"] = [1]

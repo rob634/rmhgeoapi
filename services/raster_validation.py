@@ -3,7 +3,7 @@
 # ============================================================================
 # STATUS: Service layer - Raster file validation and analysis
 # PURPOSE: Validate raster files before COG processing, determine output tiers
-# LAST_REVIEWED: 06 FEB 2026
+# LAST_REVIEWED: 12 FEB 2026
 # REVIEW_STATUS: Phase 4 BUG_REFORM - Enhanced data quality checks
 # EXPORTS: validate_raster
 # ============================================================================
@@ -20,8 +20,9 @@ Validation Steps:
        - Mostly-empty detection (RASTER_EMPTY: 99%+ nodata)
        - Nodata conflict detection (RASTER_NODATA_CONFLICT)
        - Extreme value detection (RASTER_EXTREME_VALUES: 1e38 in DEMs)
-    5. Raster type detection (RGB, RGBA, DEM, categorical, multispectral)
-    6. Type mismatch validation (user-specified vs detected)
+    5. Raster type detection (RGB, RGBA, DEM, categorical, multispectral,
+       continuous, vegetation_index — 12 FEB 2026 expanded)
+    6. Type compatibility validation (hierarchical — 12 FEB 2026, replaces strict mismatch)
     7. Bounds sanity checks
     8. Optimal COG settings recommendation
     9. COG tier compatibility detection
@@ -36,10 +37,11 @@ Error Codes (BUG_REFORM):
     RASTER_NODATA_CONFLICT: Nodata value found in real data range
     RASTER_EXTREME_VALUES: DEM with 1e38 values (unset nodata)
     RASTER_64BIT_REJECTED: Policy violation (64-bit data types)
-    RASTER_TYPE_MISMATCH: User type doesn't match detected type
+    RASTER_TYPE_MISMATCH: User type incompatible with detected type
 
 Exports:
     validate_raster: Validation handler function
+    COMPATIBLE_OVERRIDES: Hierarchical type compatibility map
 """
 
 import sys
@@ -57,6 +59,24 @@ from core.models.raster_results import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# HIERARCHICAL TYPE COMPATIBILITY (12 FEB 2026)
+# ============================================================================
+# Domain types that refine physical detections. When a user specifies a domain
+# type (e.g. flood_depth) and the auto-detector sees a compatible physical type
+# (e.g. dem or continuous), the user's type is accepted and used going forward.
+# Key = user-specified type, Value = set of acceptable physical detections.
+COMPATIBLE_OVERRIDES = {
+    'flood_depth': {'dem', 'continuous', 'unknown'},
+    'flood_probability': {'dem', 'continuous', 'unknown'},
+    'hydrology': {'dem', 'continuous', 'unknown'},
+    'temporal': {'dem', 'continuous', 'categorical', 'unknown'},
+    'population': {'dem', 'continuous', 'unknown'},
+    'vegetation_index': {'dem', 'continuous', 'unknown'},
+    'continuous': {'dem', 'continuous', 'unknown'},
+}
 
 # Lazy imports for Azure environment compatibility
 def _lazy_imports():
@@ -981,30 +1001,57 @@ def _detect_raster_type(src, user_type: str) -> dict:
             confidence = "LOW"
             evidence.append(f"4 bands, {dtype} (could be RGBA or NIR)")
 
-    # DEM Detection (HIGH confidence)
+    # Single-band continuous detection (12 FEB 2026: replaces DEM catch-all)
+    # Order: vegetation_index → DEM (smooth) → continuous (catch-all)
     elif band_count == 1 and dtype in ['float32', 'float64', 'int16', 'int32'] and sample is not None:
-        # Check for smooth gradients (spatial autocorrelation)
         if sample.size >= 100:
             try:
-                horizontal_diff = np.abs(np.diff(sample, axis=1)).mean()
-                vertical_diff = np.abs(np.diff(sample, axis=0)).mean()
-                value_range = sample.max() - sample.min()
+                valid_mask = ~np.isnan(sample) if np.issubdtype(sample.dtype, np.floating) else np.ones_like(sample, dtype=bool)
+                valid_data = sample[valid_mask]
 
-                smoothness = (horizontal_diff + vertical_diff) / (2 * value_range) if value_range > 0 else 0
+                if len(valid_data) > 0:
+                    data_min = float(valid_data.min())
+                    data_max = float(valid_data.max())
+                    value_range = data_max - data_min
 
-                if smoothness < 0.1:  # Very smooth = likely DEM
-                    detected_type = RasterType.DEM.value
-                    confidence = "HIGH"
-                    evidence.append(f"Single-band {dtype}, smooth gradients (smoothness: {smoothness:.3f})")
+                    # Vegetation index: float values bounded in [-1, 1]
+                    if dtype in ['float32', 'float64'] and -1.0 <= data_min and data_max <= 1.0 and value_range > 0.1:
+                        detected_type = RasterType.VEGETATION_INDEX.value
+                        confidence = "HIGH"
+                        evidence.append(f"Single-band {dtype}, range [{data_min:.2f}, {data_max:.2f}] (vegetation index)")
+
+                    # DEM: smooth gradients (spatial autocorrelation)
+                    elif value_range > 0:
+                        horizontal_diff = np.abs(np.diff(sample, axis=1)).mean()
+                        vertical_diff = np.abs(np.diff(sample, axis=0)).mean()
+                        smoothness = (horizontal_diff + vertical_diff) / (2 * value_range)
+
+                        if smoothness < 0.1:
+                            detected_type = RasterType.DEM.value
+                            confidence = "HIGH"
+                            evidence.append(f"Single-band {dtype}, smooth gradients (smoothness: {smoothness:.3f})")
+                        else:
+                            # Not smooth enough for DEM — generic continuous
+                            detected_type = RasterType.CONTINUOUS.value
+                            confidence = "MEDIUM"
+                            evidence.append(f"Single-band {dtype}, non-smooth (smoothness: {smoothness:.3f})")
+                    else:
+                        detected_type = RasterType.CONTINUOUS.value
+                        confidence = "LOW"
+                        evidence.append(f"Single-band {dtype}, zero range")
                 else:
-                    detected_type = RasterType.DEM.value
-                    confidence = "MEDIUM"
-                    evidence.append(f"Single-band {dtype} (likely elevation, smoothness: {smoothness:.3f})")
+                    detected_type = RasterType.CONTINUOUS.value
+                    confidence = "LOW"
+                    evidence.append(f"Single-band {dtype}, no valid data in sample")
             except Exception as e:
-                logger.debug(f"Could not compute smoothness for DEM detection: {e}")
-                detected_type = RasterType.DEM.value
+                logger.debug(f"Could not analyze single-band data: {e}")
+                detected_type = RasterType.CONTINUOUS.value
                 confidence = "LOW"
-                evidence.append(f"Single-band {dtype} (likely elevation)")
+                evidence.append(f"Single-band {dtype} (analysis failed)")
+        else:
+            detected_type = RasterType.CONTINUOUS.value
+            confidence = "LOW"
+            evidence.append(f"Single-band {dtype}, insufficient sample")
 
     # Categorical Detection (HIGH confidence)
     elif band_count == 1 and sample is not None:
@@ -1038,9 +1085,20 @@ def _detect_raster_type(src, user_type: str) -> dict:
     logger = LoggerFactory.create_logger(ComponentType.SERVICE, "validate_raster")
     logger.info(f"🔍 VALIDATION TYPE: Detected {detected_type} ({confidence})")
 
-    # User type validation (STRICT)
+    # User type validation (HIERARCHICAL — 12 FEB 2026)
+    # Domain types (flood_depth, hydrology, etc.) can refine compatible physical detections.
     if user_type and user_type != "auto":
-        if user_type != detected_type:
+        compatible = COMPATIBLE_OVERRIDES.get(user_type, set())
+        if user_type == detected_type:
+            # Exact match — always ok
+            pass
+        elif detected_type in compatible:
+            # Domain type refining a physical detection — accepted
+            logger.info(f"✅ VALIDATION TYPE: User override '{user_type}' accepted "
+                        f"(compatible with detected '{detected_type}')")
+            detected_type = user_type
+        else:
+            # Genuine mismatch — fail
             logger.error(f"❌ VALIDATION TYPE: MISMATCH - User: {user_type}, Detected: {detected_type}")
             return {
                 "success": False,
@@ -1105,6 +1163,42 @@ def _get_optimal_cog_settings(raster_type: str) -> dict:
             "compression": "deflate",
             "overview_resampling": "cubic",
             "reproject_resampling": "cubic"
+        },
+        # 12 FEB 2026: New types
+        RasterType.CONTINUOUS.value: {
+            "compression": "deflate",
+            "overview_resampling": "average",
+            "reproject_resampling": "bilinear"
+        },
+        RasterType.VEGETATION_INDEX.value: {
+            "compression": "deflate",
+            "overview_resampling": "average",
+            "reproject_resampling": "bilinear"
+        },
+        RasterType.FLOOD_DEPTH.value: {
+            "compression": "lerc_deflate",
+            "overview_resampling": "average",
+            "reproject_resampling": "bilinear"
+        },
+        RasterType.FLOOD_PROBABILITY.value: {
+            "compression": "deflate",
+            "overview_resampling": "average",
+            "reproject_resampling": "bilinear"
+        },
+        RasterType.HYDROLOGY.value: {
+            "compression": "lerc_deflate",
+            "overview_resampling": "average",
+            "reproject_resampling": "bilinear"
+        },
+        RasterType.TEMPORAL.value: {
+            "compression": "deflate",
+            "overview_resampling": "nearest",
+            "reproject_resampling": "nearest"
+        },
+        RasterType.POPULATION.value: {
+            "compression": "deflate",
+            "overview_resampling": "average",
+            "reproject_resampling": "bilinear"
         },
         RasterType.UNKNOWN.value: {
             "compression": "deflate",

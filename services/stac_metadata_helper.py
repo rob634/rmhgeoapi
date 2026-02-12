@@ -231,12 +231,20 @@ class RasterVisualizationMetadata:
         # Extract detected type
         detected_type = raster_type_info.get('detected_type', 'unknown')
 
-        # Determine colormap based on raster type
+        # Determine colormap based on raster type (12 FEB 2026: expanded with domain types)
         colormap = None
         if detected_type == 'dem':
             colormap = 'terrain'
-        elif detected_type in ['ndvi', 'vegetation_index']:
+        elif detected_type in ('vegetation_index',):
             colormap = 'rdylgn'
+        elif detected_type in ('flood_depth', 'flood_probability'):
+            colormap = 'blues'
+        elif detected_type == 'hydrology':
+            colormap = 'ylgnbu'
+        elif detected_type == 'temporal':
+            colormap = 'spectral'
+        elif detected_type == 'population':
+            colormap = 'inferno'
         elif result.get('band_count', 0) == 1:
             colormap = 'viridis'
 
@@ -291,12 +299,20 @@ class RasterVisualizationMetadata:
         # Note: params use 'data_type', validation uses 'dtype'
         dtype = raster_type_info.get('data_type') or raster_type_info.get('dtype')
 
-        # Determine colormap based on raster type
+        # Determine colormap based on raster type (12 FEB 2026: expanded with domain types)
         colormap = None
         if detected_type == 'dem':
             colormap = 'terrain'
-        elif detected_type in ['ndvi', 'vegetation_index']:
+        elif detected_type in ('vegetation_index',):
             colormap = 'rdylgn'
+        elif detected_type in ('flood_depth', 'flood_probability'):
+            colormap = 'blues'
+        elif detected_type == 'hydrology':
+            colormap = 'ylgnbu'
+        elif detected_type == 'temporal':
+            colormap = 'spectral'
+        elif detected_type == 'population':
+            colormap = 'inferno'
         elif band_count == 1:
             colormap = 'viridis'
 
@@ -325,6 +341,53 @@ class RasterVisualizationMetadata:
             rescale=None,
             colormap=colormap,
             nodata=raster_type_info.get('nodata')
+        )
+
+    @classmethod
+    def from_render_config(cls, render_config, raster_type_info: Dict[str, Any]) -> 'RasterVisualizationMetadata':
+        """
+        Build from persisted RasterRenderConfig (source of truth).
+
+        This factory reads visualization parameters from the app.raster_render_configs
+        table rather than computing them transiently. STAC properties are thus
+        derived from the persisted source of truth.
+
+        Args:
+            render_config: RasterRenderConfig model instance
+            raster_type_info: raster_type dict from validation (for band_count, detected_type)
+
+        Returns:
+            RasterVisualizationMetadata populated from persisted config
+        """
+        spec = render_config.render_spec or {}
+        detected_type = raster_type_info.get('detected_type', 'unknown')
+        band_count = raster_type_info.get('band_count', 0)
+        dtype = raster_type_info.get('data_type') or raster_type_info.get('dtype')
+
+        # RGB bands logic (same as existing from_raster_type_params)
+        rgb_bands = None
+        if band_count == 4:
+            rgb_bands = [1, 2, 3]
+        elif band_count == 8:
+            rgb_bands = [5, 3, 2]
+        elif band_count >= 10:
+            rgb_bands = [4, 3, 2]
+        elif band_count > 3:
+            rgb_bands = [1, 2, 3]
+
+        rescale = None
+        if spec.get('rescale') and len(spec['rescale']) > 0:
+            rescale = {'min': spec['rescale'][0][0], 'max': spec['rescale'][0][1]}
+
+        return cls(
+            raster_type=detected_type,
+            band_count=band_count,
+            dtype=dtype,
+            colorinterp=None,
+            rgb_bands=rgb_bands,
+            rescale=rescale,
+            colormap=spec.get('colormap_name'),
+            nodata=spec.get('nodata'),
         )
 
     def to_stac_properties(self) -> Dict[str, Any]:

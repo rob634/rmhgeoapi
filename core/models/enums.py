@@ -2,8 +2,8 @@
 # PURE ENUMERATION TYPES
 # ============================================================================
 # STATUS: Core - Type definitions without business logic
-# PURPOSE: Job, Task, and Stage status enums plus RasterType classification
-# LAST_REVIEWED: 03 JAN 2026
+# PURPOSE: Job, Task, and Stage status enums plus RasterType/ColorRamp classification
+# LAST_REVIEWED: 12 FEB 2026
 # REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
 # ============================================================================
 """
@@ -17,6 +17,7 @@ Exports:
     TaskStatus: Task state enumeration
     StageStatus: Stage state enumeration
     RasterType: Raster type classification
+    ColorRamp: Curated TiTiler colormaps for raster visualization
 """
 
 from enum import Enum
@@ -84,23 +85,112 @@ class RasterType(str, Enum):
     """
     Raster data types for automatic detection and optimization.
 
-    Used to automatically select optimal COG compression and resampling
-    settings based on the type of raster data being processed.
+    Used to automatically select optimal COG compression, resampling,
+    and default colormap based on the type of raster data being processed.
 
-    Type Detection Criteria:
+    Physical Types (auto-detectable from file characteristics):
     - RGB: 3 bands, uint8/uint16 (drone imagery, aerial photos)
     - RGBA: 4 bands, uint8/uint16 with alpha channel (drone imagery with transparency)
     - DEM: Single-band float32/int16 with smooth gradients (elevation data)
     - CATEGORICAL: Single-band with <256 discrete integer values (land cover classification)
     - MULTISPECTRAL: 5+ bands (Landsat, Sentinel-2, Planet satellite imagery)
     - NIR: 4 bands without alpha (RGB + Near-Infrared)
+    - CONTINUOUS: Single-band numeric, non-smooth (generic continuous data)
+    - VEGETATION_INDEX: Single-band float in [-1, 1] range (NDVI, EVI, etc.)
+
+    Domain Types (user-specified, refine physical detection):
+    - FLOOD_DEPTH: Flood depth/extent models (compatible with dem/continuous)
+    - FLOOD_PROBABILITY: Flood probability surfaces (compatible with dem/continuous)
+    - HYDROLOGY: Flow accumulation, drainage, watershed (compatible with dem/continuous)
+    - TEMPORAL: Each pixel = time period, e.g. deforestation year (compatible with dem/continuous/categorical)
+    - POPULATION: Population density, count grids (compatible with dem/continuous)
+
+    Fallback:
     - UNKNOWN: Cannot determine type automatically
+
+    12 FEB 2026: Expanded from 7 to 15 types. Domain types use hierarchical
+    compatibility validation (see COMPATIBLE_OVERRIDES in raster_validation.py).
     """
 
+    # Physical types (auto-detectable)
     RGB = "rgb"
     RGBA = "rgba"
     DEM = "dem"
     CATEGORICAL = "categorical"
     MULTISPECTRAL = "multispectral"
     NIR = "nir"
+    CONTINUOUS = "continuous"
+    VEGETATION_INDEX = "vegetation_index"
+
+    # Domain types (user-specified, refine physical detection)
+    FLOOD_DEPTH = "flood_depth"
+    FLOOD_PROBABILITY = "flood_probability"
+    HYDROLOGY = "hydrology"
+    TEMPORAL = "temporal"
+    POPULATION = "population"
+
+    # Fallback
     UNKNOWN = "unknown"
+
+
+class ColorRamp(str, Enum):
+    """
+    Curated TiTiler colormaps for raster visualization.
+
+    All values are valid colormap_name parameters for TiTiler tile endpoints.
+    Users can submit a ColorRamp value as the 'default_ramp' job parameter
+    to override the type-based default colormap.
+
+    Organized by use case:
+    - Sequential: General-purpose perceptual colormaps
+    - Terrain: Elevation and topographic data
+    - Water: Hydrology, flood, precipitation
+    - Heat: Temperature, intensity, density
+    - Vegetation: Diverging colormaps for vegetation indices
+    - Classification: Discrete/categorical data
+    - Specialized: Domain-specific applications
+
+    12 FEB 2026: Created for default_ramp job parameter validation.
+    """
+
+    # Perceptual sequential (general purpose)
+    VIRIDIS = "viridis"
+    PLASMA = "plasma"
+    INFERNO = "inferno"
+    MAGMA = "magma"
+    CIVIDIS = "cividis"
+
+    # Terrain / elevation
+    TERRAIN = "terrain"
+    GIST_EARTH = "gist_earth"
+
+    # Water / hydrology
+    BLUES = "blues"
+    PUBU = "pubu"
+    YLGNBU = "ylgnbu"
+
+    # Temperature / heat
+    COOLWARM = "coolwarm"
+    RDYLBU = "rdylbu"
+    REDS = "reds"
+    ORANGES = "oranges"
+    YLORRD = "ylorrd"
+
+    # Vegetation / diverging
+    RDYLGN = "rdylgn"
+    PIYG = "piyg"
+    BRBG = "brbg"
+    PRGN = "prgn"
+
+    # Classification / discrete
+    SPECTRAL = "spectral"
+    GREYS = "greys"
+    GREENS = "greens"
+    PURPLES = "purples"
+
+    # Specialized
+    SEISMIC = "seismic"
+    BWR = "bwr"
+    GNBU = "gnbu"
+    ORRD = "orrd"
+    YLORBR = "ylorbr"

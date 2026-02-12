@@ -876,8 +876,7 @@ class AdminDbMaintenanceTrigger:
                 "status": "success",
                 "steps": [
                     {"step": "nuke_schema", "status": "success", ...},
-                    {"step": "deploy_schema", "status": "success", ...},
-                    {"step": "create_system_stac_collections", "status": "success", ...}
+                    {"step": "deploy_schema", "status": "success", ...}
                 ],
                 "overall_status": "success",
                 "timestamp": "2025-11-03T..."
@@ -991,69 +990,6 @@ class AdminDbMaintenanceTrigger:
                     status_code=500,
                     mimetype='application/json'
                 )
-
-            # Step 3: Create System STAC collections (18 OCT 2025 - System STAC Layer 1)
-            logger.info("🗺️ Step 3: Creating System STAC collections...")
-
-            stac_collections_result = {
-                "status": "pending",
-                "collections_created": [],
-                "collections_failed": []
-            }
-
-            try:
-                from triggers.stac_collections import stac_collections_trigger
-                from infrastructure.pgstac_bootstrap import get_system_stac_collections
-
-                system_collections = get_system_stac_collections()
-
-                for collection_data in system_collections:
-                    try:
-                        logger.info(f"📌 Creating STAC collection: {collection_data['id']}")
-
-                        # Create mock request with collection data as JSON body
-                        import io
-                        mock_request = func.HttpRequest(
-                            method='POST',
-                            url='/api/stac/create-collection',
-                            body=json.dumps(collection_data).encode('utf-8')
-                        )
-
-                        result_response = stac_collections_trigger.handle_request(mock_request)
-                        result = json.loads(result_response.get_body().decode('utf-8'))
-
-                        if result.get('success'):
-                            stac_collections_result["collections_created"].append({
-                                "id": collection_data['id'],
-                                "status": "created"
-                            })
-                        else:
-                            stac_collections_result["collections_failed"].append({
-                                "id": collection_data['id'],
-                                "error": result.get('error', 'Unknown error')
-                            })
-
-                    except Exception as col_e:
-                        logger.error(f"❌ Failed to create collection {collection_data['id']}: {col_e}")
-                        stac_collections_result["collections_failed"].append({
-                            "id": collection_data['id'],
-                            "error": str(col_e)
-                        })
-
-                stac_collections_result["status"] = "success" if len(stac_collections_result["collections_created"]) >= 1 else "partial"
-
-            except Exception as e:
-                logger.error(f"❌ Step 3 exception: {e}")
-                logger.error(traceback.format_exc())
-                stac_collections_result["status"] = "failed"
-                stac_collections_result["error"] = str(e)
-
-            results["steps"].append({
-                "step": "create_system_stac_collections",
-                "status": stac_collections_result.get("status", "failed"),
-                "collections_created": stac_collections_result.get("collections_created", []),
-                "collections_failed": stac_collections_result.get("collections_failed", [])
-            })
 
             # Overall status
             results["overall_status"] = "success"
@@ -1709,59 +1645,10 @@ class AdminDbMaintenanceTrigger:
             results["steps"].append(step6)
 
             # ================================================================
-            # STEP 7: Create system STAC collections
+            # STEP 7: Verify app schema
             # ================================================================
-            # FIX (26 NOV 2025): Use create_production_collection() directly
-            # instead of going through mock HTTP trigger which was silently failing
-            logger.info("📚 Step 7/11: Creating system STAC collections...")
-            step7 = {"step": 7, "action": "create_system_collections", "status": "pending", "collections": []}
-
-            if pgstac_failed:
-                # Skip if pgstac deployment failed - can't create collections without pgstac schema
-                logger.warning("⏭️ Skipping STAC collections creation - pgstac deployment failed")
-                step7["status"] = "skipped"
-                step7["reason"] = "pgstac deployment failed"
-            else:
-                try:
-                    from infrastructure.pgstac_bootstrap import PgStacBootstrap
-
-                    # Create system collections directly via PgStacBootstrap
-                    # This bypasses the HTTP trigger which requires route_params
-                    bootstrap = PgStacBootstrap()
-                    # Use first 2 system collections (vectors and rasters)
-                    # system-h3-grids is created on-demand by H3 jobs
-                    system_collection_types = STACDefaults.SYSTEM_COLLECTIONS[:2]
-
-                    for collection_type in system_collection_types:
-                        try:
-                            result = bootstrap.create_production_collection(collection_type)
-
-                            if result.get('success'):
-                                step7["collections"].append(collection_type)
-                                if result.get('existed'):
-                                    logger.info(f"⏭️ Collection {collection_type} already exists (idempotent)")
-                                else:
-                                    logger.info(f"✅ Created collection: {collection_type}")
-                            else:
-                                logger.warning(f"⚠️ Failed to create collection {collection_type}: {result.get('error')}")
-
-                        except Exception as col_e:
-                            logger.warning(f"⚠️ Exception creating collection {collection_type}: {col_e}")
-
-                    step7["status"] = "success" if len(step7["collections"]) >= 2 else "partial"
-
-                except Exception as e:
-                    logger.error(f"❌ Exception during system collections creation: {e}")
-                    step7["status"] = "partial"
-                    step7["error"] = str(e)
-
-            results["steps"].append(step7)
-
-            # ================================================================
-            # STEP 8: Verify app schema
-            # ================================================================
-            logger.info("🔍 Step 8/11: Verifying app schema...")
-            step8 = {"step": 8, "action": "verify_app_schema", "status": "pending"}
+            logger.info("🔍 Step 7/10: Verifying app schema...")
+            step8 = {"step": 7, "action": "verify_app_schema", "status": "pending"}
 
             try:
                 from infrastructure.postgresql import PostgreSQLRepository
@@ -1807,8 +1694,8 @@ class AdminDbMaintenanceTrigger:
             # ================================================================
             # STEP 9: Verify pgstac schema
             # ================================================================
-            logger.info("🔍 Step 9/11: Verifying pgstac schema...")
-            step9 = {"step": 9, "action": "verify_pgstac_schema", "status": "pending"}
+            logger.info("🔍 Step 8/10: Verifying pgstac schema...")
+            step9 = {"step": 8, "action": "verify_pgstac_schema", "status": "pending"}
 
             if pgstac_failed:
                 # Skip if pgstac deployment failed - nothing to verify
@@ -1846,8 +1733,8 @@ class AdminDbMaintenanceTrigger:
             # STEP 10: Ensure Service Bus queues exist (08 DEC 2025)
             # Multi-Function App Architecture requires 4 queues
             # ================================================================
-            logger.info("🚌 Step 10/11: Ensuring Service Bus queues exist...")
-            step10 = {"step": 10, "action": "ensure_service_bus_queues", "status": "pending"}
+            logger.info("🚌 Step 9/10: Ensuring Service Bus queues exist...")
+            step10 = {"step": 9, "action": "ensure_service_bus_queues", "status": "pending"}
 
             try:
                 from infrastructure.service_bus import ServiceBusRepository
@@ -1882,8 +1769,8 @@ class AdminDbMaintenanceTrigger:
             # STEP 11: Ensure critical storage containers exist (09 DEC 2025)
             # Bronze and Silver zones must have containers for ETL to function
             # ================================================================
-            logger.info("📦 Step 11/11: Ensuring critical storage containers exist...")
-            step11 = {"step": 11, "action": "ensure_storage_containers", "status": "pending"}
+            logger.info("📦 Step 10/10: Ensuring critical storage containers exist...")
+            step11 = {"step": 10, "action": "ensure_storage_containers", "status": "pending"}
 
             try:
                 from infrastructure.blob import BlobRepository

@@ -35,9 +35,7 @@ class DocsInterface(BaseInterface):
 
     def render(self, request: func.HttpRequest) -> str:
         """Generate documentation landing page."""
-        host = request.headers.get('Host', 'localhost')
-        scheme = 'https' if 'azurewebsites.net' in host else 'http'
-        base_url = f"{scheme}://{host}"
+        base_url = self.get_base_url(request)
 
         return self._generate_html(base_url)
 

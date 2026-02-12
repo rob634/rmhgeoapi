@@ -382,7 +382,8 @@ from ogc_features import get_ogc_triggers
 # from raster_api import get_raster_triggers
 
 # xarray API - Direct Zarr access for time-series (18 DEC 2025)
-from xarray_api import get_xarray_triggers
+# DISABLED 11 FEB 2026 - US 6.1 APP_MODE cleanup, re-enable when needed
+# from xarray_api import get_xarray_triggers
 
 # OGC Styles API - CartoSym-JSON style storage and multi-format output (18 DEC 2025)
 from ogc_styles import get_styles_triggers
@@ -500,6 +501,16 @@ if _app_mode.has_admin_endpoints:
     logger.info("✅ Admin blueprints registered (APP_MODE=%s)", _app_mode.mode.value)
 else:
     logger.info("⏭️ SKIPPING admin blueprints (APP_MODE=%s)", _app_mode.mode.value)
+
+# System Health - Infrastructure admin view of ALL components (06 FEB 2026)
+# /api/system-health checks all apps, queues, database (vs /api/health which checks THIS instance)
+# Only orchestrator/standalone - handler also enforces this with 403
+if _app_mode.has_system_health_endpoint:
+    from triggers.system_health import bp as system_health_bp
+    app.register_functions(system_health_bp)
+    logger.info("✅ System health endpoint registered (APP_MODE=%s)", _app_mode.mode.value)
+else:
+    logger.info("⏭️ SKIPPING system-health endpoint (APP_MODE=%s)", _app_mode.mode.value)
 
 # Platform blueprint - Anti-corruption layer for external apps (DDH)
 # Contains all 17 platform endpoints (APP_CLEANUP Phase 5 - 23 JAN 2026)
@@ -1198,7 +1209,13 @@ def openapi_spec(req: func.HttpRequest) -> func.HttpResponse:
 
         # Update server URL to current deployment
         host = req.headers.get('Host', 'localhost')
-        scheme = 'https' if 'azurewebsites.net' in host else 'http'
+        forwarded_proto = req.headers.get('X-Forwarded-Proto', '').lower()
+        if forwarded_proto == 'https':
+            scheme = 'https'
+        elif host == 'localhost' or host.startswith('localhost:') or host.startswith('127.0.0.1'):
+            scheme = 'http'
+        else:
+            scheme = 'https'
         base_url = f"{scheme}://{host}"
 
         spec['servers'] = [
@@ -1588,6 +1605,7 @@ app.register_functions(timer_bp)
 # ============================================================================
 # XARRAY API - Direct Zarr Access for Time-Series (18 DEC 2025)
 # ============================================================================
+# DISABLED 11 FEB 2026 - US 6.1 APP_MODE cleanup, re-enable when needed
 # Direct xarray access to Zarr datasets for time-series operations.
 # More efficient than TiTiler for multi-timestep queries (single read vs N requests).
 #
@@ -1597,51 +1615,22 @@ app.register_functions(timer_bp)
 #   GET /api/xarray/aggregate/{collection}/{item}   - Temporal aggregation export
 # ============================================================================
 
-# Get trigger configurations
-_xarray_triggers = get_xarray_triggers()
-_xarray_point = _xarray_triggers[0]['handler']
-_xarray_statistics = _xarray_triggers[1]['handler']
-_xarray_aggregate = _xarray_triggers[2]['handler']
-
-
-@app.route(route="xarray/point/{collection}/{item}", methods=["GET"])
-def xarray_api_point(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Get time-series at a point.
-
-    GET /api/xarray/point/{collection}/{item}?location={name}|{lon},{lat}
-        &start_time=2015-01-01
-        &end_time=2015-12-31
-        &aggregation=none|daily|monthly|yearly
-    """
-    return _xarray_point(req)
-
-
-@app.route(route="xarray/statistics/{collection}/{item}", methods=["GET"])
-def xarray_api_statistics(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Get regional statistics over time.
-
-    GET /api/xarray/statistics/{collection}/{item}?bbox={minx},{miny},{maxx},{maxy}
-        &start_time=2015-01-01
-        &end_time=2015-12-31
-        &temporal_resolution=daily|monthly|yearly
-    """
-    return _xarray_statistics(req)
-
-
-@app.route(route="xarray/aggregate/{collection}/{item}", methods=["GET"])
-def xarray_api_aggregate(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Compute temporal aggregation and export.
-
-    GET /api/xarray/aggregate/{collection}/{item}?bbox={minx},{miny},{maxx},{maxy}
-        &start_time=2015-01-01
-        &end_time=2015-12-31
-        &aggregation=mean|max|min|sum
-        &format=json|tif|png|npy
-    """
-    return _xarray_aggregate(req)
+# _xarray_triggers = get_xarray_triggers()
+# _xarray_point = _xarray_triggers[0]['handler']
+# _xarray_statistics = _xarray_triggers[1]['handler']
+# _xarray_aggregate = _xarray_triggers[2]['handler']
+#
+# @app.route(route="xarray/point/{collection}/{item}", methods=["GET"])
+# def xarray_api_point(req: func.HttpRequest) -> func.HttpResponse:
+#     return _xarray_point(req)
+#
+# @app.route(route="xarray/statistics/{collection}/{item}", methods=["GET"])
+# def xarray_api_statistics(req: func.HttpRequest) -> func.HttpResponse:
+#     return _xarray_statistics(req)
+#
+# @app.route(route="xarray/aggregate/{collection}/{item}", methods=["GET"])
+# def xarray_api_aggregate(req: func.HttpRequest) -> func.HttpResponse:
+#     return _xarray_aggregate(req)
 
 
 # NOTE: STAC repair routes moved to triggers/admin/admin_stac.py blueprint (12 JAN 2026)

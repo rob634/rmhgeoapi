@@ -63,28 +63,8 @@ class PgStacBootstrap:
     PGSTAC_SCHEMA = "pgstac"
     PGSTAC_ROLES = ["pgstac_admin", "pgstac_ingest", "pgstac_read"]
 
-    # =========================================================================
-    # PRODUCTION COLLECTION STRATEGY
-    # =========================================================================
-    # CRITICAL: Bronze container is DEV/TEST ONLY - NOT in production STAC
-    #
-    # Production STAC Collections (3 types):
-    # 1. "cogs"       - Cloud-optimized GeoTIFFs in EPSG:4326
-    # 2. "vectors"    - PostGIS tables (queryable features)
-    # 3. "geoparquet" - GeoParquet analytical datasets (future)
-    #
-    # Development: Use "dev" collection for testing with Bronze container
-    # =========================================================================
-
-    # Collection metadata imported from config.defaults.STACDefaults
-    # Single source of truth for collection definitions
-    PRODUCTION_COLLECTIONS = STACDefaults.COLLECTION_METADATA
-
-    # Legacy tier constants (deprecated - kept for backward compatibility during migration)
+    # Valid collection tiers
     VALID_TIERS = ['bronze', 'silver', 'gold']
-
-    # Tier descriptions imported from config.defaults.STACDefaults
-    TIER_DESCRIPTIONS = STACDefaults.TIER_DESCRIPTIONS
 
     # =========================================================================
     # CORPORATE/QA ENVIRONMENT ROLE PREREQUISITES (5 DEC 2025)
@@ -992,7 +972,7 @@ ORDER BY r.rolname;""")
         # Auto-generate IDs and titles if not provided
         collection_id = collection_id or f"{tier}-{container}"
         title = title or f"{tier.title()}: {container}"
-        description = description or f"{self.TIER_DESCRIPTIONS[tier]} '{container}'"
+        description = description or f"{STACDefaults.TIER_DESCRIPTIONS[tier]} '{container}'"
 
         logger.info(f"📦 Creating {tier.upper()} collection: {collection_id} (container: {container})")
 
@@ -1043,121 +1023,6 @@ ORDER BY r.rolname;""")
 
         except (psycopg.Error, OSError) as e:
             logger.error(f"❌ Failed to create {tier} collection: {e}")
-            return {
-                'success': False,
-                'error': str(e),
-                'error_type': type(e).__name__
-            }
-
-    def create_production_collection(self, collection_type: str) -> Dict[str, Any]:
-        """
-        Create one of the production STAC collections (idempotent).
-
-        This method checks if the collection exists before attempting creation,
-        making it safe to call multiple times (infrastructure-as-code pattern).
-
-        Production collections:
-        - "system-vectors": PostGIS vector tables created by ETL (System STAC Layer 1)
-        - "system-rasters": COG raster files created by ETL (System STAC Layer 1)
-        - "cogs": Cloud-optimized GeoTIFFs in EPSG:4326 (legacy)
-        - "vectors": PostGIS tables (legacy)
-        - "geoparquet": GeoParquet analytical datasets (legacy)
-        - "dev": Development/testing (generic)
-
-        Args:
-            collection_type: One of PRODUCTION_COLLECTIONS keys
-
-        Returns:
-            Dict with collection creation results:
-            {
-                'success': bool,
-                'existed': bool,  # True if collection already existed
-                'collection_id': str,
-                'collection_type': str,
-                'config': dict,
-                'result': Any  # PgSTAC function result (only if newly created)
-            }
-
-        Examples:
-            >>> result = stac.create_production_collection('system-vectors')
-            >>> result['success']  # True
-            >>> result['existed']  # False (first run) or True (subsequent runs)
-        """
-        if collection_type not in self.PRODUCTION_COLLECTIONS:
-            error_msg = f"Invalid collection type '{collection_type}'. Must be one of: {', '.join(self.PRODUCTION_COLLECTIONS.keys())}"
-            logger.error(f"❌ {error_msg}")
-            return {
-                'success': False,
-                'error': error_msg,
-                'valid_types': list(self.PRODUCTION_COLLECTIONS.keys())
-            }
-
-        coll_config = self.PRODUCTION_COLLECTIONS[collection_type]
-
-        logger.info(f"📦 Creating production collection: {collection_type}")
-
-        # Build STAC Collection
-        collection = {
-            "id": collection_type,
-            "type": "Collection",
-            "stac_version": "1.0.0",
-            "title": coll_config['title'],
-            "description": coll_config['description'],
-            "license": STACDefaults.DEFAULT_LICENSE,
-            "extent": {
-                "spatial": {"bbox": [[-180, -90, 180, 90]]},
-                "temporal": {"interval": [[None, None]]}
-            },
-            "summaries": {
-                "asset_type": [coll_config['asset_type']],
-                "media_type": [coll_config['media_type']]
-            }
-        }
-
-        try:
-            with self._pg_repo._get_connection() as conn:
-                with conn.cursor() as cur:
-                    # Database-level idempotency check (18 OCT 2025)
-                    # Check if collection already exists before attempting creation
-                    logger.debug(f"🔍 Checking if collection '{collection_type}' exists...")
-                    cur.execute(
-                        "SELECT EXISTS(SELECT 1 FROM pgstac.collections WHERE id = %s) as exists",
-                        [collection_type]
-                    )
-                    exists = cur.fetchone()['exists']
-
-                    if exists:
-                        logger.info(f"✅ Collection '{collection_type}' already exists (idempotent - skipping creation)")
-                        return {
-                            'success': True,
-                            'existed': True,
-                            'collection_id': collection_type,
-                            'collection_type': collection_type,
-                            'config': coll_config,
-                            'message': 'Collection already exists (idempotent)'
-                        }
-
-                    # Create collection (only if doesn't exist)
-                    logger.debug(f"📝 Creating new collection '{collection_type}'...")
-                    cur.execute(
-                        "SELECT * FROM pgstac.create_collection(%s)",
-                        [json.dumps(collection)]
-                    )
-                    result = cur.fetchone()
-                    conn.commit()
-
-                    logger.info(f"✅ Production collection created: {collection_type}")
-                    return {
-                        'success': True,
-                        'existed': False,
-                        'collection_id': collection_type,
-                        'collection_type': collection_type,
-                        'config': coll_config,
-                        'result': result
-                    }
-
-        except (psycopg.Error, OSError) as e:
-            logger.error(f"❌ Failed to create collection '{collection_type}': {e}")
             return {
                 'success': False,
                 'error': str(e),
@@ -2613,31 +2478,3 @@ def get_all_collections(repo: Optional['PostgreSQLRepository'] = None) -> Dict[s
             'error': str(e),
             'error_type': type(e).__name__
         }
-
-
-# =============================================================================
-# MODULE-LEVEL HELPER FUNCTIONS
-# =============================================================================
-
-def get_system_stac_collections() -> List[Dict[str, Any]]:
-    """
-    Get STAC collection definitions for system collections.
-
-    07 FEB 2026: No system collections are auto-created.
-    STAC is for discovery, not application logic. Users specify collection_id
-    explicitly when creating STAC items. This enables mixed raster/vector collections.
-
-    History:
-        - 14 JAN 2026: system-rasters removed - collection_id required for rasters
-        - 07 FEB 2026: system-vectors removed - collection_id required for vectors
-        - 07 FEB 2026: system-h3-grids hidden - H3 functionality on hold
-
-    Returns:
-        Empty list - no system collections are auto-created
-
-    Used by:
-        - triggers/admin/db_maintenance.py full_rebuild endpoint (Step 6)
-    """
-    # No system collections auto-created (07 FEB 2026)
-    # STAC collections are created on-demand when users specify collection_id
-    return []

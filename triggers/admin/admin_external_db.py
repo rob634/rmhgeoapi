@@ -71,7 +71,7 @@ def external_db_initialize(req: func.HttpRequest) -> func.HttpResponse:
         "target_host": "external-db.postgres.database.azure.com",
         "target_database": "geodb",
         "admin_umi_client_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-        "admin_umi_name": "external-db-admin-umi",  // Optional: UMI display name for username
+        "admin_umi_name": "external-db-admin-umi",  // Required: UMI display name (PostgreSQL username)
         "dry_run": false,  // Optional: default false
         "schemas": ["geo", "pgstac"]  // Optional: default both
     }
@@ -100,7 +100,7 @@ def external_db_initialize(req: func.HttpRequest) -> func.HttpResponse:
             )
 
         # Validate required fields
-        required_fields = ["target_host", "target_database", "admin_umi_client_id"]
+        required_fields = ["target_host", "target_database", "admin_umi_client_id", "admin_umi_name"]
         missing = [f for f in required_fields if not body.get(f)]
         if missing:
             return func.HttpResponse(
@@ -116,13 +116,13 @@ def external_db_initialize(req: func.HttpRequest) -> func.HttpResponse:
         target_host = body["target_host"]
         target_database = body["target_database"]
         admin_umi_client_id = body["admin_umi_client_id"]
-        admin_umi_name = body.get("admin_umi_name")  # Optional
+        admin_umi_name = body["admin_umi_name"]
         dry_run = body.get("dry_run", False)
         schemas = body.get("schemas", ["geo", "pgstac"])
 
         logger.info(f"📦 External DB initialization request")
         logger.info(f"   Target: {target_host}/{target_database}")
-        logger.info(f"   Admin UMI: {admin_umi_client_id[:8]}...")
+        logger.info(f"   Admin UMI: {admin_umi_client_id[:8]}... ({admin_umi_name})")
         logger.info(f"   Dry run: {dry_run}")
         logger.info(f"   Schemas: {schemas}")
 
@@ -132,12 +132,9 @@ def external_db_initialize(req: func.HttpRequest) -> func.HttpResponse:
         initializer = ExternalDatabaseInitializer(
             target_host=target_host,
             target_database=target_database,
-            admin_umi_client_id=admin_umi_client_id
+            admin_umi_client_id=admin_umi_client_id,
+            admin_umi_name=admin_umi_name
         )
-
-        # Override admin username if provided
-        if admin_umi_name:
-            initializer._admin_username = admin_umi_name
 
         # Run initialization
         result = initializer.initialize(dry_run=dry_run, schemas=schemas)
@@ -194,18 +191,19 @@ def external_db_prereqs(req: func.HttpRequest) -> func.HttpResponse:
         target_host = req.params.get("target_host")
         target_database = req.params.get("target_database")
         admin_umi_client_id = req.params.get("admin_umi_client_id")
-        admin_umi_name = req.params.get("admin_umi_name")  # Optional
+        admin_umi_name = req.params.get("admin_umi_name")
 
         # Validate required params
-        if not all([target_host, target_database, admin_umi_client_id]):
+        if not all([target_host, target_database, admin_umi_client_id, admin_umi_name]):
             return func.HttpResponse(
                 json.dumps({
                     "error": "Missing required query parameters",
-                    "required": ["target_host", "target_database", "admin_umi_client_id"],
+                    "required": ["target_host", "target_database", "admin_umi_client_id", "admin_umi_name"],
                     "received": {
                         "target_host": bool(target_host),
                         "target_database": bool(target_database),
-                        "admin_umi_client_id": bool(admin_umi_client_id)
+                        "admin_umi_client_id": bool(admin_umi_client_id),
+                        "admin_umi_name": bool(admin_umi_name)
                     }
                 }),
                 status_code=400,
@@ -220,12 +218,9 @@ def external_db_prereqs(req: func.HttpRequest) -> func.HttpResponse:
         initializer = ExternalDatabaseInitializer(
             target_host=target_host,
             target_database=target_database,
-            admin_umi_client_id=admin_umi_client_id
+            admin_umi_client_id=admin_umi_client_id,
+            admin_umi_name=admin_umi_name
         )
-
-        # Override admin username if provided
-        if admin_umi_name:
-            initializer._admin_username = admin_umi_name
 
         # Check prerequisites
         prereqs = initializer.check_prerequisites()

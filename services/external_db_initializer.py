@@ -173,6 +173,7 @@ class ExternalDatabaseInitializer:
         target_host: str,
         target_database: str,
         admin_umi_client_id: str,
+        admin_umi_name: str,
         target_port: int = DEFAULT_PORT,
         target_sslmode: str = DEFAULT_SSLMODE,
         geo_schema_name: str = "geo"
@@ -184,6 +185,7 @@ class ExternalDatabaseInitializer:
             target_host: External database hostname
             target_database: External database name
             admin_umi_client_id: Client ID of admin UMI to use for authentication
+            admin_umi_name: Display name of the admin UMI (used as PostgreSQL username)
             target_port: Database port (default: 5432)
             target_sslmode: SSL mode (default: require)
             geo_schema_name: Name for geo schema (default: geo)
@@ -197,11 +199,11 @@ class ExternalDatabaseInitializer:
 
         # Will be populated by _acquire_admin_token()
         self._admin_token: Optional[str] = None
-        self._admin_username: Optional[str] = None
+        self._admin_username: str = admin_umi_name
 
         logger.info(f"🔧 ExternalDatabaseInitializer created")
         logger.info(f"   Target: {target_host}/{target_database}")
-        logger.info(f"   Admin UMI: {admin_umi_client_id[:8]}...")
+        logger.info(f"   Admin UMI: {admin_umi_client_id[:8]}... ({admin_umi_name})")
 
     def _acquire_admin_token(self) -> bool:
         """
@@ -220,14 +222,7 @@ class ExternalDatabaseInitializer:
 
             self._admin_token = token.token
 
-            # Get the UMI name for username (derived from client_id or we need to look it up)
-            # For Azure PostgreSQL with AAD, the username is the UMI name
-            # This would need to be passed or looked up - for now require it as param
-            # Actually, for managed identity auth, the username is typically the UMI display name
-            # We'll use the client_id as a placeholder - caller should provide actual name
-            self._admin_username = self.admin_umi_client_id  # Will be overridden if name provided
-
-            logger.info(f"✅ AAD token acquired successfully")
+            logger.info(f"✅ AAD token acquired successfully (user: {self._admin_username})")
             return True
 
         except Exception as e:
@@ -546,14 +541,21 @@ class ExternalDatabaseInitializer:
             )
 
             if result.returncode == 0:
-                step.status = InitStepStatus.SUCCESS
-                step.message = "pypgstac migrate completed successfully"
                 step.sql_executed.append("-- pypgstac migrate completed")
                 step.details = {
                     "stdout": result.stdout[:500] if result.stdout else None,
                     "returncode": result.returncode
                 }
                 logger.info("✅ pypgstac migrate completed successfully")
+
+                # Apply post-migration fixes (search_path for trigger functions)
+                # pypgstac 0.9.8 has a bug where partition_after_triggerfunc is
+                # created without search_path, causing errors on item deletion
+                fixes_applied = self._apply_pgstac_function_fixes()
+                step.details["post_migration_fixes"] = fixes_applied
+
+                step.status = InitStepStatus.SUCCESS
+                step.message = "pypgstac migrate completed successfully"
             else:
                 step.status = InitStepStatus.FAILED
                 step.error = result.stderr
@@ -577,38 +579,39 @@ class ExternalDatabaseInitializer:
 
         return step
 
+    def _apply_pgstac_function_fixes(self) -> List[str]:
+        """
+        Apply post-migration fixes for pypgstac bugs.
 
-# ============================================================================
-# FACTORY FUNCTION
-# ============================================================================
+        pypgstac 0.9.8 creates partition_after_triggerfunc without search_path,
+        causing "relation partition_sys_meta does not exist" errors.
+        Safe to run multiple times (idempotent).
 
-_external_db_initializer: Optional[ExternalDatabaseInitializer] = None
+        Returns:
+            List of fixes applied
+        """
+        fixes_applied = []
+        functions_to_fix = [
+            'partition_after_triggerfunc()',
+            'collection_delete_trigger_func()',
+        ]
 
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    for func_sig in functions_to_fix:
+                        try:
+                            cur.execute(
+                                f"ALTER FUNCTION pgstac.{func_sig} "
+                                f"SET search_path = pgstac, public"
+                            )
+                            fixes_applied.append(f"pgstac.{func_sig}")
+                            logger.info(f"  ✅ Fixed search_path for pgstac.{func_sig}")
+                        except Exception as e:
+                            # Function may not exist in future pypgstac versions
+                            logger.warning(f"  ⚠️ Could not fix pgstac.{func_sig}: {e}")
+                    conn.commit()
+        except Exception as e:
+            logger.warning(f"⚠️ Post-migration fixes failed (non-fatal): {e}")
 
-def get_external_db_initializer(
-    target_host: str,
-    target_database: str,
-    admin_umi_client_id: str,
-    **kwargs
-) -> ExternalDatabaseInitializer:
-    """
-    Factory function to create ExternalDatabaseInitializer.
-
-    Note: Unlike other services, this does NOT use a singleton pattern
-    because each call may target a different database.
-
-    Args:
-        target_host: External database hostname
-        target_database: External database name
-        admin_umi_client_id: Client ID of admin UMI
-        **kwargs: Additional arguments passed to constructor
-
-    Returns:
-        ExternalDatabaseInitializer instance
-    """
-    return ExternalDatabaseInitializer(
-        target_host=target_host,
-        target_database=target_database,
-        admin_umi_client_id=admin_umi_client_id,
-        **kwargs
-    )
+        return fixes_applied

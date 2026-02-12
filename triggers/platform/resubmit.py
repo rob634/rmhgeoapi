@@ -47,11 +47,11 @@ class PlatformResubmitHandler:
     def __init__(self):
         """Initialize with repository access."""
         from infrastructure import RepositoryFactory
-        from infrastructure.platform import PlatformRequestRepository
+        from infrastructure.platform import ApiRequestRepository
 
         self.repos = RepositoryFactory.create_repositories()
         self.job_repo = self.repos['job_repo']
-        self.platform_repo = PlatformRequestRepository()
+        self.platform_repo = ApiRequestRepository()
 
     def handle(self, req: func.HttpRequest) -> func.HttpResponse:
         """
@@ -163,7 +163,7 @@ class PlatformResubmitHandler:
             new_job_id = resubmit_handler._resubmit_job(job_type, parameters)
 
             # TODO: Update platform request record with new job_id when
-            # PlatformRequestRepository.update_request() is implemented.
+            # ApiRequestRepository.update_request() is implemented.
             # For now, the new job can be tracked via the response.
 
             logger.info(f"✅ Platform resubmit complete: {job_id[:16]}... → {new_job_id[:16]}...")

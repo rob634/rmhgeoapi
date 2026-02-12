@@ -93,12 +93,6 @@ if TYPE_CHECKING:
     from .revision_repository import AssetRevisionRepository as _AssetRevisionRepository
     from .platform_registry_repository import PlatformRegistryRepository as _PlatformRegistryRepository
     from .connection_pool import ConnectionPoolManager as _ConnectionPoolManager
-    from .database_initializer import (
-        DatabaseInitializer as _DatabaseInitializer,
-        InitializationResult as _InitializationResult,
-        SchemaType as _SchemaType,
-        initialize_database as _initialize_database,
-    )
     from .schema_analyzer import (
         SchemaAnalyzer as _SchemaAnalyzer,
         SchemaReport as _SchemaReport,
@@ -258,20 +252,6 @@ def __getattr__(name: str):
         from .connection_pool import ConnectionPoolManager
         return ConnectionPoolManager
 
-    # Database Initializer (21 JAN 2026 - Infrastructure as Code)
-    elif name == "DatabaseInitializer":
-        from .database_initializer import DatabaseInitializer
-        return DatabaseInitializer
-    elif name == "InitializationResult":
-        from .database_initializer import InitializationResult
-        return InitializationResult
-    elif name == "initialize_database":
-        from .database_initializer import initialize_database
-        return initialize_database
-    elif name == "SchemaType":
-        from .database_initializer import SchemaType
-        return SchemaType
-
     # Schema Analyzer (21 JAN 2026 - Drift Detection)
     elif name == "SchemaAnalyzer":
         from .schema_analyzer import SchemaAnalyzer
@@ -335,11 +315,6 @@ __all__ = [
     "CheckpointManager",
     "CheckpointValidationError",
     "ConnectionPoolManager",
-    # Database Initializer (21 JAN 2026 - Infrastructure as Code)
-    "DatabaseInitializer",
-    "InitializationResult",
-    "initialize_database",
-    "SchemaType",
     # Schema Analyzer (21 JAN 2026 - Drift Detection)
     "SchemaAnalyzer",
     "SchemaReport",

@@ -40,6 +40,27 @@ class BaseInterface(ABC):
         """Initialize interface with default settings."""
         self.embed_mode = False  # Set by handler for iframe embedding
 
+    @staticmethod
+    def get_base_url(request: func.HttpRequest) -> str:
+        """Derive base URL from request headers.
+
+        Checks X-Forwarded-Proto (set by Azure Front Door / APIM / load
+        balancer) first, then falls back to host-based heuristic.  Ensures
+        HTTPS is used for any non-localhost deployment.
+        """
+        host = request.headers.get('Host', 'localhost')
+        forwarded_proto = request.headers.get('X-Forwarded-Proto', '').lower()
+
+        if forwarded_proto == 'https':
+            scheme = 'https'
+        elif host == 'localhost' or host.startswith('localhost:') or host.startswith('127.0.0.1'):
+            scheme = 'http'
+        else:
+            # Any remote host (azurewebsites.net, APIM, custom domain)
+            scheme = 'https'
+
+        return f"{scheme}://{host}"
+
     # Common CSS used by all interfaces
     # Consolidated 23 DEC 2025 - S12.1.1
     COMMON_CSS = """

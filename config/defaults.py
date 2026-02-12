@@ -883,19 +883,15 @@ class STACDefaults:
     # ==========================================================================
     # DEFAULT COLLECTION IDs BY DATA TYPE
     # ==========================================================================
-    # VECTOR_COLLECTION removed (07 FEB 2026) - collection_id now required, no default system collection
-    # RASTER_COLLECTION removed (14 JAN 2026) - collection_id now required for all raster jobs
-    # H3_COLLECTION removed (07 FEB 2026) - H3 functionality on hold, hidden from STAC
     DEV_COLLECTION = "dev"                    # Development/testing
-    COGS_COLLECTION = "cogs"                  # User-submitted COGs
-    VECTORS_COLLECTION = "vectors"            # User-submitted vectors
-    GEOPARQUET_COLLECTION = "geoparquet"      # GeoParquet exports
+    COGS_COLLECTION = "cogs"                  # COG raster data
+    VECTORS_COLLECTION = "vectors"            # PostGIS vector data
 
     # ==========================================================================
     # VALID COLLECTIONS (for job parameter validation)
     # ==========================================================================
-    VALID_USER_COLLECTIONS = ["dev", "cogs", "vectors", "geoparquet"]
-    SYSTEM_COLLECTIONS = []  # All system collections removed (07 FEB 2026) - STAC is for discovery, not app logic
+    VALID_USER_COLLECTIONS = ["dev", "cogs", "vectors"]
+    SYSTEM_COLLECTIONS = []  # No auto-created collections -- STAC is for discovery only
 
     # ==========================================================================
     # MEDIA TYPES
@@ -920,39 +916,6 @@ class STACDefaults:
         "bronze": "Raw geospatial data from Azure Storage container",
         "silver": "Cloud-optimized GeoTIFFs (COGs) with validated metadata and PostGIS integration",
         "gold": "GeoParquet exports optimized for analytical queries",
-    }
-
-    # ==========================================================================
-    # COLLECTION METADATA (titles and descriptions)
-    # ==========================================================================
-    COLLECTION_METADATA = {
-        # system-vectors removed (07 FEB 2026) - STAC is for discovery, not application logic
-        # Users specify collection_id explicitly; vectors can be added to any collection
-        "cogs": {
-            "title": "Cloud-Optimized GeoTIFFs",
-            "description": "Raster data converted to COG format in EPSG:4326 for cloud-native access",
-            "asset_type": "raster",
-            "media_type": "image/tiff; application=geotiff; profile=cloud-optimized",
-        },
-        "vectors": {
-            "title": "Vector Features (PostGIS)",
-            "description": "Vector data stored in PostGIS tables, queryable via OGC API - Features",
-            "asset_type": "vector",
-            "media_type": "application/geo+json",
-        },
-        "geoparquet": {
-            "title": "GeoParquet Analytical Datasets",
-            "description": "Cloud-optimized columnar vector data for analytical queries",
-            "asset_type": "vector",
-            "media_type": "application/x-parquet",
-        },
-        "dev": {
-            "title": "Development & Testing",
-            "description": "Generic collection for development and testing (not for production)",
-            "asset_type": "mixed",
-            "media_type": "application/octet-stream",
-        },
-        # system-h3-grids removed (07 FEB 2026) - H3 functionality on hold
     }
 
 

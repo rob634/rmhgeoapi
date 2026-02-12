@@ -21,7 +21,7 @@ Routes (19 total):
         GET  /stac/collections/{id}/items/{item_id}   Get item
 
     Admin - Initialization (3 routes):
-        POST /stac/init                               Initialize collections
+        POST /stac/collections/{tier}                    Create collection by tier
         POST /stac/collections/{tier}                 Create tier collection
         POST /stac/nuke                               Clear STAC data
 
@@ -291,27 +291,8 @@ def stac_item_detail(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # ============================================================================
-# ADMIN - INITIALIZATION (3 routes)
+# ADMIN - INITIALIZATION
 # ============================================================================
-
-@bp.route(route="stac/init", methods=["POST"])
-def stac_init(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Initialize STAC production collections.
-
-    POST /api/stac/init
-
-    Body (optional):
-        {
-            "collections": ["dev", "cogs", "vectors", "geoparquet"]  // Default: all
-        }
-
-    Returns:
-        Results for each collection creation.
-    """
-    from triggers.stac_init import stac_init_trigger
-    return stac_init_trigger.handle_request(req)
-
 
 @bp.route(route="stac/collections/{tier}", methods=["POST"])
 def stac_collections_tier(req: func.HttpRequest) -> func.HttpResponse:

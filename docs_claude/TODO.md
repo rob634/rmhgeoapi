@@ -11,6 +11,8 @@
 | Document | Purpose |
 |----------|---------|
 | [V0.8_ADO_WORKITEMS.md](/ado_wiki/V0.8_ADO_WORKITEMS.md) | **ADO work item definitions** |
+| [D360_REQUIREMENTS_ASSESSMENT.md](./D360_REQUIREMENTS_ASSESSMENT.md) | **D360 requirements gap analysis** |
+| [D360_STYLES_LEGENDS_MIGRATION.md](./D360_STYLES_LEGENDS_MIGRATION.md) | **Styles/Legends migration plan** |
 | [B2B_REQUEST_CONTEXT.md](./B2B_REQUEST_CONTEXT.md) | US 7.x B2B request tracking |
 | [APP_MODE_ENDPOINT_REFACTOR.md](./APP_MODE_ENDPOINT_REFACTOR.md) | US 6.1 multi-app deployment |
 | [DRY_RUN_IMPLEMENTATION.md](./DRY_RUN_IMPLEMENTATION.md) | US 1.x dry_run validation |
@@ -68,7 +70,26 @@
 
 ---
 
-## FEATURE 5: Service Layer (TiTiler/TiPG) - Remaining
+## FEATURE 5: Service Layer (TiTiler/TiPG) `[ACTIVE]`
+
+### US 5.5: Styles & Legends Migration `[PRIORITY]` `[NEW]`
+
+**D360 Gap**: Only 2 unmet requirements (1.9 Legend info, 3.5 Raster legend) — both addressed here.
+**Plan**: [D360_STYLES_LEGENDS_MIGRATION.md](./D360_STYLES_LEGENDS_MIGRATION.md)
+**Assessment**: [D360_REQUIREMENTS_ASSESSMENT.md](./D360_REQUIREMENTS_ASSESSMENT.md)
+**Cross-repo**: rmhgeoapi (ETL writes) + rmhtitiler (Service API reads/serves)
+
+| Task | Status | Details |
+|------|--------|---------|
+| **Phase 1: Vector Styles to rmhtitiler** | 🔲 Ready | Copy models + translator (pure Python), rewrite repository (asyncpg), create FastAPI router |
+| T5.5.1: Copy styles_models.py to rmhtitiler | 🔲 Pending | From `ogc_styles/models.py` — 163 lines, 0 deps |
+| T5.5.2: Copy styles_translator.py to rmhtitiler | 🔲 Pending | From `ogc_styles/translator.py` — 384 lines, 0 deps |
+| T5.5.3: Create styles_db.py (asyncpg) | 🔲 Pending | Rewrite read methods from psycopg → asyncpg |
+| T5.5.4: Create legend_generator.py | 🔲 Pending | Vector + raster legend derivation from JSONB |
+| T5.5.5: Create styles.py FastAPI router | 🔲 Pending | 6 endpoints: list/get/legend for vector + raster |
+| T5.5.6: Register router in app.py | 🔲 Pending | `app.include_router(styles.router)` |
+| **Phase 2: Database Permissions** | 🔲 Pending | GRANT SELECT on `app.raster_render_configs` to geotiler user |
+| **Phase 3: Deprecate rmhgeoapi endpoints** | 🔲 Future | Add Deprecation header, eventually remove routes |
 
 ### US 5.4: pgSTAC Mosaic Searches
 

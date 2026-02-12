@@ -66,9 +66,7 @@ class ReDocInterface(BaseInterface):
         """Generate ReDoc HTML page."""
 
         # Get current host for API calls
-        host = request.headers.get('Host', 'localhost')
-        scheme = 'https' if 'azurewebsites.net' in host else 'http'
-        base_url = f"{scheme}://{host}"
+        base_url = self.get_base_url(request)
 
         # Update spec with current server URL
         spec = _OPENAPI_SPEC.copy() if _OPENAPI_SPEC else self._get_fallback_spec()

@@ -45,7 +45,7 @@ Usage:
 # ============================================================================
 # Semantic versioning follows MAJOR.MINOR.PATCH.BUILD
 # Criteria for advance to 0.9.0: DAG refactor, full ETL separation, deprecate legacy fallbacks
-__version__ = "0.8.17.0"
+__version__ = "0.8.17.1"
 
 from typing import Optional
 

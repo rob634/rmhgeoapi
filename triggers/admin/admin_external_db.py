@@ -2,7 +2,7 @@
 # EXTERNAL DATABASE ADMIN BLUEPRINT
 # ============================================================================
 # EPOCH: 4 - ACTIVE
-# STATUS: Controller - Blueprint for /api/admin/external/* routes
+# STATUS: Controller - Blueprint for /api/dbadmin/external/* routes
 # PURPOSE: Initialize target databases with pgstac and geo schemas
 # CREATED: 21 JAN 2026
 # EXPORTS: bp (Blueprint)
@@ -14,8 +14,8 @@ Provides endpoints for DevOps to initialize external databases with
 pgstac and geo schemas using a temporary admin managed identity.
 
 Routes:
-    POST /api/admin/external/initialize - Initialize external database
-    GET  /api/admin/external/prereqs    - Check DBA prerequisites
+    POST /api/dbadmin/external/initialize - Initialize external database
+    GET  /api/dbadmin/external/prereqs    - Check DBA prerequisites
 
 Security:
     - These endpoints should be protected by RBAC/authentication
@@ -24,10 +24,10 @@ Security:
 
 Usage:
     # Check prerequisites first
-    curl -X GET ".../api/admin/external/prereqs?target_host=...&target_database=...&admin_umi_client_id=..."
+    curl -X GET ".../api/dbadmin/external/prereqs?target_host=...&target_database=...&admin_umi_client_id=..."
 
     # Dry run
-    curl -X POST ".../api/admin/external/initialize" \
+    curl -X POST ".../api/dbadmin/external/initialize" \
         -H "Content-Type: application/json" \
         -d '{
             "target_host": "external-db.postgres.database.azure.com",
@@ -37,7 +37,7 @@ Usage:
         }'
 
     # Actual execution
-    curl -X POST ".../api/admin/external/initialize" \
+    curl -X POST ".../api/dbadmin/external/initialize" \
         -H "Content-Type: application/json" \
         -d '{
             "target_host": "external-db.postgres.database.azure.com",
@@ -59,12 +59,12 @@ logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, "AdminExternalDb"
 bp = Blueprint()
 
 
-@bp.route(route="admin/external/initialize", methods=["POST"])
+@bp.route(route="dbadmin/external/initialize", methods=["POST"])
 def external_db_initialize(req: func.HttpRequest) -> func.HttpResponse:
     """
     Initialize external database with pgstac and geo schemas.
 
-    POST /api/admin/external/initialize
+    POST /api/dbadmin/external/initialize
 
     Request body:
     {
@@ -161,12 +161,12 @@ def external_db_initialize(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
-@bp.route(route="admin/external/prereqs", methods=["GET"])
+@bp.route(route="dbadmin/external/prereqs", methods=["GET"])
 def external_db_prereqs(req: func.HttpRequest) -> func.HttpResponse:
     """
     Check DBA prerequisites for external database initialization.
 
-    GET /api/admin/external/prereqs?target_host=...&target_database=...&admin_umi_client_id=...
+    GET /api/dbadmin/external/prereqs?target_host=...&target_database=...&admin_umi_client_id=...
 
     Query parameters:
         target_host: External database hostname

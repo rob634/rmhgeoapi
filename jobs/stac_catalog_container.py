@@ -41,6 +41,9 @@ class StacCatalogContainerWorkflow(JobBase):
     job_type: str = "stac_catalog_container"
     description: str = "Bulk STAC metadata extraction and cataloging with parallel fan-out"
 
+    # Declarative ETL linkage - which unpublish job reverses this workflow
+    reversed_by = "unpublish_raster"
+
     # Stage definitions
     stages: List[Dict[str, Any]] = [
         {

@@ -119,12 +119,12 @@ Classes in this file:
     - RasterDefaults: COG processing settings
     - VectorDefaults: PostGIS ETL settings
     - AnalyticsDefaults: DuckDB settings
-    - H3Defaults: Spatial indexing settings
     - PlatformDefaults: DDH integration settings
-    - FathomDefaults: Flood data ETL settings
     - STACDefaults: Catalog configuration
     - AppDefaults: Application-wide settings
     - KeyVaultDefaults: Key Vault integration (future)
+
+Archived (13 FEB 2026): H3Defaults, FathomDefaults → docs/archive/v08_archive_feb2026/
 
 Usage:
     from config.defaults import DatabaseDefaults, AzureDefaults
@@ -424,18 +424,13 @@ class TaskRoutingDefaults:
     # =========================================================================
     # All GDAL, geopandas, and heavy pgstac SQL operations.
     # Docker worker tasks - no Azure Functions timeout constraints.
+    # ARCHIVED (13 FEB 2026): H3 and Fathom tasks removed → docs/archive/v08_archive_feb2026/
     DOCKER_TASKS = frozenset([
         # =====================================================================
         # CONSOLIDATED RASTER HANDLERS (Docker-only)
         # =====================================================================
         "raster_process_complete",        # F7.13: Validate → COG → STAC
-        "raster_process_large_complete",  # F7.18: Tiling pipeline (deprecated)
         "raster_collection_complete",     # V0.8: Collection to COGs (sequential)
-
-        # =====================================================================
-        # H3 PYRAMID (Docker-only)
-        # =====================================================================
-        "h3_pyramid_complete",            # F7.20: H3 pyramid (post-V0.8)
 
         # =====================================================================
         # RASTER OPERATIONS (GDAL-dependent)
@@ -450,18 +445,6 @@ class TaskRoutingDefaults:
         "raster_create_stac_collection",
 
         # =====================================================================
-        # FATHOM RASTER OPERATIONS (GDAL)
-        # =====================================================================
-        "fathom_band_stack",              # Stack 8 return periods
-        "fathom_spatial_merge",           # Merge tiles band-by-band
-        "fathom_process_chunk",           # V0.8: Band stack + VRT merge + STAC
-
-        # =====================================================================
-        # H3 RASTER AGGREGATION (rasterstats - memory intensive)
-        # =====================================================================
-        "h3_raster_zonal_stats",          # Compute zonal stats (GDAL + rasterstats)
-
-        # =====================================================================
         # VECTOR ETL - DOCKER (V0.8 - geopandas + connection pooling)
         # =====================================================================
         "vector_docker_complete",         # V0.8: Consolidated vector ETL with checkpoints
@@ -472,12 +455,11 @@ class TaskRoutingDefaults:
     # =========================================================================
     # Lightweight DB operations, inventory, STAC queries.
     # Runs on FunctionApp worker (with timeout constraints).
+    # ARCHIVED (13 FEB 2026): H3, Fathom, legacy vector tasks removed
     FUNCTIONAPP_TASKS = frozenset([
         # =====================================================================
-        # LEGACY VECTOR ETL (FunctionApp - backup/admin only after V0.8)
+        # VECTOR STAC OPERATIONS (used by Docker vector ETL)
         # =====================================================================
-        "process_vector_prepare",
-        "process_vector_upload",
         "vector_create_stac",
         "vector_extract_stac_metadata",
 
@@ -490,31 +472,6 @@ class TaskRoutingDefaults:
         "inventory_aggregate_analysis",
         "inventory_classify_geospatial",
         "inventory_aggregate_geospatial",
-
-        # =====================================================================
-        # FATHOM INVENTORY (DB queries, not raster)
-        # =====================================================================
-        "fathom_generate_scan_prefixes",
-        "fathom_scan_prefix",
-        "fathom_assign_grid_cells",
-        "fathom_inventory_summary",
-        "fathom_tile_inventory",
-        "fathom_grid_inventory",
-        "fathom_stac_register",
-        "fathom_stac_rebuild",
-        "fathom_chunk_inventory",
-        "fathom_finalize",
-
-        # =====================================================================
-        # H3 POSTGIS OPERATIONS (DB-bound, not memory intensive)
-        # =====================================================================
-        "h3_create_stac",
-        "h3_native_streaming_postgis",
-        "h3_generate_grid",
-        "h3_cascade_descendants",
-        "h3_finalize_pyramid",
-        "h3_inventory_cells",
-        "h3_aggregation_finalize",
 
         # =====================================================================
         # STAC OPERATIONS (pgSTAC queries, lightweight)
@@ -540,13 +497,6 @@ class TaskRoutingDefaults:
         "curated_fetch_data",
         "curated_etl_process",
         "curated_finalize",
-
-        # =====================================================================
-        # H3 EXPORT (DB-bound)
-        # =====================================================================
-        "h3_export_validate",
-        "h3_export_build",
-        "h3_export_register",
 
         # =====================================================================
         # INGEST COLLECTION (blob copy, pgSTAC)
@@ -703,30 +653,7 @@ class AnalyticsDefaults:
     THREADS = 4
 
 
-# =============================================================================
-# H3 DEFAULTS (Spatial indexing)
-# =============================================================================
-
-class H3Defaults:
-    """
-    H3 hexagonal spatial indexing defaults.
-
-    Controls H3 grid generation and spatial filtering.
-
-    IMPORTANT (23 DEC 2025): Admin0 table lookup REQUIRES a promoted dataset
-    with system_role='admin0_boundaries'. There is NO FALLBACK.
-
-    To configure admin0:
-        1. Create table via process_vector job
-        2. Promote with: POST /api/promote {is_system_reserved: true, system_role: 'admin0_boundaries'}
-    """
-
-    # System role for admin0 lookup (REQUIRED - no fallback)
-    ADMIN0_SYSTEM_ROLE = "admin0_boundaries"
-
-    DEFAULT_RESOLUTION = 4  # ~1,770 km² per cell
-    ENABLE_LAND_FILTER = True
-
+# H3Defaults archived (13 FEB 2026) → docs/archive/v08_archive_feb2026/
 
 # =============================================================================
 # PLATFORM DEFAULTS (DDH integration)
@@ -764,102 +691,7 @@ class PlatformDefaults:
     WEBHOOK_RETRY_DELAY_SECONDS = 5
 
 
-# =============================================================================
-# FATHOM ETL DEFAULTS
-# =============================================================================
-
-class FathomDefaults:
-    """
-    Fathom flood hazard ETL pipeline defaults.
-
-    Controls containers, prefixes, and STAC collection IDs for the
-    two-phase Fathom processing architecture.
-
-    Phase 1: Band stacking (8M → 1M files, 8× reduction)
-    Phase 2: Spatial merge (1M → 60K files with 4×4 grid)
-
-    V0.8 Architecture (24 JAN 2026):
-        - 3-stage hybrid job: Functions (inventory/finalize) + Docker (processing)
-        - VRT-based merge for memory efficiency (~500MB vs 2-5GB peak)
-        - Continent/multi-region parallelism via fan-out to Docker workers
-        - Country-based collections: fathom-flood-{region}
-    """
-
-    # Source data (Fathom Global Flood Maps v3)
-    SOURCE_CONTAINER = "bronze-fathom"
-
-    # Phase 1 outputs (band-stacked 1×1 tiles)
-    PHASE1_OUTPUT_CONTAINER = "silver-fathom"
-    PHASE1_OUTPUT_PREFIX = "fathom-stacked"
-    PHASE1_COLLECTION_ID = "fathom-flood-stacked"
-
-    # Phase 2 outputs (spatially merged NxN tiles)
-    PHASE2_OUTPUT_CONTAINER = "silver-fathom"
-    PHASE2_OUTPUT_PREFIX = "fathom"
-    PHASE2_COLLECTION_ID = "fathom-flood"
-
-    # Merge configuration
-    # Changed from 5 to 4 (06 JAN 2026): 5×5 grids caused OOM with 24 tiles @ 5-6GB each
-    # 4×4 grids = max 16 tiles @ ~3-4GB peak memory, fits in 8GB instance
-    DEFAULT_GRID_SIZE = 4  # 4×4 degree grid cells
-
-    # Return periods (bands in output COGs)
-    RETURN_PERIODS = ["1in5", "1in10", "1in20", "1in50", "1in100", "1in200", "1in500", "1in1000"]
-
-    # Short band names for STAC metadata
-    RETURN_PERIOD_NAMES = ["RP5", "RP10", "RP20", "RP50", "RP75", "RP100", "RP250", "RP500"]
-
-    # Flood types supported
-    FLOOD_TYPES = ["COASTAL_DEFENDED", "COASTAL_UNDEFENDED", "FLUVIAL_DEFENDED", "FLUVIAL_UNDEFENDED", "PLUVIAL_DEFENDED"]
-
-    # =========================================================================
-    # CONTINENT REGION MAPPINGS (V0.8 - 24 JAN 2026)
-    # =========================================================================
-    # Maps continent names to lists of ISO3 country codes for fan-out parallelism.
-    # Used by process_fathom_docker job to expand continent → regions.
-
-    CONTINENT_REGIONS = {
-        'africa': [
-            'dza', 'ago', 'ben', 'bwa', 'bfa', 'bdi', 'cmr', 'cpv', 'caf',
-            'tcd', 'com', 'cog', 'cod', 'dji', 'egy', 'gnq', 'eri', 'swz',
-            'eth', 'gab', 'gmb', 'gha', 'gin', 'gnb', 'civ', 'ken', 'lso',
-            'lbr', 'lby', 'mdg', 'mwi', 'mli', 'mrt', 'mus', 'mar', 'moz',
-            'nam', 'ner', 'nga', 'rwa', 'stp', 'sen', 'syc', 'sle', 'som',
-            'zaf', 'ssd', 'sdn', 'tza', 'tgo', 'tun', 'uga', 'zmb', 'zwe'
-        ],
-        'asia': [
-            'afg', 'arm', 'aze', 'bhr', 'bgd', 'btn', 'brn', 'khm', 'chn',
-            'cyp', 'geo', 'ind', 'idn', 'irn', 'irq', 'isr', 'jpn', 'jor',
-            'kaz', 'kwt', 'kgz', 'lao', 'lbn', 'mys', 'mdv', 'mng', 'mmr',
-            'npl', 'prk', 'omn', 'pak', 'phl', 'qat', 'sau', 'sgp', 'kor',
-            'lka', 'syr', 'twn', 'tjk', 'tha', 'tls', 'tur', 'tkm', 'are',
-            'uzb', 'vnm', 'yem'
-        ],
-        'europe': [
-            'alb', 'and', 'aut', 'blr', 'bel', 'bih', 'bgr', 'hrv', 'cze',
-            'dnk', 'est', 'fin', 'fra', 'deu', 'grc', 'hun', 'isl', 'irl',
-            'ita', 'xkx', 'lva', 'lie', 'ltu', 'lux', 'mlt', 'mda', 'mco',
-            'mne', 'nld', 'mkd', 'nor', 'pol', 'prt', 'rou', 'rus', 'smr',
-            'srb', 'svk', 'svn', 'esp', 'swe', 'che', 'ukr', 'gbr', 'vat'
-        ],
-        'north_america': [
-            'atg', 'bhs', 'brb', 'blz', 'can', 'cri', 'cub', 'dma', 'dom',
-            'slv', 'grd', 'gtm', 'hti', 'hnd', 'jam', 'mex', 'nic', 'pan',
-            'kna', 'lca', 'vct', 'tto', 'usa'
-        ],
-        'south_america': [
-            'arg', 'bol', 'bra', 'chl', 'col', 'ecu', 'guy', 'pry', 'per',
-            'sur', 'ury', 'ven'
-        ],
-        'oceania': [
-            'aus', 'fji', 'kir', 'mhl', 'fsm', 'nru', 'nzl', 'plw', 'png',
-            'wsm', 'slb', 'ton', 'tuv', 'vut'
-        ]
-    }
-
-    # Maximum tiles per chunk before splitting (for adaptive chunking)
-    MAX_TILES_PER_CHUNK = 500
-
+# FathomDefaults archived (13 FEB 2026) → docs/archive/v08_archive_feb2026/
 
 # =============================================================================
 # STAC DEFAULTS (Catalog configuration)
@@ -1012,9 +844,7 @@ __all__ = [
     "RasterDefaults",
     "VectorDefaults",
     "AnalyticsDefaults",
-    "H3Defaults",
     "PlatformDefaults",
-    "FathomDefaults",
     "STACDefaults",
     "ObservabilityDefaults",
     "AppDefaults",

@@ -476,27 +476,24 @@ if _app_mode.has_admin_endpoints:
     from triggers.admin import admin_db_bp, admin_servicebus_bp, snapshot_bp
     from triggers.admin.admin_janitor import bp as admin_janitor_bp
     from triggers.stac import stac_bp  # Unified STAC blueprint (24 JAN 2026)
-    from triggers.admin.admin_h3 import bp as admin_h3_bp
     from triggers.admin.admin_system import bp as admin_system_bp
     from triggers.admin.admin_approvals import bp as admin_approvals_bp  # Dataset approvals (16 JAN 2026)
     from triggers.admin.admin_external_db import bp as admin_external_db_bp  # External DB init (21 JAN 2026)
     from triggers.admin.admin_artifacts import bp as admin_artifacts_bp  # Artifact registry (22 JAN 2026)
     from triggers.admin.admin_external_services import bp as admin_external_services_bp  # External service registry (22 JAN 2026)
     from triggers.admin.admin_data_migration import bp as admin_data_migration_bp  # ADF data migration (22 JAN 2026)
-    from web_interfaces.h3_sources import bp as h3_sources_bp
+    # admin_h3_bp, h3_sources_bp archived (13 FEB 2026)
 
     app.register_functions(admin_db_bp)
     app.register_functions(admin_servicebus_bp)
     app.register_functions(admin_janitor_bp)
     app.register_functions(stac_bp)  # Unified STAC blueprint (24 JAN 2026)
-    app.register_functions(admin_h3_bp)
     app.register_functions(admin_system_bp)
     app.register_functions(admin_approvals_bp)  # Dataset approvals (16 JAN 2026)
     app.register_functions(admin_external_db_bp)  # External DB init (21 JAN 2026)
     app.register_functions(admin_artifacts_bp)  # Artifact registry (22 JAN 2026)
     app.register_functions(admin_external_services_bp)  # External service registry (22 JAN 2026)
     app.register_functions(admin_data_migration_bp)  # ADF data migration (22 JAN 2026)
-    app.register_functions(h3_sources_bp)
     app.register_functions(snapshot_bp)
     logger.info("✅ Admin blueprints registered (APP_MODE=%s)", _app_mode.mode.value)
 else:

@@ -296,12 +296,13 @@ class SchemaManager:
                 
                 if missing_functions:
                     logger.warning(f"⚠️ Missing functions in schema '{self.app_schema}': {missing_functions}")
-                    # Execute only functions to create missing functions
-                    functions_executed = self._execute_functions_only(conn)
+                    # Rebuild full schema - functions are generated alongside tables/enums
+                    # Using _execute_schema_file is safe (IF NOT EXISTS patterns, idempotent)
+                    functions_executed = self._execute_schema_file(conn)
                     results['functions_created'] = functions_executed
-                    results['actions_taken'] = [f"Executed functions for missing functions: {missing_functions}"]
+                    results['actions_taken'] = [f"Executed full schema rebuild for missing functions: {missing_functions}"]
                     if functions_executed:
-                        logger.info(f"✅ Functions executed for missing functions: {missing_functions}")
+                        logger.info(f"✅ Schema executed to restore missing functions: {missing_functions}")
                         results['functions_exist'] = True
                 else:
                     logger.info(f"✅ All required functions exist in schema: {self.app_schema}")

@@ -39,7 +39,7 @@ from triggers.admin.snapshot import bp as snapshot_bp, SnapshotAdminTrigger, sna
 # Phase 5: Consolidated Admin Blueprints (12 JAN 2026)
 from triggers.admin.admin_janitor import bp as admin_janitor_bp
 # NOTE: admin_stac_bp moved to triggers/stac/stac_bp.py (24 JAN 2026 - V0.8 Phase 17.3)
-from triggers.admin.admin_h3 import bp as admin_h3_bp
+# NOTE: admin_h3_bp archived (13 FEB 2026) → docs/archive/v08_archive_feb2026/triggers/
 from triggers.admin.admin_system import bp as admin_system_bp
 
 # Phase 6: External Database Admin Blueprint (21 JAN 2026)
@@ -76,7 +76,7 @@ __all__ = [
     # Phase 5: Consolidated Admin Blueprints (12 JAN 2026)
     'admin_janitor_bp',
     # NOTE: admin_stac_bp moved to triggers/stac/stac_bp.py (24 JAN 2026)
-    'admin_h3_bp',
+    # NOTE: admin_h3_bp archived (13 FEB 2026)
     'admin_system_bp',
     # Phase 6: External Database Admin Blueprint (21 JAN 2026)
     'admin_external_db_bp',

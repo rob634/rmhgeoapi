@@ -74,7 +74,8 @@ def _extract_fathom_properties(blob_path: str, cog_info: dict = None) -> Dict[st
     Returns:
         Dict with fathom:* properties
     """
-    from config import FathomDefaults
+    # Fathom return periods (inlined - FathomDefaults archived 13 FEB 2026)
+    FATHOM_RETURN_PERIODS = ["1in5", "1in10", "1in20", "1in50", "1in100", "1in200", "1in500", "1in1000"]
 
     properties = {
         "fathom:depth_unit": "cm",
@@ -108,10 +109,10 @@ def _extract_fathom_properties(blob_path: str, cog_info: dict = None) -> Dict[st
     # Add band metadata if available
     if cog_info and cog_info.get("band_count", 0) == 8:
         # Standard 8-band FATHOM COG
-        properties["fathom:return_periods"] = FathomDefaults.RETURN_PERIODS
+        properties["fathom:return_periods"] = FATHOM_RETURN_PERIODS
         properties["eo:bands"] = [
             {"name": rp, "description": f"Flood depth for {rp.replace('in', '-in-')} year return period (cm)"}
-            for rp in FathomDefaults.RETURN_PERIODS
+            for rp in FATHOM_RETURN_PERIODS
         ]
 
     return properties

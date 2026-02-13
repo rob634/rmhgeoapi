@@ -54,6 +54,9 @@ class ProcessRasterCollectionDockerJob(JobBaseMixin, JobBase):
     job_type = "process_raster_collection_docker"
     description = "Process raster collection to COGs (Docker - sequential, checkpoint-based)"
 
+    # Declarative ETL linkage - which unpublish job reverses this workflow
+    reversed_by = "unpublish_raster"
+
     # Single stage - handler manages phases internally
     stages = [
         {

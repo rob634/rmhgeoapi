@@ -68,6 +68,9 @@ class IngestCollectionJob(JobBaseMixin, JobBase):
     job_type: str = "ingest_collection"
     description: str = "Ingest pre-processed COG collection from bronze to silver"
 
+    # Declarative ETL linkage - which unpublish job reverses this workflow
+    reversed_by = "unpublish_raster"
+
     # 5-stage workflow
     stages: List[Dict[str, Any]] = [
         {

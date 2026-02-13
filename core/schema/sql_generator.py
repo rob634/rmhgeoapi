@@ -1856,13 +1856,7 @@ INSERT INTO {schema}.{table} (
         # Seed data - Platform Registry (V0.8 - 29 JAN 2026)
         composed.extend(self.generate_seed_data())
 
-        self.logger.info(f"✅ SQL composition complete: {len(composed)} statements ready")
-        self.logger.info(f"   - Schema & search_path: 2")
-        self.logger.info(f"   - ENUMs: 2")  
-        self.logger.info(f"   - Tables: 2")
-        self.logger.info(f"   - Indexes: {len(self.generate_indexes_composed('jobs', JobRecord)) + len(self.generate_indexes_composed('tasks', TaskRecord))}")
-        self.logger.info(f"   - Functions: {len(self.generate_static_functions())}")
-        self.logger.info(f"   - Triggers: {len(self.generate_triggers_composed())}")
+        self.logger.info(f"✅ SQL composition complete: {len(composed)} total statements")
         
         return composed
     

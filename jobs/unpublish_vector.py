@@ -3,11 +3,14 @@
 # ============================================================================
 # STATUS: Jobs - 3-stage surgical vector removal (PostGIS+metadata+STAC)
 # PURPOSE: Drop tables and cleanup with dry_run safety by default
-# LAST_REVIEWED: 04 JAN 2026
+# LAST_REVIEWED: 13 FEB 2026
 # REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
 # ============================================================================
 """
 UnpublishVectorJob - Surgical removal of vector PostGIS tables and metadata.
+
+Reverses these ETL workflows:
+    - vector_docker_etl: PostGIS table + metadata + STAC item
 
 Primary data source is geo.table_metadata (OGC Features source of truth).
 STAC is optional - deleted if linked in metadata.
@@ -53,6 +56,11 @@ class UnpublishVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
     # ========================================================================
     job_type = "unpublish_vector"
     description = "Remove PostGIS vector table, metadata, and optional STAC item"
+
+    # Declarative ETL linkage - which forward workflows this job reverses
+    reverses = [
+        "vector_docker_etl",
+    ]
 
     # Stage definitions
     stages = [
@@ -197,7 +205,7 @@ class UnpublishVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                     "unpublish_type": "vector",
                     # Pass through inventory data for audit record
                     "original_job_id": inventory_data.get("etl_job_id"),
-                    "original_job_type": inventory_data.get("original_job_type", "process_vector"),
+                    "original_job_type": inventory_data.get("original_job_type", "vector_docker_etl"),
                     "original_parameters": inventory_data.get("original_parameters"),
                     "postgis_table": f"{schema_name}.{table_name}",
                     "table_dropped": table_dropped,

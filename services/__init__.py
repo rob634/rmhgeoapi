@@ -55,24 +55,10 @@ from .stac_catalog import list_raster_files, extract_stac_metadata
 from .stac_vector_catalog import extract_vector_stac_metadata, create_vector_stac
 from .raster_validation import validate_raster
 from .raster_cog import create_cog
-from .handler_create_h3_stac import create_h3_stac
-from .handler_h3_native_streaming import h3_native_streaming_postgis
-from .handler_generate_h3_grid import generate_h3_grid
-from .handler_cascade_h3_descendants import cascade_h3_descendants
-from .handler_finalize_h3_pyramid import finalize_h3_pyramid
-from .vector.process_vector_tasks import process_vector_prepare, process_vector_upload
 from .raster_mosaicjson import create_mosaicjson
 from .stac_collection import create_stac_collection
 from .tiling_scheme import generate_tiling_scheme
 from .tiling_extraction import extract_tiles
-from .fathom_etl import (
-    fathom_tile_inventory,
-    fathom_band_stack,
-    fathom_grid_inventory,
-    fathom_spatial_merge,
-    fathom_stac_register,
-    fathom_stac_rebuild,
-)
 from .geospatial_inventory import (
     classify_geospatial_file,
     aggregate_geospatial_inventory,
@@ -81,12 +67,6 @@ from .container_inventory import (
     list_blobs_with_metadata,
     analyze_blob_basic,
     aggregate_blob_analysis as aggregate_blob_analysis_v2,
-)
-from .fathom_container_inventory import (
-    fathom_generate_scan_prefixes,
-    fathom_scan_prefix,
-    fathom_assign_grid_cells,
-    fathom_inventory_summary,
 )
 
 # Unpublish handlers
@@ -104,16 +84,6 @@ from jobs.curated_update import (
     curated_fetch_data,
     curated_etl_process,
     curated_finalize,
-)
-
-# H3 Aggregation handlers
-from .h3_aggregation import (
-    h3_inventory_cells,
-    h3_raster_zonal_stats,
-    h3_aggregation_finalize,
-    h3_export_validate,
-    h3_export_build,
-    h3_export_register,
 )
 
 # STAC Repair handlers
@@ -135,15 +105,8 @@ from .orphan_blob_handlers import (
     silver_blob_register,
 )
 
-# Docker consolidated handlers (F7.13, F7.18)
+# Docker consolidated handler (F7.13)
 from .handler_process_raster_complete import process_raster_complete
-from .handler_process_large_raster_complete import process_large_raster_complete
-from .handler_h3_pyramid_complete import h3_pyramid_complete
-
-# Docker FATHOM handlers (V0.8 - 3-stage hybrid)
-from .handler_fathom_chunk_inventory import fathom_chunk_inventory
-from .handler_fathom_process_chunk import fathom_process_chunk
-from .handler_fathom_finalize import fathom_finalize
 
 # Docker Vector ETL handler (V0.8 - single stage with checkpoints)
 from .handler_vector_docker_complete import vector_docker_complete
@@ -189,6 +152,8 @@ from .platform_validation import validate_version_lineage, VersionValidationResu
 # 3. Add entry to ALL_HANDLERS dict below
 # ============================================================================
 
+# ARCHIVED (13 FEB 2026): H3 (12), Fathom (11), legacy FunctionApp vector (4) handlers
+# → docs/archive/v08_archive_feb2026/services/
 ALL_HANDLERS = {
     # Hello World (test handlers)
     "hello_world_greeting": handle_greeting,
@@ -202,7 +167,7 @@ ALL_HANDLERS = {
     "inventory_classify_geospatial": classify_geospatial_file,
     "inventory_aggregate_geospatial": aggregate_geospatial_inventory,
 
-    # Raster handlers
+    # Raster handlers (shared by Docker jobs)
     "raster_list_files": list_raster_files,
     "raster_extract_stac_metadata": extract_stac_metadata,
     "raster_validate": validate_raster,
@@ -212,53 +177,16 @@ ALL_HANDLERS = {
     "raster_generate_tiling_scheme": generate_tiling_scheme,
     "raster_extract_tiles": extract_tiles,
 
-    # Docker consolidated handlers (F7.13, F7.18)
+    # Docker consolidated handlers (F7.13)
     "raster_process_complete": process_raster_complete,
-    "raster_process_large_complete": process_large_raster_complete,
     "raster_collection_complete": raster_collection_complete,
 
-    # Vector handlers
-    # Vector handlers (Function App - multi-stage)
+    # Vector STAC handlers (used by Docker vector ETL)
     "vector_extract_stac_metadata": extract_vector_stac_metadata,
     "vector_create_stac": create_vector_stac,
-    "process_vector_prepare": process_vector_prepare,
-    "process_vector_upload": process_vector_upload,
 
     # Vector handlers (Docker - single stage with checkpoints)
     "vector_docker_complete": vector_docker_complete,
-
-    # H3 handlers (Function App)
-    "h3_create_stac": create_h3_stac,
-    "h3_native_streaming_postgis": h3_native_streaming_postgis,
-    "h3_generate_grid": generate_h3_grid,
-    "h3_cascade_descendants": cascade_h3_descendants,
-    "h3_finalize_pyramid": finalize_h3_pyramid,
-    "h3_inventory_cells": h3_inventory_cells,
-    "h3_raster_zonal_stats": h3_raster_zonal_stats,
-    "h3_aggregation_finalize": h3_aggregation_finalize,
-    "h3_export_validate": h3_export_validate,
-    "h3_export_build": h3_export_build,
-    "h3_export_register": h3_export_register,
-
-    # H3 handlers (Docker - single stage)
-    "h3_pyramid_complete": h3_pyramid_complete,
-
-    # Fathom ETL (Docker - 3-stage hybrid, V0.8)
-    "fathom_chunk_inventory": fathom_chunk_inventory,
-    "fathom_process_chunk": fathom_process_chunk,
-    "fathom_finalize": fathom_finalize,
-
-    # Fathom ETL handlers
-    "fathom_tile_inventory": fathom_tile_inventory,
-    "fathom_band_stack": fathom_band_stack,
-    "fathom_grid_inventory": fathom_grid_inventory,
-    "fathom_spatial_merge": fathom_spatial_merge,
-    "fathom_stac_register": fathom_stac_register,
-    "fathom_stac_rebuild": fathom_stac_rebuild,
-    "fathom_generate_scan_prefixes": fathom_generate_scan_prefixes,
-    "fathom_scan_prefix": fathom_scan_prefix,
-    "fathom_assign_grid_cells": fathom_assign_grid_cells,
-    "fathom_inventory_summary": fathom_inventory_summary,
 
     # Unpublish handlers
     "unpublish_inventory_raster": inventory_raster_item,

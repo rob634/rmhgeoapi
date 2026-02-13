@@ -45,6 +45,9 @@ class ProcessRasterDockerJob(JobBaseMixin, JobBase):
     job_type = "process_raster_docker"
     description = "Process raster to COG (Docker - single stage, no timeout)"
 
+    # Declarative ETL linkage - which unpublish job reverses this workflow
+    reversed_by = "unpublish_raster"
+
     # Single stage - handler does everything
     stages = [
         {

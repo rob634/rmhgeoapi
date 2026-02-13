@@ -3,13 +3,18 @@
 # ============================================================================
 # STATUS: Jobs - 3-stage surgical raster removal (STAC+COG+MosaicJSON)
 # PURPOSE: Reverse process_raster workflows with dry_run safety by default
-# LAST_REVIEWED: 04 JAN 2026
+# LAST_REVIEWED: 13 FEB 2026
 # REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
 # ============================================================================
 """
 UnpublishRasterJob - Surgical removal of raster STAC items and associated blobs.
 
-Reverses process_raster_v2, process_large_raster_v2, and stac_catalog_container workflows.
+Reverses these ETL workflows:
+    - process_raster_docker: Single COG + STAC item
+    - process_raster_collection_docker: Multiple COGs + STAC collection
+    - stac_catalog_container: STAC-only catalog (no blobs created by ETL)
+    - ingest_collection: Copied COGs + STAC items (per-item unpublish)
+
 Removes STAC items, COG blobs, MosaicJSON files, and tile COGs.
 
 Three-Stage Workflow:
@@ -38,9 +43,10 @@ class UnpublishRasterJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
     Unpublish raster job using JobBaseMixin pattern.
 
     Removes raster STAC item and associated storage artifacts:
-    - Single COG files (from process_raster_v2)
-    - Tile COGs + MosaicJSON (from process_large_raster_v2)
-    - COG collections (from stac_catalog_container)
+    - Single COG files (from process_raster_docker)
+    - Multiple COGs (from process_raster_collection_docker)
+    - STAC-only catalogs (from stac_catalog_container)
+    - Ingested COGs (from ingest_collection)
 
     Three-Stage Workflow:
     1. Stage 1 (inventory): Query STAC item, extract blob hrefs
@@ -53,6 +59,14 @@ class UnpublishRasterJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
     # ========================================================================
     job_type = "unpublish_raster"
     description = "Remove raster STAC item and associated COG/MosaicJSON blobs"
+
+    # Declarative ETL linkage - which forward workflows this job reverses
+    reverses = [
+        "process_raster_docker",
+        "process_raster_collection_docker",
+        "stac_catalog_container",
+        "ingest_collection",
+    ]
 
     # Stage definitions
     stages = [

@@ -290,8 +290,7 @@ class CoreMachine:
             ContractViolationError: If task_type is not mapped in TaskRoutingDefaults
 
         Used by:
-            - _batch_queue_tasks() - groups tasks by target queue
-            - _individual_queue_tasks() - routes each task
+            - _individual_queue_tasks() - routes each task to appropriate queue
 
         Example:
             queue = self._get_queue_for_task("raster_process_complete")
@@ -352,8 +351,7 @@ class CoreMachine:
             TaskRecord ready for database insertion
 
         Used by:
-            - _individual_queue_tasks() (individual task creation)
-            - _batch_queue_tasks() (batch task creation)
+            - _individual_queue_tasks() (task creation and queueing)
 
         Example:
             queue_name = self._get_queue_for_task(task_def.task_type)
@@ -393,8 +391,7 @@ class CoreMachine:
             TaskQueueMessage ready for Service Bus
 
         Used by:
-            - _individual_queue_tasks() (individual task queueing)
-            - _batch_queue_tasks() (batch task queueing - via to_queue_message())
+            - _individual_queue_tasks() (task queueing via to_queue_message())
 
         Example:
             queue_message = self._task_definition_to_message(task_def)
@@ -1380,17 +1377,6 @@ class CoreMachine:
                 }
             )
 
-            # DEBUGGING: Update error_details to confirm we reached retry logic
-            try:
-                self.state_manager.update_task_status_direct(
-                    task_message.task_id,
-                    TaskStatus.FAILED,
-                    error_details=f"[RETRY LOGIC REACHED] {result.error_details}"
-                )
-                self.logger.info(f"✅ Updated error_details to confirm retry logic execution")
-            except Exception as debug_e:
-                self.logger.error(f"❌ Failed to update error_details for debugging: {debug_e}")
-
             # Get config for retry settings
             from config import get_config
             config = get_config()
@@ -1591,186 +1577,6 @@ class CoreMachine:
     # ========================================================================
     # PRIVATE METHODS - Internal coordination logic
     # ========================================================================
-
-    def _queue_stage_tasks(
-        self,
-        job_id: str,
-        stage_number: int,
-        job_type: str,
-        job_parameters: Dict[str, Any],
-        stage_definition: Any  # Stage model from workflow
-    ) -> Dict[str, Any]:
-        """
-        Create and queue tasks for a stage.
-
-        Determines batch vs individual queuing based on task count.
-        """
-        self.logger.info(f"📦 Creating tasks for stage {stage_number}")
-
-        # Get workflow to create tasks
-        # Get workflow class from explicit registry
-        if job_type not in self.jobs_registry:
-            raise BusinessLogicError(f"Unknown job type: {job_type}. Available: {list(self.jobs_registry.keys())}")
-        workflow = self.jobs_registry[job_type]
-
-        # Get previous stage results if needed
-        previous_results = None
-        if stage_number > 1:
-            try:
-                previous_results = self.state_manager.get_stage_results(
-                    job_id, stage_number - 1
-                )
-            except Exception as e:
-                self.logger.warning(f"⚠️ No previous stage results: {e}")
-
-        # Create task definitions (delegate to workflow)
-        from core.models import TaskDefinition
-        task_defs = []
-
-        for task_type in stage_definition.task_types:
-            # For now, create single task per task_type
-            # TODO: Handle fan-out where Stage 1 determines count
-            task_def = TaskDefinition(
-                task_id=f"{job_id[:8]}-s{stage_number}-{task_type}-{len(task_defs):04d}",
-                job_id=job_id,
-                job_type=job_type,
-                task_type=task_type,
-                stage_number=stage_number,
-                parameters=job_parameters.copy()
-            )
-            task_defs.append(task_def)
-
-        if not task_defs:
-            return {'tasks_created': 0, 'message': 'No tasks to create'}
-
-        self.logger.info(f"📊 Created {len(task_defs)} task definitions")
-
-        # Decide batch vs individual
-        batch_threshold = workflow.get_batch_threshold()
-        task_count = len(task_defs)
-
-        if task_count >= batch_threshold:
-            self.logger.info(f"🚀 Using batch processing for {task_count} tasks")
-            return self._batch_queue_tasks(task_defs, job_id, stage_number)
-        else:
-            self.logger.info(f"📝 Using individual processing for {task_count} tasks")
-            return self._individual_queue_tasks(task_defs, job_id, stage_number)
-
-    def _batch_queue_tasks(
-        self,
-        task_defs: list,
-        job_id: str,
-        stage_number: int
-    ) -> Dict[str, Any]:
-        """
-        Queue tasks in batches to Service Bus, routing by task type.
-
-        Groups tasks by target queue (raster/vector/default) and sends
-        each group to the appropriate queue. This enables multi-app
-        architecture where different Function Apps process different task types.
-
-        Updated: 07 DEC 2025 - Multi-App Architecture
-        """
-        start_time = time.time()
-        total_tasks = len(task_defs)
-        successful_batches = []
-        failed_batches = []
-
-        # Group tasks by target queue (07 DEC 2025 - Multi-App Architecture)
-        # V0.8 Phase 7: Pass task_params for admin override check
-        tasks_by_queue: Dict[str, list] = {}
-        for task_def in task_defs:
-            queue_name = self._get_queue_for_task(task_def.task_type, task_def.parameters)
-            if queue_name not in tasks_by_queue:
-                tasks_by_queue[queue_name] = []
-            tasks_by_queue[queue_name].append(task_def)
-
-        # Log routing summary
-        for queue, tasks in tasks_by_queue.items():
-            self.logger.info(f"📤 Routing {len(tasks)} tasks to queue: {queue}")
-
-        # Process each queue's tasks in batches
-        global_task_idx = 0  # Track global index for task_index field
-        for queue_name, queue_tasks in tasks_by_queue.items():
-            queue_total = len(queue_tasks)
-
-            for i in range(0, queue_total, self.BATCH_SIZE):
-                batch = queue_tasks[i:i + self.BATCH_SIZE]
-                batch_id = f"{job_id[:8]}-s{stage_number}-{queue_name[:6]}-b{i//self.BATCH_SIZE:03d}"
-
-                try:
-                    # Create task records with target_queue tracking
-                    task_records = [
-                        self._task_definition_to_record(
-                            task_def,
-                            global_task_idx + idx,
-                            target_queue=queue_name
-                        )
-                        for idx, task_def in enumerate(batch)
-                    ]
-                    self.repos['task_repo'].batch_create_tasks(task_records)
-
-                    # Send to Service Bus using helper (consistent message format)
-                    messages = [
-                        self._task_definition_to_message(task_def)
-                        for task_def in batch
-                    ]
-                    result = self.service_bus.batch_send_messages(queue_name, messages)
-
-                    if not result.success:
-                        raise RuntimeError(f"Batch send failed: {result.errors}")
-
-                    successful_batches.append({
-                        'batch_id': batch_id,
-                        'size': len(batch),
-                        'queue': queue_name
-                    })
-
-                    # Record TASK_QUEUED events for batch (23 JAN 2026 - Job Event Tracking)
-                    try:
-                        for task_def in batch:
-                            self.event_repo.record_task_event(
-                                job_id=job_id,
-                                task_id=task_def.task_id,
-                                stage=stage_number,
-                                event_type=JobEventType.TASK_QUEUED,
-                                event_status=JobEventStatus.INFO,
-                                event_data={"task_type": task_def.task_type, "queue": queue_name}
-                            )
-                    except Exception as event_err:
-                        self.logger.warning(f"⚠️ Failed to record TASK_QUEUED events for batch: {event_err}")
-
-                    self.logger.debug(f"✅ Batch {batch_id}: {len(batch)} tasks → {queue_name}")
-                    global_task_idx += len(batch)
-
-                except Exception as e:
-                    self.logger.error(f"❌ Batch {batch_id} failed: {e}")
-                    failed_batches.append({
-                        'batch_id': batch_id,
-                        'size': len(batch),
-                        'queue': queue_name,
-                        'error': str(e)
-                    })
-
-        elapsed_ms = (time.time() - start_time) * 1000
-        tasks_queued = sum(b['size'] for b in successful_batches)
-
-        # Build routing summary for return
-        routing_summary = {
-            queue: len(tasks) for queue, tasks in tasks_by_queue.items()
-        }
-
-        return {
-            'status': 'completed' if not failed_batches else 'partial',
-            'total_tasks': total_tasks,
-            'tasks_queued': tasks_queued,
-            'routing': routing_summary,  # NEW: Shows distribution across queues
-            'batches': {
-                'successful': len(successful_batches),
-                'failed': len(failed_batches)
-            },
-            'elapsed_ms': elapsed_ms
-        }
 
     def _individual_queue_tasks(
         self,

@@ -62,6 +62,9 @@ class VectorDockerETLJob(JobBaseMixin, JobBase):
     job_type: str = "vector_docker_etl"
     description: str = "Docker vector ETL with connection pooling and checkpoints"
 
+    # Declarative ETL linkage - which unpublish job reverses this workflow
+    reversed_by = "unpublish_vector"
+
     # Single stage - all work in one handler with checkpoints
     stages: List[Dict[str, Any]] = [
         {
@@ -214,11 +217,7 @@ class VectorDockerETLJob(JobBaseMixin, JobBase):
             'default': None,
             'description': 'Pre-generated STAC item ID'
         },
-        'title': {
-            'type': 'str',
-            'default': None,
-            'description': 'Human-readable title for STAC item metadata'
-        },
+        # NOTE: 'title' defined in Metadata section above (line 170)
         'tags': {
             'type': 'list',
             'default': None,
@@ -383,7 +382,7 @@ class VectorDockerETLJob(JobBaseMixin, JobBase):
                 'resource_id': job_params.get('resource_id'),
                 'version_id': job_params.get('version_id'),
                 'stac_item_id': job_params.get('stac_item_id'),
-                'title': job_params.get('title'),
+                # NOTE: 'title' already set in Metadata section above
                 'tags': job_params.get('tags'),
                 'access_level': job_params.get('access_level'),
 

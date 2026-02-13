@@ -2,7 +2,7 @@
 
 > **Navigation**: [Quick Start](../getting-started/QUICK_START.md) | **Platform API** | [Errors](ERRORS.md) | [Glossary](../getting-started/GLOSSARY.md)
 
-**Last Updated**: 01 FEB 2026
+**Last Updated**: 12 FEB 2026
 **Purpose**: B2B integration API for geospatial data processing
 **Audience**: DDH developers, external application integrators
 **API Version**: 1.5.0 (V0.8.6.2 - Version Lineage + dry_run)
@@ -958,6 +958,7 @@ GET /api/platforms/{platform_id}
         "output_tier": "analysis",
         "crs": "EPSG:4326",
         "raster_type": "auto",
+        "default_ramp": null,
         "overwrite": false
     }
 }
@@ -967,8 +968,53 @@ GET /api/platforms/{platform_id}
 |--------|--------|---------|-------------|
 | `output_tier` | `analysis`, `visualization`, `archive` | `analysis` | COG compression profile |
 | `crs` | EPSG code | `EPSG:4326` | Target coordinate system |
-| `raster_type` | `auto`, `rgb`, `dem`, `categorical` | `auto` | Raster type hint |
+| `raster_type` | See table below | `auto` | Raster type hint (physical or domain type) |
+| `default_ramp` | See ColorRamp table below | `null` | Override default colormap for visualization |
 | `overwrite` | boolean | `false` | Replace existing data |
+
+#### Raster Types (V0.8.17.2)
+
+Raster types are organized into **physical types** (auto-detectable from raster data) and **domain types** (user-specified to refine auto-detection).
+
+**Physical Types** (auto-detectable):
+
+| Value | Description | Auto-Detection |
+|-------|-------------|----------------|
+| `auto` | Let the system detect type | Default — runs all heuristics |
+| `rgb` | 3-band RGB imagery | 3 bands + uint8/16 |
+| `rgba` | 4-band RGBA imagery | 4 bands + alpha channel |
+| `dem` | Digital Elevation Model | Single-band float, smooth gradients |
+| `categorical` | Classified/discrete raster | Single-band, <256 unique integer values |
+| `multispectral` | 5+ band satellite imagery | 5+ bands |
+| `nir` | Near-infrared composite | 4 bands without alpha |
+| `continuous` | Generic single-band continuous | Single-band numeric (catch-all) |
+| `vegetation_index` | NDVI, EVI, etc. | Single-band float in [-1, 1] range |
+
+**Domain Types** (user-specified — refine physical detection):
+
+| Value | Description | Default Colormap |
+|-------|-------------|-----------------|
+| `flood_depth` | Flood depth/extent models | `blues` |
+| `flood_probability` | Flood probability surfaces | `blues` |
+| `hydrology` | Flow accumulation, drainage, watershed | `ylgnbu` |
+| `temporal` | Time-indexed data (deforestation year, etc.) | `spectral` |
+| `population` | Population density/count grids | `inferno` |
+
+Domain types are validated using **hierarchical compatibility**: a user-specified domain type is accepted if the physical auto-detection returns a compatible base type (e.g., `flood_depth` is compatible with `dem` or `continuous`). Genuine mismatches (e.g., specifying `dem` for a 3-band RGB) still fail.
+
+#### ColorRamp Values (V0.8.17.2)
+
+The `default_ramp` parameter overrides the type-based default colormap. All values are valid TiTiler `colormap_name` parameters.
+
+| Category | Values |
+|----------|--------|
+| **Sequential** | `viridis`, `plasma`, `inferno`, `magma`, `cividis` |
+| **Terrain** | `terrain`, `gist_earth` |
+| **Water** | `blues`, `pubu`, `ylgnbu` |
+| **Heat** | `coolwarm`, `rdylbu`, `reds`, `oranges`, `ylorrd` |
+| **Vegetation** | `rdylgn`, `piyg`, `brbg`, `prgn` |
+| **Classification** | `spectral`, `greys`, `greens`, `purples` |
+| **Specialized** | `seismic`, `bwr`, `gnbu`, `orrd`, `ylorbr` |
 
 ### Vector Options
 

@@ -4,7 +4,7 @@
 
 **Purpose:** Documentation for the unified Service Layer that serves finished geospatial products.
 
-**Last Updated:** 01 FEB 2026
+**Last Updated:** 12 FEB 2026
 
 ---
 
@@ -343,7 +343,80 @@ curl "/xarray/point/-77.0,38.9\
 
 ---
 
-## 6. Deployment Architecture
+## 6. Raster Render Pipeline (V0.8.17.2)
+
+### Overview
+
+The raster processing pipeline generates **server-side render configurations** that control how COGs are visualized through TiTiler. Render configs are persisted to PostgreSQL as the source of truth, and STAC item properties are derived from them.
+
+### Source of Truth Pattern
+
+```
+Processing Handler (Phase 3)
+├── Phase 3a: app.cog_metadata       ← COG physical properties (dtype, bands, CRS)
+├── Phase 3b: app.raster_render_configs  ← Visualization params (colormap, rescale)
+│
+Processing Handler (Phase 4)
+└── Phase 4: pgstac.items            ← STAC properties DERIVED from Phase 3
+    • app:colormap ← render_spec.colormap_name
+    • app:rescale  ← render_spec.rescale
+    • renders      ← STAC Renders Extension from render config
+```
+
+### Render Config Generation
+
+Default render configs are automatically generated based on:
+
+1. **Raster type** (auto-detected or user-specified)
+2. **User colormap override** (`default_ramp` parameter)
+3. **Band count and dtype**
+
+| Raster Type | Default Colormap | COG Compression |
+|-------------|-----------------|-----------------|
+| `rgb` / `rgba` / `nir` | _(no colormap, RGB bands)_ | JPEG/WebP |
+| `dem` | `terrain` | LERC+Deflate |
+| `vegetation_index` | `rdylgn` | Deflate |
+| `flood_depth` / `flood_probability` | `blues` | LERC+Deflate |
+| `hydrology` | `ylgnbu` | LERC+Deflate |
+| `temporal` | `spectral` | Deflate (nearest resampling) |
+| `population` | `inferno` | Deflate |
+| `categorical` | `viridis` | Deflate (nearest resampling) |
+| `continuous` | `viridis` | Deflate |
+
+All defaults can be overridden by the user-submitted `default_ramp` parameter at job submission time.
+
+### TiTiler Integration
+
+Render configs convert to TiTiler query parameters via `to_titiler_params()`:
+
+```python
+# Stored in app.raster_render_configs
+render_spec = {
+    "colormap_name": "blues",
+    "rescale": [[0, 5]],
+    "nodata": -9999
+}
+
+# Becomes TiTiler query params
+# /cog/tiles/{z}/{x}/{y}.png?url=...&colormap_name=blues&rescale=0,5&nodata=-9999
+```
+
+### Hierarchical Type Validation
+
+Domain types (e.g., `flood_depth`) refine physical detections (e.g., `dem`) using compatibility groups. This prevents false mismatch errors when users specify meaningful domain types for their data:
+
+```
+User specifies: raster_type=flood_depth
+Auto-detects:   dem (single-band float, smooth gradients)
+Result:         ✅ Accepted (flood_depth is compatible with dem)
+                Uses flood_depth colormap (blues) instead of dem (terrain)
+```
+
+Genuine mismatches still fail (e.g., specifying `dem` for 3-band RGB data).
+
+---
+
+## 7. Deployment Architecture
 
 ### Current Production Setup
 
@@ -411,7 +484,7 @@ The Service Layer does **NOT** access:
 
 ---
 
-## 7. Zarr Dataset Integration
+## 8. Zarr Dataset Integration
 
 ### Preparing Zarr for TiTiler
 
@@ -441,7 +514,7 @@ See `docs_claude/ZARR_TITILER_LESSONS.md` for detailed troubleshooting.
 
 ---
 
-## 8. API Quick Reference
+## 9. API Quick Reference
 
 ### STAC API (stac-fastapi)
 ```bash
@@ -488,7 +561,7 @@ GET  /xarray/tiles/WebMercatorQuad/{z}/{x}/{y}@1x.png
 
 ---
 
-## 9. Observability
+## 10. Observability
 
 ### Health Endpoints
 
@@ -533,4 +606,4 @@ All logs are sent to the container's stdout and captured by Azure App Service lo
 ---
 
 **Author:** Platform Team
-**Last Updated:** 01 FEB 2026
+**Last Updated:** 12 FEB 2026

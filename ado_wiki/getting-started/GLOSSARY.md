@@ -2,7 +2,7 @@
 
 > **Navigation**: [Quick Start](QUICK_START.md) | [Platform API](../api-reference/PLATFORM_API.md) | [Health](../api-reference/HEALTH.md) | [Errors](../api-reference/ERRORS.md) | **Glossary**
 
-**Last Updated**: 01 FEB 2026
+**Last Updated**: 12 FEB 2026
 **Status**: Reference Documentation
 **Purpose**: Clear definitions of technical terms for all team members
 **Audience**: Development team (all disciplines, including ESL speakers)
@@ -95,6 +95,18 @@ Groups all versions of the same dataset/resource together. Computed as `SHA256(p
 
 ### Idempotency
 The property where submitting the same request multiple times produces the same result. In this system, job IDs are SHA256 hashes of parameters, so identical submissions return the existing job.
+
+### Raster Render Config
+A server-side visualization configuration stored in `app.raster_render_configs`. Contains TiTiler parameters (colormap, rescale, band indexes) that control how COGs are displayed. Persisted as source of truth in Phase 3 of raster processing, before STAC metadata is generated in Phase 4.
+
+### RasterType
+An enumeration of raster data types used for validation and visualization. Divided into **physical types** (auto-detectable from raster data: `rgb`, `rgba`, `dem`, `categorical`, `multispectral`, `nir`, `continuous`, `vegetation_index`) and **domain types** (user-specified to refine detection: `flood_depth`, `flood_probability`, `hydrology`, `temporal`, `population`).
+
+### ColorRamp
+An enumeration of 28 curated TiTiler/matplotlib colormaps that users can submit via the `default_ramp` parameter to override the type-based default colormap. Organized by category: sequential (`viridis`, `plasma`), terrain (`terrain`, `gist_earth`), water (`blues`, `ylgnbu`), vegetation (`rdylgn`), and others.
+
+### Hierarchical Type Validation
+A validation strategy where user-specified domain types (e.g., `flood_depth`) are accepted if the auto-detected physical type (e.g., `dem`, `continuous`) is in a compatible group. This replaces strict mismatch validation, allowing users to specify meaningful domain types without false errors.
 
 ---
 
@@ -320,4 +332,4 @@ The following pattern names are used consistently throughout all documentation:
 
 ---
 
-**Last Updated**: 01 FEB 2026
+**Last Updated**: 12 FEB 2026

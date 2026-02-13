@@ -2,7 +2,7 @@
 
 > **Navigation**: [Quick Start](../getting-started/QUICK_START.md) | [Platform API](../api-reference/PLATFORM_API.md) | [Errors](../api-reference/ERRORS.md) | [Glossary](../getting-started/GLOSSARY.md)
 
-**Last Updated**: 01 FEB 2026
+**Last Updated**: 12 FEB 2026
 **Status**: Reference Documentation
 **Purpose**: Developer guide for configuring PostgreSQL/PostGIS in the geospatial ETL pipeline
 **Audience**: Developers and DevOps setting up or maintaining database infrastructure
@@ -78,7 +78,7 @@ PostgreSQL Database
 Server Name: _______________________________
 Resource Group: _______________________________
 Region: _______________________________
-PostgreSQL Version: 16
+PostgreSQL Version: 16+ (current: 17)
 Compute Tier: _______________________________ (Burstable B1ms minimum)
 Storage: _______________________________ GB
 Backup Retention: 7 days (default)
@@ -106,12 +106,13 @@ Max Connections: Depends on tier (B1ms: 50, GP: 100+)
 
 **⚠️ IMPORTANT**: Extensions must be created by `azure_pg_admin` role (requires Azure Portal allowlist + SQL installation).
 
-| Extension | Version | Purpose | Required For |
-|-----------|---------|---------|--------------|
-| **postgis** | 3.4+ | Spatial data types and functions | All geospatial operations |
-| **btree_gist** | - | GiST indexes with B-tree behavior | pypgstac (exclusion constraints) |
-| **unaccent** | - | Accent-insensitive text search | pypgstac (search functionality) |
-| uuid-ossp | - | UUID generation | App schema |
+| Extension | Purpose | Required For |
+|-----------|---------|--------------|
+| **postgis** | Spatial data types and functions | All geospatial operations |
+| **postgis_raster** | Raster data support | Raster operations |
+| **btree_gist** | GiST indexes with B-tree behavior | pypgstac (exclusion constraints) |
+| **btree_gin** | GIN indexes with B-tree behavior | pypgstac (composite indexing) |
+| **uuid-ossp** | UUID generation | App schema |
 
 **Installation Process** (two steps required):
 
@@ -119,8 +120,9 @@ Max Connections: Depends on tier (B1ms: 50, GP: 100+)
 2. **SQL**: Run as `azure_pg_admin` member:
    ```sql
    CREATE EXTENSION IF NOT EXISTS postgis;
+   CREATE EXTENSION IF NOT EXISTS postgis_raster;
    CREATE EXTENSION IF NOT EXISTS btree_gist;
-   CREATE EXTENSION IF NOT EXISTS unaccent;
+   CREATE EXTENSION IF NOT EXISTS btree_gin;
    CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
    ```
 
@@ -210,17 +212,25 @@ GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO "<admin_identity>";
 
 **Note**: The admin identity creates schemas itself via `CREATE SCHEMA IF NOT EXISTS`, so it automatically owns them.
 
-#### 5. Grant Reader Identity Permissions
+#### 5. Grant Reader Identity Default Privileges
 
-Run AFTER admin identity has created schemas:
+Configure default privileges **before** the admin creates schemas/tables. This ensures that when the admin identity creates objects, the reader automatically gets SELECT access.
+
+```sql
+-- Auto-grant SELECT on all future tables/sequences created by admin
+ALTER DEFAULT PRIVILEGES FOR ROLE "<admin_identity>"
+    GRANT SELECT ON TABLES TO "<reader_identity>";
+ALTER DEFAULT PRIVILEGES FOR ROLE "<admin_identity>"
+    GRANT SELECT ON SEQUENCES TO "<reader_identity>";
+ALTER DEFAULT PRIVILEGES FOR ROLE "<admin_identity>"
+    GRANT USAGE ON SCHEMAS TO "<reader_identity>";
+```
+
+After schemas exist, also grant access to existing objects:
 
 ```sql
 GRANT USAGE ON SCHEMA <schema_name> TO "<reader_identity>";
 GRANT SELECT ON ALL TABLES IN SCHEMA <schema_name> TO "<reader_identity>";
-
--- For future tables created by admin
-ALTER DEFAULT PRIVILEGES FOR ROLE "<admin_identity>" IN SCHEMA <schema_name>
-    GRANT SELECT ON TABLES TO "<reader_identity>";
 ```
 
 See [DATABASE_IDENTITY_RUNBOOK.md](DATABASE_IDENTITY_RUNBOOK.md) for complete setup instructions.
@@ -239,7 +249,7 @@ az functionapp identity assign \
     --identities "$IDENTITY_ID"
 ```
 
-#### 6. Configure Application Settings
+#### 7. Configure Application Settings
 
 ```bash
 az functionapp config appsettings set \
@@ -247,8 +257,8 @@ az functionapp config appsettings set \
     --resource-group <YOUR_RG> \
     --settings \
         "USE_MANAGED_IDENTITY=true" \
-        "AZURE_CLIENT_ID=<CLIENT_ID_OF_IDENTITY>" \
-        "POSTGIS_USER=<IDENTITY_NAME>"
+        "DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID=<CLIENT_ID_OF_IDENTITY>" \
+        "DB_ADMIN_MANAGED_IDENTITY_NAME=<IDENTITY_NAME>"
 ```
 
 ### Application Code Pattern
@@ -292,7 +302,7 @@ az postgres flexible-server create \
   --sku-name Standard_B1ms \
   --tier Burstable \
   --storage-size 32 \
-  --version 16 \
+  --version 17 \
   --yes
 ```
 
@@ -318,24 +328,45 @@ az postgres flexible-server firewall-rule create \
 
 ### Step 3: Enable Required Extensions
 
-Connect to the database and enable extensions:
+Connect to the database as `azure_pg_admin` and enable extensions:
 
 ```sql
--- Connect as admin user
 CREATE EXTENSION IF NOT EXISTS postgis;
+CREATE EXTENSION IF NOT EXISTS postgis_raster;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-
--- pgstac requires separate installation (see pgSTAC documentation)
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+CREATE EXTENSION IF NOT EXISTS btree_gin;
 ```
+
+**Note**: `pgstac` is not a PostgreSQL extension — it is deployed via `pypgstac migrate` at schema creation time.
 
 ### Step 4: Configure Function App Connection
 
+The application uses managed identity authentication — no connection strings or passwords are stored. Configure the required environment variables:
+
 ```bash
-# Set connection string in Function App
 az functionapp config appsettings set \
   --resource-group <YOUR_RG> \
   --name <YOUR_FUNCTION_APP> \
-  --settings DATABASE_CONNECTION_STRING="postgresql://<USER>:<PASSWORD>@<SERVER>.postgres.database.azure.com:5432/<DATABASE>?sslmode=require"
+  --settings \
+    "POSTGIS_HOST=<SERVER>.postgres.database.azure.com" \
+    "POSTGIS_DATABASE=<DATABASE>" \
+    "POSTGIS_SCHEMA=geo" \
+    "APP_SCHEMA=app" \
+    "PGSTAC_SCHEMA=pgstac" \
+    "H3_SCHEMA=h3" \
+    "USE_MANAGED_IDENTITY=true" \
+    "DB_ADMIN_MANAGED_IDENTITY_NAME=<ADMIN_IDENTITY_NAME>" \
+    "DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID=<ADMIN_CLIENT_ID>"
+```
+
+For read-only services (OGC API, TiTiler), also set:
+```bash
+az functionapp config appsettings set \
+  --resource-group <YOUR_RG> \
+  --name <YOUR_FUNCTION_APP> \
+  --settings \
+    "DB_READER_MANAGED_IDENTITY_NAME=<READER_IDENTITY_NAME>"
 ```
 
 ### Step 5: Deploy Schema
@@ -379,19 +410,33 @@ curl "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/dbadmin/stats"
 
 ### app.jobs Table
 
-Stores job records for the CoreMachine orchestration engine.
+Stores job records for the CoreMachine orchestration engine. DDL is generated from the `JobRecord` Pydantic model (`core/models/job.py`) via `PydanticToSQL`.
 
 ```sql
 CREATE TABLE app.jobs (
+    -- Identity
     job_id VARCHAR(64) PRIMARY KEY,
     job_type VARCHAR(100) NOT NULL,
+    parameters JSONB NOT NULL DEFAULT '{}',
+
+    -- Status tracking
     status VARCHAR(50) NOT NULL DEFAULT 'queued',
     stage INTEGER NOT NULL DEFAULT 1,
     total_stages INTEGER NOT NULL DEFAULT 1,
-    parameters JSONB NOT NULL DEFAULT '{}',
+
+    -- V0.8 Release Control: Asset & Platform linkage (30 JAN 2026)
+    asset_id VARCHAR(64),                -- FK to geospatial_assets
+    platform_id VARCHAR(50),             -- FK to platforms (B2B source)
+    request_id VARCHAR(64),              -- B2B request ID for callback routing
+    etl_version VARCHAR(20),             -- Version of ETL app that executed this job
+
+    -- Data fields
     stage_results JSONB NOT NULL DEFAULT '{}',
-    result_data JSONB,
     metadata JSONB NOT NULL DEFAULT '{}',
+    result_data JSONB,
+    error_details TEXT,
+
+    -- Timestamps
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -406,35 +451,58 @@ CREATE INDEX idx_jobs_created_at ON app.jobs(created_at DESC);
 
 ### app.tasks Table
 
-Stores task records for individual work units.
+Stores task records for individual work units. DDL is generated from the `TaskRecord` Pydantic model (`core/models/task.py`) via `PydanticToSQL`.
 
 ```sql
 CREATE TABLE app.tasks (
+    -- Identity
     task_id VARCHAR(128) PRIMARY KEY,
-    job_id VARCHAR(64) NOT NULL REFERENCES app.jobs(job_id),
+    parent_job_id VARCHAR(64) NOT NULL REFERENCES app.jobs(job_id),
+    job_type VARCHAR(100) NOT NULL,
     task_type VARCHAR(100) NOT NULL,
-    status VARCHAR(50) NOT NULL DEFAULT 'pending',
     stage INTEGER NOT NULL,
+    task_index INTEGER NOT NULL DEFAULT 0,
     parameters JSONB NOT NULL DEFAULT '{}',
-    result_data JSONB,
-    error_message TEXT,
+
+    -- Status tracking
+    status VARCHAR(50) NOT NULL DEFAULT 'pending',
     retry_count INTEGER NOT NULL DEFAULT 0,
-    heartbeat TIMESTAMP WITH TIME ZONE,
+    last_pulse TIMESTAMP WITH TIME ZONE,         -- Docker long-running task heartbeat
+    next_stage_params JSONB,                      -- Parameters for next stage
+
+    -- Checkpoint tracking (11 JAN 2026 - Docker worker resume support)
+    checkpoint_phase INTEGER,
+    checkpoint_data JSONB,
+    checkpoint_updated_at TIMESTAMP WITH TIME ZONE,
+
+    -- Multi-app tracking (07 DEC 2025 - Multi-Function App Architecture)
+    target_queue VARCHAR(100),                    -- Service Bus queue routed to
+    executed_by_app VARCHAR(100),                 -- APP_NAME of processing Function App
+    execution_started_at TIMESTAMP WITH TIME ZONE,
+
+    -- Data fields
+    result_data JSONB,
+    metadata JSONB NOT NULL DEFAULT '{}',
+    error_details TEXT,
+
+    -- Timestamps
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Indexes
-CREATE INDEX idx_tasks_job_id ON app.tasks(job_id);
+CREATE INDEX idx_tasks_job_id ON app.tasks(parent_job_id);
 CREATE INDEX idx_tasks_status ON app.tasks(status);
-CREATE INDEX idx_tasks_stage ON app.tasks(job_id, stage);
+CREATE INDEX idx_tasks_stage ON app.tasks(parent_job_id, stage);
 ```
 
 **Status values**: pending, processing, completed, failed
 
+**Note**: The Pydantic models in `core/models/` are the source of truth for DDL. The SQL above is a reference snapshot — actual DDL is generated by `PydanticToSQL` at schema creation time.
+
 ### geo Schema
 
-Contains user vector data tables created by `ingest_vector` jobs. Each table includes:
+Contains user vector data tables created by `process_vector` jobs. Each table includes:
 
 - Geometry column (PostGIS GEOMETRY type)
 - GIST spatial index
@@ -452,21 +520,44 @@ Managed by the pgSTAC extension. Contains:
 
 ## Connection Configuration
 
-### Connection String Format
+### Authentication: Managed Identity (UMI)
+
+The application uses Azure Managed Identity for database authentication. No passwords or connection strings are stored. Tokens are acquired at runtime from Azure AD and used as the PostgreSQL password.
 
 ```
-postgresql://<username>:<password>@<server>.postgres.database.azure.com:5432/<database>?sslmode=require
+Token flow:  Function App → Azure AD → short-lived token (~1 hour) → PostgreSQL
 ```
 
 ### Environment Variables
 
-| Variable | Description |
-|----------|-------------|
-| `DATABASE_CONNECTION_STRING` | Full connection string |
-| `PGHOST` | Server hostname (alternative) |
-| `PGUSER` | Username (alternative) |
-| `PGPASSWORD` | Password (alternative) |
-| `PGDATABASE` | Database name (alternative) |
+**Required:**
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `POSTGIS_HOST` | PostgreSQL server hostname | `rmhpostgres.postgres.database.azure.com` |
+| `POSTGIS_DATABASE` | Database name | `geoapp` |
+| `POSTGIS_SCHEMA` | Geo/vector schema name | `geo` |
+| `APP_SCHEMA` | Application schema name | `app` |
+| `PGSTAC_SCHEMA` | pgSTAC schema name | `pgstac` |
+| `H3_SCHEMA` | H3 hexagonal schema name | `h3` |
+
+**Managed Identity:**
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `USE_MANAGED_IDENTITY` | Enable UMI auth | `true` |
+| `DB_ADMIN_MANAGED_IDENTITY_NAME` | Admin UMI display name (PostgreSQL username) | — |
+| `DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID` | Admin UMI client ID (for token acquisition) | — |
+| `DB_READER_MANAGED_IDENTITY_NAME` | Reader UMI display name | — |
+
+**Optional:**
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `POSTGIS_PORT` | PostgreSQL port | `5432` |
+| `DB_CONNECTION_TIMEOUT` | Connection timeout (seconds) | `30` |
+| `POSTGIS_USER` | Username (local dev / password auth only) | — |
+| `POSTGIS_PASSWORD` | Password (local dev only — not used in production) | — |
 
 ### Connection Pooling
 
@@ -595,7 +686,7 @@ curl "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/dbadmin/geo/metadata?lim
       "source_format": "geojson",
       "etl_job_id": "abc123...",
       "stac_item_id": "postgis-geo-world_countries",
-      "stac_collection_id": "system-vectors",
+      "stac_collection_id": "vectors",
       "bbox": [-180, -90, 180, 90],
       "created_at": "2025-12-09T10:00:00Z"
     }
@@ -739,33 +830,110 @@ When pgSTAC has issues (e.g., missing partition tables after schema rebuild), th
 
 ---
 
-### External Database Initialization (21 JAN 2026)
+### External Database Initialization (Updated 12 FEB 2026)
 
 Initialize external/partner databases with `geo` and `pgstac` schemas. This is a **setup operation** run by DevOps using a temporary admin identity - the production app does NOT have write access to external databases.
 
-#### Prerequisites (DBA must complete first)
+> **Route Note**: These endpoints use `/api/dbadmin/external/*` (not `/api/admin/`). Azure App Service reserves the `/admin` path prefix — any routes under `/api/admin/*` return 404.
 
-1. External PostgreSQL server exists and is accessible
-2. PostGIS extension enabled (requires Azure service request)
-3. Admin UMI user created in target database
-4. Admin UMI has `CREATE` privilege on database
-5. pgstac roles created: `pgstac_admin`, `pgstac_ingest`, `pgstac_read`
-6. Admin UMI granted pgstac roles `WITH ADMIN OPTION`
+#### Complete Call Sequence
 
-#### Check Prerequisites
+```
+Step 0: DBA Setup (az cli + psql)          ← One-time per database
+Step 1: GET  /api/dbadmin/external/prereqs  ← Verify DBA setup is complete
+Step 2: POST /api/dbadmin/external/initialize (dry_run: true)   ← Validate
+Step 3: POST /api/dbadmin/external/initialize (dry_run: false)  ← Execute
+```
 
-Verify all prerequisites are met before attempting initialization:
+---
+
+#### Step 0: DBA Setup (One-Time Per Database)
+
+Create the database, extensions, roles, and admin UMI user. This must be done by a DBA with `azure_pg_admin` privileges.
+
+**0a. Create database:**
+```bash
+az postgres flexible-server db create \
+  --resource-group <RESOURCE_GROUP> \
+  --server-name <SERVER_NAME> \
+  --database-name <DATABASE_NAME>
+```
+
+**0b. Enable extensions** (connect as superuser):
+```sql
+CREATE EXTENSION IF NOT EXISTS postgis;
+CREATE EXTENSION IF NOT EXISTS postgis_raster;
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+CREATE EXTENSION IF NOT EXISTS btree_gin;
+```
+
+**0c. Create pgSTAC roles:**
+```sql
+DO $$ BEGIN CREATE ROLE pgstac_admin; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE ROLE pgstac_ingest; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE ROLE pgstac_read; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+```
+
+**0d. Create admin UMI user with roles:**
+```sql
+-- Create AAD principal (run on postgres database, then switch back)
+SELECT * FROM pgaadauth_create_principal('<ADMIN_UMI_NAME>', false, false);
+
+-- Grant pgstac roles WITH ADMIN OPTION (required for pypgstac migrate)
+GRANT pgstac_admin TO <ADMIN_UMI_NAME> WITH ADMIN OPTION;
+GRANT pgstac_ingest TO <ADMIN_UMI_NAME>;
+GRANT pgstac_read TO <ADMIN_UMI_NAME>;
+
+-- Allow schema creation
+GRANT CREATE ON DATABASE <DATABASE_NAME> TO <ADMIN_UMI_NAME>;
+```
+
+**0e. Create reader UMI with default privileges:**
+
+Set up the reader identity and configure default privileges **before** the initializer runs. This ensures that when the initializer creates tables in `geo` and `pgstac`, the reader automatically gets SELECT access.
+
+```sql
+-- Create reader AAD principal (run on postgres database, then switch back)
+SELECT * FROM pgaadauth_create_principal('<READER_UMI_NAME>', false, false);
+
+-- Auto-grant SELECT on all future tables/sequences created by admin
+ALTER DEFAULT PRIVILEGES FOR ROLE <ADMIN_UMI_NAME>
+    GRANT SELECT ON TABLES TO <READER_UMI_NAME>;
+ALTER DEFAULT PRIVILEGES FOR ROLE <ADMIN_UMI_NAME>
+    GRANT SELECT ON SEQUENCES TO <READER_UMI_NAME>;
+ALTER DEFAULT PRIVILEGES FOR ROLE <ADMIN_UMI_NAME>
+    GRANT USAGE ON SCHEMAS TO <READER_UMI_NAME>;
+```
+
+---
+
+#### Step 1: Check Prerequisites
+
+Verify all DBA setup is complete before attempting initialization. The endpoint checks 7 prerequisites and returns exact SQL to fix anything missing.
 
 ```bash
-curl "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/admin/external/prereqs?\
-target_host=external-db.postgres.database.azure.com&\
-target_database=geodb&\
-admin_umi_client_id=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+curl -G "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/dbadmin/external/prereqs" \
+  --data-urlencode "target_host=<HOST>.postgres.database.azure.com" \
+  --data-urlencode "target_database=<DATABASE_NAME>" \
+  --data-urlencode "admin_umi_client_id=<CLIENT_ID>" \
+  --data-urlencode "admin_umi_name=<ADMIN_UMI_NAME>"
 ```
+
+**Query Parameters**:
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `target_host` | Yes | External database hostname |
+| `target_database` | Yes | External database name |
+| `admin_umi_client_id` | Yes | Client ID of admin UMI |
+| `admin_umi_name` | Yes | Display name of admin UMI (PostgreSQL username) |
 
 **Response (Ready)**:
 ```json
 {
+  "checked_at": "2026-02-12T03:43:32.622854",
+  "target_host": "rmhpostgres.postgres.database.azure.com",
+  "target_database": "d360geo",
   "ready": true,
   "checks": {
     "admin_token": true,
@@ -781,7 +949,7 @@ admin_umi_client_id=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 }
 ```
 
-**Response (Not Ready)**:
+**Response (Not Ready)** — includes DBA remediation SQL:
 ```json
 {
   "ready": false,
@@ -809,52 +977,30 @@ admin_umi_client_id=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 }
 ```
 
-#### Initialize External Database
+---
 
-Run a dry-run first to validate, then execute:
+#### Step 2: Dry Run
+
+Validate what will be created without touching the database:
 
 ```bash
-# Dry run (validate without executing)
-curl -X POST "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/admin/external/initialize" \
+curl -X POST "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/dbadmin/external/initialize" \
   -H "Content-Type: application/json" \
   -d '{
-    "target_host": "external-db.postgres.database.azure.com",
-    "target_database": "geodb",
-    "admin_umi_client_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-    "admin_umi_name": "external-db-admin-umi",
+    "target_host": "<HOST>.postgres.database.azure.com",
+    "target_database": "<DATABASE_NAME>",
+    "admin_umi_client_id": "<CLIENT_ID>",
+    "admin_umi_name": "<ADMIN_UMI_NAME>",
     "dry_run": true
-  }'
-
-# Actual execution
-curl -X POST "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/admin/external/initialize" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "target_host": "external-db.postgres.database.azure.com",
-    "target_database": "geodb",
-    "admin_umi_client_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-    "admin_umi_name": "external-db-admin-umi",
-    "dry_run": false
   }'
 ```
 
-**Parameters**:
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `target_host` | Yes | External database hostname |
-| `target_database` | Yes | External database name |
-| `admin_umi_client_id` | Yes | Client ID of temporary admin UMI |
-| `admin_umi_name` | No | Display name of admin UMI (for PostgreSQL username) |
-| `dry_run` | No | If true, validate without executing (default: false) |
-| `schemas` | No | List of schemas to create: `["geo", "pgstac"]` (default: both) |
-
-**Response (Success)**:
+**Response (Dry Run)**:
 ```json
 {
-  "target_host": "external-db.postgres.database.azure.com",
-  "target_database": "geodb",
-  "admin_umi_client_id": "xxxxxxxx...",
-  "timestamp": "2026-01-21T22:00:00Z",
-  "dry_run": false,
+  "target_host": "rmhpostgres.postgres.database.azure.com",
+  "target_database": "d360geo",
+  "dry_run": true,
   "success": true,
   "steps": [
     {
@@ -864,31 +1010,128 @@ curl -X POST "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/admin/external/i
     },
     {
       "name": "initialize_geo_schema",
+      "status": "dry_run",
+      "message": "Would execute 11 statements",
+      "sql_count": 11
+    },
+    {
+      "name": "initialize_pgstac_schema",
+      "status": "dry_run",
+      "message": "Would run: pypgstac migrate",
+      "sql_count": 1
+    }
+  ],
+  "summary": {
+    "total_steps": 3,
+    "successful": 1,
+    "failed": 0,
+    "dry_run": 2
+  }
+}
+```
+
+---
+
+#### Step 3: Execute
+
+Run the actual initialization:
+
+```bash
+curl -X POST "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/dbadmin/external/initialize" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "target_host": "<HOST>.postgres.database.azure.com",
+    "target_database": "<DATABASE_NAME>",
+    "admin_umi_client_id": "<CLIENT_ID>",
+    "admin_umi_name": "<ADMIN_UMI_NAME>",
+    "dry_run": false
+  }'
+```
+
+**Request Parameters**:
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `target_host` | Yes | External database hostname |
+| `target_database` | Yes | External database name |
+| `admin_umi_client_id` | Yes | Client ID of admin UMI |
+| `admin_umi_name` | Yes | Display name of admin UMI (PostgreSQL username) |
+| `dry_run` | No | If true, validate without executing (default: false) |
+| `schemas` | No | List of schemas to create: `["geo", "pgstac"]` (default: both) |
+
+**Response (Success)**:
+```json
+{
+  "target_host": "rmhpostgres.postgres.database.azure.com",
+  "target_database": "d360geo",
+  "dry_run": false,
+  "success": true,
+  "steps": [
+    {
+      "name": "check_prerequisites",
       "status": "success",
-      "message": "Geo schema 'geo' initialized (8 statements)",
-      "sql_count": 8
+      "message": "All prerequisites met",
+      "details": {
+        "admin_token": true,
+        "connection": true,
+        "postgis_extension": true,
+        "role_pgstac_admin": true,
+        "role_pgstac_ingest": true,
+        "role_pgstac_read": true,
+        "create_privilege": true
+      }
+    },
+    {
+      "name": "initialize_geo_schema",
+      "status": "success",
+      "message": "Geo schema 'geo' initialized (11 statements)",
+      "sql_count": 11,
+      "details": {
+        "schema": "geo",
+        "statements_executed": 11,
+        "tables_created": ["table_catalog"],
+        "source": "PydanticToSQL.generate_geo_schema_ddl()"
+      }
     },
     {
       "name": "initialize_pgstac_schema",
       "status": "success",
-      "message": "pypgstac migrate completed successfully"
+      "message": "pypgstac migrate completed successfully",
+      "details": {
+        "stdout": "0.9.8\n",
+        "returncode": 0,
+        "post_migration_fixes": [
+          "pgstac.partition_after_triggerfunc()",
+          "pgstac.collection_delete_trigger_func()"
+        ]
+      }
     }
   ],
   "summary": {
     "total_steps": 3,
     "successful": 3,
-    "failed": 0
+    "failed": 0,
+    "skipped": 0,
+    "dry_run": 0
   }
 }
 ```
 
 **What gets created**:
-- `geo` schema with:
+- **`geo` schema** with:
   - `table_catalog` table (vector metadata - same structure as internal DB)
-  - `feature_collection_styles` table (OGC API Styles)
-- `pgstac` schema with all pgSTAC tables, functions, and triggers
+  - DDL generated from Pydantic models via `PydanticToSQL`
+- **`pgstac` schema** with:
+  - Full pgSTAC 0.9.8 (collections, items, partitioning, search functions)
+  - Post-migration `search_path` fixes applied to trigger functions
 
-**Architecture Note**: This endpoint uses a **temporary admin UMI** passed by DevOps. The production Function App identity has **read-only access** to external databases. After running this endpoint, DevOps should revoke or remove the admin UMI.
+---
+
+#### Architecture Notes
+
+- The initializer uses a **temporary admin UMI** passed by DevOps. The production Function App identity has **read-only access** to external databases.
+- External databases contain **only `geo` and `pgstac` schemas** (no `app` schema) — they hold public/partner data only.
+- After running this endpoint, DevOps should revoke or scope down the admin UMI as appropriate.
+- The post-migration fixes patch pypgstac 0.9.8 trigger functions (`partition_after_triggerfunc`, `collection_delete_trigger_func`) with correct `search_path = pgstac, public` to prevent runtime errors.
 
 ---
 
@@ -927,14 +1170,17 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 
 **Symptoms**: Cannot create tables or insert data
 
-**Solution**:
+**Diagnosis**: Check which identity is connecting and what permissions it has:
 ```sql
--- Grant permissions to application user
-GRANT ALL PRIVILEGES ON SCHEMA app TO <app_user>;
-GRANT ALL PRIVILEGES ON SCHEMA geo TO <app_user>;
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA app TO <app_user>;
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA geo TO <app_user>;
+SELECT current_user, session_user;
+SELECT has_database_privilege(current_user, current_database(), 'CREATE') as can_create;
 ```
+
+**Solutions**:
+- Verify the admin UMI has `CREATE ON DATABASE` (see Managed Identity Authentication § 4)
+- Verify pgstac roles are granted `WITH ADMIN OPTION` (required for pypgstac migrate)
+- Verify default privileges are configured for the reader identity (see § 5)
+- Check that the Function App is assigned the correct managed identity
 
 ### Issue 4: Connection Pool Exhausted
 
@@ -976,4 +1222,4 @@ EXPLAIN ANALYZE SELECT * FROM app.jobs WHERE status = 'processing';
 
 ---
 
-**Last Updated**: 01 FEB 2026
+**Last Updated**: 12 FEB 2026

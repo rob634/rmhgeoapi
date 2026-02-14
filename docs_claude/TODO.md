@@ -187,32 +187,9 @@ Items below are tracked here but not yet added to ADO. Add to ADO when prioritiz
 
 ### EN-TD.1: Raw JSON Parsing in HTTP Triggers `[NEW 12 FEB 2026]`
 
-**Problem**: 35 trigger files call `req.get_json()` directly, bypassing `BaseHttpTrigger.extract_json_body()`. This means they get no fallback for Azure Functions content-type mismatches (PowerShell, proxies), no `isinstance(body, dict)` type guard, and no consistent error messages.
+**Problem**: 37 occurrences across 22 code files call `req.get_json()` directly, bypassing `BaseHttpTrigger.extract_json_body()`. No fallback for content-type mismatches, no type guard, inconsistent errors.
 
-**Root Cause**: Most triggers are standalone functions (not `BaseHttpTrigger` subclasses), so they can't call `self.extract_json_body()`.
-
-**Fix**: Create a standalone utility function that any trigger can call:
-
-```python
-# triggers/utils.py (or add to http_base.py as module-level function)
-def parse_request_json(req: func.HttpRequest, required: bool = True) -> Optional[Dict]:
-    """Same logic as BaseHttpTrigger.extract_json_body() — usable without inheritance."""
-```
-
-Then find-and-replace all raw `req.get_json()` calls with `parse_request_json(req)`.
-
-**Scope**: 35 files, ~50 occurrences. Mechanical refactor, no business logic changes.
-
-**Files** (from QA review 12 FEB 2026 — Rajesh hit this in ITSES QA with PowerShell):
-
-| Category | Files |
-|----------|-------|
-| Platform triggers | `trigger_platform_status.py`, `platform/unpublish.py`, `platform/resubmit.py` |
-| Asset/Approval | `trigger_approvals.py`, `assets/asset_approvals_bp.py` |
-| Admin | `admin_approvals.py`, `admin_data_migration.py`, `admin_external_db.py`, `admin_external_services.py`, `h3_datasets.py`, `snapshot.py` |
-| STAC | `stac_vector.py`, `stac_collections.py`, `stac_extract.py` |
-| Other | `promote.py`, `trigger_map_states.py`, `curated/admin.py`, `trigger_raster_renders.py`, `probes.py` |
-| Legacy | `raster_api/triggers.py`, `raster_collection_viewer/triggers.py` |
+**Plan**: [EN_TD1_JSON_PARSING_MIGRATION.md](./EN_TD1_JSON_PARSING_MIGRATION.md) — tiered migration with full file/line inventory
 
 **Previously resolved** - see below.
 

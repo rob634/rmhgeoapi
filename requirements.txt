@@ -36,7 +36,7 @@ rasterstats>=0.19.0           # Zonal statistics for H3 aggregation
 
 # DuckDB - Analytical query engine with spatial and Azure extensions
 duckdb>=1.1.0
-pyarrow>=10.0.0
+pyarrow>=16.0.0
 
 # H3 - Uber's hexagonal hierarchical geospatial indexing system (Python bindings to C library)
 h3>=4.0.0
@@ -49,10 +49,10 @@ xarray>=2024.1.0
 zarr>=2.16.0
 fsspec>=2024.2.0
 adlfs>=2024.2.0           # Azure Blob storage backend for fsspec
-aiohttp>=3.9.0            # Async support for fsspec
+aiohttp>=3.9.4            # Async support for fsspec (CVE-2024-23334, CVE-2024-30251)
 
 # HTTP client for TiTiler proxy (18 DEC 2025)
 httpx>=0.27.0
 
 # Image output for xarray API (18 DEC 2025)
-pillow>=10.0.0
+pillow>=10.2.0

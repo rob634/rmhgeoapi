@@ -49,14 +49,14 @@ stac-pydantic>=3.4.0
 
 # DuckDB - Analytical query engine with spatial and Azure extensions
 duckdb>=1.1.0
-pyarrow>=10.0.0
+pyarrow>=16.0.0
 
 # H3 - Uber's hexagonal hierarchical geospatial indexing system
 h3>=4.0.0
 
 # H3 Aggregation - Zonal statistics and Planetary Computer access
 rasterstats>=0.19.0
-planetary-computer>=0.5.0
+planetary-computer>=1.0.0
 
 # AsyncPG - Async PostgreSQL driver for non-blocking database operations
 asyncpg>=0.29.0
@@ -66,13 +66,13 @@ xarray>=2024.1.0
 zarr>=2.16.0
 fsspec>=2024.2.0
 adlfs>=2024.2.0
-aiohttp>=3.9.0
+aiohttp>=3.9.4
 
 # HTTP client for TiTiler proxy
 httpx>=0.27.0
 
 # Image output for xarray API
-pillow>=10.0.0
+pillow>=10.2.0
 
 # Workers Entrance - Direct HTTP endpoint (optional)
 fastapi>=0.104.0

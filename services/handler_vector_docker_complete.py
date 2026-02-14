@@ -879,8 +879,8 @@ def _get_checkpoint_label(event_name: str, details: Dict[str, Any]) -> str:
     if label_fn:
         try:
             return label_fn(details)
-        except Exception:
-            pass
+        except (KeyError, TypeError, ValueError) as e:
+            logger.debug(f"Label formatting failed for event '{event_name}': {e}")
 
     # Fallback: Convert snake_case to Title Case
     return event_name.replace('_', ' ').title()

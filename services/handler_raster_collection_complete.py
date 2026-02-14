@@ -367,7 +367,8 @@ def _validate_collection_homogeneity(
                 try:
                     raster_type = _detect_raster_type(src, props["dtype"])
                     props["raster_type"] = raster_type.get("detected_type", "unknown")
-                except Exception:
+                except (KeyError, ValueError, AttributeError) as e:
+                    logger.debug(f"Raster type detection failed for {blob_name}: {e}")
                     props["raster_type"] = "unknown"
 
                 file_properties.append(props)

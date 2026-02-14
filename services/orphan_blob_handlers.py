@@ -641,8 +641,9 @@ def _extract_cog_info(container: str, blob_path: str, zone: str) -> Dict[str, An
                     *dataset.bounds
                 )
                 bbox = list(bounds)
-            except Exception:
-                # If transform fails, use raw bounds
+            except (ValueError, TypeError) as e:
+                # CRS transform can fail on unusual projections - fall back to raw bounds
+                logger.warning(f"CRS transform to EPSG:4326 failed for {blob_path}, using raw bounds: {e}")
                 bbox = list(dataset.bounds)
 
             # Build raster:bands info

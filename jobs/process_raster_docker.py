@@ -30,8 +30,12 @@ Exports:
 """
 
 from typing import Dict, Any, List, Optional
+import logging
+
 from jobs.base import JobBase
 from jobs.mixins import JobBaseMixin
+
+logger = logging.getLogger("job.ProcessRasterDockerJob")
 
 
 class ProcessRasterDockerJob(JobBaseMixin, JobBase):
@@ -336,8 +340,8 @@ class ProcessRasterDockerJob(JobBaseMixin, JobBase):
                     if validation.get('raster_type') == 'dem' and share_url:
                         titiler_urls["dem_terrain_viewer"] = f"{share_url}&colormap_name=terrain"
                         share_url = titiler_urls["dem_terrain_viewer"]
-                except Exception:
-                    pass
+                except (KeyError, ValueError, AttributeError) as e:
+                    logger.warning(f"TiTiler URL generation failed for {cog.get('cog_blob')}: {e}")
 
             return {
                 "job_type": "process_raster_docker",

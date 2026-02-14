@@ -1055,7 +1055,7 @@ async def platform_failures(req: func.HttpRequest) -> func.HttpResponse:
                 # Get recent failures with sanitized details
                 cur.execute(f"""
                     SELECT
-                        j.id as job_id,
+                        j.job_id as job_id,
                         j.job_type,
                         j.updated_at as failed_at,
                         j.result_data->>'error' as raw_error,
@@ -1063,7 +1063,7 @@ async def platform_failures(req: func.HttpRequest) -> func.HttpResponse:
                         j.parameters->>'blob_name' as blob,
                         p.request_id
                     FROM {config.app_schema}.jobs j
-                    LEFT JOIN {config.app_schema}.api_requests p ON j.id = p.job_id
+                    LEFT JOIN {config.app_schema}.api_requests p ON j.job_id = p.job_id
                     WHERE j.status = 'failed'
                       AND j.created_at >= NOW() - INTERVAL '%s hours'
                     ORDER BY j.updated_at DESC

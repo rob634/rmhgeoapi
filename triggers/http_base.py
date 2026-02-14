@@ -273,29 +273,43 @@ class BaseHttpTrigger(ABC):
     def extract_json_body(self, req: func.HttpRequest, required: bool = True) -> Optional[Dict[str, Any]]:
         """
         Extract and parse JSON request body.
-        
+
+        Azure Functions' req.get_json() can raise ValueError even when the raw
+        body is valid JSON (PowerShell Invoke-RestMethod, content-type mismatches,
+        certain proxy configurations). Falls back to raw body parsing when this
+        happens.
+
         Args:
             req: HTTP request object
             required: Whether body is required
-            
+
         Returns:
             Parsed JSON data or None if not required and missing
-            
+
         Raises:
             ValueError: If body is required but missing or invalid JSON
         """
+        body = None
+
+        # Primary: Azure Functions built-in JSON parsing
         try:
             body = req.get_json()
-            
-            if body is None and required:
-                raise ValueError("Request body is required")
-            
-            return body
-            
-        except ValueError as e:
-            if "JSON" in str(e):
-                raise ValueError(f"Invalid JSON in request body: {e}")
-            raise  # Re-raise other ValueErrors
+        except ValueError:
+            # Fallback: parse raw bytes directly (handles content-type mismatches)
+            raw = req.get_body() or b""
+            if raw:
+                try:
+                    body = json.loads(raw.decode("utf-8"))
+                except Exception as parse_err:
+                    raise ValueError(f"Invalid JSON in request body: {parse_err}")
+
+        if body is None and required:
+            raise ValueError("Request body is required")
+
+        if body is not None and not isinstance(body, dict):
+            raise ValueError("Request body must be a JSON object")
+
+        return body
     
     def validate_required_fields(self, data: Dict[str, Any], required_fields: List[str]) -> None:
         """

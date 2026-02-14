@@ -22,7 +22,7 @@ from typing import Dict, Any, List, Optional
 import json
 import azure.functions as func
 
-from triggers.http_base import BaseHttpTrigger
+from triggers.http_base import BaseHttpTrigger, parse_request_json
 from infrastructure.pgstac_bootstrap import PgStacBootstrap
 from util_logger import LoggerFactory, ComponentType
 
@@ -104,7 +104,7 @@ class StacCollectionsTrigger(BaseHttpTrigger):
 
         # Parse request body
         try:
-            body = req.get_json()
+            body = parse_request_json(req)
         except ValueError as e:
             logger.error(f"Invalid JSON in request body: {e}")
             return {

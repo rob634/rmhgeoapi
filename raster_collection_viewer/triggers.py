@@ -16,6 +16,7 @@ import azure.functions as func
 from typing import List, Dict, Any
 
 from raster_collection_viewer.service import RasterCollectionViewerService
+from triggers.http_base import parse_request_json
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +139,7 @@ def raster_qa_handler(req: func.HttpRequest) -> func.HttpResponse:
     try:
         # Parse request body
         try:
-            req_body = req.get_json()
+            req_body = parse_request_json(req)
         except ValueError:
             return func.HttpResponse(
                 json.dumps({"success": False, "error": "Invalid JSON body"}),

@@ -35,6 +35,7 @@ import json
 import logging
 
 from services.promote_service import PromoteService
+from triggers.http_base import parse_request_json
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +91,7 @@ def handle_promote(req: func.HttpRequest) -> func.HttpResponse:
 
         elif method == "POST":
             # Promote a dataset
-            body = req.get_json()
+            body = parse_request_json(req)
 
             # Required field
             promoted_id = body.get('promoted_id')
@@ -301,7 +302,7 @@ def handle_promote_item(req: func.HttpRequest) -> func.HttpResponse:
 
         elif method == "PUT":
             # Update
-            body = req.get_json()
+            body = parse_request_json(req)
 
             # Re-promote with updates (uses same promote logic)
             existing = service.get(promoted_id)
@@ -424,7 +425,7 @@ def handle_gallery(req: func.HttpRequest) -> func.HttpResponse:
             # Add to gallery
             order = None
             try:
-                body = req.get_json()
+                body = parse_request_json(req)
                 order = body.get('order')
             except (ValueError, TypeError) as e:
                 # No body or invalid JSON is fine for this endpoint

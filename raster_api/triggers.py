@@ -38,6 +38,7 @@ from typing import Dict, Any, List
 
 from .config import get_raster_api_config
 from .service import RasterAPIService
+from triggers.http_base import parse_request_json
 
 logger = logging.getLogger(__name__)
 
@@ -311,7 +312,7 @@ class RasterClipTrigger(BaseRasterTrigger):
             if req.method == 'POST':
                 # POST: geometry in body
                 try:
-                    body = req.get_json()
+                    body = parse_request_json(req)
                     if 'geometry' in body:
                         geometry = body['geometry']
                     elif body.get('type') in ['Polygon', 'MultiPolygon']:

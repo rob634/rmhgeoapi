@@ -35,6 +35,7 @@ from typing import Optional, Dict, Any
 
 from util_logger import LoggerFactory, ComponentType
 from config import get_config
+from triggers.http_base import parse_request_json
 from services.curated.registry_service import CuratedRegistryService
 from core.models import (
     CuratedDataset,
@@ -228,7 +229,7 @@ class CuratedAdminTrigger:
         logger.info("Creating curated dataset")
 
         try:
-            body = req.get_json()
+            body = parse_request_json(req)
         except ValueError:
             return self._error_response("Invalid JSON body", 400)
 
@@ -290,7 +291,7 @@ class CuratedAdminTrigger:
         logger.info(f"Updating curated dataset: {dataset_id}")
 
         try:
-            body = req.get_json()
+            body = parse_request_json(req)
         except ValueError:
             return self._error_response("Invalid JSON body", 400)
 

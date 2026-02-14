@@ -31,6 +31,7 @@ Updated: 08 FEB 2026 - V0.8.11 AssetApprovalService refactor
 import json
 import azure.functions as func
 
+from triggers.http_base import parse_request_json
 from util_logger import LoggerFactory, ComponentType
 
 logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "ApprovalTriggers")
@@ -168,7 +169,7 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
     logger.info("Platform approve endpoint called")
 
     try:
-        req_body = req.get_json()
+        req_body = parse_request_json(req)
 
         # Extract identifiers (support multiple lookup methods)
         asset_id_param = req_body.get('asset_id')
@@ -343,7 +344,7 @@ def platform_reject(req: func.HttpRequest) -> func.HttpResponse:
     logger.info("Platform reject endpoint called")
 
     try:
-        req_body = req.get_json()
+        req_body = parse_request_json(req)
 
         # Extract identifiers
         asset_id_param = req_body.get('asset_id')
@@ -487,7 +488,7 @@ def platform_revoke(req: func.HttpRequest) -> func.HttpResponse:
     logger.info("Platform revoke endpoint called")
 
     try:
-        req_body = req.get_json()
+        req_body = parse_request_json(req)
 
         # Extract identifiers
         asset_id_param = req_body.get('asset_id')

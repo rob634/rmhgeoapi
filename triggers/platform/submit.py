@@ -26,6 +26,7 @@ import logging
 from typing import Dict, Any
 
 import azure.functions as func
+from triggers.http_base import parse_request_json
 
 from util_logger import LoggerFactory, ComponentType
 logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "platform_submit")
@@ -192,7 +193,7 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
 
     try:
         # Parse and validate request
-        req_body = req.get_json()
+        req_body = parse_request_json(req)
         platform_req = PlatformRequest(**req_body)
 
         # V0.8 Release Control: Check dry_run parameter (31 JAN 2026)

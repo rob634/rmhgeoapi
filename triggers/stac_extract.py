@@ -23,6 +23,7 @@ from typing import Dict, Any
 import json
 import logging
 from config.defaults import STACDefaults
+from triggers.http_base import parse_request_json
 
 # LAZY LOADING: Import heavy dependencies INSIDE function, not at module level
 # This prevents GDAL/rasterio from loading during Azure Functions cold start
@@ -121,7 +122,7 @@ def handle_request(req: func.HttpRequest) -> func.HttpResponse:
     # STEP 3: Parse request body
     try:
         logger.info("🔄 STEP 3: Parsing request body...")
-        body = req.get_json()
+        body = parse_request_json(req)
         logger.debug(f"   Request body keys: {list(body.keys())}")
         container = body.get('container')
         blob_name = body.get('blob_name')

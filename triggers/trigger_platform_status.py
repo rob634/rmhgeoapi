@@ -41,6 +41,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
 import azure.functions as func
+from triggers.http_base import parse_request_json
 
 # Import infrastructure
 from infrastructure import PlatformRepository, JobRepository, TaskRepository, PostgreSQLRepository, RepositoryFactory
@@ -1368,12 +1369,12 @@ async def platform_validate(req: func.HttpRequest) -> func.HttpResponse:
     try:
         # Parse request body
         try:
-            req_body = req.get_json()
-        except ValueError:
+            req_body = parse_request_json(req)
+        except ValueError as e:
             return func.HttpResponse(
                 json.dumps({
                     "valid": False,
-                    "error": "Invalid JSON body",
+                    "error": str(e),
                     "usage": "Same request body as POST /api/platform/submit"
                 }),
                 status_code=400,

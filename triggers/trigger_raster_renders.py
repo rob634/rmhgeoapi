@@ -31,6 +31,7 @@ import logging
 from typing import Optional
 
 from services.raster_render_service import get_raster_render_service
+from triggers.http_base import parse_request_json
 
 logger = logging.getLogger(__name__)
 
@@ -231,7 +232,7 @@ def create_render(req: func.HttpRequest) -> func.HttpResponse:
         return _error_response("BadRequest", "cog_id is required", 400)
 
     try:
-        body = req.get_json()
+        body = parse_request_json(req)
     except ValueError:
         return _error_response("BadRequest", "Invalid JSON body", 400)
 
@@ -308,7 +309,7 @@ def update_render(req: func.HttpRequest) -> func.HttpResponse:
         return _error_response("BadRequest", "render_id is required", 400)
 
     try:
-        body = req.get_json()
+        body = parse_request_json(req)
     except ValueError:
         return _error_response("BadRequest", "Invalid JSON body", 400)
 
@@ -469,7 +470,7 @@ def create_default_render(req: func.HttpRequest) -> func.HttpResponse:
         return _error_response("BadRequest", "cog_id is required", 400)
 
     try:
-        body = req.get_json() if req.get_body() else {}
+        body = parse_request_json(req, required=False) or {}
     except ValueError:
         body = {}
 

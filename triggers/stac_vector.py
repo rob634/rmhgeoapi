@@ -25,6 +25,7 @@ import logging
 from services.service_stac_vector import StacVectorService
 from infrastructure.pgstac_bootstrap import PgStacBootstrap
 from config.defaults import STACDefaults
+from triggers.http_base import parse_request_json
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ def handle_request(req: func.HttpRequest) -> func.HttpResponse:
     """
     try:
         # Parse request
-        body = req.get_json()
+        body = parse_request_json(req)
         schema = body.get('schema')
         table_name = body.get('table_name')
         collection_id = body.get('collection_id', STACDefaults.VECTORS_COLLECTION)

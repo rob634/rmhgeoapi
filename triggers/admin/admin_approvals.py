@@ -35,6 +35,7 @@ import json
 import azure.functions as func
 from azure.functions import Blueprint
 
+from triggers.http_base import parse_request_json
 from util_logger import LoggerFactory, ComponentType
 
 logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "ApprovalsAdmin")
@@ -234,7 +235,7 @@ def approve_dataset(req: func.HttpRequest) -> func.HttpResponse:
 
         # Parse body
         try:
-            body = req.get_json()
+            body = parse_request_json(req)
         except ValueError:
             body = {}
 
@@ -337,7 +338,7 @@ def reject_dataset(req: func.HttpRequest) -> func.HttpResponse:
 
         # Parse body
         try:
-            body = req.get_json()
+            body = parse_request_json(req)
         except ValueError:
             body = {}
 
@@ -423,7 +424,7 @@ def revoke_dataset(req: func.HttpRequest) -> func.HttpResponse:
 
         # Parse body
         try:
-            body = req.get_json()
+            body = parse_request_json(req)
         except ValueError:
             body = {}
 

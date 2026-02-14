@@ -53,6 +53,7 @@ from azure.functions import Blueprint
 from typing import Optional
 
 from util_logger import LoggerFactory, ComponentType
+from triggers.http_base import parse_request_json
 
 logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, "AdminExternalDb")
 
@@ -88,7 +89,7 @@ def external_db_initialize(req: func.HttpRequest) -> func.HttpResponse:
     try:
         # Parse request body
         try:
-            body = req.get_json()
+            body = parse_request_json(req)
         except ValueError:
             return func.HttpResponse(
                 json.dumps({

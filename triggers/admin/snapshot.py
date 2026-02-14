@@ -32,6 +32,7 @@ import azure.functions as func
 from azure.functions import Blueprint
 
 from util_logger import LoggerFactory, ComponentType
+from triggers.http_base import parse_request_json
 
 logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "SnapshotAdmin")
 
@@ -98,7 +99,7 @@ class SnapshotAdminTrigger:
             notes = req.params.get('notes')
             if not notes:
                 try:
-                    body = req.get_json()
+                    body = parse_request_json(req)
                     notes = body.get('notes') if body else None
                 except ValueError:
                     pass

@@ -34,6 +34,7 @@ import logging
 from typing import Optional
 
 from services.map_state_service import get_map_state_service
+from triggers.http_base import parse_request_json
 
 logger = logging.getLogger(__name__)
 
@@ -224,7 +225,7 @@ def create_map(req: func.HttpRequest) -> func.HttpResponse:
         500: Server error
     """
     try:
-        body = req.get_json()
+        body = parse_request_json(req)
     except ValueError:
         return _error_response("BadRequest", "Invalid JSON body", 400)
 
@@ -309,7 +310,7 @@ def update_map(req: func.HttpRequest) -> func.HttpResponse:
         return _error_response("BadRequest", "map_id is required", 400)
 
     try:
-        body = req.get_json()
+        body = parse_request_json(req)
     except ValueError:
         return _error_response("BadRequest", "Invalid JSON body", 400)
 

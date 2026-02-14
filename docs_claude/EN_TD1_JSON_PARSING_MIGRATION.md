@@ -1,7 +1,8 @@
 # EN-TD.1: Raw JSON Parsing Migration Plan
 
 **Created**: 12 FEB 2026
-**Status**: PENDING
+**Completed**: 12 FEB 2026
+**Status**: DONE
 **Priority**: Medium (defensive hardening, not blocking)
 **Scope**: 37 occurrences across 22 code files
 **Estimated Effort**: 2-3 hours (mechanical refactor)

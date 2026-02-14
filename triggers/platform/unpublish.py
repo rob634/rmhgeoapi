@@ -22,6 +22,7 @@ import logging
 from typing import Dict, Any, Optional, Tuple
 
 import azure.functions as func
+from triggers.http_base import parse_request_json
 
 from util_logger import LoggerFactory, ComponentType
 logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "platform_unpublish")
@@ -125,7 +126,7 @@ def platform_unpublish(req: func.HttpRequest) -> func.HttpResponse:
     logger.info("Platform consolidated unpublish endpoint called")
 
     try:
-        req_body = req.get_json()
+        req_body = parse_request_json(req)
         dry_run = req_body.get('dry_run', True)  # Safety default
 
         # Resolve data type and parameters

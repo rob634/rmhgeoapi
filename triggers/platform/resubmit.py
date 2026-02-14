@@ -30,6 +30,7 @@ import traceback
 from typing import Dict, Any, Optional, Tuple
 
 import azure.functions as func
+from triggers.http_base import parse_request_json
 
 from util_logger import LoggerFactory, ComponentType
 
@@ -190,10 +191,7 @@ class PlatformResubmitHandler:
 
     def _parse_body(self, req: func.HttpRequest) -> Optional[Dict[str, Any]]:
         """Parse request body."""
-        try:
-            return req.get_json()
-        except ValueError:
-            return None
+        return parse_request_json(req, required=False)
 
     def _resolve_job_id(
         self,

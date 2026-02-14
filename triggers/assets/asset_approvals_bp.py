@@ -41,6 +41,7 @@ import json
 import azure.functions as func
 from azure.functions import Blueprint
 
+from triggers.http_base import parse_request_json
 from util_logger import LoggerFactory, ComponentType
 
 logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "AssetApprovals")
@@ -104,7 +105,7 @@ def approve_asset(req: func.HttpRequest) -> func.HttpResponse:
     logger.info(f"Asset approve endpoint called for {asset_id[:16]}...")
 
     try:
-        req_body = req.get_json()
+        req_body = parse_request_json(req)
     except ValueError:
         return func.HttpResponse(
             json.dumps({
@@ -261,7 +262,7 @@ def reject_asset(req: func.HttpRequest) -> func.HttpResponse:
     logger.info(f"Asset reject endpoint called for {asset_id[:16]}...")
 
     try:
-        req_body = req.get_json()
+        req_body = parse_request_json(req)
     except ValueError:
         return func.HttpResponse(
             json.dumps({
@@ -395,7 +396,7 @@ def revoke_asset(req: func.HttpRequest) -> func.HttpResponse:
     logger.info(f"Asset revoke endpoint called for {asset_id[:16]}...")
 
     try:
-        req_body = req.get_json()
+        req_body = parse_request_json(req)
     except ValueError:
         return func.HttpResponse(
             json.dumps({

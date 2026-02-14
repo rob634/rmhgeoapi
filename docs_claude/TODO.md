@@ -185,11 +185,9 @@ Items below are tracked here but not yet added to ADO. Add to ADO when prioritiz
 
 ## Technical Debt
 
-### EN-TD.1: Raw JSON Parsing in HTTP Triggers `[NEW 12 FEB 2026]`
+### EN-TD.1: Raw JSON Parsing in HTTP Triggers `[DONE 12 FEB 2026]`
 
-**Problem**: 37 occurrences across 22 code files call `req.get_json()` directly, bypassing `BaseHttpTrigger.extract_json_body()`. No fallback for content-type mismatches, no type guard, inconsistent errors.
-
-**Plan**: [EN_TD1_JSON_PARSING_MIGRATION.md](./EN_TD1_JSON_PARSING_MIGRATION.md) — tiered migration with full file/line inventory
+Migrated 37 occurrences across 22 code files from raw `req.get_json()` to `parse_request_json(req)` with fallback + type guard. See [EN_TD1_JSON_PARSING_MIGRATION.md](./EN_TD1_JSON_PARSING_MIGRATION.md).
 
 **Previously resolved** - see below.
 

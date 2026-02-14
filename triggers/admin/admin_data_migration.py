@@ -41,6 +41,7 @@ from azure.identity import DefaultAzureCredential
 from azure.mgmt.datafactory import DataFactoryManagementClient
 
 from util_logger import ComponentType, LoggerFactory
+from triggers.http_base import parse_request_json
 
 logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "DataMigrationAdmin")
 
@@ -200,7 +201,7 @@ def data_migration_trigger(req: func.HttpRequest) -> func.HttpResponse:
 
     try:
         try:
-            req_body = req.get_json()
+            req_body = parse_request_json(req)
         except ValueError as e:
             raw_body = req.get_body().decode("utf-8", errors="replace")
             logger.error(f"JSON parse error: {e}, raw body: {raw_body!r}")

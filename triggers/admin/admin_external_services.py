@@ -36,6 +36,7 @@ import azure.functions as func
 from azure.functions import Blueprint
 
 from util_logger import LoggerFactory, ComponentType
+from triggers.http_base import parse_request_json
 
 logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "admin_external_services")
 
@@ -85,7 +86,7 @@ def admin_service_register(req: func.HttpRequest) -> func.HttpResponse:
     try:
         # Parse request body
         try:
-            body = req.get_json()
+            body = parse_request_json(req)
         except ValueError:
             return _make_error_response("Invalid JSON body", 400)
 

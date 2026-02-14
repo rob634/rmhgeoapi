@@ -40,6 +40,49 @@ from util_logger import LoggerFactory
 from util_logger import ComponentType, LogLevel, LogContext
 
 
+# ============================================================================
+# STANDALONE JSON PARSING — usable without inheriting BaseHttpTrigger
+# ============================================================================
+
+def parse_request_json(req: func.HttpRequest, required: bool = True) -> Optional[Dict[str, Any]]:
+    """
+    Parse JSON from Azure Functions HTTP request with robust fallback.
+
+    Azure Functions' req.get_json() can raise ValueError even when the raw
+    body is valid JSON (PowerShell Invoke-RestMethod, content-type mismatches,
+    certain proxy configurations). Falls back to raw body parsing.
+
+    Args:
+        req: Azure Functions HTTP request
+        required: If True, raises ValueError when body is missing
+
+    Returns:
+        Parsed dict or None (if not required and body is empty)
+
+    Raises:
+        ValueError: If body is required but missing, not valid JSON, or not a dict
+    """
+    body = None
+
+    try:
+        body = req.get_json()
+    except ValueError:
+        raw = req.get_body() or b""
+        if raw:
+            try:
+                body = json.loads(raw.decode("utf-8"))
+            except Exception as parse_err:
+                raise ValueError(f"Invalid JSON in request body: {parse_err}")
+
+    if body is None and required:
+        raise ValueError("Request body is required")
+
+    if body is not None and not isinstance(body, dict):
+        raise ValueError("Request body must be a JSON object")
+
+    return body
+
+
 class BaseHttpTrigger(ABC):
     """
     Abstract base class for Azure Functions HTTP triggers.
@@ -274,10 +317,8 @@ class BaseHttpTrigger(ABC):
         """
         Extract and parse JSON request body.
 
-        Azure Functions' req.get_json() can raise ValueError even when the raw
-        body is valid JSON (PowerShell Invoke-RestMethod, content-type mismatches,
-        certain proxy configurations). Falls back to raw body parsing when this
-        happens.
+        Delegates to module-level parse_request_json() for consistent behavior
+        whether called via inheritance or standalone import.
 
         Args:
             req: HTTP request object
@@ -289,27 +330,7 @@ class BaseHttpTrigger(ABC):
         Raises:
             ValueError: If body is required but missing or invalid JSON
         """
-        body = None
-
-        # Primary: Azure Functions built-in JSON parsing
-        try:
-            body = req.get_json()
-        except ValueError:
-            # Fallback: parse raw bytes directly (handles content-type mismatches)
-            raw = req.get_body() or b""
-            if raw:
-                try:
-                    body = json.loads(raw.decode("utf-8"))
-                except Exception as parse_err:
-                    raise ValueError(f"Invalid JSON in request body: {parse_err}")
-
-        if body is None and required:
-            raise ValueError("Request body is required")
-
-        if body is not None and not isinstance(body, dict):
-            raise ValueError("Request body must be a JSON object")
-
-        return body
+        return parse_request_json(req, required=required)
     
     def validate_required_fields(self, data: Dict[str, Any], required_fields: List[str]) -> None:
         """

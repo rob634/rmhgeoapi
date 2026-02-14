@@ -43,6 +43,7 @@ from azure.functions import Blueprint
 
 # Import startup state - this module has zero dependencies
 from startup import STARTUP_STATE
+from triggers.http_base import parse_request_json
 
 # Create Blueprint for probe endpoints
 bp = Blueprint()
@@ -496,7 +497,7 @@ def appinsights_query(req: func.HttpRequest) -> func.HttpResponse:
 
         # Parse request body
         try:
-            body = req.get_json()
+            body = parse_request_json(req)
         except ValueError:
             return func.HttpResponse(
                 json.dumps({"status": "error", "error": "Invalid JSON body"}),
@@ -590,7 +591,7 @@ def appinsights_export(req: func.HttpRequest) -> func.HttpResponse:
 
         # Parse request body
         try:
-            body = req.get_json()
+            body = parse_request_json(req)
         except ValueError:
             return func.HttpResponse(
                 json.dumps({"status": "error", "error": "Invalid JSON body"}),

@@ -46,6 +46,7 @@ from typing import Optional
 
 from infrastructure.h3_repository import H3Repository
 from util_logger import LoggerFactory, ComponentType
+from triggers.http_base import parse_request_json
 
 logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "AdminH3Datasets")
 
@@ -199,7 +200,7 @@ class AdminH3DatasetsTrigger:
             source_license, recommended_h3_res, nodata_value
         """
         try:
-            body = req.get_json()
+            body = parse_request_json(req)
         except ValueError:
             return func.HttpResponse(
                 json.dumps({

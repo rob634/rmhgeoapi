@@ -33,6 +33,7 @@ from typing import Dict, Any, Optional, List
 import azure.functions as func
 
 from util_logger import LoggerFactory, ComponentType
+from triggers.http_base import parse_request_json
 
 logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "job_resubmit")
 
@@ -167,7 +168,7 @@ class JobResubmitHandler:
     def _parse_options(self, req: func.HttpRequest) -> Dict[str, Any]:
         """Parse options from request body."""
         try:
-            return req.get_json() or {}
+            return parse_request_json(req, required=False) or {}
         except ValueError:
             return {}
 

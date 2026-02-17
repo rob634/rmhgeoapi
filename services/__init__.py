@@ -133,8 +133,6 @@ def _validate_no_handler_collisions(base_keys: set, merge_dict: dict, merge_name
 from .iso3_attribution import ISO3Attribution, ISO3AttributionService
 from .stac_metadata_helper import (
     STACMetadataHelper,
-    PlatformMetadata,
-    AppMetadata,
     VisualizationMetadata
 )
 
@@ -299,8 +297,6 @@ __all__ = [
     'validate_task_routing_coverage',
     # STAC Metadata Helper
     'STACMetadataHelper',
-    'PlatformMetadata',
-    'AppMetadata',
     'VisualizationMetadata',
     'ISO3Attribution',
     'ISO3AttributionService',

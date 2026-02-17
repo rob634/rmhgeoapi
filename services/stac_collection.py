@@ -48,7 +48,7 @@ from util_logger import LoggerFactory, ComponentType
 from config import get_config  # For TiTiler base URL and other config (17 NOV 2025)
 from infrastructure.pgstac_repository import PgStacRepository  # For collection/item operations (Phase 2B: 17 NOV 2025)
 from services.pgstac_search_registration import PgSTACSearchRegistration  # NEW (17 NOV 2025): Direct database registration (Option A)
-from services.stac_metadata_helper import RasterVisualizationMetadata, AppMetadata  # BUG-006 (27 JAN 2026): For TiTiler bidx params, AppMetadata for job traceability
+from core.models.stac import ProvenanceProperties  # V0.9 P2.6: Replaces AppMetadata
 
 
 # Logger
@@ -458,18 +458,15 @@ def _create_stac_collection_impl(
         from services.service_stac_metadata import StacMetadataService
         stac_service = StacMetadataService()
 
-        # BUG-006 FIX (27 JAN 2026): Create raster visualization metadata for TiTiler URLs
-        # Without this, multi-band tiles get 500 errors because bidx params are missing
-        raster_meta = None
-        if raster_type:
-            raster_meta = RasterVisualizationMetadata.from_raster_type_params(raster_type)
-            logger.info(f"   Raster metadata: {raster_meta.band_count} bands, rgb_bands={raster_meta.rgb_bands}")
-
-        # Job traceability (02 FEB 2026): Create AppMetadata for STAC items
-        # Enables tracing STAC items back to the job that created them
-        app_meta = None
+        # V0.9 P2.6: ProvenanceProperties replaces AppMetadata for job traceability
+        # Raster visualization is now handled by renders builder inside extract_item_from_blob
+        provenance = None
         if job_id:
-            app_meta = AppMetadata(job_id=job_id, job_type=job_type or 'raster_collection')
+            detected = raster_type.get('detected_type') if raster_type else None
+            provenance = ProvenanceProperties(
+                job_id=job_id,
+                raster_type=detected,
+            )
             logger.info(f"   Job traceability: job_id={job_id[:8]}..., job_type={job_type}")
 
         # ORTHODOX STAC (11 NOV 2025): Create STAC Items for each COG tile
@@ -488,16 +485,14 @@ def _create_stac_collection_impl(
                 tile_name = tile_blob.split('/')[-1].replace('_cog.tif', '').replace('.tif', '')
                 item_id = f"{collection_id}_{tile_name}"
 
-                # Create STAC Item using existing service (reuses process_raster logic)
-                # BUG-006: Pass raster_meta for TiTiler bidx params on multi-band tiles
-                # Job traceability (02 FEB 2026): Pass app_meta for job_id in STAC items
+                # V0.9 P2.6: extract_item_from_blob now builds renders internally
+                # ProvenanceProperties passed as app_meta (duck-typed via getattr)
                 item = stac_service.extract_item_from_blob(
                     container=cog_container,
                     blob_name=tile_blob,
                     collection_id=collection_id,
                     item_id=item_id,
-                    raster_meta=raster_meta,  # BUG-006: Enables smart TiTiler URLs
-                    app_meta=app_meta  # Job traceability: Enables app:job_id in STAC items
+                    app_meta=provenance,  # V0.9: ProvenanceProperties (duck-typed: has job_id)
                 )
 
                 # Insert Item into PgSTAC

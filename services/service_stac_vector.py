@@ -204,8 +204,8 @@ class StacVectorService:
         if additional_properties:
             properties.update(additional_properties)
 
-        # Add metadata via STACMetadataHelper (25 NOV 2025)
-        # Adds: platform:*, app:*, geo:* properties
+        # Add metadata via STACMetadataHelper (V0.9 P2.6: uses Pydantic models)
+        # Adds: ddh:*, geoetl:*, geo:* properties
         # Note: Vector items don't need TiTiler COG links (they're PostGIS tables)
         try:
             logger.debug(f"Adding metadata via STACMetadataHelper for {schema}.{table_name}...")
@@ -218,14 +218,14 @@ class StacVectorService:
             temp_item = metadata_helper.augment_item(
                 item_dict=temp_item,
                 bbox=bbox,
-                platform=platform_meta,
-                app=app_meta,
+                provenance=app_meta,    # V0.9: ProvenanceProperties (duck-typed via to_prefixed_dict)
+                platform=platform_meta,  # V0.9: PlatformProperties (duck-typed via model_dump)
                 include_iso3=True,
                 include_titiler=False  # Vector items don't need TiTiler COG links
             )
             # Merge enriched properties back
             properties.update(temp_item.get('properties', {}))
-            logger.debug("Metadata enrichment complete (platform, app, geo)")
+            logger.debug("Metadata enrichment complete (ddh, geoetl, geo)")
         except Exception as e:
             # Non-fatal: Log warning but continue - STAC item can exist without enrichment
             logger.warning(f"Metadata enrichment failed (non-fatal): {e}")

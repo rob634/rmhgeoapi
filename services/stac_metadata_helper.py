@@ -3,419 +3,47 @@
 # ============================================================================
 # STATUS: Service layer - Centralized metadata enrichment for STAC items
 # PURPOSE: Ensure consistent metadata across all STAC items (raster and vector)
-# LAST_REVIEWED: 22 JAN 2026
-# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
-# EXPORTS: STACMetadataHelper, PlatformMetadata, AppMetadata, VisualizationMetadata, RasterVisualizationMetadata
-# DEPENDENCIES: stac-pydantic
+# LAST_REVIEWED: 16 FEB 2026
+# REVIEW_STATUS: V0.9 P2.6 — Aligned with Epoch 5 property namespaces
+# EXPORTS: STACMetadataHelper, VisualizationMetadata
+# DEPENDENCIES: core.models.stac (ProvenanceProperties, PlatformProperties, GeoProperties)
 # ============================================================================
 """
 STAC Metadata Helper - Centralized Metadata Enrichment.
 
-Consolidates scattered metadata generation into a clean, type-safe architecture:
-    - Platform metadata (DDH identifiers) → platform:* properties
-    - App metadata (job linkage) → app:* properties
-    - Geographic metadata (ISO3 codes) → geo:* properties
-    - Raster visualization metadata (band info, rescale, colormap) → app:* properties
-    - Visualization metadata (TiTiler URLs) → links and assets
+V0.9 P2.6 Rewrite (16 FEB 2026):
+    Old dataclasses (PlatformMetadata, AppMetadata, RasterVisualizationMetadata) DELETED.
+    Replaced by Pydantic models in core.models.stac:
+        - ProvenanceProperties (geoetl:*)
+        - PlatformProperties (ddh:*)
+        - GeoProperties (geo:*)
 
-Smart TiTiler URL Generation (F2.9 - 30 DEC 2025):
-    - Single-band DEMs → rescale + terrain colormap
-    - Single-band float → rescale + viridis colormap
-    - 3-band RGB → no extra params
-    - 3-band BGR → bidx reordering
-    - 4+ bands → bidx=1,2,3 or custom rgb_bands
+    TiTiler URL generation now reads from properties.renders.default
+    (STAC Render Extension v2.0.0) instead of custom app:* properties.
 
 Exports:
-    STACMetadataHelper: Main helper class for augmenting STAC items
-    PlatformMetadata: Platform identifier dataclass
-    AppMetadata: Job linkage dataclass
-    VisualizationMetadata: TiTiler URL dataclass
-    RasterVisualizationMetadata: Raster band/type info for smart URLs
+    STACMetadataHelper: Main helper class for augmenting STAC items/collections
+    VisualizationMetadata: TiTiler URL dataclass (for pgSTAC search links)
 """
 
 import logging
 import urllib.parse
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from dataclasses import dataclass
 from typing import Dict, Any, Optional, List, Tuple
+
+from core.models.stac import (
+    ProvenanceProperties,
+    PlatformProperties,
+    GeoProperties,
+    STAC_EXT_FILE,
+)
 
 logger = logging.getLogger(__name__)
 
 
 # =============================================================================
-# METADATA DATACLASSES
+# VISUALIZATION METADATA (kept — used for pgSTAC search links)
 # =============================================================================
-
-@dataclass
-class PlatformMetadata:
-    """
-    Platform/DDH identifiers for STAC properties.
-
-    Namespace: platform:*
-    Source: PlatformRequest via job_parameters
-
-    Attributes:
-        dataset_id: DDH dataset identifier
-        resource_id: DDH resource identifier
-        version_id: DDH version identifier
-        request_id: Platform request hash (SHA256[:32])
-        access_level: Data classification (public, OUO, restricted)
-        client_id: Client application identifier (default: 'ddh')
-    """
-    dataset_id: Optional[str] = None
-    resource_id: Optional[str] = None
-    version_id: Optional[str] = None
-    request_id: Optional[str] = None
-    access_level: Optional[str] = None
-    client_id: str = 'ddh'
-
-    @classmethod
-    def from_job_params(cls, params: Dict[str, Any]) -> Optional['PlatformMetadata']:
-        """
-        Factory method to extract PlatformMetadata from job parameters.
-
-        Looks for platform identifiers in params dict. Returns None if
-        no platform fields found.
-
-        Args:
-            params: Job or task parameters dict
-
-        Returns:
-            PlatformMetadata if any fields found, None otherwise
-        """
-        # Check if any platform fields exist
-        platform_fields = [
-            'dataset_id', 'resource_id', 'version_id',
-            '_platform_request_id', 'request_id',
-            'access_level', 'client_id'
-        ]
-        has_platform_data = any(params.get(f) for f in platform_fields)
-
-        if not has_platform_data:
-            # Also check nested platform_metadata dict
-            nested = params.get('platform_metadata', {})
-            if not nested:
-                return None
-            params = nested
-
-        return cls(
-            dataset_id=params.get('dataset_id'),
-            resource_id=params.get('resource_id'),
-            version_id=params.get('version_id'),
-            request_id=params.get('_platform_request_id') or params.get('request_id'),
-            access_level=params.get('access_level'),
-            client_id=params.get('client_id', 'ddh')
-        )
-
-    def to_stac_properties(self) -> Dict[str, Any]:
-        """
-        Convert to STAC properties dict with platform:* prefix.
-
-        Returns:
-            Dict of namespaced properties (only non-None values)
-        """
-        props = {}
-        if self.dataset_id:
-            props['platform:dataset_id'] = self.dataset_id
-        if self.resource_id:
-            props['platform:resource_id'] = self.resource_id
-        if self.version_id:
-            props['platform:version_id'] = self.version_id
-        if self.request_id:
-            props['platform:request_id'] = self.request_id
-        if self.access_level:
-            props['platform:access_level'] = self.access_level
-        if self.client_id:
-            props['platform:client'] = self.client_id
-        return props
-
-
-@dataclass
-class AppMetadata:
-    """
-    Application-level metadata for STAC properties.
-
-    Namespace: app:*
-    Source: Job execution context
-
-    Attributes:
-        job_id: CoreMachine job ID (links STAC item back to job)
-        job_type: Job type that created this item
-        created_by: Application identifier (default: 'rmhazuregeoapi')
-        processing_timestamp: When the item was created (auto-filled if None)
-
-    Properties Generated:
-        app:published - Always False on creation (requires explicit approval)
-        app:created_by - Application identifier
-        app:processing_timestamp - ISO timestamp
-        app:job_id - Job ID (if provided)
-        app:job_type - Job type (if provided)
-
-    Note:
-        F7.Approval (22 JAN 2026): All STAC items start with app:published=False.
-        Publication requires explicit approval via ApprovalService.
-    """
-    job_id: Optional[str] = None
-    job_type: Optional[str] = None
-    created_by: str = 'rmhazuregeoapi'
-    processing_timestamp: Optional[str] = None
-
-    def to_stac_properties(self) -> Dict[str, Any]:
-        """
-        Convert to STAC properties dict with app:* prefix.
-
-        Returns:
-            Dict of namespaced properties
-
-        Note:
-            app:published defaults to False - requires explicit approval
-            to set True. This is part of the mandatory approval workflow
-            (F7.Approval - 22 JAN 2026).
-        """
-        props = {
-            'app:created_by': self.created_by,
-            'app:processing_timestamp': self.processing_timestamp or datetime.now(timezone.utc).isoformat(),
-            'app:published': False,  # F7.Approval: Requires explicit approval to publish
-        }
-        if self.job_id:
-            props['app:job_id'] = self.job_id
-        if self.job_type:
-            props['app:job_type'] = self.job_type
-        return props
-
-
-@dataclass
-class RasterVisualizationMetadata:
-    """
-    Raster visualization metadata for STAC properties.
-
-    Namespace: app:*
-    Source: Raster validation results + rio-stac extraction
-
-    Used to generate smart TiTiler URLs based on raster characteristics.
-    Stored in STAC item properties for downstream viewer use.
-
-    Attributes:
-        raster_type: Detected type (rgb, rgba, dem, nir, multispectral, categorical)
-        band_count: Number of bands
-        dtype: Data type (uint8, uint16, float32, etc.)
-        colorinterp: Color interpretation per band (red, green, blue, alpha, gray, etc.)
-        rgb_bands: Recommended band indices for RGB display (1-indexed)
-        rescale: Min/max rescale values with source info
-        colormap: Recommended colormap name for single-band
-        nodata: Nodata value if known
-    """
-    raster_type: Optional[str] = None
-    band_count: Optional[int] = None
-    dtype: Optional[str] = None
-    colorinterp: Optional[List[str]] = None
-    rgb_bands: Optional[List[int]] = None
-    rescale: Optional[Dict[str, Any]] = None
-    colormap: Optional[str] = None
-    nodata: Optional[float] = None
-
-    @classmethod
-    def from_validation_result(cls, validation_result: Dict[str, Any]) -> 'RasterVisualizationMetadata':
-        """
-        Factory method to extract RasterVisualizationMetadata from raster validation result.
-
-        Args:
-            validation_result: Result dict from raster_validation.validate_raster()
-
-        Returns:
-            RasterVisualizationMetadata populated from validation data
-        """
-        result = validation_result.get('result', {})
-        raster_type_info = result.get('raster_type', {})
-
-        # Extract detected type
-        detected_type = raster_type_info.get('detected_type', 'unknown')
-
-        # Determine colormap based on raster type (12 FEB 2026: expanded with domain types)
-        colormap = None
-        if detected_type == 'dem':
-            colormap = 'terrain'
-        elif detected_type in ('vegetation_index',):
-            colormap = 'rdylgn'
-        elif detected_type in ('flood_depth', 'flood_probability'):
-            colormap = 'blues'
-        elif detected_type == 'hydrology':
-            colormap = 'ylgnbu'
-        elif detected_type == 'temporal':
-            colormap = 'spectral'
-        elif detected_type == 'population':
-            colormap = 'inferno'
-        elif result.get('band_count', 0) == 1:
-            colormap = 'viridis'
-
-        # Determine RGB bands for multi-band imagery
-        rgb_bands = None
-        band_count = result.get('band_count', 0)
-        if band_count == 4:
-            # RGBA - use first 3 bands
-            rgb_bands = [1, 2, 3]
-        elif band_count == 8:
-            # WorldView-3: use bands 5,3,2 for natural color
-            rgb_bands = [5, 3, 2]
-        elif band_count >= 10:
-            # Sentinel-2/Landsat style: use bands 4,3,2 for natural color
-            rgb_bands = [4, 3, 2]
-
-        return cls(
-            raster_type=detected_type,
-            band_count=result.get('band_count'),
-            dtype=result.get('dtype'),
-            colorinterp=None,  # Not in validation result, comes from rio-stac
-            rgb_bands=rgb_bands,
-            rescale=None,  # Populated later from statistics
-            colormap=colormap,
-            nodata=result.get('nodata')
-        )
-
-    @classmethod
-    def from_raster_type_params(cls, raster_type_info: Dict[str, Any]) -> 'RasterVisualizationMetadata':
-        """
-        Factory method to extract RasterVisualizationMetadata from job params raster_type dict.
-
-        This handles the flattened structure passed through job parameters:
-            {
-                "detected_type": "multispectral",
-                "band_count": 8,
-                "data_type": "uint16",
-                "optimal_cog_settings": {}
-            }
-
-        Args:
-            raster_type_info: raster_type dict from job params (NOT full validation result)
-
-        Returns:
-            RasterVisualizationMetadata with band_count and rgb_bands properly set
-        """
-        if not raster_type_info or not isinstance(raster_type_info, dict):
-            return cls()
-
-        detected_type = raster_type_info.get('detected_type', 'unknown')
-        band_count = raster_type_info.get('band_count', 0)
-        # Note: params use 'data_type', validation uses 'dtype'
-        dtype = raster_type_info.get('data_type') or raster_type_info.get('dtype')
-
-        # Determine colormap based on raster type (12 FEB 2026: expanded with domain types)
-        colormap = None
-        if detected_type == 'dem':
-            colormap = 'terrain'
-        elif detected_type in ('vegetation_index',):
-            colormap = 'rdylgn'
-        elif detected_type in ('flood_depth', 'flood_probability'):
-            colormap = 'blues'
-        elif detected_type == 'hydrology':
-            colormap = 'ylgnbu'
-        elif detected_type == 'temporal':
-            colormap = 'spectral'
-        elif detected_type == 'population':
-            colormap = 'inferno'
-        elif band_count == 1:
-            colormap = 'viridis'
-
-        # Determine RGB bands for multi-band imagery (04 JAN 2026)
-        # Critical for TiTiler to avoid dimension errors on 4+ band rasters
-        rgb_bands = None
-        if band_count == 4:
-            # RGBA - use first 3 bands
-            rgb_bands = [1, 2, 3]
-        elif band_count == 8:
-            # WorldView-2/3: use bands 5,3,2 for natural color (Red, Green, Blue)
-            rgb_bands = [5, 3, 2]
-        elif band_count >= 10:
-            # Sentinel-2/Landsat style: use bands 4,3,2 for natural color
-            rgb_bands = [4, 3, 2]
-        elif band_count > 3:
-            # Generic multi-band: use first 3 bands
-            rgb_bands = [1, 2, 3]
-
-        return cls(
-            raster_type=detected_type,
-            band_count=band_count,
-            dtype=dtype,
-            colorinterp=None,
-            rgb_bands=rgb_bands,
-            rescale=None,
-            colormap=colormap,
-            nodata=raster_type_info.get('nodata')
-        )
-
-    @classmethod
-    def from_render_config(cls, render_config, raster_type_info: Dict[str, Any]) -> 'RasterVisualizationMetadata':
-        """
-        Build from persisted RasterRenderConfig (source of truth).
-
-        This factory reads visualization parameters from the app.raster_render_configs
-        table rather than computing them transiently. STAC properties are thus
-        derived from the persisted source of truth.
-
-        Args:
-            render_config: RasterRenderConfig model instance
-            raster_type_info: raster_type dict from validation (for band_count, detected_type)
-
-        Returns:
-            RasterVisualizationMetadata populated from persisted config
-        """
-        spec = render_config.render_spec or {}
-        detected_type = raster_type_info.get('detected_type', 'unknown')
-        band_count = raster_type_info.get('band_count', 0)
-        dtype = raster_type_info.get('data_type') or raster_type_info.get('dtype')
-
-        # RGB bands logic (same as existing from_raster_type_params)
-        rgb_bands = None
-        if band_count == 4:
-            rgb_bands = [1, 2, 3]
-        elif band_count == 8:
-            rgb_bands = [5, 3, 2]
-        elif band_count >= 10:
-            rgb_bands = [4, 3, 2]
-        elif band_count > 3:
-            rgb_bands = [1, 2, 3]
-
-        rescale = None
-        if spec.get('rescale') and len(spec['rescale']) > 0:
-            rescale = {'min': spec['rescale'][0][0], 'max': spec['rescale'][0][1]}
-
-        return cls(
-            raster_type=detected_type,
-            band_count=band_count,
-            dtype=dtype,
-            colorinterp=None,
-            rgb_bands=rgb_bands,
-            rescale=rescale,
-            colormap=spec.get('colormap_name'),
-            nodata=spec.get('nodata'),
-        )
-
-    def to_stac_properties(self) -> Dict[str, Any]:
-        """
-        Convert to STAC properties dict with app:* prefix.
-
-        Returns:
-            Dict of namespaced properties (only non-None values)
-        """
-        props = {}
-        if self.raster_type:
-            props['app:raster_type'] = self.raster_type
-        if self.band_count is not None:
-            props['app:band_count'] = self.band_count
-        if self.dtype:
-            props['app:dtype'] = self.dtype
-        if self.colorinterp:
-            props['app:colorinterp'] = self.colorinterp
-        if self.rgb_bands:
-            props['app:rgb_bands'] = self.rgb_bands
-        if self.rescale:
-            props['app:rescale'] = self.rescale
-        if self.colormap:
-            props['app:colormap'] = self.colormap
-        if self.nodata is not None:
-            props['app:nodata'] = self.nodata
-        return props
-
 
 @dataclass
 class VisualizationMetadata:
@@ -477,27 +105,24 @@ class STACMetadataHelper:
     """
     Centralized STAC metadata enrichment helper.
 
-    Consolidates metadata generation for STAC collections and items across:
-    - Platform metadata (DDH identifiers) → platform:*
-    - Application metadata (job linkage) → app:*
-    - Geographic metadata (ISO3 country codes) → geo:*
-    - Visualization metadata (TiTiler URLs) → links + assets
+    V0.9 P2.6: Uses Pydantic models from core.models.stac instead of
+    old dataclasses. TiTiler URLs read from properties.renders.default.
 
-    Args:
-        iso3_service: ISO3 attribution service (creates default if None)
-        search_registrar: pgSTAC search registration service (creates default if None)
+    Consolidates metadata generation for STAC collections and items:
+    - Provenance metadata (geoetl:*) → ProvenanceProperties
+    - Platform metadata (ddh:*) → PlatformProperties
+    - Geographic metadata (geo:*) → GeoProperties (via ISO3AttributionService)
+    - Visualization metadata (TiTiler URLs) → links + assets
 
     Example:
         helper = STACMetadataHelper()
 
-        # Augment item with all metadata
         item_dict = helper.augment_item(
             item_dict=base_item,
-            bbox=[-70.7, -56.3, -70.6, -56.2],
-            container='silver-cogs',
-            blob_name='collection/tile.tif',
-            platform=PlatformMetadata(dataset_id='aerial-2024'),
-            app=AppMetadata(job_id='abc123')
+            provenance=ProvenanceProperties(job_id='abc123', epoch=4),
+            platform=PlatformProperties(dataset_id='aerial-2024'),
+            include_iso3=True,
+            include_titiler=True,
         )
     """
 
@@ -506,13 +131,6 @@ class STACMetadataHelper:
         iso3_service: Optional['ISO3AttributionService'] = None,
         search_registrar: Optional['PgSTACSearchRegistration'] = None
     ):
-        """
-        Initialize with optional service injection.
-
-        Args:
-            iso3_service: ISO3 attribution service (lazy-loaded if None)
-            search_registrar: pgSTAC search registration (lazy-loaded if None)
-        """
         self._iso3_service = iso3_service
         self._search_registrar = search_registrar
         self._config = None
@@ -542,181 +160,76 @@ class STACMetadataHelper:
         return self._search_registrar
 
     # -------------------------------------------------------------------------
-    # LOW-LEVEL BUILDERS
+    # TITILER URL GENERATION (reads from renders.default)
     # -------------------------------------------------------------------------
 
-    def build_platform_properties(self, platform: PlatformMetadata) -> Dict[str, Any]:
-        """
-        Build STAC properties from platform metadata.
-
-        Args:
-            platform: PlatformMetadata with DDH identifiers
-
-        Returns:
-            Dict of platform:* prefixed properties
-        """
-        return platform.to_stac_properties()
-
-    def build_app_properties(self, app: AppMetadata) -> Dict[str, Any]:
-        """
-        Build STAC properties from application metadata.
-
-        Args:
-            app: AppMetadata with job linkage
-
-        Returns:
-            Dict of app:* prefixed properties
-        """
-        return app.to_stac_properties()
-
-    def build_geographic_properties(
+    def _build_titiler_url_params_from_renders(
         self,
-        bbox: Optional[List[float]] = None,
-        geometry: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
-        """
-        Build STAC properties with ISO3 country attribution.
-
-        Uses ISO3AttributionService for spatial queries.
-
-        Args:
-            bbox: Bounding box [minx, miny, maxx, maxy]
-            geometry: GeoJSON geometry (alternative to bbox)
-
-        Returns:
-            Dict of geo:* prefixed properties
-        """
-        if bbox:
-            attribution = self.iso3_service.get_attribution_for_bbox(bbox)
-        elif geometry:
-            attribution = self.iso3_service.get_attribution_for_geometry(geometry)
-        else:
-            return {}
-
-        return attribution.to_stac_properties()
-
-    def build_raster_visualization_properties(
-        self,
-        raster_meta: RasterVisualizationMetadata
-    ) -> Dict[str, Any]:
-        """
-        Build STAC properties from raster visualization metadata.
-
-        Args:
-            raster_meta: RasterVisualizationMetadata with band/type info
-
-        Returns:
-            Dict of app:* prefixed properties
-        """
-        return raster_meta.to_stac_properties()
-
-    def _build_titiler_url_params(
-        self,
-        raster_meta: Optional[RasterVisualizationMetadata] = None
+        item_dict: Dict[str, Any]
     ) -> str:
         """
-        Build TiTiler URL parameters based on raster metadata.
+        Build TiTiler URL parameters from properties.renders.default.
 
-        Implements the decision tree from TITILER-URL-GUIDE.md:
-        - 1 band + float → rescale + colormap
-        - 1 band + uint8 → grayscale (no params)
-        - 3 bands RGB → no params
-        - 4+ bands → bidx=1&bidx=2&bidx=3 (or custom rgb_bands)
+        V0.9 P2.6: Reads from STAC Render Extension v2.0.0 instead of
+        custom app:* properties.
 
         Args:
-            raster_meta: Optional raster metadata for smart URL generation
+            item_dict: STAC item dict with properties.renders.default
 
         Returns:
             URL parameter string (without leading &)
         """
-        if not raster_meta:
+        renders_default = (
+            item_dict.get("properties", {})
+            .get("renders", {})
+            .get("default", {})
+        )
+
+        if not renders_default:
             return ""
 
         params = []
-        band_count = raster_meta.band_count or 0
-        dtype = raster_meta.dtype or ""
-        raster_type = raster_meta.raster_type or ""
-        colorinterp = raster_meta.colorinterp or []
 
-        # Single band handling
-        if band_count == 1:
-            # Add rescale if available
-            if raster_meta.rescale:
-                min_val = raster_meta.rescale.get('min')
-                max_val = raster_meta.rescale.get('max')
-                if min_val is not None and max_val is not None:
-                    params.append(f"rescale={min_val},{max_val}")
+        # Rescale — renders stores as [[min, max], ...] per band
+        rescale = renders_default.get("rescale")
+        if rescale:
+            for band_rescale in rescale:
+                if isinstance(band_rescale, (list, tuple)) and len(band_rescale) == 2:
+                    params.append(f"rescale={band_rescale[0]},{band_rescale[1]}")
 
-            # Add colormap based on type
-            if raster_meta.colormap:
-                params.append(f"colormap_name={raster_meta.colormap}")
-            elif raster_type == 'dem':
-                params.append("colormap_name=terrain")
-            elif dtype in ['float32', 'float64', 'int16', 'int32']:
-                params.append("colormap_name=viridis")
+        # Colormap
+        colormap = renders_default.get("colormap_name")
+        if colormap:
+            params.append(f"colormap_name={colormap}")
 
-        # Multi-band handling (3+ bands)
-        elif band_count >= 3:
-            # Use custom rgb_bands if specified
-            if raster_meta.rgb_bands:
-                for band_idx in raster_meta.rgb_bands:
-                    params.append(f"bidx={band_idx}")
+        # Band indices
+        bidx = renders_default.get("bidx")
+        if bidx:
+            for b in bidx:
+                params.append(f"bidx={b}")
 
-            # Check colorinterp for BGR ordering
-            elif len(colorinterp) >= 3:
-                if colorinterp[:3] == ['blue', 'green', 'red']:
-                    # BGR order - reorder to RGB
-                    params.extend(["bidx=3", "bidx=2", "bidx=1"])
-                elif band_count == 4 and colorinterp[3] != 'alpha':
-                    # 4th band is not alpha - exclude it
-                    params.extend(["bidx=1", "bidx=2", "bidx=3"])
-
-            # Default for 4+ band without colorinterp info
-            elif band_count >= 4 and not colorinterp:
-                # Assume first 3 bands are RGB
-                params.extend(["bidx=1", "bidx=2", "bidx=3"])
-
-            # Add rescale for non-uint8 multi-band data (04 JAN 2026)
-            # TiTiler requires one rescale param per displayed band for proper visualization
-            if dtype not in ['uint8', '']:
-                if raster_meta.rescale:
-                    # Use provided rescale values
-                    min_val = raster_meta.rescale.get('min', 0)
-                    max_val = raster_meta.rescale.get('max', 10000)
-                    rescale_str = f"{min_val},{max_val}"
-                else:
-                    # Smart defaults based on dtype (04 JAN 2026)
-                    # WorldView/satellite uint16 typically ranges 0-2000 for reflectance
-                    # Use conservative range that works for most satellite imagery
-                    if dtype == 'uint16':
-                        rescale_str = "0,2000"
-                    elif dtype in ['int16']:
-                        rescale_str = "-1000,1000"
-                    elif dtype in ['float32', 'float64']:
-                        rescale_str = "0,1"
-                    else:
-                        rescale_str = "0,10000"
-
-                # Add one rescale per displayed band (3 for RGB display)
-                num_display_bands = len(raster_meta.rgb_bands) if raster_meta.rgb_bands else 3
-                for _ in range(num_display_bands):
-                    params.append(f"rescale={rescale_str}")
+        # Nodata
+        nodata = renders_default.get("nodata")
+        if nodata is not None:
+            params.append(f"nodata={nodata}")
 
         return "&".join(params)
 
     def build_titiler_links_cog(
         self,
+        item_dict: Dict[str, Any],
         container: str,
         blob_name: str,
-        raster_meta: Optional[RasterVisualizationMetadata] = None
     ) -> Tuple[List[Dict], Dict[str, Any]]:
         """
         Generate TiTiler visualization links and assets for single COG.
 
+        V0.9 P2.6: Reads render params from item_dict properties.renders.default.
+
         Args:
+            item_dict: STAC item dict (for reading renders.default)
             container: Azure container name
             blob_name: Blob path within container
-            raster_meta: Optional raster metadata for smart URL generation
 
         Returns:
             Tuple of (links list, assets dict) for STAC item
@@ -725,8 +238,8 @@ class STACMetadataHelper:
         vsiaz_path = f"/vsiaz/{container}/{blob_name}"
         encoded = urllib.parse.quote(vsiaz_path, safe='')
 
-        # Build smart URL parameters based on raster type
-        extra_params = self._build_titiler_url_params(raster_meta)
+        # Build URL parameters from renders.default
+        extra_params = self._build_titiler_url_params_from_renders(item_dict)
         param_suffix = f"&{extra_params}" if extra_params else ""
 
         links = [
@@ -750,7 +263,7 @@ class STACMetadataHelper:
             }
         ]
 
-        # Thumbnail also uses smart params for proper rendering
+        # Thumbnail also uses render params for proper rendering
         assets = {
             'thumbnail': {
                 'href': f"{base}/cog/preview.png?url={encoded}&max_size=256{param_suffix}",
@@ -770,8 +283,6 @@ class STACMetadataHelper:
     ) -> Tuple[List[Dict], VisualizationMetadata]:
         """
         Generate TiTiler-pgSTAC visualization links for collection.
-
-        Optionally registers a pgSTAC search and returns URLs.
 
         Args:
             collection_id: STAC collection ID
@@ -797,7 +308,7 @@ class STACMetadataHelper:
                     assets=['data']
                 )
             except Exception as e:
-                logger.warning(f"   ⚠️  pgSTAC search registration failed (non-fatal): {e}")
+                logger.warning(f"   pgSTAC search registration failed (non-fatal): {e}")
 
         vis_meta = VisualizationMetadata(
             viewer_url=urls.get('viewer'),
@@ -818,31 +329,32 @@ class STACMetadataHelper:
         bbox: Optional[List[float]] = None,
         container: Optional[str] = None,
         blob_name: Optional[str] = None,
-        platform: Optional[PlatformMetadata] = None,
-        app: Optional[AppMetadata] = None,
-        raster: Optional[RasterVisualizationMetadata] = None,
+        provenance: Optional[ProvenanceProperties] = None,
+        platform: Optional[PlatformProperties] = None,
+        geo: Optional[GeoProperties] = None,
         include_iso3: bool = True,
         include_titiler: bool = True,
-        file_checksum: Optional[str] = None,  # STAC file extension (21 JAN 2026)
-        file_size: Optional[int] = None,  # STAC file extension (21 JAN 2026)
+        file_checksum: Optional[str] = None,
+        file_size: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Augment STAC item dict with all metadata categories.
 
-        This is the primary entry point for adding metadata to items.
+        V0.9 P2.6: Uses Pydantic models instead of old dataclasses.
+        TiTiler URLs read from properties.renders.default.
 
         Args:
-            item_dict: Base STAC item dictionary
+            item_dict: Base STAC item dictionary (plain dict)
             bbox: Bounding box for geographic attribution (uses item bbox if None)
             container: Azure container for TiTiler URLs
             blob_name: Blob path for TiTiler URLs
-            platform: Platform-layer metadata (DDH)
-            app: Application-layer metadata (job linkage)
-            raster: Raster visualization metadata (app:* properties + smart TiTiler URLs)
-            include_iso3: Add ISO3 country codes (default True)
+            provenance: Provenance metadata (geoetl:*)
+            platform: Platform metadata (ddh:*)
+            geo: Geographic metadata (geo:*) — overrides ISO3 lookup if provided
+            include_iso3: Look up ISO3 country codes if geo not provided (default True)
             include_titiler: Add TiTiler visualization links (default True)
-            file_checksum: SHA-256 multihash for STAC file:checksum (21 JAN 2026)
-            file_size: File size in bytes for STAC file:size (21 JAN 2026)
+            file_checksum: SHA-256 multihash for STAC file:checksum
+            file_size: File size in bytes for STAC file:size
 
         Returns:
             Augmented item_dict with additional properties, links, assets
@@ -855,34 +367,32 @@ class STACMetadataHelper:
         if bbox is None:
             bbox = item_dict.get('bbox')
 
-        # Add platform metadata
+        # Add provenance metadata (geoetl:*)
+        if provenance:
+            props = provenance.to_prefixed_dict()
+            item_dict['properties'].update(props)
+            logger.debug(f"   Added provenance metadata: {list(props.keys())}")
+
+        # Add platform metadata (ddh:*)
         if platform:
-            props = self.build_platform_properties(platform)
+            props = platform.model_dump(by_alias=True, exclude_none=True)
             item_dict['properties'].update(props)
             logger.debug(f"   Added platform metadata: {list(props.keys())}")
 
-        # Add app metadata (job linkage)
-        if app:
-            props = self.build_app_properties(app)
+        # Add geographic metadata (geo:*)
+        if geo:
+            props = geo.to_flat_dict()
             item_dict['properties'].update(props)
-            logger.debug(f"   Added app metadata: {list(props.keys())}")
-
-        # Add raster visualization metadata (app:*)
-        if raster:
-            props = self.build_raster_visualization_properties(raster)
-            item_dict['properties'].update(props)
-            logger.debug(f"   Added raster visualization metadata: {list(props.keys())}")
-
-        # Add geographic metadata (ISO3)
-        if include_iso3 and bbox:
-            props = self.build_geographic_properties(bbox=bbox)
+            logger.debug(f"   Added geographic metadata: {list(props.keys())}")
+        elif include_iso3 and bbox:
+            props = self._build_geographic_properties(bbox=bbox)
             if props:
                 item_dict['properties'].update(props)
-                logger.debug(f"   Added geographic metadata: {list(props.keys())}")
+                logger.debug(f"   Added geographic metadata (ISO3 lookup): {list(props.keys())}")
 
-        # Add TiTiler visualization (with smart URLs if raster metadata provided)
+        # Add TiTiler visualization (reads from renders.default)
         if include_titiler and container and blob_name:
-            links, assets = self.build_titiler_links_cog(container, blob_name, raster)
+            links, assets = self.build_titiler_links_cog(item_dict, container, blob_name)
 
             if 'links' not in item_dict:
                 item_dict['links'] = []
@@ -894,34 +404,9 @@ class STACMetadataHelper:
 
             logger.debug(f"   Added TiTiler links: {[l['rel'] for l in links]}")
 
-        # Add STAC file extension properties to data asset (21 JAN 2026)
-        # Per https://github.com/stac-extensions/file
+        # Add STAC file extension properties to data asset
         if file_checksum or file_size:
-            if 'assets' not in item_dict:
-                item_dict['assets'] = {}
-
-            # Ensure 'data' asset exists (rio-stac creates it, but be defensive)
-            if 'data' not in item_dict['assets']:
-                item_dict['assets']['data'] = {
-                    'href': f"/vsiaz/{container}/{blob_name}" if container and blob_name else '',
-                    'type': 'image/tiff; application=geotiff; profile=cloud-optimized',
-                    'roles': ['data'],
-                }
-
-            # Add file extension properties
-            if file_checksum:
-                item_dict['assets']['data']['file:checksum'] = file_checksum
-            if file_size:
-                item_dict['assets']['data']['file:size'] = file_size
-
-            # Add file extension to stac_extensions if not present
-            file_extension_url = 'https://stac-extensions.github.io/file/v2.1.0/schema.json'
-            if 'stac_extensions' not in item_dict:
-                item_dict['stac_extensions'] = []
-            if file_extension_url not in item_dict['stac_extensions']:
-                item_dict['stac_extensions'].append(file_extension_url)
-
-            logger.debug(f"   Added file extension: checksum={file_checksum[:20] if file_checksum else None}..., size={file_size}")
+            self._add_file_extension(item_dict, container, blob_name, file_checksum, file_size)
 
         return item_dict
 
@@ -929,19 +414,21 @@ class STACMetadataHelper:
         self,
         collection_dict: Dict[str, Any],
         bbox: Optional[List[float]] = None,
-        platform: Optional[PlatformMetadata] = None,
-        app: Optional[AppMetadata] = None,
+        provenance: Optional[ProvenanceProperties] = None,
+        platform: Optional[PlatformProperties] = None,
         include_iso3: bool = True,
         register_search: bool = True
     ) -> Tuple[Dict[str, Any], VisualizationMetadata]:
         """
         Augment STAC collection dict with metadata and visualization.
 
+        V0.9 P2.6: platform:* → ddh:*, app:* → geoetl:*
+
         Args:
             collection_dict: Base STAC collection dictionary
             bbox: Collection bounding box
-            platform: Platform-layer metadata
-            app: Application-layer metadata
+            provenance: Provenance metadata (geoetl:*)
+            platform: Platform metadata (ddh:*)
             include_iso3: Add ISO3 country codes to summaries
             register_search: Register pgSTAC search for visualization
 
@@ -961,25 +448,21 @@ class STACMetadataHelper:
         # Initialize summaries
         summaries = collection_dict.get('summaries', {})
 
-        # Add platform metadata to summaries
+        # Add platform metadata to summaries (ddh:*)
         if platform:
-            if platform.dataset_id:
-                summaries['platform:dataset_id'] = [platform.dataset_id]
-            if platform.access_level:
-                summaries['platform:access_level'] = [platform.access_level]
-            if platform.client_id:
-                summaries['platform:client'] = [platform.client_id]
+            platform_props = platform.model_dump(by_alias=True, exclude_none=True)
+            for key, val in platform_props.items():
+                summaries[key] = [val]
 
-        # Add app metadata to summaries
-        if app:
-            if app.job_id:
-                summaries['app:job_id'] = [app.job_id]
-            if app.job_type:
-                summaries['app:job_type'] = [app.job_type]
+        # Add provenance metadata to summaries (geoetl:*)
+        if provenance:
+            prov_props = provenance.to_prefixed_dict()
+            for key, val in prov_props.items():
+                summaries[key] = [val]
 
         # Add ISO3 to summaries
         if include_iso3 and bbox:
-            props = self.build_geographic_properties(bbox=bbox)
+            props = self._build_geographic_properties(bbox=bbox)
             if props.get('geo:iso3'):
                 summaries['geo:iso3'] = props['geo:iso3']
             if props.get('geo:primary_iso3'):
@@ -1008,12 +491,70 @@ class STACMetadataHelper:
 
         return collection_dict, vis_meta
 
+    # -------------------------------------------------------------------------
+    # INTERNAL HELPERS
+    # -------------------------------------------------------------------------
+
+    def _build_geographic_properties(
+        self,
+        bbox: Optional[List[float]] = None,
+        geometry: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Build geo:* properties via ISO3AttributionService lookup.
+
+        Args:
+            bbox: Bounding box [minx, miny, maxx, maxy]
+            geometry: GeoJSON geometry (alternative to bbox)
+
+        Returns:
+            Dict of geo:* prefixed properties
+        """
+        if bbox:
+            attribution = self.iso3_service.get_attribution_for_bbox(bbox)
+        elif geometry:
+            attribution = self.iso3_service.get_attribution_for_geometry(geometry)
+        else:
+            return {}
+
+        return attribution.to_stac_properties()
+
+    @staticmethod
+    def _add_file_extension(
+        item_dict: Dict[str, Any],
+        container: Optional[str],
+        blob_name: Optional[str],
+        file_checksum: Optional[str],
+        file_size: Optional[int],
+    ) -> None:
+        """Add STAC file extension properties to data asset."""
+        if 'assets' not in item_dict:
+            item_dict['assets'] = {}
+
+        # Ensure 'data' asset exists
+        if 'data' not in item_dict['assets']:
+            item_dict['assets']['data'] = {
+                'href': f"/vsiaz/{container}/{blob_name}" if container and blob_name else '',
+                'type': 'image/tiff; application=geotiff; profile=cloud-optimized',
+                'roles': ['data'],
+            }
+
+        if file_checksum:
+            item_dict['assets']['data']['file:checksum'] = file_checksum
+        if file_size:
+            item_dict['assets']['data']['file:size'] = file_size
+
+        # Add file extension URL if not present
+        if 'stac_extensions' not in item_dict:
+            item_dict['stac_extensions'] = []
+        if STAC_EXT_FILE not in item_dict['stac_extensions']:
+            item_dict['stac_extensions'].append(STAC_EXT_FILE)
+
+        logger.debug(f"   Added file extension: checksum={file_checksum[:20] if file_checksum else None}..., size={file_size}")
+
 
 # Export classes
 __all__ = [
     'STACMetadataHelper',
-    'PlatformMetadata',
-    'AppMetadata',
     'VisualizationMetadata',
-    'RasterVisualizationMetadata'
 ]

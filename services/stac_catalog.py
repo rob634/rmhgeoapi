@@ -253,44 +253,45 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
             logger.info(f"📡 STEP 3: Starting STAC extraction from blob (this may take 30-60s)...")
             extract_start = datetime.utcnow()
 
-            # STEP 3A: Extract platform, app, and raster metadata for STAC enrichment (25 NOV 2025, updated 04 JAN 2026)
+            # STEP 3A: Extract platform and provenance metadata for STAC enrichment
+            # V0.9 P2.6: Uses Pydantic models from core.models.stac
             platform_meta = None
             app_meta = None
-            raster_meta = None
             try:
-                from services.stac_metadata_helper import PlatformMetadata, AppMetadata, RasterVisualizationMetadata
-                platform_meta = PlatformMetadata.from_job_params(params)
-                app_meta = AppMetadata(
-                    job_id=params.get('_job_id'),
-                    job_type=params.get('_job_type', 'stac_catalog_container')
-                )
-                # Create raster visualization metadata (12 FEB 2026)
-                # Prefer persisted render_config (source of truth) when provided by handler.
-                # Falls back to transient from_raster_type_params() for backward compatibility.
-                render_config = params.get('_render_config')
+                from core.models.stac import PlatformProperties, ProvenanceProperties
+                # Build PlatformProperties (ddh:*) from job params
+                ddh_fields = {
+                    'dataset_id': params.get('dataset_id'),
+                    'resource_id': params.get('resource_id'),
+                    'version_id': params.get('version_id'),
+                    'access_level': params.get('access_level'),
+                }
+                # Check nested platform_metadata dict too
+                nested = params.get('platform_metadata', {})
+                if nested:
+                    ddh_fields = {k: nested.get(k) or v for k, v in ddh_fields.items()}
+                if any(ddh_fields.values()):
+                    platform_meta = PlatformProperties(**{k: v for k, v in ddh_fields.items() if v})
+
+                # Build ProvenanceProperties (geoetl:*) for job traceability
                 raster_type_info = params.get('raster_type')
-                if render_config and raster_type_info and isinstance(raster_type_info, dict):
-                    raster_meta = RasterVisualizationMetadata.from_render_config(render_config, raster_type_info)
-                    logger.debug(f"   Step 3A: Raster metadata from render_config - type={raster_meta.raster_type}, "
-                                f"colormap={raster_meta.colormap}, rgb_bands={raster_meta.rgb_bands}")
-                elif raster_type_info and isinstance(raster_type_info, dict):
-                    raster_meta = RasterVisualizationMetadata.from_raster_type_params(raster_type_info)
-                    logger.debug(f"   Step 3A: Raster metadata from params - type={raster_meta.raster_type}, "
-                                f"bands={raster_meta.band_count}, rgb_bands={raster_meta.rgb_bands}")
-                logger.debug(f"   Step 3A: Platform/App metadata extracted - job_id={params.get('_job_id')}")
+                detected_type = raster_type_info.get('detected_type') if isinstance(raster_type_info, dict) else None
+                app_meta = ProvenanceProperties(
+                    job_id=params.get('_job_id'),
+                    raster_type=detected_type,
+                )
+                logger.debug(f"   Step 3A: Platform/Provenance metadata extracted - job_id={params.get('_job_id')}")
             except Exception as meta_err:
                 logger.warning(f"   Step 3A: Metadata extraction failed (non-critical): {meta_err}")
 
-            # Pass item_id if provided, otherwise auto-generate
+            # V0.9 P2.6: Renders are built inside extract_item_from_blob, no raster_meta needed
             item = stac_service.extract_item_from_blob(
                 container=container_name,
                 blob_name=blob_name,
                 collection_id=collection_id,
-                item_id=item_id,  # Will be None if not provided, service will auto-generate
-                platform_meta=platform_meta,
-                app_meta=app_meta,
-                raster_meta=raster_meta,  # For DEM colormap in preview URLs (01 JAN 2026)
-                # STAC file extension: checksum and size (21 JAN 2026)
+                item_id=item_id,
+                platform_meta=platform_meta,  # PlatformProperties (duck-typed via getattr)
+                app_meta=app_meta,  # ProvenanceProperties (duck-typed: has job_id)
                 file_checksum=params.get('file_checksum'),
                 file_size=params.get('file_size'),
             )

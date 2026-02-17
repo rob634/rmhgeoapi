@@ -87,12 +87,12 @@ class PgStacRepository:
     # COLLECTION OPERATIONS
     # =========================================================================
 
-    def insert_collection(self, collection: 'pystac.Collection') -> str:
+    def insert_collection(self, collection) -> str:
         """
         Insert STAC collection into PgSTAC.
 
         Args:
-            collection: pystac.Collection object
+            collection: STAC collection as dict, pystac.Collection, or stac_pydantic model
 
         Returns:
             Collection ID (string)
@@ -100,25 +100,28 @@ class PgStacRepository:
         Raises:
             RuntimeError: If collection insert fails
             ValueError: If collection is invalid
-
-        Note:
-            Uses PgSTAC's insert_collection() SQL function which handles:
-            - Collection validation
-            - Partition creation for items
-            - Upsert semantics (updates if exists)
         """
-        if not pystac:
-            raise ImportError("pystac library required for collection operations")
+        # V0.9 P3.2: Accept dict (Epoch 5 pattern), pystac.Collection, or Pydantic model
+        is_dict = isinstance(collection, dict)
+        is_pystac = pystac and isinstance(collection, pystac.Collection)
 
-        if not isinstance(collection, pystac.Collection):
-            raise ValueError(f"Expected pystac.Collection, got {type(collection).__name__}")
+        if is_dict:
+            collection_dict = collection
+            collection_id = collection.get('id')
+            if not collection_id:
+                raise ValueError("Collection dict must have 'id' key")
+        elif is_pystac:
+            collection_dict = collection.to_dict()
+            collection_id = collection.id
+        elif hasattr(collection, 'model_dump'):
+            collection_dict = collection.model_dump(mode='json', by_alias=True)
+            collection_id = collection_dict.get('id')
+        else:
+            raise ValueError(f"Expected dict, pystac.Collection, or Pydantic model, got {type(collection).__name__}")
 
-        collection_id = collection.id
         logger.info(f"🔄 Inserting collection into PgSTAC: {collection_id}")
 
         try:
-            # Convert collection to dict and serialize to JSON
-            collection_dict = collection.to_dict()
             collection_json = json.dumps(collection_dict)
 
             with self._pg_repo._get_connection() as conn:
@@ -567,8 +570,8 @@ class PgStacRepository:
         """
         Search for STAC item by DDH platform identifiers.
 
-        Uses the platform:* properties stored in STAC item properties.
-        This enables B2B catalog lookup where DDH can find STAC items
+        V0.9 P3.3: Uses ddh:* namespace (was platform:*).
+        Enables B2B catalog lookup where DDH can find STAC items
         using their own identifiers without knowing our internal STAC IDs.
 
         Args:
@@ -580,21 +583,17 @@ class PgStacRepository:
             STAC item dict if found, None otherwise
 
         Note:
-            This query uses JSONB containment operator (@>) which can leverage
-            GIN indexes if available on pgstac.items.content.
-
-        Created: 16 JAN 2026 - F12.8 B2B STAC Catalog Access
+            Uses JSONB containment operator (@>) which leverages
+            GIN indexes on pgstac.items.content.
         """
         logger.debug(
-            f"🔍 Searching by platform IDs: dataset={dataset_id}, "
+            f"🔍 Searching by DDH IDs: dataset={dataset_id}, "
             f"resource={resource_id}, version={version_id}"
         )
 
         try:
             with self._pg_repo._get_connection() as conn:
                 with conn.cursor() as cur:
-                    # Use JSONB containment for efficient matching
-                    # This allows the query to use GIN indexes if available
                     cur.execute(
                         """
                         SELECT content, collection, id
@@ -603,9 +602,9 @@ class PgStacRepository:
                         LIMIT 1
                         """,
                         (json.dumps({
-                            "platform:dataset_id": dataset_id,
-                            "platform:resource_id": resource_id,
-                            "platform:version_id": version_id
+                            "ddh:dataset_id": dataset_id,
+                            "ddh:resource_id": resource_id,
+                            "ddh:version_id": version_id
                         }),)
                     )
                     result = cur.fetchone()
@@ -632,9 +631,8 @@ class PgStacRepository:
         """
         Get all STAC items for a DDH dataset.
 
-        Returns all items that have the specified platform:dataset_id,
-        regardless of resource_id or version_id. Useful for finding
-        all versions/resources within a DDH dataset.
+        V0.9 P3.3: Uses ddh:dataset_id (was platform:dataset_id).
+        Returns all items regardless of resource_id or version_id.
 
         Args:
             dataset_id: DDH dataset identifier
@@ -642,24 +640,17 @@ class PgStacRepository:
 
         Returns:
             List of STAC item dicts (with id and collection added)
-
-        Note:
-            pgstac stores id and collection as table columns, not in content.
-            We merge them into the returned dict for convenience.
-
-        Created: 16 JAN 2026 - F12.8 B2B STAC Catalog Access
         """
-        logger.debug(f"🔍 Getting items for platform dataset: {dataset_id}")
+        logger.debug(f"🔍 Getting items for DDH dataset: {dataset_id}")
 
         try:
             with self._pg_repo._get_connection() as conn:
                 with conn.cursor() as cur:
-                    # Include id and collection columns (not in content JSON)
                     cur.execute(
                         """
                         SELECT id, collection, content
                         FROM pgstac.items
-                        WHERE content->'properties'->>'platform:dataset_id' = %s
+                        WHERE content->'properties'->>'ddh:dataset_id' = %s
                         ORDER BY content->'properties'->>'datetime' DESC
                         LIMIT %s
                         """,

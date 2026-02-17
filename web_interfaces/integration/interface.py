@@ -2485,10 +2485,15 @@ class PlatformSubmitIntegrationInterface(BaseInterface):
                             <div class="step-icon">🔓</div>
                             <div class="step-content">
                                 <div class="step-title">Approve (Activate)</div>
-                                <div class="step-desc">POST /api/platform/approve with request_id or job_id</div>
+                                <div class="step-desc">POST /api/platform/approve with request_id, version_id (required for drafts), and previous_version_id (for lineage)</div>
                             </div>
                         </div>
                         <div class="classification-note">
+                            <strong>Version Assignment:</strong>
+                            <ul>
+                                <li>Draft assets (submitted without version_id) require <code>version_id</code> at approval</li>
+                                <li>Use <code>previous_version_id</code> to chain lineage (v1.0 → v2.0)</li>
+                            </ul>
                             <strong>Classification Behavior:</strong>
                             <ul>
                                 <li><span class="access-level ouo">OUO</span> Updates STAC metadata, data stays internal</li>
@@ -2504,12 +2509,15 @@ class PlatformSubmitIntegrationInterface(BaseInterface):
                             <button class="copy-btn" onclick="copyCurl('curl-approve')">Copy</button>
                         </div>
                         <pre class="curl-code" id="curl-approve"><span class="comment"># Approve using request_id from submit response</span>
+<span class="comment"># version_id is REQUIRED for draft assets (submitted without version)</span>
 <span class="cmd">curl</span> -X POST \\
   <span class="url">"{API_BASE_URL}/api/platform/approve"</span> \\
   -H <span class="string">"Content-Type: application/json"</span> \\
   -d '{
     <span class="key">"request_id"</span>: <span class="string">"<span id="curl-approve-request-id">{request_id}</span>"</span>,
     <span class="key">"reviewer"</span>: <span class="string">"user@worldbank.org"</span>,
+    <span class="key">"version_id"</span>: <span class="string">"v1.0"</span>,
+    <span class="key">"previous_version_id"</span>: <span class="string">""</span>,
     <span class="key">"notes"</span>: <span class="string">"Data quality verified"</span>
   }'
 

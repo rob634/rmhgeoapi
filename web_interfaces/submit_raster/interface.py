@@ -331,9 +331,6 @@ class SubmitRasterInterface(BaseInterface):
             if collection_id:
                 processing_options['collection_id'] = collection_id
 
-            # Docker worker always used for GDAL operations (06 FEB 2026)
-            processing_options['processing_mode'] = 'docker'
-
             # Overwrite existing data (22 JAN 2026)
             overwrite = get_param('overwrite')
             if overwrite == 'true':  # HTML checkbox sends value="true" when checked
@@ -422,18 +419,6 @@ class SubmitRasterInterface(BaseInterface):
         else:
             title = "Request Processed"
 
-        # Check if Docker mode was used (19 JAN 2026)
-        processing_options = payload.get('processing_options', {})
-        is_docker = processing_options.get('processing_mode') == 'docker'
-        processing_mode_row = ''
-        if is_docker:
-            processing_mode_row = '''
-                <div class="detail-row">
-                    <span class="detail-label">Processing Mode</span>
-                    <span class="detail-value" style="color: #2563eb; font-weight: 600;">Docker Worker</span>
-                </div>
-            '''
-
         return f'''
         <div class="submit-result success">
             <div class="result-icon">✅</div>
@@ -459,7 +444,6 @@ class SubmitRasterInterface(BaseInterface):
                     <span class="detail-label">Source File</span>
                     <span class="detail-value">{payload.get('file_name', 'N/A')}</span>
                 </div>
-                {processing_mode_row}
             </div>
             <div class="result-actions">
                 <a href="/api/interface/tasks?job_id={job_id}" class="btn btn-primary">Workflow Monitor</a>

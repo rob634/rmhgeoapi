@@ -70,6 +70,17 @@ from .platform import (
     PlatformRequest
 )
 
+# Typed processing options (17 FEB 2026 - Platform Pre-Flight Type Safety)
+from .processing_options import (
+    OutputTier,
+    RasterType,
+    CollectionRasterType,
+    BaseProcessingOptions,
+    VectorProcessingOptions,
+    RasterProcessingOptions,
+    RasterCollectionProcessingOptions,
+)
+
 # Janitor models
 from .janitor import (
     JanitorRun,
@@ -251,6 +262,15 @@ __all__ = [
     'DataType',
     'OperationType',
     'PlatformRequest',
+
+    # Typed processing options (17 FEB 2026)
+    'OutputTier',
+    'RasterType',
+    'CollectionRasterType',
+    'BaseProcessingOptions',
+    'VectorProcessingOptions',
+    'RasterProcessingOptions',
+    'RasterCollectionProcessingOptions',
 
     # Janitor models
     'JanitorRun',

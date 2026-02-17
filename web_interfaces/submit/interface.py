@@ -292,7 +292,7 @@ class UnifiedSubmitInterface(BaseInterface):
             data_type = get_param('data_type', 'raster')
             dataset_id = get_param('dataset_id')
             resource_id = get_param('resource_id')
-            version_id = get_param('version_id', 'v1.0')
+            version_id = get_param('version_id') or None  # None = draft mode
             container_name = get_param('container_name')
 
             # Validate basic fields
@@ -340,10 +340,11 @@ class UnifiedSubmitInterface(BaseInterface):
             platform_payload = {
                 'dataset_id': dataset_id,
                 'resource_id': resource_id,
-                'version_id': version_id,
                 'container_name': container_name,
                 'file_name': file_name
             }
+            if version_id:
+                platform_payload['version_id'] = version_id
 
             # Set data_type for API (raster_collection is detected by list)
             if data_type == 'vector':
@@ -391,9 +392,6 @@ class UnifiedSubmitInterface(BaseInterface):
                 input_crs = get_param('input_crs')
                 if input_crs:
                     processing_options['crs'] = input_crs
-
-                # Docker worker always used for GDAL operations (06 FEB 2026)
-                processing_options['processing_mode'] = 'docker'
 
             # Vector-specific (CSV columns)
             if data_type == 'vector':
@@ -455,7 +453,7 @@ class UnifiedSubmitInterface(BaseInterface):
                             'info': {
                                 'dataset_id': dataset_id,
                                 'resource_id': resource_id,
-                                'version_id': version_id,
+                                'version_id': version_id or '(draft)',
                                 'data_type': data_type,
                                 'file_count': len(file_name) if isinstance(file_name, list) else 1,
                                 'lineage_exists': lineage_exists,
@@ -520,7 +518,7 @@ class UnifiedSubmitInterface(BaseInterface):
                     </div>
                     <div class="info-row">
                         <span class="info-label">Version:</span>
-                        <span class="info-value">{info.get('version_id', 'v1.0')}</span>
+                        <span class="info-value">{info.get('version_id', '(draft)')}</span>
                     </div>
                     <div class="info-row">
                         <span class="info-label">Data Type:</span>
@@ -592,7 +590,7 @@ class UnifiedSubmitInterface(BaseInterface):
             data_type = get_param('data_type', 'raster')
             dataset_id = get_param('dataset_id')
             resource_id = get_param('resource_id')
-            version_id = get_param('version_id', 'v1.0')
+            version_id = get_param('version_id') or None  # None = draft mode
             container_name = get_param('container_name')
 
             # Basic validation
@@ -620,10 +618,11 @@ class UnifiedSubmitInterface(BaseInterface):
             platform_payload = {
                 'dataset_id': dataset_id,
                 'resource_id': resource_id,
-                'version_id': version_id,
                 'container_name': container_name,
                 'file_name': file_name
             }
+            if version_id:
+                platform_payload['version_id'] = version_id
 
             if data_type == 'vector':
                 platform_payload['data_type'] = 'vector'
@@ -668,9 +667,6 @@ class UnifiedSubmitInterface(BaseInterface):
                 input_crs = get_param('input_crs')
                 if input_crs:
                     processing_options['crs'] = input_crs
-
-                # Docker worker always used for GDAL operations (06 FEB 2026)
-                processing_options['processing_mode'] = 'docker'
 
             if data_type == 'vector':
                 lat_name = get_param('lat_name')
@@ -781,7 +777,7 @@ class UnifiedSubmitInterface(BaseInterface):
                 </div>
                 <div class="detail-row">
                     <span class="detail-label">DDH Identifier</span>
-                    <span class="detail-value">{payload.get('dataset_id')}/{payload.get('resource_id')}/{payload.get('version_id')}</span>
+                    <span class="detail-value">{payload.get('dataset_id')}/{payload.get('resource_id')}/{payload.get('version_id', '(draft)')}</span>
                 </div>
                 <div class="detail-row">
                     <span class="detail-label">File(s)</span>
@@ -986,10 +982,11 @@ class UnifiedSubmitInterface(BaseInterface):
                                            pattern="[a-z0-9][a-z0-9-]*[a-z0-9]">
                                 </div>
                                 <div class="form-group">
-                                    <label for="version_id">Version ID</label>
+                                    <label for="version_id">Version ID (optional)</label>
                                     <input type="text" id="version_id" name="version_id"
-                                           value="v1.0"
-                                           placeholder="e.g., v1.0">
+                                           value=""
+                                           placeholder="e.g., v1.0 (leave blank for draft)">
+                                    <span class="field-hint">Assigned at approval if left blank (draft mode)</span>
                                 </div>
                             </div>
                             <div class="form-row">
@@ -2344,7 +2341,7 @@ class UnifiedSubmitInterface(BaseInterface):
             // Clear form
             document.getElementById('dataset_id').value = '';
             document.getElementById('resource_id').value = '';
-            document.getElementById('version_id').value = 'v1.0';
+            document.getElementById('version_id').value = '';
             document.getElementById('previous_version_id').value = '';
             document.getElementById('collection_id').value = '';
             document.getElementById('title').value = '';
@@ -2360,7 +2357,7 @@ class UnifiedSubmitInterface(BaseInterface):
         function generateCurl() {{
             const datasetId = document.getElementById('dataset_id').value;
             const resourceId = document.getElementById('resource_id').value;
-            const versionId = document.getElementById('version_id').value || 'v1.0';
+            const versionId = document.getElementById('version_id').value;
             const containerName = document.getElementById('container_name').value;
 
             if (!datasetId || !resourceId) {{
@@ -2384,11 +2381,13 @@ class UnifiedSubmitInterface(BaseInterface):
             const payload = {{
                 dataset_id: datasetId,
                 resource_id: resourceId,
-                version_id: versionId,
                 data_type: currentDataType === 'vector' ? 'vector' : 'raster',
                 container_name: containerName,
                 file_name: fileName
             }};
+
+            // Version ID (optional — omit for draft mode)
+            if (versionId) payload.version_id = versionId;
 
             // Previous version (for lineage tracking)
             const previousVersionId = document.getElementById('previous_version_id').value;

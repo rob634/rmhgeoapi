@@ -96,11 +96,13 @@ def _handle_overwrite_unpublish(existing_request: ApiRequest, platform_repo: Pla
     logger.info(f"Overwrite: data_type={data_type}, request_id={existing_request.request_id[:16]}")
 
     # Log what the handler will do (informational only)
+    # version_id may be empty string for draft assets
+    version_id = existing_request.version_id or None
     if data_type == "vector":
         table_name = generate_table_name(
             existing_request.dataset_id,
             existing_request.resource_id,
-            existing_request.version_id
+            version_id
         )
         logger.info(f"Overwrite vector: handler will drop table {table_name} directly")
 
@@ -108,7 +110,7 @@ def _handle_overwrite_unpublish(existing_request: ApiRequest, platform_repo: Pla
         stac_item_id = generate_stac_item_id(
             existing_request.dataset_id,
             existing_request.resource_id,
-            existing_request.version_id
+            version_id
         )
         logger.info(f"Overwrite raster: handler will compare checksums for {stac_item_id}")
         # Handler will:
@@ -212,10 +214,14 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
             platform_req.version_id
         )
 
+        # Draft mode detection (17 FEB 2026): version_id deferred to approve
+        is_draft = platform_req.version_id is None
+
         logger.info(f"Processing Platform request: {request_id[:16]}...")
         logger.info(f"  Dataset: {platform_req.dataset_id}")
         logger.info(f"  Resource: {platform_req.resource_id}")
-        logger.info(f"  Version: {platform_req.version_id}")
+        logger.info(f"  Version: {platform_req.version_id or '(draft)'}")
+        logger.info(f"  Draft mode: {is_draft}")
         logger.info(f"  Data type: {platform_req.data_type.value}")
         logger.info(f"  Operation: {platform_req.operation.value}")
 
@@ -223,7 +229,7 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
         # If processing_options.overwrite=true, unpublish existing and reprocess (21 JAN 2026)
         platform_repo = PlatformRepository()
         existing = platform_repo.get_request(request_id)
-        overwrite = platform_req.processing_options.get('overwrite', False) if platform_req.processing_options else False
+        overwrite = platform_req.processing_options.overwrite
 
         # Extract optional clearance_level (V0.8 - 29 JAN 2026)
         # Most assets start UNCLEARED and are cleared at approval time.
@@ -282,68 +288,98 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
             submitted_by = req_body.get('submitted_by') or req.headers.get('X-Submitted-By')
 
             # Build platform_refs from DDH request fields
+            # Draft mode (17 FEB 2026): omit version_id when not provided
             platform_refs = {
                 "dataset_id": platform_req.dataset_id,
                 "resource_id": platform_req.resource_id,
-                "version_id": platform_req.version_id
             }
+            if platform_req.version_id:
+                platform_refs["version_id"] = platform_req.version_id
 
             # =====================================================================
             # V0.8 RELEASE CONTROL: Version Lineage Validation (31 JAN 2026)
             # V0.8.16: Approval-aware overwrite validation (09 FEB 2026)
-            # Validate previous_version_id before allowing job creation.
-            # Prevents race conditions where two clients submit v2.0 concurrently.
-            # Blocks overwrite if asset is APPROVED (must revoke first).
+            # V0.9+: Draft mode (17 FEB 2026) — skip lineage validation when
+            #   no version_id. Lineage validation deferred to approve/ stage.
             # =====================================================================
-            validation_result = validate_version_lineage(
-                platform_id="ddh",
-                platform_refs=platform_refs,
-                previous_version_id=platform_req.previous_version_id,
-                asset_service=asset_service,
-                overwrite=overwrite  # V0.8.16: Pass overwrite for approval check
-            )
+            lineage_id = None
+            version_ordinal = 1
+            previous_asset_id = None
+            validation_result = None
 
-            if dry_run:
-                # Return validation result without creating job
-                # job_type already translated above (line 264)
-                return func.HttpResponse(
-                    json.dumps({
-                        "valid": validation_result.valid,
-                        "dry_run": True,
-                        "request_id": request_id,
-                        "would_create_job_type": job_type,
-                        "lineage_state": {
-                            "lineage_id": validation_result.lineage_id,
-                            "lineage_exists": validation_result.lineage_exists,
-                            "current_latest": validation_result.current_latest
-                        },
-                        "validation": {
-                            "data_type_detected": platform_req.data_type.value,
-                            "previous_version_valid": validation_result.valid
-                        },
-                        "warnings": validation_result.warnings,
-                        "suggested_params": validation_result.suggested_params
-                    }),
-                    status_code=200,
-                    mimetype="application/json"
+            if is_draft:
+                # Draft mode: compute lineage_id for grouping but skip validation
+                from core.models.asset import GeospatialAsset as _GA
+                lineage_id = _GA.generate_lineage_id("ddh", platform_refs, ["dataset_id", "resource_id"])
+                logger.info(f"  Draft mode: lineage validation deferred to approve. lineage_id={lineage_id[:16]}...")
+
+                if dry_run:
+                    return func.HttpResponse(
+                        json.dumps({
+                            "valid": True,
+                            "dry_run": True,
+                            "draft_mode": True,
+                            "request_id": request_id,
+                            "would_create_job_type": job_type,
+                            "lineage_state": {
+                                "lineage_id": lineage_id,
+                                "lineage_exists": False,
+                            },
+                            "validation": {
+                                "data_type_detected": platform_req.data_type.value,
+                                "note": "Draft mode — version lineage validation deferred to approve"
+                            },
+                            "warnings": [],
+                            "suggested_params": {"version_ordinal": 1}
+                        }),
+                        status_code=200,
+                        mimetype="application/json"
+                    )
+            else:
+                # Versioned submit: run full lineage validation (existing behavior)
+                validation_result = validate_version_lineage(
+                    platform_id="ddh",
+                    platform_refs=platform_refs,
+                    previous_version_id=platform_req.previous_version_id,
+                    asset_service=asset_service,
+                    overwrite=overwrite  # V0.8.16: Pass overwrite for approval check
                 )
 
-            # Not dry_run - enforce validation before creating job
-            if not validation_result.valid:
-                logger.warning(f"Version validation failed: {validation_result.warnings}")
-                return validation_error(validation_result.warnings[0])
+                if dry_run:
+                    return func.HttpResponse(
+                        json.dumps({
+                            "valid": validation_result.valid,
+                            "dry_run": True,
+                            "request_id": request_id,
+                            "would_create_job_type": job_type,
+                            "lineage_state": {
+                                "lineage_id": validation_result.lineage_id,
+                                "lineage_exists": validation_result.lineage_exists,
+                                "current_latest": validation_result.current_latest
+                            },
+                            "validation": {
+                                "data_type_detected": platform_req.data_type.value,
+                                "previous_version_valid": validation_result.valid
+                            },
+                            "warnings": validation_result.warnings,
+                            "suggested_params": validation_result.suggested_params
+                        }),
+                        status_code=200,
+                        mimetype="application/json"
+                    )
 
-            # =====================================================================
-            # V0.8.4.1 RELEASE CONTROL: Lineage wiring (30 JAN 2026)
-            # Use lineage state from validation result
-            # =====================================================================
-            lineage_id = validation_result.lineage_id
-            version_ordinal = validation_result.suggested_params.get('version_ordinal', 1)
-            previous_asset_id = None
+                # Not dry_run - enforce validation before creating job
+                if not validation_result.valid:
+                    logger.warning(f"Version validation failed: {validation_result.warnings}")
+                    return validation_error(validation_result.warnings[0])
 
-            # Get previous_asset_id from current_latest if exists
-            if validation_result.current_latest:
-                previous_asset_id = validation_result.current_latest.get('asset_id')
+                # Use lineage state from validation result
+                lineage_id = validation_result.lineage_id
+                version_ordinal = validation_result.suggested_params.get('version_ordinal', 1)
+
+                # Get previous_asset_id from current_latest if exists
+                if validation_result.current_latest:
+                    previous_asset_id = validation_result.current_latest.get('asset_id')
 
             logger.info(f"  Lineage: {lineage_id[:16]}... ordinal={version_ordinal}, prev={previous_asset_id[:16] if previous_asset_id else 'None'}")
 
@@ -354,7 +390,7 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                 stac_item_id=job_params.get('stac_item_id', generate_stac_item_id(
                     platform_req.dataset_id,
                     platform_req.resource_id,
-                    platform_req.version_id
+                    platform_req.version_id  # None for drafts → "draft" placeholder
                 )),
                 stac_collection_id=job_params.get('collection_id', platform_req.dataset_id.lower()),
                 table_name=job_params.get('table_name') if platform_req.data_type.value == 'vector' else None,
@@ -402,7 +438,7 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
             request_id=request_id,
             dataset_id=platform_req.dataset_id,
             resource_id=platform_req.resource_id,
-            version_id=platform_req.version_id,
+            version_id=platform_req.version_id or "",  # Empty string for drafts (DB column NOT NULL)
             job_id=job_id,
             data_type=platform_req.data_type.value,
             asset_id=job_params.get('asset_id'),  # FK to GeospatialAsset

@@ -147,7 +147,9 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
         "request_id": "a3f2c1b8...",           // Or by Platform request ID
         "reviewer": "user@example.com",        // Required: Who is approving
         "clearance_level": "ouo",              // Required: "ouo" or "public"
-        "notes": "Looks good"                  // Optional: Review notes
+        "notes": "Looks good",                 // Optional: Review notes
+        "version_id": "v1.0",                  // Required if asset is draft (no version_id)
+        "previous_version_id": "v0.9"          // Required if lineage exists (v1→v2)
     }
 
     Clearance Levels:
@@ -183,6 +185,9 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
         reviewer = req_body.get('reviewer')
         notes = req_body.get('notes')
         clearance_level_str = req_body.get('clearance_level')
+        # Draft mode (17 FEB 2026): version assignment at approve time
+        version_id = req_body.get('version_id')
+        previous_version_id = req_body.get('previous_version_id')
 
         # Validate reviewer is provided
         if not reviewer:
@@ -244,6 +249,78 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
                 json.dumps(error),
                 status_code=404 if error.get('error_type') == 'NotFound' else 400,
                 headers={"Content-Type": "application/json"}
+            )
+
+        # =====================================================================
+        # DRAFT MODE: Version assignment at approve time (17 FEB 2026)
+        # If asset has no version_id in platform_refs, it's a draft.
+        # Reviewer must provide version_id to finalize.
+        # =====================================================================
+        from services.asset_service import AssetService, AssetNotFoundError, AssetStateError
+        asset_service = AssetService()
+        asset = asset_service.get_active_asset(asset_id)
+
+        if not asset:
+            return func.HttpResponse(
+                json.dumps({
+                    "success": False,
+                    "error": f"Asset not found: {asset_id}",
+                    "error_type": "NotFound"
+                }),
+                status_code=404,
+                headers={"Content-Type": "application/json"}
+            )
+
+        is_draft = not asset.platform_refs.get('version_id')
+
+        if is_draft:
+            if not version_id:
+                return func.HttpResponse(
+                    json.dumps({
+                        "success": False,
+                        "error": "version_id is required when approving a draft asset (no version_id was set at submit time)",
+                        "error_type": "ValidationError",
+                        "asset_id": asset_id,
+                        "draft": True
+                    }),
+                    status_code=400,
+                    headers={"Content-Type": "application/json"}
+                )
+
+            # Assign version (validates lineage, updates platform_refs, rebuilds names)
+            try:
+                asset = asset_service.assign_version(
+                    asset_id=asset_id,
+                    version_id=version_id,
+                    previous_version_id=previous_version_id
+                )
+                logger.info(f"Draft asset {asset_id[:16]} assigned version_id={version_id}")
+            except AssetStateError as e:
+                return func.HttpResponse(
+                    json.dumps({
+                        "success": False,
+                        "error": str(e),
+                        "error_type": "StateError"
+                    }),
+                    status_code=400,
+                    headers={"Content-Type": "application/json"}
+                )
+            except ValueError as e:
+                # Lineage validation failure
+                return func.HttpResponse(
+                    json.dumps({
+                        "success": False,
+                        "error": str(e),
+                        "error_type": "LineageValidationError"
+                    }),
+                    status_code=400,
+                    headers={"Content-Type": "application/json"}
+                )
+        elif version_id:
+            # Asset already versioned but caller provided version_id — log and ignore
+            logger.info(
+                f"Asset {asset_id[:16]} already has version_id="
+                f"{asset.platform_refs.get('version_id')}, ignoring provided version_id={version_id}"
             )
 
         # Perform approval using AssetApprovalService

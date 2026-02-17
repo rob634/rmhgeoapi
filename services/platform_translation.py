@@ -62,7 +62,7 @@ def normalize_data_type(data_type: str) -> Optional[str]:
     return dt_lower
 
 
-def generate_table_name(dataset_id: str, resource_id: str, version_id: str) -> str:
+def generate_table_name(dataset_id: str, resource_id: str, version_id: Optional[str] = None) -> str:
     """
     Generate PostGIS table name from DDH identifiers.
 
@@ -71,7 +71,7 @@ def generate_table_name(dataset_id: str, resource_id: str, version_id: str) -> s
     Args:
         dataset_id: DDH dataset identifier
         resource_id: DDH resource identifier
-        version_id: DDH version identifier
+        version_id: DDH version identifier (None for draft mode → "draft")
 
     Returns:
         URL-safe table name
@@ -80,7 +80,7 @@ def generate_table_name(dataset_id: str, resource_id: str, version_id: str) -> s
     return config.platform.generate_vector_table_name(dataset_id, resource_id, version_id)
 
 
-def generate_stac_item_id(dataset_id: str, resource_id: str, version_id: str) -> str:
+def generate_stac_item_id(dataset_id: str, resource_id: str, version_id: Optional[str] = None) -> str:
     """
     Generate STAC item ID from DDH identifiers.
 
@@ -89,7 +89,7 @@ def generate_stac_item_id(dataset_id: str, resource_id: str, version_id: str) ->
     Args:
         dataset_id: DDH dataset identifier
         resource_id: DDH resource identifier
-        version_id: DDH version identifier
+        version_id: DDH version identifier (None for draft mode → "draft")
 
     Returns:
         URL-safe STAC item ID
@@ -164,7 +164,7 @@ def translate_to_coremachine(
         # Otherwise auto-generate from DDH identifiers
         # This allows human-readable names when DDH IDs are numeric (e.g., "552342_2342345_v2")
         opts = request.processing_options
-        table_name = opts.get('table_name')
+        table_name = opts.table_name
         if not table_name:
             table_name = platform_cfg.generate_vector_table_name(
                 request.dataset_id,
@@ -193,11 +193,11 @@ def translate_to_coremachine(
         # Build converter params if CSV/lon-lat columns specified
         # Note: Use 'lat_name'/'lon_name' keys to match job validator expectations
         converter_params = {}
-        if opts.get('lon_column') or opts.get('lat_column') or opts.get('wkt_column'):
+        if opts.lon_column or opts.lat_column or opts.wkt_column:
             converter_params = {
-                'lon_name': opts.get('lon_column'),
-                'lat_name': opts.get('lat_column'),
-                'wkt_column': opts.get('wkt_column')
+                'lon_name': opts.lon_column,
+                'lat_name': opts.lat_column,
+                'wkt_column': opts.wkt_column
             }
 
         # Docker worker always used for GDAL operations (06 FEB 2026)
@@ -228,7 +228,7 @@ def translate_to_coremachine(
 
             # Processing options
             'converter_params': converter_params,
-            'overwrite': opts.get('overwrite', False)
+            'overwrite': opts.overwrite
         }
 
     # ========================================================================
@@ -249,7 +249,7 @@ def translate_to_coremachine(
 
         # Collection ID: use override from processing_options if provided (22 JAN 2026)
         # Otherwise auto-generate from DDH identifiers
-        collection_id = opts.get('collection_id')
+        collection_id = opts.collection_id
         if not collection_id:
             collection_id = platform_cfg.generate_stac_collection_id(
                 request.dataset_id,
@@ -283,7 +283,7 @@ def translate_to_coremachine(
                 'collection_id': collection_id,
                 'collection_title': request.generated_title,
                 'collection_description': request.description,
-                'license': opts.get('license', 'proprietary'),
+                'license': opts.license,
 
                 # DDH identifiers (Platform passthrough)
                 'dataset_id': request.dataset_id,
@@ -292,26 +292,23 @@ def translate_to_coremachine(
                 'access_level': request.access_level.value,  # E4 Phase 1: enum → string
 
                 # Processing options
-                'output_tier': opts.get('output_tier', 'analysis'),
-                'target_crs': opts.get('crs'),
-                'input_crs': opts.get('input_crs'),
-                'raster_type': opts.get('raster_type', 'auto'),
-                'jpeg_quality': opts.get('jpeg_quality'),
+                'output_tier': opts.output_tier.value,
+                'target_crs': opts.crs,
+                'input_crs': opts.input_crs,
+                'raster_type': opts.raster_type.value,
+                'jpeg_quality': opts.jpeg_quality,
 
                 # Docker options
-                'use_mount_storage': opts.get('use_mount_storage', True),
-                'cleanup_temp': opts.get('cleanup_temp', True),
-                'strict_mode': opts.get('strict_mode', False),
+                'use_mount_storage': opts.use_mount_storage,
+                'cleanup_temp': opts.cleanup_temp,
+                'strict_mode': opts.strict_mode,
             }
         else:
-            # Single raster → process_raster_v2 or process_raster_docker (12 JAN 2026)
+            # Single raster → process_raster_docker (06 FEB 2026)
             file_name = request.file_name
             if isinstance(file_name, list):
                 file_name = file_name[0]
 
-            # Determine processing mode (21 JAN 2026)
-            # Default to Docker if docker_worker_enabled, else Function App
-            # Explicit processing_mode in options overrides the default
             # Docker worker always used for GDAL operations (06 FEB 2026)
             job_type = 'process_raster_docker'
             logger.info(f"  Raster processing → {job_type}")
@@ -335,12 +332,12 @@ def translate_to_coremachine(
                 'version_id': request.version_id,
 
                 # Processing options
-                'output_tier': opts.get('output_tier', 'analysis'),
-                'target_crs': opts.get('crs'),
-                'raster_type': opts.get('raster_type', 'auto'),
+                'output_tier': opts.output_tier.value,
+                'target_crs': opts.crs,
+                'raster_type': opts.raster_type.value,
 
                 # Overwrite behavior (28 JAN 2026)
-                'overwrite': opts.get('overwrite', False),
+                'overwrite': opts.overwrite,
                 'title': request.generated_title,
                 'tags': request.tags,
             }
@@ -388,7 +385,7 @@ def translate_single_raster(
 
     # Collection ID: use override from processing_options if provided (22 JAN 2026)
     # Otherwise auto-generate from DDH identifiers
-    collection_id = opts.get('collection_id')
+    collection_id = opts.collection_id
     if not collection_id:
         collection_id = platform_cfg.generate_stac_collection_id(
             request.dataset_id,
@@ -409,9 +406,6 @@ def translate_single_raster(
     if isinstance(file_name, list):
         file_name = file_name[0]
 
-    # Determine processing mode (21 JAN 2026)
-    # Default to Docker if docker_worker_enabled, else Function App
-    # Explicit processing_mode in options overrides the default
     # Docker worker always used for GDAL operations (06 FEB 2026)
     job_type = 'process_raster_docker'
     logger.info(f"  Raster processing → {job_type}")
@@ -435,12 +429,12 @@ def translate_single_raster(
         'version_id': request.version_id,
 
         # Processing options
-        'output_tier': opts.get('output_tier', 'analysis'),
-        'target_crs': opts.get('crs'),
-        'raster_type': opts.get('raster_type', 'auto'),
+        'output_tier': opts.output_tier.value,
+        'target_crs': opts.crs,
+        'raster_type': opts.raster_type.value,
 
         # Overwrite behavior (28 JAN 2026)
-        'overwrite': opts.get('overwrite', False),
+        'overwrite': opts.overwrite,
         'title': request.generated_title,
         'tags': request.tags,
     }
@@ -479,7 +473,7 @@ def translate_raster_collection(
 
     # Collection ID: use override from processing_options if provided (22 JAN 2026)
     # Otherwise auto-generate from DDH identifiers
-    collection_id = opts.get('collection_id')
+    collection_id = opts.collection_id
     if not collection_id:
         collection_id = platform_cfg.generate_stac_collection_id(
             request.dataset_id,
@@ -503,7 +497,7 @@ def translate_raster_collection(
         'collection_id': collection_id,
         'collection_title': request.generated_title,
         'collection_description': request.description,
-        'license': opts.get('license', 'proprietary'),
+        'license': opts.license,
 
         # DDH identifiers (Platform passthrough)
         'dataset_id': request.dataset_id,
@@ -512,14 +506,14 @@ def translate_raster_collection(
         'access_level': request.access_level.value,  # E4 Phase 1: enum → string
 
         # Processing options
-        'output_tier': opts.get('output_tier', 'analysis'),
-        'target_crs': opts.get('crs'),
-        'input_crs': opts.get('input_crs'),
-        'raster_type': opts.get('raster_type', 'auto'),
-        'jpeg_quality': opts.get('jpeg_quality'),
+        'output_tier': opts.output_tier.value,
+        'target_crs': opts.crs,
+        'input_crs': opts.input_crs,
+        'raster_type': opts.raster_type.value,
+        'jpeg_quality': opts.jpeg_quality,
 
         # Docker options
-        'use_mount_storage': opts.get('use_mount_storage', True),
-        'cleanup_temp': opts.get('cleanup_temp', True),
-        'strict_mode': opts.get('strict_mode', False),
+        'use_mount_storage': opts.use_mount_storage,
+        'cleanup_temp': opts.cleanup_temp,
+        'strict_mode': opts.strict_mode,
     }

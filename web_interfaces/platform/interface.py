@@ -268,21 +268,21 @@ class PlatformInterface(BaseInterface):
             <div class="section">
                 <h2>DDH Naming Patterns</h2>
                 <p style="color: var(--ds-gray); margin-bottom: 16px;">
-                    Platform translates DDH identifiers (dataset_id, resource_id, version_id) to CoreMachine outputs using these patterns:
+                    Platform translates DDH identifiers (dataset_id, resource_id, version_id) to CoreMachine outputs. Version ID is optional at submit (draft mode) and assigned at approval:
                 </p>
                 <div class="config-grid">
                     <div class="config-card">
                         <h3>PostGIS Table Name</h3>
-                        <div class="config-value">{dataset_id}_{resource_id}_{version_id}</div>
+                        <div class="config-value">{dataset_id}_{resource_id}_{version_id|draft}</div>
                         <p style="font-size: 12px; color: #666; margin-top: 8px;">
-                            Example: aerial_imagery_site_alpha_v1_0
+                            Example: aerial_imagery_site_alpha_v1_0 (or _draft before approval)
                         </p>
                     </div>
                     <div class="config-card">
                         <h3>Raster Output Folder</h3>
-                        <div class="config-value">{dataset_id}/{resource_id}/{version_id}</div>
+                        <div class="config-value">{dataset_id}/{resource_id}/{version_id|draft}</div>
                         <p style="font-size: 12px; color: #666; margin-top: 8px;">
-                            Example: aerial-imagery/site-alpha/v1.0
+                            Example: aerial-imagery/site-alpha/v1.0 (or /draft before approval)
                         </p>
                     </div>
                     <div class="config-card">
@@ -294,9 +294,9 @@ class PlatformInterface(BaseInterface):
                     </div>
                     <div class="config-card">
                         <h3>STAC Item ID</h3>
-                        <div class="config-value">{dataset_id}_{resource_id}_{version_id}</div>
+                        <div class="config-value">{dataset_id}_{resource_id}_{version_id|draft}</div>
                         <p style="font-size: 12px; color: #666; margin-top: 8px;">
-                            Example: aerial-imagery-site-alpha-v1-0
+                            Example: aerial-imagery-site-alpha-v1-0 (or -draft before approval)
                         </p>
                     </div>
                 </div>
@@ -406,9 +406,10 @@ class PlatformInterface(BaseInterface):
                 </p>
                 <div class="config-card">
                     <h3>Formula</h3>
-                    <div class="config-value">SHA256(dataset_id | resource_id | version_id)[:32]</div>
+                    <div class="config-value">SHA256(dataset_id | resource_id [| version_id])[:32]</div>
                     <p style="font-size: 12px; color: #666; margin-top: 8px;">
                         Same inputs always produce same request_id, enabling natural deduplication.
+                        Draft mode omits version_id — one draft per dataset+resource.
                     </p>
                 </div>
             </div>

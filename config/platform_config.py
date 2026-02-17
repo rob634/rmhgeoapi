@@ -294,7 +294,7 @@ class PlatformConfig(BaseModel):
         self,
         dataset_id: str,
         resource_id: str,
-        version_id: str
+        version_id: Optional[str] = None
     ) -> str:
         """
         Generate PostGIS table name from DDH identifiers.
@@ -302,7 +302,7 @@ class PlatformConfig(BaseModel):
         Args:
             dataset_id: DDH dataset identifier
             resource_id: DDH resource identifier
-            version_id: DDH version identifier
+            version_id: DDH version identifier (None for draft mode → "draft")
 
         Returns:
             URL-safe, lowercase table name suitable for PostgreSQL
@@ -310,11 +310,13 @@ class PlatformConfig(BaseModel):
         Example:
             >>> config.generate_vector_table_name("Aerial-Imagery", "Site Alpha", "v1.0")
             'aerial_imagery_site_alpha_v1_0'
+            >>> config.generate_vector_table_name("Aerial-Imagery", "Site Alpha")
+            'aerial_imagery_site_alpha_draft'
         """
         name = self.vector_table_pattern.format(
             dataset_id=dataset_id,
             resource_id=resource_id,
-            version_id=version_id
+            version_id=version_id or "draft"
         )
         return _slugify_for_postgres(name)
 
@@ -322,7 +324,7 @@ class PlatformConfig(BaseModel):
         self,
         dataset_id: str,
         resource_id: str,
-        version_id: str
+        version_id: Optional[str] = None
     ) -> str:
         """
         Generate COG output folder path from DDH identifiers.
@@ -330,7 +332,7 @@ class PlatformConfig(BaseModel):
         Args:
             dataset_id: DDH dataset identifier
             resource_id: DDH resource identifier
-            version_id: DDH version identifier
+            version_id: DDH version identifier (None for draft mode → "draft")
 
         Returns:
             Path-safe folder structure for Azure Blob Storage
@@ -338,11 +340,13 @@ class PlatformConfig(BaseModel):
         Example:
             >>> config.generate_raster_output_folder("Aerial-Imagery", "Site Alpha", "v1.0")
             'aerial-imagery/site-alpha/v1.0'
+            >>> config.generate_raster_output_folder("Aerial-Imagery", "Site Alpha")
+            'aerial-imagery/site-alpha/draft'
         """
         path = self.raster_output_folder_pattern.format(
             dataset_id=dataset_id,
             resource_id=resource_id,
-            version_id=version_id
+            version_id=version_id or "draft"
         )
         return _slugify_for_path(path)
 
@@ -374,7 +378,7 @@ class PlatformConfig(BaseModel):
         self,
         dataset_id: str,
         resource_id: str,
-        version_id: str
+        version_id: Optional[str] = None
     ) -> str:
         """
         Generate STAC item ID from DDH identifiers.
@@ -382,7 +386,7 @@ class PlatformConfig(BaseModel):
         Args:
             dataset_id: DDH dataset identifier
             resource_id: DDH resource identifier
-            version_id: DDH version identifier
+            version_id: DDH version identifier (None for draft mode → "draft")
 
         Returns:
             URL-safe STAC item ID
@@ -390,7 +394,7 @@ class PlatformConfig(BaseModel):
         item_id = self.stac_item_pattern.format(
             dataset_id=dataset_id,
             resource_id=resource_id,
-            version_id=version_id
+            version_id=version_id or "draft"
         )
         return _slugify_for_stac(item_id)
 
@@ -423,20 +427,24 @@ class PlatformConfig(BaseModel):
 def generate_platform_request_id(
     dataset_id: str,
     resource_id: str,
-    version_id: str,
+    version_id: Optional[str] = None,
     length: int = 32
 ) -> str:
     """
     Generate deterministic, idempotent Platform request ID from DDH identifiers.
 
-    This function creates a unique, reproducible ID by hashing the three DDH
+    This function creates a unique, reproducible ID by hashing the DDH
     identifiers. The same inputs will always produce the same output, enabling
     natural deduplication of Platform requests.
+
+    Draft mode (17 FEB 2026): When version_id is None, hashes only
+    dataset_id + resource_id. This naturally enforces one draft per
+    dataset+resource combination via idempotent deduplication.
 
     Args:
         dataset_id: DDH dataset identifier
         resource_id: DDH resource identifier
-        version_id: DDH version identifier
+        version_id: DDH version identifier (None for draft mode)
         length: Length of returned hash prefix (default 32, max 64)
 
     Returns:
@@ -446,9 +454,9 @@ def generate_platform_request_id(
         >>> generate_platform_request_id("aerial-2024", "site-alpha", "v1.0")
         'a3f2c1b8e9d7f6a5c4b3a2e1d9c8b7a6'
 
-        >>> # Same inputs = same output (idempotent)
-        >>> generate_platform_request_id("aerial-2024", "site-alpha", "v1.0")
-        'a3f2c1b8e9d7f6a5c4b3a2e1d9c8b7a6'
+        >>> # Draft mode (no version_id)
+        >>> generate_platform_request_id("aerial-2024", "site-alpha")
+        'b4c3d2a1f8e7d6c5b4a3c2d1e9f8a7b6'
 
     Note:
         This ID is used for:
@@ -456,9 +464,18 @@ def generate_platform_request_id(
         - DDH status polling endpoint
         - Deduplication of resubmitted requests
     """
+    # TODO (17 FEB 2026): Add app_identifier (e.g. "ddh") to the hash composite
+    # for multi-platform support. Future format:
+    #   f"{app_id}|{dataset_id}|{resource_id}|{version_id}"
+    # This will be a breaking change for existing request_ids — coordinate
+    # with api_requests table cleanup when implementing.
+
     # Combine identifiers with separator to avoid collisions
     # e.g., "a|bc|d" vs "ab|c|d" would produce different hashes
-    combined = f"{dataset_id}|{resource_id}|{version_id}"
+    if version_id:
+        combined = f"{dataset_id}|{resource_id}|{version_id}"
+    else:
+        combined = f"{dataset_id}|{resource_id}"
 
     # SHA256 hash (64 hex chars), truncate to requested length
     hash_hex = hashlib.sha256(combined.encode('utf-8')).hexdigest()

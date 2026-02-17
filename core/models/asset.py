@@ -149,6 +149,9 @@ class GeospatialAsset(BaseModel):
         # for .value access in endpoints. Enum serialization handled in to_dict().
         extra='ignore',
         str_strip_whitespace=True,
+        # TODO (17 FEB 2026): json_encoders is deprecated in Pydantic V2.
+        # Replace with @field_serializer when cleaning up. Currently dead code —
+        # all serialization goes through hand-written to_dict() methods.
         json_encoders={datetime: lambda v: v.isoformat() if v else None}
     )
 

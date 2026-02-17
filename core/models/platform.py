@@ -41,13 +41,22 @@ Removed (22 NOV 2025):
     - metadata column (pass through, don't store twice)
 """
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Dict, Any, List, Optional, Union
 from datetime import datetime
 from enum import Enum
+import logging
 import re
 
 from .stac import AccessLevel
+from .processing_options import (
+    BaseProcessingOptions,
+    VectorProcessingOptions,
+    RasterProcessingOptions,
+    RasterCollectionProcessingOptions,
+)
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================================
@@ -111,11 +120,15 @@ class PlatformRequest(BaseModel):
     """
 
     # ========================================================================
-    # DDH Core Identifiers (Required)
+    # DDH Core Identifiers (Required: dataset_id, resource_id; Optional: version_id)
     # ========================================================================
     dataset_id: str = Field(..., max_length=255, description="DDH dataset identifier")
     resource_id: str = Field(..., max_length=255, description="DDH resource identifier")
-    version_id: str = Field(..., max_length=50, description="DDH version identifier")
+    version_id: Optional[str] = Field(
+        default=None,
+        max_length=50,
+        description="DDH version identifier. Optional at submit (draft mode), required at approve."
+    )
 
     # ========================================================================
     # V0.8 Release Control - Version Validation (31 JAN 2026)
@@ -242,7 +255,7 @@ class PlatformRequest(BaseModel):
     #   - table_name: Custom PostGIS table name for vectors (slugified for PostgreSQL)
     #   - collection_id: Custom STAC collection ID for rasters
     # Other options: crs, nodata_value, overwrite, docker, lon_column, lat_column, etc.
-    processing_options: Dict[str, Any] = Field(
+    processing_options: Union[Dict[str, Any], BaseProcessingOptions] = Field(
         default_factory=dict,
         description="Processing options including table_name (vector) or collection_id (raster) overrides"
     )
@@ -251,6 +264,61 @@ class PlatformRequest(BaseModel):
     # Client Identifier
     # ========================================================================
     client_id: str = Field(default="ddh", description="Client application identifier")
+
+    # ========================================================================
+    # Model Validator: Resolve processing_options to typed model
+    # ========================================================================
+    @model_validator(mode='after')
+    def resolve_processing_options(self):
+        """
+        Dispatch raw dict processing_options to typed Pydantic model.
+
+        Detects data_type from file_name extension, then parses the dict
+        into VectorProcessingOptions, RasterProcessingOptions, or
+        RasterCollectionProcessingOptions. From this point forward, all
+        access is typed attribute access — no more .get().
+
+        Unknown keys are logged and dropped (extra='ignore').
+        """
+        opts = self.processing_options
+        # Already resolved (e.g., constructed programmatically)
+        if isinstance(opts, BaseProcessingOptions):
+            return self
+
+        # Must be a dict (from JSON parsing)
+        if not isinstance(opts, dict):
+            self.processing_options = BaseProcessingOptions()
+            return self
+
+        raw_dict = opts
+
+        # Log unknown keys that will be dropped
+        try:
+            data_type = self.data_type
+        except ValueError:
+            # Unsupported extension — use base model
+            self.processing_options = BaseProcessingOptions(**raw_dict)
+            return self
+
+        if data_type == DataType.VECTOR:
+            model_cls = VectorProcessingOptions
+        elif data_type == DataType.RASTER:
+            if self.is_raster_collection:
+                model_cls = RasterCollectionProcessingOptions
+            else:
+                model_cls = RasterProcessingOptions
+        else:
+            # POINTCLOUD, MESH_3D, TABULAR — use base model
+            model_cls = BaseProcessingOptions
+
+        # Log keys that will be ignored
+        known_fields = set(model_cls.model_fields.keys())
+        unknown_keys = set(raw_dict.keys()) - known_fields
+        if unknown_keys:
+            logger.debug(f"Processing options: ignoring unknown keys {unknown_keys} for {model_cls.__name__}")
+
+        self.processing_options = model_cls(**raw_dict)
+        return self
 
     # ========================================================================
     # Computed Properties
@@ -304,7 +372,7 @@ class PlatformRequest(BaseModel):
             request = PlatformRequest(**body)
             request.validate_expected_data_type()  # Raises if mismatch
         """
-        expected = self.processing_options.get('expected_data_type')
+        expected = self.processing_options.expected_data_type
         if expected:
             expected_lower = expected.lower()
             detected = self.data_type.value.lower()
@@ -322,11 +390,13 @@ class PlatformRequest(BaseModel):
         Generate URL-safe STAC item_id from DDH identifiers.
 
         Example: "aerial-imagery-2024", "site-alpha", "v1.0" → "aerial-imagery-2024_site-alpha_v1-0"
+        Draft mode: "aerial-imagery-2024", "site-alpha", None → "aerial-imagery-2024_site-alpha_draft"
 
         Note: Uses PlatformConfig pattern for consistency with generate_stac_item_id().
         """
         # Build from DDH identifiers (same pattern as PlatformConfig)
-        item_id = f"{self.dataset_id}_{self.resource_id}_{self.version_id}"
+        version_part = self.version_id if self.version_id else "draft"
+        item_id = f"{self.dataset_id}_{self.resource_id}_{version_part}"
         item_id = item_id.lower()
         item_id = item_id.replace(' ', '-')
         item_id = re.sub(r'[^a-z0-9\-_]', '', item_id)
@@ -339,10 +409,12 @@ class PlatformRequest(BaseModel):
 
         Returns user-provided title if set, otherwise generates from DDH IDs.
         Example: "aerial-imagery-2024 / site-alpha v1.0"
+        Draft mode: "aerial-imagery-2024 / site-alpha (draft)"
         """
         if self.title:
             return self.title
-        return f"{self.dataset_id} / {self.resource_id} {self.version_id}"
+        version_part = self.version_id if self.version_id else "(draft)"
+        return f"{self.dataset_id} / {self.resource_id} {version_part}"
 
     @property
     def is_raster_collection(self) -> bool:
@@ -413,7 +485,7 @@ class ApiRequest(BaseModel):
     )
     dataset_id: str = Field(..., max_length=255, description="DDH dataset identifier")
     resource_id: str = Field(..., max_length=255, description="DDH resource identifier")
-    version_id: str = Field(..., max_length=50, description="DDH version identifier")
+    version_id: str = Field(default="", max_length=50, description="DDH version identifier (empty string for drafts)")
     job_id: str = Field(
         ...,
         max_length=64,

@@ -1217,6 +1217,126 @@ class AssetService:
         return GeospatialAsset.generate_lineage_id(platform_id, platform_refs, nominal_refs)
 
     # =========================================================================
+    # VERSION ASSIGNMENT (Draft Mode - 17 FEB 2026)
+    # =========================================================================
+
+    def assign_version(
+        self,
+        asset_id: str,
+        version_id: str,
+        previous_version_id: Optional[str] = None,
+    ) -> GeospatialAsset:
+        """
+        Assign a version_id to a draft asset at approval time.
+
+        Draft mode (17 FEB 2026): Assets submitted without version_id are
+        "drafts". At approve/ time, the reviewer provides version_id (and
+        previous_version_id for lineage chaining). This method:
+
+        1. Validates asset exists and is a draft (no version_id in platform_refs)
+        2. Runs lineage validation (reuses validate_version_lineage)
+        3. Updates platform_refs with version_id
+        4. Wires lineage: version_ordinal, previous_asset_id, is_latest flip
+        5. Rebuilds stac_item_id and table_name with version_id
+        6. Returns updated asset
+
+        Args:
+            asset_id: Asset to assign version to
+            version_id: Version identifier (e.g., "v1.0")
+            previous_version_id: Previous version for lineage chaining (None for first version)
+
+        Returns:
+            Updated GeospatialAsset
+
+        Raises:
+            AssetNotFoundError: If asset not found
+            AssetStateError: If asset already has a version_id (not a draft)
+            ValueError: If lineage validation fails
+        """
+        from services.platform_validation import validate_version_lineage
+        from services.platform_translation import generate_stac_item_id, generate_table_name
+
+        # 1. Fetch and validate asset is a draft
+        asset = self._asset_repo.get_active_by_id(asset_id)
+        if not asset:
+            raise AssetNotFoundError(asset_id)
+
+        existing_version = asset.platform_refs.get('version_id')
+        if existing_version:
+            raise AssetStateError(
+                asset_id,
+                f"versioned ({existing_version})",
+                "draft (no version_id)",
+                "assign_version"
+            )
+
+        # 2. Build updated platform_refs with version_id
+        updated_refs = dict(asset.platform_refs)
+        updated_refs['version_id'] = version_id
+
+        # 3. Run lineage validation (same logic as submit, now at approve time)
+        validation_result = validate_version_lineage(
+            platform_id=asset.platform_id,
+            platform_refs=updated_refs,
+            previous_version_id=previous_version_id,
+            asset_service=self,
+            overwrite=False
+        )
+
+        if not validation_result.valid:
+            raise ValueError(
+                f"Version lineage validation failed: {validation_result.warnings[0]}"
+            )
+
+        # 4. Compute lineage wiring
+        lineage_id = validation_result.lineage_id
+        version_ordinal = validation_result.suggested_params.get('version_ordinal', 1)
+        previous_asset_id = None
+        if validation_result.current_latest:
+            previous_asset_id = validation_result.current_latest.get('asset_id')
+
+        # 5. Flip is_latest on current latest before we update this asset
+        if previous_asset_id and previous_asset_id != asset_id:
+            current_latest = self._asset_repo.get_latest_in_lineage(lineage_id)
+            if current_latest and current_latest.asset_id != asset_id:
+                self._asset_repo.update(current_latest.asset_id, {'is_latest': False})
+                logger.info(
+                    f"assign_version: cleared is_latest on {current_latest.asset_id[:16]} "
+                    f"for lineage {lineage_id[:16]}"
+                )
+
+        # 6. Rebuild stac_item_id and table_name with version_id
+        dataset_id = asset.platform_refs.get('dataset_id', '')
+        resource_id = asset.platform_refs.get('resource_id', '')
+        new_stac_item_id = generate_stac_item_id(dataset_id, resource_id, version_id)
+        new_table_name = None
+        if asset.data_type == 'vector':
+            new_table_name = generate_table_name(dataset_id, resource_id, version_id)
+
+        # 7. Atomic update of all version-related fields
+        update_fields = {
+            'platform_refs': updated_refs,
+            'lineage_id': lineage_id,
+            'version_ordinal': version_ordinal,
+            'previous_asset_id': previous_asset_id,
+            'is_latest': True,
+            'stac_item_id': new_stac_item_id,
+        }
+        if new_table_name:
+            update_fields['table_name'] = new_table_name
+
+        self._asset_repo.update(asset_id, update_fields)
+
+        # 8. Re-fetch and return
+        updated_asset = self._asset_repo.get_by_id(asset_id)
+        logger.info(
+            f"assign_version: {asset_id[:16]} → version_id={version_id}, "
+            f"ordinal={version_ordinal}, stac_item_id={new_stac_item_id}, "
+            f"lineage={lineage_id[:16]}"
+        )
+        return updated_asset
+
+    # =========================================================================
     # UTILITY
     # =========================================================================
 

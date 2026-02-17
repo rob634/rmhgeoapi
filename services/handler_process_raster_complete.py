@@ -2041,18 +2041,16 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             }
 
         # =====================================================================
-        # PHASE 3: PERSIST APP TABLES (70-80%) — Source of Truth
+        # PHASE 3: EXTRACT STAC + PERSIST METADATA (70-85%)
         # =====================================================================
-        # Write cog_metadata and render_config BEFORE STAC so that:
-        # 1. App schema tables are source of truth for all STAC metadata
-        # 2. STAC properties (app:colormap, etc.) are derived from persisted config
-        # 3. If STAC fails, app tables still have the data
-        # These are idempotent upserts — safe on resume, no checkpoint needed.
-        logger.info("🔄 PHASE 3: Persisting app tables (source of truth)...")
-        _report_progress(docker_context, 72, 3, 4, "Persist Metadata", "Writing app tables")
+        # V0.9 P2.7: Extract STAC FIRST (gets band_stats), then persist ALL
+        # metadata to app tables. This ensures cog_metadata has complete data
+        # including raster_bands, rescale_range, transform, resolution.
+        logger.info("🔄 PHASE 3: Extracting STAC metadata + persisting app tables...")
+        _report_progress(docker_context, 72, 3, 4, "Extract & Persist", "Extracting STAC metadata")
         phase3_start = time.time()
 
-        # Pre-compute STAC item_id (deterministic, matches what stac_catalog would generate)
+        # Pre-compute STAC item_id (deterministic)
         collection_id = params.get('collection_id') or 'cogs'
         stac_item_id = params.get('stac_item_id') or params.get('item_id')
         if not stac_item_id:
@@ -2060,17 +2058,60 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             stac_item_id = f"{collection_id}-{safe_name}"
 
         raster_type_info = validation_result.get('raster_type', {})
+        stac_item_dict = None  # Will hold the built STAC item for Phase 4
+
+        # --- Phase 3 Step 1: Extract STAC item via canonical builder ---
+        # This opens the raster, extracts band_stats, builds renders,
+        # constructs RasterMetadata, and calls to_stac_item().
+        try:
+            from services.service_stac_metadata import StacMetadataService
+            from core.models.stac import ProvenanceProperties, PlatformProperties
+
+            stac_service = StacMetadataService()
+
+            # Build provenance and platform for extract_item_from_blob
+            provenance = ProvenanceProperties(
+                job_id=job_id,
+                raster_type=raster_type_info.get('detected_type'),
+            )
+            platform_props = None
+            ddh_fields = {
+                'dataset_id': params.get('dataset_id'),
+                'resource_id': params.get('resource_id'),
+                'version_id': params.get('version_id'),
+                'access_level': params.get('access_level'),
+            }
+            if any(ddh_fields.values()):
+                platform_props = PlatformProperties(**{k: v for k, v in ddh_fields.items() if v})
+
+            stac_item_dict = stac_service.extract_item_from_blob(
+                container=cog_container,
+                blob_name=cog_blob,
+                collection_id=collection_id,
+                item_id=stac_item_id,
+                app_meta=provenance,
+                platform_meta=platform_props,
+                file_checksum=cog_result.get('file_checksum'),
+                file_size=cog_result.get('file_size'),
+            )
+
+            logger.info(f"✅ Phase 3 Step 1: STAC item extracted - {stac_item_dict.get('id', 'unknown')}")
+
+        except Exception as stac_extract_err:
+            logger.warning(f"⚠️ Phase 3 Step 1: STAC extraction failed (non-fatal): {stac_extract_err}")
+
+        _report_progress(docker_context, 76, 3, 4, "Extract & Persist", "Writing app tables")
 
         # --- Phase 3a: app.cog_metadata ---
-        # V0.9 P2.3: Enriched upsert — populate all available fields from
-        # validation_result and cog_result. Band statistics (raster_bands)
-        # will be populated in a later phase after extraction.
+        # V0.9 P2.7: Now includes raster_bands, rescale_range, transform,
+        # resolution extracted from the STAC item built above.
         try:
             from infrastructure.raster_metadata_repository import get_raster_metadata_repository
+            from services.stac_renders import recommend_colormap
 
             cog_repo = get_raster_metadata_repository()
 
-            # /vsiaz/ path for GDAL/TiTiler access (V0.9 P2.3)
+            # /vsiaz/ path for GDAL/TiTiler access
             cog_url = f"/vsiaz/{cog_container}/{cog_blob}"
 
             # Extract spatial bounds from COG result (WGS84)
@@ -2080,25 +2121,50 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             bbox_maxx = cog_bounds[2] if len(cog_bounds) >= 4 else None
             bbox_maxy = cog_bounds[3] if len(cog_bounds) >= 4 else None
 
-            # Extract dimensions from COG result (post-processing shape)
+            # Extract dimensions from COG result
             cog_shape = cog_result.get('shape') or []
             cog_height = cog_shape[0] if len(cog_shape) >= 2 else 0
             cog_width = cog_shape[1] if len(cog_shape) >= 2 else 0
 
-            # Build renders for colormap/rescale (V0.9 P2.1)
-            from services.stac_renders import build_renders, recommend_colormap
-
             detected_type = raster_type_info.get('detected_type', 'unknown')
             band_count = raster_type_info.get('band_count', 1)
             dtype = raster_type_info.get('data_type', 'unknown')
-
-            # Renders builder needs band_stats which aren't available yet in Phase 3a.
-            # Store colormap and rescale_range from type detection for now.
             colormap = recommend_colormap(detected_type)
 
             # COG tile size → blocksize
             tile_size = cog_result.get('tile_size')
             blocksize = tile_size if isinstance(tile_size, list) else None
+
+            # V0.9 P2.7: Extract raster_bands, rescale_range, transform,
+            # resolution from the STAC item (available now that extraction ran first)
+            raster_bands = None
+            rescale_range = None
+            transform = None
+            resolution = None
+
+            if stac_item_dict:
+                # raster:bands from data asset
+                data_asset = stac_item_dict.get('assets', {}).get('data', {})
+                raster_bands = data_asset.get('raster:bands')
+
+                # rescale from renders.default
+                renders_default = (
+                    stac_item_dict.get('properties', {})
+                    .get('renders', {})
+                    .get('default', {})
+                )
+                rescale_list = renders_default.get('rescale')
+                if rescale_list and len(rescale_list) > 0:
+                    first_rescale = rescale_list[0]
+                    if isinstance(first_rescale, (list, tuple)) and len(first_rescale) == 2:
+                        rescale_range = list(first_rescale)
+
+                # proj:transform and proj:resolution from properties
+                props = stac_item_dict.get('properties', {})
+                transform = props.get('proj:transform')
+                # Derive resolution from transform if available
+                if transform and len(transform) >= 6:
+                    resolution = [abs(transform[0]), abs(transform[4])]
 
             cog_repo.upsert(
                 cog_id=stac_item_id,
@@ -2121,6 +2187,11 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                 compression=cog_result.get('compression'),
                 blocksize=blocksize,
                 overview_levels=cog_result.get('overview_levels'),
+                # V0.9 P2.7: Fields now available from STAC extraction
+                transform=transform,
+                resolution=resolution,
+                raster_bands=raster_bands,
+                rescale_range=rescale_range,
                 # Visualization defaults
                 colormap=colormap,
                 # STAC linkage
@@ -2134,7 +2205,8 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                 custom_properties={'raster_type': detected_type},
             )
             logger.info(f"✅ Phase 3a: app.cog_metadata persisted for {stac_item_id} "
-                        f"({cog_width}x{cog_height}, {detected_type})")
+                        f"({cog_width}x{cog_height}, {detected_type}, "
+                        f"raster_bands={'yes' if raster_bands else 'no'})")
 
             _emit_job_event(job_id, task_id, 1, 'raster_cog_metadata_persisted', {
                 'cog_id': stac_item_id,
@@ -2143,6 +2215,7 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                 'width': cog_width,
                 'height': cog_height,
                 'has_bbox': bbox_minx is not None,
+                'has_raster_bands': raster_bands is not None,
             })
 
         except Exception as cog_meta_err:
@@ -2181,69 +2254,54 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
 
         phase3_duration = time.time() - phase3_start
         logger.info(f"✅ PHASE 3 complete: {phase3_duration:.2f}s")
-        _report_progress(docker_context, 80, 3, 4, "Persist Metadata", f"Complete ({phase3_duration:.1f}s)")
+        _report_progress(docker_context, 85, 3, 4, "Extract & Persist", f"Complete ({phase3_duration:.1f}s)")
 
         # =====================================================================
-        # PHASE 4: STAC METADATA (80-100%) — Derived from app tables
+        # PHASE 4: INSERT STAC INTO PGSTAC (85-100%)
         # =====================================================================
+        # V0.9 P2.7: STAC item was already built in Phase 3 Step 1.
+        # Now just insert the pre-built dict into pgstac.
         if checkpoint and checkpoint.should_skip(4):
-            logger.info("⏭️ PHASE 4: Skipping STAC metadata (already completed)")
+            logger.info("⏭️ PHASE 4: Skipping STAC insertion (already completed)")
             _report_progress(docker_context, 100, 4, 4, "STAC Registration", "Skipped (resumed)")
-            # Restore STAC result from checkpoint
             stac_result = checkpoint.get_data('stac_result', {})
         else:
-            logger.info("🔄 PHASE 4: Creating STAC metadata...")
-            _report_progress(docker_context, 85, 4, 4, "STAC Registration", "Registering with catalog")
+            logger.info("🔄 PHASE 4: Inserting STAC item into pgstac...")
+            _report_progress(docker_context, 90, 4, 4, "STAC Registration", "Inserting into pgstac")
             phase4_start = time.time()
 
             _emit_job_event(job_id, task_id, 1, 'raster_stac_started', {
                 'collection_id': collection_id,
             })
 
-            from .stac_catalog import extract_stac_metadata
+            stac_result = {}
+            if stac_item_dict:
+                try:
+                    from infrastructure.pgstac_bootstrap import PgStacBootstrap
 
-            # Build raster_type for STAC: prefer render_config (source of truth)
-            stac_raster_type = cog_result.get('raster_type')
-            if render_config:
-                # Inject render_config so stac_catalog can use from_render_config()
-                stac_raster_type = stac_raster_type or raster_type_info
-                # Pass render_config through params for stac_catalog to use
-                stac_render_config = render_config
+                    pgstac = PgStacBootstrap()
+                    pgstac_id = pgstac.insert_item(stac_item_dict, collection_id)
+
+                    stac_result = {
+                        'item_id': stac_item_dict.get('id'),
+                        'collection_id': collection_id,
+                        'pgstac_id': pgstac_id,
+                    }
+                    logger.info(f"✅ STAC item inserted: {stac_item_dict.get('id')}")
+
+                except Exception as insert_err:
+                    logger.warning(f"⚠️ STAC insertion failed (non-fatal): {insert_err}")
+                    stac_result = {
+                        "degraded": True,
+                        "error": str(insert_err),
+                        "message": "STAC insertion into pgstac failed",
+                    }
             else:
-                stac_render_config = None
-
-            stac_params = {
-                'container_name': cog_container,
-                'blob_name': cog_blob,
-                'collection_id': collection_id,
-                # 30 JAN 2026: Use stac_item_id from Platform (DDH format) if available
-                'item_id': params.get('stac_item_id') or params.get('item_id'),
-                # Platform passthrough
-                'dataset_id': params.get('dataset_id'),
-                'resource_id': params.get('resource_id'),
-                'version_id': params.get('version_id'),
-                'access_level': params.get('access_level'),
-                # Raster type for visualization
-                'raster_type': stac_raster_type,
-                # Pass render config so STAC derives from source of truth
-                '_render_config': stac_render_config,
-                # STAC file extension: checksum and size (21 JAN 2026)
-                'file_checksum': cog_result.get('file_checksum'),
-                'file_size': cog_result.get('file_size'),
-            }
-
-            stac_response = extract_stac_metadata(stac_params)
-
-            if not stac_response.get('success'):
-                # STAC failure is non-fatal - COG was created successfully
-                logger.warning(f"⚠️ STAC creation failed (non-fatal): {stac_response.get('error')}")
                 stac_result = {
                     "degraded": True,
-                    "error": stac_response.get('error'),
-                    "message": stac_response.get('message', 'STAC creation failed'),
+                    "error": "No STAC item dict available (extraction failed in Phase 3)",
+                    "message": "STAC extraction failed",
                 }
-            else:
-                stac_result = stac_response.get('result', {})
 
             phase4_duration = time.time() - phase4_start
             logger.info(f"✅ PHASE 4 complete: {phase4_duration:.2f}s")

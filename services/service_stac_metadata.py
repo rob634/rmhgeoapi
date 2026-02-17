@@ -108,6 +108,7 @@ class StacMetadataService:
         raster_meta: Optional['RasterVisualizationMetadata'] = None,  # For DEM colormap (01 JAN 2026)
         file_checksum: Optional[str] = None,  # STAC file extension (21 JAN 2026)
         file_size: Optional[int] = None,  # STAC file extension (21 JAN 2026)
+        skip_stats: bool = False,  # V0.9 P2.2: Override to skip statistics extraction
     ) -> Item:
         """
         Extract STAC Item from raster blob using rio-stac.
@@ -186,6 +187,8 @@ class StacMetadataService:
             raise ValueError(f"Failed to determine item ID: {e}")
 
         # STEP D: Determine file size and statistics extraction strategy
+        # V0.9 P2.2: Always extract statistics (reading from mounted filestore).
+        # skip_stats parameter allows override for edge cases.
         try:
             logger.debug("   Step D: Determining file size and extraction strategy...")
             file_size_mb = 0
@@ -198,14 +201,15 @@ class StacMetadataService:
                 file_size_mb = blob_properties.get('size', 0) / (1024.0 * 1024.0)
                 logger.debug(f"   → Retrieved size: {file_size_mb:.1f} MB")
 
-            SIZE_THRESHOLD_MB = 1000  # 1 GB threshold
-            extract_statistics = file_size_mb <= SIZE_THRESHOLD_MB
+            extract_statistics = not skip_stats
 
-            if not extract_statistics:
-                logger.warning(
-                    f"   ⚠️  File {blob_name} is {file_size_mb:.1f} MB (> {SIZE_THRESHOLD_MB} MB) - "
-                    f"skipping raster statistics to avoid timeout."
+            if skip_stats:
+                logger.info(
+                    f"   ⚠️  skip_stats=True for {blob_name} ({file_size_mb:.1f} MB) - "
+                    f"skipping raster statistics extraction."
                 )
+            else:
+                logger.debug(f"   → Statistics will be extracted ({file_size_mb:.1f} MB)")
             logger.debug(f"   ✅ Step D: Strategy determined - extract_statistics={extract_statistics}")
         except Exception as e:
             logger.error(f"❌ Step D FAILED: Error determining file size")

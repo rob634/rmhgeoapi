@@ -2062,33 +2062,87 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
         raster_type_info = validation_result.get('raster_type', {})
 
         # --- Phase 3a: app.cog_metadata ---
+        # V0.9 P2.3: Enriched upsert — populate all available fields from
+        # validation_result and cog_result. Band statistics (raster_bands)
+        # will be populated in a later phase after extraction.
         try:
             from infrastructure.raster_metadata_repository import get_raster_metadata_repository
 
             cog_repo = get_raster_metadata_repository()
 
-            cog_url = f"https://{config.storage.silver.account_name}.blob.core.windows.net/{cog_container}/{cog_blob}"
+            # /vsiaz/ path for GDAL/TiTiler access (V0.9 P2.3)
+            cog_url = f"/vsiaz/{cog_container}/{cog_blob}"
+
+            # Extract spatial bounds from COG result (WGS84)
+            cog_bounds = cog_result.get('bounds_4326') or []
+            bbox_minx = cog_bounds[0] if len(cog_bounds) >= 4 else None
+            bbox_miny = cog_bounds[1] if len(cog_bounds) >= 4 else None
+            bbox_maxx = cog_bounds[2] if len(cog_bounds) >= 4 else None
+            bbox_maxy = cog_bounds[3] if len(cog_bounds) >= 4 else None
+
+            # Extract dimensions from COG result (post-processing shape)
+            cog_shape = cog_result.get('shape') or []
+            cog_height = cog_shape[0] if len(cog_shape) >= 2 else 0
+            cog_width = cog_shape[1] if len(cog_shape) >= 2 else 0
+
+            # Build renders for colormap/rescale (V0.9 P2.1)
+            from services.stac_renders import build_renders, recommend_colormap
+
+            detected_type = raster_type_info.get('detected_type', 'unknown')
+            band_count = raster_type_info.get('band_count', 1)
+            dtype = raster_type_info.get('data_type', 'unknown')
+
+            # Renders builder needs band_stats which aren't available yet in Phase 3a.
+            # Store colormap and rescale_range from type detection for now.
+            colormap = recommend_colormap(detected_type)
+
+            # COG tile size → blocksize
+            tile_size = cog_result.get('tile_size')
+            blocksize = tile_size if isinstance(tile_size, list) else None
+
             cog_repo.upsert(
                 cog_id=stac_item_id,
                 container=cog_container,
                 blob_path=cog_blob,
                 cog_url=cog_url,
-                band_count=raster_type_info.get('band_count'),
-                dtype=raster_type_info.get('data_type', 'unknown'),
+                width=cog_width,
+                height=cog_height,
+                band_count=band_count,
+                dtype=dtype,
                 nodata=validation_result.get('nodata'),
                 crs=f"EPSG:{validation_result.get('epsg', 4326)}",
                 is_cog=True,
+                # Spatial bounds (WGS84)
+                bbox_minx=bbox_minx,
+                bbox_miny=bbox_miny,
+                bbox_maxx=bbox_maxx,
+                bbox_maxy=bbox_maxy,
+                # COG processing metadata
+                compression=cog_result.get('compression'),
+                blocksize=blocksize,
+                overview_levels=cog_result.get('overview_levels'),
+                # Visualization defaults
+                colormap=colormap,
+                # STAC linkage
                 stac_item_id=stac_item_id,
                 stac_collection_id=collection_id,
+                # ETL traceability
                 etl_job_id=job_id,
                 source_file=blob_name,
+                source_crs=validation_result.get('source_crs'),
+                # Raster type in custom_properties
+                custom_properties={'raster_type': detected_type},
             )
-            logger.info(f"✅ Phase 3a: app.cog_metadata persisted for {stac_item_id}")
+            logger.info(f"✅ Phase 3a: app.cog_metadata persisted for {stac_item_id} "
+                        f"({cog_width}x{cog_height}, {detected_type})")
 
             _emit_job_event(job_id, task_id, 1, 'raster_cog_metadata_persisted', {
                 'cog_id': stac_item_id,
-                'band_count': raster_type_info.get('band_count'),
-                'dtype': raster_type_info.get('data_type'),
+                'band_count': band_count,
+                'dtype': dtype,
+                'width': cog_width,
+                'height': cog_height,
+                'has_bbox': bbox_minx is not None,
             })
 
         except Exception as cog_meta_err:

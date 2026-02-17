@@ -923,9 +923,10 @@ class RasterCollectionViewerService:
                 // Get thumbnail URL if available
                 const thumbUrl = item.assets?.thumbnail?.href || '';
 
-                // Get raster metadata
-                const rasterType = props['app:raster_type'] || 'unknown';
-                const bandCount = props['app:band_count'] || '?';
+                // Get raster metadata (V0.9: geoetl:* namespace + renders extension)
+                const rasterType = props['geoetl:raster_type'] || 'unknown';
+                const rasterBands = item.assets?.data?.['raster:bands'];
+                const bandCount = rasterBands ? rasterBands.length : (props.renders?.default?.bidx?.length || '?');
                 const datetime = props.datetime ? new Date(props.datetime).toLocaleDateString() : '';
 
                 const row = document.createElement('div');
@@ -959,7 +960,7 @@ class RasterCollectionViewerService:
             // Update band selectors based on item metadata
             updateBandSelectors();
 
-            // Apply item's app:* metadata if available
+            // Apply item metadata from STAC renders extension
             applyItemMetadata();
 
             // Show QA section and update status
@@ -971,7 +972,8 @@ class RasterCollectionViewerService:
 
         // Update band selectors based on current item
         function updateBandSelectors() {{
-            const bandCount = currentItem?.properties?.['app:band_count'] || 3;
+            const rasterBands = currentItem?.assets?.data?.['raster:bands'];
+            const bandCount = rasterBands ? rasterBands.length : (currentItem?.properties?.renders?.default?.bidx?.length || 3);
 
             ['band-r', 'band-g', 'band-b'].forEach(id => {{
                 const select = document.getElementById(id);
@@ -1050,33 +1052,37 @@ class RasterCollectionViewerService:
             if (currentItem) loadTileLayer();
         }}
 
-        // Apply item's app:* metadata
+        // Apply item metadata from STAC renders extension (V0.9)
         function applyItemMetadata() {{
             const props = currentItem?.properties || {{}};
+            const rendersDefault = props.renders?.default || {{}};
 
-            // Apply rgb_bands if available
-            const rgbBands = props['app:rgb_bands'];
-            if (rgbBands && Array.isArray(rgbBands)) {{
-                currentBands = rgbBands;
-                if (rgbBands.length >= 1) document.getElementById('band-r').value = rgbBands[0];
-                if (rgbBands.length >= 2) document.getElementById('band-g').value = rgbBands[1];
-                if (rgbBands.length >= 3) document.getElementById('band-b').value = rgbBands[2];
+            // Apply bidx (band indices) from renders.default
+            const bidx = rendersDefault.bidx;
+            if (bidx && Array.isArray(bidx)) {{
+                currentBands = bidx;
+                if (bidx.length >= 1) document.getElementById('band-r').value = bidx[0];
+                if (bidx.length >= 2) document.getElementById('band-g').value = bidx[1];
+                if (bidx.length >= 3) document.getElementById('band-b').value = bidx[2];
             }}
 
-            // Apply rescale if available
-            const rescale = props['app:rescale'];
-            if (rescale && rescale.min !== undefined && rescale.max !== undefined) {{
-                currentRescale = [rescale.min, rescale.max];
-                document.getElementById('rescale-min').value = rescale.min;
-                document.getElementById('rescale-max').value = rescale.max;
+            // Apply rescale from renders.default (format: [[min, max]])
+            const rescale = rendersDefault.rescale;
+            if (rescale && Array.isArray(rescale) && rescale.length > 0) {{
+                const firstBand = rescale[0];
+                if (Array.isArray(firstBand) && firstBand.length === 2) {{
+                    currentRescale = [firstBand[0], firstBand[1]];
+                    document.getElementById('rescale-min').value = firstBand[0];
+                    document.getElementById('rescale-max').value = firstBand[1];
+                }}
             }} else {{
                 currentRescale = null;
                 document.getElementById('rescale-min').value = '';
                 document.getElementById('rescale-max').value = '';
             }}
 
-            // Apply colormap if available
-            const colormap = props['app:colormap'];
+            // Apply colormap_name from renders.default
+            const colormap = rendersDefault.colormap_name;
             if (colormap) {{
                 currentColormap = colormap;
                 document.getElementById('colormap-select').value = colormap;
@@ -1207,7 +1213,7 @@ class RasterCollectionViewerService:
             panel.style.display = 'block';
 
             document.getElementById('layer-title').textContent = currentItem?.id || 'Unknown';
-            document.getElementById('layer-type').textContent = currentItem?.properties?.['app:raster_type'] || 'unknown';
+            document.getElementById('layer-type').textContent = currentItem?.properties?.['geoetl:raster_type'] || 'unknown';
             document.getElementById('layer-bands').textContent = currentBands.join(', ');
             document.getElementById('layer-rescale').textContent = currentRescale ? `${{currentRescale[0]}} - ${{currentRescale[1]}}` : 'auto';
         }}
@@ -1336,7 +1342,7 @@ class RasterCollectionViewerService:
             document.getElementById('qa-section').style.display = 'block';
 
             // Get current QA status
-            const qaStatus = currentItem.properties?.['app:qa_status'] || 'pending';
+            const qaStatus = currentItem.properties?.['geoetl:qa_status'] || 'pending';
             updateQaStatusBadge(qaStatus);
         }}
 
@@ -1369,7 +1375,7 @@ class RasterCollectionViewerService:
                 if (response.ok && result.success) {{
                     // Update local item properties
                     currentItem.properties = currentItem.properties || {{}};
-                    currentItem.properties['app:qa_status'] = status;
+                    currentItem.properties['geoetl:qa_status'] = status;
 
                     // Update UI
                     updateQaStatusBadge(status);

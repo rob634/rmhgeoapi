@@ -103,9 +103,9 @@ class StacMetadataService:
         collection_id: str = STACDefaults.DEV_COLLECTION,
         existing_metadata: Optional[Dict[str, Any]] = None,
         item_id: Optional[str] = None,
-        platform_meta: Optional['PlatformMetadata'] = None,
-        app_meta: Optional['AppMetadata'] = None,
-        raster_meta: Optional['RasterVisualizationMetadata'] = None,  # For DEM colormap (01 JAN 2026)
+        platform_meta: Optional['PlatformProperties'] = None,
+        app_meta: Optional['ProvenanceProperties'] = None,
+        raster_meta=None,  # DEPRECATED V0.9: raster_type now read from app_meta.raster_type
         file_checksum: Optional[str] = None,  # STAC file extension (21 JAN 2026)
         file_size: Optional[int] = None,  # STAC file extension (21 JAN 2026)
         skip_stats: bool = False,  # V0.9 P2.2: Override to skip statistics extraction
@@ -119,9 +119,9 @@ class StacMetadataService:
             collection_id: STAC collection ID (default: 'dev')
             existing_metadata: Optional metadata from analyze_single_blob()
             item_id: Optional custom STAC item ID (auto-generated if not provided)
-            platform_meta: Optional PlatformMetadata for DDH identifiers (25 NOV 2025)
-            app_meta: Optional AppMetadata for job linkage (25 NOV 2025)
-            raster_meta: Optional RasterVisualizationMetadata for colormap selection (01 JAN 2026)
+            platform_meta: Optional PlatformProperties for DDH identifiers (V0.9: ddh:*)
+            app_meta: Optional ProvenanceProperties for job linkage (V0.9: geoetl:*)
+            raster_meta: DEPRECATED V0.9 — raster_type now read from app_meta.raster_type
 
         Returns:
             Validated stac-pydantic Item

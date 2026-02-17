@@ -27,7 +27,7 @@ Routes (5 total):
         POST /api/approvals/{id}/revoke    - Revoke approved asset
 
 Clearance determines post-approval action:
-    - OUO: Update STAC item with app:published=true
+    - OUO: Update STAC item with geoetl:published=true
     - PUBLIC: Trigger ADF pipeline + update STAC
 """
 
@@ -218,7 +218,7 @@ def approve_dataset(req: func.HttpRequest) -> func.HttpResponse:
         }
 
     Actions:
-        - Updates STAC item with app:published=true
+        - Updates STAC item with geoetl:published=true
         - If PUBLIC clearance, triggers ADF pipeline
     """
     try:

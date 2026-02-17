@@ -429,10 +429,10 @@ class AssetApprovalService:
             pgstac = PgStacRepository()
 
             properties_update = {
-                'app:published': True,
-                'app:published_at': datetime.now(timezone.utc).isoformat(),
-                'app:approved_by': reviewer,
-                'app:clearance': clearance_state.value
+                'geoetl:published': True,
+                'geoetl:published_at': datetime.now(timezone.utc).isoformat(),
+                'geoetl:approved_by': reviewer,
+                'geoetl:clearance': clearance_state.value
             }
 
             success = pgstac.update_item_properties(
@@ -467,10 +467,10 @@ class AssetApprovalService:
         Update STAC item with revocation properties.
 
         Sets:
-            app:revoked = true
-            app:revoked_at = ISO timestamp
-            app:revoked_by = revoker
-            app:revocation_reason = reason
+            geoetl:revoked = true
+            geoetl:revoked_at = ISO timestamp
+            geoetl:revoked_by = revoker
+            geoetl:revocation_reason = reason
         """
         if not asset.stac_item_id or not asset.stac_collection_id:
             return {
@@ -483,10 +483,10 @@ class AssetApprovalService:
             pgstac = PgStacRepository()
 
             properties_update = {
-                'app:revoked': True,
-                'app:revoked_at': datetime.now(timezone.utc).isoformat(),
-                'app:revoked_by': revoker,
-                'app:revocation_reason': reason
+                'geoetl:revoked': True,
+                'geoetl:revoked_at': datetime.now(timezone.utc).isoformat(),
+                'geoetl:revoked_by': revoker,
+                'geoetl:revocation_reason': reason
             }
 
             success = pgstac.update_item_properties(

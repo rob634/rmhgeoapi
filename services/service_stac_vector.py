@@ -79,8 +79,8 @@ class StacVectorService:
         collection_id: str = 'vectors',
         source_file: Optional[str] = None,
         additional_properties: Optional[Dict[str, Any]] = None,
-        platform_meta: Optional['PlatformMetadata'] = None,
-        app_meta: Optional['AppMetadata'] = None,
+        platform_meta: Optional['PlatformProperties'] = None,
+        app_meta: Optional['ProvenanceProperties'] = None,
         item_id: Optional[str] = None
     ) -> Item:
         """
@@ -92,8 +92,8 @@ class StacVectorService:
             collection_id: STAC collection ID (default: 'vectors')
             source_file: Optional source file path (e.g., blob name)
             additional_properties: Optional custom properties to add
-            platform_meta: Optional PlatformMetadata for DDH identifiers (25 NOV 2025)
-            app_meta: Optional AppMetadata for job linkage (25 NOV 2025)
+            platform_meta: Optional PlatformProperties for DDH identifiers (ddh:*)
+            app_meta: Optional ProvenanceProperties for job linkage (geoetl:*)
             item_id: Optional custom STAC item ID (30 JAN 2026 - DDH format support)
                      If not provided, falls back to 'postgis-{schema}-{table_name}'
 

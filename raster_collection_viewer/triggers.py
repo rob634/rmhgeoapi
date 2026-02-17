@@ -191,8 +191,8 @@ def raster_qa_handler(req: func.HttpRequest) -> func.HttpResponse:
 
         # Set QA properties
         properties_update = {
-            "app:qa_status": status,
-            "app:qa_updated": datetime.now(timezone.utc).isoformat()
+            "geoetl:qa_status": status,
+            "geoetl:qa_updated": datetime.now(timezone.utc).isoformat()
         }
 
         success = repo.update_item_properties(item_id, collection_id, properties_update)

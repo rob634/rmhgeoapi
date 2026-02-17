@@ -176,8 +176,8 @@ class STACItem:
         if xarray_var:
             return xarray_var
 
-        # Check app:variable property
-        app_var = self.properties.get("app:variable")
+        # Check geoetl:variable property (V0.9 namespace)
+        app_var = self.properties.get("geoetl:variable")
         if app_var:
             return app_var
 

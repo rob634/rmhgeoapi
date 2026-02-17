@@ -210,8 +210,8 @@ class UnpublishRasterJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
             properties = stac_item.get("properties", {}) if stac_item else {}
 
             # Extract original job info from STAC item properties
-            original_job_id = properties.get("app:job_id")
-            original_job_type = properties.get("app:job_type")
+            original_job_id = properties.get("geoetl:job_id")
+            original_job_type = properties.get("geoetl:job_type")
 
             # previous_results from Stage 2 are delete_blob result dicts
             # Each contains: {blob_deleted: bool, blob_path: str, etc.}

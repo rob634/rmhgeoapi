@@ -137,7 +137,7 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
     POST /api/platform/approve
 
     Approves a dataset for publication. Updates GeospatialAsset.approval_state
-    and STAC item with app:published=true. For PUBLIC clearance, triggers ADF.
+    and STAC item with geoetl:published=true. For PUBLIC clearance, triggers ADF.
 
     Request Body:
     {

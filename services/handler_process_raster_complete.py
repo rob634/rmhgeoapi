@@ -343,8 +343,8 @@ def _handle_metadata_only_update(
     if 'title' in metadata_changes:
         stac_updates['title'] = metadata_changes['title']
     if 'tags' in metadata_changes:
-        # STAC uses 'app:tags' for custom properties
-        stac_updates['app:tags'] = metadata_changes['tags']
+        # V0.9: geoetl:* namespace (was app:*)
+        stac_updates['geoetl:tags'] = metadata_changes['tags']
 
     if stac_updates and existing_artifact.stac_item_id:
         try:

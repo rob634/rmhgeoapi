@@ -472,6 +472,19 @@ class StacMetadataService:
             # Extract transform from rio-stac properties
             transform = rio_props.get('proj:transform')
 
+            # Extract datetime from rio-stac result or use item_datetime from Step B
+            rio_datetime_str = rio_props.get('datetime')
+            if rio_datetime_str:
+                try:
+                    created_at = datetime.fromisoformat(rio_datetime_str.replace('Z', '+00:00'))
+                except (ValueError, TypeError):
+                    created_at = item_datetime
+            else:
+                created_at = item_datetime
+            # Ensure timezone-aware (pgSTAC requires RFC3339)
+            if created_at and created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+
             raster_metadata = RasterMetadata(
                 id=item_dict.get('id', item_id),
                 title=rio_props.get('title') or item_id,
@@ -491,6 +504,7 @@ class StacMetadataService:
                 etl_job_id=app_meta.job_id if app_meta and hasattr(app_meta, 'job_id') else None,
                 source_file=blob_name,
                 raster_bands=raster_bands if raster_bands else None,
+                created_at=created_at,
             )
             logger.debug(f"   ✅ Step N.3: RasterMetadata built - {raster_metadata.id}")
         except Exception as e:

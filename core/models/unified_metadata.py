@@ -935,7 +935,16 @@ class VectorMetadata(BaseMetadata):
             "description": self.description
         }
 
-        # Handle datetime per STAC spec
+        # Handle datetime per STAC spec (pgSTAC requires RFC3339)
+        # CRITICAL: datetime must NEVER be null unless start_datetime + end_datetime are both set
+        def _to_rfc3339(dt) -> str:
+            """Ensure datetime is RFC3339 with timezone."""
+            if isinstance(dt, str):
+                return dt
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.isoformat()
+
         if self.extent and self.extent.temporal and self.extent.temporal.interval:
             interval = self.extent.temporal.interval[0]
             if interval[0] and interval[1]:
@@ -946,13 +955,13 @@ class VectorMetadata(BaseMetadata):
                 properties["datetime"] = interval[0]
             else:
                 properties["datetime"] = (
-                    self.created_at.isoformat() if self.created_at
-                    else None
+                    _to_rfc3339(self.created_at) if self.created_at
+                    else datetime.now(timezone.utc).isoformat()
                 )
         else:
             properties["datetime"] = (
-                self.created_at.isoformat() if self.created_at
-                else None
+                _to_rfc3339(self.created_at) if self.created_at
+                else datetime.now(timezone.utc).isoformat()
             )
 
         # Table Extension properties
@@ -1405,7 +1414,16 @@ class RasterMetadata(BaseMetadata):
         if self.description:
             properties["description"] = self.description
 
-        # Handle datetime per STAC spec
+        # Handle datetime per STAC spec (pgSTAC requires RFC3339)
+        # CRITICAL: datetime must NEVER be null unless start_datetime + end_datetime are both set
+        def _to_rfc3339(dt) -> str:
+            """Ensure datetime is RFC3339 with timezone."""
+            if isinstance(dt, str):
+                return dt
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.isoformat()
+
         if self.extent and self.extent.temporal and self.extent.temporal.interval:
             interval = self.extent.temporal.interval[0]
             if interval[0] and interval[1]:
@@ -1416,13 +1434,13 @@ class RasterMetadata(BaseMetadata):
                 properties["datetime"] = interval[0]
             else:
                 properties["datetime"] = (
-                    self.created_at.isoformat() if self.created_at
-                    else None
+                    _to_rfc3339(self.created_at) if self.created_at
+                    else datetime.now(timezone.utc).isoformat()
                 )
         else:
             properties["datetime"] = (
-                self.created_at.isoformat() if self.created_at
-                else None
+                _to_rfc3339(self.created_at) if self.created_at
+                else datetime.now(timezone.utc).isoformat()
             )
 
         # proj:* extension

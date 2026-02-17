@@ -2278,34 +2278,24 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             if stac_item_dict:
                 try:
                     from infrastructure.pgstac_repository import PgStacRepository
+                    from services.stac_collection import build_raster_stac_collection
 
                     # CRITICAL (17 FEB 2026): CREATE COLLECTION FIRST before Item.
                     # PgSTAC requires collections to exist before items because collections
                     # create table partitions that items use. Without collection, item insertion
                     # fails with: "no partition of relation 'items' found for row"
-                    # Pattern copied from stac_collection.py lines 426-455.
                     pgstac_repo = PgStacRepository()
 
-                    # Build minimal STAC collection from item metadata
-                    item_bbox = stac_item_dict.get('bbox')
+                    # Build collection using canonical builder (same as tiled flow)
+                    item_bbox = stac_item_dict.get('bbox', [-180, -90, 180, 90])
                     item_dt = stac_item_dict.get('properties', {}).get('datetime')
-                    temporal_extent = [[item_dt, None]] if item_dt else [[None, None]]
-                    spatial_extent = [item_bbox] if item_bbox else [[-180, -90, 180, 90]]
+                    collection_dict = build_raster_stac_collection(
+                        collection_id=collection_id,
+                        bbox=item_bbox,
+                        temporal_start=item_dt,
+                    )
 
-                    minimal_collection = {
-                        "type": "Collection",
-                        "id": collection_id,
-                        "stac_version": stac_item_dict.get('stac_version', '1.0.0'),
-                        "description": f"Raster collection: {collection_id}",
-                        "links": [],
-                        "license": "proprietary",
-                        "extent": {
-                            "spatial": {"bbox": spatial_extent},
-                            "temporal": {"interval": temporal_extent},
-                        },
-                    }
-
-                    pgstac_repo.insert_collection(minimal_collection)
+                    pgstac_repo.insert_collection(collection_dict)
                     logger.info(f"✅ Collection upserted: {collection_id}")
 
                     # Verify collection exists before inserting item

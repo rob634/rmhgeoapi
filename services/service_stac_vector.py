@@ -80,7 +80,7 @@ class StacVectorService:
         source_file: Optional[str] = None,
         additional_properties: Optional[Dict[str, Any]] = None,
         platform_meta: Optional['PlatformProperties'] = None,
-        app_meta: Optional['ProvenanceProperties'] = None,
+        provenance_props: Optional['ProvenanceProperties'] = None,
         item_id: Optional[str] = None
     ) -> Item:
         """
@@ -93,7 +93,7 @@ class StacVectorService:
             source_file: Optional source file path (e.g., blob name)
             additional_properties: Optional custom properties to add
             platform_meta: Optional PlatformProperties for DDH identifiers (ddh:*)
-            app_meta: Optional ProvenanceProperties for job linkage (geoetl:*)
+            provenance_props: Optional ProvenanceProperties for job linkage (geoetl:*)
             item_id: Optional custom STAC item ID (30 JAN 2026 - DDH format support)
                      If not provided, falls back to 'postgis-{schema}-{table_name}'
 
@@ -218,7 +218,7 @@ class StacVectorService:
             temp_item = metadata_helper.augment_item(
                 item_dict=temp_item,
                 bbox=bbox,
-                provenance=app_meta,    # V0.9: ProvenanceProperties (duck-typed via to_prefixed_dict)
+                provenance=provenance_props,  # V0.9: ProvenanceProperties (duck-typed via to_prefixed_dict)
                 platform=platform_meta,  # V0.9: PlatformProperties (duck-typed via model_dump)
                 include_iso3=True,
                 include_titiler=False  # Vector items don't need TiTiler COG links

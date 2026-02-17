@@ -406,22 +406,15 @@ def _create_stac_collection_impl(
         else:
             logger.info(f"   No MosaicJSON asset (V0.8: use pgSTAC search for mosaic access)")
 
-        # Add ISO3 country attribution to collection extra_fields (25 NOV 2025)
-        # Uses centralized ISO3AttributionService for geographic metadata
-        try:
-            from services.iso3_attribution import ISO3AttributionService
-            iso3_service = ISO3AttributionService()
-            iso3_attribution = iso3_service.get_attribution_for_bbox(spatial_extent)
-
-            if iso3_attribution.available and iso3_attribution.iso3_codes:
-                collection.extra_fields['geo:iso3'] = iso3_attribution.iso3_codes
-                collection.extra_fields['geo:primary_iso3'] = iso3_attribution.primary_iso3
-                if iso3_attribution.countries:
-                    collection.extra_fields['geo:countries'] = iso3_attribution.countries
-                logger.debug(f"   Added ISO3 attribution to collection: {iso3_attribution.primary_iso3}")
-        except Exception as e:
-            # Non-fatal: Log warning but continue - collection can exist without country codes
-            logger.warning(f"   ISO3 attribution failed for collection (non-fatal): {e}")
+        # Add ISO3 country attribution to collection extra_fields
+        from services.iso3_attribution import get_geo_properties_for_bbox
+        geo_props = get_geo_properties_for_bbox(spatial_extent)
+        if geo_props:
+            collection.extra_fields['geo:iso3'] = geo_props.iso3
+            collection.extra_fields['geo:primary_iso3'] = geo_props.primary_iso3
+            if geo_props.countries:
+                collection.extra_fields['geo:countries'] = geo_props.countries
+            logger.debug(f"   Added ISO3 attribution to collection: {geo_props.primary_iso3}")
 
         # CRITICAL (12 NOV 2025): CREATE COLLECTION FIRST before Items
         # PgSTAC requires collections to exist before items because collections
@@ -433,9 +426,7 @@ def _create_stac_collection_impl(
         logger.info(f"✅ STAC collection validated: {collection.id}")
 
         # CRITICAL FIX (18 NOV 2025): Use SINGLE repository instance
-        # Problem: _insert_into_pgstac_collections() creates PgStacRepository instance A,
-        #          StacMetadataService.stac creates PgStacBootstrap instance B
-        #          Two instances = two connections = READ AFTER WRITE consistency issue
+        # Two instances = two connections = READ AFTER WRITE consistency issue
         # Solution: Create repository once, use for both insert and verification
         from infrastructure.pgstac_repository import PgStacRepository
         pgstac_repo = PgStacRepository()
@@ -486,13 +477,13 @@ def _create_stac_collection_impl(
                 item_id = f"{collection_id}_{tile_name}"
 
                 # V0.9 P2.6: extract_item_from_blob now builds renders internally
-                # ProvenanceProperties passed as app_meta (duck-typed via getattr)
+                # V0.9: ProvenanceProperties for job traceability (geoetl:*)
                 item = stac_service.extract_item_from_blob(
                     container=cog_container,
                     blob_name=tile_blob,
                     collection_id=collection_id,
                     item_id=item_id,
-                    app_meta=provenance,  # V0.9: ProvenanceProperties (duck-typed: has job_id)
+                    provenance_props=provenance,
                 )
 
                 # Insert Item into PgSTAC
@@ -571,16 +562,13 @@ def _create_stac_collection_impl(
             # Without bidx params, TiTiler returns HTTP 500 for 3+ band COGs
             config = get_config()
 
-            # Extract band indexes from raster metadata (set earlier in this function)
-            # rgb_bands is a list like [1,2,3] for 8-band imagery, or [1] for single-band
+            # Extract band indexes from raster_type dict (passed as function parameter)
+            # BUG-012 FIX (17 FEB 2026): was referencing undefined `raster_meta` variable
             band_indexes = None
-            if raster_meta and raster_meta.rgb_bands:
-                band_indexes = raster_meta.rgb_bands
-                logger.info(f"   Using band indexes for visualization: {band_indexes}")
-            elif raster_meta and raster_meta.band_count and raster_meta.band_count > 3:
-                # Fallback: if no rgb_bands specified but >3 bands, default to [1,2,3]
+            band_count = raster_type.get('band_count') if raster_type else None
+            if band_count and band_count > 3:
                 band_indexes = [1, 2, 3]
-                logger.info(f"   Multi-band imagery ({raster_meta.band_count} bands) - defaulting to RGB bands [1,2,3]")
+                logger.info(f"   Multi-band imagery ({band_count} bands) - defaulting to RGB bands [1,2,3]")
 
             urls = search_registrar.get_search_urls(
                 search_id=search_id,
@@ -788,47 +776,3 @@ def _calculate_spatial_extent_from_tiles(
     return extent
 
 
-def _insert_into_pgstac_collections(collection_dict: Dict[str, Any]) -> str:
-    """
-    DEPRECATED (18 NOV 2025): Use PgStacRepository().insert_collection() directly.
-
-    This function creates a new repository instance which causes READ AFTER WRITE
-    consistency issues. Use single repository instance pattern instead.
-
-    Insert STAC collection into PgSTAC collections table.
-
-    Uses PgStacRepository which handles managed identity authentication
-    and connection management properly.
-
-    Args:
-        collection_dict: STAC collection as dictionary
-
-    Returns:
-        PgSTAC collection ID
-
-    Raises:
-        Exception: PgSTAC insertion failure
-
-    Migration History:
-        - Phase 2B (17 NOV 2025): Refactored to use PgStacRepository
-        - Phase 2B Fix (18 NOV 2025): DEPRECATED - causes connection consistency issues
-    """
-    logger.info(f"Inserting collection into PgSTAC: {collection_dict['id']}")
-
-    try:
-        # Convert dict to pystac.Collection object
-        # PgStacRepository.insert_collection() requires pystac.Collection
-        collection = Collection.from_dict(collection_dict)
-
-        # Use repository pattern for managed identity authentication (17 NOV 2025)
-        repo = PgStacRepository()
-        pgstac_id = repo.insert_collection(collection)
-
-        logger.info(f"✅ [STAC-SUCCESS] PgSTAC collection created via repository: {pgstac_id}")
-        return pgstac_id
-
-    except Exception as e:
-        logger.error(f"❌ [STAC-ERROR] Failed to insert collection via repository: {e}", exc_info=True)
-        logger.error(f"   Exception type: {type(e).__name__}")
-        logger.error(f"   Collection ID: {collection_dict.get('id', 'UNKNOWN')}")
-        raise Exception(f"PgSTAC insertion failed: {str(e)}") from e

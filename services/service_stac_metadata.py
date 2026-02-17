@@ -104,8 +104,8 @@ class StacMetadataService:
         existing_metadata: Optional[Dict[str, Any]] = None,
         item_id: Optional[str] = None,
         platform_meta: Optional['PlatformProperties'] = None,
-        app_meta: Optional['ProvenanceProperties'] = None,
-        raster_meta=None,  # DEPRECATED V0.9: raster_type now read from app_meta.raster_type
+        provenance_props: Optional['ProvenanceProperties'] = None,
+        raster_meta=None,  # DEPRECATED V0.9: raster_type now read from provenance_props.raster_type
         file_checksum: Optional[str] = None,  # STAC file extension (21 JAN 2026)
         file_size: Optional[int] = None,  # STAC file extension (21 JAN 2026)
         skip_stats: bool = False,  # V0.9 P2.2: Override to skip statistics extraction
@@ -120,8 +120,8 @@ class StacMetadataService:
             existing_metadata: Optional metadata from analyze_single_blob()
             item_id: Optional custom STAC item ID (auto-generated if not provided)
             platform_meta: Optional PlatformProperties for DDH identifiers (V0.9: ddh:*)
-            app_meta: Optional ProvenanceProperties for job linkage (V0.9: geoetl:*)
-            raster_meta: DEPRECATED V0.9 — raster_type now read from app_meta.raster_type
+            provenance_props: Optional ProvenanceProperties for job linkage (V0.9: geoetl:*)
+            raster_meta: DEPRECATED V0.9 — raster_type now read from provenance_props.raster_type
 
         Returns:
             Validated stac-pydantic Item
@@ -409,8 +409,8 @@ class StacMetadataService:
             detected_type = 'unknown'
             if raster_meta and hasattr(raster_meta, 'detected_type') and raster_meta.detected_type:
                 detected_type = raster_meta.detected_type
-            elif app_meta and hasattr(app_meta, 'raster_type') and app_meta.raster_type:
-                detected_type = app_meta.raster_type
+            elif provenance_props and hasattr(provenance_props, 'raster_type') and provenance_props.raster_type:
+                detected_type = provenance_props.raster_type
 
             # Convert rio-stac raster:bands to band_stats format for renders builder
             band_stats = []
@@ -501,7 +501,7 @@ class StacMetadataService:
                 extent=extent,
                 stac_item_id=item_dict.get('id', item_id),
                 stac_collection_id=collection_id,
-                etl_job_id=app_meta.job_id if app_meta and hasattr(app_meta, 'job_id') else None,
+                etl_job_id=provenance_props.job_id if provenance_props and hasattr(provenance_props, 'job_id') else None,
                 source_file=blob_name,
                 raster_bands=raster_bands if raster_bands else None,
                 created_at=created_at,
@@ -517,12 +517,17 @@ class StacMetadataService:
             logger.debug("   Step N.4: Building namespace properties...")
             from core.models.stac import ProvenanceProperties, PlatformProperties, GeoProperties
 
-            # geoetl:* provenance
-            provenance_props = ProvenanceProperties(
-                job_id=app_meta.job_id if app_meta and hasattr(app_meta, 'job_id') else None,
-                raster_type=detected_type if detected_type != 'unknown' else None,
-                statistics_extracted=extract_statistics,
-            )
+            # geoetl:* provenance — augment passed-in props with locally-detected fields
+            if provenance_props:
+                # Update mutable fields detected during extraction
+                if detected_type != 'unknown':
+                    provenance_props.raster_type = detected_type
+                provenance_props.statistics_extracted = extract_statistics
+            else:
+                provenance_props = ProvenanceProperties(
+                    raster_type=detected_type if detected_type != 'unknown' else None,
+                    statistics_extracted=extract_statistics,
+                )
 
             # ddh:* platform passthrough
             platform_props = None
@@ -535,20 +540,8 @@ class StacMetadataService:
                 )
 
             # geo:* attribution (from ISO3 service)
-            geo_props = None
-            try:
-                from services.iso3_attribution import ISO3AttributionService
-                iso3_service = ISO3AttributionService()
-                if bbox and len(bbox) >= 4:
-                    attribution = iso3_service.get_attribution_for_bbox(bbox)
-                    if attribution and attribution.available:
-                        geo_props = GeoProperties(
-                            iso3=attribution.iso3_codes or [],
-                            primary_iso3=attribution.primary_iso3,
-                            countries=attribution.countries or [],
-                        )
-            except Exception as geo_err:
-                logger.warning(f"   ⚠️  ISO3 attribution failed (non-fatal): {geo_err}")
+            from services.iso3_attribution import get_geo_properties_for_bbox
+            geo_props = get_geo_properties_for_bbox(bbox) if bbox else None
 
             logger.debug(f"   ✅ Step N.4: Namespace props built")
         except Exception as e:

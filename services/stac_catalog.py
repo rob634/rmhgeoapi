@@ -256,7 +256,7 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
             # STEP 3A: Extract platform and provenance metadata for STAC enrichment
             # V0.9 P2.6: Uses Pydantic models from core.models.stac
             platform_meta = None
-            app_meta = None
+            provenance = None
             try:
                 from core.models.stac import PlatformProperties, ProvenanceProperties
                 # Build PlatformProperties (ddh:*) from job params
@@ -276,7 +276,7 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
                 # Build ProvenanceProperties (geoetl:*) for job traceability
                 raster_type_info = params.get('raster_type')
                 detected_type = raster_type_info.get('detected_type') if isinstance(raster_type_info, dict) else None
-                app_meta = ProvenanceProperties(
+                provenance = ProvenanceProperties(
                     job_id=params.get('_job_id'),
                     raster_type=detected_type,
                 )
@@ -290,8 +290,8 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
                 blob_name=blob_name,
                 collection_id=collection_id,
                 item_id=item_id,
-                platform_meta=platform_meta,  # PlatformProperties (duck-typed via getattr)
-                app_meta=app_meta,  # ProvenanceProperties (duck-typed: has job_id)
+                platform_meta=platform_meta,
+                provenance_props=provenance,
                 file_checksum=params.get('file_checksum'),
                 file_size=params.get('file_size'),
             )

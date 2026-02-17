@@ -381,5 +381,34 @@ class ISO3AttributionService:
         return [min(xs), min(ys), max(xs), max(ys)]
 
 
+def get_geo_properties_for_bbox(bbox: List[float]) -> Optional['GeoProperties']:
+    """
+    Convenience helper: Get GeoProperties from bbox in one call.
+
+    Wraps ISO3AttributionService to return a GeoProperties object
+    ready for RasterMetadata.to_stac_item() or VectorMetadata.to_stac_item().
+
+    Args:
+        bbox: [minx, miny, maxx, maxy] in EPSG:4326
+
+    Returns:
+        GeoProperties if attribution succeeded, None otherwise
+    """
+    try:
+        from core.models.stac import GeoProperties
+        service = ISO3AttributionService()
+        if bbox and len(bbox) >= 4:
+            attribution = service.get_attribution_for_bbox(bbox)
+            if attribution and attribution.available:
+                return GeoProperties(
+                    iso3=attribution.iso3_codes or [],
+                    primary_iso3=attribution.primary_iso3,
+                    countries=attribution.countries or [],
+                )
+    except Exception as e:
+        logger.warning(f"ISO3 attribution failed (non-fatal): {e}")
+    return None
+
+
 # Export the service class and result dataclass
-__all__ = ['ISO3Attribution', 'ISO3AttributionService']
+__all__ = ['ISO3Attribution', 'ISO3AttributionService', 'get_geo_properties_for_bbox']

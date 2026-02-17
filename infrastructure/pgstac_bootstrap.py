@@ -1059,39 +1059,7 @@ ORDER BY r.rolname;""")
 
         return mapping.get(asset_type.lower(), 'dev')
 
-    # =========================================================================
-    # COLLECTION MANAGEMENT - Check and verify PgSTAC collections
-    # =========================================================================
-
-    def collection_exists(self, collection_id: str) -> bool:
-        """
-        Check if STAC Collection exists in PgSTAC.
-
-        Args:
-            collection_id: Collection ID to check
-
-        Returns:
-            True if collection exists, False otherwise
-
-        Note:
-            This is critical before inserting items - pgSTAC uses table partitioning
-            where each collection gets its own partition. Inserting into non-existent
-            collection fails with "no partition of relation items found for row" error.
-        """
-        try:
-            with self._pg_repo._get_connection() as conn:
-                with conn.cursor() as cur:
-                    # Query pgstac.collections table
-                    cur.execute(
-                        "SELECT EXISTS(SELECT 1 FROM pgstac.collections WHERE id = %s) as exists",
-                        (collection_id,)
-                    )
-                    result = cur.fetchone()
-                    return result['exists'] if result else False  # dict_row
-
-        except Exception as e:
-            self.logger.error(f"Error checking collection existence: {e}")
-            return False  # Conservative: assume doesn't exist on error
+    # collection_exists() defined below in STAC Operations section (line ~1336)
 
     # =========================================================================
     # ITEM MANAGEMENT - Insert STAC Items into PgSTAC

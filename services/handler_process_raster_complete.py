@@ -2277,10 +2277,46 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             stac_result = {}
             if stac_item_dict:
                 try:
-                    from infrastructure.pgstac_bootstrap import PgStacBootstrap
+                    from infrastructure.pgstac_repository import PgStacRepository
 
-                    pgstac = PgStacBootstrap()
-                    pgstac_id = pgstac.insert_item(stac_item_dict, collection_id)
+                    # CRITICAL (17 FEB 2026): CREATE COLLECTION FIRST before Item.
+                    # PgSTAC requires collections to exist before items because collections
+                    # create table partitions that items use. Without collection, item insertion
+                    # fails with: "no partition of relation 'items' found for row"
+                    # Pattern copied from stac_collection.py lines 426-455.
+                    pgstac_repo = PgStacRepository()
+
+                    # Build minimal STAC collection from item metadata
+                    item_bbox = stac_item_dict.get('bbox')
+                    item_dt = stac_item_dict.get('properties', {}).get('datetime')
+                    temporal_extent = [[item_dt, None]] if item_dt else [[None, None]]
+                    spatial_extent = [item_bbox] if item_bbox else [[-180, -90, 180, 90]]
+
+                    minimal_collection = {
+                        "type": "Collection",
+                        "id": collection_id,
+                        "stac_version": stac_item_dict.get('stac_version', '1.0.0'),
+                        "description": f"Raster collection: {collection_id}",
+                        "links": [],
+                        "license": "proprietary",
+                        "extent": {
+                            "spatial": {"bbox": spatial_extent},
+                            "temporal": {"interval": temporal_extent},
+                        },
+                    }
+
+                    pgstac_repo.insert_collection(minimal_collection)
+                    logger.info(f"✅ Collection upserted: {collection_id}")
+
+                    # Verify collection exists before inserting item
+                    if not pgstac_repo.collection_exists(collection_id):
+                        raise RuntimeError(
+                            f"Collection '{collection_id}' not found in PgSTAC after insertion. "
+                            f"Cannot create STAC Items without a collection partition."
+                        )
+
+                    # Now insert item — collection partition is guaranteed to exist
+                    pgstac_id = pgstac_repo.insert_item(stac_item_dict, collection_id)
 
                     stac_result = {
                         'item_id': stac_item_dict.get('id'),

@@ -1280,13 +1280,16 @@ class RasterMetadata(BaseMetadata):
         Returns:
             Complete STAC Collection dict
         """
-        from core.models.stac import STAC_VERSION
+        from core.models.stac import (
+            STAC_VERSION,
+            STAC_EXT_RASTER, STAC_EXT_PROJECTION, STAC_EXT_PROCESSING,
+        )
 
         # Build extension list
         extensions = self.stac_extensions or [
-            "https://stac-extensions.github.io/raster/v1.1.0/schema.json",
-            "https://stac-extensions.github.io/projection/v1.0.0/schema.json",
-            "https://stac-extensions.github.io/processing/v1.1.0/schema.json"
+            STAC_EXT_RASTER,
+            STAC_EXT_PROJECTION,
+            STAC_EXT_PROCESSING,
         ]
         if self.eo_bands:
             extensions.append("https://stac-extensions.github.io/eo/v1.1.0/schema.json")
@@ -1348,26 +1351,34 @@ class RasterMetadata(BaseMetadata):
     def to_stac_item(
         self,
         base_url: str,
+        provenance_props: Optional['ProvenanceProperties'] = None,
+        platform_props: Optional['PlatformProperties'] = None,
+        geo_props: Optional['GeoProperties'] = None,
         titiler_base_url: Optional[str] = None,
-        renders: Optional[Dict[str, Dict[str, Any]]] = None
+        renders: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """
         Convert to STAC Item response.
 
-        Creates a STAC Item representing this raster dataset with COG assets.
-        Supports STAC Renders Extension for TiTiler visualization parameters.
+        Canonical STAC builder — used by both initial creation AND rebuild.
+        Aligned with Epoch 5 patterns (rmhdagmaster/handlers/raster/stac.py).
 
         Args:
             base_url: Base URL for link generation
+            provenance_props: geoetl:* custom namespace properties
+            platform_props: ddh:* B2B passthrough properties
+            geo_props: geo:* geographic attribution properties
             titiler_base_url: Optional TiTiler base URL for visualization links
-            renders: Optional dict of render_id → STAC render format for embedding
-                     in the COG asset per STAC Renders Extension
-                     Example: {"default": {"colormap_name": "viridis", "rescale": [[0, 100]]}}
+            renders: STAC Renders Extension dict (from services.stac_renders.build_renders)
 
         Returns:
             Complete STAC Item dict
         """
-        from core.models.stac import STAC_VERSION
+        from core.models.stac import (
+            STAC_VERSION, APP_PREFIX,
+            STAC_EXT_PROJECTION, STAC_EXT_RASTER, STAC_EXT_FILE,
+            STAC_EXT_RENDER, STAC_EXT_PROCESSING,
+        )
         import urllib.parse
 
         # Build bbox from extent
@@ -1390,8 +1401,9 @@ class RasterMetadata(BaseMetadata):
         # Build properties
         properties: Dict[str, Any] = {
             "title": self.title,
-            "description": self.description
         }
+        if self.description:
+            properties["description"] = self.description
 
         # Handle datetime per STAC spec
         if self.extent and self.extent.temporal and self.extent.temporal.interval:
@@ -1413,7 +1425,7 @@ class RasterMetadata(BaseMetadata):
                 else None
             )
 
-        # Projection extension
+        # proj:* extension
         if self.crs:
             if self.crs.startswith("EPSG:"):
                 properties["proj:epsg"] = int(self.crs.replace("EPSG:", ""))
@@ -1421,39 +1433,41 @@ class RasterMetadata(BaseMetadata):
                 properties["proj:wkt2"] = self.crs
         if self.transform:
             properties["proj:transform"] = self.transform
-        if self.resolution:
-            properties["proj:resolution"] = self.resolution
 
-        # Raster extension
-        if self.band_count:
-            properties["raster:bands_count"] = self.band_count
-        if self.dtype:
-            properties["raster:dtype"] = self.dtype
+        # processing:* extension
+        epoch = provenance_props.epoch if provenance_props else 4
+        properties["processing:lineage"] = f"Processed by {APP_PREFIX} epoch {epoch}"
 
-        # EO extension - add band info
-        if self.eo_bands:
-            properties["eo:bands"] = self.eo_bands
+        # geoetl:* custom namespace
+        if provenance_props:
+            properties.update(provenance_props.to_prefixed_dict())
 
-        # Processing extension
-        if self.etl_job_id:
-            properties["processing:lineage"] = f"ETL job {self.etl_job_id}"
-        if self.source_file:
-            properties["processing:source_file"] = self.source_file
+        # ddh:* B2B passthrough
+        if platform_props:
+            properties.update(
+                platform_props.model_dump(by_alias=True, exclude_none=True)
+            )
 
-        # Build extension list
-        extensions = self.stac_extensions or [
-            "https://stac-extensions.github.io/raster/v1.1.0/schema.json",
-            "https://stac-extensions.github.io/projection/v1.0.0/schema.json",
-            "https://stac-extensions.github.io/processing/v1.1.0/schema.json"
+        # geo:* geographic attribution
+        if geo_props:
+            properties.update(geo_props.to_flat_dict())
+
+        # STAC Renders Extension — renders in properties (not on asset)
+        if renders:
+            properties["renders"] = renders
+
+        # Build extension list from constants
+        extensions = [
+            STAC_EXT_PROJECTION,
+            STAC_EXT_RASTER,
+            STAC_EXT_PROCESSING,
         ]
         if self.eo_bands:
-            if "https://stac-extensions.github.io/eo/v1.1.0/schema.json" not in extensions:
-                extensions.append("https://stac-extensions.github.io/eo/v1.1.0/schema.json")
-        # Add STAC Renders Extension if renders are provided (F2.11 - 22 JAN 2026)
+            extensions.append(
+                "https://stac-extensions.github.io/eo/v1.1.0/schema.json"
+            )
         if renders:
-            render_ext = "https://stac-extensions.github.io/render/v1.0.0/schema.json"
-            if render_ext not in extensions:
-                extensions.append(render_ext)
+            extensions.append(STAC_EXT_RENDER)
 
         collection_id = self.stac_collection_id or self.id
         item_id = self.stac_item_id or self.id
@@ -1482,50 +1496,46 @@ class RasterMetadata(BaseMetadata):
             "assets": {}
         }
 
-        # Build COG asset URL (HTTPS for external access)
-        storage_account = self.container.split("-")[0] if "-" in self.container else self.container
-        # Build HTTPS URL from container and blob_path
-        cog_https_url = f"https://{storage_account}.blob.core.windows.net/{self.container}/{self.blob_path}"
-
-        # Add COG data asset
+        # COG asset — /vsiaz/ path for GDAL/TiTiler access
         cog_asset: Dict[str, Any] = {
-            "href": cog_https_url,
+            "href": f"/vsiaz/{self.container}/{self.blob_path}",
             "type": "image/tiff; application=geotiff; profile=cloud-optimized",
             "title": "Cloud-optimized GeoTIFF",
-            "roles": ["data"]
+            "roles": ["data"],
         }
 
-        # Add raster extension band info to asset
+        # raster:bands on ASSET (not in properties)
         if self.raster_bands:
             cog_asset["raster:bands"] = self.raster_bands
         elif self.band_names:
-            # Build basic raster bands from band names
             cog_asset["raster:bands"] = [
                 {"name": name, "data_type": self.dtype}
                 for name in self.band_names
             ]
 
-        # Add EO bands to asset
+        # EO bands on asset
         if self.eo_bands:
             cog_asset["eo:bands"] = self.eo_bands
 
-        # Add STAC Renders Extension (F2.11 - 22 JAN 2026)
-        # Embeds TiTiler visualization parameters per render_id
-        if renders:
-            cog_asset["renders"] = renders
-
         item["assets"]["data"] = cog_asset
 
-        # Add TiTiler visualization links if base URL provided
+        # TiTiler visualization links from renders.default
         if titiler_base_url:
-            encoded_url = urllib.parse.quote(cog_https_url, safe='')
+            vsiaz_url = f"/vsiaz/{self.container}/{self.blob_path}"
+            encoded_url = urllib.parse.quote(vsiaz_url, safe='')
 
-            # Thumbnail asset
+            # Build thumbnail from renders.default parameters
             thumbnail_params = f"url={encoded_url}"
-            if self.rescale_range:
-                thumbnail_params += f"&rescale={self.rescale_range[0]},{self.rescale_range[1]}"
-            if self.colormap:
-                thumbnail_params += f"&colormap_name={self.colormap}"
+            if renders and "default" in renders:
+                default_render = renders["default"]
+                if "rescale" in default_render and default_render["rescale"]:
+                    rescale = default_render["rescale"][0]
+                    thumbnail_params += f"&rescale={rescale[0]},{rescale[1]}"
+                if "colormap_name" in default_render:
+                    thumbnail_params += f"&colormap_name={default_render['colormap_name']}"
+                if "bidx" in default_render:
+                    for b in default_render["bidx"]:
+                        thumbnail_params += f"&bidx={b}"
 
             item["assets"]["thumbnail"] = {
                 "href": f"{titiler_base_url}/cog/preview.png?{thumbnail_params}",

@@ -1,10 +1,10 @@
 # ============================================================================
 # STAC DATA MODELS
 # ============================================================================
+# EPOCH: 4 - ACTIVE (Aligned with Epoch 5 patterns)
 # STATUS: Core - Centralized STAC property schemas
-# PURPOSE: Type-safe Pydantic models for all STAC property namespaces
-# LAST_REVIEWED: 03 JAN 2026
-# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# PURPOSE: Type-safe Pydantic models for STAC property namespaces
+# LAST_REVIEWED: 16 FEB 2026
 # ============================================================================
 """
 STAC Data Models.
@@ -12,31 +12,28 @@ STAC Data Models.
 Centralized Pydantic models for all STAC property namespaces. These models
 enforce type safety and consistency across all STAC item/collection creation.
 
+Aligned with Epoch 5 (rmhdagmaster/core/models/stac_properties.py) so that
+both apps produce structurally compatible items in the shared pgstac catalog.
+
 Design Principle:
     ALL STAC property namespaces are defined here. Service files import from
     this module to ensure consistency.
 
 Namespaces:
-    - platform:* - DDH platform identifiers
-    - app:* - Job linkage and application metadata
+    - geoetl:* - Platform provenance (via APP_PREFIX, custom properties)
+    - ddh:* - DDH platform identifiers (B2B passthrough)
     - geo:* - Geographic attribution (ISO3 codes)
-    - azure:* - Azure blob storage metadata
     - postgis:* - PostGIS vector table metadata
 
-Exports:
-    STAC_VERSION: Single source of truth for STAC spec version
-    PlatformProperties: DDH platform identifiers
-    AppProperties: Job linkage metadata
-    GeoProperties: Geographic attribution
-    AzureProperties: Azure blob metadata
-    PostGISProperties: PostGIS table metadata
-    STACItemProperties: Composite model for all properties
+Extension URL Constants:
+    STAC_EXT_PROJECTION, STAC_EXT_RASTER, STAC_EXT_FILE,
+    STAC_EXT_RENDER, STAC_EXT_PROCESSING
 
 Created: 22 DEC 2025
+V0.9 Alignment: 16 FEB 2026
 """
 
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 from enum import Enum
 from pydantic import BaseModel, Field, ConfigDict, model_validator
 
@@ -48,6 +45,16 @@ from pydantic import BaseModel, Field, ConfigDict, model_validator
 # Single source of truth for STAC specification version
 # All STAC items and collections MUST use this version
 STAC_VERSION = "1.0.0"
+
+# App prefix — single point of change (aligned with Epoch 5 rmhdagmaster)
+APP_PREFIX = "geoetl"
+
+# STAC Extension URLs (standard extensions used by both Epoch 4 and Epoch 5)
+STAC_EXT_PROJECTION = "https://stac-extensions.github.io/projection/v1.0.0/schema.json"
+STAC_EXT_RASTER = "https://stac-extensions.github.io/raster/v1.1.0/schema.json"
+STAC_EXT_FILE = "https://stac-extensions.github.io/file/v2.1.0/schema.json"
+STAC_EXT_RENDER = "https://stac-extensions.github.io/render/v2.0.0/schema.json"
+STAC_EXT_PROCESSING = "https://stac-extensions.github.io/processing/v1.2.0/schema.json"
 
 
 # =============================================================================
@@ -62,7 +69,7 @@ class AccessLevel(str, Enum):
     - Pydantic models (PlatformRequest, DatasetApproval, PromotedDataset)
     - SQL ENUMs (app.access_level_enum)
     - Service Bus messages
-    - STAC item properties (platform:access_level)
+    - STAC item properties (ddh:access_level)
 
     Values:
         PUBLIC: Data can be exported to external-facing storage (ADF handles this)
@@ -158,147 +165,55 @@ def normalize_access_level(value: Any) -> AccessLevel:
 # NAMESPACE PROPERTY MODELS
 # =============================================================================
 
+class ProvenanceProperties(BaseModel):
+    """
+    Custom platform provenance properties.
+
+    Namespace: geoetl:* (via APP_PREFIX)
+    Only properties that have NO standard STAC extension equivalent.
+    Uses APP_PREFIX for dynamic namespace (one-line change when app is named).
+
+    Aligned with Epoch 5: rmhdagmaster/core/models/stac_properties.py
+
+    Properties:
+        job_id: Which processing job created this item
+        managed_by: Which system manages this item (multi-producer catalog)
+        epoch: Processing system version (internal versioning)
+        raster_type: Domain-specific type classification (dem, rgb, categorical...)
+        processing_seconds: How long processing took
+        statistics_extracted: Whether band stats were computed
+    """
+    model_config = ConfigDict(populate_by_name=True)
+
+    job_id: Optional[str] = Field(default=None)
+    managed_by: str = Field(default=APP_PREFIX)  # "geoetl" — the ETL system
+    epoch: int = Field(default=4)                # this codebase is Epoch 4
+    raster_type: Optional[str] = Field(default=None)
+    processing_seconds: Optional[float] = Field(default=None)
+    statistics_extracted: Optional[bool] = Field(default=None)
+
+    def to_prefixed_dict(self) -> dict:
+        """Serialize with APP_PREFIX, excluding None values."""
+        raw = self.model_dump(exclude_none=True)
+        return {f"{APP_PREFIX}:{k}": v for k, v in raw.items()}
+
+
 class PlatformProperties(BaseModel):
     """
-    DDH platform identifiers.
+    DDH platform identifiers — B2B passthrough.
 
-    Namespace: platform:*
-    Source: PlatformRequest via job_parameters
+    Namespace: ddh:*
+    These are external identifiers from the upstream platform.
+    Always use 'ddh:' prefix (not configurable — it's the platform name).
 
-    These properties link STAC items back to the DDH platform that
-    requested their creation.
+    Aligned with Epoch 5: rmhdagmaster/core/models/stac_properties.py
     """
     model_config = ConfigDict(populate_by_name=True)
 
-    dataset_id: Optional[str] = Field(
-        default=None,
-        alias="platform:dataset_id",
-        description="DDH dataset identifier"
-    )
-    resource_id: Optional[str] = Field(
-        default=None,
-        alias="platform:resource_id",
-        description="DDH resource identifier"
-    )
-    version_id: Optional[str] = Field(
-        default=None,
-        alias="platform:version_id",
-        description="DDH version identifier"
-    )
-    request_id: Optional[str] = Field(
-        default=None,
-        alias="platform:request_id",
-        description="Platform request hash (SHA256[:32])"
-    )
-    access_level: Optional[AccessLevel] = Field(
-        default=None,
-        alias="platform:access_level",
-        description="Data classification level"
-    )
-    client: str = Field(
-        default="ddh",
-        alias="platform:client",
-        description="Client application identifier"
-    )
-
-    @classmethod
-    def from_platform_refs(
-        cls,
-        platform_refs: Dict[str, Any],
-        request_id: Optional[str] = None,
-        access_level: Optional[AccessLevel] = None,
-        client: str = "ddh"
-    ) -> "PlatformProperties":
-        """
-        Create PlatformProperties from platform_refs dict.
-
-        V0.8 Migration (30 JAN 2026):
-        - Factory method to create from GeospatialAsset.platform_refs
-
-        Args:
-            platform_refs: Dict with dataset_id, resource_id, version_id
-            request_id: Optional platform request ID
-            access_level: Optional access level
-            client: Client identifier (default: "ddh")
-
-        Returns:
-            PlatformProperties instance
-        """
-        return cls(
-            dataset_id=platform_refs.get("dataset_id"),
-            resource_id=platform_refs.get("resource_id"),
-            version_id=platform_refs.get("version_id"),
-            request_id=request_id,
-            access_level=access_level,
-            client=client
-        )
-
-    def to_flat_dict(self) -> Dict[str, Any]:
-        """Convert to flat dict with namespaced keys."""
-        result = {}
-        if self.dataset_id:
-            result["platform:dataset_id"] = self.dataset_id
-        if self.resource_id:
-            result["platform:resource_id"] = self.resource_id
-        if self.version_id:
-            result["platform:version_id"] = self.version_id
-        if self.request_id:
-            result["platform:request_id"] = self.request_id
-        if self.access_level:
-            result["platform:access_level"] = self.access_level.value
-        if self.client:
-            result["platform:client"] = self.client
-        return result
-
-
-class AppProperties(BaseModel):
-    """
-    Application-level metadata for job linkage.
-
-    Namespace: app:*
-    Source: Job execution context
-
-    These properties link STAC items back to the CoreMachine job
-    that created them.
-    """
-    model_config = ConfigDict(populate_by_name=True)
-
-    job_id: Optional[str] = Field(
-        default=None,
-        alias="app:job_id",
-        description="CoreMachine job ID that created this item"
-    )
-    job_type: Optional[str] = Field(
-        default=None,
-        alias="app:job_type",
-        description="Job type that created this item"
-    )
-    created_by: str = Field(
-        default="rmhazuregeoapi",
-        alias="app:created_by",
-        description="Application identifier"
-    )
-    processing_timestamp: Optional[datetime] = Field(
-        default=None,
-        alias="app:processing_timestamp",
-        description="When the item was created"
-    )
-
-    def to_flat_dict(self) -> Dict[str, Any]:
-        """Convert to flat dict with namespaced keys."""
-        result = {
-            "app:created_by": self.created_by,
-            "app:processing_timestamp": (
-                self.processing_timestamp.isoformat()
-                if self.processing_timestamp
-                else datetime.now(timezone.utc).isoformat()
-            )
-        }
-        if self.job_id:
-            result["app:job_id"] = self.job_id
-        if self.job_type:
-            result["app:job_type"] = self.job_type
-        return result
+    dataset_id: Optional[str] = Field(default=None, alias="ddh:dataset_id")
+    resource_id: Optional[str] = Field(default=None, alias="ddh:resource_id")
+    version_id: Optional[str] = Field(default=None, alias="ddh:version_id")
+    access_level: Optional[str] = Field(default=None, alias="ddh:access_level")
 
 
 class GeoProperties(BaseModel):
@@ -338,70 +253,6 @@ class GeoProperties(BaseModel):
             result["geo:primary_iso3"] = self.primary_iso3
         if self.countries:
             result["geo:countries"] = self.countries
-        return result
-
-
-class AzureProperties(BaseModel):
-    """
-    Azure blob storage metadata.
-
-    Namespace: azure:*
-    Source: Azure Blob Storage properties
-
-    These properties track the Azure storage location and characteristics
-    of raster STAC items.
-    """
-    model_config = ConfigDict(populate_by_name=True)
-
-    container: str = Field(
-        ...,
-        alias="azure:container",
-        description="Azure container name"
-    )
-    blob_path: str = Field(
-        ...,
-        alias="azure:blob_path",
-        description="Blob path within container"
-    )
-    tier: str = Field(
-        default="silver",
-        alias="azure:tier",
-        description="Data tier (bronze, silver, gold)"
-    )
-    size_mb: float = Field(
-        default=0.0,
-        alias="azure:size_mb",
-        description="File size in megabytes"
-    )
-    statistics_extracted: bool = Field(
-        default=True,
-        alias="azure:statistics_extracted",
-        description="Whether raster statistics were extracted"
-    )
-    etag: Optional[str] = Field(
-        default=None,
-        alias="azure:etag",
-        description="Azure blob ETag for versioning"
-    )
-    content_type: Optional[str] = Field(
-        default=None,
-        alias="azure:content_type",
-        description="Blob content type"
-    )
-
-    def to_flat_dict(self) -> Dict[str, Any]:
-        """Convert to flat dict with namespaced keys."""
-        result = {
-            "azure:container": self.container,
-            "azure:blob_path": self.blob_path,
-            "azure:tier": self.tier,
-            "azure:size_mb": self.size_mb,
-            "azure:statistics_extracted": self.statistics_extracted
-        }
-        if self.etag:
-            result["azure:etag"] = self.etag
-        if self.content_type:
-            result["azure:content_type"] = self.content_type
         return result
 
 
@@ -451,137 +302,6 @@ class PostGISProperties(BaseModel):
             "postgis:geometry_types": self.geometry_types,
             "postgis:srid": self.srid
         }
-
-
-# =============================================================================
-# COMPOSITE STAC PROPERTIES MODEL
-# =============================================================================
-
-class STACItemProperties(BaseModel):
-    """
-    Composite STAC item properties with all namespaces.
-
-    This model represents the complete properties object for a STAC item,
-    including core STAC fields and all custom namespace properties.
-
-    Usage:
-        props = STACItemProperties(
-            item_datetime=datetime.now(timezone.utc),
-            platform=PlatformProperties(dataset_id="flood-data"),
-            app=AppProperties(job_id="abc123"),
-            azure=AzureProperties(container="silver-cogs", blob_path="tile.tif")
-        )
-        flat_props = props.to_flat_dict()
-    """
-    model_config = ConfigDict(
-        populate_by_name=True,
-        arbitrary_types_allowed=True
-    )
-
-    # Core STAC datetime fields (renamed to avoid Pydantic conflicts)
-    item_datetime: Union[datetime, None] = Field(
-        default=None,
-        description="Acquisition datetime (null if using start/end)"
-    )
-    start_datetime: Union[datetime, None] = Field(
-        default=None,
-        description="Start of temporal extent"
-    )
-    end_datetime: Union[datetime, None] = Field(
-        default=None,
-        description="End of temporal extent"
-    )
-
-    # Optional title/description
-    title: Optional[str] = Field(default=None, description="Human-readable title")
-    description: Optional[str] = Field(default=None, description="Description")
-
-    # Namespace property models (optional - include as needed)
-    platform: Optional[PlatformProperties] = Field(
-        default=None,
-        description="DDH platform identifiers"
-    )
-    app: Optional[AppProperties] = Field(
-        default=None,
-        description="Application/job metadata"
-    )
-    geo: Optional[GeoProperties] = Field(
-        default=None,
-        description="Geographic attribution"
-    )
-    azure: Optional[AzureProperties] = Field(
-        default=None,
-        description="Azure blob metadata (for rasters)"
-    )
-    postgis: Optional[PostGISProperties] = Field(
-        default=None,
-        description="PostGIS table metadata (for vectors)"
-    )
-
-    @model_validator(mode='after')
-    def validate_datetime_fields(self):
-        """
-        Validate datetime handling per STAC spec.
-
-        STAC requires either:
-        - datetime (non-null)
-        - OR start_datetime + end_datetime (with datetime=null)
-        """
-        has_datetime = self.item_datetime is not None
-        has_range = self.start_datetime is not None or self.end_datetime is not None
-
-        # If using temporal range, datetime should be None
-        if has_range and has_datetime:
-            # This is technically allowed but unusual - log a warning
-            pass
-
-        # If no datetime info at all, that's an issue
-        if not has_datetime and not has_range:
-            # Will be caught during item creation - not a model-level error
-            pass
-
-        return self
-
-    def to_flat_dict(self) -> Dict[str, Any]:
-        """
-        Flatten all properties to a single dict with namespaced keys.
-
-        This is the format expected by STAC item properties.
-
-        Returns:
-            Flat dictionary with all properties properly namespaced
-        """
-        props: Dict[str, Any] = {}
-
-        # Handle datetime per STAC spec (item_datetime maps to 'datetime' in output)
-        if self.item_datetime:
-            props['datetime'] = self.item_datetime.isoformat()
-        elif self.start_datetime or self.end_datetime:
-            props['datetime'] = None
-            if self.start_datetime:
-                props['start_datetime'] = self.start_datetime.isoformat()
-            if self.end_datetime:
-                props['end_datetime'] = self.end_datetime.isoformat()
-
-        # Add title/description
-        if self.title:
-            props['title'] = self.title
-        if self.description:
-            props['description'] = self.description
-
-        # Flatten embedded namespace models
-        if self.platform:
-            props.update(self.platform.to_flat_dict())
-        if self.app:
-            props.update(self.app.to_flat_dict())
-        if self.geo:
-            props.update(self.geo.to_flat_dict())
-        if self.azure:
-            props.update(self.azure.to_flat_dict())
-        if self.postgis:
-            props.update(self.postgis.to_flat_dict())
-
-        return props
 
 
 # =============================================================================
@@ -643,6 +363,12 @@ class STACItemCore(BaseModel):
 __all__ = [
     # Constants
     'STAC_VERSION',
+    'APP_PREFIX',
+    'STAC_EXT_PROJECTION',
+    'STAC_EXT_RASTER',
+    'STAC_EXT_FILE',
+    'STAC_EXT_RENDER',
+    'STAC_EXT_PROCESSING',
 
     # Enums
     'AccessLevel',
@@ -652,13 +378,11 @@ __all__ = [
     'normalize_access_level',
 
     # Namespace models
-    'PlatformProperties',
-    'AppProperties',
-    'GeoProperties',
-    'AzureProperties',
-    'PostGISProperties',
+    'ProvenanceProperties',   # NEW (geoetl:*)
+    'PlatformProperties',     # REWRITTEN (ddh:*)
+    'GeoProperties',          # UNCHANGED (geo:*)
+    'PostGISProperties',      # UNCHANGED (postgis:*)
 
-    # Composite models
-    'STACItemProperties',
-    'STACItemCore',
+    # Structural validation
+    'STACItemCore',           # UNCHANGED
 ]

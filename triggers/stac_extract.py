@@ -201,7 +201,7 @@ def handle_request(req: func.HttpRequest) -> func.HttpResponse:
             blob_name=blob_name,
             collection_id=collection_id
         )
-        logger.info(f"✅ STEP 6: extract_item_from_blob() completed - Item ID: {item.id}")
+        logger.info(f"✅ STEP 6: extract_item_from_blob() completed - Item ID: {item.get('id', 'unknown') if isinstance(item, dict) else item.id}")
     except ValueError as e:
         logger.error(f"❌ STEP 6 FAILED: ValueError during STAC extraction")
         logger.error(f"   Error: {e}")
@@ -233,10 +233,16 @@ def handle_request(req: func.HttpRequest) -> func.HttpResponse:
         )
 
     # STEP 7: Convert to dict for response
+    # V0.9 P2.5: extract_item_from_blob now returns plain dict
     try:
-        logger.info("🔄 STEP 7: Converting STAC Item to dict...")
-        item_dict = item.model_dump(mode='json', by_alias=True)
-        logger.info(f"✅ STEP 7: Item converted to dict - {len(item_dict)} top-level keys")
+        logger.info("🔄 STEP 7: Preparing STAC Item dict...")
+        if isinstance(item, dict):
+            item_dict = item
+        elif hasattr(item, 'model_dump'):
+            item_dict = item.model_dump(mode='json', by_alias=True)
+        else:
+            item_dict = item
+        logger.info(f"✅ STEP 7: Item dict ready - {len(item_dict)} top-level keys")
     except Exception as e:
         logger.error(f"❌ STEP 7 FAILED: Error converting Item to dict")
         logger.error(f"   Error: {e}")

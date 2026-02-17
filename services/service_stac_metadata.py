@@ -109,7 +109,7 @@ class StacMetadataService:
         file_checksum: Optional[str] = None,  # STAC file extension (21 JAN 2026)
         file_size: Optional[int] = None,  # STAC file extension (21 JAN 2026)
         skip_stats: bool = False,  # V0.9 P2.2: Override to skip statistics extraction
-    ) -> Item:
+    ) -> Dict[str, Any]:
         """
         Extract STAC Item from raster blob using rio-stac.
 
@@ -389,158 +389,184 @@ class StacMetadataService:
             # Fail fast - these fields are mandatory for pgSTAC compatibility
             raise RuntimeError(f"Failed to add required STAC fields: {e}")
 
-        # STEP G.1b: Extract band statistics for rescale calculation (04 JAN 2026)
-        # rio-stac populates raster:bands with min/max/mean/stddev when with_raster=True
-        # Use these to calculate appropriate rescale values for TiTiler URLs
+        # =====================================================================
+        # V0.9 P2.5: Build STAC item via RasterMetadata.to_stac_item()
+        # Replaces old Steps G.1b, G.2, G.5, H, I with canonical builder.
+        # =====================================================================
+
+        # STEP N.1: Extract band statistics and raster type from rio-stac output
         try:
-            logger.debug("   Step G.1b: Extracting band statistics for rescale calculation...")
+            logger.debug("   Step N.1: Extracting band stats and raster type...")
             data_asset = item_dict.get('assets', {}).get('data', {})
             raster_bands = data_asset.get('raster:bands', [])
 
-            if raster_bands and raster_meta:
-                # Get the bands that will be displayed
-                display_bands = raster_meta.rgb_bands or [1, 2, 3]
+            # Detect raster type from band count + dtype
+            rio_props = item_dict.get('properties', {})
+            band_count = len(raster_bands) if raster_bands else 1
+            dtype = raster_bands[0].get('data_type', 'float32') if raster_bands else 'float32'
 
-                # Extract max values from displayed bands (1-indexed)
-                band_maxes = []
-                for band_idx in display_bands:
-                    if band_idx <= len(raster_bands):
-                        band_stats = raster_bands[band_idx - 1].get('statistics', {})
-                        band_max = band_stats.get('maximum')
-                        if band_max is not None:
-                            band_maxes.append(band_max)
-                            logger.debug(f"      Band {band_idx}: max={band_max}")
+            # Use raster_meta.detected_type if provided, else auto-detect
+            detected_type = 'unknown'
+            if raster_meta and hasattr(raster_meta, 'detected_type') and raster_meta.detected_type:
+                detected_type = raster_meta.detected_type
+            elif app_meta and hasattr(app_meta, 'raster_type') and app_meta.raster_type:
+                detected_type = app_meta.raster_type
 
-                if band_maxes:
-                    # Use the maximum of displayed bands, with 10% headroom
-                    # This prevents clipping while maintaining good contrast
-                    max_value = max(band_maxes)
-                    rescale_max = int(max_value * 1.1)  # 10% headroom
-                    raster_meta.rescale = {'min': 0, 'max': rescale_max}
-                    logger.info(f"   ✅ Step G.1b: Calculated rescale from band stats: 0,{rescale_max} (bands {display_bands})")
-                else:
-                    logger.debug("   ⚠️  Step G.1b: No band statistics available, using dtype defaults")
-            else:
-                logger.debug("   ⚠️  Step G.1b: No raster:bands or raster_meta, skipping rescale calculation")
+            # Convert rio-stac raster:bands to band_stats format for renders builder
+            band_stats = []
+            for i, rb in enumerate(raster_bands):
+                stats = rb.get('statistics', {})
+                if stats:
+                    band_stats.append({
+                        'band': i + 1,
+                        'statistics': {
+                            'minimum': stats.get('minimum', 0),
+                            'maximum': stats.get('maximum', 0),
+                        }
+                    })
+
+            logger.debug(f"   ✅ Step N.1: {band_count} bands, dtype={dtype}, "
+                         f"type={detected_type}, stats={len(band_stats)} bands")
         except Exception as e:
-            logger.warning(f"   ⚠️  Step G.1b: Band statistics extraction failed (non-fatal): {e}")
+            logger.warning(f"   ⚠️  Step N.1: Band stats extraction failed (non-fatal): {e}")
+            band_stats = []
+            band_count = 1
+            dtype = 'float32'
+            detected_type = 'unknown'
 
-        # STEP G.2: Add metadata via STACMetadataHelper (25 NOV 2025)
-        # Adds: platform:*, app:*, geo:* properties + TiTiler links/assets
-        # Replaces inline ISO3 code with centralized ISO3AttributionService
+        # STEP N.2: Build renders via renders builder (P2.1)
+        renders = None
         try:
-            logger.debug("   Step G.2: Adding metadata via STACMetadataHelper...")
-            from services.stac_metadata_helper import STACMetadataHelper
+            logger.debug("   Step N.2: Building STAC renders...")
+            from services.stac_renders import build_renders
 
-            metadata_helper = STACMetadataHelper()
-            item_dict = metadata_helper.augment_item(
-                item_dict=item_dict,
-                bbox=item_dict.get('bbox'),
-                container=container,
-                blob_name=blob_name,
-                platform=platform_meta,
-                app=app_meta,
-                raster=raster_meta,  # Now includes calculated rescale (04 JAN 2026)
-                include_iso3=True,
-                include_titiler=True,  # Adds TiTiler links + thumbnail asset
-                # STAC file extension (21 JAN 2026)
-                file_checksum=file_checksum,
-                file_size=file_size,
+            renders = build_renders(
+                raster_type=detected_type,
+                band_count=band_count,
+                dtype=dtype,
+                band_stats=band_stats if band_stats else None,
             )
-            logger.debug("   ✅ Step G.2: Metadata enrichment complete (platform, app, geo, titiler)")
-        except Exception as e:
-            # Non-fatal: Log warning but continue - core STAC item can exist without enrichment
-            logger.warning(f"   ⚠️  Step G.2: Metadata enrichment failed (non-fatal): {e}")
-            logger.debug(f"   Traceback:\n{traceback.format_exc()}")
-
-        # STEP G.5: Convert asset URLs to /vsiaz/ paths for OAuth compatibility
-        try:
-            logger.debug("   Step G.5: Converting asset URLs to /vsiaz/ paths for OAuth...")
-            converted_count = 0
-            for asset_key, asset_value in item_dict.get('assets', {}).items():
-                if 'href' in asset_value:
-                    original_url = asset_value['href']
-
-                    # Convert HTTPS URLs to /vsiaz/ paths for OAuth-based access
-                    if original_url.startswith('https://'):
-                        # Extract container and blob path from HTTPS URL
-                        # Format: https://account.blob.core.windows.net/container/path/to/blob.tif?sas_token
-                        # Target: /vsiaz/container/path/to/blob.tif
-
-                        # Remove SAS token if present
-                        base_url = original_url.split('?')[0]
-
-                        # Extract path after blob.core.windows.net/
-                        # Example: https://rmhazuregeo.blob.core.windows.net/silver-cogs/file.tif
-                        #       -> silver-cogs/file.tif
-                        if '.blob.core.windows.net/' in base_url:
-                            path_part = base_url.split('.blob.core.windows.net/', 1)[1]
-                            vsiaz_path = f"/vsiaz/{path_part}"
-                            asset_value['href'] = vsiaz_path
-                            converted_count += 1
-                            logger.debug(f"      Converted asset '{asset_key}' to /vsiaz/ path")
-                            logger.debug(f"         Before: {original_url[:100]}...")
-                            logger.debug(f"         After:  {vsiaz_path}")
-                        else:
-                            logger.warning(f"      Could not parse HTTPS URL for asset '{asset_key}': {original_url[:100]}...")
-                    elif original_url.startswith('/vsiaz/'):
-                        # Already a /vsiaz/ path - no conversion needed
-                        logger.debug(f"      Asset '{asset_key}' already uses /vsiaz/ path: {original_url}")
-                    else:
-                        logger.debug(f"      Asset '{asset_key}' uses non-HTTPS URL: {original_url[:100]}...")
-
-            if converted_count > 0:
-                logger.info(f"   ✅ Step G.5: Converted {converted_count} asset URL(s) to /vsiaz/ paths for OAuth")
+            if renders:
+                logger.info(f"   ✅ Step N.2: Renders built - {list(renders.keys())}")
             else:
-                logger.debug(f"   ✅ Step G.5: No HTTPS URLs to convert (assets may already use /vsiaz/ paths)")
+                logger.debug("   ⚠️  Step N.2: No renders built (insufficient data)")
         except Exception as e:
-            logger.error(f"❌ Step G.5 FAILED: Error converting asset URLs to /vsiaz/ paths")
-            logger.error(f"   Error: {e}")
-            logger.error(f"   Traceback:\n{traceback.format_exc()}")
-            # CRITICAL (11 NOV 2025): /vsiaz/ paths required for OAuth-based TiTiler access
-            # Fail fast rather than creating Items that won't work with TiTiler
-            # If conversion fails, indicates URL format issue that needs to be fixed
-            raise RuntimeError(f"/vsiaz/ path conversion failed: {e}")
+            logger.warning(f"   ⚠️  Step N.2: Renders build failed (non-fatal): {e}")
 
-        # STEP H: Supplement with Azure-specific properties
+        # STEP N.3: Build RasterMetadata from rio-stac extraction
         try:
-            logger.debug("   Step H: Adding Azure-specific properties...")
-            item_dict['properties']['azure:container'] = container
-            item_dict['properties']['azure:blob_path'] = blob_name
-            item_dict['properties']['azure:tier'] = self._determine_tier(container)
-            item_dict['properties']['azure:size_mb'] = file_size_mb
-            item_dict['properties']['azure:statistics_extracted'] = extract_statistics
+            logger.debug("   Step N.3: Building RasterMetadata from extracted data...")
+            from core.models.unified_metadata import RasterMetadata, SpatialExtent, Extent
 
-            if existing_metadata:
-                item_dict['properties']['azure:etag'] = existing_metadata.get('etag')
-                item_dict['properties']['azure:content_type'] = existing_metadata.get('content_type')
+            bbox = item_dict.get('bbox')
+            spatial = None
+            if bbox and len(bbox) >= 4:
+                spatial = SpatialExtent.from_flat_bbox(bbox[0], bbox[1], bbox[2], bbox[3])
 
-            logger.debug(f"   ✅ Step H: Azure properties added")
+            extent = Extent(spatial=spatial) if spatial else None
+
+            # Extract proj:epsg from rio-stac properties
+            proj_epsg = rio_props.get('proj:epsg')
+            crs = f"EPSG:{proj_epsg}" if proj_epsg else 'EPSG:4326'
+
+            # Extract transform from rio-stac properties
+            transform = rio_props.get('proj:transform')
+
+            raster_metadata = RasterMetadata(
+                id=item_dict.get('id', item_id),
+                title=rio_props.get('title') or item_id,
+                cog_url=f"/vsiaz/{container}/{blob_name}",
+                container=container,
+                blob_path=blob_name,
+                width=rio_props.get('proj:shape', [0, 0])[1] if rio_props.get('proj:shape') else 0,
+                height=rio_props.get('proj:shape', [0, 0])[0] if rio_props.get('proj:shape') else 0,
+                band_count=band_count,
+                dtype=dtype,
+                nodata=raster_bands[0].get('nodata') if raster_bands else None,
+                crs=crs,
+                transform=transform,
+                extent=extent,
+                stac_item_id=item_dict.get('id', item_id),
+                stac_collection_id=collection_id,
+                etl_job_id=app_meta.job_id if app_meta and hasattr(app_meta, 'job_id') else None,
+                source_file=blob_name,
+                raster_bands=raster_bands if raster_bands else None,
+            )
+            logger.debug(f"   ✅ Step N.3: RasterMetadata built - {raster_metadata.id}")
         except Exception as e:
-            logger.error(f"❌ Step H FAILED: Error adding Azure properties")
-            logger.error(f"   Error: {e}")
+            logger.error(f"❌ Step N.3 FAILED: Error building RasterMetadata: {e}")
             logger.error(f"   Traceback:\n{traceback.format_exc()}")
-            raise ValueError(f"Failed to add Azure properties: {e}")
+            raise RuntimeError(f"Failed to build RasterMetadata: {e}")
 
-        # STEP H.5: REMOVED (25 NOV 2025)
-        # TiTiler links and thumbnail asset now added by STACMetadataHelper in Step G.2
-        # This consolidates all metadata enrichment in one place for maintainability
-
-        # STEP I: Validate with stac-pydantic
+        # STEP N.4: Build namespace properties
         try:
-            logger.debug("   Step I: Validating with stac-pydantic...")
-            item = Item(**item_dict)
-            logger.debug(f"   ✅ Step I: STAC Item validated successfully")
-        except Exception as e:
-            logger.error(f"❌ Step I FAILED: stac-pydantic validation error")
-            logger.error(f"   Error: {e}")
-            logger.error(f"   Error type: {type(e).__name__}")
-            logger.error(f"   Item dict keys: {list(item_dict.keys())}")
-            logger.error(f"   Traceback:\n{traceback.format_exc()}")
-            raise ValueError(f"STAC Item validation failed: {e}")
+            logger.debug("   Step N.4: Building namespace properties...")
+            from core.models.stac import ProvenanceProperties, PlatformProperties, GeoProperties
 
-        logger.info(f"✅ STAC ITEM EXTRACTION COMPLETE: {item.id}")
-        return item
+            # geoetl:* provenance
+            provenance_props = ProvenanceProperties(
+                job_id=app_meta.job_id if app_meta and hasattr(app_meta, 'job_id') else None,
+                raster_type=detected_type if detected_type != 'unknown' else None,
+                statistics_extracted=extract_statistics,
+            )
+
+            # ddh:* platform passthrough
+            platform_props = None
+            if platform_meta:
+                platform_props = PlatformProperties(
+                    dataset_id=getattr(platform_meta, 'dataset_id', None),
+                    resource_id=getattr(platform_meta, 'resource_id', None),
+                    version_id=getattr(platform_meta, 'version_id', None),
+                    access_level=getattr(platform_meta, 'access_level', None),
+                )
+
+            # geo:* attribution (from ISO3 service)
+            geo_props = None
+            try:
+                from services.iso3_attribution import ISO3AttributionService
+                iso3_service = ISO3AttributionService()
+                if bbox and len(bbox) >= 4:
+                    attribution = iso3_service.get_attribution_for_bbox(bbox)
+                    if attribution and attribution.available:
+                        geo_props = GeoProperties(
+                            iso3=attribution.iso3_codes or [],
+                            primary_iso3=attribution.primary_iso3,
+                            countries=attribution.countries or [],
+                        )
+            except Exception as geo_err:
+                logger.warning(f"   ⚠️  ISO3 attribution failed (non-fatal): {geo_err}")
+
+            logger.debug(f"   ✅ Step N.4: Namespace props built")
+        except Exception as e:
+            logger.warning(f"   ⚠️  Step N.4: Namespace props failed (non-fatal): {e}")
+            provenance_props = ProvenanceProperties(statistics_extracted=extract_statistics)
+            platform_props = None
+            geo_props = None
+
+        # STEP N.5: Build final STAC item via canonical builder
+        try:
+            logger.debug("   Step N.5: Calling RasterMetadata.to_stac_item()...")
+            from config import get_config
+            config = get_config()
+            base_url = getattr(config.platform, 'etl_app_base_url', '') or ''
+            titiler_url = getattr(config.platform, 'titiler_base_url', None)
+
+            final_item = raster_metadata.to_stac_item(
+                base_url=base_url,
+                provenance_props=provenance_props,
+                platform_props=platform_props,
+                geo_props=geo_props,
+                titiler_base_url=titiler_url,
+                renders=renders,
+            )
+            logger.debug(f"   ✅ Step N.5: STAC item built via to_stac_item()")
+        except Exception as e:
+            logger.error(f"❌ Step N.5 FAILED: to_stac_item() error: {e}")
+            logger.error(f"   Traceback:\n{traceback.format_exc()}")
+            raise RuntimeError(f"Failed to build STAC item: {e}")
+
+        logger.info(f"✅ STAC ITEM EXTRACTION COMPLETE: {final_item.get('id', 'unknown')}")
+        return final_item
 
     def generate_stac_item_id(self, blob_name: str) -> str:
         """

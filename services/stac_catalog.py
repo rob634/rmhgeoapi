@@ -296,7 +296,8 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
             )
 
             extract_duration = (datetime.utcnow() - extract_start).total_seconds()
-            logger.info(f"✅ STEP 3: STAC extraction completed in {extract_duration:.2f}s - item_id={item.id}")
+            item_id_str = item.get('id', 'unknown') if isinstance(item, dict) else item.id
+            logger.info(f"✅ STEP 3: STAC extraction completed in {extract_duration:.2f}s - item_id={item_id_str}")
         except Exception as e:
             extract_duration = (datetime.utcnow() - extract_start).total_seconds() if 'extract_start' in locals() else 0
             logger.error(f"❌ STEP 3 FAILED after {extract_duration:.2f}s: STAC extraction error: {e}\n{traceback.format_exc()}")
@@ -316,7 +317,13 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
             import json as json_module
 
             # Convert item to JSON-serializable dict
-            item_dict_for_json = item.model_dump(mode='json', by_alias=True)
+            # V0.9 P2.5: extract_item_from_blob now returns plain dict
+            if isinstance(item, dict):
+                item_dict_for_json = item
+            elif hasattr(item, 'model_dump'):
+                item_dict_for_json = item.model_dump(mode='json', by_alias=True)
+            else:
+                item_dict_for_json = item
 
             # Generate JSON blob name (same as COG but .json extension)
             # dctest_cog_analysis.tif → dctest_cog_analysis.json

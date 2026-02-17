@@ -234,12 +234,12 @@ class PgStacRepository:
     # ITEM OPERATIONS
     # =========================================================================
 
-    def insert_item(self, item: 'pystac.Item', collection_id: str) -> str:
+    def insert_item(self, item, collection_id: str) -> str:
         """
         Insert STAC item into PgSTAC.
 
         Args:
-            item: pystac.Item object
+            item: STAC item as pystac.Item, stac_pydantic.Item, or plain dict
             collection_id: Collection ID that item belongs to
 
         Returns:
@@ -253,17 +253,17 @@ class PgStacRepository:
             Collection MUST exist before inserting items (PgSTAC requirement).
             Uses PgSTAC's insert_item() which handles partitioning.
         """
-        # Accept both pystac.Item and stac_pydantic.Item (18 NOV 2025)
-        # StacMetadataService returns stac_pydantic.Item, but both are valid STAC items
+        # Accept pystac.Item, stac_pydantic.Item, or plain dict (V0.9 P3.1)
         is_pystac_item = pystac and isinstance(item, pystac.Item)
         is_pydantic_item = StacPydanticItem and isinstance(item, StacPydanticItem)
+        is_dict_item = isinstance(item, dict)
 
-        if not (is_pystac_item or is_pydantic_item):
+        if not (is_pystac_item or is_pydantic_item or is_dict_item):
             raise ValueError(
-                f"Expected pystac.Item or stac_pydantic.Item, got {type(item).__name__}"
+                f"Expected pystac.Item, stac_pydantic.Item, or dict, got {type(item).__name__}"
             )
 
-        item_id = item.id
+        item_id = item['id'] if is_dict_item else item.id
         logger.info(f"🔄 Inserting item into PgSTAC: {item_id} (collection: {collection_id})")
 
         try:

@@ -257,6 +257,18 @@ class RasterViewerInterface(BaseInterface):
                     </select>
                 </div>
 
+                <!-- Version ID (required for draft assets) -->
+                <div class="qa-field">
+                    <label for="qa-version-id">Version ID</label>
+                    <input type="text" class="qa-input" id="qa-version-id" placeholder="e.g. v1.0 (required for drafts)">
+                </div>
+
+                <!-- Previous Version ID (for lineage chaining) -->
+                <div class="qa-field">
+                    <label for="qa-previous-version-id">Previous Version ID</label>
+                    <input type="text" class="qa-input" id="qa-previous-version-id" placeholder="e.g. v0.9 (if replacing a previous version)">
+                </div>
+
                 <!-- Notes / Reason -->
                 <div class="qa-field">
                     <label for="qa-notes">Notes <span id="notes-required" class="required" style="display:none;">*</span></label>
@@ -1535,11 +1547,16 @@ class RasterViewerInterface(BaseInterface):
             setStatus('Submitting approval...', '');
 
             try {{
+                const versionId = document.getElementById('qa-version-id').value.trim();
+                const previousVersionId = document.getElementById('qa-previous-version-id').value.trim();
+
                 const payload = {{
                     reviewer: reviewer,
                     clearance_level: clearance,
                     notes: notes || 'Approved via Raster Viewer QA'
                 }};
+                if (versionId) payload.version_id = versionId;
+                if (previousVersionId) payload.previous_version_id = previousVersionId;
                 // Use asset_id if provided (V0.8.13), then approval_id, then stac_item_id
                 if (QA_CONTEXT.asset_id) {{
                     payload.asset_id = QA_CONTEXT.asset_id;

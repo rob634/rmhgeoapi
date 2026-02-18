@@ -970,6 +970,20 @@ class VectorViewerService:
                                 </select>
                             </div>
 
+                            <!-- Version ID (required for draft assets) -->
+                            <div class="control-row">
+                                <label class="control-label">Version ID</label>
+                                <input type="text" class="number-input" id="qa-version-id"
+                                       placeholder="e.g. v1.0 (required for drafts)" style="text-align: left;">
+                            </div>
+
+                            <!-- Previous Version ID (for lineage chaining) -->
+                            <div class="control-row">
+                                <label class="control-label">Previous Version ID</label>
+                                <input type="text" class="number-input" id="qa-previous-version-id"
+                                       placeholder="e.g. v0.9 (if replacing)" style="text-align: left;">
+                            </div>
+
                             <!-- Notes -->
                             <div class="control-row">
                                 <label class="control-label">Notes <span id="notes-required" style="color: var(--ds-error); display:none;">*</span></label>
@@ -1439,16 +1453,23 @@ class VectorViewerService:
 
             setStatus('Submitting approval...', 'info');
 
+            const versionId = document.getElementById('qa-version-id').value.trim();
+            const previousVersionId = document.getElementById('qa-previous-version-id').value.trim();
+
             try {{
+                const approvePayload = {{
+                    asset_id: ASSET_ID,
+                    reviewer: reviewer,
+                    clearance_level: clearance,
+                    notes: notes || undefined
+                }};
+                if (versionId) approvePayload.version_id = versionId;
+                if (previousVersionId) approvePayload.previous_version_id = previousVersionId;
+
                 const response = await fetch('/api/platform/approve', {{
                     method: 'POST',
                     headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify({{
-                        asset_id: ASSET_ID,
-                        reviewer: reviewer,
-                        clearance_level: clearance,
-                        notes: notes || undefined
-                    }})
+                    body: JSON.stringify(approvePayload)
                 }});
 
                 const result = await response.json();

@@ -44,7 +44,9 @@ def _resolve_asset_id(
     asset_id: str = None,
     stac_item_id: str = None,
     job_id: str = None,
-    request_id: str = None
+    request_id: str = None,
+    dataset_id: str = None,
+    resource_id: str = None
 ) -> tuple:
     """
     Resolve asset_id from various B2B identifiers.
@@ -54,6 +56,8 @@ def _resolve_asset_id(
         stac_item_id: STAC item ID
         job_id: Job ID
         request_id: Platform request ID
+        dataset_id: DDH dataset identifier (must be paired with resource_id)
+        resource_id: DDH resource identifier (must be paired with dataset_id)
 
     Returns:
         Tuple of (asset_id, error_response) - error_response is None if found
@@ -122,10 +126,42 @@ def _resolve_asset_id(
             "error_type": "NotFound"
         }
 
+    # By dataset_id + resource_id (18 FEB 2026) — both must be provided explicitly
+    if dataset_id and resource_id:
+        from psycopg import sql as psql
+        import json as _json
+        # Use JSONB containment (@>) to find asset regardless of whether version_id exists
+        # Returns the latest (most recent) active asset for this dataset+resource pair
+        refs_filter = {"dataset_id": dataset_id, "resource_id": resource_id}
+        with asset_repo._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    psql.SQL("""
+                        SELECT asset_id FROM {}.{}
+                        WHERE platform_id = 'ddh'
+                          AND platform_refs @> %s
+                          AND deleted_at IS NULL
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                    """).format(
+                        psql.Identifier(asset_repo.schema),
+                        psql.Identifier(asset_repo.table)
+                    ),
+                    (_json.dumps(refs_filter),)
+                )
+                row = cur.fetchone()
+                if row:
+                    return row['asset_id'], None
+        return None, {
+            "success": False,
+            "error": f"No asset found for dataset_id={dataset_id}, resource_id={resource_id}",
+            "error_type": "NotFound"
+        }
+
     # No identifier provided
     return None, {
         "success": False,
-        "error": "Must provide asset_id, stac_item_id, job_id, or request_id",
+        "error": "Must provide asset_id, stac_item_id, job_id, request_id, or dataset_id+resource_id",
         "error_type": "ValidationError"
     }
 
@@ -178,6 +214,8 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
         stac_item_id = req_body.get('stac_item_id')
         job_id = req_body.get('job_id')
         request_id = req_body.get('request_id')
+        dataset_id = req_body.get('dataset_id')
+        resource_id = req_body.get('resource_id')
         # Legacy: also accept approval_id as alias for asset_id
         if not asset_id_param:
             asset_id_param = req_body.get('approval_id')
@@ -242,7 +280,9 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
             asset_id=asset_id_param,
             stac_item_id=stac_item_id,
             job_id=job_id,
-            request_id=request_id
+            request_id=request_id,
+            dataset_id=dataset_id,
+            resource_id=resource_id
         )
         if error:
             return func.HttpResponse(
@@ -428,6 +468,8 @@ def platform_reject(req: func.HttpRequest) -> func.HttpResponse:
         stac_item_id = req_body.get('stac_item_id')
         job_id = req_body.get('job_id')
         request_id = req_body.get('request_id')
+        dataset_id = req_body.get('dataset_id')
+        resource_id = req_body.get('resource_id')
         # Legacy: also accept approval_id as alias for asset_id
         if not asset_id_param:
             asset_id_param = req_body.get('approval_id')
@@ -463,7 +505,9 @@ def platform_reject(req: func.HttpRequest) -> func.HttpResponse:
             asset_id=asset_id_param,
             stac_item_id=stac_item_id,
             job_id=job_id,
-            request_id=request_id
+            request_id=request_id,
+            dataset_id=dataset_id,
+            resource_id=resource_id
         )
         if error:
             return func.HttpResponse(
@@ -572,6 +616,8 @@ def platform_revoke(req: func.HttpRequest) -> func.HttpResponse:
         stac_item_id = req_body.get('stac_item_id')
         job_id = req_body.get('job_id')
         request_id = req_body.get('request_id')
+        dataset_id = req_body.get('dataset_id')
+        resource_id = req_body.get('resource_id')
         # Legacy: also accept approval_id as alias for asset_id
         if not asset_id_param:
             asset_id_param = req_body.get('approval_id')
@@ -607,7 +653,9 @@ def platform_revoke(req: func.HttpRequest) -> func.HttpResponse:
             asset_id=asset_id_param,
             stac_item_id=stac_item_id,
             job_id=job_id,
-            request_id=request_id
+            request_id=request_id,
+            dataset_id=dataset_id,
+            resource_id=resource_id
         )
         if error:
             return func.HttpResponse(

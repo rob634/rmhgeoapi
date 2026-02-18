@@ -25,7 +25,6 @@ Checkpoint Phases:
     table_created  - PostGIS table and metadata created
     style_created  - Default OGC style registered
     chunk_N        - Chunk N uploaded (N = 0, 1, 2...)
-    stac_created   - STAC item registered
     complete       - Final result
 
 Benefits:
@@ -219,28 +218,7 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
         )
 
         # =====================================================================
-        # PHASE 4: Create STAC Item (OPTIONAL - 07 FEB 2026)
-        # Only runs if make_stac=True. Default is False (vectors use OGC Features API)
-        # =====================================================================
-        stac_result = {'item_id': None, 'collection_id': None}  # Default if skipped
-
-        if parameters.get('make_stac', False):
-            logger.info(f"[{job_id[:8]}] Phase 4: Creating STAC item (make_stac=True)")
-
-            stac_result = _create_stac_item(
-                table_name=table_name,
-                schema=schema,
-                parameters=parameters,
-                load_info=load_info,
-                job_id=job_id
-            )
-
-            checkpoint("stac_created", stac_result)
-        else:
-            logger.info(f"[{job_id[:8]}] Phase 4: Skipped (make_stac=False, using OGC Features API)")
-
-        # =====================================================================
-        # PHASE 5: Refresh TiPG Collection Catalog (05 FEB 2026 - F1.6)
+        # PHASE 4: Refresh TiPG Collection Catalog (05 FEB 2026 - F1.6)
         # =====================================================================
         # Notify the Service Layer to re-scan PostGIS so TiPG immediately
         # discovers the new collection without waiting for cache TTL or restart.
@@ -330,9 +308,6 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
                 "total_rows": total_rows,
                 "geometry_type": table_result['geometry_type'],
                 "srid": table_result.get('srid', 4326),
-                # STAC optional (07 FEB 2026) - only populated if make_stac=True
-                "stac_item_id": stac_result.get('item_id'),
-                "collection_id": stac_result.get('collection_id'),
                 "style_id": style_result.get('style_id', 'default'),
                 "chunks_uploaded": upload_result.get('chunks_uploaded', 0),
                 "checkpoint_count": len(checkpoints),
@@ -728,71 +703,6 @@ def _upload_chunks_with_checkpoints(
         'avg_chunk_time': round(sum(chunk_times) / len(chunk_times), 2) if chunk_times else 0,
         'idempotent_reruns_detected': total_rows_deleted > 0
     }
-
-
-def _create_stac_item(
-    table_name: str,
-    schema: str,
-    parameters: Dict[str, Any],
-    load_info: Dict[str, Any],
-    job_id: str
-) -> Dict[str, Any]:
-    """
-    Create STAC item for the vector table.
-
-    Returns:
-        Dict with STAC creation result
-    """
-    try:
-        from services.stac_vector_catalog import create_vector_stac
-
-        # Get collection_id from parameters, fall back to dataset_id (07 FEB 2026)
-        # VECTOR_COLLECTION constant removed - collection_id now derived from dataset_id
-        collection_id = parameters.get('collection_id') or parameters.get('dataset_id')
-
-        stac_params = {
-            'schema': schema,
-            'table_name': table_name,
-            'collection_id': collection_id,
-            'source_file': parameters.get('blob_name'),
-            'source_format': parameters.get('file_extension'),
-            'title': parameters.get('title'),
-            'description': parameters.get('description'),
-            'keywords': parameters.get('keywords'),
-            'license': parameters.get('license'),
-            'attribution': parameters.get('attribution'),
-            # 30 JAN 2026: Use stac_item_id from Platform (DDH format) if available
-            'item_id': parameters.get('stac_item_id') or parameters.get('item_id'),
-        }
-
-        # Add platform job ID if available
-        if parameters.get('_platform_job_id'):
-            stac_params['platform_job_id'] = parameters['_platform_job_id']
-
-        result = create_vector_stac(stac_params)
-
-        # Extract item_id from nested result structure (30 JAN 2026 fix)
-        # create_vector_stac returns: {"success": True, "result": {"item_id": "...", ...}}
-        stac_result = result.get('result', {})
-        item_id = stac_result.get('item_id')
-
-        logger.info(f"[{job_id[:8]}] STAC item created: {item_id}")
-
-        return {
-            'item_id': item_id,
-            'collection_id': stac_result.get('collection_id', collection_id),
-            'success': result.get('success', False)
-        }
-
-    except Exception as e:
-        # STAC creation failure is logged but non-fatal for table creation
-        logger.error(f"[{job_id[:8]}] STAC creation failed: {e}")
-        return {
-            'item_id': None,
-            'collection_id': None,
-            'success': False,
-            'error': str(e)
-        }
 
 
 def _record_validation_events(job_id: str, validation_events: List[Dict[str, Any]]):

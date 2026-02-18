@@ -50,7 +50,6 @@ class VectorDockerETLJob(JobBaseMixin, JobBase):
         table_created  - PostGIS table + metadata created
         style_created  - Default style registered
         chunk_N        - Chunk N uploaded (N = 0, 1, 2...)
-        stac_created   - STAC item registered
         complete       - Final result
 
     Resume Behavior:
@@ -90,7 +89,6 @@ class VectorDockerETLJob(JobBaseMixin, JobBase):
         {"name": "validation_complete", "label": "Validation complete", "phase": "validate"},
         {"name": "table_created", "label": "Create PostGIS table", "phase": "upload"},
         {"name": "style_created", "label": "Create default style", "phase": "upload"},
-        {"name": "stac_created", "label": "Register STAC item", "phase": "catalog"},
     ]
 
     # Declarative validation schema
@@ -262,13 +260,6 @@ class VectorDockerETLJob(JobBaseMixin, JobBase):
             'description': 'Max vertices per polygon in tile view'
         },
 
-        # === STAC Catalog (optional) ===
-        'make_stac': {
-            'type': 'bool',
-            'default': False,
-            'description': 'Create STAC item for this vector (default: False, vectors use OGC Features API)'
-        },
-
         # === Internal (set by platform) ===
         '_platform_job_id': {
             'type': 'str',
@@ -395,9 +386,6 @@ class VectorDockerETLJob(JobBaseMixin, JobBase):
                 'create_tile_view': job_params.get('create_tile_view', False),
                 'max_tile_vertices': job_params.get('max_tile_vertices', 256),
 
-                # STAC (optional - default False)
-                'make_stac': job_params.get('make_stac', False),
-
                 # Platform tracking
                 '_platform_job_id': job_params.get('_platform_job_id'),
             }
@@ -467,13 +455,6 @@ class VectorDockerETLJob(JobBaseMixin, JobBase):
             "total_rows": result_data.get("total_rows", 0),
             "geometry_type": result_data.get("geometry_type"),
             "srid": result_data.get("srid"),
-
-            # STAC info - only included if make_stac=True was used (07 FEB 2026)
-            # Default is no STAC - vectors accessed via OGC Features API
-            "stac": {
-                "item_id": result_data.get("stac_item_id"),
-                "collection_id": result_data.get("collection_id") or result_data.get("dataset_id"),
-            } if result_data.get("stac_item_id") else None,
 
             # Style info
             "style_id": result_data.get("style_id", "default"),

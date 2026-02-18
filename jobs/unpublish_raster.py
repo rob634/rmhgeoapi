@@ -65,7 +65,6 @@ class UnpublishRasterJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
         "process_raster_docker",
         "process_raster_collection_docker",
         "stac_catalog_container",
-        "ingest_collection",
     ]
 
     # Stage definitions

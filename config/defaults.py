@@ -448,41 +448,9 @@ class TaskRoutingDefaults:
         # VECTOR ETL - DOCKER (V0.8 - geopandas + connection pooling)
         # =====================================================================
         "vector_docker_complete",         # V0.8: Consolidated vector ETL with checkpoints
-    ])
-
-    # =========================================================================
-    # FUNCTIONAPP_TASKS → functionapp-tasks queue (V0.8 - 24 JAN 2026)
-    # =========================================================================
-    # Lightweight DB operations, inventory, STAC queries.
-    # Runs on FunctionApp worker (with timeout constraints).
-    # ARCHIVED (13 FEB 2026): H3, Fathom, legacy vector tasks removed
-    FUNCTIONAPP_TASKS = frozenset([
-        # =====================================================================
-        # VECTOR STAC OPERATIONS (used by Docker vector ETL)
-        # =====================================================================
-        "vector_create_stac",
-        "vector_extract_stac_metadata",
 
         # =====================================================================
-        # INVENTORY OPERATIONS (blob listing, lightweight)
-        # =====================================================================
-        "inventory_container_summary",
-        "inventory_list_blobs",
-        "inventory_analyze_blob",
-        "inventory_aggregate_analysis",
-        "inventory_classify_geospatial",
-        "inventory_aggregate_geospatial",
-
-        # =====================================================================
-        # STAC OPERATIONS (pgSTAC queries, lightweight)
-        # =====================================================================
-        "stac_repair_inventory",
-        "stac_repair_item",
-        "stac_rebuild_validate",
-        "stac_rebuild_item",
-
-        # =====================================================================
-        # UNPUBLISH OPERATIONS (STAC queries, blob deletes)
+        # UNPUBLISH OPERATIONS (V0.9 - moved from functionapp-tasks)
         # =====================================================================
         "unpublish_inventory_raster",
         "unpublish_inventory_vector",
@@ -491,35 +459,19 @@ class TaskRoutingDefaults:
         "unpublish_delete_stac",
 
         # =====================================================================
-        # CURATED DATASET UPDATES (HTTP, DB, lightweight)
-        # =====================================================================
-        "curated_check_source",
-        "curated_fetch_data",
-        "curated_etl_process",
-        "curated_finalize",
-
-        # =====================================================================
-        # INGEST COLLECTION (blob copy, pgSTAC)
-        # =====================================================================
-        "ingest_inventory",
-        "ingest_copy_batch",
-        "ingest_register_collection",
-        "ingest_register_items",
-        "ingest_finalize",
-
-        # =====================================================================
-        # ORPHAN BLOB OPERATIONS (blob listing, DB queries)
-        # =====================================================================
-        "orphan_blob_inventory",
-        "silver_blob_validate",
-        "silver_blob_register",
-
-        # =====================================================================
-        # TEST HANDLERS
+        # TEST HANDLERS (V0.9 - moved from functionapp-tasks)
         # =====================================================================
         "hello_world_greeting",
         "hello_world_reply",
     ])
+
+    # =========================================================================
+    # FUNCTIONAPP_TASKS → functionapp-tasks queue (ELIMINATED - 18 FEB 2026)
+    # =========================================================================
+    # All tasks either deleted, archived, or moved to DOCKER_TASKS.
+    # Queue has no consumer and can be drained/removed.
+    # ARCHIVED: docs/archive/v09_archive_feb2026/
+    FUNCTIONAPP_TASKS = frozenset()
 
     # =========================================================================
     # DEPRECATED: Keep for backward compatibility during migration

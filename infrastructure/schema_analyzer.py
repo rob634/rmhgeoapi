@@ -306,24 +306,6 @@ class ExpectedSchemaRegistry:
                 "created_at": "TIMESTAMP",
                 "completed_at": "TIMESTAMP",
             },
-            "curated_datasets": {
-                "dataset_id": "VARCHAR",
-                "display_name": "VARCHAR",
-                "target_table_name": "VARCHAR",
-                "source_type": "curated_source_type",  # enum
-                "enabled": "BOOLEAN",
-                "created_at": "TIMESTAMP",
-                "updated_at": "TIMESTAMP",
-            },
-            "curated_update_log": {
-                "log_id": "VARCHAR",
-                "dataset_id": "VARCHAR",
-                "update_type": "curated_update_type",  # enum
-                "status": "curated_update_status",  # enum
-                "job_id": "VARCHAR",
-                "started_at": "TIMESTAMP",
-                "completed_at": "TIMESTAMP",
-            },
             "promoted_datasets": {
                 "promoted_id": "VARCHAR",
                 "stac_collection_id": "VARCHAR",

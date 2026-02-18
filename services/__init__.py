@@ -50,24 +50,13 @@ Historical context archived in: docs/archive/INIT_PY_HISTORY.md
 """
 
 from .service_hello_world import handle_greeting, handle_reply
-from .container_summary import analyze_container_summary
 from .stac_catalog import list_raster_files, extract_stac_metadata
-from .stac_vector_catalog import extract_vector_stac_metadata, create_vector_stac
 from .raster_validation import validate_raster
 from .raster_cog import create_cog
 from .raster_mosaicjson import create_mosaicjson
 from .stac_collection import create_stac_collection
 from .tiling_scheme import generate_tiling_scheme
 from .tiling_extraction import extract_tiles
-from .geospatial_inventory import (
-    classify_geospatial_file,
-    aggregate_geospatial_inventory,
-)
-from .container_inventory import (
-    list_blobs_with_metadata,
-    analyze_blob_basic,
-    aggregate_blob_analysis as aggregate_blob_analysis_v2,
-)
 
 # Unpublish handlers
 from .unpublish_handlers import (
@@ -78,33 +67,6 @@ from .unpublish_handlers import (
     delete_stac_and_audit,
 )
 
-# Curated dataset update handlers
-from jobs.curated_update import (
-    curated_check_source,
-    curated_fetch_data,
-    curated_etl_process,
-    curated_finalize,
-)
-
-# STAC Repair handlers
-from .stac_repair_handlers import (
-    stac_repair_inventory,
-    stac_repair_item,
-)
-
-# STAC Rebuild handlers (F7.11 Self-Healing)
-from .rebuild_stac_handlers import (
-    stac_rebuild_validate,
-    stac_rebuild_item,
-)
-
-# Orphan Blob handlers (F7.11 STAC Self-Healing)
-from .orphan_blob_handlers import (
-    orphan_blob_inventory,
-    silver_blob_validate,
-    silver_blob_register,
-)
-
 # Docker consolidated handler (F7.13)
 from .handler_process_raster_complete import process_raster_complete
 
@@ -113,19 +75,6 @@ from .handler_vector_docker_complete import vector_docker_complete
 
 # Docker Raster Collection handler (V0.8 - sequential checkpoint-based)
 from .handler_raster_collection_complete import raster_collection_complete
-
-# Ingest Collection handlers
-from .ingest import ALL_HANDLERS as INGEST_HANDLERS
-
-# Validate no handler name collisions before merge
-def _validate_no_handler_collisions(base_keys: set, merge_dict: dict, merge_name: str):
-    """Fail fast if handler registries have overlapping keys."""
-    collisions = base_keys & set(merge_dict.keys())
-    if collisions:
-        raise ValueError(
-            f"FATAL: Handler name collision when merging {merge_name}: {collisions}. "
-            f"Each handler must have a unique name across all registries."
-        )
 
 # ============================================================================
 # STAC METADATA HELPER
@@ -152,18 +101,12 @@ from .platform_validation import validate_version_lineage, VersionValidationResu
 
 # ARCHIVED (13 FEB 2026): H3 (12), Fathom (11), legacy FunctionApp vector (4) handlers
 # → docs/archive/v08_archive_feb2026/services/
+# ARCHIVED (18 FEB 2026): V0.9 Docker migration — inventory (5), STAC rebuild (2), orphan blob (3)
+# → docs/archive/v09_archive_feb2026/services/
 ALL_HANDLERS = {
     # Hello World (test handlers)
     "hello_world_greeting": handle_greeting,
     "hello_world_reply": handle_reply,
-
-    # Container inventory
-    "inventory_container_summary": analyze_container_summary,
-    "inventory_list_blobs": list_blobs_with_metadata,
-    "inventory_analyze_blob": analyze_blob_basic,
-    "inventory_aggregate_analysis": aggregate_blob_analysis_v2,
-    "inventory_classify_geospatial": classify_geospatial_file,
-    "inventory_aggregate_geospatial": aggregate_geospatial_inventory,
 
     # Raster handlers (shared by Docker jobs)
     "raster_list_files": list_raster_files,
@@ -179,10 +122,6 @@ ALL_HANDLERS = {
     "raster_process_complete": process_raster_complete,
     "raster_collection_complete": raster_collection_complete,
 
-    # Vector STAC handlers (used by Docker vector ETL)
-    "vector_extract_stac_metadata": extract_vector_stac_metadata,
-    "vector_create_stac": create_vector_stac,
-
     # Vector handlers (Docker - single stage with checkpoints)
     "vector_docker_complete": vector_docker_complete,
 
@@ -193,31 +132,7 @@ ALL_HANDLERS = {
     "unpublish_drop_table": drop_postgis_table,
     "unpublish_delete_stac": delete_stac_and_audit,
 
-    # Curated dataset handlers
-    "curated_check_source": curated_check_source,
-    "curated_fetch_data": curated_fetch_data,
-    "curated_etl_process": curated_etl_process,
-    "curated_finalize": curated_finalize,
-
-    # STAC Repair handlers
-    "stac_repair_inventory": stac_repair_inventory,
-    "stac_repair_item": stac_repair_item,
-
-    # STAC Rebuild handlers (F7.11)
-    "stac_rebuild_validate": stac_rebuild_validate,
-    "stac_rebuild_item": stac_rebuild_item,
-
-    # Orphan Blob handlers (F7.11 STAC Self-Healing)
-    "orphan_blob_inventory": orphan_blob_inventory,
-    "silver_blob_validate": silver_blob_validate,
-    "silver_blob_register": silver_blob_register,
 }
-
-# Validate no collisions before merging INGEST_HANDLERS
-_validate_no_handler_collisions(set(ALL_HANDLERS.keys()), INGEST_HANDLERS, "INGEST_HANDLERS")
-
-# Merge Ingest Collection handlers
-ALL_HANDLERS.update(INGEST_HANDLERS)
 
 # ============================================================================
 # VALIDATION

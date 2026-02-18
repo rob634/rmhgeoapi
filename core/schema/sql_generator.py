@@ -71,12 +71,6 @@ from ..models import (
     UnpublishJobRecord,  # Unpublish audit (12 DEC 2025)
     UnpublishType,
     UnpublishStatus,
-    CuratedDataset,  # Curated datasets (15 DEC 2025)
-    CuratedUpdateLog,
-    CuratedSourceType,
-    CuratedUpdateStrategy,
-    CuratedUpdateType,
-    CuratedUpdateStatus
 )
 from ..models.promoted import PromotedDataset, SystemRole  # Promoted datasets (23 DEC 2025)
 from ..models.stac import AccessLevel  # Data classification (25 JAN 2026 - S4.DM unified)
@@ -999,16 +993,6 @@ class PydanticToSQL:
                     sql.Identifier("source_blob_path")
                 )
             )
-        elif table_name == "curated_datasets":
-            # Curated datasets registry (15 DEC 2025)
-            constraints.append(
-                sql.SQL("PRIMARY KEY ({})").format(sql.Identifier("dataset_id"))
-            )
-        elif table_name == "curated_update_log":
-            # Curated update audit log (15 DEC 2025)
-            constraints.append(
-                sql.SQL("PRIMARY KEY ({})").format(sql.Identifier("log_id"))
-            )
         elif table_name == "promoted_datasets":
             # Promoted datasets registry (23 DEC 2025)
             constraints.append(
@@ -1779,10 +1763,6 @@ INSERT INTO {schema}.{table} (
         composed.extend(self.generate_enum("janitor_run_status", JanitorRunStatus))
         composed.extend(self.generate_enum("unpublish_type", UnpublishType))  # Unpublish audit (12 DEC 2025)
         composed.extend(self.generate_enum("unpublish_status", UnpublishStatus))
-        composed.extend(self.generate_enum("curated_source_type", CuratedSourceType))  # Curated datasets (15 DEC 2025)
-        composed.extend(self.generate_enum("curated_update_strategy", CuratedUpdateStrategy))
-        composed.extend(self.generate_enum("curated_update_type", CuratedUpdateType))
-        composed.extend(self.generate_enum("curated_update_status", CuratedUpdateStatus))
         composed.extend(self.generate_enum("system_role", SystemRole))  # Promoted datasets (23 DEC 2025)
         # AccessLevel unified from Classification (25 JAN 2026 - S4.DM)
         # NOTE: RESTRICTED is defined but NOT YET SUPPORTED
@@ -1810,8 +1790,6 @@ INSERT INTO {schema}.{table} (
         composed.append(self.generate_table_composed(JanitorRun, "janitor_runs"))
         composed.append(self.generate_table_composed(EtlSourceFile, "etl_source_files"))  # ETL tracking (21 DEC 2025 - generalized)
         composed.append(self.generate_table_composed(UnpublishJobRecord, "unpublish_jobs"))  # Unpublish audit (12 DEC 2025)
-        composed.append(self.generate_table_composed(CuratedDataset, "curated_datasets"))  # Curated datasets (15 DEC 2025)
-        composed.append(self.generate_table_composed(CuratedUpdateLog, "curated_update_log"))
         composed.append(self.generate_table_composed(PromotedDataset, "promoted_datasets"))  # Promoted datasets (23 DEC 2025)
         composed.append(self.generate_table_composed(SystemSnapshotRecord, "system_snapshots"))  # System snapshots (04 JAN 2026)
         composed.append(self.generate_table_composed(DatasetRefRecord, "dataset_refs"))  # External references (09 JAN 2026 - F7.8)
@@ -1832,8 +1810,6 @@ INSERT INTO {schema}.{table} (
         composed.extend(self.generate_indexes_composed("janitor_runs", JanitorRun))
         composed.extend(self.generate_indexes_composed("etl_source_files", EtlSourceFile))  # ETL tracking (21 DEC 2025 - generalized)
         composed.extend(self.generate_indexes_composed("unpublish_jobs", UnpublishJobRecord))  # Unpublish audit (12 DEC 2025)
-        composed.extend(self.generate_indexes_composed("curated_datasets", CuratedDataset))  # Curated datasets (15 DEC 2025)
-        composed.extend(self.generate_indexes_composed("curated_update_log", CuratedUpdateLog))
         composed.extend(self.generate_indexes_composed("promoted_datasets", PromotedDataset))  # Promoted datasets (23 DEC 2025)
         composed.extend(self.generate_indexes_composed("system_snapshots", SystemSnapshotRecord))  # System snapshots (04 JAN 2026)
         composed.extend(self.generate_indexes_composed("dataset_refs", DatasetRefRecord))  # External references (09 JAN 2026 - F7.8)

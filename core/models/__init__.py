@@ -100,16 +100,6 @@ from .unpublish import (
     UnpublishStatus
 )
 
-# Curated dataset models
-from .curated import (
-    CuratedDataset,
-    CuratedUpdateLog,
-    CuratedSourceType,
-    CuratedUpdateStrategy,
-    CuratedUpdateType,
-    CuratedUpdateStatus
-)
-
 # Promoted dataset models
 from .promoted import (
     PromotedDataset,
@@ -284,14 +274,6 @@ __all__ = [
     'UnpublishJobRecord',
     'UnpublishType',
     'UnpublishStatus',
-
-    # Curated dataset models
-    'CuratedDataset',
-    'CuratedUpdateLog',
-    'CuratedSourceType',
-    'CuratedUpdateStrategy',
-    'CuratedUpdateType',
-    'CuratedUpdateStatus',
 
     # Promoted dataset models
     'PromotedDataset',

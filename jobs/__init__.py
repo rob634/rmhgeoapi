@@ -31,34 +31,25 @@ Historical context archived in: docs/archive/INIT_PY_HISTORY.md
 
 from .base import JobBase
 from .hello_world import HelloWorldJob
-from .container_summary import ContainerSummaryWorkflow
 from .stac_catalog_container import StacCatalogContainerWorkflow
-from .stac_catalog_vectors import StacCatalogVectorsWorkflow
 from .validate_raster_job import ValidateRasterJob
 from .raster_mixin import RasterMixin
-from .inventory_container_contents import InventoryContainerContentsJob
 from .unpublish_raster import UnpublishRasterJob
 from .unpublish_vector import UnpublishVectorJob
-from .curated_update import CuratedDatasetUpdateJob
-from .repair_stac_items import RepairStacItemsJob
-from .rebuild_stac import RebuildStacJob
-from .ingest_collection import IngestCollectionJob
 from .process_raster_docker import ProcessRasterDockerJob
 from .process_raster_collection_docker import ProcessRasterCollectionDockerJob
-from .detect_orphan_blobs import DetectOrphanBlobsJob
-from .register_silver_blobs import RegisterSilverBlobsJob
 from .vector_docker_etl import VectorDockerETLJob
 
 # Job Registry - add new jobs here
 # ARCHIVED (13 FEB 2026): H3 (7), Fathom (4), legacy Function App ETL (4) → docs/archive/v08_archive_feb2026/
+# ARCHIVED (18 FEB 2026): V0.9 Docker migration — curated (1), ingest (1), inventory (2),
+#   STAC catalog vectors (1), STAC repair (1), STAC rebuild (1), orphan blobs (2) → docs/archive/v09_archive_feb2026/
 ALL_JOBS = {
     # Test/Utility
     "hello_world": HelloWorldJob,
-    "summarize_container": ContainerSummaryWorkflow,
 
     # STAC Catalog
     "stac_catalog_container": StacCatalogContainerWorkflow,
-    "stac_catalog_vectors": StacCatalogVectorsWorkflow,
 
     # Validation
     "validate_raster_job": ValidateRasterJob,
@@ -70,26 +61,9 @@ ALL_JOBS = {
     "process_raster_docker": ProcessRasterDockerJob,
     "process_raster_collection_docker": ProcessRasterCollectionDockerJob,
 
-    # Container Inventory
-    "inventory_container_contents": InventoryContainerContentsJob,
-
     # Unpublish
     "unpublish_raster": UnpublishRasterJob,
     "unpublish_vector": UnpublishVectorJob,
-
-    # Curated Datasets
-    "curated_dataset_update": CuratedDatasetUpdateJob,
-
-    # STAC Maintenance
-    "repair_stac_items": RepairStacItemsJob,
-    "rebuild_stac": RebuildStacJob,
-
-    # Ingest
-    "ingest_collection": IngestCollectionJob,
-
-    # Orphan Blob Detection & Registration (F7.11 STAC Self-Healing)
-    "detect_orphan_blobs": DetectOrphanBlobsJob,
-    "register_silver_blobs": RegisterSilverBlobsJob,
 }
 
 def validate_job_registry():

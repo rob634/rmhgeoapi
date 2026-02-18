@@ -909,6 +909,239 @@ class TasksInterface(BaseInterface):
             border-color: #059669;
         }
 
+        /* ============================================
+         * Approval Panel (17 FEB 2026)
+         * Inline approve/reject for platform assets
+         * ============================================ */
+
+        .approval-panel {
+            margin-top: 20px;
+            padding: 20px;
+            background: linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%);
+            border: 1px solid #3B82F6;
+            border-radius: 12px;
+        }
+
+        .approval-panel h4 {
+            font-size: 16px;
+            font-weight: 600;
+            color: #1E3A5F;
+            margin: 0 0 16px 0;
+        }
+
+        .approval-status-row {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            margin-bottom: 16px;
+        }
+
+        .approval-status-item {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .approval-status-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: #1D4ED8;
+            text-transform: uppercase;
+        }
+
+        .approval-status-value {
+            font-size: 14px;
+            color: #1E3A5F;
+        }
+
+        .approval-badge {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .approval-badge.pending_review {
+            background: #FEF3C7;
+            color: #92400E;
+            border: 1px solid #F59E0B;
+        }
+
+        .approval-badge.approved {
+            background: #D1FAE5;
+            color: #065F46;
+            border: 1px solid #10B981;
+        }
+
+        .approval-badge.rejected {
+            background: #FEE2E2;
+            color: #991B1B;
+            border: 1px solid #EF4444;
+        }
+
+        .approval-badge.revoked {
+            background: #F3F4F6;
+            color: #4B5563;
+            border: 1px solid #9CA3AF;
+        }
+
+        .approval-form {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-top: 12px;
+        }
+
+        .approval-form-row {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .approval-field {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            flex: 1;
+            min-width: 180px;
+        }
+
+        .approval-field label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #1D4ED8;
+        }
+
+        .approval-field input,
+        .approval-field select,
+        .approval-field textarea {
+            padding: 8px 12px;
+            border: 1px solid #93C5FD;
+            border-radius: 6px;
+            font-size: 13px;
+            background: white;
+            color: #1E3A5F;
+            font-family: inherit;
+        }
+
+        .approval-field input:focus,
+        .approval-field select:focus,
+        .approval-field textarea:focus {
+            outline: none;
+            border-color: #3B82F6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+        }
+
+        .approval-field textarea {
+            resize: vertical;
+            min-height: 60px;
+        }
+
+        .approval-actions {
+            display: flex;
+            gap: 12px;
+            margin-top: 8px;
+        }
+
+        .approval-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .approval-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .approval-btn-approve {
+            background: #10B981;
+            color: white;
+        }
+
+        .approval-btn-approve:hover:not(:disabled) {
+            background: #059669;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+        }
+
+        .approval-btn-reject {
+            background: #EF4444;
+            color: white;
+        }
+
+        .approval-btn-reject:hover:not(:disabled) {
+            background: #DC2626;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+        }
+
+        .approval-btn-revoke {
+            background: #6B7280;
+            color: white;
+        }
+
+        .approval-btn-revoke:hover:not(:disabled) {
+            background: #4B5563;
+            transform: translateY(-1px);
+        }
+
+        .approval-result {
+            margin-top: 12px;
+            padding: 12px 16px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .approval-result.success {
+            background: #D1FAE5;
+            color: #065F46;
+            border: 1px solid #10B981;
+        }
+
+        .approval-result.error {
+            background: #FEE2E2;
+            color: #991B1B;
+            border: 1px solid #EF4444;
+        }
+
+        .approval-readonly {
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.6);
+            border-radius: 8px;
+            font-size: 13px;
+            color: #1E3A5F;
+        }
+
+        .approval-readonly strong {
+            font-weight: 600;
+        }
+
+        .approval-version-section {
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.5);
+            border: 1px dashed #93C5FD;
+            border-radius: 8px;
+        }
+
+        .approval-version-section .section-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: #1D4ED8;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+
         .stage-counts {
             display: flex;
             justify-content: center;
@@ -3001,7 +3234,17 @@ class TasksInterface(BaseInterface):
                 }}
             }}
 
+            // Add approval panel placeholder for platform jobs
+            if (job.asset_id) {{
+                html += `<div id="approval-panel-container"></div>`;
+            }}
+
             document.getElementById('job-summary-card').innerHTML = html;
+
+            // Load approval state for platform jobs
+            if (job.asset_id) {{
+                loadApprovalState(job);
+            }}
 
             // Add Job Details toggle and panel to separate container (below events)
             const jobParams = job.parameters || {{}};
@@ -4286,7 +4529,11 @@ class TasksInterface(BaseInterface):
                 'checkpoint': '📍',
                 'callback_started': '📞',
                 'callback_success': '📞',
-                'callback_failed': '📞'
+                'callback_failed': '📞',
+                'approval_requested': '📋',
+                'approval_granted': '✅',
+                'approval_rejected': '❌',
+                'approval_revoked': '🚫'
             }};
             return icons[eventType] || '•';
         }}
@@ -4651,6 +4898,329 @@ class TasksInterface(BaseInterface):
                 hideDeleteModal();
             }}
         }});
+
+        // ============================================================
+        // APPROVAL PANEL (17 FEB 2026)
+        // ============================================================
+
+        async function loadApprovalState(job) {{
+            const container = document.getElementById('approval-panel-container');
+            if (!container) return;
+
+            container.innerHTML = `
+                <div class="approval-panel" style="opacity: 0.6;">
+                    <h4>Loading approval state...</h4>
+                </div>
+            `;
+
+            try {{
+                const approvalState = await fetchJSON(
+                    `${{API_BASE_URL}}/api/assets/${{job.asset_id}}/approval`
+                );
+                renderApprovalPanel(container, job, approvalState);
+            }} catch (err) {{
+                container.innerHTML = `
+                    <div class="approval-panel">
+                        <h4>Approval</h4>
+                        <div class="approval-result error">Failed to load approval state: ${{err.message}}</div>
+                    </div>
+                `;
+            }}
+        }}
+
+        function renderApprovalPanel(container, job, state) {{
+            const approvalState = state.approval_state || 'unknown';
+            const processingStatus = state.processing_status || 'unknown';
+            const isDraft = !job.parameters?.version_id;
+
+            let html = `<div class="approval-panel">`;
+            html += `<h4>Approval</h4>`;
+
+            // Status row
+            html += `
+                <div class="approval-status-row">
+                    <div class="approval-status-item">
+                        <span class="approval-status-label">Approval Status</span>
+                        <span class="approval-badge ${{approvalState}}">${{approvalState.replace(/_/g, ' ')}}</span>
+                    </div>
+                    <div class="approval-status-item">
+                        <span class="approval-status-label">Processing</span>
+                        <span class="approval-status-value">${{processingStatus}}</span>
+                    </div>
+                    <div class="approval-status-item">
+                        <span class="approval-status-label">Asset</span>
+                        <span class="approval-status-value" style="font-family: monospace; font-size: 12px;">${{job.asset_id.substring(0, 12)}}...</span>
+                    </div>
+                    ${{isDraft ? `
+                    <div class="approval-status-item">
+                        <span class="approval-status-label">Mode</span>
+                        <span class="approval-badge pending_review">Draft</span>
+                    </div>
+                    ` : ''}}
+                </div>
+            `;
+
+            // Already approved — read-only
+            if (approvalState === 'approved') {{
+                html += `
+                    <div class="approval-readonly">
+                        <strong>Approved</strong>
+                        ${{state.reviewer ? ` by ${{state.reviewer}}` : ''}}
+                        ${{state.approved_at ? ` on ${{new Date(state.approved_at).toLocaleString()}}` : ''}}
+                        ${{state.clearance_level ? ` — Clearance: ${{state.clearance_level}}` : ''}}
+                    </div>
+                `;
+                if (state.can_revoke) {{
+                    html += `
+                        <div class="approval-actions">
+                            <button class="approval-btn approval-btn-revoke" onclick="executeRevoke('${{job.asset_id}}')">
+                                Revoke Approval
+                            </button>
+                        </div>
+                    `;
+                }}
+                html += `</div>`;
+                container.innerHTML = html;
+                return;
+            }}
+
+            // Rejected — read-only
+            if (approvalState === 'rejected') {{
+                html += `
+                    <div class="approval-readonly">
+                        <strong>Rejected</strong>
+                        ${{state.reviewer ? ` by ${{state.reviewer}}` : ''}}
+                        ${{state.rejected_at ? ` on ${{new Date(state.rejected_at).toLocaleString()}}` : ''}}
+                        ${{state.rejection_reason ? `<br>Reason: ${{state.rejection_reason}}` : ''}}
+                    </div>
+                `;
+                html += `</div>`;
+                container.innerHTML = html;
+                return;
+            }}
+
+            // Revoked — read-only
+            if (approvalState === 'revoked') {{
+                html += `
+                    <div class="approval-readonly">
+                        <strong>Revoked</strong>
+                        ${{state.reviewer ? ` by ${{state.reviewer}}` : ''}}
+                    </div>
+                `;
+                html += `</div>`;
+                container.innerHTML = html;
+                return;
+            }}
+
+            // Processing not complete — no actions
+            if (processingStatus !== 'completed' && job.status !== 'completed') {{
+                html += `
+                    <div class="approval-readonly">
+                        Processing is still in progress. Approval actions will be available once processing completes.
+                    </div>
+                `;
+                html += `</div>`;
+                container.innerHTML = html;
+                return;
+            }}
+
+            // Processing failed — warn
+            if (processingStatus === 'failed') {{
+                html += `
+                    <div class="approval-result error">
+                        Processing failed. Cannot approve this asset.
+                    </div>
+                `;
+                html += `</div>`;
+                container.innerHTML = html;
+                return;
+            }}
+
+            // Pending review — show form
+            html += `<div class="approval-form">`;
+
+            // Version fields for drafts
+            if (isDraft) {{
+                html += `
+                    <div class="approval-version-section">
+                        <div class="section-label">Version (required for drafts)</div>
+                        <div class="approval-form-row">
+                            <div class="approval-field">
+                                <label for="approval-version-id">Version ID</label>
+                                <input type="text" id="approval-version-id" placeholder="e.g. v1.0" />
+                            </div>
+                            <div class="approval-field">
+                                <label for="approval-previous-version">Previous Version (for lineage)</label>
+                                <input type="text" id="approval-previous-version" placeholder="Optional" />
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }}
+
+            html += `
+                <div class="approval-form-row">
+                    <div class="approval-field">
+                        <label for="approval-reviewer">Reviewer</label>
+                        <input type="text" id="approval-reviewer" placeholder="user@example.com" />
+                    </div>
+                    <div class="approval-field">
+                        <label for="approval-clearance">Clearance Level</label>
+                        <select id="approval-clearance">
+                            <option value="public">Public</option>
+                            <option value="OUO" selected>OUO</option>
+                            <option value="FOUO">FOUO</option>
+                            <option value="restricted">Restricted</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="approval-field">
+                    <label for="approval-notes">Notes</label>
+                    <input type="text" id="approval-notes" placeholder="Optional notes" />
+                </div>
+                <div class="approval-field">
+                    <label for="reject-reason">Rejection Reason (only used if rejecting)</label>
+                    <textarea id="reject-reason" placeholder="Required if rejecting"></textarea>
+                </div>
+            `;
+
+            html += `
+                <div class="approval-actions">
+                    ${{state.can_approve ? `
+                        <button class="approval-btn approval-btn-approve" id="approve-btn" onclick="executeApproval()">
+                            Approve
+                        </button>
+                    ` : ''}}
+                    ${{state.can_reject ? `
+                        <button class="approval-btn approval-btn-reject" id="reject-btn" onclick="executeRejection()">
+                            Reject
+                        </button>
+                    ` : ''}}
+                </div>
+            `;
+
+            html += `</div>`;  // close approval-form
+            html += `<div id="approval-result-area"></div>`;
+            html += `</div>`;  // close approval-panel
+
+            container.innerHTML = html;
+        }}
+
+        async function executeApproval() {{
+            const btn = document.getElementById('approve-btn');
+            const resultArea = document.getElementById('approval-result-area');
+            const reviewer = document.getElementById('approval-reviewer').value.trim();
+
+            if (!reviewer) {{
+                resultArea.innerHTML = `<div class="approval-result error">Reviewer is required.</div>`;
+                return;
+            }}
+
+            btn.disabled = true;
+            btn.textContent = 'Approving...';
+            resultArea.innerHTML = '';
+
+            const payload = {{
+                job_id: JOB_ID,
+                reviewer: reviewer,
+                clearance_level: document.getElementById('approval-clearance').value,
+                notes: document.getElementById('approval-notes').value.trim() || undefined
+            }};
+
+            // Draft mode: include version fields
+            const versionEl = document.getElementById('approval-version-id');
+            if (versionEl && versionEl.value.trim()) {{
+                payload.version_id = versionEl.value.trim();
+            }}
+            const prevEl = document.getElementById('approval-previous-version');
+            if (prevEl && prevEl.value.trim()) {{
+                payload.previous_version_id = prevEl.value.trim();
+            }}
+
+            try {{
+                const response = await fetchJSON(`${{API_BASE_URL}}/api/platform/approve`, {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify(payload)
+                }});
+
+                resultArea.innerHTML = `<div class="approval-result success">Asset approved successfully.</div>`;
+
+                // Refresh events timeline and approval panel
+                loadEvents();
+                setTimeout(() => loadData(), 1500);
+
+            }} catch (err) {{
+                resultArea.innerHTML = `<div class="approval-result error">Approval failed: ${{err.message}}</div>`;
+                btn.disabled = false;
+                btn.textContent = 'Approve';
+            }}
+        }}
+
+        async function executeRejection() {{
+            const btn = document.getElementById('reject-btn');
+            const resultArea = document.getElementById('approval-result-area');
+            const reviewer = document.getElementById('approval-reviewer').value.trim();
+            const reason = document.getElementById('reject-reason').value.trim();
+
+            if (!reviewer) {{
+                resultArea.innerHTML = `<div class="approval-result error">Reviewer is required.</div>`;
+                return;
+            }}
+            if (!reason) {{
+                resultArea.innerHTML = `<div class="approval-result error">Rejection reason is required.</div>`;
+                return;
+            }}
+
+            btn.disabled = true;
+            btn.textContent = 'Rejecting...';
+            resultArea.innerHTML = '';
+
+            try {{
+                const response = await fetchJSON(`${{API_BASE_URL}}/api/platform/reject`, {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{
+                        job_id: JOB_ID,
+                        reviewer: reviewer,
+                        reason: reason
+                    }})
+                }});
+
+                resultArea.innerHTML = `<div class="approval-result success">Asset rejected.</div>`;
+
+                // Refresh events timeline and approval panel
+                loadEvents();
+                setTimeout(() => loadData(), 1500);
+
+            }} catch (err) {{
+                resultArea.innerHTML = `<div class="approval-result error">Rejection failed: ${{err.message}}</div>`;
+                btn.disabled = false;
+                btn.textContent = 'Reject';
+            }}
+        }}
+
+        async function executeRevoke(assetId) {{
+            if (!confirm('Are you sure you want to revoke the approval?')) return;
+
+            try {{
+                // Use the asset's approval endpoint for revocation
+                const response = await fetchJSON(`${{API_BASE_URL}}/api/platform/revoke`, {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{
+                        asset_id: assetId,
+                        reviewer: 'workflow_monitor'
+                    }})
+                }});
+
+                loadEvents();
+                setTimeout(() => loadData(), 1500);
+
+            }} catch (err) {{
+                alert('Revoke failed: ' + err.message);
+            }}
+        }}
 
         // ============================================================
         // ERROR/UTILITY FUNCTIONS

@@ -12,7 +12,6 @@ Timer Triggers Module.
 Provides a Blueprint with all timer triggers for scheduled system operations:
 - Janitor timers: task_watchdog, job_health, orphan_detector
 - Geo maintenance: geo_orphan_check, metadata_consistency, geo_integrity_check
-- Scheduled operations: curated_dataset_scheduler
 - System monitoring: system_snapshot, log_cleanup, external_service_health
 
 This module extracts ~250 lines of timer trigger code from function_app.py

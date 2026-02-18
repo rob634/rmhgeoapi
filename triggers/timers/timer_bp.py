@@ -196,28 +196,6 @@ def geo_integrity_check_timer(timer: func.TimerRequest) -> None:
 
 
 # ============================================================================
-# CURATED DATASET SCHEDULER (15 DEC 2025)
-# ============================================================================
-
-@bp.timer_trigger(
-    schedule="0 0 2 * * *",  # Daily at 2 AM UTC
-    arg_name="timer",
-    run_on_startup=False
-)
-def curated_dataset_scheduler(timer: func.TimerRequest) -> None:
-    """
-    Timer trigger: Check curated datasets for updates daily at 2 AM.
-
-    Checks all enabled datasets with schedules and submits update jobs
-    for those that are due.
-
-    Schedule: Daily at 2 AM UTC (most datasets update weekly at most)
-    """
-    from triggers.curated.scheduler import curated_scheduler_trigger
-    curated_scheduler_trigger.handle_timer(timer)
-
-
-# ============================================================================
 # SYSTEM MONITORING TIMERS (04 JAN 2026)
 # ============================================================================
 

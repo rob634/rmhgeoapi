@@ -359,9 +359,6 @@ from triggers.admin.db_diagnostics import admin_db_diagnostics_trigger
 from triggers.admin.servicebus import servicebus_admin_trigger
 # NOTE: H3 admin triggers (h3_debug, h3_datasets) moved to admin_h3 blueprint (12 JAN 2026)
 
-# Curated Dataset Admin - DISABLED (04 FEB 2026) - In development
-# from triggers.curated.admin import curated_admin_trigger
-
 # Platform Service Layer triggers moved to blueprint (23 JAN 2026 - APP_CLEANUP Phase 5)
 # triggers/platform/platform_bp.py now contains all 17 platform endpoints
 # Registered conditionally via app.register_functions(platform_bp) below
@@ -543,27 +540,6 @@ if _app_mode.has_platform_endpoints:
 #   - routes/admin_db.py (19 routes)
 #   - routes/admin_servicebus.py (2 routes)
 # Registered via app.register_functions() above
-# ============================================================================
-
-
-# ============================================================================
-# CURATED DATASET MANAGEMENT ENDPOINTS - DISABLED (04 FEB 2026)
-# ============================================================================
-# In development - will be re-enabled later
-# CRUD operations for curated (system-managed) datasets.
-# Examples: WDPA, Admin0 boundaries, other authoritative sources.
-# ============================================================================
-# @app.route(route="curated/datasets", methods=["GET", "POST"])
-# def curated_datasets(req: func.HttpRequest) -> func.HttpResponse:
-#     return curated_admin_trigger.handle_request(req)
-#
-# @app.route(route="curated/datasets/{dataset_id}", methods=["GET", "PUT", "DELETE"])
-# def curated_dataset_by_id(req: func.HttpRequest) -> func.HttpResponse:
-#     return curated_admin_trigger.handle_request(req)
-#
-# @app.route(route="curated/datasets/{dataset_id}/{action}", methods=["GET", "POST"])
-# def curated_dataset_action(req: func.HttpRequest) -> func.HttpResponse:
-#     return curated_admin_trigger.handle_request(req)
 # ============================================================================
 
 
@@ -1551,7 +1527,6 @@ logger.info("=" * 70)
 # Includes:
 # - Janitor timers: task_watchdog, job_health, orphan_detector
 # - Geo maintenance: geo_orphan_check, metadata_consistency, geo_integrity_check
-# - Scheduled operations: curated_dataset_scheduler
 # - System monitoring: system_snapshot, log_cleanup, external_service_health
 #
 # Timer Schedule Overview:
@@ -1561,7 +1536,6 @@ logger.info("=" * 70)
 #   - geo_orphan_check_timer: Every 6 hours
 #   - metadata_consistency_timer: 03:00, 09:00, 15:00, 21:00 UTC
 #   - geo_integrity_check_timer: 02:00, 08:00, 14:00, 20:00 UTC
-#   - curated_dataset_scheduler: Daily 2 AM UTC
 #   - system_snapshot_timer: Every hour
 #   - log_cleanup_timer: Daily 3 AM UTC
 #   - external_service_health_timer: Every hour

@@ -58,6 +58,10 @@ from .processing_options import (
 
 logger = logging.getLogger(__name__)
 
+# Identifier character validation (18 FEB 2026)
+# Alphanumeric, hyphens, underscores, dots. Must start with alphanumeric.
+_IDENTIFIER_PATTERN = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9._-]*$')
+
 
 # ============================================================================
 # ENUMS
@@ -122,6 +126,10 @@ class PlatformRequest(BaseModel):
     # ========================================================================
     # DDH Core Identifiers (Required: dataset_id, resource_id; Optional: version_id)
     # ========================================================================
+    # Character validation (18 FEB 2026): Reject at API boundary, not silently strip.
+    # Allowed: a-z, A-Z, 0-9, hyphens, underscores, dots. NO spaces, #, &, ?, /, etc.
+    # Downstream slugify functions convert to lowercase/specific formats, but the
+    # raw input must be clean — prevents silent mangling and collision risk.
     dataset_id: str = Field(..., max_length=255, description="DDH dataset identifier")
     resource_id: str = Field(..., max_length=255, description="DDH resource identifier")
     version_id: Optional[str] = Field(
@@ -141,6 +149,46 @@ class PlatformRequest(BaseModel):
         max_length=50,
         description="Required for version advances. Must match current latest version_id in lineage."
     )
+
+    @field_validator('dataset_id', 'resource_id', mode='after')
+    @classmethod
+    def validate_identifier_chars(cls, v: str, info) -> str:
+        """
+        Enforce safe characters for DDH identifiers.
+
+        Allowed: alphanumeric, hyphens, underscores, dots.
+        Must start with alphanumeric. Rejects at API boundary to prevent
+        silent mangling by downstream slugify functions.
+        """
+        if not v or not v.strip():
+            raise ValueError(f"{info.field_name} must not be empty or whitespace")
+        v = v.strip()
+        if not _IDENTIFIER_PATTERN.match(v):
+            bad_chars = set(re.findall(r'[^a-zA-Z0-9._-]', v))
+            raise ValueError(
+                f"{info.field_name} contains invalid characters: {bad_chars}. "
+                f"Allowed: letters, digits, hyphens, underscores, dots. "
+                f"Must start with a letter or digit. Got: '{v}'"
+            )
+        return v
+
+    @field_validator('version_id', 'previous_version_id', mode='after')
+    @classmethod
+    def validate_version_id_chars(cls, v: Optional[str], info) -> Optional[str]:
+        """Validate version_id characters (same rules, but allows None)."""
+        if v is None:
+            return v
+        v = v.strip()
+        if not v:
+            return None
+        if not _IDENTIFIER_PATTERN.match(v):
+            bad_chars = set(re.findall(r'[^a-zA-Z0-9._-]', v))
+            raise ValueError(
+                f"{info.field_name} contains invalid characters: {bad_chars}. "
+                f"Allowed: letters, digits, hyphens, underscores, dots. "
+                f"Must start with a letter or digit. Got: '{v}'"
+            )
+        return v
 
     # ========================================================================
     # DDH Operation (Required)

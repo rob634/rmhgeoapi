@@ -85,8 +85,6 @@ if TYPE_CHECKING:
     )
     from .data_factory import AzureDataFactoryRepository as _AzureDataFactoryRepository
     from .interface_repository import IDataFactoryRepository as _IDataFactoryRepository
-    from .curated_repository import CuratedDatasetRepository as _CuratedDatasetRepository
-    from .curated_repository import CuratedUpdateLogRepository as _CuratedUpdateLogRepository
     from .promoted_repository import PromotedDatasetRepository as _PromotedDatasetRepository
     from .job_event_repository import JobEventRepository as _JobEventRepository
     from .asset_repository import GeospatialAssetRepository as _GeospatialAssetRepository
@@ -184,14 +182,6 @@ def __getattr__(name: str):
     elif name == "AzureDataFactoryRepository":
         from .data_factory import AzureDataFactoryRepository
         return AzureDataFactoryRepository
-
-    # Curated datasets
-    elif name == "CuratedDatasetRepository":
-        from .curated_repository import CuratedDatasetRepository
-        return CuratedDatasetRepository
-    elif name == "CuratedUpdateLogRepository":
-        from .curated_repository import CuratedUpdateLogRepository
-        return CuratedUpdateLogRepository
 
     # Promoted datasets
     elif name == "PromotedDatasetRepository":
@@ -296,8 +286,6 @@ __all__ = [
     "IBlobRepository",
     "IDataFactoryRepository",
     "AzureDataFactoryRepository",
-    "CuratedDatasetRepository",
-    "CuratedUpdateLogRepository",
     "PromotedDatasetRepository",
     # Job Event Tracking (23 JAN 2026 - Execution Timeline)
     "JobEventRepository",

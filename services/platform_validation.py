@@ -209,7 +209,7 @@ def validate_version_lineage(
         # First version case - lineage must be empty OR overwrite=True for same version
         if current_latest and not (overwrite and version_exists):
             valid = False
-            latest_version = current_latest.get('version_id', 'unknown')
+            latest_version = current_latest.get('version_id') or 'draft'
             warnings.append(
                 f"Version '{latest_version}' already exists for this dataset/resource. "
                 f"Specify previous_version_id='{latest_version}' to submit a new version, "

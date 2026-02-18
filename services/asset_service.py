@@ -1284,9 +1284,22 @@ class AssetService:
         )
 
         if not validation_result.valid:
-            raise ValueError(
-                f"Version lineage validation failed: {validation_result.warnings[0]}"
+            # Draft seeing itself as "current_latest" is expected — bypass (18 FEB 2026)
+            # Check for both None and "" (empty string) as draft indicators
+            draft_self_conflict = (
+                validation_result.current_latest
+                and validation_result.current_latest.get('asset_id') == asset_id
+                and not validation_result.current_latest.get('version_id')
             )
+            if draft_self_conflict:
+                logger.info(
+                    f"assign_version: draft {asset_id[:16]} sees itself in lineage, "
+                    f"proceeding as first version"
+                )
+            else:
+                raise ValueError(
+                    f"Version lineage validation failed: {validation_result.warnings[0]}"
+                )
 
         # 4. Compute lineage wiring
         lineage_id = validation_result.lineage_id

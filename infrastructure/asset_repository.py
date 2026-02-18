@@ -588,24 +588,13 @@ class GeospatialAssetRepository(PostgreSQLRepository):
         # Always update updated_at
         updates['updated_at'] = datetime.now(timezone.utc)
 
-        # Convert enums to values
-        if 'approval_state' in updates and isinstance(updates['approval_state'], ApprovalState):
-            updates['approval_state'] = updates['approval_state'].value
-        if 'clearance_state' in updates and isinstance(updates['clearance_state'], ClearanceState):
-            updates['clearance_state'] = updates['clearance_state'].value
-        if 'processing_status' in updates and isinstance(updates['processing_status'], ProcessingStatus):
-            updates['processing_status'] = updates['processing_status'].value
-
         # Build SET clause
+        # Note: psycopg3 adapters handle dict→JSONB and Enum→.value automatically
         set_parts = []
         values = []
         for key, value in updates.items():
             set_parts.append(sql.SQL("{} = %s").format(sql.Identifier(key)))
-            # JSONB columns need json.dumps() for psycopg3 (18 FEB 2026)
-            if isinstance(value, dict) or isinstance(value, list):
-                values.append(json.dumps(value))
-            else:
-                values.append(value)
+            values.append(value)  # psycopg3 adapter handles dict/list/enum
 
         values.append(asset_id)  # For WHERE clause
 

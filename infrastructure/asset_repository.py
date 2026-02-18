@@ -601,7 +601,11 @@ class GeospatialAssetRepository(PostgreSQLRepository):
         values = []
         for key, value in updates.items():
             set_parts.append(sql.SQL("{} = %s").format(sql.Identifier(key)))
-            values.append(value)
+            # JSONB columns need json.dumps() for psycopg3 (18 FEB 2026)
+            if isinstance(value, dict) or isinstance(value, list):
+                values.append(json.dumps(value))
+            else:
+                values.append(value)
 
         values.append(asset_id)  # For WHERE clause
 

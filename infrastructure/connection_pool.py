@@ -234,6 +234,11 @@ class ConnectionPoolManager:
         # Set row factory to return dicts
         conn.row_factory = dict_row
 
+        # Register psycopg3 type adapters (18 FEB 2026 — EN-TD.2)
+        # dict/list → JSONB, Enum → .value — same adapters as single-use path
+        from infrastructure.postgresql import _register_type_adapters
+        _register_type_adapters(conn)
+
         # Set search path to include common schemas
         from config import get_config
         config = get_config()

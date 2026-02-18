@@ -92,6 +92,39 @@ from exceptions import DatabaseError
 logger = logging.getLogger(__name__)
 
 
+# =============================================================================
+# psycopg3 TYPE ADAPTERS (18 FEB 2026 — EN-TD.2)
+# =============================================================================
+# psycopg3 does NOT auto-adapt Python dict/list → PostgreSQL JSONB (psycopg2 did).
+# Register adapters once per connection so all repositories inherit automatic
+# serialization. This eliminates the need for manual json.dumps() in every repo.
+# =============================================================================
+
+from psycopg.types.json import JsonbBinaryDumper
+from psycopg.adapt import Dumper
+from enum import Enum
+
+
+class _EnumDumper(Dumper):
+    """Adapt any Enum subclass → its .value for psycopg3."""
+
+    def dump(self, obj):
+        return str(obj.value).encode('utf-8')
+
+
+def _register_type_adapters(conn) -> None:
+    """
+    Register psycopg3 type adapters on a connection.
+
+    Called for both single-use (Function App) and pooled (Docker) connections.
+    After registration, dict/list auto-serialize to JSONB and Enum subclasses
+    auto-serialize to their .value — no manual json.dumps() or .value needed.
+    """
+    conn.adapters.register_dumper(dict, JsonbBinaryDumper)
+    conn.adapters.register_dumper(list, JsonbBinaryDumper)
+    conn.adapters.register_dumper(Enum, _EnumDumper)
+
+
 def _parse_jsonb_column(value: Any, column_name: str, record_id: str, default: Any = None) -> Any:
     """
     Parse a JSONB column value with explicit error handling (28 NOV 2025).
@@ -693,6 +726,7 @@ class PostgreSQLRepository(BaseRepository):
                     logger.debug(f"  Could not parse host from connection string: {parse_err}")
 
             conn = psycopg.connect(self.conn_string, row_factory=dict_row)
+            _register_type_adapters(conn)
             logger.debug(f"✅ PostgreSQL connection established successfully")
             yield conn
 

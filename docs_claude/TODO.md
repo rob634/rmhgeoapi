@@ -1,6 +1,6 @@
 # Working Backlog - ADO Aligned
 
-**Last Updated**: 11 FEB 2026
+**Last Updated**: 18 FEB 2026
 **Source of Truth**: [V0.8_ADO_WORKITEMS.md](/ado_wiki/V0.8_ADO_WORKITEMS.md)
 **Structure**: EPIC → FEATURE → User Story → Tasks
 
@@ -185,6 +185,63 @@ Items below are tracked here but not yet added to ADO. Add to ADO when prioritiz
 
 ## Technical Debt
 
+### EN-TD.2: psycopg3 Type Adapter + Serialization Cleanup `[NEW 18 FEB 2026]`
+
+**Plan**: [PYDANTIC_REVIEW.md](/PYDANTIC_REVIEW.md) (root)
+**Trigger**: Production bug — `assign_version()` passed raw dict to psycopg3 `%s` param, raised `cannot adapt type 'dict'`
+**Root cause**: psycopg3 (unlike psycopg2) does not auto-adapt `dict → jsonb`. Fix is to register type adapters at connection level, not scatter `json.dumps()` across 40+ call sites.
+**Scope**: 2 connection creation points, then incremental cleanup of 15 repos
+
+#### Phase 1: Register psycopg3 Type Adapters (THE FIX)
+
+**Register once at connection level → all repos inherit automatically. Zero repo code changes.**
+
+| Task | Status | File | Details |
+|------|--------|------|---------|
+| T-TD2.1: Register `JsonbBinaryDumper` for dict+list on single-use connections | 🔲 Ready | `infrastructure/postgresql.py` | In `_get_single_use_connection()` after line 696 (`conn = psycopg.connect(...)`), add: `conn.adapters.register_dumper(dict, psycopg.types.json.JsonbBinaryDumper)` and same for `list`. ~3 lines. |
+| T-TD2.2: Register `JsonbBinaryDumper` for dict+list on pooled connections | 🔲 Ready | `infrastructure/connection_pool.py` | In `_configure_connection()` after search_path setup, add same adapter registration. ~3 lines. |
+| T-TD2.3: Register Enum adapter (or add `_prepare_value()` fallback) | 🔲 Ready | `infrastructure/postgresql.py` | Option A: Custom `EnumDumper` registered for `Enum` base class. Option B: Add lightweight `_prepare_value()` static method that only handles Enum→.value (dicts handled by adapter). **Test whether psycopg3 dumper inheritance covers Enum subclasses** — if not, use Option B. |
+| T-TD2.4: Verify existing code still works (no repo changes) | 🔲 Ready | N/A | After adapter registration, all existing `json.dumps()` calls still work (strings are valid for JSONB). Run: submit flow, approval flow, job creation. Zero behavior change expected. |
+
+#### Phase 2: Revert Bandaid + Simplify asset_repository.update()
+
+| Task | Status | File | Details |
+|------|--------|------|---------|
+| T-TD2.5: Revert isinstance dict/list check in `update()` | 🔲 Blocked by Phase 1 | `infrastructure/asset_repository.py` | Revert commit `dafc46f` lines 604-608. With adapter registered, dicts pass straight through. Also remove manual enum pre-conversion (lines 592-597). |
+| T-TD2.6: Test assign_version + approval end-to-end | 🔲 Blocked by T-TD2.5 | N/A | The flow that originally triggered the bug. Must work with raw dicts and enums. |
+
+#### Phase 3: Remove json.dumps() Across Repositories (incremental)
+
+**With adapters registered, all `json.dumps()` calls become unnecessary — they convert dict→string, but psycopg3 now also accepts dicts. Existing calls are harmless but redundant.**
+
+**IMPORTANT for Claude**: One repo per commit. Test after each. Do NOT batch.
+
+| Task | Status | File | Details |
+|------|--------|------|---------|
+| T-TD2.7: GeospatialAssetRepository — remove 7 `json.dumps()` + 3 enum `.value` sites | 🔲 Blocked by Phase 1 | `infrastructure/asset_repository.py` | Replace `json.dumps(platform_refs)` → `platform_refs` everywhere. Remove enum isinstance checks. Pass raw Python objects — adapter handles serialization. |
+| T-TD2.8: PostgreSQLJobRepository — remove json.dumps in create_job/update_job | 🔲 Blocked by Phase 1 | `infrastructure/postgresql.py` | 4 JSONB cols, 2 enums. |
+| T-TD2.9: PostgreSQLTaskRepository — remove json.dumps in create_task/update_task | 🔲 Blocked by Phase 1 | `infrastructure/postgresql.py` | 3 JSONB cols, 1 enum. |
+| T-TD2.10: ArtifactRepository — remove 6 json.dumps sites | 🔲 Blocked by Phase 1 | `infrastructure/artifact_repository.py` | |
+| T-TD2.11: ExternalServiceRepository — remove 4 json.dumps + 2 enum sites | 🔲 Blocked by Phase 1 | `infrastructure/external_service_repository.py` | |
+| T-TD2.12: Remaining repos — PlatformRegistry, H3, JobEvent, Metrics, Promoted | 🔲 Blocked by Phase 1 | Various | PromotedDatasetRepository: also remove `Jsonb()` wrapper (inconsistent). |
+
+#### Phase 4: Cleanup Models + Documentation
+
+| Task | Status | File | Details |
+|------|--------|------|---------|
+| T-TD2.13: Delete `to_dict()` from GeospatialAsset + AssetRevision | 🔲 Blocked by Phase 3 | `core/models/asset.py` | Dead code — no repo calls it. Only remove after Phase 3 confirms model_dump() works everywhere. |
+| T-TD2.14: Remove deprecated `json_encoders` from model_config | 🔲 Blocked by Phase 3 | `core/models/asset.py` | Deprecated in Pydantic V2, was dead code already (TODO from 17 FEB 2026). |
+| T-TD2.15: Verify `_parse_jsonb_column()` still needed for reads | 🔲 Blocked by Phase 3 | `infrastructure/postgresql.py` | psycopg3 `row_factory=dict_row` auto-parses JSONB on read. If so, `_parse_jsonb_column()` (line 95) is dead code. |
+| T-TD2.16: Add pattern to DEV_BEST_PRACTICES.md | 🔲 Ready | `docs_claude/DEV_BEST_PRACTICES.md` | Document: "psycopg3 adapters registered at connection level. NEVER call json.dumps() or .value in repo code. Pass raw Python objects." |
+
+#### Delegation Notes
+
+- **Phase 1**: Ship first and alone. ~10 lines across 2 files. Test by running existing flows — zero behavior change.
+- **Phase 2**: Revert the bandaid. Only after Phase 1 is deployed and verified.
+- **Phase 3**: Incremental cleanup. One repo per commit. Existing json.dumps calls are harmless, so no urgency — can be done over multiple sessions.
+- **Phase 4**: Only after Phase 3 complete. Low priority.
+- **Models stay clean**: No `@field_serializer` needed. `model_dump()` returns native Python types. psycopg3 adapter handles serialization at the driver layer.
+
 ### EN-TD.1: Raw JSON Parsing in HTTP Triggers `[DONE 12 FEB 2026]`
 
 Migrated 37 occurrences across 22 code files from raw `req.get_json()` to `parse_request_json(req)` with fallback + type guard. See [EN_TD1_JSON_PARSING_MIGRATION.md](./EN_TD1_JSON_PARSING_MIGRATION.md).
@@ -216,6 +273,10 @@ Migrated 37 occurrences across 22 code files from raw `req.get_json()` to `parse
 
 | Date | Feature | Task |
 |------|---------|------|
+| 18 FEB 2026 | F7 | dataset_id + resource_id lookup on platform/status (v0.8.19.1) |
+| 18 FEB 2026 | F7 | Fix draft self-conflict bypass (empty string vs None) |
+| 18 FEB 2026 | F7 | Fix psycopg3 dict adaptation in asset_repository.update() |
+| 18 FEB 2026 | EN-TD.2 | Pydantic V2 serialization review + implementation plan |
 | 11 FEB 2026 | US 4.2 | Approval consolidation COMPLETE - all 5 phases + post-migration docs verified |
 | 10 FEB 2026 | US 4.2.1 | Approval-aware overwrite & version validation |
 | 09 FEB 2026 | F7 | Forward FK architecture (V0.8.16) |

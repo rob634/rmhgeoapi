@@ -3,7 +3,7 @@
 # ============================================================================
 # STATUS: Trigger layer - Platform status and diagnostic endpoints
 # PURPOSE: Query Platform request/job status and diagnostics for gateway integration
-# LAST_REVIEWED: 07 FEB 2026
+# LAST_REVIEWED: 18 FEB 2026
 # REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
 # EXPORTS: platform_request_status, platform_job_status, platform_health, platform_failures, platform_lineage, platform_validate
 # DEPENDENCIES: infrastructure.PlatformRepository, infrastructure.JobRepository
@@ -16,7 +16,8 @@ gateway integration where only /api/platform/* endpoints are exposed externally.
 
 Status Endpoints:
     GET /api/platform/status/{id} - Consolidated status endpoint (21 JAN 2026)
-        Accepts EITHER request_id OR job_id - auto-detects ID type
+        Accepts EITHER request_id OR job_id OR asset_id - auto-detects ID type
+    GET /api/platform/status?dataset_id=X&resource_id=Y - Lookup by platform refs (18 FEB 2026)
     GET /api/platform/status - List all platform requests
     GET /api/platform/jobs/{job_id}/status - DEPRECATED (use /status/{job_id})
 
@@ -66,7 +67,16 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
         The {id} parameter can be EITHER:
         - A request_id (Platform request identifier)
         - A job_id (CoreMachine job identifier)
+        - An asset_id (GeospatialAsset identifier)
         The endpoint auto-detects which type of ID was provided.
+        Query params:
+            - verbose=true: Include full task details (default: false)
+
+    GET /api/platform/status?dataset_id=X&resource_id=Y
+        Lookup by platform identifiers (18 FEB 2026).
+        Finds all assets for the dataset+resource pair, surfaces the most
+        actionable one (active job > completed draft > single > most recent).
+        If multiple assets exist, includes a "versions" summary array.
         Query params:
             - verbose=true: Include full task details (default: false)
 
@@ -141,7 +151,7 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
             # ================================================================
             platform_request = platform_repo.get_request(lookup_id)
             lookup_type = "request_id"
-            asset_info = None  # V0.8: Track asset info for response
+            pre_resolved_asset = None  # V0.8: Track resolved asset for response
 
             if not platform_request:
                 # Try as job_id (reverse lookup)
@@ -157,12 +167,7 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
                         # Found asset with linked job - get platform request via job
                         platform_request = platform_repo.get_request_by_job(asset.current_job_id)
                         lookup_type = "asset_id"
-                        asset_info = {
-                            "asset_id": asset.asset_id,
-                            "revision": asset.revision,
-                            "approval_state": asset.approval_state.value if hasattr(asset.approval_state, 'value') else str(asset.approval_state),
-                            "clearance_state": asset.clearance_state.value if hasattr(asset.clearance_state, 'value') else str(asset.clearance_state),
-                        }
+                        pre_resolved_asset = asset
                 except Exception as asset_err:
                     logger.debug(f"Asset lookup failed (non-fatal): {asset_err}")
 
@@ -179,94 +184,11 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
 
             logger.debug(f"Found platform request via {lookup_type}: {platform_request.request_id}")
 
-            # Get CoreMachine job status (delegation)
-            job = job_repo.get_job(platform_request.job_id)
-
-            if job:
-                job_status = job.status.value if hasattr(job.status, 'value') else job.status
-                job_stage = job.stage
-                job_result = job.result_data
-                job_type = job.job_type
-            else:
-                job_status = "unknown"
-                job_stage = None
-                job_result = None
-                job_type = None
-                logger.warning(f"CoreMachine job {platform_request.job_id} not found")
-
-            # Get task summary (09 DEC 2025)
-            task_summary = _get_task_summary(task_repo, platform_request.job_id, verbose=verbose)
-
-            # Build response
-            result = {
-                "success": True,
-                # Platform identifiers
-                "request_id": platform_request.request_id,
-                "dataset_id": platform_request.dataset_id,
-                "resource_id": platform_request.resource_id,
-                "version_id": platform_request.version_id,
-                "data_type": platform_request.data_type,
-                "created_at": platform_request.created_at.isoformat() if platform_request.created_at else None,
-
-                # CoreMachine job status (delegated)
-                "job_id": platform_request.job_id,
-                "job_type": job_type,
-                "job_status": job_status,
-                "job_stage": job_stage,
-                "job_result": job_result,
-
-                # Task summary (09 DEC 2025)
-                "task_summary": task_summary,
-
-                # V0.8: Asset info if available (29 JAN 2026)
-                "asset": asset_info,
-
-                # Helpful URLs
-                "urls": {
-                    "job_status": f"/api/jobs/status/{platform_request.job_id}",
-                    "job_tasks": f"/api/dbadmin/tasks/{platform_request.job_id}"
-                }
-            }
-
-            # V0.8.16: Get asset_id from direct FKs (09 FEB 2026)
-            # Use forward FKs (ApiRequest.asset_id or Job.asset_id) instead of
-            # reverse lookup via current_job_id. Forward FKs are always set at
-            # job creation time and don't depend on job completion.
-            resolved_asset_id = None
-            if not asset_info:
-                # Try ApiRequest.asset_id first (set at submit time)
-                resolved_asset_id = platform_request.asset_id
-
-                # Fallback to Job.asset_id if ApiRequest doesn't have it
-                if not resolved_asset_id and job:
-                    resolved_asset_id = job.asset_id
-
-                # Fetch full asset info for response
-                if resolved_asset_id:
-                    try:
-                        asset_repo = GeospatialAssetRepository()
-                        asset = asset_repo.get_by_id(resolved_asset_id)
-                        if asset:
-                            result["asset"] = {
-                                "asset_id": asset.asset_id,
-                                "revision": asset.revision,
-                                "approval_state": asset.approval_state.value if hasattr(asset.approval_state, 'value') else str(asset.approval_state),
-                                "clearance_state": asset.clearance_state.value if hasattr(asset.clearance_state, 'value') else str(asset.clearance_state),
-                            }
-                    except Exception:
-                        pass  # Non-fatal - asset info is optional
-            else:
-                # Asset info was pre-populated (from lookup by asset_id)
-                resolved_asset_id = asset_info.get('asset_id') if isinstance(asset_info, dict) else None
-
-            # Add data access URLs if job completed
-            if job_status == "completed" and job_result:
-                result["data_access"] = _generate_data_access_urls(
-                    platform_request,
-                    job_type,
-                    job_result,
-                    asset_id=resolved_asset_id
-                )
+            # Build response using shared helper (refactored 18 FEB 2026)
+            result = _build_single_status_response(
+                platform_request, job_repo, task_repo,
+                verbose=verbose, pre_resolved_asset=pre_resolved_asset
+            )
 
             return func.HttpResponse(
                 json.dumps(result, indent=2, default=str),
@@ -276,11 +198,22 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
 
         else:
             # ================================================================
-            # List all requests
+            # No path ID — check for dataset_id + resource_id query params
+            # or fall through to list-all (18 FEB 2026)
             # ================================================================
-            limit = int(req.params.get('limit', 100))
             dataset_id = req.params.get('dataset_id')
+            resource_id = req.params.get('resource_id')
 
+            if dataset_id and resource_id:
+                # Asset lookup by platform refs (18 FEB 2026)
+                return _handle_platform_refs_lookup(
+                    dataset_id, resource_id,
+                    job_repo, task_repo, platform_repo,
+                    verbose=verbose
+                )
+
+            # List all requests (existing behavior)
+            limit = int(req.params.get('limit', 100))
             requests = platform_repo.get_all_requests(limit=limit, dataset_id=dataset_id)
 
             return func.HttpResponse(
@@ -598,6 +531,297 @@ def _get_task_summary(
             "error": str(e),
             "total": 0
         }
+
+
+def _build_single_status_response(
+    platform_request,
+    job_repo,
+    task_repo,
+    verbose: bool = False,
+    pre_resolved_asset=None
+) -> dict:
+    """
+    Build the standard status response dict for a single Platform request.
+
+    Extracts job status, task summary, asset info, and data access URLs into
+    a reusable response shape shared by all lookup paths (request_id, job_id,
+    asset_id, platform_refs).
+
+    Args:
+        platform_request: ApiRequest record
+        job_repo: JobRepository instance
+        task_repo: TaskRepository instance
+        verbose: Include full task details in task_summary
+        pre_resolved_asset: GeospatialAsset if already fetched (skips re-query)
+
+    Returns:
+        Response dict ready for JSON serialization
+    """
+    # Get CoreMachine job status
+    job = job_repo.get_job(platform_request.job_id)
+
+    if job:
+        job_status = job.status.value if hasattr(job.status, 'value') else job.status
+        job_stage = job.stage
+        job_result = job.result_data
+        job_type = job.job_type
+    else:
+        job_status = "unknown"
+        job_stage = None
+        job_result = None
+        job_type = None
+        logger.warning(f"CoreMachine job {platform_request.job_id} not found")
+
+    # Get task summary
+    task_summary = _get_task_summary(task_repo, platform_request.job_id, verbose=verbose)
+
+    # Build response
+    result = {
+        "success": True,
+        "request_id": platform_request.request_id,
+        "dataset_id": platform_request.dataset_id,
+        "resource_id": platform_request.resource_id,
+        "version_id": platform_request.version_id,
+        "data_type": platform_request.data_type,
+        "created_at": platform_request.created_at.isoformat() if platform_request.created_at else None,
+        "job_id": platform_request.job_id,
+        "job_type": job_type,
+        "job_status": job_status,
+        "job_stage": job_stage,
+        "job_result": job_result,
+        "task_summary": task_summary,
+        "asset": None,
+        "urls": {
+            "job_status": f"/api/jobs/status/{platform_request.job_id}",
+            "job_tasks": f"/api/dbadmin/tasks/{platform_request.job_id}"
+        }
+    }
+
+    # Resolve asset info
+    resolved_asset_id = None
+    if pre_resolved_asset:
+        asset = pre_resolved_asset
+        result["asset"] = {
+            "asset_id": asset.asset_id,
+            "revision": asset.revision,
+            "approval_state": asset.approval_state.value if hasattr(asset.approval_state, 'value') else str(asset.approval_state),
+            "clearance_state": asset.clearance_state.value if hasattr(asset.clearance_state, 'value') else str(asset.clearance_state),
+        }
+        resolved_asset_id = asset.asset_id
+    else:
+        # Try ApiRequest.asset_id first (set at submit time)
+        resolved_asset_id = platform_request.asset_id
+        # Fallback to Job.asset_id
+        if not resolved_asset_id and job:
+            resolved_asset_id = job.asset_id
+        # Fetch full asset info
+        if resolved_asset_id:
+            try:
+                asset_repo = GeospatialAssetRepository()
+                asset = asset_repo.get_by_id(resolved_asset_id)
+                if asset:
+                    result["asset"] = {
+                        "asset_id": asset.asset_id,
+                        "revision": asset.revision,
+                        "approval_state": asset.approval_state.value if hasattr(asset.approval_state, 'value') else str(asset.approval_state),
+                        "clearance_state": asset.clearance_state.value if hasattr(asset.clearance_state, 'value') else str(asset.clearance_state),
+                    }
+            except Exception:
+                pass  # Non-fatal
+
+    # Add data access URLs if job completed
+    if job_status == "completed" and job_result:
+        result["data_access"] = _generate_data_access_urls(
+            platform_request, job_type, job_result, asset_id=resolved_asset_id
+        )
+
+    return result
+
+
+def _build_version_summary(assets: list) -> list:
+    """
+    Build compact version summary for multi-asset responses.
+
+    Args:
+        assets: List of GeospatialAsset objects
+
+    Returns:
+        List of dicts with version info, sorted by created_at descending
+    """
+    summaries = []
+    for asset in assets:
+        summaries.append({
+            "asset_id": asset.asset_id,
+            "version_id": getattr(asset, 'version_id', None) or (
+                asset.platform_refs.get('version_id') if asset.platform_refs else None
+            ),
+            "approval_state": asset.approval_state.value if hasattr(asset.approval_state, 'value') else str(asset.approval_state),
+            "clearance_state": asset.clearance_state.value if hasattr(asset.clearance_state, 'value') else str(asset.clearance_state),
+            "processing_status": asset.processing_status.value if hasattr(asset.processing_status, 'value') else str(asset.processing_status),
+            "is_latest": getattr(asset, 'is_latest', False),
+            "created_at": asset.created_at.isoformat() if asset.created_at else None,
+        })
+    # Sort by created_at descending (most recent first)
+    summaries.sort(key=lambda x: x["created_at"] or "", reverse=True)
+    return summaries
+
+
+def _handle_platform_refs_lookup(
+    dataset_id: str,
+    resource_id: str,
+    job_repo,
+    task_repo,
+    platform_repo,
+    verbose: bool = False
+) -> func.HttpResponse:
+    """
+    Lookup status by dataset_id + resource_id (platform refs).
+
+    Finds all assets matching the dataset/resource pair, selects the most
+    actionable one (active job > completed draft > single > most recent),
+    and returns the standard status response shape.
+
+    Priority logic:
+        1. Asset with active job (PENDING or PROCESSING) — currently running
+        2. Completed draft (no version_id, processing done) — awaiting approval
+        3. Only one asset total — unambiguous
+        4. All approved — pick most recent, add workflow_status hint
+
+    Added 18 FEB 2026 for DDH QA team workflow.
+
+    Args:
+        dataset_id: Platform dataset identifier
+        resource_id: Platform resource identifier
+        job_repo: JobRepository instance
+        task_repo: TaskRepository instance
+        platform_repo: PlatformRepository instance
+        verbose: Include full task details
+
+    Returns:
+        func.HttpResponse with status JSON
+    """
+    from core.models.asset import ProcessingStatus, ApprovalState
+
+    asset_repo = GeospatialAssetRepository()
+    refs_filter = {"dataset_id": dataset_id, "resource_id": resource_id}
+    assets = asset_repo.list_by_platform_refs("ddh", refs_filter)
+
+    if not assets:
+        return func.HttpResponse(
+            json.dumps({
+                "success": False,
+                "error": f"No assets found for dataset_id={dataset_id}, resource_id={resource_id}",
+                "hint": "Check dataset_id and resource_id values, or submit a new request via /api/platform/submit"
+            }),
+            status_code=404,
+            headers={"Content-Type": "application/json"}
+        )
+
+    # Classify assets by state
+    active_job_assets = []      # PENDING or PROCESSING
+    completed_draft_assets = []  # Completed, no version_id (awaiting approval)
+    approved_assets = []         # Approved
+    other_assets = []
+
+    for asset in assets:
+        proc_status = asset.processing_status.value if hasattr(asset.processing_status, 'value') else str(asset.processing_status)
+        approval = asset.approval_state.value if hasattr(asset.approval_state, 'value') else str(asset.approval_state)
+        version_id = (asset.platform_refs or {}).get('version_id', '')
+
+        if proc_status in ('pending', 'processing'):
+            active_job_assets.append(asset)
+        elif proc_status == 'completed' and approval != 'approved' and not version_id:
+            completed_draft_assets.append(asset)
+        elif approval == 'approved':
+            approved_assets.append(asset)
+        else:
+            other_assets.append(asset)
+
+    # Priority select primary asset
+    primary_asset = None
+    workflow_status = None
+    workflow_message = None
+
+    if active_job_assets:
+        # Pick the most recent active job
+        primary_asset = max(active_job_assets, key=lambda a: a.created_at or datetime.min.replace(tzinfo=timezone.utc))
+    elif completed_draft_assets:
+        # Pick the most recent completed draft (awaiting approval)
+        primary_asset = max(completed_draft_assets, key=lambda a: a.created_at or datetime.min.replace(tzinfo=timezone.utc))
+    elif len(assets) == 1:
+        primary_asset = assets[0]
+    else:
+        # All approved or mixed — pick most recent
+        primary_asset = max(assets, key=lambda a: a.created_at or datetime.min.replace(tzinfo=timezone.utc))
+        # Check if all are approved (no open workflow)
+        if all(
+            (a.approval_state.value if hasattr(a.approval_state, 'value') else str(a.approval_state)) == 'approved'
+            for a in assets
+        ):
+            workflow_status = "no_open_workflow"
+            workflow_message = "All versions approved. No active draft or processing job."
+
+    # Reverse-lookup: asset → ApiRequest via current_job_id
+    platform_request = None
+    if primary_asset.current_job_id:
+        platform_request = platform_repo.get_request_by_job(primary_asset.current_job_id)
+
+    if platform_request:
+        result = _build_single_status_response(
+            platform_request, job_repo, task_repo,
+            verbose=verbose, pre_resolved_asset=primary_asset
+        )
+    else:
+        # Edge case: no ApiRequest found — build response from asset + job fields
+        job = job_repo.get_job(primary_asset.current_job_id) if primary_asset.current_job_id else None
+        result = {
+            "success": True,
+            "request_id": None,
+            "dataset_id": dataset_id,
+            "resource_id": resource_id,
+            "version_id": (primary_asset.platform_refs or {}).get('version_id'),
+            "data_type": primary_asset.data_type,
+            "created_at": primary_asset.created_at.isoformat() if primary_asset.created_at else None,
+            "job_id": primary_asset.current_job_id,
+            "job_type": job.job_type if job else None,
+            "job_status": (job.status.value if hasattr(job.status, 'value') else str(job.status)) if job else "unknown",
+            "job_stage": job.stage if job else None,
+            "job_result": job.result_data if job else None,
+            "task_summary": _get_task_summary(task_repo, primary_asset.current_job_id, verbose=verbose) if primary_asset.current_job_id else {"total": 0},
+            "asset": {
+                "asset_id": primary_asset.asset_id,
+                "revision": primary_asset.revision,
+                "approval_state": primary_asset.approval_state.value if hasattr(primary_asset.approval_state, 'value') else str(primary_asset.approval_state),
+                "clearance_state": primary_asset.clearance_state.value if hasattr(primary_asset.clearance_state, 'value') else str(primary_asset.clearance_state),
+            },
+            "urls": {
+                "job_status": f"/api/jobs/status/{primary_asset.current_job_id}" if primary_asset.current_job_id else None,
+                "job_tasks": f"/api/dbadmin/tasks/{primary_asset.current_job_id}" if primary_asset.current_job_id else None,
+            }
+        }
+        # Add data access URLs if job completed
+        if job and (job.status.value if hasattr(job.status, 'value') else str(job.status)) == "completed" and job.result_data:
+            result["data_access"] = _generate_data_access_urls(
+                platform_request, job.job_type, job.result_data, asset_id=primary_asset.asset_id
+            )
+
+    # Add lookup_type
+    result["lookup_type"] = "platform_refs"
+
+    # Add workflow_status if applicable
+    if workflow_status:
+        result["workflow_status"] = workflow_status
+        result["message"] = workflow_message
+
+    # Add version summary if multiple assets
+    if len(assets) > 1:
+        result["versions"] = _build_version_summary(assets)
+
+    return func.HttpResponse(
+        json.dumps(result, indent=2, default=str),
+        status_code=200,
+        headers={"Content-Type": "application/json"}
+    )
 
 
 def _generate_data_access_urls(

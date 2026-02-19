@@ -2,57 +2,60 @@
 # The Python Worker is managed by Azure Functions platform
 # Manually managing azure-functions-worker may cause unexpected issues
 
+# === Azure SDK ===
 azure-functions
-azure-storage-blob
-azure-identity
-azure-keyvault-secrets
+azure-storage-blob>=12.20.0
+azure-identity>=1.16.1
+azure-keyvault-secrets>=4.8.0
 azure-servicebus>=7.11.0
 azure-mgmt-datafactory>=4.0.0
-geopandas
-psycopg[binary]
+
+# === Geospatial Core ===
+geopandas>=1.1.2                      # CVE-2025-69662 (SQL injection) fixed in 1.1.2
+psycopg[binary]>=3.1.0
 rasterio>=1.3.1
-rio-cogeo
+rio-cogeo>=5.0.0
 rio-stac>=0.10.0
 cogeo-mosaic>=7.0.0
 
-# STRONG TYPING DISCIPLINE - Schema validation and enforcement
+# === Schema Validation ===
 pydantic>=2.0.0
 
-# DEBUG MODE - Memory and performance profiling
+# === NumPy: Pin to <2 for C-extension ABI compatibility ===
+# pyarrow, compiled geospatial modules may break with NumPy 2.x
+numpy<2
+
+# === Profiling ===
 psutil>=5.9.0
 
-# STAC Implementation - PgSTAC database and Python libraries
-# Upgraded to 0.9.8 (13 NOV 2025) - Matches database schema version
-pypgstac==0.9.8
-psycopg-pool>=3.1.0
-# Do not use psycopg-pool in code- dependency for pgstac only
+# === STAC Implementation ===
+pypgstac==0.9.8                       # Must match pgstac database schema version
+psycopg-pool>=3.1.0                   # Dependency for pgstac only
 pystac>=1.13.0
 pystac-client>=0.7.0
 stac-pydantic>=3.4.0
-planetary-computer>=1.0.0     # Planetary Computer STAC URL signing
+planetary-computer>=1.0.0
 
-# Raster Analysis - Zonal statistics on COGs
-rasterstats>=0.19.0           # Zonal statistics for H3 aggregation
+# === Raster Analysis ===
+rasterstats>=0.19.0
 
-# DuckDB - Analytical query engine with spatial and Azure extensions
+# === DuckDB ===
 duckdb>=1.1.0
-pyarrow>=16.0.0
+pyarrow>=14.0.1,<22.0
 
-# H3 - Uber's hexagonal hierarchical geospatial indexing system (Python bindings to C library)
+# === H3 ===
 h3>=4.0.0
 
-# AsyncPG - Async PostgreSQL driver for non-blocking database operations
+# === Async PostgreSQL ===
 asyncpg>=0.29.0
 
-# xarray ecosystem - Service Layer API for Zarr direct access (18 DEC 2025)
+# === xarray ecosystem (Zarr direct access) ===
 xarray>=2024.1.0
 zarr>=2.16.0
 fsspec>=2024.2.0
-adlfs>=2024.2.0           # Azure Blob storage backend for fsspec
-aiohttp>=3.9.4            # Async support for fsspec (CVE-2024-23334, CVE-2024-30251)
+adlfs>=2024.2.0
+aiohttp>=3.13.3                       # CVE-2025-69223 + 5 others fixed in 3.13.3
 
-# HTTP client for TiTiler proxy (18 DEC 2025)
+# === HTTP / Image ===
 httpx>=0.27.0
-
-# Image output for xarray API (18 DEC 2025)
-pillow>=10.2.0
+pillow>=12.1.1                        # CVE-2026-25990 (OOB write) fixed in 12.1.1

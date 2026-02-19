@@ -474,15 +474,36 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
             job_params['asset_id'] = asset_err.asset_id
 
         except Exception as asset_err:
-            # Non-fatal: log warning but continue with job creation
-            # Asset linking can be retried later
-            logger.warning(f"Failed to create asset (continuing without): {asset_err}")
+            # FATAL: Asset creation is required for platform jobs (18 FEB 2026)
+            # Without asset_id, approval/reject/revoke workflows fail with 404
+            logger.error(f"Asset creation failed: {asset_err}", exc_info=True)
+            return error_response(
+                f"Failed to create asset record: {asset_err}",
+                "AssetCreationError",
+                status_code=500
+            )
 
         # Create CoreMachine job
         job_id = create_and_submit_job(job_type, job_params, request_id)
 
         if not job_id:
             raise RuntimeError("Failed to create CoreMachine job")
+
+        # Defensive: verify asset_id persisted on job record (18 FEB 2026)
+        if job_params.get('asset_id'):
+            from infrastructure import JobRepository
+            job_repo = JobRepository()
+            job_record = job_repo.get_job(job_id)
+            if not job_record or not job_record.asset_id:
+                logger.error(
+                    f"BUG: Job {job_id[:16]} created without asset_id! "
+                    f"Expected: {job_params['asset_id'][:16]}"
+                )
+                try:
+                    job_repo.set_asset_id(job_id, job_params['asset_id'])
+                    logger.warning("Emergency repair: set job.asset_id post-creation")
+                except Exception as repair_err:
+                    logger.error(f"Emergency repair failed: {repair_err}")
 
         # Store thin tracking record (request_id → job_id)
         # V0.8.11: Include asset_id and platform_id FKs (08 FEB 2026)

@@ -1,80 +1,74 @@
 # ============================================================================
 # Docker Worker Dependencies
 # ============================================================================
-# This is the same as rmhgeoapi/requirements.txt MINUS azure-functions
-# which is only needed for Azure Functions runtime.
+# Same as requirements.txt MINUS azure-functions, PLUS FastAPI/uvicorn.
 #
 # NOTE: GDAL is NOT listed here - it comes pre-installed in the base image
 # (ghcr.io/osgeo/gdal:ubuntu-full-3.10.1). Do NOT add GDAL to this file.
-# ubuntu-full includes NetCDF, HDF5, Zarr, and all multidimensional drivers.
 #
-# Generated: 22 DEC 2025
-# Updated: 10 JAN 2026 - Copied to unified rmhgeoapi repo
+# Updated: 19 FEB 2026 - CVE fixes, version pinning
 # ============================================================================
 
-# Azure SDK - Storage, Service Bus, Identity
-azure-storage-blob
-azure-storage-queue
-azure-data-tables
-azure-identity
-azure-keyvault-secrets
+# === Azure SDK ===
+azure-storage-blob>=12.20.0
+azure-storage-queue>=12.9.0
+azure-data-tables>=12.5.0
+azure-identity>=1.16.1
+azure-keyvault-secrets>=4.8.0
 azure-servicebus>=7.11.0
 azure-mgmt-datafactory>=4.0.0
-
-# Azure Monitor OpenTelemetry - Application Insights for Docker workers
-# This sends logs/traces/metrics to App Insights (same as Function App)
-# Must call configure_azure_monitor() BEFORE importing FastAPI
 azure-monitor-opentelemetry>=1.6.0
 
-# Geospatial - Core libraries
-geopandas
-psycopg[binary]
+# === Geospatial Core ===
+geopandas>=1.1.2                      # CVE-2025-69662 (SQL injection) fixed in 1.1.2
+psycopg[binary]>=3.1.0
 rasterio>=1.3.1
-rio-cogeo
+rio-cogeo>=5.0.0
 rio-stac>=0.10.0
 cogeo-mosaic>=7.0.0
 
-# STRONG TYPING DISCIPLINE - Schema validation and enforcement
+# === Schema Validation ===
 pydantic>=2.0.0
 
-# DEBUG MODE - Memory and performance profiling
+# === NumPy: Pin to <2 for C-extension ABI compatibility ===
+numpy<2
+
+# === Profiling ===
 psutil>=5.9.0
 
-# STAC Implementation - PgSTAC database and Python libraries
+# === STAC Implementation ===
 pypgstac==0.9.8
 psycopg-pool>=3.1.0
 pystac>=1.13.0
 pystac-client>=0.7.0
 stac-pydantic>=3.4.0
 
-# DuckDB - Analytical query engine with spatial and Azure extensions
+# === DuckDB ===
 duckdb>=1.1.0
-pyarrow>=16.0.0
+pyarrow>=14.0.1,<22.0
 
-# H3 - Uber's hexagonal hierarchical geospatial indexing system
+# === H3 ===
 h3>=4.0.0
 
-# H3 Aggregation - Zonal statistics and Planetary Computer access
+# === Raster / STAC Utilities ===
 rasterstats>=0.19.0
 planetary-computer>=1.0.0
 
-# AsyncPG - Async PostgreSQL driver for non-blocking database operations
+# === Async PostgreSQL ===
 asyncpg>=0.29.0
 
-# xarray ecosystem - Service Layer API for Zarr direct access
+# === xarray ecosystem (Zarr direct access) ===
 xarray>=2024.1.0
 zarr>=2.16.0
 fsspec>=2024.2.0
 adlfs>=2024.2.0
-aiohttp>=3.9.4
+aiohttp>=3.13.3                       # CVE-2025-69223 + 5 others fixed in 3.13.3
 
-# HTTP client for TiTiler proxy
+# === HTTP / Image ===
 httpx>=0.27.0
+pillow>=12.1.1                        # CVE-2026-25990 (OOB write) fixed in 12.1.1
 
-# Image output for xarray API
-pillow>=10.2.0
-
-# Workers Entrance - Direct HTTP endpoint (optional)
+# === Docker Worker HTTP Server ===
 fastapi>=0.104.0
 uvicorn>=0.24.0
-jinja2>=3.1.0  # HTML templates for Docker Worker UI
+jinja2>=3.1.6                         # CVE-2025-27516 (sandbox breakout) fixed in 3.1.6

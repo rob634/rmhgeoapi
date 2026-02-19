@@ -1686,9 +1686,12 @@ async def platform_validate(req: func.HttpRequest) -> func.HttpResponse:
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
+        # Return 400 when validation fails (18 FEB 2026)
+        status_code = 200 if validation_result.valid else 400
+
         return func.HttpResponse(
             json.dumps(result, indent=2),
-            status_code=200,
+            status_code=status_code,
             headers={"Content-Type": "application/json"}
         )
 

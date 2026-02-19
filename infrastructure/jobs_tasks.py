@@ -306,6 +306,41 @@ class JobRepository(PostgreSQLJobRepository):
             {'error_details': error_details}
         )
 
+    def set_asset_id(self, job_id: str, asset_id: str) -> bool:
+        """
+        Set asset_id on an existing job (emergency repair).
+
+        18 FEB 2026: Handles edge case where asset_id is lost during job creation.
+
+        Args:
+            job_id: Job ID to update
+            asset_id: Asset ID to link
+
+        Returns:
+            True if updated successfully
+        """
+        from psycopg import sql
+
+        with self._error_context("set asset_id", job_id):
+            query = sql.SQL("""
+                UPDATE {schema}.{table}
+                SET asset_id = %s, updated_at = NOW()
+                WHERE job_id = %s
+                RETURNING job_id
+            """).format(
+                schema=sql.Identifier(self.schema_name),
+                table=sql.Identifier("jobs")
+            )
+
+            result = self._execute_query(query, (asset_id, job_id), fetch='one')
+
+            if result:
+                logger.info(f"Set job.asset_id: {job_id[:16]}... -> {asset_id[:16]}...")
+                return True
+            else:
+                logger.warning(f"Failed to set asset_id for job {job_id[:16]}...")
+                return False
+
     def reset_failed_job(self, job_id: str, preserve_error: bool = True) -> Dict[str, Any]:
         """
         Reset a failed job for re-processing (09 DEC 2025).

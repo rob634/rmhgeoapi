@@ -245,7 +245,42 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                 clearance_level = None
 
         if existing:
+            # =========================================================
+            # APPROVAL GUARD (18 FEB 2026)
+            # Check if the existing asset is approved. If so:
+            #   - overwrite=true is BLOCKED (can't destroy approved data)
+            #   - draft resubmit (no version_id) is a NEW workflow, not
+            #     idempotent with the old request
+            # =========================================================
+            existing_asset = None
+            existing_approved = False
+            if existing.asset_id:
+                try:
+                    existing_asset = AssetService().get_active_asset(existing.asset_id)
+                    if existing_asset and existing_asset.approval_state.value == 'approved':
+                        existing_approved = True
+                except Exception:
+                    pass  # Asset may not exist yet (job still running)
+
             if overwrite:
+                # Block overwrite on approved assets (18 FEB 2026)
+                if existing_approved:
+                    existing_version = (existing_asset.platform_refs or {}).get('version_id', '')
+                    logger.warning(
+                        f"OVERWRITE BLOCKED: asset {existing.asset_id[:16]} is approved "
+                        f"(version={existing_version or 'draft'})"
+                    )
+                    return error_response(
+                        f"Cannot overwrite approved asset. "
+                        f"Version '{existing_version or 'draft'}' has been approved. "
+                        f"Submit with a new version_id instead.",
+                        "OverwriteBlockedError",
+                        status_code=409,
+                        existing_request_id=request_id,
+                        asset_id=existing.asset_id,
+                        approval_state="approved"
+                    )
+
                 # Overwrite mode: unpublish existing outputs and reprocess (21 JAN 2026)
                 logger.warning(f"OVERWRITE: Unpublishing existing request {request_id[:16]} before reprocessing")
                 try:
@@ -259,6 +294,25 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                         existing_request_id=request_id,
                         existing_job_id=existing.job_id
                     )
+            elif is_draft and existing_approved:
+                # Draft resubmit after approval: this is a NEW version workflow,
+                # not idempotent with the old request (18 FEB 2026)
+                existing_version = (existing_asset.platform_refs or {}).get('version_id', '')
+                logger.info(
+                    f"Draft resubmit: existing asset {existing.asset_id[:16]} is approved "
+                    f"(version={existing_version}). Treating as new workflow."
+                )
+                return error_response(
+                    f"Previous version '{existing_version}' is already approved. "
+                    f"To submit a new version, include version_id in the request "
+                    f"(e.g., version_id='{existing_version}' with a new version label). "
+                    f"Draft mode (no version_id) is only for the first submission.",
+                    "VersionLifecycleError",
+                    status_code=409,
+                    existing_request_id=request_id,
+                    asset_id=existing.asset_id,
+                    approved_version=existing_version
+                )
             else:
                 # Normal idempotent behavior: return existing request
                 logger.info(f"Request already exists: {request_id[:16]} → job {existing.job_id[:16]}")
@@ -308,10 +362,12 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
             validation_result = None
 
             if is_draft:
-                # Draft mode: compute lineage_id for grouping but skip validation
-                from core.models.asset import GeospatialAsset as _GA
-                lineage_id = _GA.generate_lineage_id("ddh", platform_refs, ["dataset_id", "resource_id"])
-                logger.info(f"  Draft mode: lineage validation deferred to approve. lineage_id={lineage_id[:16]}...")
+                # Draft mode: NO lineage wiring at submit time (18 FEB 2026)
+                # lineage_id, version_ordinal, previous_asset_id all stay None
+                # These are assigned at approve time via assign_version()
+                lineage_id = None
+                version_ordinal = None
+                logger.info("  Draft mode: lineage validation deferred to approve")
 
                 if dry_run:
                     return func.HttpResponse(
@@ -321,16 +377,11 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                             "draft_mode": True,
                             "request_id": request_id,
                             "would_create_job_type": job_type,
-                            "lineage_state": {
-                                "lineage_id": lineage_id,
-                                "lineage_exists": False,
-                            },
                             "validation": {
                                 "data_type_detected": platform_req.data_type.value,
-                                "note": "Draft mode — version lineage validation deferred to approve"
+                                "note": "Draft mode — lineage deferred to approve"
                             },
-                            "warnings": [],
-                            "suggested_params": {"version_ordinal": 1}
+                            "warnings": []
                         }),
                         status_code=200,
                         mimetype="application/json"
@@ -399,10 +450,11 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                 clearance_level=clearance_level,
                 submitted_by=submitted_by,
                 # V0.8.4.1 Release Control - lineage parameters
+                # Drafts: all None — wired at approve time via assign_version()
                 lineage_id=lineage_id,
                 version_ordinal=version_ordinal,
                 previous_asset_id=previous_asset_id,
-                is_latest=True
+                is_latest=not is_draft  # Drafts are not "latest" until versioned
             )
             logger.info(f"  Asset {asset_operation}: {asset.asset_id[:16]} (revision {asset.revision}, lineage ordinal {version_ordinal})")
 

@@ -1283,30 +1283,34 @@ class AssetService:
             overwrite=False
         )
 
-        if not validation_result.valid:
-            # Draft seeing itself as "current_latest" is expected — bypass (18 FEB 2026)
-            # Check for both None and "" (empty string) as draft indicators
-            draft_self_conflict = (
-                validation_result.current_latest
-                and validation_result.current_latest.get('asset_id') == asset_id
-                and not validation_result.current_latest.get('version_id')
+        # Detect draft seeing itself as "current_latest" (18 FEB 2026)
+        draft_self_conflict = (
+            not validation_result.valid
+            and validation_result.current_latest
+            and validation_result.current_latest.get('asset_id') == asset_id
+            and not validation_result.current_latest.get('version_id')
+        )
+
+        if not validation_result.valid and not draft_self_conflict:
+            raise ValueError(
+                f"Version lineage validation failed: {validation_result.warnings[0]}"
             )
-            if draft_self_conflict:
-                logger.info(
-                    f"assign_version: draft {asset_id[:16]} sees itself in lineage, "
-                    f"proceeding as first version"
-                )
-            else:
-                raise ValueError(
-                    f"Version lineage validation failed: {validation_result.warnings[0]}"
-                )
 
         # 4. Compute lineage wiring
         lineage_id = validation_result.lineage_id
-        version_ordinal = validation_result.suggested_params.get('version_ordinal', 1)
-        previous_asset_id = None
-        if validation_result.current_latest:
-            previous_asset_id = validation_result.current_latest.get('asset_id')
+        if draft_self_conflict:
+            # Draft is the only asset in lineage — this IS version 1, no predecessor
+            version_ordinal = 1
+            previous_asset_id = None
+            logger.info(
+                f"assign_version: draft {asset_id[:16]} is first version in lineage "
+                f"{lineage_id[:16]}"
+            )
+        else:
+            version_ordinal = validation_result.suggested_params.get('version_ordinal', 1)
+            previous_asset_id = None
+            if validation_result.current_latest:
+                previous_asset_id = validation_result.current_latest.get('asset_id')
 
         # 5. Flip is_latest on current latest before we update this asset
         if previous_asset_id and previous_asset_id != asset_id:

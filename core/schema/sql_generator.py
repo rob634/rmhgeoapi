@@ -1602,6 +1602,14 @@ BEGIN
             cleared_by = NULL,
             made_public_at = NULL,
             made_public_by = NULL,
+            -- 20 FEB 2026: Clear revocation fields on overwrite (revoke-first workflow)
+            revoked_at = NULL,
+            revoked_by = NULL,
+            revocation_reason = NULL,
+            -- 20 FEB 2026: Reset identity fields on overwrite (revoke-first workflow)
+            platform_refs = p_platform_refs,
+            stac_item_id = p_stac_item_id,
+            stac_collection_id = p_stac_collection_id,
             table_name = COALESCE(p_table_name, table_name),
             blob_path = COALESCE(p_blob_path, blob_path),
             -- V0.8 Release Control: Update lineage fields on overwrite

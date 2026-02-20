@@ -151,37 +151,6 @@ def _delete_platform_request(request_id: str, platform_repo: PlatformRepository)
 # DRAFT SEQUENCE HELPER (19 FEB 2026)
 # ============================================================================
 
-def _count_assets_for_lineage(dataset_id: str, resource_id: str) -> int:
-    """
-    Count existing assets for a dataset+resource lineage.
-
-    Used to generate unique draft request_ids when resubmitting drafts
-    after a previous version has been approved.
-
-    Args:
-        dataset_id: DDH dataset identifier
-        resource_id: DDH resource identifier
-
-    Returns:
-        Number of non-deleted assets for this lineage
-    """
-    try:
-        asset_service = AssetService()
-        assets = asset_service.asset_repo.list_by_platform_refs(
-            platform_id="ddh",
-            refs_filter={
-                "dataset_id": dataset_id,
-                "resource_id": resource_id
-            },
-            limit=1000
-        )
-        return len(assets)
-    except Exception as e:
-        logger.warning(f"Could not count lineage assets: {e}")
-        # Fallback: use timestamp-based uniqueness
-        import time
-        return int(time.time()) % 100000
-
 
 # ============================================================================
 # HTTP HANDLERS
@@ -331,24 +300,25 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                         existing_job_id=existing.job_id
                     )
             elif is_draft and existing_approved:
-                # 19 FEB 2026: New draft alongside approved version.
-                # Generate a unique request_id by including a draft sequence number.
+                # 20 FEB 2026: Revoke-first workflow. No coexisting drafts.
+                # asset_id is deterministic from platform_refs (without version_id),
+                # so a new draft would collide with the approved asset's PK.
+                # User must revoke the approved version first, then resubmit.
                 existing_version = (existing_asset.platform_refs or {}).get('version_id', '')
-                logger.info(
-                    f"New draft alongside approved version '{existing_version}'. "
-                    f"Generating unique draft request_id."
+                logger.warning(
+                    f"DRAFT BLOCKED: approved version '{existing_version}' exists for "
+                    f"{platform_req.dataset_id}/{platform_req.resource_id}. Revoke first."
                 )
-                # Count existing assets for this lineage to get next sequence
-                draft_seq = _count_assets_for_lineage(
-                    platform_req.dataset_id, platform_req.resource_id
+                return error_response(
+                    f"Cannot submit new draft while version '{existing_version}' is approved. "
+                    f"Revoke the approved version first (POST /api/platform/revoke) then resubmit.",
+                    "DraftBlockedError",
+                    status_code=409,
+                    existing_request_id=request_id,
+                    asset_id=existing.asset_id,
+                    approval_state="approved",
+                    approved_version=existing_version
                 )
-                request_id = generate_platform_request_id(
-                    platform_req.dataset_id,
-                    platform_req.resource_id,
-                    f"__draft_{draft_seq}"  # Synthetic version for unique hash
-                )
-                # Clear so we don't hit idempotency path below
-                existing = None
             else:
                 # Normal idempotent behavior: return existing request
                 logger.info(f"Request already exists: {request_id[:16]} → job {existing.job_id[:16]}")

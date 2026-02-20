@@ -94,9 +94,40 @@ def _resolve_asset_id(
         job = job_repo.get_job(job_id)
         if job and job.asset_id:
             return job.asset_id, None
+
+        # FALLBACK: Legacy jobs (before V0.8.16) — asset_id in job parameters
+        if job and job.parameters and job.parameters.get('asset_id'):
+            legacy_asset_id = job.parameters['asset_id']
+            logger.info(f"Legacy job detected - using asset_id from job_params: {legacy_asset_id[:16]}...")
+            asset = asset_repo.get_by_id(legacy_asset_id)
+            if asset:
+                return legacy_asset_id, None
+
+        # FALLBACK 2: Very old jobs — lookup via api_requests by job_id
+        if job:
+            from infrastructure import PlatformRepository
+            platform_repo = PlatformRepository()
+            try:
+                from psycopg import sql
+                with platform_repo._get_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            sql.SQL("""
+                                SELECT asset_id FROM {}.api_requests
+                                WHERE job_id = %s
+                            """).format(sql.Identifier(platform_repo.config.app_schema)),
+                            (job_id,)
+                        )
+                        row = cur.fetchone()
+                        if row and row['asset_id']:
+                            logger.info(f"Found asset via api_requests lookup: {row['asset_id'][:16]}...")
+                            return row['asset_id'], None
+            except Exception as lookup_err:
+                logger.warning(f"Legacy asset lookup failed: {lookup_err}")
+
         return None, {
             "success": False,
-            "error": f"No asset found for job: {job_id}",
+            "error": f"No asset found for job: {job_id}. This may be a legacy job from before V0.8.16.",
             "error_type": "NotFound"
         }
 

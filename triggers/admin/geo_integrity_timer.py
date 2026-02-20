@@ -139,6 +139,7 @@ class GeoIntegrityTimerHandler(TimerHandlerBase):
                     health_status = "WARNING"
 
             return {
+                "success": True,
                 "health_status": health_status,
                 "total_tables": report.get('total_tables', 0),
                 "valid_tables": report.get('valid_tables', 0),
@@ -160,6 +161,7 @@ class GeoIntegrityTimerHandler(TimerHandlerBase):
         except Exception as e:
             self.logger.error(f"❌ Geo integrity check failed: {e}")
             return {
+                "success": False,
                 "health_status": "ERROR",
                 "error": str(e),
                 "total_tables": 0,

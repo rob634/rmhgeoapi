@@ -421,7 +421,7 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                             "warnings": validation_result.warnings,
                             "suggested_params": validation_result.suggested_params
                         }),
-                        status_code=200,
+                        status_code=200 if validation_result.valid else 400,
                         mimetype="application/json"
                     )
 

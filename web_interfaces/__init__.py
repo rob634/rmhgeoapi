@@ -185,9 +185,10 @@ def unified_interface_handler(req: func.HttpRequest) -> func.HttpResponse:
         is_htmx = req.headers.get('HX-Request') == 'true'
         fragment = req.params.get('fragment')
 
-        if is_htmx and fragment:
+        if fragment:
             # HTMX partial update - return HTML fragment
-            logger.info(f"🔄 HTMX partial: {interface_name}/{fragment}")
+            source = "HTMX" if is_htmx else "fragment param"
+            logger.info(f"🔄 {source} partial: {interface_name}/{fragment}")
             html = interface.htmx_partial(req, fragment)
 
             return func.HttpResponse(

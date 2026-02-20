@@ -226,7 +226,7 @@ class STACClient:
 
     Usage:
         # Option 1: Explicit base_url
-        client = STACClient(base_url="https://rmhogcapi.../api/stac")
+        client = STACClient(base_url="https://{app-url}/api/stac")
 
         # Option 2: From environment variable STAC_API_BASE_URL
         client = STACClient()

@@ -307,6 +307,25 @@ def _execute_vector_unpublish(
     if not table_name:
         return validation_error("table_name is required for vector unpublish")
 
+    # Dry run: preview only — no job, no tracking record (20 FEB 2026)
+    if dry_run:
+        logger.info(f"Vector unpublish dry_run: table={schema_name}.{table_name}")
+        return func.HttpResponse(
+            json.dumps({
+                "success": True,
+                "dry_run": True,
+                "data_type": "vector",
+                "would_delete": {
+                    "table": f"{schema_name}.{table_name}",
+                },
+                "dataset_id": original_request.dataset_id if original_request else None,
+                "resource_id": original_request.resource_id if original_request else None,
+                "message": "Dry run - no changes made. Set dry_run=false to execute."
+            }),
+            status_code=200,
+            headers={"Content-Type": "application/json"}
+        )
+
     platform_repo = PlatformRepository()
     unpublish_request_id = generate_unpublish_request_id("vector", table_name)
 
@@ -363,6 +382,26 @@ def _execute_raster_unpublish(
     """Execute raster unpublish job."""
     if not stac_item_id or not collection_id:
         return validation_error("stac_item_id and collection_id are required for raster unpublish")
+
+    # Dry run: preview only — no job, no tracking record (20 FEB 2026)
+    if dry_run:
+        logger.info(f"Raster unpublish dry_run: item={stac_item_id}, collection={collection_id}")
+        return func.HttpResponse(
+            json.dumps({
+                "success": True,
+                "dry_run": True,
+                "data_type": "raster",
+                "would_delete": {
+                    "stac_item_id": stac_item_id,
+                    "collection_id": collection_id,
+                },
+                "dataset_id": original_request.dataset_id if original_request else None,
+                "resource_id": original_request.resource_id if original_request else None,
+                "message": "Dry run - no changes made. Set dry_run=false to execute."
+            }),
+            status_code=200,
+            headers={"Content-Type": "application/json"}
+        )
 
     platform_repo = PlatformRepository()
     unpublish_request_id = generate_unpublish_request_id("raster", stac_item_id)
@@ -459,6 +498,26 @@ def _handle_collection_unpublish(
         )
 
     logger.info(f"Found {len(item_ids)} items in collection '{collection_id}'")
+
+    # Dry run: preview only — no jobs, no tracking records (20 FEB 2026)
+    if dry_run:
+        logger.info(f"Collection unpublish dry_run: {len(item_ids)} items in '{collection_id}'")
+        return func.HttpResponse(
+            json.dumps({
+                "success": True,
+                "dry_run": True,
+                "mode": "collection",
+                "collection_id": collection_id,
+                "total_items": len(item_ids),
+                "would_delete": {
+                    "stac_item_ids": item_ids[:50],
+                    "collection_id": collection_id,
+                },
+                "message": f"Dry run - would unpublish {len(item_ids)} items from '{collection_id}'. Set dry_run=false to execute."
+            }),
+            status_code=200,
+            headers={"Content-Type": "application/json"}
+        )
 
     # Submit unpublish job for each item
     submitted_jobs = []

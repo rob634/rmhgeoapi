@@ -169,7 +169,7 @@ class TiTilerSearchService:
         Example:
             >>> url = service.generate_viewer_url("abc123")
             >>> print(url)
-            'https://rmhtitiler-.../searches/abc123/map'
+            'https://{titiler-url}/.../searches/abc123/map'
         """
         url = f"{self.titiler_base_url}/searches/{search_id}/viewer"
         logger.debug(f"   Generated viewer URL: {url}")
@@ -191,7 +191,7 @@ class TiTilerSearchService:
         Example:
             >>> url = service.generate_tilejson_url("abc123")
             >>> print(url)
-            'https://rmhtitiler-.../searches/abc123/WebMercatorQuad/tilejson.json'
+            'https://{titiler-url}/.../searches/abc123/WebMercatorQuad/tilejson.json'
         """
         url = f"{self.titiler_base_url}/searches/{search_id}/WebMercatorQuad/tilejson.json"
         logger.debug(f"   Generated TileJSON URL: {url}")
@@ -213,7 +213,7 @@ class TiTilerSearchService:
         Example:
             >>> url = service.generate_tiles_url("abc123")
             >>> print(url)
-            'https://rmhtitiler-.../searches/abc123/WebMercatorQuad/tiles/{z}/{x}/{y}'
+            'https://{titiler-url}/.../searches/abc123/WebMercatorQuad/tiles/{z}/{x}/{y}'
         """
         url = f"{self.titiler_base_url}/searches/{search_id}/WebMercatorQuad/tiles/{{z}}/{{x}}/{{y}}"
         logger.debug(f"   Generated tiles URL: {url}")

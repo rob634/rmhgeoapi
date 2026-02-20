@@ -172,14 +172,14 @@ class AppModeConfig(BaseModel):
 
     docker_worker_url: Optional[str] = Field(
         default=None,
-        description="URL of the Docker worker for health checks (e.g., https://rmhheavyapi.azurewebsites.net). "
+        description="URL of the Docker worker for health checks (e.g., https://{worker-app}.azurewebsites.net). "
                     "Used by health interface to fetch Docker worker status."
     )
 
     # Orchestrator URL for platform mode (06 FEB 2026)
     orchestrator_url: Optional[str] = Field(
         default=None,
-        description="URL of the orchestrator app for API calls (e.g., https://rmhazuregeoapi-xxx.azurewebsites.net). "
+        description="URL of the orchestrator app for API calls (e.g., https://{orchestrator-app}.azurewebsites.net). "
                     "Used by platform mode UI to fetch job data from orchestrator's dbadmin endpoints."
     )
 

@@ -226,7 +226,7 @@ class PgSTACSearchRegistration:
             ...     "namangan_collection",
             ...     bbox=[71.6063, 40.9806, 71.7219, 40.9850]
             ... )
-            >>> print(f"Viewer: https://rmhtitiler.../searches/{search_id}/map.html")
+            >>> print(f"Viewer: https://{titiler-url}/.../searches/{search_id}/map.html")
         """
         if metadata is None:
             metadata = {"name": f"{collection_id} mosaic"}
@@ -255,7 +255,7 @@ class PgSTACSearchRegistration:
 
         Args:
             search_id: Search hash from register_search()
-            titiler_base_url: TiTiler base URL (e.g., "https://rmhtitiler-...")
+            titiler_base_url: TiTiler base URL (e.g., "https://{titiler-url}/...")
             assets: List of asset names to render (defaults to ["data"])
             band_indexes: Band indexes for multi-band imagery (e.g., [1,2,3] for RGB).
                          Required for 3+ band imagery or TiTiler returns HTTP 500.
@@ -267,12 +267,12 @@ class PgSTACSearchRegistration:
         Example:
             >>> urls = registrar.get_search_urls(
             ...     search_id="6ee588d7...",
-            ...     titiler_base_url="https://rmhtitiler-...",
+            ...     titiler_base_url="https://{titiler-url}/...",
             ...     assets=["data"],
             ...     band_indexes=[1, 2, 3]  # For 8-band WorldView imagery
             ... )
             >>> print(urls["viewer"])
-            'https://rmhtitiler-.../searches/6ee588d7.../WebMercatorQuad/map.html?assets=data&bidx=1&bidx=2&bidx=3'
+            'https://{titiler-url}/.../searches/6ee588d7.../WebMercatorQuad/map.html?assets=data&bidx=1&bidx=2&bidx=3'
         """
         if assets is None:
             assets = ["data"]

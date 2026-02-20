@@ -1101,7 +1101,7 @@ def storage_upload(req: func.HttpRequest) -> func.HttpResponse:
         Maximum file size: 100MB
 
     Example:
-        curl -X POST "https://rmhazuregeoapi-.../api/storage/upload" \\
+        curl -X POST "https://{app-url}/api/storage/upload" \\
             -F "file=@myfile.gpkg" \\
             -F "container=source-data" \\
             -F "path=uploads/myfile.gpkg"

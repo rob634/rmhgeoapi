@@ -490,12 +490,12 @@ class ProcessRasterIntegrationInterface(BaseInterface):
   <span class="key">"job_type"</span>: <span class="string">"process_raster_v2"</span>,
   <span class="key">"result_data"</span>: {
     <span class="key">"cog"</span>: {
-      <span class="key highlight highlight-url">"output_url"</span>: <span class="string highlight highlight-url">"https://rmhazuregeosilver.blob.../silver-cogs/..."</span>,
+      <span class="key highlight highlight-url">"output_url"</span>: <span class="string highlight highlight-url">"https://{storage-account}.blob.../silver-cogs/..."</span>,
       <span class="key">"size_bytes"</span>: <span class="number">15234567</span>,
       <span class="key">"tier"</span>: <span class="string">"analysis"</span>
     },
     <span class="key">"stac"</span>: {
-      <span class="key highlight highlight-url">"item_url"</span>: <span class="string highlight highlight-url">"https://rmhazuregeoapi-.../api/stac/collections/.../items/..."</span>,
+      <span class="key highlight highlight-url">"item_url"</span>: <span class="string highlight highlight-url">"https://{app-url}/api/stac/collections/.../items/..."</span>,
       <span class="key">"collection_id"</span>: <span class="string">"aerial-imagery-2024"</span>,
       <span class="key">"item_id"</span>: <span class="string">"auto-generated-id"</span>
     },
@@ -1520,11 +1520,11 @@ class ProcessVectorIntegrationInterface(BaseInterface):
       <span class="key">"srid"</span>: <span class="number">4326</span>
     },
     <span class="key">"ogc_features"</span>: {
-      <span class="key highlight highlight-url">"collection_url"</span>: <span class="string highlight highlight-url">"https://rmhtitiler-.../vector/collections/geo.parcels_2024..."</span>,
-      <span class="key highlight highlight-url">"items_url"</span>: <span class="string highlight highlight-url">"https://rmhtitiler-.../vector/collections/geo.parcels.../items"</span>
+      <span class="key highlight highlight-url">"collection_url"</span>: <span class="string highlight highlight-url">"https://{titiler-url}/vector/collections/geo.parcels_2024..."</span>,
+      <span class="key highlight highlight-url">"items_url"</span>: <span class="string highlight highlight-url">"https://{titiler-url}/vector/collections/geo.parcels.../items"</span>
     },
     <span class="key">"stac"</span>: {
-      <span class="key">"item_url"</span>: <span class="string">"https://rmhazuregeoapi-.../api/stac/collections/.../items/..."</span>,
+      <span class="key">"item_url"</span>: <span class="string">"https://{app-url}/api/stac/collections/.../items/..."</span>,
       <span class="key">"collection_id"</span>: <span class="string">"system-vectors"</span>
     },
     <span class="key highlight highlight-ddh">"platform"</span>: {
@@ -1556,13 +1556,13 @@ class ProcessVectorIntegrationInterface(BaseInterface):
 <span class="cmd">curl</span> <span class="url" id="result-url-display">"{API_BASE_URL}/api/platform/jobs/{job_id}/status"</span>
 
 <span class="comment"># Query features via OGC Features API:</span>
-<span class="cmd">curl</span> <span class="url">"https://rmhtitiler-.../vector/collections/geo.{table}/items?limit=10"</span>
+<span class="cmd">curl</span> <span class="url">"https://{titiler-url}/vector/collections/geo.{table}/items?limit=10"</span>
 
 <span class="comment"># Query with bbox filter:</span>
-<span class="cmd">curl</span> <span class="url">"https://rmhtitiler-.../vector/collections/geo.{table}/items?bbox=-122.5,47.5,-122.0,47.8"</span>
+<span class="cmd">curl</span> <span class="url">"https://{titiler-url}/vector/collections/geo.{table}/items?bbox=-122.5,47.5,-122.0,47.8"</span>
 
 <span class="comment"># Get vector tiles (MVT):</span>
-<span class="cmd">curl</span> <span class="url">"https://rmhtitiler-.../vector/collections/geo.{table}/tiles/{z}/{x}/{y}"</span></pre>
+<span class="cmd">curl</span> <span class="url">"https://{titiler-url}/vector/collections/geo.{table}/tiles/{z}/{x}/{y}"</span></pre>
                     </div>
                 </div>
             </div>

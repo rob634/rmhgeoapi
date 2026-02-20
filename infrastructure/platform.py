@@ -297,6 +297,36 @@ class ApiRequestRepository(PostgreSQLRepository):
                 for row in rows
             ]
 
+    def update_job_id(self, request_id: str, new_job_id: str) -> bool:
+        """
+        Update the job_id on a platform request record.
+
+        20 FEB 2026: Used by platform/resubmit to keep status polling working
+        after a job is deleted and resubmitted.
+
+        Args:
+            request_id: Platform request ID
+            new_job_id: New job ID to associate
+
+        Returns:
+            True if updated, False if request not found
+        """
+        with self._error_context("update platform request job_id", request_id):
+            query = sql.SQL("""
+                UPDATE {}.{}
+                SET job_id = %s, updated_at = NOW()
+                WHERE request_id = %s
+            """).format(
+                sql.Identifier(self.schema_name),
+                sql.Identifier("api_requests")
+            )
+
+            rowcount = self._execute_query(query, (new_job_id, request_id))
+            updated = rowcount > 0
+            if updated:
+                logger.info(f"Updated platform request {request_id[:16]}... with new job_id {new_job_id[:16]}...")
+            return updated
+
     def _row_to_record(self, row) -> ApiRequest:
         """
         Convert database row to ApiRequest model.

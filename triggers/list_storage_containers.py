@@ -21,13 +21,13 @@ Returns containers grouped by zone with storage account info.
 
 Example Usage:
     # List all containers across all zones
-    curl https://rmhazuregeoapi-.../api/storage/containers
+    curl https://{app-url}/api/storage/containers
 
     # Filter to bronze zone only
-    curl "https://rmhazuregeoapi-.../api/storage/containers?zone=bronze"
+    curl "https://{app-url}/api/storage/containers?zone=bronze"
 
     # Filter by container name prefix
-    curl "https://rmhazuregeoapi-.../api/storage/containers?prefix=silver-"
+    curl "https://{app-url}/api/storage/containers?prefix=silver-"
 """
 
 import json

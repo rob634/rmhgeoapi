@@ -110,6 +110,21 @@ class PlatformResubmitHandler:
                     404
                 )
 
+            # Block resubmit on approved assets (20 FEB 2026: STAC B2C integrity)
+            asset = None
+            asset_repo = None
+            if job.asset_id:
+                from infrastructure.asset_repository import GeospatialAssetRepository
+                asset_repo = GeospatialAssetRepository()
+                asset = asset_repo.get_by_id(job.asset_id)
+                if asset and asset.approval_state.value == 'approved':
+                    return self._error_response(
+                        "Cannot resubmit approved asset. "
+                        "Revoke approval first (POST /api/platform/revoke) then resubmit.",
+                        "ResubmitBlockedError",
+                        409
+                    )
+
             # Check if job is currently processing (unless force=True)
             if job.status.value == 'processing' and not force:
                 return func.HttpResponse(
@@ -160,12 +175,29 @@ class PlatformResubmitHandler:
             # Execute cleanup
             cleanup_result = resubmit_handler._execute_cleanup(job, cleanup_plan, delete_blobs)
 
-            # Resubmit job
-            new_job_id = resubmit_handler._resubmit_job(job_type, parameters)
+            # Resubmit job (pass asset_id to preserve linkage)
+            new_job_id = resubmit_handler._resubmit_job(job_type, parameters, asset_id=job.asset_id)
 
-            # TODO: Update platform request record with new job_id when
-            # ApiRequestRepository.update_request() is implemented.
-            # For now, the new job can be tracked via the response.
+            # Update asset with new job_id and reset processing state (20 FEB 2026)
+            if asset:
+                try:
+                    asset_repo.update(asset.asset_id, {
+                        'current_job_id': new_job_id,
+                        'processing_status': 'processing',
+                    })
+                    logger.info(f"  Updated asset {asset.asset_id[:16]}... with new job_id")
+                except Exception as e:
+                    logger.warning(f"  Failed to update asset after resubmit: {e}")
+
+            # Update platform request with new job_id (20 FEB 2026)
+            if platform_refs and platform_refs.get('request_id'):
+                try:
+                    self.platform_repo.update_job_id(
+                        platform_refs['request_id'], new_job_id
+                    )
+                    logger.info(f"  Updated platform request with new job_id")
+                except Exception as e:
+                    logger.warning(f"  Failed to update platform request: {e}")
 
             logger.info(f"✅ Platform resubmit complete: {job_id[:16]}... → {new_job_id[:16]}...")
 
@@ -178,7 +210,7 @@ class PlatformResubmitHandler:
                     "platform_refs": platform_refs,
                     "cleanup_summary": cleanup_result,
                     "message": "Job resubmitted successfully",
-                    "monitor_url": f"/api/platform/status/{new_job_id}"
+                    "monitor_url": f"/api/platform/status/{platform_refs['request_id']}" if platform_refs and platform_refs.get('request_id') else f"/api/jobs/status/{new_job_id}"
                 }, default=str),
                 status_code=202,
                 mimetype="application/json"
@@ -218,10 +250,10 @@ class PlatformResubmitHandler:
                 request = self.platform_repo.get_request_by_job(job_id)
                 if request:
                     platform_refs = {
-                        'request_id': request.get('request_id'),
-                        'dataset_id': request.get('dataset_id'),
-                        'resource_id': request.get('resource_id'),
-                        'version_id': request.get('version_id'),
+                        'request_id': request.request_id,
+                        'dataset_id': request.dataset_id,
+                        'resource_id': request.resource_id,
+                        'version_id': request.version_id,
                     }
             except Exception:
                 pass
@@ -241,16 +273,16 @@ class PlatformResubmitHandler:
 
                 platform_refs = {
                     'request_id': request_id,
-                    'dataset_id': request.get('dataset_id'),
-                    'resource_id': request.get('resource_id'),
-                    'version_id': request.get('version_id'),
+                    'dataset_id': request.dataset_id,
+                    'resource_id': request.resource_id,
+                    'version_id': request.version_id,
                 }
 
                 # Get job_id from request
-                job_id = request.get('job_id')
+                job_id = request.job_id
                 if not job_id:
                     # Check jobs_created array
-                    jobs_created = request.get('jobs_created', [])
+                    jobs_created = getattr(request, 'jobs_created', []) or []
                     if jobs_created:
                         # Use first job (or could allow specifying which one)
                         job_id = jobs_created[0]
@@ -293,15 +325,15 @@ class PlatformResubmitHandler:
                     )
 
                 platform_refs = {
-                    'request_id': request.get('request_id'),
+                    'request_id': request.request_id,
                     'dataset_id': dataset_id,
                     'resource_id': resource_id,
                     'version_id': version_id,
                 }
 
-                job_id = request.get('job_id')
+                job_id = request.job_id
                 if not job_id:
-                    jobs_created = request.get('jobs_created', [])
+                    jobs_created = getattr(request, 'jobs_created', []) or []
                     if jobs_created:
                         job_id = jobs_created[0]
 
@@ -413,7 +445,7 @@ def platform_resubmit(req: func.HttpRequest) -> func.HttpResponse:
                 "blobs_deleted": []
             },
             "message": "Job resubmitted successfully",
-            "monitor_url": "/api/platform/status/def456..."
+            "monitor_url": "/api/platform/status/a3f2c1b8..."
         }
     """
     handler = get_handler()

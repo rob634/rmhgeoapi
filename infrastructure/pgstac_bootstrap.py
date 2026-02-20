@@ -2346,8 +2346,10 @@ def get_all_collections(repo: Optional['PostgreSQLRepository'] = None) -> Dict[s
             from infrastructure.postgresql import PostgreSQLRepository
             repo = PostgreSQLRepository()
 
-        # Base URL for STAC API
-        base_url = "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/stac"
+        # Base URL for STAC API (from config)
+        from config import get_config
+        _config = get_config()
+        base_url = _config.stac_api_base_url.rstrip('/')
 
         # Query all collections with full content AND item counts
         query = """
@@ -2436,7 +2438,7 @@ def get_all_collections(repo: Optional['PostgreSQLRepository'] = None) -> Dict[s
 
     except Exception as e:
         logger.error(f"Error in get_all_collections: {e}", exc_info=True)
-        base_url = "https://rmhgeoapibeta-dzd8gyasenbkaqax.eastus-01.azurewebsites.net/api/stac"
+        base_url = "/api/stac"
         return {
             'collections': [],
             'links': [

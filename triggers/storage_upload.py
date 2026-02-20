@@ -22,7 +22,7 @@ Security:
     - Admin functionality - not exposed to external Platform API
 
 Example Usage:
-    curl -X POST "https://rmhazuregeoapi-.../api/storage/upload" \\
+    curl -X POST "https://{app-url}/api/storage/upload" \\
         -F "file=@myfile.gpkg" \\
         -F "container=source-data" \\
         -F "path=uploads/myfile.gpkg"

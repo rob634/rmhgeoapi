@@ -293,17 +293,24 @@ def _execute_cleanup(job, plan: Dict[str, Any], delete_blobs: bool, job_repo, ta
 
 
 def _drop_table(table_fqn: str) -> None:
-    """Drop a PostGIS table."""
-    from infrastructure.postgresql import PostgreSQLAdapter
+    """Drop a PostGIS table using safe parameterized identifiers."""
+    from infrastructure.postgresql import PostgreSQLRepository
+    from psycopg import sql
 
     if '.' in table_fqn:
         schema, table = table_fqn.split('.', 1)
     else:
         schema, table = 'geo', table_fqn
 
-    adapter = PostgreSQLAdapter()
-    query = f'DROP TABLE IF EXISTS "{schema}"."{table}" CASCADE'
-    adapter.execute_non_query(query)
+    repo = PostgreSQLRepository()
+    with repo._get_connection() as conn:
+        with conn.cursor() as cur:
+            drop_query = sql.SQL("DROP TABLE IF EXISTS {}.{} CASCADE").format(
+                sql.Identifier(schema),
+                sql.Identifier(table)
+            )
+            cur.execute(drop_query)
+        conn.commit()
 
 
 def _delete_stac_item(item_id: str, collection_id: str) -> None:
@@ -315,11 +322,8 @@ def _delete_stac_item(item_id: str, collection_id: str) -> None:
 
 
 def _delete_blob(blob_path: str) -> None:
-    """Delete a blob from storage."""
-    from infrastructure.storage import BlobStorageAdapter
-    from config import get_config
-
-    config = get_config()
+    """Delete a blob from storage (20 FEB 2026: fixed to use BlobRepository)."""
+    from infrastructure.blob import BlobRepository
 
     parts = blob_path.split('/', 1)
     if len(parts) == 2 and parts[0] in ['silver-cogs', 'bronze-rasters', 'gold-exports']:
@@ -328,12 +332,10 @@ def _delete_blob(blob_path: str) -> None:
         container = 'silver-cogs'
         blob_name = blob_path
 
-    if container.startswith('bronze'):
-        account = config.storage.bronze_account
-    elif container.startswith('gold'):
-        account = config.storage.gold_account
-    else:
-        account = config.storage.silver_account
+    zone = 'bronze' if container.startswith('bronze') else 'silver'
+    blob_repo = BlobRepository.for_zone(zone)
 
-    adapter = BlobStorageAdapter(account)
-    adapter.delete_blob(container, blob_name)
+    if blob_repo.blob_exists(container, blob_name):
+        blob_repo.delete_blob(container, blob_name)
+    else:
+        logger.info(f"  Blob already deleted (idempotent): {container}/{blob_name}")

@@ -441,7 +441,7 @@ def platform_resubmit_route(req: func.HttpRequest) -> func.HttpResponse:
                 "blobs_deleted": []
             },
             "message": "Job resubmitted successfully",
-            "monitor_url": "/api/platform/status/def456..."
+            "monitor_url": "/api/platform/status/a3f2c1b8..."
         }
     """
     from triggers.platform.resubmit import platform_resubmit

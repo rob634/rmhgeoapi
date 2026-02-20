@@ -276,7 +276,7 @@ def _convert_urls_to_vsiaz(mosaic_dict: dict, container: str) -> dict:
                 url_without_sas = url.split('?')[0]
 
                 # Extract path after .blob.core.windows.net/
-                # Example: https://rmhazuregeo.blob.core.windows.net/silver-cogs/file.tif
+                # Example: https://{account}.blob.core.windows.net/silver-cogs/file.tif
                 #          → silver-cogs/file.tif
                 parts = url_without_sas.split('.blob.core.windows.net/')
                 if len(parts) == 2:

@@ -68,7 +68,7 @@ def vector_viewer_handler(req: func.HttpRequest) -> func.HttpResponse:
         host_url = None
         if hasattr(req, 'url'):
             # Extract protocol and host from full URL
-            # Example: https://rmhazuregeoapi-.../api/vector/viewer?...
+            # Example: https://{app-url}/api/vector/viewer?...
             url_parts = req.url.split('/api/')
             if len(url_parts) > 0:
                 host_url = url_parts[0]

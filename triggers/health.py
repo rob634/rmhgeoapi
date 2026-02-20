@@ -33,7 +33,7 @@ DEPLOYMENT VERIFICATION
 
 This endpoint is the PRIMARY deployment verification tool. After any deployment:
 
-    curl -sf https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/health
+    curl -sf https://{app-url}/api/health
 
 Response Interpretation:
     HTTP 200 + "status": "healthy"  →  Deployment successful

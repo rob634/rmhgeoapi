@@ -86,6 +86,26 @@ class JobResubmitHandler:
                     mimetype="application/json"
                 )
 
+            # Block resubmit on approved assets (20 FEB 2026: STAC B2C integrity)
+            asset = None
+            asset_repo = None
+            if job.asset_id:
+                from infrastructure.asset_repository import GeospatialAssetRepository
+                asset_repo = GeospatialAssetRepository()
+                asset = asset_repo.get_by_id(job.asset_id)
+                if asset and asset.approval_state.value == 'approved':
+                    return func.HttpResponse(
+                        json.dumps({
+                            "success": False,
+                            "error": "Cannot resubmit approved asset. "
+                                     "Revoke approval first then resubmit.",
+                            "error_type": "ResubmitBlockedError",
+                            "asset_id": job.asset_id
+                        }),
+                        status_code=409,
+                        mimetype="application/json"
+                    )
+
             # Check if job is currently processing (unless force=True)
             if job.status.value == 'processing' and not force:
                 return func.HttpResponse(
@@ -134,8 +154,19 @@ class JobResubmitHandler:
             # Step 3: Execute cleanup
             cleanup_result = self._execute_cleanup(job, cleanup_plan, delete_blobs)
 
-            # Step 4: Resubmit job
-            new_job_id = self._resubmit_job(job_type, parameters)
+            # Step 4: Resubmit job (pass asset_id to preserve linkage)
+            new_job_id = self._resubmit_job(job_type, parameters, asset_id=job.asset_id)
+
+            # Update asset with new job_id and reset processing state (20 FEB 2026)
+            if asset and asset_repo:
+                try:
+                    asset_repo.update(asset.asset_id, {
+                        'current_job_id': new_job_id,
+                        'processing_status': 'processing',
+                    })
+                    logger.info(f"  Updated asset {asset.asset_id[:16]}... with new job_id")
+                except Exception as e:
+                    logger.warning(f"  Failed to update asset after resubmit: {e}")
 
             logger.info(f"✅ Job resubmitted: {job_id[:16]}... → {new_job_id[:16]}...")
 
@@ -193,13 +224,19 @@ class JobResubmitHandler:
 
         # Determine artifacts based on job type
         if 'vector' in job_type.lower():
-            # Vector job - check for table_name
+            # Vector job - check parameters then result_data for table_name
             table_name = parameters.get('table_name')
             schema = parameters.get('schema', 'geo')
+            if not table_name and job.result_data:
+                table_name = job.result_data.get('table_name')
+                schema = job.result_data.get('schema', schema)
             if table_name:
                 plan["tables_to_drop"].append(f"{schema}.{table_name}")
 
             # Check for STAC item
+            # NOTE (20 FEB 2026): In B2C architecture, pgSTAC items only exist for
+            # approved assets. For rejected/draft assets this finds nothing — correct.
+            # For revoked assets, _delete_stac() already removed the item at revocation.
             stac_item_id = parameters.get('stac_item_id')
             if stac_item_id:
                 plan["stac_items_to_delete"].append({
@@ -209,6 +246,7 @@ class JobResubmitHandler:
 
         elif 'raster' in job_type.lower():
             # Raster job - check for STAC item and COG
+            # NOTE (20 FEB 2026): Same B2C note as vector — pgSTAC items deferred to approval
             stac_item_id = parameters.get('stac_item_id')
             collection_id = parameters.get('collection_id')  # No default (14 JAN 2026)
 
@@ -301,8 +339,9 @@ class JobResubmitHandler:
         return result
 
     def _drop_table(self, table_fqn: str) -> None:
-        """Drop a PostGIS table."""
-        from infrastructure.postgresql import PostgreSQLAdapter
+        """Drop a PostGIS table using safe parameterized identifiers."""
+        from infrastructure.postgresql import PostgreSQLRepository
+        from psycopg import sql
 
         # Parse schema.table
         if '.' in table_fqn:
@@ -310,10 +349,15 @@ class JobResubmitHandler:
         else:
             schema, table = 'geo', table_fqn
 
-        adapter = PostgreSQLAdapter()
-        # Use parameterized identifiers safely
-        query = f'DROP TABLE IF EXISTS "{schema}"."{table}" CASCADE'
-        adapter.execute_non_query(query)
+        repo = PostgreSQLRepository()
+        with repo._get_connection() as conn:
+            with conn.cursor() as cur:
+                drop_query = sql.SQL("DROP TABLE IF EXISTS {}.{} CASCADE").format(
+                    sql.Identifier(schema),
+                    sql.Identifier(table)
+                )
+                cur.execute(drop_query)
+            conn.commit()
 
     def _delete_stac_item(self, item_id: str, collection_id: str) -> None:
         """Delete a STAC item from pgSTAC."""
@@ -323,11 +367,8 @@ class JobResubmitHandler:
         pgstac_repo.delete_item(collection_id, item_id)
 
     def _delete_blob(self, blob_path: str) -> None:
-        """Delete a blob from storage."""
-        from infrastructure.storage import BlobStorageAdapter
-        from config import get_config
-
-        config = get_config()
+        """Delete a blob from storage (20 FEB 2026: fixed to use BlobRepository)."""
+        from infrastructure.blob import BlobRepository
 
         # Parse container/blob from path
         # Expected format: container/path/to/blob.tif or just path/to/blob.tif
@@ -339,18 +380,16 @@ class JobResubmitHandler:
             container = 'silver-cogs'
             blob_name = blob_path
 
-        # Determine storage account based on container
-        if container.startswith('bronze'):
-            account = config.storage.bronze_account
-        elif container.startswith('gold'):
-            account = config.storage.gold_account
+        # Determine zone from container name
+        zone = 'bronze' if container.startswith('bronze') else 'silver'
+        blob_repo = BlobRepository.for_zone(zone)
+
+        if blob_repo.blob_exists(container, blob_name):
+            blob_repo.delete_blob(container, blob_name)
         else:
-            account = config.storage.silver_account
+            logger.info(f"  Blob already deleted (idempotent): {container}/{blob_name}")
 
-        adapter = BlobStorageAdapter(account)
-        adapter.delete_blob(container, blob_name)
-
-    def _resubmit_job(self, job_type: str, parameters: Dict[str, Any]) -> str:
+    def _resubmit_job(self, job_type: str, parameters: Dict[str, Any], asset_id: str = None) -> str:
         """
         Resubmit the job with the same parameters.
 
@@ -382,12 +421,14 @@ class JobResubmitHandler:
         # Validate parameters
         validated_params = job_class.validate_job_parameters(parameters)
 
-        # Generate job ID (deterministic based on params)
+        # Generate unique job ID (include timestamp to avoid collision with deleted job)
+        import time
         clean_params = {k: v for k, v in validated_params.items() if not k.startswith('_')}
-        canonical = f"{job_type}:{json.dumps(clean_params, sort_keys=True)}"
+        resubmit_ts = str(time.time())
+        canonical = f"{job_type}:{json.dumps(clean_params, sort_keys=True)}:resubmit:{resubmit_ts}"
         job_id = hashlib.sha256(canonical.encode()).hexdigest()
 
-        # Create job record
+        # Create job record (20 FEB 2026: wire asset_id to preserve job→asset linkage)
         job_record = JobRecord(
             job_id=job_id,
             job_type=job_type,
@@ -395,9 +436,10 @@ class JobResubmitHandler:
             stage=1,
             total_stages=len(job_class.stages),
             parameters=validated_params,
+            asset_id=asset_id,
             metadata={
                 'resubmitted': True,
-                'resubmit_timestamp': str(uuid.uuid4())[:8]  # Make unique for idempotency
+                'resubmit_timestamp': str(uuid.uuid4())[:8]
             }
         )
 

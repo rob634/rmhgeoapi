@@ -100,9 +100,30 @@ deploy_docker() {
     echo "🐳 Building and deploying Docker Worker ($DOCKER_APP)..."
     echo ""
 
-    # Build and push to ACR
+    # Build and push to ACR (5-minute timeout — build typically takes ~2m30s)
     echo "📦 Building Docker image ($ACR_REPO:$VERSION)..."
-    az acr build --registry $ACR_REGISTRY --image $ACR_REPO:$VERSION --file Dockerfile .
+    echo "   (timeout: 5 minutes)"
+    set +e
+    timeout 300 az acr build --registry $ACR_REGISTRY --image $ACR_REPO:$VERSION --file Dockerfile .
+    ACR_EXIT=$?
+    set -e
+
+    if [ $ACR_EXIT -ne 0 ]; then
+        echo ""
+        echo "=============================================="
+        echo "❌ ACR BUILD/PUSH FAILED (exit code: $ACR_EXIT)"
+        echo "=============================================="
+        if [ $ACR_EXIT -eq 124 ]; then
+            echo "   REASON: Timed out after 5 minutes"
+        else
+            echo "   REASON: Likely ACR auth token expired during push"
+            echo "   This is a known Azure Container Registry intermittent issue."
+        fi
+        echo ""
+        echo "   To retry Docker only:  ./deploy.sh docker"
+        echo "=============================================="
+        exit 1
+    fi
 
     # Update container
     echo ""

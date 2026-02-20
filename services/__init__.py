@@ -186,17 +186,16 @@ def validate_task_routing_coverage():
     from config.defaults import TaskRoutingDefaults
 
     all_tasks = set(ALL_HANDLERS.keys())
-    # V0.8: Consolidated to DOCKER_TASKS and FUNCTIONAPP_TASKS
+    # V0.9: All tasks route to Docker (19 FEB 2026)
     docker_set = set(TaskRoutingDefaults.DOCKER_TASKS)
-    functionapp_set = set(TaskRoutingDefaults.FUNCTIONAPP_TASKS)
 
-    unmapped = all_tasks - docker_set - functionapp_set
+    unmapped = all_tasks - docker_set
 
     if unmapped:
         raise ValueError(
             f"FATAL: {len(unmapped)} handler(s) have NO queue routing configured! "
             f"Tasks will fail at runtime. Add to config/defaults.py "
-            f"TaskRoutingDefaults.DOCKER_TASKS or FUNCTIONAPP_TASKS: {sorted(unmapped)}"
+            f"TaskRoutingDefaults.DOCKER_TASKS: {sorted(unmapped)}"
         )
 
 

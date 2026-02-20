@@ -206,9 +206,8 @@ class HealthInterface(BaseInterface):
         if titiler_url.startswith('http://'):
             titiler_url = titiler_url[7:]
 
-        # Queue names from config (V0.8)
+        # Queue names from config (V0.9 - Docker-only)
         jobs_queue = config.queues.jobs_queue
-        functionapp_queue = config.queues.functionapp_tasks_queue
         container_queue = config.queues.container_tasks_queue
 
         # Docker worker config
@@ -228,11 +227,9 @@ class HealthInterface(BaseInterface):
             # Platform API and workers (all same Function App in standalone mode)
             'comp-platform-api': f"{website_hostname}\nEndpoints: /api/platform/*, /api/jobs/*",
             'comp-orchestrator': f"{website_hostname}\nListens: {jobs_queue}",
-            'comp-functionapp-worker': f"{website_hostname}\nListens: {functionapp_queue}",
 
-            # Service Bus queues (V0.8: Consolidated to 3 queues)
+            # Service Bus queues (V0.9: Docker-only, 2 queues)
             'comp-job-queues': f"{service_bus_ns}\nQueue: {jobs_queue}",
-            'comp-functionapp-queue': f"{service_bus_ns}\nQueue: {functionapp_queue}",
 
             # Database
             'comp-job-tables': f"{db_host}\nDB: {db_name}\nSchema: {app_schema}.jobs",

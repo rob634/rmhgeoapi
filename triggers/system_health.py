@@ -266,7 +266,6 @@ class SystemHealthProbe:
 
             queue_names = [
                 config.queues.job_queue_name,
-                config.queues.functionapp_tasks_queue,
                 config.queues.container_tasks_queue
             ]
 

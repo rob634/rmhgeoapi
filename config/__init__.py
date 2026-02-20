@@ -45,7 +45,7 @@ Usage:
 # ============================================================================
 # Semantic versioning follows MAJOR.MINOR.PATCH.BUILD
 # Criteria for advance to 0.9.0: DAG refactor, full ETL separation, deprecate legacy fallbacks
-__version__ = "0.8.19.6"
+__version__ = "0.8.20.0"
 
 from typing import Optional
 
@@ -168,11 +168,10 @@ def debug_config() -> dict:
                 'target_schema': config.vector.target_schema,
             },
 
-            # Queues (11 DEC 2025 - No Legacy Fallbacks, 3 queues only)
+            # Queues (19 FEB 2026 - Docker-only, 2 queues)
             'queues': {
                 'jobs_queue': config.queues.jobs_queue,
-                'raster_tasks_queue': config.queues.raster_tasks_queue,
-                'vector_tasks_queue': config.queues.vector_tasks_queue,
+                'container_tasks_queue': config.queues.container_tasks_queue,
                 'connection': '***MASKED***' if config.queues.connection_string else None,
             },
 

@@ -1348,6 +1348,7 @@ class ServiceBusRepository(IQueueRepository):
         # - geospatial-jobs: Job orchestration
         # - functionapp-tasks: Lightweight ops (DB queries, STAC)
         # - container-tasks: Heavy ops (GDAL, geopandas) - Docker worker
+        # V0.9: Docker-only queue architecture (19 FEB 2026)
         queue_configs = [
             {
                 "name": config.service_bus_jobs_queue,  # geospatial-jobs
@@ -1356,16 +1357,10 @@ class ServiceBusRepository(IQueueRepository):
                 "purpose": "Job orchestration and stage_complete signals"
             },
             {
-                "name": config.queues.functionapp_tasks_queue,  # functionapp-tasks
-                "lock_duration_minutes": 2,
-                "max_delivery_count": 1,
-                "purpose": "Lightweight task processing (DB queries, STAC, inventory)"
-            },
-            {
                 "name": config.queues.container_tasks_queue,  # container-tasks
                 "lock_duration_minutes": 10,  # Longer lock for heavy GDAL operations
                 "max_delivery_count": 1,
-                "purpose": "Heavy task processing (GDAL, geopandas) - Docker worker"
+                "purpose": "All ETL operations - Docker worker"
             }
         ]
 

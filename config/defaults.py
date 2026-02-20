@@ -324,10 +324,9 @@ class QueueDefaults:
     Note: This is a SERVICE BUS ONLY application.
     Storage Queues are NOT supported.
 
-    V0.8 Queue Architecture (24 JAN 2026):
+    V0.9 Queue Architecture (19 FEB 2026):
     - geospatial-jobs: Job orchestration (Platform/Orchestrator apps listen)
-    - container-tasks: Docker worker (ALL heavy operations - GDAL, geopandas, bulk SQL)
-    - functionapp-tasks: FunctionApp worker (lightweight DB ops, inventory)
+    - container-tasks: Docker worker (ALL operations — GDAL, geopandas, bulk SQL)
 
     All task types MUST be explicitly mapped in TaskRoutingDefaults.
     Unmapped task types will raise ContractViolationError (no fallback).
@@ -335,14 +334,8 @@ class QueueDefaults:
 
     JOBS_QUEUE = "geospatial-jobs"
 
-    # V0.8: New consolidated queues (24 JAN 2026)
-    CONTAINER_TASKS_QUEUE = "container-tasks"      # Docker worker (heavy ops)
-    FUNCTIONAPP_TASKS_QUEUE = "functionapp-tasks"  # FunctionApp worker (lightweight)
-
-    # DEPRECATED: Keep for migration period (remove after V0.8 stabilizes)
-    RASTER_TASKS_QUEUE = "raster-tasks"            # DEPRECATED → use FUNCTIONAPP_TASKS_QUEUE
-    VECTOR_TASKS_QUEUE = "vector-tasks"            # DEPRECATED → use FUNCTIONAPP_TASKS_QUEUE
-    LONG_RUNNING_TASKS_QUEUE = "long-running-tasks"  # DEPRECATED → use CONTAINER_TASKS_QUEUE
+    # V0.9: Docker-only queue (19 FEB 2026)
+    CONTAINER_TASKS_QUEUE = "container-tasks"      # Docker worker (all operations)
 
     # Service outage alerts queue (22 JAN 2026)
     # External service health monitoring sends outage/recovery notifications here
@@ -364,29 +357,26 @@ class AppModeDefaults:
     Controls which queues this app listens to and how tasks are routed.
     Enables single codebase to be deployed in different configurations.
 
-    V0.8 Architecture (24 JAN 2026):
-    - 5 clean modes for 3 deployment configurations
+    V0.9 Architecture (19 FEB 2026):
+    - 4 modes for 3 deployment configurations
     - Centralized orchestration: Orchestrator handles jobs queue
-    - Distributed execution: Workers process task queues
-    - Docker workers: Heavy operations without Azure Functions timeout constraints
+    - Docker worker: All ETL operations via container-tasks queue
 
     Mode Summary:
     - standalone: All queues, all HTTP (development only)
     - platform: HTTP gateway only, sends to jobs queue (external entry point)
     - orchestrator: Jobs queue + all HTTP (can combine with platform)
-    - worker_functionapp: functionapp-tasks queue (lightweight ops)
-    - worker_docker: container-tasks queue (heavy ops)
+    - worker_docker: container-tasks queue (Docker worker)
     """
 
-    # V0.8: 5 clean modes (25 JAN 2026)
+    # V0.9: 4 clean modes (19 FEB 2026)
     STANDALONE = "standalone"                 # All queues, all endpoints (dev)
     PLATFORM = "platform"                     # HTTP only, sends to jobs queue
     ORCHESTRATOR = "orchestrator"             # Jobs queue + all HTTP
-    WORKER_FUNCTIONAPP = "worker_functionapp" # functionapp-tasks queue
     WORKER_DOCKER = "worker_docker"           # container-tasks queue (Docker)
 
     VALID_MODES = [
-        STANDALONE, PLATFORM, ORCHESTRATOR, WORKER_FUNCTIONAPP, WORKER_DOCKER
+        STANDALONE, PLATFORM, ORCHESTRATOR, WORKER_DOCKER
     ]
 
     DEFAULT_MODE = STANDALONE
@@ -407,16 +397,14 @@ class TaskRoutingDefaults:
     """
     Task type to queue category mapping.
 
-    Maps task_type → routing category (docker, functionapp).
+    Maps task_type → routing category.
     CoreMachine uses this to route tasks to appropriate queues.
 
-    V0.8 Architecture (24 JAN 2026):
-    ALL task types MUST be explicitly listed in DOCKER_TASKS or FUNCTIONAPP_TASKS.
+    V0.9 Architecture (19 FEB 2026):
+    ALL task types MUST be explicitly listed in DOCKER_TASKS.
     Unmapped task types raise ContractViolationError (no fallback).
 
-    Queue Selection Guidelines:
-    - DOCKER_TASKS → container-tasks: GDAL, geopandas, bulk SQL (heavy ops)
-    - FUNCTIONAPP_TASKS → functionapp-tasks: DB queries, inventory, STAC ops
+    All operations route to container-tasks queue (Docker worker).
     """
 
     # =========================================================================
@@ -465,21 +453,8 @@ class TaskRoutingDefaults:
         "hello_world_reply",
     ])
 
-    # =========================================================================
-    # FUNCTIONAPP_TASKS → functionapp-tasks queue (ELIMINATED - 18 FEB 2026)
-    # =========================================================================
-    # All tasks either deleted, archived, or moved to DOCKER_TASKS.
-    # Queue has no consumer and can be drained/removed.
-    # ARCHIVED: docs/archive/v09_archive_feb2026/
-    FUNCTIONAPP_TASKS = frozenset()
-
-    # =========================================================================
-    # DEPRECATED: Keep for backward compatibility during migration
-    # =========================================================================
-    # These are aliases pointing to the same tasks for migration period
-    LONG_RUNNING_TASKS = list(DOCKER_TASKS)  # DEPRECATED → use DOCKER_TASKS
-    RASTER_TASKS = []  # DEPRECATED → merged into DOCKER_TASKS
-    VECTOR_TASKS = []  # DEPRECATED → merged into FUNCTIONAPP_TASKS
+    # FUNCTIONAPP_TASKS, RASTER_TASKS, VECTOR_TASKS, LONG_RUNNING_TASKS
+    # removed 19 FEB 2026 — all tasks consolidated into DOCKER_TASKS (V0.9)
 
 
 # =============================================================================

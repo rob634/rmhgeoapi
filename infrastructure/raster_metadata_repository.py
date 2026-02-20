@@ -146,7 +146,8 @@ class RasterMetadataRepository:
         source_crs: Optional[str] = None,
         sci_doi: Optional[str] = None,
         sci_citation: Optional[str] = None,
-        custom_properties: Optional[Dict[str, Any]] = None
+        custom_properties: Optional[Dict[str, Any]] = None,
+        stac_item_json: Optional[Dict[str, Any]] = None
     ) -> bool:
         """
         Insert or update COG metadata.
@@ -217,6 +218,7 @@ class RasterMetadataRepository:
             providers_json = json.dumps(providers) if providers else None
             stac_extensions_json = json.dumps(stac_extensions) if stac_extensions else None
             custom_properties_json = json.dumps(custom_properties) if custom_properties else None
+            stac_item_json_val = json.dumps(stac_item_json) if stac_item_json else None
 
             with self._pg_repo._get_connection() as conn:
                 with conn.cursor() as cur:
@@ -234,6 +236,7 @@ class RasterMetadataRepository:
                             stac_item_id, stac_collection_id,
                             etl_job_id, source_file, source_format, source_crs,
                             sci_doi, sci_citation, custom_properties,
+                            stac_item_json,
                             created_at, updated_at
                         ) VALUES (
                             %s, %s, %s, %s,
@@ -248,6 +251,7 @@ class RasterMetadataRepository:
                             %s, %s,
                             %s, %s, %s, %s,
                             %s, %s, %s,
+                            %s,
                             %s, %s
                         )
                         ON CONFLICT (cog_id) DO UPDATE SET
@@ -293,6 +297,7 @@ class RasterMetadataRepository:
                             sci_doi = EXCLUDED.sci_doi,
                             sci_citation = EXCLUDED.sci_citation,
                             custom_properties = EXCLUDED.custom_properties,
+                            stac_item_json = EXCLUDED.stac_item_json,
                             updated_at = EXCLUDED.updated_at
                     """, (
                         cog_id, container, blob_path, cog_url,
@@ -307,6 +312,7 @@ class RasterMetadataRepository:
                         stac_item_id, stac_collection_id,
                         etl_job_id, source_file, source_format, source_crs,
                         sci_doi, sci_citation, custom_properties_json,
+                        stac_item_json_val,
                         now, now
                     ))
                     conn.commit()
@@ -519,6 +525,76 @@ class RasterMetadataRepository:
 
         except Exception as e:
             logger.error(f"Error updating STAC linkage for {cog_id}: {e}")
+            return False
+
+    def get_stac_item_json(self, cog_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Read cached STAC item dict by cog_id.
+
+        Args:
+            cog_id: COG identifier (draft stac_item_id at processing time)
+
+        Returns:
+            STAC item dict, or None if not found or not cached
+        """
+        if not self._check_table_exists():
+            return None
+
+        try:
+            with self._pg_repo._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT stac_item_json FROM app.cog_metadata
+                        WHERE cog_id = %s
+                    """, (cog_id,))
+                    result = cur.fetchone()
+                    if result and result['stac_item_json']:
+                        val = result['stac_item_json']
+                        # psycopg3 auto-deserializes JSONB to dict
+                        if isinstance(val, str):
+                            return json.loads(val)
+                        return val
+                    return None
+
+        except Exception as e:
+            logger.error(f"Error reading stac_item_json for {cog_id}: {e}")
+            return None
+
+    def update_stac_item_json(self, cog_id: str, stac_item_json: Dict[str, Any]) -> bool:
+        """
+        Update cached STAC item dict for an existing cog_metadata record.
+
+        Args:
+            cog_id: COG identifier
+            stac_item_json: Full STAC item dict to cache
+
+        Returns:
+            True if updated, False otherwise
+        """
+        if not self._check_table_exists():
+            return False
+
+        try:
+            now = datetime.now(timezone.utc)
+            stac_json_val = json.dumps(stac_item_json) if stac_item_json else None
+
+            with self._pg_repo._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        UPDATE app.cog_metadata
+                        SET stac_item_json = %s,
+                            updated_at = %s
+                        WHERE cog_id = %s
+                    """, (stac_json_val, now, cog_id))
+                    updated = cur.rowcount > 0
+                    conn.commit()
+
+            if updated:
+                logger.info(f"Updated stac_item_json for {cog_id}")
+            return updated
+
+        except Exception as e:
+            logger.error(f"Error updating stac_item_json for {cog_id}: {e}")
             return False
 
     def count(self, stac_collection_id: Optional[str] = None) -> int:

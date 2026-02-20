@@ -268,23 +268,18 @@ class CoreMachine:
         """
         Route task to appropriate queue based on task type.
 
-        V0.8 Architecture (24 JAN 2026):
-        - DOCKER_TASKS → container_tasks_queue (GDAL, geopandas, heavy ops)
-        - FUNCTIONAPP_TASKS → functionapp_tasks_queue (DB queries, lightweight)
-
-        Admin Override (V0.8 Phase 7):
-        - If task_params contains '_force_functionapp': True, Docker tasks are
-          routed to functionapp-tasks instead. Used for debugging only.
+        V0.9 Architecture (19 FEB 2026):
+        - All tasks → container_tasks_queue (Docker worker)
 
         CRITICAL: All task types MUST be explicitly mapped in TaskRoutingDefaults.
         Unmapped task types raise ContractViolationError to enforce explicit routing.
 
         Args:
             task_type: The task_type field from TaskDefinition
-            task_params: Optional task parameters (checked for _force_functionapp)
+            task_params: Optional task parameters (reserved for future use)
 
         Returns:
-            Queue name string (e.g., "container-tasks", "functionapp-tasks")
+            Queue name string (e.g., "container-tasks")
 
         Raises:
             ContractViolationError: If task_type is not mapped in TaskRoutingDefaults
@@ -298,30 +293,15 @@ class CoreMachine:
         """
         from exceptions import ContractViolationError
 
-        # V0.8 Phase 7: Admin override - force Docker tasks to FunctionApp (debug only)
-        force_functionapp = (task_params or {}).get('_force_functionapp', False)
-        if force_functionapp and task_type in TaskRoutingDefaults.DOCKER_TASKS:
-            self.logger.warning(
-                f"⚠️ ADMIN OVERRIDE: Routing '{task_type}' to functionapp-tasks "
-                f"(normally routes to container-tasks). Debug mode only!"
-            )
-            return self.config.queues.functionapp_tasks_queue
-
-        # V0.8: Consolidated routing (24 JAN 2026)
+        # V0.9: All tasks route to Docker worker (19 FEB 2026)
         if task_type in TaskRoutingDefaults.DOCKER_TASKS:
-            # Docker tasks → container-tasks queue (heavy operations)
             queue_name = self.config.queues.container_tasks_queue
             self.logger.debug(f"📤 Task type '{task_type}' → container queue: {queue_name}")
-        elif task_type in TaskRoutingDefaults.FUNCTIONAPP_TASKS:
-            # FunctionApp tasks → functionapp-tasks queue (lightweight)
-            queue_name = self.config.queues.functionapp_tasks_queue
-            self.logger.debug(f"📤 Task type '{task_type}' → functionapp queue: {queue_name}")
         else:
             # NO FALLBACK - Explicit routing required
             raise ContractViolationError(
                 f"Task type '{task_type}' is not mapped to a queue. "
-                f"Add '{task_type}' to TaskRoutingDefaults.DOCKER_TASKS or "
-                f"TaskRoutingDefaults.FUNCTIONAPP_TASKS in config/defaults.py"
+                f"Add '{task_type}' to TaskRoutingDefaults.DOCKER_TASKS in config/defaults.py"
             )
 
         return queue_name
@@ -1828,10 +1808,7 @@ class CoreMachine:
         - STANDALONE: Does everything
         - ORCHESTRATOR: Handles jobs queue
         """
-        return self.app_mode_config.mode in [
-            AppMode.WORKER_FUNCTIONAPP,
-            AppMode.WORKER_DOCKER,
-        ]
+        return self.app_mode_config.mode == AppMode.WORKER_DOCKER
 
     def _advance_stage(self, job_id: str, job_type: str, next_stage: int):
         """

@@ -381,11 +381,10 @@ class InfrastructureHealthChecks(HealthCheckPlugin):
                 queue_status["_repository_error"] = classify_error(str(e), e)
                 return queue_status
 
-            # Check all 3 queues
+            # Check active queues (V0.9 - Docker-only, 19 FEB 2026)
             queues_to_check = [
                 {"name": config.service_bus_jobs_queue, "purpose": "Job orchestration + stage_complete signals"},
-                {"name": config.queues.functionapp_tasks_queue, "purpose": "Lightweight tasks (DB, STAC, inventory)"},
-                {"name": config.queues.container_tasks_queue, "purpose": "Heavy tasks (GDAL, geopandas) - Docker worker"}
+                {"name": config.queues.container_tasks_queue, "purpose": "All ETL operations - Docker worker"}
             ]
 
             queues_accessible = 0

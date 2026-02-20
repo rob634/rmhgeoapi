@@ -72,16 +72,6 @@ class JobSubmissionTrigger(JobManagementTrigger):
         # Extract Service Bus toggle parameter
         use_service_bus = req_body.get("use_service_bus", False)
 
-        # V0.8 Phase 7: Admin override - force Docker tasks to FunctionApp (debug only)
-        # Query param: ?force_functionapp=true
-        # This routes container-tasks to functionapp-tasks for debugging
-        force_functionapp = req.params.get('force_functionapp', 'false').lower() == 'true'
-        if force_functionapp:
-            self.logger.warning(
-                f"⚠️ ADMIN OVERRIDE: force_functionapp=true - Docker tasks will route to FunctionApp. "
-                f"This is for debugging only!"
-            )
-
         # Extract additional parameters
         additional_params = {}
         standard_params = {"dataset_id", "resource_id", "version_id", "system", "use_service_bus"}
@@ -111,7 +101,6 @@ class JobSubmissionTrigger(JobManagementTrigger):
             'version_id': version_id,
             'system': system,
             'use_service_bus': use_service_bus,  # Pass toggle to controller
-            '_force_functionapp': force_functionapp,  # V0.8: Admin override for debugging
             **additional_params
         }
         

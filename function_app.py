@@ -1256,12 +1256,11 @@ def openapi_spec(req: func.HttpRequest) -> func.HttpResponse:
 # on APP_MODE environment variable. This allows identical code to be deployed
 # to multiple Function Apps with different queue listening configurations.
 #
-# V0.8 QUEUE ARCHITECTURE (24 JAN 2026):
+# V0.9 QUEUE ARCHITECTURE (19 FEB 2026):
 # - geospatial-jobs: Job orchestration + stage_complete signals
-# - functionapp-tasks: Lightweight operations (DB queries, inventory, STAC)
-# - container-tasks: Heavy operations (GDAL, geopandas) - Docker worker handles this
+# - container-tasks: All ETL operations (Docker worker)
 #
-# All task types MUST be explicitly mapped in TaskRoutingDefaults (DOCKER_TASKS or FUNCTIONAPP_TASKS).
+# All task types MUST be explicitly mapped in TaskRoutingDefaults.DOCKER_TASKS.
 # Unmapped task types raise ContractViolationError (no fallback queue).
 #
 # See config/app_mode_config.py for mode definitions and queue mappings.
@@ -1382,9 +1381,8 @@ logger.info(f"      has_platform_endpoints: {_app_mode.has_platform_endpoints}")
 logger.info(f"      has_jobs_endpoints: {_app_mode.has_jobs_endpoints}")
 logger.info(f"      has_admin_endpoints: {_app_mode.has_admin_endpoints}")
 logger.info("-" * 70)
-logger.info("   QUEUE LISTENERS (V0.8):")
+logger.info("   QUEUE LISTENERS (V0.9):")
 logger.info(f"      listens_to_jobs_queue: {_app_mode.listens_to_jobs_queue}")
-logger.info(f"      listens_to_functionapp_tasks: {_app_mode.listens_to_functionapp_tasks}")
 logger.info(f"      listens_to_container_tasks: {_app_mode.listens_to_container_tasks}")
 logger.info("-" * 70)
 
@@ -1418,32 +1416,11 @@ if STARTUP_STATE.all_passed and _app_mode.listens_to_jobs_queue:
 
 
 # =============================================================================
-# V0.8: CONSOLIDATED TASK QUEUES (24 JAN 2026)
+# V0.9: CONTAINER-TASKS QUEUE (19 FEB 2026)
 # =============================================================================
-# - functionapp-tasks: Lightweight operations (DB queries, inventory, STAC)
-# - container-tasks: Heavy operations (GDAL, geopandas) - only in standalone without Docker
+# All ETL operations route to container-tasks (Docker worker).
+# In standalone dev mode without Docker, the Function App handles this queue.
 # =============================================================================
-
-# FunctionApp Tasks Queue Trigger - worker_functionapp/standalone modes
-if STARTUP_STATE.all_passed and _app_mode.listens_to_functionapp_tasks:
-    logger.info("✅ REGISTERING: functionapp-tasks queue trigger (lightweight DB ops)")
-elif _app_mode.listens_to_functionapp_tasks:
-    logger.warning("⏭️ SKIPPING: functionapp-tasks queue trigger (validation failed)")
-else:
-    logger.warning("⏭️ SKIPPING: functionapp-tasks queue trigger (APP_MODE=%s)", _app_mode.mode.value)
-
-if STARTUP_STATE.all_passed and _app_mode.listens_to_functionapp_tasks:
-    from triggers.service_bus import handle_task_message
-
-    @app.service_bus_queue_trigger(
-        arg_name="msg",
-        queue_name="functionapp-tasks",
-        connection="ServiceBusConnection"
-    )
-    def process_functionapp_task(msg: func.ServiceBusMessage) -> None:
-        """Process task messages from functionapp-tasks queue (V0.8)."""
-        handle_task_message(msg, core_machine, queue_name="functionapp-tasks")
-
 
 # Container Tasks Queue Trigger - Only standalone mode with DOCKER_WORKER_ENABLED=false
 # When Docker worker is deployed, it handles container-tasks, not the Function App
@@ -1471,19 +1448,16 @@ if STARTUP_STATE.all_passed and _app_mode.listens_to_container_tasks:
         handle_task_message(msg, core_machine, queue_name="container-tasks")
 
 
-# Summary of trigger registration (V0.8 - 24 JAN 2026)
+# Summary of trigger registration (V0.9 - 19 FEB 2026)
 _registered_triggers = []
 if STARTUP_STATE.all_passed and _app_mode.listens_to_jobs_queue:
     _registered_triggers.append("geospatial-jobs")
-if STARTUP_STATE.all_passed and _app_mode.listens_to_functionapp_tasks:
-    _registered_triggers.append("functionapp-tasks")
 if STARTUP_STATE.all_passed and _app_mode.listens_to_container_tasks:
     _registered_triggers.append("container-tasks")
 
 # Calculate expected triggers based on mode
 _expected_triggers = sum([
     _app_mode.listens_to_jobs_queue,
-    _app_mode.listens_to_functionapp_tasks,
     _app_mode.listens_to_container_tasks,
 ])
 

@@ -334,8 +334,8 @@ ENV_VAR_RULES: Dict[str, EnvVarRule] = {
     # APP MODE & DOCKER WORKER (12 JAN 2026)
     # =========================================================================
     "APP_MODE": EnvVarRule(
-        pattern=re.compile(r"^(standalone|platform|orchestrator|worker_functionapp|worker_docker)$"),
-        pattern_description="Deployment mode (standalone, platform, orchestrator, worker_functionapp, worker_docker)",
+        pattern=re.compile(r"^(standalone|platform|orchestrator|worker_docker)$"),
+        pattern_description="Deployment mode (standalone, platform, orchestrator, worker_docker)",
         required=False,
         fix_suggestion="Set to 'standalone' for single-app deployment or specific mode for multi-app",
         example="standalone",
@@ -373,32 +373,8 @@ ENV_VAR_RULES: Dict[str, EnvVarRule] = {
         default_value="geospatial-jobs",
     ),
 
-    "SERVICE_BUS_RASTER_TASKS_QUEUE": EnvVarRule(
-        pattern=re.compile(r"^[a-z0-9][a-z0-9-]{0,49}$"),
-        pattern_description="Queue name (lowercase, alphanumeric with hyphens)",
-        required=False,
-        fix_suggestion="Set queue name or use default 'raster-tasks'",
-        example="raster-tasks",
-        default_value="raster-tasks",
-    ),
-
-    "SERVICE_BUS_VECTOR_TASKS_QUEUE": EnvVarRule(
-        pattern=re.compile(r"^[a-z0-9][a-z0-9-]{0,49}$"),
-        pattern_description="Queue name (lowercase, alphanumeric with hyphens)",
-        required=False,
-        fix_suggestion="Set queue name or use default 'vector-tasks'",
-        example="vector-tasks",
-        default_value="vector-tasks",
-    ),
-
-    "SERVICE_BUS_LONG_RUNNING_TASKS_QUEUE": EnvVarRule(
-        pattern=re.compile(r"^[a-z0-9][a-z0-9-]{0,49}$"),
-        pattern_description="Queue name (lowercase, alphanumeric with hyphens)",
-        required=False,
-        fix_suggestion="Set queue name or use default 'long-running-tasks'",
-        example="long-running-tasks",
-        default_value="long-running-tasks",
-    ),
+    # SERVICE_BUS_RASTER_TASKS_QUEUE, SERVICE_BUS_VECTOR_TASKS_QUEUE,
+    # SERVICE_BUS_LONG_RUNNING_TASKS_QUEUE removed 19 FEB 2026 (V0.9 Docker-only)
 
     "SERVICE_BUS_CONTAINER_TASKS_QUEUE": EnvVarRule(
         pattern=re.compile(r"^[a-z0-9][a-z0-9-]{0,49}$"),
@@ -506,14 +482,7 @@ ENV_VAR_RULES: Dict[str, EnvVarRule] = {
         default_value="/mnt/etl",
     ),
 
-    "SERVICE_BUS_FUNCTIONAPP_TASKS_QUEUE": EnvVarRule(
-        pattern=re.compile(r"^[a-z0-9][a-z0-9-]{0,49}$"),
-        pattern_description="Queue name for Docker worker tasks (lowercase, alphanumeric with hyphens)",
-        required=False,
-        fix_suggestion="Set queue name for Docker worker or use default 'functionapp-tasks'",
-        example="functionapp-tasks",
-        default_value="functionapp-tasks",
-    ),
+    # SERVICE_BUS_FUNCTIONAPP_TASKS_QUEUE removed 19 FEB 2026 (V0.9 Docker-only)
 
     # =========================================================================
     # PLATFORM / CLASSIFICATION CONFIG (26 JAN 2026)

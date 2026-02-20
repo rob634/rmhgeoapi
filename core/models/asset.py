@@ -268,10 +268,10 @@ class GeospatialAsset(BaseModel):
         max_length=64,
         description="Groups versions: SHA256(platform_id|nominal_refs_json)[:32]"
     )
-    version_ordinal: int = Field(
-        default=1,
+    version_ordinal: Optional[int] = Field(
+        default=None,
         ge=1,
-        description="B2B-provided version order (1, 2, 3...). Not parsed, just stored."
+        description="Version order (1, 2, 3...). NULL for drafts and revoked assets — assigned at approve time."
     )
     previous_asset_id: Optional[str] = Field(
         default=None,

@@ -916,11 +916,10 @@ class AdminDbMaintenanceTrigger:
             service_bus = ServiceBusRepository.instance()
 
             queues_cleared = {}
-            # Clear all 3 queues (11 DEC 2025 - No Legacy Fallbacks)
+            # Clear active queues (19 FEB 2026 - Docker-only architecture)
             queue_names = [
                 config.service_bus_jobs_queue,
-                config.queues.raster_tasks_queue,
-                config.queues.vector_tasks_queue
+                config.queues.container_tasks_queue,
             ]
 
             for queue_name in queue_names:

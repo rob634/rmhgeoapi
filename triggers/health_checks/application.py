@@ -84,12 +84,10 @@ class ApplicationHealthChecks(HealthCheckPlugin):
                 "docker_worker_enabled": app_mode_config.docker_worker_enabled,
                 "queues_listening": {
                     "jobs": app_mode_config.listens_to_jobs_queue,
-                    "functionapp_tasks": app_mode_config.listens_to_functionapp_tasks,
                     "container_tasks": app_mode_config.listens_to_container_tasks,
                 },
                 "queue_names": {
                     "jobs": config.queues.jobs_queue,
-                    "functionapp_tasks": config.queues.functionapp_tasks_queue,
                     "container_tasks": config.queues.container_tasks_queue,
                 },
                 "routing": {
@@ -160,7 +158,7 @@ class ApplicationHealthChecks(HealthCheckPlugin):
                 "admin_endpoints": {
                     "expected": app_mode_config.has_admin_endpoints,
                     "description": "/api/dbadmin/*, /api/admin/*",
-                    "modes_enabled": ["standalone", "orchestrator", "worker_functionapp"],
+                    "modes_enabled": ["standalone", "orchestrator"],
                     "test_modules": [
                         "triggers.admin.admin_db",
                         "triggers.admin.admin_system",
@@ -228,7 +226,7 @@ class ApplicationHealthChecks(HealthCheckPlugin):
                 summary["issues"] = issues
 
             # Provide actionable guidance for common issues
-            if app_mode_config.mode.value in ["worker_functionapp", "worker_docker"]:
+            if app_mode_config.mode.value == "worker_docker":
                 summary["guidance"] = (
                     f"APP_MODE={app_mode_config.mode.value} disables platform endpoints. "
                     "If you need /api/platform/approve or /api/platform/approvals, "

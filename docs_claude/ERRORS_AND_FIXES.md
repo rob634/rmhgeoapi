@@ -1,6 +1,6 @@
 # ERRORS_AND_FIXES.md - Error Tracking and Resolution Log
 
-**Last Updated**: 01 FEB 2026
+**Last Updated**: 19 FEB 2026
 **Purpose**: Canonical error tracking for pattern analysis and faster troubleshooting
 
 ---
@@ -753,6 +753,86 @@ curl https://rmhheavyapi.../health
 
 **Related**: See DOCKER_INTEGRATION.md → "Docker Worker Parallelism Model" for architecture details
 
+### PIP-007: Draft asset approval returns 400 — version lineage self-conflict
+
+**Date**: 18 FEB 2026
+**Version**: 0.8.19.x
+**Severity**: Critical (draft approval workflow completely broken)
+**Found by**: QA testing (Robert + Rajesh)
+
+**Error Message**:
+```
+Version lineage validation failed: Version 'None' already exists in lineage for collection '...'
+```
+
+**Location**: `services/asset_service.py` → `assign_version()`
+
+**Root Cause**:
+Draft assets were receiving full lineage wiring at submit time: `lineage_id` (computed), `version_ordinal=1`, `is_latest=True`. When `/api/platform/approve` called `assign_version()`, `validate_version_lineage()` found the draft itself as `current_latest` (because `is_latest=True`). It then rejected the new `version_id` because it detected an existing version — the draft's own unversioned record.
+
+On the second attempt (with a bypass), the draft saw itself as predecessor, resulting in `version_ordinal=2` and `previous_asset_id` pointing to its own `asset_id`.
+
+**Resolution** (two-part fix):
+
+1. **`triggers/platform/submit.py`**: Drafts now get `lineage_id=None`, `version_ordinal=None`, `is_latest=False`. All lineage deferred to approval.
+```python
+if is_draft:
+    lineage_id = None
+    version_ordinal = None
+    logger.info("  Draft mode: lineage validation deferred to approve")
+```
+
+2. **`services/asset_service.py`**: Added `draft_self_conflict` detection — when the only "existing" version is the draft itself, force `ordinal=1` and `previous_asset_id=None`.
+
+**Prevention**:
+- Version ordinals must NEVER be assigned until a `version_id` is provided (at approve time)
+- Drafts are "invisible" to lineage until versioned
+- Rule: `is_latest=False` for all drafts at submit
+
+### PIP-008: Asset creation failure silently ignored — jobs run without asset records
+
+**Date**: 18 FEB 2026
+**Version**: 0.8.19.x
+**Severity**: High (orphaned jobs with no asset linkage)
+**Found by**: QA testing (Rajesh — ADO repo `ITSES-GEOSPATIAL-ETL/tree/QA`)
+
+**Error Message**: No error — that was the problem. Asset creation failures were logged as warnings and processing continued.
+
+**Location**: `triggers/platform/submit.py` → asset creation block
+
+**Root Cause**:
+Asset creation was wrapped in a try/except that logged a warning and continued. If the database insert failed (constraint violation, connection issue), the job would be submitted and run to completion but with no `asset_id` linked. Downstream approval, lineage, and STAC catalog operations would then fail with confusing errors.
+
+**Resolution** (three-layer defense, ported from Rajesh):
+
+1. **Layer 1**: Asset creation failure is now FATAL — returns HTTP 500 immediately
+2. **Layer 2**: Post-creation verification reads the job back to confirm `asset_id` persisted
+3. **Layer 3**: Emergency repair via `JobRepository.set_asset_id()` if verification fails
+
+**Prevention**:
+- Asset creation is a hard prerequisite for platform jobs — never degrade to warning
+- Always verify critical writes with a read-back
+
+### PIP-009: Platform validate endpoint returns 200 on validation failure
+
+**Date**: 18 FEB 2026
+**Version**: 0.8.19.x
+**Severity**: Medium (clients can't distinguish valid from invalid via HTTP status)
+**Found by**: QA testing (Rajesh — ADO repo)
+
+**Error Message**: N/A — endpoint returned `{"valid": false, ...}` with HTTP 200
+
+**Location**: `triggers/trigger_platform_status.py` → `/api/platform/validate`
+
+**Root Cause**: The validate endpoint always returned HTTP 200 regardless of validation result. Clients relying on HTTP status codes (rather than parsing the JSON body) would treat invalid submissions as successful.
+
+**Resolution**:
+```python
+status_code = 200 if validation_result.valid else 400
+```
+
+**Prevention**: API endpoints that report success/failure should use appropriate HTTP status codes, not just JSON body fields.
+
 ---
 
 ## CODE Errors
@@ -1052,6 +1132,28 @@ raster_type_info = {
 2. Add logging to confirm raster_type propagation through the pipeline
 3. Test multi-band (4+, 8-band) imagery specifically, not just 3-band RGB
 
+### COD-009: Missing `import json` in asset_repository.py
+
+**Date**: 18 FEB 2026
+**Version**: 0.8.19.1
+**Severity**: Critical (all asset operations with JSONB columns crash)
+
+**Error Message**:
+```
+NameError: name 'json' is not defined
+```
+
+**Location**: `infrastructure/asset_repository.py` — 8+ call sites using `json.dumps()` for JSONB column serialization
+
+**Root Cause**:
+The `import json` statement was missing from the file. The module uses `json.dumps()` in every method that writes JSONB columns (`stac_properties`, `processing_options`, etc.). Likely lost during a recent edit or linter run.
+
+**Resolution**: Added `import json` at line 29.
+
+**Prevention**:
+- When editing imports, verify all stdlib references are still present
+- JSONB serialization is a critical path — any asset create/update would crash
+
 ---
 
 ## Error Pattern Analysis
@@ -1265,4 +1367,4 @@ How to fix it
 
 ---
 
-**Last Updated**: 21 JAN 2026
+**Last Updated**: 19 FEB 2026

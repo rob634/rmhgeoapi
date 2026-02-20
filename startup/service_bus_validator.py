@@ -136,14 +136,7 @@ def _get_required_queues(
             "flag": "listens_to_jobs_queue"
         })
 
-    # V0.8: Use consolidated queue names (24 JAN 2026)
-    if app_mode_config.listens_to_functionapp_tasks:
-        required_queues.append({
-            "name": app_config.queues.functionapp_tasks_queue,
-            "purpose": "FunctionApp tasks (lightweight DB ops)",
-            "flag": "listens_to_functionapp_tasks"
-        })
-
+    # V0.9: Docker-only queue (19 FEB 2026)
     if app_mode_config.listens_to_container_tasks:
         required_queues.append({
             "name": app_config.queues.container_tasks_queue,

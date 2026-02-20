@@ -1,12 +1,12 @@
 # ============================================================================
-# APPLICATION MODE CONFIGURATION (V0.8)
+# APPLICATION MODE CONFIGURATION (V0.9)
 # ============================================================================
-# STATUS: Configuration - Multi-Function App deployment modes
+# STATUS: Configuration - Docker-only deployment modes
 # PURPOSE: Control queue listening behavior and task routing per deployment
-# LAST_REVIEWED: 05 FEB 2026
+# LAST_REVIEWED: 19 FEB 2026
 # ============================================================================
 """
-Application Mode Configuration (V0.8 - 25 JAN 2026).
+Application Mode Configuration (V0.9 - 19 FEB 2026).
 
 ================================================================================
 DEPLOYMENT MODES
@@ -15,12 +15,13 @@ DEPLOYMENT MODES
 ┌─────────────────────┬───────────────────────────────┬─────────────────────────┐
 │ Mode                │ Queues Listening              │ HTTP Endpoints          │
 ├─────────────────────┼───────────────────────────────┼─────────────────────────┤
-│ STANDALONE          │ jobs + functionapp-tasks      │ All (dev only)          │
+│ STANDALONE          │ jobs + container-tasks*       │ All (dev only)          │
 │ PLATFORM            │ None (send-only)              │ platform/* only         │
 │ ORCHESTRATOR        │ jobs                          │ All except workers      │
-│ WORKER_FUNCTIONAPP  │ functionapp-tasks             │ admin/* only            │
 │ WORKER_DOCKER       │ container-tasks               │ health only             │
 └─────────────────────┴───────────────────────────────┴─────────────────────────┘
+
+* STANDALONE listens to container-tasks only if DOCKER_WORKER_ENABLED=false
 
 --------------------------------------------------------------------------------
 MODE DETAILS
@@ -28,7 +29,7 @@ MODE DETAILS
 
 1. STANDALONE (Development)
    - Single app handles everything
-   - Listens: geospatial-jobs, functionapp-tasks
+   - Listens: geospatial-jobs
    - Container-tasks: Only if DOCKER_WORKER_ENABLED=false
 
    Environment: APP_MODE=standalone
@@ -45,14 +46,8 @@ MODE DETAILS
 
    Environment: APP_MODE=orchestrator
 
-4. WORKER_FUNCTIONAPP (Lightweight Worker)
-   - Processes lightweight tasks (DB queries, STAC ops)
-   - Listens: functionapp-tasks
-
-   Environment: APP_MODE=worker_functionapp
-
-5. WORKER_DOCKER (Heavy Worker)
-   - Processes heavy tasks (GDAL, geopandas)
+4. WORKER_DOCKER (Docker Worker)
+   - Processes all ETL tasks (GDAL, geopandas, bulk SQL)
    - Listens: container-tasks
    - Runs in Docker container, not Azure Functions
 
@@ -63,7 +58,7 @@ ENVIRONMENT VARIABLES
 --------------------------------------------------------------------------------
 
 Required:
-    APP_MODE = standalone | platform | orchestrator | worker_functionapp | worker_docker
+    APP_MODE = standalone | platform | orchestrator | worker_docker
 
 Optional:
     APP_NAME = {unique-app-identifier}
@@ -110,37 +105,36 @@ from .defaults import AppModeDefaults
 
 class AppMode(str, Enum):
     """
-    Application deployment modes (V0.8 - 25 JAN 2026).
+    Application deployment modes (V0.9 - 19 FEB 2026).
 
     Each mode determines:
     - Which Service Bus queues the app listens to
     - Which HTTP endpoints are exposed
     - How tasks are routed
 
-    V0.8 Architecture - 5 Clean Modes:
+    V0.9 Architecture - 4 Modes:
     ─────────────────────────────────────────────────────────────────────────
     Mode              │ Queues                    │ HTTP Endpoints
     ─────────────────────────────────────────────────────────────────────────
-    STANDALONE        │ jobs + functionapp-tasks  │ All (dev only)
+    STANDALONE        │ jobs + container-tasks    │ All (dev only)
     PLATFORM          │ None (send-only)          │ platform/* only
     ORCHESTRATOR      │ jobs                      │ All except workers
-    WORKER_FUNCTIONAPP│ functionapp-tasks         │ admin/* only
     WORKER_DOCKER     │ container-tasks           │ health only
     ─────────────────────────────────────────────────────────────────────────
 
-    Migration Notes:
+    Migration Notes (V0.8 → V0.9):
     - gateway → PLATFORM
     - platform_only → ORCHESTRATOR
     - platform_raster → ORCHESTRATOR
     - platform_vector → ORCHESTRATOR
-    - worker_raster → WORKER_FUNCTIONAPP
-    - worker_vector → WORKER_FUNCTIONAPP
+    - worker_raster → WORKER_DOCKER
+    - worker_vector → WORKER_DOCKER
+    - worker_functionapp → WORKER_DOCKER
     """
 
     STANDALONE = "standalone"                 # All queues, all endpoints (dev)
     PLATFORM = "platform"                     # HTTP only, sends to jobs queue
     ORCHESTRATOR = "orchestrator"             # Jobs queue + all HTTP
-    WORKER_FUNCTIONAPP = "worker_functionapp" # functionapp-tasks queue
     WORKER_DOCKER = "worker_docker"           # container-tasks queue (Docker)
 
 
@@ -155,10 +149,8 @@ class AppModeConfig(BaseModel):
     Determines queue listening behavior and task routing based on deployment mode.
 
     Attributes:
-        mode: The deployment mode (standalone, platform_*, worker_*)
+        mode: The deployment mode (standalone, platform, orchestrator, worker_docker)
         app_name: Unique identifier for this app instance (for task tracking)
-        raster_app_url: External raster app URL (future cross-app HTTP calls)
-        vector_app_url: External vector app URL (future cross-app HTTP calls)
     """
 
     mode: AppMode = Field(
@@ -169,17 +161,6 @@ class AppModeConfig(BaseModel):
     app_name: str = Field(
         default=AppModeDefaults.DEFAULT_APP_NAME,
         description="Unique identifier for this app instance (tracked on tasks)"
-    )
-
-    # External app URLs (for future cross-app routing)
-    raster_app_url: Optional[str] = Field(
-        default=None,
-        description="External raster Function App URL (future use)"
-    )
-
-    vector_app_url: Optional[str] = Field(
-        default=None,
-        description="External vector Function App URL (future use)"
     )
 
     # Docker worker integration (08 JAN 2026)
@@ -238,7 +219,6 @@ class AppModeConfig(BaseModel):
         return self.mode in [
             AppMode.STANDALONE,
             AppMode.ORCHESTRATOR,
-            AppMode.WORKER_FUNCTIONAPP,
         ]
 
     @property
@@ -272,7 +252,6 @@ class AppModeConfig(BaseModel):
         return self.mode in [
             AppMode.STANDALONE,
             AppMode.ORCHESTRATOR,
-            AppMode.WORKER_FUNCTIONAPP,  # May need storage access
         ]
 
     @property
@@ -313,14 +292,6 @@ class AppModeConfig(BaseModel):
         ]
 
     @property
-    def listens_to_functionapp_tasks(self) -> bool:
-        """Whether this mode processes functionapp-tasks queue."""
-        return self.mode in [
-            AppMode.STANDALONE,
-            AppMode.WORKER_FUNCTIONAPP,
-        ]
-
-    @property
     def listens_to_container_tasks(self) -> bool:
         """
         Whether this mode processes container-tasks queue (Docker worker).
@@ -354,10 +325,7 @@ class AppModeConfig(BaseModel):
     @property
     def is_worker_mode(self) -> bool:
         """Whether this is a worker-only mode (no orchestration)."""
-        return self.mode in [
-            AppMode.WORKER_FUNCTIONAPP,
-            AppMode.WORKER_DOCKER,
-        ]
+        return self.mode == AppMode.WORKER_DOCKER
 
     @property
     def is_platform_mode(self) -> bool:
@@ -389,9 +357,7 @@ class AppModeConfig(BaseModel):
         Environment Variables:
             APP_MODE: Deployment mode (default: AppModeDefaults.DEFAULT_MODE)
             APP_NAME: Unique app identifier (default: AppModeDefaults.DEFAULT_APP_NAME)
-            RASTER_APP_URL: External raster app URL (optional)
-            VECTOR_APP_URL: External vector app URL (optional)
-            DOCKER_WORKER_ENABLED: Enable long-running-tasks queue validation (default: False)
+            DOCKER_WORKER_ENABLED: Enable container-tasks queue validation (default: False)
                                    Set to "true" when a Docker worker is deployed.
 
         Raises:
@@ -422,8 +388,9 @@ class AppModeConfig(BaseModel):
                 "platform_only": "orchestrator",
                 "platform_raster": "orchestrator",
                 "platform_vector": "orchestrator",
-                "worker_raster": "worker_functionapp",
-                "worker_vector": "worker_functionapp",
+                "worker_raster": "worker_docker",
+                "worker_vector": "worker_docker",
+                "worker_functionapp": "worker_docker",
             }
             migration_msg = ""
             if mode_str in migration_hints:
@@ -436,11 +403,10 @@ class AppModeConfig(BaseModel):
                 f"Provided: APP_MODE='{mode_str}'\n"
                 f"Valid modes: {valid_modes}\n"
                 f"{migration_msg}"
-                f"\nV0.8 Modes (25 JAN 2026):\n"
+                f"\nV0.9 Modes (19 FEB 2026):\n"
                 f"  standalone         - All queues, all HTTP (development)\n"
                 f"  platform           - HTTP gateway only, sends to jobs queue\n"
                 f"  orchestrator       - Jobs queue listener + all HTTP endpoints\n"
-                f"  worker_functionapp - functionapp-tasks queue (lightweight ops)\n"
                 f"  worker_docker      - container-tasks queue (Docker container)\n"
                 f"\n"
                 f"Fix: Set APP_MODE to one of the valid modes.\n"
@@ -461,7 +427,7 @@ class AppModeConfig(BaseModel):
                 f"INVALID CONFIGURATION: APP_MODE='{mode.value}' cannot be used in Azure Functions. "
                 f"WORKER_DOCKER mode is only valid in Docker containers. "
                 f"Detected FUNCTIONS_WORKER_RUNTIME='{os.environ.get('FUNCTIONS_WORKER_RUNTIME')}'. "
-                f"For Azure Functions, use: standalone, platform, orchestrator, or worker_functionapp."
+                f"For Azure Functions, use: standalone, platform, or orchestrator."
             )
 
         if mode != AppMode.WORKER_DOCKER and not is_azure_functions:
@@ -485,8 +451,6 @@ class AppModeConfig(BaseModel):
         return cls(
             mode=mode,
             app_name=os.environ.get("APP_NAME", AppModeDefaults.DEFAULT_APP_NAME),
-            raster_app_url=os.environ.get("RASTER_APP_URL"),
-            vector_app_url=os.environ.get("VECTOR_APP_URL"),
             docker_worker_enabled=docker_worker_enabled,
             docker_worker_url=docker_worker_url,
             orchestrator_url=orchestrator_url,
@@ -509,8 +473,7 @@ class AppModeConfig(BaseModel):
             "docker_worker_enabled": self.docker_worker_enabled,
             "queues_listening": {
                 "jobs": self.listens_to_jobs_queue,
-                "functionapp_tasks": self.listens_to_functionapp_tasks,  # V0.8
-                "container_tasks": self.listens_to_container_tasks,      # V0.8
+                "container_tasks": self.listens_to_container_tasks,
             },
             "endpoints": {
                 "has_platform": self.has_platform_endpoints,
@@ -536,8 +499,6 @@ class AppModeConfig(BaseModel):
                 "has_http": self.has_http_endpoints,
             },
             "external_apps": {
-                "raster_app_url": self.raster_app_url,
-                "vector_app_url": self.vector_app_url,
                 "docker_worker_url": self.docker_worker_url,
                 "orchestrator_url": self.orchestrator_url,
             },

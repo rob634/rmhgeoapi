@@ -107,10 +107,9 @@ class ServiceBusAdminTrigger:
         self._config = None
 
         # Known queue names from QueueDefaults
-        # V0.8 (24 JAN 2026): Consolidated to 3 queues
+        # V0.9 (19 FEB 2026): Docker-only, 2 queues
         self._known_queues = [
             QueueDefaults.JOBS_QUEUE,
-            QueueDefaults.FUNCTIONAPP_TASKS_QUEUE,
             QueueDefaults.CONTAINER_TASKS_QUEUE,
         ]
 

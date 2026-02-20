@@ -213,6 +213,12 @@ class CogMetadataRecord(BaseModel):
         description="Additional custom properties (JSONB)"
     )
 
+    # Cached STAC item (19 FEB 2026: STAC as B2C materialized view)
+    stac_item_json: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Full STAC item dict cached at processing time. Materialized to pgSTAC at approval."
+    )
+
     # Timestamps
     created_at: Optional[datetime] = Field(default=None, description="Record creation timestamp")
     updated_at: Optional[datetime] = Field(default=None, description="Record last update timestamp")

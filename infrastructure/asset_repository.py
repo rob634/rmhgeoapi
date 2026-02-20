@@ -1420,6 +1420,11 @@ class GeospatialAssetRepository(PostgreSQLRepository):
         V0.8 Release Control (30 JAN 2026):
         Used by Service Layer to resolve /latest URLs.
 
+        19 FEB 2026: Use max version_ordinal instead of is_latest flag.
+        The is_latest flag is denormalized and can drift (e.g. after revoke
+        → overwrite → re-approve). Max ordinal is always authoritative.
+        Excludes drafts (version_ordinal IS NULL) and revoked assets.
+
         Args:
             lineage_id: Lineage identifier (hash of platform_id + nominal refs)
 
@@ -1432,8 +1437,11 @@ class GeospatialAssetRepository(PostgreSQLRepository):
                     sql.SQL("""
                         SELECT * FROM {}.{}
                         WHERE lineage_id = %s
-                          AND is_latest = TRUE
+                          AND version_ordinal IS NOT NULL
+                          AND approval_state != 'revoked'
                           AND deleted_at IS NULL
+                        ORDER BY version_ordinal DESC
+                        LIMIT 1
                     """).format(
                         sql.Identifier(self.schema),
                         sql.Identifier(self.table)
@@ -1771,6 +1779,9 @@ class GeospatialAssetRepository(PostgreSQLRepository):
         """
         with self._get_connection() as conn:
             with conn.cursor() as cur:
+                # 19 FEB 2026: Clear version info on revoke — asset returns to draft state.
+                # This ensures revoked assets are invisible to lineage lookups and
+                # re-approval goes through assign_version() to wire lineage fresh.
                 cur.execute(
                     sql.SQL("""
                         UPDATE {}.{}
@@ -1778,6 +1789,10 @@ class GeospatialAssetRepository(PostgreSQLRepository):
                             revoked_at = %s,
                             revoked_by = %s,
                             revocation_reason = %s,
+                            version_ordinal = NULL,
+                            lineage_id = NULL,
+                            is_latest = FALSE,
+                            platform_refs = platform_refs - 'version_id',
                             updated_at = NOW()
                         WHERE asset_id = %s
                           AND deleted_at IS NULL

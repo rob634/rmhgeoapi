@@ -1558,7 +1558,7 @@ BEGIN
                 revision, approval_state, clearance_state
             ) VALUES (
                 p_asset_id, p_platform_id, p_platform_refs,
-                p_lineage_id, COALESCE(p_version_ordinal, 1), p_previous_asset_id, COALESCE(p_is_latest, TRUE), TRUE,
+                p_lineage_id, p_version_ordinal, p_previous_asset_id, COALESCE(p_is_latest, TRUE), TRUE,
                 p_data_type, p_stac_item_id, p_stac_collection_id,
                 p_table_name, p_blob_path,
                 1, 'pending_review'::{schema}.approval_state, 'uncleared'::{schema}.clearance_state

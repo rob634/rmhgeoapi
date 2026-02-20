@@ -148,6 +148,42 @@ def _delete_platform_request(request_id: str, platform_repo: PlatformRepository)
 
 
 # ============================================================================
+# DRAFT SEQUENCE HELPER (19 FEB 2026)
+# ============================================================================
+
+def _count_assets_for_lineage(dataset_id: str, resource_id: str) -> int:
+    """
+    Count existing assets for a dataset+resource lineage.
+
+    Used to generate unique draft request_ids when resubmitting drafts
+    after a previous version has been approved.
+
+    Args:
+        dataset_id: DDH dataset identifier
+        resource_id: DDH resource identifier
+
+    Returns:
+        Number of non-deleted assets for this lineage
+    """
+    try:
+        asset_service = AssetService()
+        assets = asset_service.asset_repo.list_by_platform_refs(
+            platform_id="ddh",
+            refs_filter={
+                "dataset_id": dataset_id,
+                "resource_id": resource_id
+            },
+            limit=1000
+        )
+        return len(assets)
+    except Exception as e:
+        logger.warning(f"Could not count lineage assets: {e}")
+        # Fallback: use timestamp-based uniqueness
+        import time
+        return int(time.time()) % 100000
+
+
+# ============================================================================
 # HTTP HANDLERS
 # ============================================================================
 
@@ -273,7 +309,7 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                     return error_response(
                         f"Cannot overwrite approved asset. "
                         f"Version '{existing_version or 'draft'}' has been approved. "
-                        f"Submit with a new version_id instead.",
+                        f"Revoke approval first (POST /api/platform/revoke) or submit with a new version_id.",
                         "OverwriteBlockedError",
                         status_code=409,
                         existing_request_id=request_id,
@@ -295,24 +331,24 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                         existing_job_id=existing.job_id
                     )
             elif is_draft and existing_approved:
-                # Draft resubmit after approval: this is a NEW version workflow,
-                # not idempotent with the old request (18 FEB 2026)
+                # 19 FEB 2026: New draft alongside approved version.
+                # Generate a unique request_id by including a draft sequence number.
                 existing_version = (existing_asset.platform_refs or {}).get('version_id', '')
                 logger.info(
-                    f"Draft resubmit: existing asset {existing.asset_id[:16]} is approved "
-                    f"(version={existing_version}). Treating as new workflow."
+                    f"New draft alongside approved version '{existing_version}'. "
+                    f"Generating unique draft request_id."
                 )
-                return error_response(
-                    f"Previous version '{existing_version}' is already approved. "
-                    f"To submit a new version, include version_id in the request "
-                    f"(e.g., version_id='{existing_version}' with a new version label). "
-                    f"Draft mode (no version_id) is only for the first submission.",
-                    "VersionLifecycleError",
-                    status_code=409,
-                    existing_request_id=request_id,
-                    asset_id=existing.asset_id,
-                    approved_version=existing_version
+                # Count existing assets for this lineage to get next sequence
+                draft_seq = _count_assets_for_lineage(
+                    platform_req.dataset_id, platform_req.resource_id
                 )
+                request_id = generate_platform_request_id(
+                    platform_req.dataset_id,
+                    platform_req.resource_id,
+                    f"__draft_{draft_seq}"  # Synthetic version for unique hash
+                )
+                # Clear so we don't hit idempotency path below
+                existing = None
             else:
                 # Normal idempotent behavior: return existing request
                 logger.info(f"Request already exists: {request_id[:16]} → job {existing.job_id[:16]}")
@@ -432,7 +468,7 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                 if validation_result.current_latest:
                     previous_asset_id = validation_result.current_latest.get('asset_id')
 
-            logger.info(f"  Lineage: {lineage_id[:16]}... ordinal={version_ordinal}, prev={previous_asset_id[:16] if previous_asset_id else 'None'}")
+            logger.info(f"  Lineage: {lineage_id[:16] if lineage_id else 'None'}... ordinal={version_ordinal}, prev={previous_asset_id[:16] if previous_asset_id else 'None'}")
 
             asset, asset_operation = asset_service.create_or_update_asset(
                 platform_id="ddh",
@@ -463,7 +499,7 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
 
             # V0.8.16.7: Pass reset_approval flag for handler to reset after success (10 FEB 2026)
             # This is set when overwriting a REJECTED or REVOKED asset
-            if validation_result.suggested_params.get('reset_approval'):
+            if validation_result and validation_result.suggested_params.get('reset_approval'):
                 job_params['reset_approval'] = True
                 logger.info(f"  Will reset approval to PENDING_REVIEW after job success")
 

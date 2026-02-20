@@ -4,6 +4,7 @@
 # STATUS: Service - Approval workflow for GeospatialAsset (Aggregate Root)
 # PURPOSE: Manage approval state transitions on GeospatialAsset directly
 # CREATED: 08 FEB 2026 (V0.8.11 - Approval Consolidation Phase 2)
+# UPDATED: 19 FEB 2026 - STAC as B2C materialized view (materialize at approve, delete at revoke)
 # EXPORTS: AssetApprovalService
 # DEPENDENCIES: infrastructure.asset_repository, infrastructure.pgstac_repository
 # ============================================================================
@@ -19,10 +20,11 @@ Design Principle:
 
 Workflow:
     1. Platform submit creates asset with approval_state=PENDING_REVIEW
-    2. Job completes, asset.processing_status=COMPLETED
+    2. Job completes, asset.processing_status=COMPLETED, STAC dict cached in cog_metadata
     3. Reviewer approves/rejects via this service
-    4. If approved, clearance_state is set and STAC updated
+    4. If approved, STAC item materialized to pgSTAC from cached dict
     5. If PUBLIC, ADF pipeline triggered
+    6. If revoked, STAC item deleted from pgSTAC (invisible to consumers)
 
 State Transitions:
     PENDING_REVIEW → APPROVED (with clearance_state)
@@ -152,8 +154,8 @@ class AssetApprovalService:
                 'error': f"Failed to update asset approval state"
             }
 
-        # Update STAC item
-        stac_result = self._update_stac_published(asset, reviewer, clearance_state)
+        # Materialize STAC item to pgSTAC (19 FEB 2026: B2C materialized view)
+        stac_result = self._materialize_stac(asset, reviewer, clearance_state)
 
         # Trigger ADF if PUBLIC
         adf_run_id = None
@@ -325,19 +327,23 @@ class AssetApprovalService:
                 'error': f"Failed to update asset revocation state"
             }
 
-        # Update STAC with revocation properties
-        stac_result = self._update_stac_revoked(asset, revoker, reason)
+        # Delete STAC item (19 FEB 2026: approved=visible, not approved=invisible)
+        stac_result = self._delete_stac(asset)
 
         # Get updated asset
         updated_asset = self.asset_repo.get_by_id(asset_id)
 
-        logger.warning(f"AUDIT: Asset {asset_id[:16]}... REVOKED by {revoker}. Reason: {reason}")
+        # 19 FEB 2026: Version info cleared on revoke — asset returns to draft state
+        logger.warning(
+            f"AUDIT: Asset {asset_id[:16]}... REVOKED by {revoker}. Reason: {reason}. "
+            f"Version info cleared (lineage_id, version_ordinal, version_id) — asset is now draft."
+        )
 
         return {
             'success': True,
             'asset': updated_asset.to_dict() if updated_asset else None,
             'stac_updated': stac_result.get('success', False),
-            'warning': 'Approved asset has been revoked - this action is logged for audit'
+            'warning': 'Approved asset has been revoked and version info cleared. Re-approval will require version assignment.'
         }
 
     # =========================================================================
@@ -403,20 +409,25 @@ class AssetApprovalService:
     # STAC INTEGRATION
     # =========================================================================
 
-    def _update_stac_published(
+    def _materialize_stac(
         self,
         asset: GeospatialAsset,
         reviewer: str,
         clearance_state: ClearanceState
     ) -> Dict[str, Any]:
         """
-        Update STAC item with published properties.
+        Create pgSTAC item from cached STAC dict at approval time.
 
-        Sets:
-            app:published = true
-            app:published_at = ISO timestamp
-            app:approved_by = reviewer
-            app:clearance = clearance_state value
+        19 FEB 2026: STAC as B2C materialized view.
+        The STAC item dict was cached in cog_metadata.stac_item_json during processing.
+        At approval, we:
+        1. Read the cached dict
+        2. Patch it with versioned ID and approval properties
+        3. Build/upsert the STAC collection
+        4. Insert the item into pgSTAC
+
+        The cached dict uses the DRAFT cog_id (before assign_version renamed it).
+        We reconstruct the draft cog_id deterministically from platform_refs.
         """
         if not asset.stac_item_id or not asset.stac_collection_id:
             return {
@@ -425,87 +436,110 @@ class AssetApprovalService:
             }
 
         try:
+            from infrastructure.raster_metadata_repository import get_raster_metadata_repository
             from infrastructure.pgstac_repository import PgStacRepository
-            pgstac = PgStacRepository()
+            from services.stac_collection import build_raster_stac_collection
+            from services.platform_translation import generate_stac_item_id
 
-            properties_update = {
-                'geoetl:published': True,
-                'geoetl:published_at': datetime.now(timezone.utc).isoformat(),
-                'geoetl:approved_by': reviewer,
-                'geoetl:clearance': clearance_state.value
-            }
+            cog_repo = get_raster_metadata_repository()
 
-            success = pgstac.update_item_properties(
-                item_id=asset.stac_item_id,
-                collection_id=asset.stac_collection_id,
-                properties_update=properties_update
+            # Reconstruct the draft cog_id (before assign_version renamed it)
+            # Draft STAC item IDs use version_id=None → "draft" placeholder
+            platform_refs = asset.platform_refs or {}
+            draft_cog_id = generate_stac_item_id(
+                platform_refs.get('dataset_id', ''),
+                platform_refs.get('resource_id', ''),
+                None  # draft
             )
 
-            if success:
-                logger.info(f"Updated STAC item {asset.stac_item_id} with published=true")
-                return {'success': True}
-            else:
+            # Read cached STAC item dict
+            stac_item_json = cog_repo.get_stac_item_json(draft_cog_id)
+            if not stac_item_json:
+                logger.warning(f"No cached STAC item for draft cog_id={draft_cog_id}")
                 return {
                     'success': False,
-                    'error': f"STAC item not found: {asset.stac_item_id}"
+                    'error': f'STAC metadata not cached for {draft_cog_id} — resubmit data'
                 }
 
+            # Patch the dict with versioned ID and approval properties
+            stac_item_json['id'] = asset.stac_item_id  # Versioned ID from assign_version
+            stac_item_json['collection'] = asset.stac_collection_id
+
+            now_iso = datetime.now(timezone.utc).isoformat()
+            props = stac_item_json.setdefault('properties', {})
+            props['geoetl:published'] = True
+            props['geoetl:published_at'] = now_iso
+            props['geoetl:approved_by'] = reviewer
+            props['geoetl:clearance'] = clearance_state.value
+
+            # Add version info from platform_refs
+            version_id = platform_refs.get('version_id')
+            if version_id:
+                props['ddh:version_id'] = version_id
+
+            # Build and upsert STAC collection
+            pgstac = PgStacRepository()
+
+            item_bbox = stac_item_json.get('bbox', [-180, -90, 180, 90])
+            item_dt = props.get('datetime')
+            collection_dict = build_raster_stac_collection(
+                collection_id=asset.stac_collection_id,
+                bbox=item_bbox,
+                temporal_start=item_dt,
+            )
+            pgstac.insert_collection(collection_dict)
+            logger.info(f"Collection upserted: {asset.stac_collection_id}")
+
+            # Insert item into pgSTAC
+            pgstac_id = pgstac.insert_item(stac_item_json, asset.stac_collection_id)
+            logger.info(
+                f"Materialized STAC item {asset.stac_item_id} in collection "
+                f"{asset.stac_collection_id} (pgstac_id={pgstac_id})"
+            )
+
+            return {'success': True, 'pgstac_id': pgstac_id}
+
         except Exception as e:
-            logger.error(f"Error updating STAC item: {e}")
+            logger.error(f"Error materializing STAC item: {e}")
             return {
                 'success': False,
                 'error': str(e)
             }
 
-    def _update_stac_revoked(
-        self,
-        asset: GeospatialAsset,
-        revoker: str,
-        reason: str
-    ) -> Dict[str, Any]:
+    def _delete_stac(self, asset: GeospatialAsset) -> Dict[str, Any]:
         """
-        Update STAC item with revocation properties.
+        Delete pgSTAC item on revocation.
 
-        Sets:
-            geoetl:revoked = true
-            geoetl:revoked_at = ISO timestamp
-            geoetl:revoked_by = revoker
-            geoetl:revocation_reason = reason
+        19 FEB 2026: STAC as B2C materialized view.
+        Approved = visible in catalog, not approved = invisible.
+        Revocation deletes the item from pgSTAC entirely.
+        The cached stac_item_json in cog_metadata is preserved for re-approval.
+
+        Note: asset.stac_item_id is read BEFORE update_revocation() clears
+        version info. The SQL update doesn't mutate the Python object in memory.
         """
         if not asset.stac_item_id or not asset.stac_collection_id:
             return {
-                'success': False,
-                'error': 'Asset has no STAC item/collection ID'
+                'success': True,
+                'deleted': False,
+                'reason': 'Asset has no STAC item/collection ID (never materialized)'
             }
 
         try:
             from infrastructure.pgstac_repository import PgStacRepository
             pgstac = PgStacRepository()
 
-            properties_update = {
-                'geoetl:revoked': True,
-                'geoetl:revoked_at': datetime.now(timezone.utc).isoformat(),
-                'geoetl:revoked_by': revoker,
-                'geoetl:revocation_reason': reason
-            }
+            deleted = pgstac.delete_item(asset.stac_collection_id, asset.stac_item_id)
 
-            success = pgstac.update_item_properties(
-                item_id=asset.stac_item_id,
-                collection_id=asset.stac_collection_id,
-                properties_update=properties_update
-            )
-
-            if success:
-                logger.info(f"Updated STAC item {asset.stac_item_id} with revoked=true")
-                return {'success': True}
+            if deleted:
+                logger.info(f"Deleted pgSTAC item {asset.stac_item_id}")
             else:
-                return {
-                    'success': False,
-                    'error': f"STAC item not found: {asset.stac_item_id}"
-                }
+                logger.info(f"pgSTAC item {asset.stac_item_id} not found (never materialized)")
+
+            return {'success': True, 'deleted': deleted}
 
         except Exception as e:
-            logger.warning(f"Failed to update STAC revocation properties: {e}")
+            logger.warning(f"Failed to delete STAC item on revocation: {e}")
             return {
                 'success': False,
                 'error': str(e)

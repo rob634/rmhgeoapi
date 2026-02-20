@@ -353,109 +353,48 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
             raise
 
         # =====================================================================
-        # STEPS 4, 4.5, 5: pgSTAC operations (conditional on availability)
+        # STEPS 4, 4.5, 5: DEFERRED TO APPROVAL (19 FEB 2026)
         # =====================================================================
+        # STAC as B2C materialized view: pgSTAC inserts happen at approval time.
+        # Cache the STAC item dict in cog_metadata.stac_item_json instead.
         insert_result = None
         insert_duration = 0
         inserted_to_pgstac = False
 
-        if pgstac_available:
-            # STEP 4: Initialize PgSTAC infrastructure
-            try:
-                logger.debug(f"🗄️ STEP 4: Initializing PgStacBootstrap...")
-                stac_infra = PgStacBootstrap()
-                logger.info(f"✅ STEP 4: PgStacBootstrap initialized")
-            except Exception as e:
-                logger.error(f"❌ STEP 4 FAILED: PgStacBootstrap initialization error: {e}\n{traceback.format_exc()}")
-                raise
+        try:
+            from infrastructure.raster_metadata_repository import get_raster_metadata_repository
+            cog_repo = get_raster_metadata_repository()
 
-            # STEP 4.5: Check collection exists, auto-create if missing
-            try:
-                logger.info(f"🔍 STEP 4.5: Checking if collection '{collection_id}' exists...")
+            # item may be a pydantic model or dict
+            if isinstance(item, dict):
+                item_dict_for_cache = item
+            elif hasattr(item, 'model_dump'):
+                item_dict_for_cache = item.model_dump(mode='json', by_alias=True)
+            else:
+                item_dict_for_cache = item
 
-                if not stac_infra.collection_exists(collection_id):
-                    # 12 JAN 2026: Fail fast if collection_must_exist=True
-                    if collection_must_exist:
-                        raise ValueError(
-                            f"Collection '{collection_id}' does not exist and collection_must_exist=True. "
-                            f"Create the collection first or set collection_must_exist=False to auto-create."
-                        )
-                    logger.warning(f"⚠️ STEP 4.5: Collection '{collection_id}' does not exist! Auto-creating...")
-                    logger.warning(f"⚠️ This is expected on first use of '{collection_id}' collection")
+            cache_item_id = item.id if hasattr(item, 'id') else item_dict_for_cache.get('id', item_id)
+            cached = cog_repo.update_stac_item_json(
+                cog_id=cache_item_id,
+                stac_item_json=item_dict_for_cache
+            )
+            if cached:
+                logger.info(f"✅ STEPS 4-5: STAC item cached in cog_metadata for {cache_item_id} (pgSTAC deferred to approval)")
+            else:
+                logger.warning(f"⚠️ STEPS 4-5: Could not cache STAC item in cog_metadata for {cache_item_id} (record may not exist)")
 
-                    # Create minimal collection for standalone rasters
-                    # Import at function level to avoid circular dependencies
-                    from infrastructure.pgstac_repository import PgStacRepository
-                    import pystac
-
-                    pgstac_repo = PgStacRepository()
-
-                    # Create pystac.Collection object (not just a dict!)
-                    # SpatialExtent and TemporalExtent require proper pystac objects
-                    spatial_extent = pystac.SpatialExtent(bboxes=[[-180, -90, 180, 90]])
-                    temporal_extent = pystac.TemporalExtent(intervals=[[None, None]])
-                    extent = pystac.Extent(spatial=spatial_extent, temporal=temporal_extent)
-
-                    collection = pystac.Collection(
-                        id=collection_id,
-                        description=f"Auto-created collection for standalone raster processing (created: {datetime.utcnow().isoformat()}Z)",
-                        extent=extent,
-                        license="proprietary"
-                    )
-
-                    # Insert collection using PgStacRepository
-                    collection_id_result = pgstac_repo.insert_collection(collection)
-
-                    if not collection_id_result:
-                        raise Exception(f"Failed to auto-create collection '{collection_id}'")
-
-                    logger.warning(f"✅ STEP 4.5: Collection '{collection_id}' auto-created successfully")
-                else:
-                    logger.info(f"✅ STEP 4.5: Collection '{collection_id}' exists")
-
-            except Exception as e:
-                logger.error(f"❌ STEP 4.5 FAILED: Collection check/creation error: {e}\n{traceback.format_exc()}")
-                raise
-
-            # STEP 5: Insert into PgSTAC (with idempotency check)
-            try:
-                insert_start = datetime.utcnow()
-
-                # Check if item already exists (idempotency)
-                logger.debug(f"🔍 STEP 5A: Checking if item {item.id} already exists in collection {collection_id}...")
-                if stac_infra.item_exists(item.id, collection_id):
-                    logger.info(f"⏭️ STEP 5: Item {item.id} already exists in PgSTAC - skipping insertion (idempotent)")
-                    insert_result = {
-                        'success': True,
-                        'item_id': item.id,
-                        'collection': collection_id,
-                        'skipped': True,
-                        'reason': 'Item already exists (idempotent operation)'
-                    }
-                else:
-                    # Item doesn't exist - insert it
-                    logger.info(f"💾 STEP 5B: Inserting new item {item.id} into PgSTAC collection {collection_id}...")
-                    insert_result = stac_infra.insert_item(item, collection_id)
-                    logger.info(f"✅ STEP 5B: PgSTAC insert completed - success={insert_result.get('success')}")
-
-                insert_duration = (datetime.utcnow() - insert_start).total_seconds()
-                logger.info(f"✅ STEP 5: PgSTAC operation completed in {insert_duration:.2f}s")
-                inserted_to_pgstac = insert_result.get('success', False) or insert_result.get('skipped', False)
-
-            except Exception as e:
-                insert_duration = (datetime.utcnow() - insert_start).total_seconds() if 'insert_start' in locals() else 0
-                logger.error(f"❌ STEP 5 FAILED after {insert_duration:.2f}s: PgSTAC error: {e}\n{traceback.format_exc()}")
-                raise
-
-        else:
-            # pgSTAC not available - skip Steps 4, 4.5, 5
-            logger.info(f"⏭️ STEPS 4, 4.5, 5: Skipped (pgSTAC unavailable) - JSON fallback is authoritative")
             insert_result = {
-                'success': False,
-                'skipped': True,
-                'reason': 'pgSTAC unavailable - JSON fallback written'
+                'success': True,
+                'cached': True,
+                'reason': 'STAC item cached — pgSTAC deferred to approval'
             }
-            inserted_to_pgstac = False
+        except Exception as cache_err:
+            logger.warning(f"⚠️ STEPS 4-5: STAC caching failed (non-fatal): {cache_err}")
+            insert_result = {
+                'success': True,
+                'cached': False,
+                'reason': f'STAC caching failed: {cache_err}'
+            }
 
         duration = (datetime.utcnow() - start_time).total_seconds()
 
@@ -483,38 +422,7 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
             logger.error(f"❌ STEP 6 FAILED: Metadata extraction error: {e}\n{traceback.format_exc()}")
             raise
 
-        # Check pgSTAC insertion status (only relevant if pgstac was available)
-        insert_success = insert_result.get('success', False) if insert_result else False
-        insert_skipped = insert_result.get('skipped', False) if insert_result else False
-
-        # In degraded mode (pgstac unavailable), we succeed if JSON was written
-        if not pgstac_available:
-            # Degraded mode - success depends on JSON write, not pgstac
-            pass  # Continue to return success with degraded flag
-        elif not insert_success and not insert_skipped:
-            # Insert failed - this is a FAILURE condition
-            error_msg = insert_result.get('error', 'Unknown pgSTAC insertion error')
-            logger.error(f"❌ STAC INSERTION FAILED: {error_msg}")
-            logger.error(f"💥 Operation cannot complete without successful pgSTAC insertion")
-
-            # Use typed result for errors (F7.21)
-            # Include partial data for debugging
-            partial_data = STACCreationData(
-                collection_id=collection_id,
-                item_id=item.id,
-                blob_name=blob_name,
-                execution_time_seconds=round(duration, 2),
-                extract_time_seconds=round(extract_duration, 2),
-                insert_time_seconds=round(insert_duration, 2),
-                stac_item=item_dict
-            )
-            error_result = STACCreationResult(
-                success=False,
-                error=f"Failed to insert STAC item into pgSTAC: {error_msg}",
-                error_type="STACInsertionError",
-                result=partial_data  # Include partial data for debugging
-            )
-            return error_result.model_dump()
+        # 19 FEB 2026: pgSTAC insertion deferred to approval — no failure check needed here
 
         # STEP 7: Upsert DDH refs to app.dataset_refs (09 JAN 2026 - F7.8)
         # This links internal dataset_id (COG blob path) to external DDH identifiers

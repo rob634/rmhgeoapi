@@ -413,41 +413,22 @@ def _create_stac_collection_impl(
                 collection.extra_fields['geo:countries'] = geo_props.countries
             logger.debug(f"   Added ISO3 attribution to collection: {geo_props.primary_iso3}")
 
-        # CRITICAL (12 NOV 2025): CREATE COLLECTION FIRST before Items
-        # PgSTAC requires collections to exist before items because collections
-        # create table partitions that items use. Without collection, item insertion
-        # fails with: "no partition of relation 'items' found for row"
+        # =========================================================================
+        # 19 FEB 2026: STAC as B2C materialized view
+        # Collection + items are NOT inserted into pgSTAC during processing.
+        # Instead, extract STAC item dicts and cache in cog_metadata.stac_item_json.
+        # pgSTAC insertion happens at approval time via _materialize_stac().
+        # =========================================================================
 
-        # Validate STAC collection
+        # Validate STAC collection (structural check only, no pgSTAC insert)
         collection.validate()
         logger.info(f"✅ STAC collection validated: {collection.id}")
 
-        # CRITICAL FIX (18 NOV 2025): Use SINGLE repository instance
-        # Two instances = two connections = READ AFTER WRITE consistency issue
-        # Solution: Create repository once, use for both insert and verification
-        from infrastructure.pgstac_repository import PgStacRepository
-        pgstac_repo = PgStacRepository()
-
-        # Insert collection into PgSTAC FIRST (creates partition for items)
-        pgstac_id = pgstac_repo.insert_collection(collection)
-        logger.info(f"✅ Collection inserted into PgSTAC: {pgstac_id}")
-
-        # Validate collection exists before creating Items (18 NOV 2025: Use SAME repository!)
-        # This defensive check ensures PgSTAC partition is ready
-        if not pgstac_repo.collection_exists(collection_id):
-            raise RuntimeError(
-                f"Collection '{collection_id}' was not found in PgSTAC after insertion. "
-                f"Cannot create STAC Items without a collection partition. "
-                f"This indicates a PgSTAC insertion failure."
-            )
-        logger.info(f"✅ Collection '{collection_id}' verified in PgSTAC - ready for Items")
-
-        # Import STAC metadata service for item creation
+        # Import STAC metadata service for item extraction
         from services.service_stac_metadata import StacMetadataService
         stac_service = StacMetadataService()
 
-        # V0.9 P2.6: ProvenanceProperties replaces AppMetadata for job traceability
-        # Raster visualization is now handled by renders builder inside extract_item_from_blob
+        # V0.9 P2.6: ProvenanceProperties for job traceability
         provenance = None
         if job_id:
             detected = raster_type.get('detected_type') if raster_type else None
@@ -457,24 +438,23 @@ def _create_stac_collection_impl(
             )
             logger.info(f"   Job traceability: job_id={job_id[:8]}..., job_type={job_type}")
 
-        # ORTHODOX STAC (11 NOV 2025): Create STAC Items for each COG tile
-        # Items are searchable with geometry, datetime, and properties
-        # NOW collection partition exists, so Items can be inserted safely
-        logger.info(f"📝 Creating STAC Items for {len(tile_blobs)} COG tiles...")
+        # Extract STAC Items for each tile and cache in cog_metadata
+        logger.info(f"📝 Extracting STAC Items for {len(tile_blobs)} COG tiles (caching, no pgSTAC)...")
+
+        from infrastructure.raster_metadata_repository import get_raster_metadata_repository
+        cog_repo = get_raster_metadata_repository()
 
         created_items = []
         failed_items = []
 
         for i, tile_blob in enumerate(tile_blobs):
             try:
-                logger.info(f"   Creating STAC Item {i+1}/{len(tile_blobs)}: {tile_blob}")
+                logger.info(f"   Extracting STAC Item {i+1}/{len(tile_blobs)}: {tile_blob}")
 
                 # Generate semantic item ID from blob name
                 tile_name = tile_blob.split('/')[-1].replace('_cog.tif', '').replace('.tif', '')
                 item_id = f"{collection_id}_{tile_name}"
 
-                # V0.9 P2.6: extract_item_from_blob now builds renders internally
-                # V0.9: ProvenanceProperties for job traceability (geoetl:*)
                 item = stac_service.extract_item_from_blob(
                     container=cog_container,
                     blob_name=tile_blob,
@@ -483,186 +463,51 @@ def _create_stac_collection_impl(
                     provenance_props=provenance,
                 )
 
-                # Insert Item into PgSTAC
-                # CRITICAL (12 NOV 2025): Use Pydantic model_dump() for proper JSON serialization
-                # stac-pydantic.Item is a Pydantic model - use model_dump(mode='json') pattern
-                # This properly serializes datetime objects to ISO strings
-                pgstac_id = stac_service.stac.insert_item(item, collection_id)
+                # Convert to dict for caching
+                if hasattr(item, 'model_dump'):
+                    item_dict = item.model_dump(mode='json', by_alias=True)
+                elif isinstance(item, dict):
+                    item_dict = item
+                else:
+                    item_dict = item
+
+                # Cache STAC item dict in cog_metadata (upsert creates record if needed)
+                cog_repo.upsert(
+                    cog_id=item_id,
+                    container=cog_container,
+                    blob_path=tile_blob,
+                    cog_url=f"/vsiaz/{cog_container}/{tile_blob}",
+                    width=0,  # Will be populated by detailed metadata extraction
+                    height=0,
+                    stac_item_id=item_id,
+                    stac_collection_id=collection_id,
+                    etl_job_id=job_id,
+                    stac_item_json=item_dict,
+                )
+
                 created_items.append(item_id)
-                logger.debug(f"   ✅ STAC Item created: {item_id} (pgstac_id: {pgstac_id})")
+                logger.debug(f"   ✅ STAC Item cached: {item_id}")
 
             except Exception as e:
-                logger.error(f"   ❌ Failed to create STAC Item for {tile_blob}: {e}")
-                logger.error(f"      Container: {cog_container}")
-                logger.error(f"      Item ID: {item_id}")
-                logger.error(f"      Progress: {i+1}/{len(tile_blobs)}")
+                logger.error(f"   ❌ Failed to extract/cache STAC Item for {tile_blob}: {e}")
                 logger.error(f"      Traceback: {traceback.format_exc()}")
                 failed_items.append(tile_blob)
-                # CRITICAL (11 NOV 2025): Fail fast if Item creation fails
-                # Orthodox STAC requires Items - if they fail, the collection is incomplete
-                # Better to fail with clear error than succeed with broken/missing Items
                 raise RuntimeError(
-                    f"STAC Item creation failed for tile {i+1}/{len(tile_blobs)}: {tile_blob} "
+                    f"STAC Item extraction failed for tile {i+1}/{len(tile_blobs)}: {tile_blob} "
                     f"in container {cog_container}. "
                     f"Created {len(created_items)} items before failure. "
                     f"Error: {e}"
                 )
 
-        logger.info(f"✅ Created {len(created_items)} STAC Items successfully")
-        if len(created_items) != len(tile_blobs):
-            logger.warning(
-                f"   ⚠️  Only {len(created_items)} of {len(tile_blobs)} items created - "
-                f"this should not happen with fail-fast error handling!"
-            )
+        logger.info(f"✅ Cached {len(created_items)} STAC Items (pgSTAC deferred to approval)")
 
-        # =========================================================================
-        # Phase 4: Register pgSTAC Search (Direct Database - 17 NOV 2025)
-        # =========================================================================
-        # OPTION A ARCHITECTURE (Production Security):
-        # - ETL pipeline writes directly to pgstac.searches table
-        # - TiTiler has read-only database access (better security)
-        # - No APIM needed to protect /searches/register endpoint
-        # - Atomic operations (collection + search in same workflow)
-        # - search_id computed as SHA256 hash (deterministic, permanent)
-        # =========================================================================
-
+        # No pgSTAC search registration at processing time
+        # Search registration will happen at approval via _materialize_stac
         search_id = None
         viewer_url = None
         tilejson_url = None
         tiles_url = None
-
-        try:
-            logger.info(f"🔍 Registering pgSTAC search (direct database write) for collection: {collection_id}")
-
-            # Initialize search registration service (17 NOV 2025 - Option A: Direct database writes)
-            search_registrar = PgSTACSearchRegistration()
-
-            # Register search directly in database (NO TiTiler API call)
-            # Pass collection bbox so TileJSON returns correct bounds for auto-zoom (21 NOV 2025)
-            # Extract bbox from collection extent (pystac Collection object)
-            collection_bbox = None
-            if collection.extent and collection.extent.spatial and collection.extent.spatial.bboxes:
-                collection_bbox = collection.extent.spatial.bboxes[0]  # First bbox
-                logger.debug(f"   Collection bbox for TileJSON: {collection_bbox}")
-
-            search_id = search_registrar.register_collection_search(
-                collection_id=collection_id,
-                metadata={"name": f"{collection_id} mosaic"},
-                bbox=collection_bbox
-            )
-
-            logger.info(f"✅ Search registered: {search_id}")
-            logger.info(f"🔍 DEBUG: search_id type={type(search_id)}, value='{search_id}', len={len(search_id) if isinstance(search_id, str) else 'N/A'}")
-
-            # Generate visualization URLs
-            # BUG-011 FIX (28 JAN 2026): Pass band_indexes for multi-band imagery
-            # Without bidx params, TiTiler returns HTTP 500 for 3+ band COGs
-            config = get_config()
-
-            # Extract band indexes from raster_type dict (passed as function parameter)
-            # BUG-012 FIX (17 FEB 2026): was referencing undefined `raster_meta` variable
-            band_indexes = None
-            band_count = raster_type.get('band_count') if raster_type else None
-            if band_count and band_count > 3:
-                band_indexes = [1, 2, 3]
-                logger.info(f"   Multi-band imagery ({band_count} bands) - defaulting to RGB bands [1,2,3]")
-
-            urls = search_registrar.get_search_urls(
-                search_id=search_id,
-                titiler_base_url=config.titiler_base_url,
-                assets=["data"],
-                band_indexes=band_indexes
-            )
-            viewer_url = urls["viewer"]
-            tilejson_url = urls["tilejson"]
-            tiles_url = urls["tiles"]
-
-            logger.info(f"📊 Generated visualization URLs:")
-            logger.info(f"   Viewer: {viewer_url}")
-            logger.info(f"   TileJSON: {tilejson_url}")
-            logger.info(f"   Tiles: {tiles_url}")
-
-            # Update collection metadata with search info
-            logger.info(f"🔄 Updating collection with search metadata...")
-
-            # Serialize existing links to dicts (pystac Link objects need conversion)
-            existing_links = []
-            for link in collection.links:
-                if hasattr(link, 'to_dict'):
-                    existing_links.append(link.to_dict())
-                elif isinstance(link, dict):
-                    existing_links.append(link)
-                else:
-                    # Fallback: convert to dict manually
-                    existing_links.append({
-                        "rel": getattr(link, 'rel', 'related'),
-                        "href": getattr(link, 'href', str(link))
-                    })
-
-            # Add search_id to summaries and links to collection
-            metadata_update = {
-                "summaries": {
-                    "mosaic:search_id": [search_id]  # STAC summaries use arrays
-                },
-                "links": existing_links + [
-                    {
-                        "rel": "preview",
-                        "href": viewer_url,
-                        "type": "text/html",
-                        "title": "Interactive map preview (TiTiler-PgSTAC)"
-                    },
-                    {
-                        "rel": "tilejson",
-                        "href": tilejson_url,
-                        "type": "application/json",
-                        "title": "TileJSON specification for web maps"
-                    },
-                    {
-                        "rel": "tiles",
-                        "href": tiles_url,
-                        "type": "image/png",
-                        "title": "XYZ tile endpoint (templated)"
-                    }
-                ]
-            }
-
-            # Update collection in pgSTAC
-            pgstac_repo = PgStacRepository()
-            pgstac_repo.update_collection_metadata(collection_id, metadata_update)
-
-            logger.info(f"✅ Collection metadata updated with search_id: {search_id}")
-
-        except Exception as e:
-            # CRITICAL FIX (18 NOV 2025): Eliminate silent errors - propagate exception to task record
-            # Search registration failures should fail the entire collection creation task
-            # This ensures we know WHY visualization URLs are missing (not silent nulls)
-            logger.error(f"❌ Search registration failed - failing task to expose root cause")
-            logger.error(f"   Collection: {collection_id}")
-            logger.error(f"   Error: {e}")
-            logger.error(f"   Error type: {type(e).__name__}")
-            logger.error(f"   Traceback: {traceback.format_exc()}")
-
-            # Clean up: Remove collection from PgSTAC since we can't provide visualization
-            try:
-                logger.info(f"🧹 Cleaning up collection '{collection_id}' due to search registration failure...")
-                pgstac_repo = PgStacRepository()
-                with pgstac_repo._pg_repo._get_connection() as conn:
-                    with conn.cursor() as cur:
-                        # Delete collection (CASCADE will delete items)
-                        cur.execute("DELETE FROM pgstac.collections WHERE id = %s", (collection_id,))
-                        conn.commit()
-                logger.info(f"✅ Collection cleanup complete")
-            except Exception as cleanup_error:
-                logger.error(f"⚠️  Failed to cleanup collection: {cleanup_error}")
-                # Don't mask original error with cleanup failure
-
-            # Propagate original exception to task record (fail task)
-            raise RuntimeError(
-                f"Search registration failed for collection '{collection_id}': {e}"
-            ) from e
-
-        # Collection already validated and inserted above (12 NOV 2025)
-        # search_id, URLs added if search registration succeeded
+        pgstac_id = None
 
         # V0.8 FIX (27 JAN 2026): Return with "result" wrapper to match handler contract
         # Handler expects: {"success": True, "result": {...}}

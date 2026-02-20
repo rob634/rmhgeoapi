@@ -199,11 +199,9 @@ class JanitorService:
         """
         from config.defaults import TaskRoutingDefaults, QueueDefaults
 
-        # V0.8: Consolidated queue routing
+        # V0.9: All tasks route to Docker (19 FEB 2026)
         if task_type in TaskRoutingDefaults.DOCKER_TASKS:
             return QueueDefaults.CONTAINER_TASKS_QUEUE
-        elif task_type in TaskRoutingDefaults.FUNCTIONAPP_TASKS:
-            return QueueDefaults.FUNCTIONAPP_TASKS_QUEUE
         else:
             # Default to jobs queue for unknown types
             return QueueDefaults.JOBS_QUEUE

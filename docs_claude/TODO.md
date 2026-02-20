@@ -18,6 +18,7 @@
 | [DRY_RUN_IMPLEMENTATION.md](./DRY_RUN_IMPLEMENTATION.md) | US 1.x dry_run validation |
 | [APPROVAL_WORKFLOW.md](./APPROVAL_WORKFLOW.md) | US 4.2 approval system |
 | [DOCKER_INTEGRATION.md](./DOCKER_INTEGRATION.md) | US 1.1 Docker framework |
+| [MULTI_APP_CLEANUP.md](./MULTI_APP_CLEANUP.md) | EN-TD.3 Multi-app routing cleanup |
 | [HISTORY.md](./HISTORY.md) | Completed work log |
 
 ---
@@ -241,6 +242,21 @@ Items below are tracked here but not yet added to ADO. Add to ADO when prioritiz
 - **Phase 3**: Incremental cleanup. One repo per commit. Existing json.dumps calls are harmless, so no urgency — can be done over multiple sessions.
 - **Phase 4**: Only after Phase 3 complete. Low priority.
 - **Models stay clean**: No `@field_serializer` needed. `model_dump()` returns native Python types. psycopg3 adapter handles serialization at the driver layer.
+
+### EN-TD.3: Multi-App Routing Cleanup `[LOW PRIORITY]`
+
+**Plan**: [MULTI_APP_CLEANUP.md](./MULTI_APP_CLEANUP.md)
+**Trigger**: All processing consolidated to Docker worker (V0.8, 24 JAN 2026). Old multi-Function App routing artifacts remain.
+**Scope**: Dead queue configs, unused app URLs, `_force_functionapp` override, `WORKER_FUNCTIONAPP` mode, obsolete TaskRecord fields (`target_queue`, `executed_by_app`, `execution_started_at`), 410 endpoint stubs.
+
+| Task | Status | Details |
+|------|--------|---------|
+| T-TD3.1: Remove deprecated queue names + config fields | 🔲 Ready | `config/queue_config.py`, `config/defaults.py` — 9 dead items |
+| T-TD3.2: Remove `_force_functionapp` override | 🔲 Ready | `triggers/submit_job.py`, `core/machine.py` — routes to dead queue |
+| T-TD3.3: Remove unused app URLs from AppModeConfig | 🔲 Ready | `config/app_mode_config.py` — `raster_app_url`, `vector_app_url` |
+| T-TD3.4: Remove `WORKER_FUNCTIONAPP` mode + `functionapp-tasks` config | 🔲 Ready | `config/app_mode_config.py`, `config/queue_config.py` |
+| T-TD3.5: Remove obsolete TaskRecord fields (schema migration) | 🔲 Ready | `core/models/task.py` — requires ALTER TABLE or model-only removal |
+| T-TD3.6: Remove 410 Gone endpoint stubs | 🔲 Blocked | `triggers/platform/platform_bp.py` — keep until DDH migration complete |
 
 ### EN-TD.1: Raw JSON Parsing in HTTP Triggers `[DONE 12 FEB 2026]`
 

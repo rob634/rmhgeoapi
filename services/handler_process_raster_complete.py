@@ -2203,6 +2203,8 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                 source_crs=validation_result.get('source_crs'),
                 # Raster type in custom_properties
                 custom_properties={'raster_type': detected_type},
+                # 19 FEB 2026: Cache STAC item dict for materialization at approval
+                stac_item_json=stac_item_dict,
             )
             logger.info(f"✅ Phase 3a: app.cog_metadata persisted for {stac_item_id} "
                         f"({cog_width}x{cog_height}, {detected_type}, "
@@ -2257,85 +2259,39 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
         _report_progress(docker_context, 85, 3, 4, "Extract & Persist", f"Complete ({phase3_duration:.1f}s)")
 
         # =====================================================================
-        # PHASE 4: INSERT STAC INTO PGSTAC (85-100%)
+        # PHASE 4: STAC DEFERRED TO APPROVAL (85-100%)
         # =====================================================================
-        # V0.9 P2.7: STAC item was already built in Phase 3 Step 1.
-        # Now just insert the pre-built dict into pgstac.
+        # 19 FEB 2026: STAC as B2C materialized view.
+        # STAC item dict is cached in cog_metadata.stac_item_json (Phase 3a).
+        # pgSTAC write deferred to approval time via _materialize_stac().
         if checkpoint and checkpoint.should_skip(4):
-            logger.info("⏭️ PHASE 4: Skipping STAC insertion (already completed)")
-            _report_progress(docker_context, 100, 4, 4, "STAC Registration", "Skipped (resumed)")
+            logger.info("⏭️ PHASE 4: Skipping (already completed)")
+            _report_progress(docker_context, 100, 4, 4, "STAC Cached", "Skipped (resumed)")
             stac_result = checkpoint.get_data('stac_result', {})
         else:
-            logger.info("🔄 PHASE 4: Inserting STAC item into pgstac...")
-            _report_progress(docker_context, 90, 4, 4, "STAC Registration", "Inserting into pgstac")
+            logger.info("🔄 PHASE 4: STAC item cached — pgSTAC write deferred to approval")
+            _report_progress(docker_context, 95, 4, 4, "STAC Cached", "Deferred to approval")
             phase4_start = time.time()
 
-            _emit_job_event(job_id, task_id, 1, 'raster_stac_started', {
+            _emit_job_event(job_id, task_id, 1, 'raster_stac_cached', {
                 'collection_id': collection_id,
             })
 
-            stac_result = {}
-            if stac_item_dict:
-                try:
-                    from infrastructure.pgstac_repository import PgStacRepository
-                    from services.stac_collection import build_raster_stac_collection
+            stac_result = {
+                'item_id': stac_item_dict.get('id') if stac_item_dict else None,
+                'collection_id': collection_id,
+                'cached': True,
+            }
 
-                    # CRITICAL (17 FEB 2026): CREATE COLLECTION FIRST before Item.
-                    # PgSTAC requires collections to exist before items because collections
-                    # create table partitions that items use. Without collection, item insertion
-                    # fails with: "no partition of relation 'items' found for row"
-                    pgstac_repo = PgStacRepository()
-
-                    # Build collection using canonical builder (same as tiled flow)
-                    item_bbox = stac_item_dict.get('bbox', [-180, -90, 180, 90])
-                    item_dt = stac_item_dict.get('properties', {}).get('datetime')
-                    collection_dict = build_raster_stac_collection(
-                        collection_id=collection_id,
-                        bbox=item_bbox,
-                        temporal_start=item_dt,
-                    )
-
-                    pgstac_repo.insert_collection(collection_dict)
-                    logger.info(f"✅ Collection upserted: {collection_id}")
-
-                    # Verify collection exists before inserting item
-                    if not pgstac_repo.collection_exists(collection_id):
-                        raise RuntimeError(
-                            f"Collection '{collection_id}' not found in PgSTAC after insertion. "
-                            f"Cannot create STAC Items without a collection partition."
-                        )
-
-                    # Now insert item — collection partition is guaranteed to exist
-                    pgstac_id = pgstac_repo.insert_item(stac_item_dict, collection_id)
-
-                    stac_result = {
-                        'item_id': stac_item_dict.get('id'),
-                        'collection_id': collection_id,
-                        'pgstac_id': pgstac_id,
-                    }
-                    logger.info(f"✅ STAC item inserted: {stac_item_dict.get('id')}")
-
-                except Exception as insert_err:
-                    logger.warning(f"⚠️ STAC insertion failed (non-fatal): {insert_err}")
-                    stac_result = {
-                        "degraded": True,
-                        "error": str(insert_err),
-                        "message": "STAC insertion into pgstac failed",
-                    }
-            else:
-                stac_result = {
-                    "degraded": True,
-                    "error": "No STAC item dict available (extraction failed in Phase 3)",
-                    "message": "STAC extraction failed",
-                }
+            if not stac_item_dict:
+                stac_result['degraded'] = True
+                stac_result['error'] = "No STAC item dict available (extraction failed in Phase 3)"
 
             phase4_duration = time.time() - phase4_start
-            logger.info(f"✅ PHASE 4 complete: {phase4_duration:.2f}s")
-            if stac_result.get('item_id'):
-                logger.info(f"   STAC item: {stac_result.get('item_id')}")
-            _report_progress(docker_context, 100, 4, 4, "STAC Registration", f"Complete ({phase4_duration:.1f}s)")
+            logger.info(f"✅ PHASE 4 complete: {phase4_duration:.2f}s (STAC cached, pgSTAC deferred)")
+            _report_progress(docker_context, 100, 4, 4, "STAC Cached", f"Complete ({phase4_duration:.1f}s)")
 
-            _emit_job_event(job_id, task_id, 1, 'raster_stac_complete', {
+            _emit_job_event(job_id, task_id, 1, 'raster_stac_cached_complete', {
                 'collection_id': collection_id,
                 'item_id': stac_result.get('item_id'),
             }, duration_ms=int(phase4_duration * 1000))

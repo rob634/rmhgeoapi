@@ -152,6 +152,12 @@ from .asset import (
     AssetRevision
 )
 
+# V0.9 Asset/Release entity models (21 FEB 2026 - Entity Split)
+from .asset_v2 import (
+    Asset,
+    AssetRelease,
+)
+
 # Platform registry models (V0.8 Entity Architecture - 29 JAN 2026)
 from .platform_registry import (
     Platform,
@@ -313,6 +319,10 @@ __all__ = [
     'ClearanceState',
     'GeospatialAsset',
     'AssetRevision',
+
+    # V0.9 Asset/Release entity models (21 FEB 2026 - Entity Split)
+    'Asset',
+    'AssetRelease',
 
     # Platform registry models (V0.8 Entity Architecture - 29 JAN 2026)
     'Platform',

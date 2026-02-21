@@ -90,6 +90,9 @@ if TYPE_CHECKING:
     from .asset_repository import GeospatialAssetRepository as _GeospatialAssetRepository
     from .revision_repository import AssetRevisionRepository as _AssetRevisionRepository
     from .platform_registry_repository import PlatformRegistryRepository as _PlatformRegistryRepository
+    # V0.9 Asset/Release entity split (21 FEB 2026)
+    from .asset_repository_v2 import AssetRepositoryV2 as _AssetRepositoryV2
+    from .release_repository import ReleaseRepository as _ReleaseRepository
     from .connection_pool import ConnectionPoolManager as _ConnectionPoolManager
     from .schema_analyzer import (
         SchemaAnalyzer as _SchemaAnalyzer,
@@ -204,6 +207,14 @@ def __getattr__(name: str):
         from .platform_registry_repository import PlatformRegistryRepository
         return PlatformRegistryRepository
 
+    # V0.9 Asset/Release entity split (21 FEB 2026)
+    elif name == "AssetRepositoryV2":
+        from .asset_repository_v2 import AssetRepositoryV2
+        return AssetRepositoryV2
+    elif name == "ReleaseRepository":
+        from .release_repository import ReleaseRepository
+        return ReleaseRepository
+
     # Pipeline Observability (E13)
     elif name == "MetricsRepository":
         from .metrics_repository import MetricsRepository
@@ -293,6 +304,9 @@ __all__ = [
     "GeospatialAssetRepository",
     "AssetRevisionRepository",
     "PlatformRegistryRepository",
+    # V0.9 Asset/Release entity split (21 FEB 2026)
+    "AssetRepositoryV2",
+    "ReleaseRepository",
     "MetricsRepository",
     "JobProgressTracker",
     "JobProgressSnapshot",

@@ -4,7 +4,9 @@
 # STATUS: Service - B2B catalog lookup and asset URL generation
 # PURPOSE: Provide DDH-identifier-based STAC access for B2B integration
 # CREATED: 16 JAN 2026
+# LAST_REVIEWED: 21 FEB 2026
 # EPIC: F12.8 API Documentation Hub - B2B STAC Catalog Access
+# V0.9: Unified catalog ops use Asset+Release instead of GeospatialAsset
 # ============================================================================
 """
 Platform Catalog Service - B2B STAC Access for DDH Integration.
@@ -66,12 +68,15 @@ class PlatformCatalogService:
     def __init__(self):
         """Initialize with repository dependencies."""
         from infrastructure import PlatformRepository, JobRepository
+        from infrastructure import AssetRepositoryV2, ReleaseRepository
         from infrastructure.pgstac_repository import PgStacRepository
         from config import get_config
 
         self._platform_repo = PlatformRepository()
         self._job_repo = JobRepository()
         self._stac_repo = PgStacRepository()
+        self._asset_repo = AssetRepositoryV2()
+        self._release_repo = ReleaseRepository()
         self._config = get_config()
 
         logger.debug("PlatformCatalogService initialized")
@@ -469,10 +474,11 @@ class PlatformCatalogService:
         }
 
     # =========================================================================
-    # UNIFIED CATALOG OPERATIONS (10 FEB 2026 - Bypasses STAC/OGC APIs)
+    # UNIFIED CATALOG OPERATIONS (V0.9 - Asset+Release entity split)
     # =========================================================================
-    # These methods query app.geospatial_assets directly (source of truth) and
-    # JOIN to metadata tables for bbox. Works for both vectors AND rasters.
+    # These methods query app.assets + app.asset_releases (source of truth).
+    # Works for both vectors AND rasters.
+    # V0.9 (21 FEB 2026): Replaced GeospatialAsset with Asset+Release.
     # See: docs_claude/UNIFIED_B2B_CATALOG.md
 
     def lookup_unified(
@@ -484,8 +490,14 @@ class PlatformCatalogService:
         """
         Unified lookup - works for both raster and vector data.
 
-        Queries GeospatialAsset directly, bypasses STAC/OGC APIs.
-        This is the recommended B2B lookup method for V0.8+.
+        Queries Asset+Release directly, bypasses STAC/OGC APIs.
+        This is the recommended B2B lookup method for V0.9+.
+
+        Strategy:
+            1. Find Asset by identity (platform=ddh, dataset_id, resource_id)
+            2. If version_id provided, get that specific Release version
+            3. Otherwise, get the latest approved Release
+            4. Build response from both Asset and Release data
 
         Args:
             dataset_id: DDH dataset identifier
@@ -501,24 +513,16 @@ class PlatformCatalogService:
             ...     print(f"Type: {result['data_type']}, bbox: {result['metadata']['bbox']}")
         """
         from datetime import datetime, timezone
-        from infrastructure import GeospatialAssetRepository
 
         logger.info(
-            f"🔍 Unified catalog lookup: dataset={dataset_id}, "
+            f"Unified catalog lookup: dataset={dataset_id}, "
             f"resource={resource_id}, version={version_id}"
         )
 
-        # Query GeospatialAsset with metadata JOIN
-        repo = GeospatialAssetRepository()
-        platform_refs = {
-            "dataset_id": dataset_id,
-            "resource_id": resource_id,
-            "version_id": version_id
-        }
+        # Step 1: Find Asset by identity triple
+        asset = self._asset_repo.get_by_identity("ddh", dataset_id, resource_id)
 
-        result = repo.get_with_metadata("ddh", platform_refs)
-
-        if not result:
+        if not asset:
             logger.debug("   No asset found for these DDH identifiers")
             return {
                 "found": False,
@@ -526,38 +530,68 @@ class PlatformCatalogService:
                 "message": "No asset found for these DDH identifiers. "
                            "The data may not have been submitted through the Platform API.",
                 "suggestion": "Submit the data via POST /api/platform/submit",
-                "ddh_refs": platform_refs,
+                "ddh_refs": {
+                    "dataset_id": dataset_id,
+                    "resource_id": resource_id,
+                    "version_id": version_id
+                },
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }
 
-        # Build response based on data_type
-        data_type = result.get('data_type')
+        # Step 2: Get Release - specific version or latest
+        if version_id:
+            release = self._release_repo.get_by_version(asset.asset_id, version_id)
+        else:
+            release = self._release_repo.get_latest(asset.asset_id)
+
+        if not release:
+            logger.debug(f"   No release found for asset {asset.asset_id[:16]}...")
+            return {
+                "found": False,
+                "reason": "release_not_found",
+                "message": f"Asset exists but no {'version ' + version_id if version_id else 'approved release'} found.",
+                "asset_id": asset.asset_id,
+                "ddh_refs": {
+                    "dataset_id": dataset_id,
+                    "resource_id": resource_id,
+                    "version_id": version_id
+                },
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+
+        # Step 3: Build response based on data_type
+        asset_dict = asset.to_dict()
+        release_dict = release.to_dict()
+        data_type = asset.data_type
 
         if data_type == 'vector':
-            response = self._build_vector_response(result)
+            response = self._build_vector_response(asset_dict, release_dict)
         elif data_type == 'raster':
-            response = self._build_raster_response(result)
+            response = self._build_raster_response(asset_dict, release_dict)
         else:
             logger.warning(f"   Unknown data_type: {data_type}")
-            response = self._build_generic_response(result)
+            response = self._build_generic_response(asset_dict, release_dict)
 
-        logger.info(f"   ✅ Found {data_type}: {result.get('asset_id', '')[:16]}...")
+        logger.info(f"   Found {data_type}: {asset.asset_id[:16]}...")
         return response
 
-    def _build_vector_response(self, asset: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_vector_response(self, asset: Dict[str, Any], release: Dict[str, Any]) -> Dict[str, Any]:
         """
         Build vector-specific response with TiPG URLs.
 
+        V0.9: Takes separate asset and release dicts. Status and lineage
+        fields come from the release, identity from the asset.
+
         Args:
-            asset: Asset dict from get_with_metadata()
+            asset: Asset dict from Asset.to_dict()
+            release: Release dict from AssetRelease.to_dict()
 
         Returns:
             Unified response format with vector-specific fields
         """
         from datetime import datetime, timezone
 
-        table_name = asset.get('table_name')
-        vector_meta = asset.get('vector', {})
+        table_name = release.get('table_name')
 
         # Generate TiPG URLs
         tile_urls = self._config.generate_vector_tile_urls(table_name, schema="geo") if table_name else {}
@@ -568,23 +602,19 @@ class PlatformCatalogService:
             "data_type": "vector",
 
             "status": {
-                "processing": asset.get('processing_status', 'pending'),
-                "approval": asset.get('approval_state', 'pending_review'),
-                "clearance": asset.get('clearance_state', 'uncleared')
+                "processing": release.get('processing_status', 'pending'),
+                "approval": release.get('approval_state', 'pending_review'),
+                "clearance": release.get('clearance_state', 'uncleared')
             },
 
             "metadata": {
-                "bbox": asset.get('bbox'),
-                "title": vector_meta.get('title'),
-                "description": vector_meta.get('description'),
-                "created_at": asset.get('created_at').isoformat() if asset.get('created_at') else None
+                "bbox": None,  # V0.9: bbox requires metadata JOIN (not yet implemented)
+                "created_at": asset.get('created_at')
             },
 
             "vector": {
                 "table_name": table_name,
                 "schema": "geo",
-                "feature_count": vector_meta.get('feature_count'),
-                "geometry_type": vector_meta.get('geometry_type'),
                 "endpoints": {
                     "features": f"/api/features/collections/{table_name}/items" if table_name else None,
                     "collection": f"/api/features/collections/{table_name}" if table_name else None
@@ -596,24 +626,33 @@ class PlatformCatalogService:
                 }
             },
 
-            "ddh_refs": asset.get('platform_refs', {}),
+            "ddh_refs": {
+                "dataset_id": asset.get('dataset_id'),
+                "resource_id": asset.get('resource_id'),
+                "version_id": release.get('version_id')
+            },
 
             "lineage": {
-                "lineage_id": asset.get('lineage_id'),
-                "version_ordinal": asset.get('version_ordinal'),
-                "is_latest": asset.get('is_latest'),
-                "is_served": asset.get('is_served')
+                "asset_id": asset.get('asset_id'),
+                "version_id": release.get('version_id'),
+                "version_ordinal": release.get('version_ordinal'),
+                "is_latest": release.get('is_latest'),
+                "is_served": release.get('is_served')
             },
 
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
-    def _build_raster_response(self, asset: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_raster_response(self, asset: Dict[str, Any], release: Dict[str, Any]) -> Dict[str, Any]:
         """
         Build raster-specific response with TiTiler URLs.
 
+        V0.9: Takes separate asset and release dicts. Physical outputs
+        (blob_path, stac IDs) and status come from the release.
+
         Args:
-            asset: Asset dict from get_with_metadata()
+            asset: Asset dict from Asset.to_dict()
+            release: Release dict from AssetRelease.to_dict()
 
         Returns:
             Unified response format with raster-specific fields
@@ -621,10 +660,9 @@ class PlatformCatalogService:
         from datetime import datetime, timezone
         from urllib.parse import quote_plus
 
-        blob_path = asset.get('blob_path')
-        raster_meta = asset.get('raster', {})
-        stac_collection_id = asset.get('stac_collection_id')
-        stac_item_id = asset.get('stac_item_id')
+        blob_path = release.get('blob_path')
+        stac_collection_id = release.get('stac_collection_id')
+        stac_item_id = release.get('stac_item_id')
 
         # Generate TiTiler URLs if we have blob_path
         titiler_urls = {}
@@ -652,25 +690,19 @@ class PlatformCatalogService:
             "data_type": "raster",
 
             "status": {
-                "processing": asset.get('processing_status', 'pending'),
-                "approval": asset.get('approval_state', 'pending_review'),
-                "clearance": asset.get('clearance_state', 'uncleared')
+                "processing": release.get('processing_status', 'pending'),
+                "approval": release.get('approval_state', 'pending_review'),
+                "clearance": release.get('clearance_state', 'uncleared')
             },
 
             "metadata": {
-                "bbox": asset.get('bbox'),
-                "created_at": asset.get('created_at').isoformat() if asset.get('created_at') else None
+                "bbox": None,  # V0.9: bbox requires metadata JOIN (not yet implemented)
+                "created_at": asset.get('created_at')
             },
 
             "raster": {
                 "blob_path": blob_path,
                 "container": "silver-cogs",
-                "band_count": raster_meta.get('band_count'),
-                "dtype": raster_meta.get('dtype'),
-                "dimensions": {
-                    "width": raster_meta.get('width'),
-                    "height": raster_meta.get('height')
-                } if raster_meta.get('width') else None,
                 "stac": {
                     "collection_id": stac_collection_id,
                     "item_id": stac_item_id
@@ -678,24 +710,32 @@ class PlatformCatalogService:
                 "tiles": titiler_urls
             },
 
-            "ddh_refs": asset.get('platform_refs', {}),
+            "ddh_refs": {
+                "dataset_id": asset.get('dataset_id'),
+                "resource_id": asset.get('resource_id'),
+                "version_id": release.get('version_id')
+            },
 
             "lineage": {
-                "lineage_id": asset.get('lineage_id'),
-                "version_ordinal": asset.get('version_ordinal'),
-                "is_latest": asset.get('is_latest'),
-                "is_served": asset.get('is_served')
+                "asset_id": asset.get('asset_id'),
+                "version_id": release.get('version_id'),
+                "version_ordinal": release.get('version_ordinal'),
+                "is_latest": release.get('is_latest'),
+                "is_served": release.get('is_served')
             },
 
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
-    def _build_generic_response(self, asset: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_generic_response(self, asset: Dict[str, Any], release: Dict[str, Any]) -> Dict[str, Any]:
         """
         Build generic response for unknown data types.
 
+        V0.9: Takes separate asset and release dicts.
+
         Args:
-            asset: Asset dict from get_with_metadata()
+            asset: Asset dict from Asset.to_dict()
+            release: Release dict from AssetRelease.to_dict()
 
         Returns:
             Basic response with available fields
@@ -708,17 +748,29 @@ class PlatformCatalogService:
             "data_type": asset.get('data_type'),
 
             "status": {
-                "processing": asset.get('processing_status', 'pending'),
-                "approval": asset.get('approval_state', 'pending_review'),
-                "clearance": asset.get('clearance_state', 'uncleared')
+                "processing": release.get('processing_status', 'pending'),
+                "approval": release.get('approval_state', 'pending_review'),
+                "clearance": release.get('clearance_state', 'uncleared')
             },
 
             "metadata": {
-                "bbox": asset.get('bbox'),
-                "created_at": asset.get('created_at').isoformat() if asset.get('created_at') else None
+                "bbox": None,
+                "created_at": asset.get('created_at')
             },
 
-            "ddh_refs": asset.get('platform_refs', {}),
+            "ddh_refs": {
+                "dataset_id": asset.get('dataset_id'),
+                "resource_id": asset.get('resource_id'),
+                "version_id": release.get('version_id')
+            },
+
+            "lineage": {
+                "asset_id": asset.get('asset_id'),
+                "version_id": release.get('version_id'),
+                "version_ordinal": release.get('version_ordinal'),
+                "is_latest": release.get('is_latest'),
+                "is_served": release.get('is_served')
+            },
 
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
@@ -727,24 +779,22 @@ class PlatformCatalogService:
         """
         Get service URLs by asset_id.
 
-        Retrieves an asset by its ID and returns appropriate service URLs
-        based on data_type.
+        Retrieves an Asset and its latest approved Release, then returns
+        appropriate service URLs based on data_type.
 
         Args:
-            asset_id: GeospatialAsset identifier
+            asset_id: Asset identifier
 
         Returns:
             Dict with service URLs for the asset
         """
         from datetime import datetime, timezone
-        from infrastructure import GeospatialAssetRepository
 
-        logger.info(f"🔗 Getting URLs for asset: {asset_id[:16]}...")
+        logger.info(f"Getting URLs for asset: {asset_id[:16]}...")
 
-        repo = GeospatialAssetRepository()
-        asset = repo.get_active_by_id(asset_id)
+        asset = self._asset_repo.get_by_id(asset_id)
 
-        if not asset:
+        if not asset or not asset.is_active():
             return {
                 "found": False,
                 "reason": "asset_not_found",
@@ -752,34 +802,27 @@ class PlatformCatalogService:
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }
 
-        # Convert to dict for building response
-        asset_dict = {
-            'asset_id': asset.asset_id,
-            'data_type': asset.data_type,
-            'table_name': asset.table_name,
-            'blob_path': asset.blob_path,
-            'stac_item_id': asset.stac_item_id,
-            'stac_collection_id': asset.stac_collection_id,
-            'platform_refs': asset.platform_refs,
-            'processing_status': asset.processing_status.value if hasattr(asset.processing_status, 'value') else asset.processing_status,
-            'approval_state': asset.approval_state.value if hasattr(asset.approval_state, 'value') else asset.approval_state,
-            'clearance_state': asset.clearance_state.value if hasattr(asset.clearance_state, 'value') else asset.clearance_state,
-            'created_at': asset.created_at,
-            'lineage_id': asset.lineage_id,
-            'version_ordinal': asset.version_ordinal,
-            'is_latest': asset.is_latest,
-            'is_served': asset.is_served,
-            'vector': {},  # Will be populated if needed
-            'raster': {},  # Will be populated if needed
-            'bbox': None   # Would need metadata JOIN for this
-        }
+        # Get latest approved release
+        release = self._release_repo.get_latest(asset.asset_id)
+
+        if not release:
+            return {
+                "found": False,
+                "reason": "release_not_found",
+                "message": f"Asset '{asset_id}' exists but has no approved release",
+                "asset_id": asset_id,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+
+        asset_dict = asset.to_dict()
+        release_dict = release.to_dict()
 
         if asset.data_type == 'vector':
-            return self._build_vector_response(asset_dict)
+            return self._build_vector_response(asset_dict, release_dict)
         elif asset.data_type == 'raster':
-            return self._build_raster_response(asset_dict)
+            return self._build_raster_response(asset_dict, release_dict)
         else:
-            return self._build_generic_response(asset_dict)
+            return self._build_generic_response(asset_dict, release_dict)
 
     def list_dataset_unified(
         self,
@@ -788,10 +831,10 @@ class PlatformCatalogService:
         offset: int = 0
     ) -> Dict[str, Any]:
         """
-        List all assets for a dataset with metadata.
+        List all assets for a dataset with their latest releases.
 
-        Queries GeospatialAsset directly, returns all assets (rasters and vectors)
-        for the specified dataset.
+        V0.9: JOINs app.assets with app.asset_releases to get both
+        identity and versioned artifact data in a single query.
 
         Args:
             dataset_id: DDH dataset identifier
@@ -802,33 +845,68 @@ class PlatformCatalogService:
             Dict with assets list and count
         """
         from datetime import datetime, timezone
-        from infrastructure import GeospatialAssetRepository
+        from psycopg import sql
 
-        logger.info(f"📋 Unified listing for dataset: {dataset_id}")
+        logger.info(f"Unified listing for dataset: {dataset_id}")
 
-        repo = GeospatialAssetRepository()
-        assets = repo.list_by_dataset_with_metadata("ddh", dataset_id, limit, offset)
+        # JOIN assets with their latest release
+        query = sql.SQL("""
+            SELECT a.asset_id, a.platform_id, a.dataset_id, a.resource_id,
+                   a.data_type, a.created_at as asset_created_at,
+                   r.release_id, r.version_id, r.version_ordinal,
+                   r.is_latest, r.is_served,
+                   r.blob_path, r.table_name,
+                   r.stac_item_id, r.stac_collection_id,
+                   r.processing_status, r.approval_state, r.clearance_state,
+                   r.created_at as release_created_at
+            FROM {schema}.{assets} a
+            LEFT JOIN {schema}.{releases} r
+                ON r.asset_id = a.asset_id AND r.is_latest = true
+            WHERE a.platform_id = 'ddh'
+              AND a.dataset_id = %s
+              AND a.deleted_at IS NULL
+            ORDER BY r.created_at DESC NULLS LAST
+            LIMIT %s OFFSET %s
+        """).format(
+            schema=sql.Identifier("app"),
+            assets=sql.Identifier("assets"),
+            releases=sql.Identifier("asset_releases")
+        )
+
+        with self._asset_repo._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, (dataset_id, limit, offset))
+                rows = cur.fetchall()
 
         items = []
-        for asset in assets:
-            data_type = asset.get('data_type')
+        for row in rows:
+            data_type = row.get('data_type')
             item = {
-                "asset_id": asset.get('asset_id'),
+                "asset_id": row.get('asset_id'),
                 "data_type": data_type,
-                "bbox": asset.get('bbox'),
-                "processing_status": asset.get('processing_status'),
-                "approval_state": asset.get('approval_state'),
-                "created_at": asset.get('created_at').isoformat() if asset.get('created_at') else None,
-                "ddh_refs": asset.get('platform_refs', {})
+                "processing_status": row.get('processing_status'),
+                "approval_state": row.get('approval_state'),
+                "created_at": row['asset_created_at'].isoformat() if row.get('asset_created_at') else None,
+                "ddh_refs": {
+                    "dataset_id": row.get('dataset_id'),
+                    "resource_id": row.get('resource_id'),
+                    "version_id": row.get('version_id')
+                },
+                "lineage": {
+                    "asset_id": row.get('asset_id'),
+                    "version_id": row.get('version_id'),
+                    "version_ordinal": row.get('version_ordinal'),
+                    "is_latest": row.get('is_latest'),
+                    "is_served": row.get('is_served')
+                }
             }
 
             # Add type-specific identifiers
             if data_type == 'vector':
-                item["table_name"] = asset.get('table_name')
-                item["feature_count"] = asset.get('vector', {}).get('feature_count')
+                item["table_name"] = row.get('table_name')
             elif data_type == 'raster':
-                item["stac_item_id"] = asset.get('stac_item_id')
-                item["stac_collection_id"] = asset.get('stac_collection_id')
+                item["stac_item_id"] = row.get('stac_item_id')
+                item["stac_collection_id"] = row.get('stac_collection_id')
 
             items.append(item)
 

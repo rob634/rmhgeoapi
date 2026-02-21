@@ -229,8 +229,14 @@ def _default_platform_callback(job_id: str, job_type: str, status: str, result: 
             logger.debug(f"[RELEASE] No release linked to job {job_id[:8]}... (pre-V0.9 job or internal job)")
         else:
             # Update processing status
-            new_status = 'completed' if status == 'completed' else 'failed'
-            release_repo.update_processing_status(release.release_id, status=new_status)
+            from core.models.asset import ProcessingStatus
+            from datetime import datetime, timezone
+            new_status = ProcessingStatus.COMPLETED if status == 'completed' else ProcessingStatus.FAILED
+            release_repo.update_processing_status(
+                release.release_id,
+                status=new_status,
+                completed_at=datetime.now(timezone.utc) if status == 'completed' else None
+            )
 
             # Update physical outputs if available
             outputs = {}
@@ -251,9 +257,7 @@ def _default_platform_callback(job_id: str, job_type: str, status: str, result: 
             if stac_item_id:
                 outputs['stac_item_id'] = stac_item_id
 
-            stac_collection_id = extract_stac_collection_id(result)
-            if stac_collection_id:
-                outputs['stac_collection_id'] = stac_collection_id
+            # Note: stac_collection_id is set at release creation, not updated here
 
             if outputs:
                 release_repo.update_physical_outputs(release.release_id, **outputs)

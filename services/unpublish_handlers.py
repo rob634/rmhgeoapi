@@ -87,30 +87,36 @@ def inventory_raster_item(params: Dict[str, Any], context: Optional[Dict[str, An
                 "error_type": "ValidationError"
             }
 
-        # Check if this item has an APPROVED asset (V0.8.11 - 08 FEB 2026)
+        # Check if this item has an APPROVED release (V0.9 - 21 FEB 2026)
         # Approved items require force_approved=true to unpublish
         force_approved = params.get('force_approved', False)
         try:
-            from infrastructure.asset_repository import GeospatialAssetRepository
-            from core.models.asset import ApprovalState
+            from infrastructure import ReleaseRepository
+            from psycopg import sql as psql
 
-            asset_repo = GeospatialAssetRepository()
-            asset = asset_repo.get_by_stac_item_id(stac_item_id)
+            release_repo = ReleaseRepository()
+            with release_repo._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        psql.SQL("SELECT release_id, approval_state FROM {}.{} WHERE stac_item_id = %s ORDER BY created_at DESC LIMIT 1").format(
+                            psql.Identifier(release_repo.schema),
+                            psql.Identifier(release_repo.table)
+                        ),
+                        (stac_item_id,)
+                    )
+                    row = cur.fetchone()
 
-            if asset and asset.approval_state == ApprovalState.APPROVED:
+            if row and row['approval_state'] == 'approved':
                 if not force_approved:
                     return {
                         "success": False,
-                        "error": f"Cannot unpublish: STAC item '{stac_item_id}' has APPROVED status",
+                        "error": f"Cannot unpublish approved release. Use force_approved=true.",
                         "error_type": "ApprovalBlocksUnpublish",
-                        "asset_id": asset.asset_id,
-                        "approval_state": asset.approval_state.value,
+                        "release_id": row['release_id'],
+                        "approval_state": row['approval_state'],
                         "hint": "Use force_approved=true to revoke approval and unpublish"
                     }
-                logger.warning(
-                    f"Force unpublishing APPROVED item {stac_item_id} "
-                    f"(asset: {asset.asset_id[:16]}..., force_approved=true)"
-                )
+                logger.warning(f"Force-unpublishing approved release {row['release_id'][:16]}...")
         except Exception as e:
             # Approval check is best-effort - log and continue if service unavailable
             logger.warning(f"Could not check approval status for {stac_item_id}: {e}")
@@ -307,32 +313,38 @@ def inventory_vector_item(params: Dict[str, Any], context: Optional[Dict[str, An
                         f"(created outside ETL). Table will still be dropped."
                     )
 
-        # Check if linked STAC item has an APPROVED asset (V0.8.11 - 08 FEB 2026)
+        # Check if linked STAC item has an APPROVED release (V0.9 - 21 FEB 2026)
         # Approved items require force_approved=true to unpublish
         force_approved = params.get('force_approved', False)
         if stac_item_id:
             try:
-                from infrastructure.asset_repository import GeospatialAssetRepository
-                from core.models.asset import ApprovalState
+                from infrastructure import ReleaseRepository
+                from psycopg import sql as psql
 
-                asset_repo = GeospatialAssetRepository()
-                asset = asset_repo.get_by_stac_item_id(stac_item_id)
+                release_repo = ReleaseRepository()
+                with release_repo._get_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            psql.SQL("SELECT release_id, approval_state FROM {}.{} WHERE stac_item_id = %s ORDER BY created_at DESC LIMIT 1").format(
+                                psql.Identifier(release_repo.schema),
+                                psql.Identifier(release_repo.table)
+                            ),
+                            (stac_item_id,)
+                        )
+                        row = cur.fetchone()
 
-                if asset and asset.approval_state == ApprovalState.APPROVED:
+                if row and row['approval_state'] == 'approved':
                     if not force_approved:
                         return {
                             "success": False,
-                            "error": f"Cannot unpublish: Linked STAC item '{stac_item_id}' has APPROVED status",
+                            "error": f"Cannot unpublish approved release. Use force_approved=true.",
                             "error_type": "ApprovalBlocksUnpublish",
-                            "asset_id": asset.asset_id,
-                            "approval_state": asset.approval_state.value,
+                            "release_id": row['release_id'],
+                            "approval_state": row['approval_state'],
                             "table_name": table_name,
                             "hint": "Use force_approved=true to revoke approval and unpublish"
                         }
-                    logger.warning(
-                        f"Force unpublishing vector table {table_name} with APPROVED STAC item {stac_item_id} "
-                        f"(asset: {asset.asset_id[:16]}..., force_approved=true)"
-                    )
+                    logger.warning(f"Force-unpublishing approved release {row['release_id'][:16]}...")
             except Exception as e:
                 # Approval check is best-effort - log and continue if service unavailable
                 logger.warning(f"Could not check approval status for linked STAC item {stac_item_id}: {e}")
@@ -726,34 +738,34 @@ def delete_stac_and_audit(params: Dict[str, Any], context: Optional[Dict[str, An
                     if stac_deleted:
                         logger.info(f"Deleted STAC item: {collection_id}/{stac_item_id}")
 
-                        # Revoke asset if it exists and was APPROVED (V0.8.11 - 08 FEB 2026)
+                        # Revoke release if it exists and was APPROVED (V0.9 - 21 FEB 2026)
                         try:
-                            from infrastructure.asset_repository import GeospatialAssetRepository
-                            from services.asset_approval_service import AssetApprovalService
-                            from core.models.asset import ApprovalState
+                            from infrastructure import ReleaseRepository
+                            from psycopg import sql as psql
 
-                            asset_repo = GeospatialAssetRepository()
-                            asset = asset_repo.get_by_stac_item_id(stac_item_id)
+                            release_repo = ReleaseRepository()
+                            with release_repo._get_connection() as rel_conn:
+                                with rel_conn.cursor() as rel_cur:
+                                    rel_cur.execute(
+                                        psql.SQL("SELECT release_id, approval_state FROM {}.{} WHERE stac_item_id = %s LIMIT 1").format(
+                                            psql.Identifier(release_repo.schema),
+                                            psql.Identifier(release_repo.table)
+                                        ),
+                                        (stac_item_id,)
+                                    )
+                                    rel_row = rel_cur.fetchone()
 
-                            if asset and asset.approval_state == ApprovalState.APPROVED:
-                                approval_service = AssetApprovalService()
-                                revoke_result = approval_service.revoke_asset(
-                                    asset_id=asset.asset_id,
+                            if rel_row and rel_row['approval_state'] == 'approved':
+                                from services.asset_approval_service_v2 import AssetApprovalServiceV2
+                                approval_svc = AssetApprovalServiceV2()
+                                approval_svc.revoke_release(
+                                    release_id=rel_row['release_id'],
                                     revoker=f"unpublish_job:{unpublish_job_id}",
-                                    reason=f"Data unpublished via {unpublish_type} unpublish job"
+                                    reason=f"Unpublished via delete_stac_and_audit"
                                 )
-                                if revoke_result.get('success'):
-                                    logger.info(
-                                        f"AUDIT: Revoked asset {asset.asset_id[:16]}... during unpublish "
-                                        f"(job: {unpublish_job_id})"
-                                    )
-                                else:
-                                    logger.warning(
-                                        f"Failed to revoke asset {asset.asset_id[:16]}...: "
-                                        f"{revoke_result.get('error')}"
-                                    )
-                        except Exception as e:
-                            logger.warning(f"Could not check/revoke asset for {stac_item_id}: {e}")
+                                logger.warning(f"AUDIT: Revoked release {rel_row['release_id'][:16]}... during unpublish")
+                        except Exception as revoke_err:
+                            logger.error(f"Failed to revoke release: {revoke_err}")
                     else:
                         logger.warning(f"STAC item not found (already deleted?): {collection_id}/{stac_item_id}")
 

@@ -58,8 +58,8 @@ from services.platform_response import (
     unpublish_accepted,
 )
 
-# V0.8 Entity Architecture - Asset Service (29 JAN 2026)
-from services.asset_service import AssetService
+# V0.9 Entity Architecture - Asset/Release split (21 FEB 2026)
+# Release revocation uses inline imports in the unpublish block below
 
 
 # ============================================================================
@@ -140,35 +140,38 @@ def platform_unpublish(req: func.HttpRequest) -> func.HttpResponse:
         logger.info(f"Unpublish: data_type={data_type}, dry_run={dry_run}, params={resolved_params}")
 
         # =====================================================================
-        # V0.8: Soft delete GeospatialAsset (29 JAN 2026)
+        # V0.9: Revoke release and optionally soft-delete asset (21 FEB 2026)
         # =====================================================================
-        # Mark asset as deleted BEFORE submitting unpublish job.
-        # This ensures the asset is marked as deleted even if unpublish job fails.
+        # Revoke any approved release BEFORE submitting unpublish job.
+        # This ensures the release is revoked even if unpublish job fails.
         # =====================================================================
-        asset_deleted = False
-        asset_id = None
+        release_id = None
         if original_request and not dry_run:
             try:
-                asset_service = AssetService()
-                # Find asset by platform_refs (V0.8 - 30 JAN 2026)
-                platform_refs = {
-                    "dataset_id": original_request.dataset_id,
-                    "resource_id": original_request.resource_id,
-                    "version_id": original_request.version_id
-                }
-                asset = asset_service.get_asset_by_platform_refs(
-                    platform_id="ddh",
-                    platform_refs=platform_refs
-                )
-                if asset and asset.is_active():
-                    deleted_by = req_body.get('deleted_by', 'platform_unpublish')
-                    asset = asset_service.soft_delete(asset.asset_id, deleted_by)
-                    asset_deleted = True
-                    asset_id = asset.asset_id
-                    logger.info(f"Soft deleted GeospatialAsset {asset.asset_id[:16]}")
-            except Exception as asset_err:
-                # Non-fatal: continue with unpublish even if asset update fails
-                logger.warning(f"Failed to soft delete asset (non-fatal): {asset_err}")
+                from infrastructure import ReleaseRepository, AssetRepositoryV2
+                release_repo = ReleaseRepository()
+                asset_repo = AssetRepositoryV2()
+
+                # Find release by job_id or stac_item_id
+                release = None
+                if original_request.job_id:
+                    release = release_repo.get_by_job_id(original_request.job_id)
+
+                if release:
+                    release_id = release.release_id
+                    if release.approval_state.value == 'approved':
+                        deleted_by = req_body.get('deleted_by', 'platform_unpublish')
+                        from services.asset_approval_service_v2 import AssetApprovalServiceV2
+                        approval_svc = AssetApprovalServiceV2()
+                        approval_svc.revoke_release(
+                            release_id=release.release_id,
+                            revoker=deleted_by or 'system',
+                            reason='Unpublished via platform endpoint'
+                        )
+                        logger.info(f"Revoked release {release.release_id[:16]}...")
+            except Exception as e:
+                # Non-fatal: continue with unpublish even if release cleanup fails
+                logger.warning(f"Release cleanup failed (non-fatal): {e}")
 
         # Delegate to appropriate handler based on data type
         if data_type == "vector":

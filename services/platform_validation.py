@@ -1,23 +1,29 @@
 # ============================================================================
 # PLATFORM VALIDATION SERVICE
 # ============================================================================
-# EPOCH: 4 - ACTIVE
-# STATUS: Service - Version lineage validation for platform submit
+# EPOCH: 5 - ACTIVE
+# STATUS: Service - V0.9 version lineage validation using Asset + Release repos
 # PURPOSE: Validate previous_version_id before job creation (dry_run support)
 # CREATED: 31 JAN 2026
-# UPDATED: 09 FEB 2026 - Approval-aware overwrite and version validation
+# LAST_REVIEWED: 21 FEB 2026
 # EXPORTS: validate_version_lineage, VersionValidationResult
-# DEPENDENCIES: services.asset_service
+# DEPENDENCIES: infrastructure.AssetRepositoryV2, infrastructure.ReleaseRepository
 # ============================================================================
 """
-Platform Validation Service - V0.8 Release Control.
+Platform Validation Service - V0.9 Implicit Lineage.
 
 Provides validation logic for platform submit operations, specifically
 for version lineage validation to prevent race conditions.
 
-This service is used by both:
+This service is used by:
 - dry_run=true requests (return validation result without job creation)
-- Actual submit requests (enforce validation before job creation)
+  via triggers/trigger_platform_status.py
+
+V0.9 Simplification (21 FEB 2026):
+- Lineage is implicit: the Asset IS the lineage container
+- Replaced AssetService.get_lineage_state() with direct repo calls
+- Uses AssetRepositoryV2 for identity lookup
+- Uses ReleaseRepository for version/draft state
 
 V0.8.16 Approval-Aware Validation (09 FEB 2026):
 - Overwrite blocked if asset is APPROVED (must revoke first)
@@ -36,7 +42,6 @@ from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, field
 
 from util_logger import LoggerFactory, ComponentType
-from services.asset_service import AssetService
 
 logger = LoggerFactory.create_logger(ComponentType.SERVICE, "PlatformValidation")
 
@@ -48,8 +53,8 @@ class VersionValidationResult:
 
     Attributes:
         valid: True if validation passed
-        lineage_id: Computed lineage ID for this dataset/resource
-        lineage_exists: True if lineage has existing versions
+        lineage_id: Asset ID (the asset IS the lineage in V0.9)
+        lineage_exists: True if asset has existing releases
         current_latest: Info about current latest version (if exists)
         warnings: List of validation warnings/errors
         suggested_params: Suggested parameters for submit
@@ -77,11 +82,14 @@ def validate_version_lineage(
     platform_id: str,
     platform_refs: Dict[str, Any],
     previous_version_id: Optional[str],
-    asset_service: Optional[AssetService] = None,
-    overwrite: bool = False
+    overwrite: bool = False,
+    **kwargs  # Accept but ignore legacy asset_service param
 ) -> VersionValidationResult:
     """
     Validate version lineage for platform submit.
+
+    V0.9: Uses Asset + Release repos directly instead of AssetService.
+    The Asset IS the lineage container -- lineage_id = asset_id.
 
     Implements the validation matrix from DRY_RUN_IMPLEMENTATION.md with
     approval-aware extensions from APPROVAL_OVERWRITE_VALIDATION.md.
@@ -115,36 +123,67 @@ def validate_version_lineage(
         platform_id: Platform identifier (e.g., "ddh")
         platform_refs: Full platform refs including version_id
         previous_version_id: The previous version ID provided by B2B app (or None)
-        asset_service: Optional AssetService instance (creates one if not provided)
         overwrite: If True, attempting to replace existing version
+        **kwargs: Accepts legacy params (e.g., asset_service) silently
 
     Returns:
         VersionValidationResult with validation outcome and suggestions
     """
-    if asset_service is None:
-        asset_service = AssetService()
+    from infrastructure import AssetRepositoryV2, ReleaseRepository
+    from core.models.asset_v2 import Asset
 
-    # Nominal refs for lineage (excludes version)
-    nominal_refs = ["dataset_id", "resource_id"]
+    dataset_id = platform_refs.get('dataset_id')
+    resource_id = platform_refs.get('resource_id')
+    version_id = platform_refs.get('version_id')
 
-    # Get lineage state from asset service
-    lineage_state = asset_service.get_lineage_state(
-        platform_id=platform_id,
-        platform_refs=platform_refs,
-        nominal_refs=nominal_refs
-    )
+    asset_repo = AssetRepositoryV2()
+    release_repo = ReleaseRepository()
 
-    lineage_id = lineage_state['lineage_id']
-    current_latest = lineage_state.get('current_latest')
-    lineage_exists = lineage_state.get('lineage_exists', False)
-    existing_asset = lineage_state.get('existing_asset')
-    version_exists = lineage_state.get('version_exists', False)
+    # Find asset (lineage container) -- the Asset IS the lineage in V0.9
+    asset = asset_repo.get_by_identity(platform_id, dataset_id, resource_id)
+    lineage_id = asset.asset_id if asset else Asset.generate_asset_id(platform_id, dataset_id, resource_id)
+    lineage_exists = asset is not None
+
+    # Get latest approved release
+    latest_release = release_repo.get_latest(asset.asset_id) if asset else None
+    current_latest = None
+    if latest_release:
+        current_latest = {
+            'version_id': latest_release.version_id,
+            'approval_state': latest_release.approval_state.value if hasattr(latest_release.approval_state, 'value') else str(latest_release.approval_state)
+        }
+
+    # Check if this specific version exists (as a release)
+    existing_release = None
+    version_exists = False
+    if asset:
+        if version_id:
+            existing_release = release_repo.get_by_version(asset.asset_id, version_id)
+        if not existing_release:
+            existing_release = release_repo.get_draft(asset.asset_id)
+        version_exists = existing_release is not None
+
+    # Build existing_asset equivalent for overwrite checks
+    existing_asset = None
+    if existing_release:
+        existing_asset = {
+            'asset_id': existing_release.asset_id,
+            'release_id': existing_release.release_id,
+            'approval_state': existing_release.approval_state.value if hasattr(existing_release.approval_state, 'value') else str(existing_release.approval_state)
+        }
 
     warnings: List[str] = []
     valid = True
 
     # Build suggested params
-    suggested_version_ordinal = lineage_state.get('suggested_params', {}).get('version_ordinal', 1)
+    # Compute suggested version ordinal from release count
+    suggested_version_ordinal = 1
+    if asset:
+        releases = release_repo.list_by_asset(asset.asset_id)
+        if releases:
+            max_ordinal = max((r.version_ordinal or 0) for r in releases)
+            suggested_version_ordinal = max_ordinal + 1
+
     suggested_previous = None
     if current_latest:
         suggested_previous = current_latest.get('version_id')

@@ -1,30 +1,30 @@
 # ============================================================================
 # ASSET APPROVALS ADMIN BLUEPRINT
 # ============================================================================
-# STATUS: Trigger layer - Blueprint for asset approval routes
-# PURPOSE: QA workflow endpoints for reviewing and approving assets
+# STATUS: Trigger layer - Blueprint for asset approval routes (V0.9 Release-based)
+# PURPOSE: QA workflow endpoints for reviewing and approving releases
 # CREATED: 16 JAN 2026
-# UPDATED: 08 FEB 2026 - V0.8.11 AssetApprovalService refactor
+# LAST_REVIEWED: 21 FEB 2026 (V0.9 Asset/Release entity split)
 # EXPORTS: bp (Blueprint)
+# DEPENDENCIES: services.asset_approval_service, infrastructure.ReleaseRepository
 # ============================================================================
 """
-Asset Approvals Admin Blueprint - QA workflow routes.
+Asset Approvals Admin Blueprint -- V0.9 Release-Based Approval.
 
-V0.8.11 Refactor (08 FEB 2026):
-- Uses AssetApprovalService (GeospatialAsset-centric)
-- GeospatialAsset.approval_state is the single source of truth
-- Removed legacy DatasetApproval dependency
-- Route parameter 'approval_id' now interpreted as 'asset_id'
+V0.9 Refactor (21 FEB 2026):
+- Uses AssetApprovalService operating on AssetRelease (not Asset)
+- Route parameter 'approval_id' interpreted as 'asset_id', then resolved to release_id
+- Approval state lives on AssetRelease, not Asset
 
 Routes (5 total):
     List & Get (2):
-        GET  /api/approvals           - List assets by approval state
-        GET  /api/approvals/{id}      - Get specific asset
+        GET  /api/approvals           - List releases by approval state
+        GET  /api/approvals/{id}      - Get specific asset + releases
 
     Actions (3):
-        POST /api/approvals/{id}/approve   - Approve asset
-        POST /api/approvals/{id}/reject    - Reject asset
-        POST /api/approvals/{id}/revoke    - Revoke approved asset
+        POST /api/approvals/{id}/approve   - Approve release
+        POST /api/approvals/{id}/reject    - Reject release
+        POST /api/approvals/{id}/revoke    - Revoke approved release
 
 Clearance determines post-approval action:
     - OUO: Update STAC item with geoetl:published=true
@@ -65,9 +65,11 @@ def list_approvals(req: func.HttpRequest) -> func.HttpResponse:
     """
     try:
         from services.asset_approval_service import AssetApprovalService
+        from infrastructure import ReleaseRepository
         from core.models.asset import ApprovalState, ClearanceState
 
         service = AssetApprovalService()
+        release_repo = ReleaseRepository()
 
         # Parse query parameters
         status_str = req.params.get('status')
@@ -106,22 +108,22 @@ def list_approvals(req: func.HttpRequest) -> func.HttpResponse:
                     mimetype='application/json'
                 )
 
-        # Get assets
+        # V0.9: Get releases (not assets)
         if approval_state:
-            assets = service.list_by_approval_state(
-                approval_state=approval_state,
+            releases = release_repo.list_by_approval_state(
+                state=approval_state,
                 limit=limit
             )
         else:
             # Default: list pending review
-            assets = service.list_pending_review(limit=limit)
+            releases = service.list_pending_review(limit=limit)
 
         # Get status counts for summary
         counts = service.get_approval_stats()
 
         result = {
-            'assets': [a.to_dict() for a in assets],
-            'count': len(assets),
+            'releases': [r.to_dict() for r in releases],
+            'count': len(releases),
             'limit': limit,
             'offset': offset,
             'status_counts': counts
@@ -156,7 +158,7 @@ def get_approval(req: func.HttpRequest) -> func.HttpResponse:
         Asset record with full details
     """
     try:
-        from infrastructure.asset_repository import GeospatialAssetRepository
+        from infrastructure import AssetRepository, ReleaseRepository
 
         asset_id = req.route_params.get('approval_id')
         if not asset_id:
@@ -166,7 +168,8 @@ def get_approval(req: func.HttpRequest) -> func.HttpResponse:
                 mimetype='application/json'
             )
 
-        asset_repo = GeospatialAssetRepository()
+        # V0.9: Return asset + all releases
+        asset_repo = AssetRepository()
         asset = asset_repo.get_by_id(asset_id)
 
         if not asset:
@@ -176,8 +179,17 @@ def get_approval(req: func.HttpRequest) -> func.HttpResponse:
                 mimetype='application/json'
             )
 
+        release_repo = ReleaseRepository()
+        releases = release_repo.list_by_asset(asset_id)
+
+        result = {
+            'asset': asset.to_dict(),
+            'releases': [r.to_dict() for r in releases],
+            'release_count': len(releases),
+        }
+
         return func.HttpResponse(
-            json.dumps(asset.to_dict(), indent=2, default=str),
+            json.dumps(result, indent=2, default=str),
             status_code=200,
             mimetype='application/json'
         )
@@ -223,6 +235,7 @@ def approve_dataset(req: func.HttpRequest) -> func.HttpResponse:
     """
     try:
         from services.asset_approval_service import AssetApprovalService
+        from infrastructure import ReleaseRepository
         from core.models.asset import ClearanceState
 
         asset_id = req.route_params.get('approval_id')
@@ -273,11 +286,23 @@ def approve_dataset(req: func.HttpRequest) -> func.HttpResponse:
 
         notes = body.get('notes')
 
-        logger.info(f"Approve request: {asset_id[:16]}... by {reviewer} (clearance: {clearance_state.value})")
+        # V0.9: Resolve asset_id -> release_id
+        release_repo = ReleaseRepository()
+        release = release_repo.get_draft(asset_id)
+        if not release:
+            release = release_repo.get_latest(asset_id)
+        if not release:
+            return func.HttpResponse(
+                json.dumps({'error': f'No release found for asset {asset_id}'}),
+                status_code=404,
+                mimetype='application/json'
+            )
+
+        logger.info(f"Approve request: release {release.release_id[:16]}... (asset {asset_id[:16]}...) by {reviewer} (clearance: {clearance_state.value})")
 
         service = AssetApprovalService()
-        result = service.approve_asset(
-            asset_id=asset_id,
+        result = service.approve_release(
+            release_id=release.release_id,
             reviewer=reviewer,
             clearance_state=clearance_state,
             notes=notes
@@ -327,6 +352,7 @@ def reject_dataset(req: func.HttpRequest) -> func.HttpResponse:
     """
     try:
         from services.asset_approval_service import AssetApprovalService
+        from infrastructure import ReleaseRepository
 
         asset_id = req.route_params.get('approval_id')
         if not asset_id:
@@ -358,11 +384,23 @@ def reject_dataset(req: func.HttpRequest) -> func.HttpResponse:
                 mimetype='application/json'
             )
 
-        logger.info(f"Reject request: {asset_id[:16]}... by {reviewer}")
+        # V0.9: Resolve asset_id -> release_id
+        release_repo = ReleaseRepository()
+        release = release_repo.get_draft(asset_id)
+        if not release:
+            release = release_repo.get_latest(asset_id)
+        if not release:
+            return func.HttpResponse(
+                json.dumps({'error': f'No release found for asset {asset_id}'}),
+                status_code=404,
+                mimetype='application/json'
+            )
+
+        logger.info(f"Reject request: release {release.release_id[:16]}... (asset {asset_id[:16]}...) by {reviewer}")
 
         service = AssetApprovalService()
-        result = service.reject_asset(
-            asset_id=asset_id,
+        result = service.reject_release(
+            release_id=release.release_id,
             reviewer=reviewer,
             reason=reason
         )
@@ -413,6 +451,7 @@ def revoke_dataset(req: func.HttpRequest) -> func.HttpResponse:
     """
     try:
         from services.asset_approval_service import AssetApprovalService
+        from infrastructure import ReleaseRepository
 
         asset_id = req.route_params.get('approval_id')
         if not asset_id:
@@ -444,11 +483,21 @@ def revoke_dataset(req: func.HttpRequest) -> func.HttpResponse:
                 mimetype='application/json'
             )
 
-        logger.warning(f"AUDIT: Revoke request: {asset_id[:16]}... by {revoker}")
+        # V0.9: Resolve asset_id -> release_id (for revoke, get latest approved release)
+        release_repo = ReleaseRepository()
+        release = release_repo.get_latest(asset_id)  # get_latest returns approved release
+        if not release:
+            return func.HttpResponse(
+                json.dumps({'error': f'No approved release found for asset {asset_id}'}),
+                status_code=404,
+                mimetype='application/json'
+            )
+
+        logger.warning(f"AUDIT: Revoke request: release {release.release_id[:16]}... (asset {asset_id[:16]}...) by {revoker}")
 
         service = AssetApprovalService()
-        result = service.revoke_asset(
-            asset_id=asset_id,
+        result = service.revoke_release(
+            release_id=release.release_id,
             revoker=revoker,
             reason=reason
         )

@@ -184,12 +184,12 @@ def _default_platform_callback(job_id: str, job_type: str, status: str, result: 
 
     This callback is invoked by CoreMachine when jobs complete.
     Handles:
-    1. GeospatialAsset update (V0.8 - 29 JAN 2026)
-    2. Approval record creation for dataset-producing jobs (28 JAN 2026)
+    1. AssetRelease update (V0.9 - 21 FEB 2026)
 
-    V0.8 Entity Architecture (29 JAN 2026):
-    - Updates GeospatialAsset with table_name/blob_path from result
-    - Asset was created on request receipt, now updated with outputs
+    V0.9 Entity Architecture (21 FEB 2026):
+    - Updates AssetRelease with processing_status and physical outputs
+    - Release was created on request receipt, now updated with outputs
+    - Finds release by job_id (not asset_id)
 
     Approval Philosophy:
     - job_id is the source of truth (not STAC)
@@ -210,72 +210,66 @@ def _default_platform_callback(job_id: str, job_type: str, status: str, result: 
         return
 
     # =========================================================================
-    # V0.8.12: Update GeospatialAsset with job outputs (08 FEB 2026)
+    # V0.9: Update AssetRelease with job outputs (21 FEB 2026)
     # =========================================================================
-    # Asset was created on request receipt with minimal data.
+    # Release was created on request receipt with minimal data.
     # Now update with:
-    # - current_job_id: Link back to the job that processed this asset
     # - processing_status: completed or failed
-    # - Output data: table_name, blob_path, stac_item_id, etc.
+    # - Physical outputs: table_name, blob_path, stac_item_id, etc.
+    # Release is found by job_id (not asset_id).
     # =========================================================================
     try:
-        from infrastructure import GeospatialAssetRepository, JobRepository
-        from core.models.asset import ProcessingStatus
+        from infrastructure import ReleaseRepository
 
-        # Get job record to find asset_id (job.asset_id is the source of truth)
-        job_repo = JobRepository()
-        job = job_repo.get_job(job_id)
+        # V0.9: Find release by job_id, update release (not asset)
+        release_repo = ReleaseRepository()
+        release = release_repo.get_by_job_id(job_id)
 
-        if not job or not job.asset_id:
-            logger.debug(f"[ASSET] No asset_id on job {job_id[:8]}... (pre-V0.8 job or internal job)")
+        if not release:
+            logger.debug(f"[RELEASE] No release linked to job {job_id[:8]}... (pre-V0.9 job or internal job)")
         else:
-            asset_repo = GeospatialAssetRepository()
-            asset = asset_repo.get_by_id(job.asset_id)
+            # Update processing status
+            new_status = 'completed' if status == 'completed' else 'failed'
+            release_repo.update_processing_status(release.release_id, status=new_status)
 
-            if asset:
-                # Build updates dict with bidirectional link and status
-                updates = {
-                    'current_job_id': job_id,  # Bidirectional link: asset → job
-                    'processing_status': ProcessingStatus.COMPLETED.value if status == 'completed' else ProcessingStatus.FAILED.value,
-                }
+            # Update physical outputs if available
+            outputs = {}
 
-                # Vector: table_name from result
-                table_name = result.get('table_name')
-                if table_name:
-                    updates['table_name'] = table_name
+            # Vector: table_name from result
+            table_name = result.get('table_name')
+            if table_name:
+                outputs['table_name'] = table_name
 
-                # Raster: blob_path from result
-                cog_blob = result.get('cog', {}).get('cog_blob') if isinstance(result.get('cog'), dict) else None
-                cog_url = cog_blob or result.get('cog_url') or result.get('output_blob_name')
-                if cog_url:
-                    updates['blob_path'] = cog_url
+            # Raster: blob_path from result
+            cog_blob = result.get('cog', {}).get('cog_blob') if isinstance(result.get('cog'), dict) else None
+            cog_url = cog_blob or result.get('cog_url') or result.get('output_blob_name')
+            if cog_url:
+                outputs['blob_path'] = cog_url
 
-                # STAC IDs if available
-                stac_item_id = extract_stac_item_id(result)
-                if stac_item_id:
-                    updates['stac_item_id'] = stac_item_id
+            # STAC IDs if available
+            stac_item_id = extract_stac_item_id(result)
+            if stac_item_id:
+                outputs['stac_item_id'] = stac_item_id
 
-                stac_collection_id = extract_stac_collection_id(result)
-                if stac_collection_id:
-                    updates['stac_collection_id'] = stac_collection_id
+            stac_collection_id = extract_stac_collection_id(result)
+            if stac_collection_id:
+                outputs['stac_collection_id'] = stac_collection_id
 
-                # Update asset
-                asset_repo.update(asset.asset_id, updates)
-                logger.info(f"[ASSET] Updated asset {asset.asset_id[:12]}... status={updates['processing_status']}, outputs: {[k for k in updates.keys() if k not in ['current_job_id', 'processing_status']]}")
-            else:
-                logger.warning(f"[ASSET] Asset {job.asset_id[:12]}... not found in database")
+            if outputs:
+                release_repo.update_physical_outputs(release.release_id, **outputs)
+
+            logger.info(f"[RELEASE] Updated release {release.release_id[:12]}... status={new_status}, outputs: {list(outputs.keys())}")
 
     except Exception as e:
-        # Non-fatal: asset update failure should not affect job completion
-        logger.warning(f"[ASSET] Failed to update asset for job {job_id[:8]}... (non-fatal): {e}")
+        # Non-fatal: release update failure should not affect job completion
+        logger.warning(f"[RELEASE] Failed to update release for job {job_id[:8]}... (non-fatal): {e}")
 
     # =========================================================================
-    # V0.8.11: DatasetApproval creation removed (08 FEB 2026)
+    # V0.9: Approval managed on AssetRelease (21 FEB 2026)
     # =========================================================================
-    # Legacy: Created separate DatasetApproval records for each job.
-    # New: GeospatialAsset is created at platform/submit with approval_state=PENDING_REVIEW
-    # Approval state is now managed directly on GeospatialAsset (single source of truth)
-    # See: services/asset_approval_service.py, triggers/trigger_approvals.py
+    # Release is created at platform/submit with approval_state=PENDING_REVIEW.
+    # Approval state is managed on AssetRelease (not Asset).
+    # See: services/asset_approval_service.py
     # =========================================================================
 
 

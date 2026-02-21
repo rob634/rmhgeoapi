@@ -1683,7 +1683,6 @@ async def platform_validate(req: func.HttpRequest) -> func.HttpResponse:
 
         # Import models and services
         from core.models import PlatformRequest
-        from services.asset_service import AssetService
         from services.platform_validation import validate_version_lineage
         from services.platform_translation import translate_to_coremachine
         from config import generate_platform_request_id
@@ -1733,13 +1732,11 @@ async def platform_validate(req: func.HttpRequest) -> func.HttpResponse:
             "version_id": platform_req.version_id
         }
 
-        # Run version lineage validation
-        asset_service = AssetService()
+        # Run version lineage validation (V0.9: no longer needs AssetService)
         validation_result = validate_version_lineage(
             platform_id="ddh",
             platform_refs=platform_refs,
             previous_version_id=platform_req.previous_version_id,
-            asset_service=asset_service
         )
 
         # Build response (same structure as dry_run=true)

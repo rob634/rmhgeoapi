@@ -1,40 +1,41 @@
 # ============================================================================
 # ASSET APPROVALS BLUEPRINT
 # ============================================================================
-# STATUS: Trigger layer - Asset-centric approval endpoints
-# PURPOSE: Approval workflow operating directly on GeospatialAsset (Aggregate Root)
+# STATUS: Trigger layer - Asset-centric approval endpoints (V0.9 Release-based)
+# PURPOSE: Approval workflow resolving asset_id to release_id, then operating on AssetRelease
 # CREATED: 08 FEB 2026 (V0.8.11 - Approval Consolidation Phase 3)
+# LAST_REVIEWED: 21 FEB 2026 (V0.9 Asset/Release entity split)
 # EXPORTS: bp (Blueprint)
-# DEPENDENCIES: services.asset_approval_service
+# DEPENDENCIES: services.asset_approval_service, infrastructure.ReleaseRepository
 # ============================================================================
 """
-Asset Approvals Blueprint.
+Asset Approvals Blueprint -- V0.9 Release-Based Approval.
 
-V0.8+ asset-centric approval endpoints that operate directly on GeospatialAsset.
-This replaces the legacy /api/approvals/* and /api/platform/approve|reject|revoke
-endpoints that used the separate DatasetApproval table.
+V0.9: URLs still use asset_id for external API stability, but internally
+each action resolves asset_id -> release_id via ReleaseRepository, then
+delegates to AssetApprovalService which operates on AssetRelease.
 
 Design Principle:
-    GeospatialAsset is the Aggregate Root - all approval state lives on the asset.
-    No separate approval records needed.
+    AssetRelease is the approval target. All approval state lives on the release.
+    The Asset (identity container) is never mutated during approval.
 
 Routes (7 total):
     Actions (3):
-        POST /api/assets/{asset_id}/approve   - Approve asset for publication
-        POST /api/assets/{asset_id}/reject    - Reject asset
-        POST /api/assets/{asset_id}/revoke    - Revoke approved asset (unpublish)
+        POST /api/assets/{asset_id}/approve   - Approve release for publication
+        POST /api/assets/{asset_id}/reject    - Reject release
+        POST /api/assets/{asset_id}/revoke    - Revoke approved release (unpublish)
 
     Query (3):
-        GET  /api/assets/pending-review       - List assets awaiting approval
+        GET  /api/assets/pending-review       - List releases awaiting approval
         GET  /api/assets/approval-stats       - Get counts by approval state
-        GET  /api/assets/{asset_id}/approval  - Get approval state for asset
+        GET  /api/assets/{asset_id}/approval  - Get approval state for asset + releases
 
     Batch (1):
-        GET  /api/assets/by-approval-state    - List assets by approval state
+        GET  /api/assets/by-approval-state    - List releases by approval state
 
 Endpoint Pattern:
-    Asset-centric: /api/assets/{asset_id}/action
-    vs Legacy: /api/approvals/{approval_id}/action
+    Asset-centric URLs: /api/assets/{asset_id}/action
+    Internal: resolve asset_id -> release_id, operate on release
 """
 
 import json
@@ -171,12 +172,30 @@ def approve_asset(req: func.HttpRequest) -> func.HttpResponse:
 
     try:
         from services.asset_approval_service import AssetApprovalService
+        from infrastructure import ReleaseRepository
+
+        # V0.9: Resolve asset_id -> release_id (get draft or latest unapproved)
+        release_repo = ReleaseRepository()
+        release = release_repo.get_draft(asset_id)
+        if not release:
+            release = release_repo.get_latest(asset_id)
+        if not release:
+            return func.HttpResponse(
+                json.dumps({
+                    "success": False,
+                    "error": f"No release found for asset {asset_id}",
+                    "error_type": "NotFound"
+                }),
+                status_code=404,
+                headers={"Content-Type": "application/json"}
+            )
+
         service = AssetApprovalService()
 
-        logger.info(f"Approving asset {asset_id[:16]}... by {reviewer} (clearance: {clearance_state.value})")
+        logger.info(f"Approving release {release.release_id[:16]}... (asset {asset_id[:16]}...) by {reviewer} (clearance: {clearance_state.value})")
 
-        result = service.approve_asset(
-            asset_id=asset_id,
+        result = service.approve_release(
+            release_id=release.release_id,
             reviewer=reviewer,
             clearance_state=clearance_state,
             notes=notes
@@ -302,12 +321,30 @@ def reject_asset(req: func.HttpRequest) -> func.HttpResponse:
 
     try:
         from services.asset_approval_service import AssetApprovalService
+        from infrastructure import ReleaseRepository
+
+        # V0.9: Resolve asset_id -> release_id (get draft or latest unapproved)
+        release_repo = ReleaseRepository()
+        release = release_repo.get_draft(asset_id)
+        if not release:
+            release = release_repo.get_latest(asset_id)
+        if not release:
+            return func.HttpResponse(
+                json.dumps({
+                    "success": False,
+                    "error": f"No release found for asset {asset_id}",
+                    "error_type": "NotFound"
+                }),
+                status_code=404,
+                headers={"Content-Type": "application/json"}
+            )
+
         service = AssetApprovalService()
 
-        logger.info(f"Rejecting asset {asset_id[:16]}... by {reviewer}")
+        logger.info(f"Rejecting release {release.release_id[:16]}... (asset {asset_id[:16]}...) by {reviewer}")
 
-        result = service.reject_asset(
-            asset_id=asset_id,
+        result = service.reject_release(
+            release_id=release.release_id,
             reviewer=reviewer,
             reason=reason
         )
@@ -436,12 +473,28 @@ def revoke_asset(req: func.HttpRequest) -> func.HttpResponse:
 
     try:
         from services.asset_approval_service import AssetApprovalService
+        from infrastructure import ReleaseRepository
+
+        # V0.9: Resolve asset_id -> release_id (for revoke, get latest approved release)
+        release_repo = ReleaseRepository()
+        release = release_repo.get_latest(asset_id)  # get_latest returns approved release
+        if not release:
+            return func.HttpResponse(
+                json.dumps({
+                    "success": False,
+                    "error": f"No approved release found for asset {asset_id}",
+                    "error_type": "NotFound"
+                }),
+                status_code=404,
+                headers={"Content-Type": "application/json"}
+            )
+
         service = AssetApprovalService()
 
-        logger.warning(f"AUDIT: Revoking asset {asset_id[:16]}... by {revoker}. Reason: {reason}")
+        logger.warning(f"AUDIT: Revoking release {release.release_id[:16]}... (asset {asset_id[:16]}...) by {revoker}. Reason: {reason}")
 
-        result = service.revoke_asset(
-            asset_id=asset_id,
+        result = service.revoke_release(
+            release_id=release.release_id,
             revoker=revoker,
             reason=reason
         )
@@ -488,23 +541,22 @@ def revoke_asset(req: func.HttpRequest) -> func.HttpResponse:
 @bp.route(route="assets/pending-review", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def list_pending_review(req: func.HttpRequest) -> func.HttpResponse:
     """
-    List assets awaiting approval.
+    List releases awaiting approval.
 
-    GET /api/assets/pending-review?limit=50&include_incomplete=false
+    GET /api/assets/pending-review?limit=50
+
+    V0.9: Returns AssetRelease objects with processing_status=COMPLETED
+    and approval_state=PENDING_REVIEW.
 
     Query Parameters:
         limit: Maximum results (default: 50, max: 200)
-        include_incomplete: Include assets still processing (default: false)
 
     Response:
         {
             "success": true,
-            "assets": [...],
+            "releases": [...],
             "count": 25,
-            "limit": 50,
-            "filters": {
-                "include_incomplete": false
-            }
+            "limit": 50
         }
     """
     logger.info("Assets pending-review endpoint called")
@@ -512,25 +564,18 @@ def list_pending_review(req: func.HttpRequest) -> func.HttpResponse:
     try:
         # Parse query parameters
         limit = min(int(req.params.get('limit', 50)), 200)
-        include_incomplete = req.params.get('include_incomplete', 'false').lower() == 'true'
 
         from services.asset_approval_service import AssetApprovalService
         service = AssetApprovalService()
 
-        assets = service.list_pending_review(
-            limit=limit,
-            include_processing_incomplete=include_incomplete
-        )
+        releases = service.list_pending_review(limit=limit)
 
         return func.HttpResponse(
             json.dumps({
                 "success": True,
-                "assets": [a.to_dict() for a in assets],
-                "count": len(assets),
-                "limit": limit,
-                "filters": {
-                    "include_incomplete": include_incomplete
-                }
+                "releases": [r.to_dict() for r in releases],
+                "count": len(releases),
+                "limit": limit
             }, indent=2, default=str),
             status_code=200,
             headers={"Content-Type": "application/json"}
@@ -552,9 +597,11 @@ def list_pending_review(req: func.HttpRequest) -> func.HttpResponse:
 @bp.route(route="assets/approval-stats", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def get_approval_stats(req: func.HttpRequest) -> func.HttpResponse:
     """
-    Get counts of assets by approval_state.
+    Get counts of releases by approval_state.
 
     GET /api/assets/approval-stats
+
+    V0.9: Counts AssetRelease records by approval_state.
 
     Response:
         {
@@ -603,20 +650,20 @@ def get_approval_stats(req: func.HttpRequest) -> func.HttpResponse:
 @bp.route(route="assets/{asset_id}/approval", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def get_asset_approval(req: func.HttpRequest) -> func.HttpResponse:
     """
-    Get approval state for a specific asset.
+    Get approval state for a specific asset and its releases.
 
     GET /api/assets/{asset_id}/approval
+
+    V0.9: Returns asset identity info plus all releases with their
+    approval states. The primary release (draft or latest) is highlighted.
 
     Response:
         {
             "success": true,
             "asset_id": "...",
-            "approval_state": "approved",
-            "clearance_state": "ouo",
-            "reviewer": "user@example.com",
-            "reviewed_at": "2026-02-08T...",
-            "approval_notes": "Looks good",
-            "processing_status": "completed"
+            "asset": {...},
+            "releases": [...],
+            "primary_release": {...}
         }
     """
     asset_id = req.route_params.get('asset_id')
@@ -634,10 +681,10 @@ def get_asset_approval(req: func.HttpRequest) -> func.HttpResponse:
     logger.info(f"Get asset approval state for {asset_id[:16]}...")
 
     try:
-        from infrastructure.asset_repository import GeospatialAssetRepository
-        repo = GeospatialAssetRepository()
+        from infrastructure import AssetRepository, ReleaseRepository
 
-        asset = repo.get_by_id(asset_id)
+        asset_repo = AssetRepository()
+        asset = asset_repo.get_by_id(asset_id)
         if not asset:
             return func.HttpResponse(
                 json.dumps({
@@ -649,22 +696,27 @@ def get_asset_approval(req: func.HttpRequest) -> func.HttpResponse:
                 headers={"Content-Type": "application/json"}
             )
 
+        release_repo = ReleaseRepository()
+        releases = release_repo.list_by_asset(asset_id)
+
+        # Find primary release (draft first, then latest)
+        primary = release_repo.get_draft(asset_id)
+        if not primary:
+            primary = release_repo.get_latest(asset_id)
+
+        response_data = {
+            "success": True,
+            "asset_id": asset.asset_id,
+            "asset": asset.to_dict(),
+            "releases": [r.to_dict() for r in releases],
+            "release_count": len(releases),
+        }
+
+        if primary:
+            response_data["primary_release"] = primary.to_dict()
+
         return func.HttpResponse(
-            json.dumps({
-                "success": True,
-                "asset_id": asset.asset_id,
-                "approval_state": asset.approval_state.value if asset.approval_state else None,
-                "clearance_state": asset.clearance_state.value if asset.clearance_state else None,
-                "reviewer": asset.reviewer,
-                "reviewed_at": asset.reviewed_at.isoformat() if asset.reviewed_at else None,
-                "approval_notes": asset.approval_notes,
-                "rejection_reason": asset.rejection_reason,
-                "processing_status": asset.processing_status.value if asset.processing_status else None,
-                "can_approve": asset.can_approve(),
-                "can_reject": asset.can_reject(),
-                "can_revoke": asset.can_revoke(),
-                "is_revoked": asset.is_revoked()
-            }, indent=2, default=str),
+            json.dumps(response_data, indent=2, default=str),
             status_code=200,
             headers={"Content-Type": "application/json"}
         )
@@ -689,9 +741,11 @@ def get_asset_approval(req: func.HttpRequest) -> func.HttpResponse:
 @bp.route(route="assets/by-approval-state", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def list_by_approval_state(req: func.HttpRequest) -> func.HttpResponse:
     """
-    List assets by approval state.
+    List releases by approval state.
 
     GET /api/assets/by-approval-state?state=approved&limit=100
+
+    V0.9: Returns AssetRelease objects filtered by approval_state.
 
     Query Parameters:
         state: Required - pending_review, approved, rejected, revoked
@@ -700,7 +754,7 @@ def list_by_approval_state(req: func.HttpRequest) -> func.HttpResponse:
     Response:
         {
             "success": true,
-            "assets": [...],
+            "releases": [...],
             "count": 50,
             "state": "approved",
             "limit": 100
@@ -739,19 +793,19 @@ def list_by_approval_state(req: func.HttpRequest) -> func.HttpResponse:
                 headers={"Content-Type": "application/json"}
             )
 
-        from services.asset_approval_service import AssetApprovalService
-        service = AssetApprovalService()
+        from infrastructure import ReleaseRepository
+        release_repo = ReleaseRepository()
 
-        assets = service.list_by_approval_state(
-            approval_state=approval_state,
+        releases = release_repo.list_by_approval_state(
+            state=approval_state,
             limit=limit
         )
 
         return func.HttpResponse(
             json.dumps({
                 "success": True,
-                "assets": [a.to_dict() for a in assets],
-                "count": len(assets),
+                "releases": [r.to_dict() for r in releases],
+                "count": len(releases),
                 "state": state_str,
                 "limit": limit
             }, indent=2, default=str),

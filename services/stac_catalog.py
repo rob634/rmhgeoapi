@@ -396,6 +396,27 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
                 'reason': f'STAC caching failed: {cache_err}'
             }
 
+        # V0.9: Also cache STAC item dict on Release entity (21 FEB 2026)
+        # This allows AssetApprovalServiceV2._materialize_stac() to read from Release
+        release_id = params.get('release_id')
+        if release_id:
+            try:
+                # Derive release_item_dict independently (item_dict_for_cache may not
+                # be set if the cog_metadata caching block above raised an exception)
+                if isinstance(item, dict):
+                    release_item_dict = item
+                elif hasattr(item, 'model_dump'):
+                    release_item_dict = item.model_dump(mode='json', by_alias=True)
+                else:
+                    release_item_dict = item
+
+                from infrastructure import ReleaseRepository
+                release_repo = ReleaseRepository()
+                release_repo.update_stac_item_json(release_id, release_item_dict)
+                logger.info(f"STAC item cached on Release {release_id[:16]}...")
+            except Exception as release_cache_err:
+                logger.warning(f"Failed to cache STAC on Release (non-fatal): {release_cache_err}")
+
         duration = (datetime.utcnow() - start_time).total_seconds()
 
         # STEP 6: Extract metadata for summary

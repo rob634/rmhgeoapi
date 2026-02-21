@@ -86,25 +86,28 @@ class JobResubmitHandler:
                     mimetype="application/json"
                 )
 
-            # Block resubmit on approved assets (20 FEB 2026: STAC B2C integrity)
-            asset = None
-            asset_repo = None
+            # Block resubmit on approved releases (V0.9: check Release, not Asset)
+            release = None
             if job.asset_id:
-                from infrastructure.asset_repository import GeospatialAssetRepository
-                asset_repo = GeospatialAssetRepository()
-                asset = asset_repo.get_by_id(job.asset_id)
-                if asset and asset.approval_state.value == 'approved':
-                    return func.HttpResponse(
-                        json.dumps({
-                            "success": False,
-                            "error": "Cannot resubmit approved asset. "
-                                     "Revoke approval first then resubmit.",
-                            "error_type": "ResubmitBlockedError",
-                            "asset_id": job.asset_id
-                        }),
-                        status_code=409,
-                        mimetype="application/json"
-                    )
+                try:
+                    from infrastructure import ReleaseRepository
+                    release_repo = ReleaseRepository()
+                    release = release_repo.get_by_job_id(job.job_id)
+                    if release and release.approval_state.value == 'approved':
+                        return func.HttpResponse(
+                            json.dumps({
+                                "success": False,
+                                "error": "Cannot resubmit approved release. "
+                                         "Revoke approval first then resubmit.",
+                                "error_type": "ResubmitBlockedError",
+                                "release_id": release.release_id,
+                                "asset_id": job.asset_id
+                            }),
+                            status_code=409,
+                            mimetype="application/json"
+                        )
+                except Exception as e:
+                    logger.warning(f"Release lookup failed (non-fatal): {e}")
 
             # Check if job is currently processing (unless force=True)
             if job.status.value == 'processing' and not force:
@@ -157,16 +160,15 @@ class JobResubmitHandler:
             # Step 4: Resubmit job (pass asset_id to preserve linkage)
             new_job_id = self._resubmit_job(job_type, parameters, asset_id=job.asset_id)
 
-            # Update asset with new job_id and reset processing state (20 FEB 2026)
-            if asset and asset_repo:
+            # Update release with new job_id and reset processing state (V0.9)
+            if release:
                 try:
-                    asset_repo.update(asset.asset_id, {
-                        'current_job_id': new_job_id,
-                        'processing_status': 'processing',
-                    })
-                    logger.info(f"  Updated asset {asset.asset_id[:16]}... with new job_id")
+                    from infrastructure import ReleaseRepository
+                    release_repo = ReleaseRepository()
+                    release_repo.link_job(release.release_id, new_job_id)
+                    logger.info(f"  Updated release {release.release_id[:16]}... with new job_id")
                 except Exception as e:
-                    logger.warning(f"  Failed to update asset after resubmit: {e}")
+                    logger.warning(f"  Failed to update release after resubmit: {e}")
 
             logger.info(f"✅ Job resubmitted: {job_id[:16]}... → {new_job_id[:16]}...")
 

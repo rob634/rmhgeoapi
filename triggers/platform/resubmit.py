@@ -110,20 +110,22 @@ class PlatformResubmitHandler:
                     404
                 )
 
-            # Block resubmit on approved assets (20 FEB 2026: STAC B2C integrity)
-            asset = None
-            asset_repo = None
+            # Block resubmit on approved releases (V0.9: check Release, not Asset)
+            release = None
             if job.asset_id:
-                from infrastructure.asset_repository import GeospatialAssetRepository
-                asset_repo = GeospatialAssetRepository()
-                asset = asset_repo.get_by_id(job.asset_id)
-                if asset and asset.approval_state.value == 'approved':
-                    return self._error_response(
-                        "Cannot resubmit approved asset. "
-                        "Revoke approval first (POST /api/platform/revoke) then resubmit.",
-                        "ResubmitBlockedError",
-                        409
-                    )
+                try:
+                    from infrastructure import ReleaseRepository
+                    release_repo = ReleaseRepository()
+                    release = release_repo.get_by_job_id(job_id)
+                    if release and release.approval_state.value == 'approved':
+                        return self._error_response(
+                            "Cannot resubmit approved release. "
+                            "Revoke approval first (POST /api/platform/revoke) then resubmit.",
+                            "ResubmitBlockedError",
+                            409
+                        )
+                except Exception as e:
+                    logger.warning(f"Release lookup failed (non-fatal): {e}")
 
             # Check if job is currently processing (unless force=True)
             if job.status.value == 'processing' and not force:
@@ -178,16 +180,13 @@ class PlatformResubmitHandler:
             # Resubmit job (pass asset_id to preserve linkage)
             new_job_id = resubmit_handler._resubmit_job(job_type, parameters, asset_id=job.asset_id)
 
-            # Update asset with new job_id and reset processing state (20 FEB 2026)
-            if asset:
+            # Update release with new job_id (V0.9)
+            if release:
                 try:
-                    asset_repo.update(asset.asset_id, {
-                        'current_job_id': new_job_id,
-                        'processing_status': 'processing',
-                    })
-                    logger.info(f"  Updated asset {asset.asset_id[:16]}... with new job_id")
+                    release_repo.link_job(release.release_id, new_job_id)
+                    logger.info(f"  Updated release {release.release_id[:16]}... with new job_id")
                 except Exception as e:
-                    logger.warning(f"  Failed to update asset after resubmit: {e}")
+                    logger.warning(f"  Failed to update release after resubmit: {e}")
 
             # Update platform request with new job_id (20 FEB 2026)
             if platform_refs and platform_refs.get('request_id'):

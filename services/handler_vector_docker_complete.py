@@ -288,17 +288,15 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
             f"{total_rows:,} rows in {elapsed:.1f}s ({rows_per_sec:.0f} rows/sec)"
         )
 
-        # V0.8.16.7: Reset approval state after successful overwrite (10 FEB 2026)
-        # This resets REJECTED/REVOKED assets to PENDING_REVIEW now that new data exists
-        if parameters.get('reset_approval') and parameters.get('asset_id'):
+        # V0.9: Update release processing status to COMPLETED
+        if parameters.get('release_id'):
             try:
-                from services.asset_service import AssetService
-                asset_service = AssetService()
-                reset_done = asset_service.reset_approval_for_overwrite(parameters['asset_id'])
-                if reset_done:
-                    logger.info(f"[{job_id[:8]}] Reset approval state to PENDING_REVIEW after successful overwrite")
-            except Exception as reset_err:
-                logger.warning(f"[{job_id[:8]}] Failed to reset approval state: {reset_err}")
+                from infrastructure import ReleaseRepository
+                release_repo = ReleaseRepository()
+                release_repo.update_processing_status(parameters['release_id'], status='completed')
+                logger.info(f"[{job_id[:8]}] Updated release {parameters['release_id'][:16]}... processing_status=completed")
+            except Exception as release_err:
+                logger.warning(f"[{job_id[:8]}] Failed to update release processing status: {release_err}")
 
         return {
             "success": True,

@@ -804,16 +804,15 @@ def _process_raster_tiled(
         artifact_id = None
         logger.debug("Skipping artifact creation for tiled job (use STAC collection for discovery)")
 
-        # V0.8.16.7: Reset approval state after successful overwrite (10 FEB 2026)
-        if params.get('reset_approval') and params.get('asset_id'):
+        # V0.9: Update release processing status to COMPLETED
+        if params.get('release_id'):
             try:
-                from services.asset_service import AssetService
-                asset_service = AssetService()
-                reset_done = asset_service.reset_approval_for_overwrite(params['asset_id'])
-                if reset_done:
-                    logger.info(f"Reset approval state to PENDING_REVIEW after successful overwrite")
-            except Exception as reset_err:
-                logger.warning(f"Failed to reset approval state: {reset_err}")
+                from infrastructure import ReleaseRepository
+                release_repo = ReleaseRepository()
+                release_repo.update_processing_status(params['release_id'], status='completed')
+                logger.info(f"Updated release {params['release_id'][:16]}... processing_status=completed")
+            except Exception as release_err:
+                logger.warning(f"Failed to update release processing status: {release_err}")
 
         return {
             "success": True,
@@ -1560,16 +1559,15 @@ def _process_raster_tiled_mount(
             logger.info(f"   STAC: {stac_result.get('collection_id')}")
         logger.info("=" * 70)
 
-        # V0.8.16.7: Reset approval state after successful overwrite (10 FEB 2026)
-        if params.get('reset_approval') and params.get('asset_id'):
+        # V0.9: Update release processing status to COMPLETED
+        if params.get('release_id'):
             try:
-                from services.asset_service import AssetService
-                asset_service = AssetService()
-                reset_done = asset_service.reset_approval_for_overwrite(params['asset_id'])
-                if reset_done:
-                    logger.info(f"Reset approval state to PENDING_REVIEW after successful overwrite")
-            except Exception as reset_err:
-                logger.warning(f"Failed to reset approval state: {reset_err}")
+                from infrastructure import ReleaseRepository
+                release_repo = ReleaseRepository()
+                release_repo.update_processing_status(params['release_id'], status='completed')
+                logger.info(f"Updated release {params['release_id'][:16]}... processing_status=completed")
+            except Exception as release_err:
+                logger.warning(f"Failed to update release processing status: {release_err}")
 
         return {
             "success": True,
@@ -2430,16 +2428,15 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             logger.warning(f"⚠️ Artifact creation failed (non-fatal): {e}")
             logger.warning(f"⚠️ Artifact error traceback: {traceback.format_exc()}")
 
-        # V0.8.16.7: Reset approval state after successful overwrite (10 FEB 2026)
-        if params.get('reset_approval') and params.get('asset_id'):
+        # V0.9: Update release processing status to COMPLETED
+        if params.get('release_id'):
             try:
-                from services.asset_service import AssetService
-                asset_service = AssetService()
-                reset_done = asset_service.reset_approval_for_overwrite(params['asset_id'])
-                if reset_done:
-                    logger.info(f"Reset approval state to PENDING_REVIEW after successful overwrite")
-            except Exception as reset_err:
-                logger.warning(f"Failed to reset approval state: {reset_err}")
+                from infrastructure import ReleaseRepository
+                release_repo = ReleaseRepository()
+                release_repo.update_processing_status(params['release_id'], status='completed')
+                logger.info(f"Updated release {params['release_id'][:16]}... processing_status=completed")
+            except Exception as release_err:
+                logger.warning(f"Failed to update release processing status: {release_err}")
 
         return {
             "success": True,

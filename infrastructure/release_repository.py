@@ -614,6 +614,43 @@ class ReleaseRepository(PostgreSQLRepository):
                     logger.warning(f"AUDIT: Release {release_id[:16]}... REVOKED by {revoked_by}")
                 return updated
 
+    def link_job(self, release_id: str, job_id: str) -> bool:
+        """
+        Link a processing job to a release.
+
+        Sets job_id and resets processing_status to PENDING.
+
+        Args:
+            release_id: Release to link
+            job_id: Job identifier
+
+        Returns:
+            True if updated, False if release not found
+        """
+        logger.info(f"Linking job {job_id[:16]}... to release {release_id[:16]}...")
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL("""
+                        UPDATE {}.{}
+                        SET job_id = %s,
+                            processing_status = %s,
+                            updated_at = NOW()
+                        WHERE release_id = %s
+                    """).format(
+                        sql.Identifier(self.schema),
+                        sql.Identifier(self.table)
+                    ),
+                    (job_id, ProcessingStatus.PENDING, release_id)
+                )
+                conn.commit()
+
+                updated = cur.rowcount > 0
+                if updated:
+                    logger.info(f"Linked job {job_id[:16]}... to release {release_id[:16]}...")
+                return updated
+
     def update_processing_status(
         self,
         release_id: str,

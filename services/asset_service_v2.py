@@ -508,9 +508,7 @@ class AssetServiceV2:
         """
         Link a processing job to a release.
 
-        Thin wrapper -- resets processing status to PENDING. The actual
-        job_id association is typically set at create_release time or
-        by the handler.
+        Sets the job_id on the release and resets processing_status to PENDING.
 
         Args:
             release_id: Release to link
@@ -519,9 +517,7 @@ class AssetServiceV2:
         Returns:
             True if updated, False if release not found
         """
-        return self.release_repo.update_processing_status(
-            release_id, ProcessingStatus.PENDING
-        )
+        return self.release_repo.link_job(release_id, job_id)
 
     def update_processing_status(
         self,

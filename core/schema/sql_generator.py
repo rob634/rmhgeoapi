@@ -77,8 +77,7 @@ from ..models.stac import AccessLevel  # Data classification (25 JAN 2026 - S4.D
 from ..models.system_snapshot import SystemSnapshotRecord, SnapshotTriggerType  # System snapshots (04 JAN 2026)
 from ..models.external_refs import DatasetRefRecord  # External references (09 JAN 2026 - F7.8)
 from ..models.raster_metadata import CogMetadataRecord  # Raster metadata (09 JAN 2026 - F7.9)
-from ..models.asset import GeospatialAsset, AssetRevision, ApprovalState, ClearanceState, ProcessingStatus  # Geospatial assets (29 JAN 2026 - V0.8)
-from ..models.asset_v2 import Asset, AssetRelease  # V0.9 Asset/Release entity split (21 FEB 2026)
+from ..models.asset import Asset, AssetRelease, ApprovalState, ClearanceState, ProcessingStatus  # V0.9 Asset/Release entity split (21 FEB 2026)
 from ..models.platform_registry import Platform, DDH_PLATFORM  # Platform registry (29 JAN 2026 - V0.8)
 from ..models.artifact import Artifact, ArtifactStatus  # Artifact registry (20 JAN 2026)
 from ..models.external_service import ExternalService, ServiceType, ServiceStatus  # External service registry (22 JAN 2026)
@@ -1809,8 +1808,6 @@ INSERT INTO {schema}.{table} (
         composed.append(self.generate_table_from_model(MapStateSnapshot))  # Map state snapshots (23 JAN 2026)
         composed.append(self.generate_table_from_model(JobEvent))  # Job event tracking (23 JAN 2026)
         composed.append(self.generate_table_from_model(Platform))  # Platform registry (29 JAN 2026 - V0.8) - before assets (FK)
-        composed.append(self.generate_table_from_model(GeospatialAsset))  # Geospatial assets (29 JAN 2026 - V0.8)
-        composed.append(self.generate_table_from_model(AssetRevision))  # Asset revisions (29 JAN 2026 - V0.8)
         composed.append(self.generate_table_from_model(Asset))  # V0.9 Asset (21 FEB 2026)
         composed.append(self.generate_table_from_model(AssetRelease))  # V0.9 AssetRelease (21 FEB 2026)
 
@@ -1831,8 +1828,6 @@ INSERT INTO {schema}.{table} (
         composed.extend(self.generate_indexes_from_model(MapStateSnapshot))  # Map state snapshots (23 JAN 2026)
         composed.extend(self.generate_indexes_from_model(JobEvent))  # Job event tracking (23 JAN 2026)
         composed.extend(self.generate_indexes_from_model(Platform))  # Platform registry (29 JAN 2026 - V0.8)
-        composed.extend(self.generate_indexes_from_model(GeospatialAsset))  # Geospatial assets (29 JAN 2026 - V0.8)
-        composed.extend(self.generate_indexes_from_model(AssetRevision))  # Asset revisions (29 JAN 2026 - V0.8)
         composed.extend(self.generate_indexes_from_model(Asset))  # V0.9 Asset (21 FEB 2026)
         composed.extend(self.generate_indexes_from_model(AssetRelease))  # V0.9 AssetRelease (21 FEB 2026)
 

@@ -87,11 +87,9 @@ if TYPE_CHECKING:
     from .interface_repository import IDataFactoryRepository as _IDataFactoryRepository
     from .promoted_repository import PromotedDatasetRepository as _PromotedDatasetRepository
     from .job_event_repository import JobEventRepository as _JobEventRepository
-    from .asset_repository import GeospatialAssetRepository as _GeospatialAssetRepository
-    from .revision_repository import AssetRevisionRepository as _AssetRevisionRepository
     from .platform_registry_repository import PlatformRegistryRepository as _PlatformRegistryRepository
     # V0.9 Asset/Release entity split (21 FEB 2026)
-    from .asset_repository_v2 import AssetRepositoryV2 as _AssetRepositoryV2
+    from .asset_repository import AssetRepository as _AssetRepository
     from .release_repository import ReleaseRepository as _ReleaseRepository
     from .connection_pool import ConnectionPoolManager as _ConnectionPoolManager
     from .schema_analyzer import (
@@ -196,21 +194,19 @@ def __getattr__(name: str):
         from .job_event_repository import JobEventRepository
         return JobEventRepository
 
-    # Geospatial Asset Entity (29 JAN 2026 - V0.8 Entity Architecture)
-    elif name == "GeospatialAssetRepository":
-        from .asset_repository import GeospatialAssetRepository
-        return GeospatialAssetRepository
-    elif name == "AssetRevisionRepository":
-        from .revision_repository import AssetRevisionRepository
-        return AssetRevisionRepository
+    # Platform Registry (V0.8 Entity Architecture)
     elif name == "PlatformRegistryRepository":
         from .platform_registry_repository import PlatformRegistryRepository
         return PlatformRegistryRepository
 
     # V0.9 Asset/Release entity split (21 FEB 2026)
+    elif name == "AssetRepository":
+        from .asset_repository import AssetRepository
+        return AssetRepository
     elif name == "AssetRepositoryV2":
-        from .asset_repository_v2 import AssetRepositoryV2
-        return AssetRepositoryV2
+        # Backward-compat alias (will be cleaned up in import sweep)
+        from .asset_repository import AssetRepository
+        return AssetRepository
     elif name == "ReleaseRepository":
         from .release_repository import ReleaseRepository
         return ReleaseRepository
@@ -300,12 +296,10 @@ __all__ = [
     "PromotedDatasetRepository",
     # Job Event Tracking (23 JAN 2026 - Execution Timeline)
     "JobEventRepository",
-    # Geospatial Asset Entity (29 JAN 2026 - V0.8 Entity Architecture)
-    "GeospatialAssetRepository",
-    "AssetRevisionRepository",
+    # Platform Registry (V0.8 Entity Architecture)
     "PlatformRegistryRepository",
     # V0.9 Asset/Release entity split (21 FEB 2026)
-    "AssetRepositoryV2",
+    "AssetRepository",
     "ReleaseRepository",
     "MetricsRepository",
     "JobProgressTracker",

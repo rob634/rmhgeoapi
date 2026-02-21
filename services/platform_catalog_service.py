@@ -68,14 +68,14 @@ class PlatformCatalogService:
     def __init__(self):
         """Initialize with repository dependencies."""
         from infrastructure import PlatformRepository, JobRepository
-        from infrastructure import AssetRepositoryV2, ReleaseRepository
+        from infrastructure import AssetRepository, ReleaseRepository
         from infrastructure.pgstac_repository import PgStacRepository
         from config import get_config
 
         self._platform_repo = PlatformRepository()
         self._job_repo = JobRepository()
         self._stac_repo = PgStacRepository()
-        self._asset_repo = AssetRepositoryV2()
+        self._asset_repo = AssetRepository()
         self._release_repo = ReleaseRepository()
         self._config = get_config()
 

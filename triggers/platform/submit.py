@@ -7,7 +7,7 @@
 # UPDATED: 21 FEB 2026 - V0.9 Asset/Release two-entity architecture
 # EXPORTS: platform_request_submit
 # DEPENDENCIES: services.platform_translation, services.platform_job_submit,
-#               services.asset_service_v2
+#               services.asset_service
 # ============================================================================
 """
 Platform Submit HTTP Triggers.
@@ -72,8 +72,8 @@ from services.platform_response import (
 )
 
 # V0.9 Entity Architecture - Asset/Release Service (21 FEB 2026)
-from services.asset_service_v2 import AssetServiceV2, ReleaseStateError
-from core.models.asset_v2 import ClearanceState
+from services.asset_service import AssetService, ReleaseStateError
+from core.models.asset import ClearanceState
 
 
 # ============================================================================
@@ -179,7 +179,7 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
         # 4. No revoke-first workflow — handled by get_or_overwrite_release()
         # =====================================================================
         try:
-            asset_service = AssetServiceV2()
+            asset_service = AssetService()
 
             # Step 1: Find or create Asset (stable identity container)
             asset, asset_op = asset_service.find_or_create_asset(

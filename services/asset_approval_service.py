@@ -1,39 +1,44 @@
 # ============================================================================
-# ASSET APPROVAL SERVICE
+# CLAUDE CONTEXT - ASSET APPROVAL SERVICE (RELEASE-BASED APPROVAL)
 # ============================================================================
-# STATUS: Service - Approval workflow for GeospatialAsset (Aggregate Root)
-# PURPOSE: Manage approval state transitions on GeospatialAsset directly
-# CREATED: 08 FEB 2026 (V0.8.11 - Approval Consolidation Phase 2)
-# UPDATED: 19 FEB 2026 - STAC as B2C materialized view (materialize at approve, delete at revoke)
+# EPOCH: 5 - ACTIVE
+# STATUS: Service - V0.9 approval workflow operates on Release, not Asset
+# PURPOSE: Manage approval state transitions on AssetRelease
+# LAST_REVIEWED: 21 FEB 2026
 # EXPORTS: AssetApprovalService
-# DEPENDENCIES: infrastructure.asset_repository, infrastructure.pgstac_repository
+# DEPENDENCIES: infrastructure.release_repository, services.asset_service
 # ============================================================================
 """
-Asset Approval Service.
+Asset Approval Service -- Release-Based Approval Workflow.
 
-Business logic for the approval workflow operating directly on GeospatialAsset.
-This replaces the legacy ApprovalService that used a separate DatasetApproval table.
+Part of the V0.9 Asset/Release entity split. Approval now targets a release_id,
+not an asset_id. The Asset entity is NEVER mutated during approval.
 
 Design Principle:
-    GeospatialAsset is the Aggregate Root - all approval state lives on the asset itself.
-    No separate approval records needed.
+    AssetRelease is the approval target. All approval state lives on the release.
+    The Asset (identity container) remains untouched.
 
 Workflow:
-    1. Platform submit creates asset with approval_state=PENDING_REVIEW
-    2. Job completes, asset.processing_status=COMPLETED, STAC dict cached in cog_metadata
+    1. Platform submit creates Release with approval_state=PENDING_REVIEW
+    2. Processing completes, STAC dict cached on Release.stac_item_json
     3. Reviewer approves/rejects via this service
-    4. If approved, STAC item materialized to pgSTAC from cached dict
-    5. If PUBLIC, ADF pipeline triggered
-    6. If revoked, STAC item deleted from pgSTAC (invisible to consumers)
+    4. At approval: version assigned, STAC materialized to pgSTAC
+    5. If PUBLIC: ADF pipeline triggered
+    6. If revoked: STAC deleted from pgSTAC, is_latest flipped
 
 State Transitions:
-    PENDING_REVIEW → APPROVED (with clearance_state)
-    PENDING_REVIEW → REJECTED (with rejection_reason)
-    APPROVED → REVOKED (for unpublish, terminal state)
-    REJECTED → PENDING_REVIEW (only via new version submit)
+    PENDING_REVIEW -> APPROVED (with clearance_state)
+    PENDING_REVIEW -> REJECTED (with rejection_reason)
+    APPROVED -> REVOKED (for unpublish, terminal state)
+    REJECTED -> PENDING_REVIEW (only via new version submit)
+
+Key V0.9 Change vs V0.8:
+    - V0.8: approve_asset(asset_id) mutated GeospatialAsset directly
+    - V0.9: approve_release(release_id) updates AssetRelease; Asset untouched
+    - STAC materialized from Release.stac_item_json (not cog_metadata)
 
 Exports:
-    AssetApprovalService: Approval workflow for GeospatialAsset
+    AssetApprovalService: Approval workflow for AssetRelease
 """
 
 from typing import Optional, List, Dict, Any
@@ -41,7 +46,7 @@ from datetime import datetime, timezone
 
 from util_logger import LoggerFactory, ComponentType
 from core.models.asset import (
-    GeospatialAsset,
+    AssetRelease,
     ApprovalState,
     ClearanceState,
     ProcessingStatus
@@ -52,135 +57,168 @@ logger = LoggerFactory.create_logger(ComponentType.SERVICE, "AssetApprovalServic
 
 class AssetApprovalService:
     """
-    Approval workflow service operating on GeospatialAsset (Aggregate Root).
+    V0.9 approval workflow operating on AssetRelease.
 
-    All approval state is stored directly on GeospatialAsset:
-    - approval_state: ApprovalState enum
-    - reviewer: who approved/rejected
-    - reviewed_at: when
-    - rejection_reason: why (if rejected)
-    - approval_notes: optional notes
-    - revoked_at/by/reason: if revoked
+    Key difference from V0.8: approval targets release_id, not asset_id.
+    The Asset entity is never mutated during approval.
 
-    This service orchestrates:
-    - State transitions with validation
-    - STAC property updates (app:published, etc.)
-    - ADF triggers for PUBLIC clearance
+    Workflow:
+        1. Platform submit creates Release with approval_state=PENDING_REVIEW
+        2. Processing completes, STAC dict cached on Release.stac_item_json
+        3. Reviewer approves/rejects via this service
+        4. At approval: version assigned, STAC materialized to pgSTAC
+        5. If PUBLIC: ADF pipeline triggered
+        6. If revoked: STAC deleted from pgSTAC, is_latest flipped
     """
 
     def __init__(self):
-        """Initialize with repository dependencies."""
-        from infrastructure.asset_repository import GeospatialAssetRepository
-        self.asset_repo = GeospatialAssetRepository()
+        """Initialize with repository and service dependencies (lazy imports)."""
+        from infrastructure.release_repository import ReleaseRepository
+        from services.asset_service import AssetService
+        self.release_repo = ReleaseRepository()
+        self.asset_service = AssetService()
 
     # =========================================================================
     # APPROVE
     # =========================================================================
 
-    def approve_asset(
+    def approve_release(
         self,
-        asset_id: str,
+        release_id: str,
         reviewer: str,
         clearance_state: ClearanceState,
+        version_id: str,
         notes: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Approve an asset for publication.
+        Approve a release for publication.
 
-        Performs the following:
-        1. Validates asset exists and is PENDING_REVIEW
-        2. Updates GeospatialAsset with approval fields
-        3. Updates STAC item with app:published=true
-        4. If PUBLIC clearance, triggers ADF pipeline
+        Steps:
+        1. Validate release exists and is PENDING_REVIEW
+        2. Warn (don't block) if processing_status != COMPLETED
+        3. Assign version (version_id, ordinal, is_latest) via asset_service
+        4. Update approval_state to APPROVED
+        5. Update clearance (with made_public tracking if PUBLIC)
+        6. Materialize STAC from cached stac_item_json
+        7. Trigger ADF if PUBLIC
 
         Args:
-            asset_id: Asset to approve
+            release_id: Release to approve
             reviewer: Email or identifier of reviewer
             clearance_state: OUO or PUBLIC (determines post-approval action)
+            version_id: Version to assign (e.g., "v1", "v2")
             notes: Optional approval notes
 
         Returns:
             Dict with:
                 success: bool
-                asset: Updated GeospatialAsset dict
+                release: Updated AssetRelease dict
                 action: 'approved_ouo' or 'approved_public_adf_triggered'
                 stac_updated: bool
                 adf_run_id: str (if PUBLIC)
                 error: str (if failed)
         """
-        logger.info(f"Approving asset {asset_id[:16]}... by {reviewer} (clearance: {clearance_state.value})")
+        logger.info(
+            f"Approving release {release_id[:16]}... by {reviewer} "
+            f"(clearance: {clearance_state.value}, version: {version_id})"
+        )
 
-        # Get asset
-        asset = self.asset_repo.get_by_id(asset_id)
-        if not asset:
+        # Get release
+        release = self.release_repo.get_by_id(release_id)
+        if not release:
             return {
                 'success': False,
-                'error': f"Asset not found: {asset_id}"
+                'error': f"Release not found: {release_id}"
             }
 
         # Validate state
-        if not asset.can_approve():
+        if not release.can_approve():
             return {
                 'success': False,
-                'error': f"Cannot approve: approval_state is '{asset.approval_state}', expected 'pending_review'"
+                'error': (
+                    f"Cannot approve: approval_state is '{release.approval_state.value}', "
+                    f"expected 'pending_review'"
+                )
             }
 
-        # Validate processing is complete (should be COMPLETED before approval)
-        if asset.processing_status != ProcessingStatus.COMPLETED:
+        # Warn if processing is not complete (don't block)
+        if release.processing_status != ProcessingStatus.COMPLETED:
             logger.warning(
-                f"Approving asset with processing_status={asset.processing_status.value} "
+                f"Approving release with processing_status={release.processing_status.value} "
                 f"(expected COMPLETED) - proceeding anyway"
             )
 
         now = datetime.now(timezone.utc)
 
-        # Update asset with approval
-        success = self.asset_repo.update_approval_state(
-            asset_id=asset_id,
+        # Assign version (version_id, ordinal, is_latest) via asset_service
+        try:
+            self.asset_service.assign_version(release_id, version_id, reviewer)
+        except Exception as e:
+            logger.error(f"Failed to assign version {version_id} to {release_id[:16]}...: {e}")
+            return {
+                'success': False,
+                'error': f"Version assignment failed: {e}"
+            }
+
+        # Update approval state
+        success = self.release_repo.update_approval_state(
+            release_id=release_id,
             approval_state=ApprovalState.APPROVED,
             reviewer=reviewer,
             reviewed_at=now,
-            approval_notes=notes,
-            clearance_state=clearance_state,
-            cleared_at=now,
-            cleared_by=reviewer,
-            made_public_at=now if clearance_state == ClearanceState.PUBLIC else None,
-            made_public_by=reviewer if clearance_state == ClearanceState.PUBLIC else None
+            approval_notes=notes
         )
 
         if not success:
             return {
                 'success': False,
-                'error': f"Failed to update asset approval state"
+                'error': "Failed to update release approval state"
             }
 
-        # Materialize STAC item to pgSTAC (19 FEB 2026: B2C materialized view)
-        stac_result = self._materialize_stac(asset, reviewer, clearance_state)
+        # Update clearance
+        self.release_repo.update_clearance(
+            release_id=release_id,
+            clearance_state=clearance_state,
+            cleared_by=reviewer
+        )
+
+        # Materialize STAC item to pgSTAC from cached stac_item_json
+        stac_result = self._materialize_stac(release, reviewer, clearance_state)
 
         # Trigger ADF if PUBLIC
         adf_run_id = None
         action = 'approved_ouo'
 
         if clearance_state == ClearanceState.PUBLIC:
-            adf_result = self._trigger_adf_pipeline(asset)
+            adf_result = self._trigger_adf_pipeline(release)
             if adf_result.get('success'):
                 adf_run_id = adf_result.get('run_id')
                 action = 'approved_public_adf_triggered'
-                # Update asset with ADF run ID
-                self.asset_repo.update_adf_run_id(asset_id, adf_run_id)
-                logger.info(f"ADF triggered for {asset_id[:16]}...: {adf_run_id}")
+                # Update clearance with ADF run ID
+                self.release_repo.update_clearance(
+                    release_id=release_id,
+                    clearance_state=clearance_state,
+                    cleared_by=reviewer,
+                    adf_run_id=adf_run_id
+                )
+                logger.info(f"ADF triggered for {release_id[:16]}...: {adf_run_id}")
             else:
-                logger.warning(f"ADF trigger failed for {asset_id[:16]}...: {adf_result.get('error')}")
+                logger.warning(
+                    f"ADF trigger failed for {release_id[:16]}...: {adf_result.get('error')}"
+                )
                 action = 'approved_public_adf_failed'
 
-        # Get updated asset
-        updated_asset = self.asset_repo.get_by_id(asset_id)
+        # Get updated release
+        updated_release = self.release_repo.get_by_id(release_id)
 
-        logger.info(f"Asset {asset_id[:16]}... approved by {reviewer} (clearance: {clearance_state.value})")
+        logger.info(
+            f"Release {release_id[:16]}... approved by {reviewer} "
+            f"(clearance: {clearance_state.value}, version: {version_id})"
+        )
 
         return {
             'success': True,
-            'asset': updated_asset.to_dict() if updated_asset else None,
+            'release': updated_release.to_dict() if updated_release else None,
             'action': action,
             'stac_updated': stac_result.get('success', False),
             'adf_run_id': adf_run_id
@@ -190,27 +228,27 @@ class AssetApprovalService:
     # REJECT
     # =========================================================================
 
-    def reject_asset(
+    def reject_release(
         self,
-        asset_id: str,
+        release_id: str,
         reviewer: str,
         reason: str
     ) -> Dict[str, Any]:
         """
-        Reject an asset.
+        Reject a release.
 
         Args:
-            asset_id: Asset to reject
+            release_id: Release to reject
             reviewer: Email or identifier of reviewer
             reason: Rejection reason (required)
 
         Returns:
             Dict with:
                 success: bool
-                asset: Updated GeospatialAsset dict
+                release: Updated AssetRelease dict
                 error: str (if failed)
         """
-        logger.info(f"Rejecting asset {asset_id[:16]}... by {reviewer}")
+        logger.info(f"Rejecting release {release_id[:16]}... by {reviewer}")
 
         if not reason or not reason.strip():
             return {
@@ -218,26 +256,29 @@ class AssetApprovalService:
                 'error': 'Rejection reason is required'
             }
 
-        # Get asset
-        asset = self.asset_repo.get_by_id(asset_id)
-        if not asset:
+        # Get release
+        release = self.release_repo.get_by_id(release_id)
+        if not release:
             return {
                 'success': False,
-                'error': f"Asset not found: {asset_id}"
+                'error': f"Release not found: {release_id}"
             }
 
         # Validate state
-        if not asset.can_reject():
+        if not release.can_approve():
             return {
                 'success': False,
-                'error': f"Cannot reject: approval_state is '{asset.approval_state}', expected 'pending_review'"
+                'error': (
+                    f"Cannot reject: approval_state is '{release.approval_state.value}', "
+                    f"expected 'pending_review'"
+                )
             }
 
         now = datetime.now(timezone.utc)
 
-        # Update asset with rejection
-        success = self.asset_repo.update_approval_state(
-            asset_id=asset_id,
+        # Update release with rejection
+        success = self.release_repo.update_approval_state(
+            release_id=release_id,
             approval_state=ApprovalState.REJECTED,
             reviewer=reviewer,
             reviewed_at=now,
@@ -247,48 +288,53 @@ class AssetApprovalService:
         if not success:
             return {
                 'success': False,
-                'error': f"Failed to update asset approval state"
+                'error': "Failed to update release approval state"
             }
 
-        # Get updated asset
-        updated_asset = self.asset_repo.get_by_id(asset_id)
+        # Get updated release
+        updated_release = self.release_repo.get_by_id(release_id)
 
-        logger.info(f"Asset {asset_id[:16]}... rejected by {reviewer}: {reason[:50]}...")
+        logger.info(f"Release {release_id[:16]}... rejected by {reviewer}: {reason[:50]}...")
 
         return {
             'success': True,
-            'asset': updated_asset.to_dict() if updated_asset else None
+            'release': updated_release.to_dict() if updated_release else None
         }
 
     # =========================================================================
     # REVOKE
     # =========================================================================
 
-    def revoke_asset(
+    def revoke_release(
         self,
-        asset_id: str,
+        release_id: str,
         revoker: str,
         reason: str
     ) -> Dict[str, Any]:
         """
-        Revoke a previously approved asset (unpublish).
+        Revoke a previously approved release (unpublish).
 
         This is a terminal state - to re-publish, submit a new version.
+        STAC item is deleted BEFORE state change to ensure consumers
+        see the item disappear cleanly.
+
+        If the revoked release was is_latest, the next most recent
+        approved release is promoted to is_latest.
 
         Args:
-            asset_id: Asset to revoke
-            revoker: Who is revoking (user email or system ID like "unpublish_job:xxx")
+            release_id: Release to revoke
+            revoker: Who is revoking (user email or system ID)
             reason: Revocation reason (required for audit trail)
 
         Returns:
             Dict with:
                 success: bool
-                asset: Updated GeospatialAsset dict
+                release: Updated AssetRelease dict
                 stac_updated: bool
                 warning: Audit note
                 error: str (if failed)
         """
-        logger.info(f"Revoking asset {asset_id[:16]}... by {revoker}")
+        logger.info(f"Revoking release {release_id[:16]}... by {revoker}")
 
         if not reason or not reason.strip():
             return {
@@ -296,27 +342,30 @@ class AssetApprovalService:
                 'error': 'Revocation reason is required for audit trail'
             }
 
-        # Get asset
-        asset = self.asset_repo.get_by_id(asset_id)
-        if not asset:
+        # Get release
+        release = self.release_repo.get_by_id(release_id)
+        if not release:
             return {
                 'success': False,
-                'error': f"Asset not found: {asset_id}"
+                'error': f"Release not found: {release_id}"
             }
 
         # Validate state
-        if not asset.can_revoke():
+        if not release.can_revoke():
             return {
                 'success': False,
-                'error': f"Cannot revoke: approval_state is '{asset.approval_state}', expected 'approved'"
+                'error': (
+                    f"Cannot revoke: approval_state is '{release.approval_state.value}', "
+                    f"expected 'approved'"
+                )
             }
 
-        now = datetime.now(timezone.utc)
+        # Delete STAC item FIRST (before state change)
+        stac_result = self._delete_stac(release)
 
-        # Update asset with revocation
-        success = self.asset_repo.update_revocation(
-            asset_id=asset_id,
-            revoked_at=now,
+        # Update release with revocation
+        success = self.release_repo.update_revocation(
+            release_id=release_id,
             revoked_by=revoker,
             revocation_reason=reason
         )
@@ -324,86 +373,71 @@ class AssetApprovalService:
         if not success:
             return {
                 'success': False,
-                'error': f"Failed to update asset revocation state"
+                'error': "Failed to update release revocation state"
             }
 
-        # Delete STAC item (19 FEB 2026: approved=visible, not approved=invisible)
-        stac_result = self._delete_stac(asset)
+        # If revoked release was is_latest, flip to next most recent approved release
+        if release.is_latest:
+            versions = self.release_repo.list_by_asset(release.asset_id)
+            next_latest = None
+            for v in reversed(versions):  # list is ordered by ordinal
+                if v.release_id != release_id and v.approval_state == ApprovalState.APPROVED:
+                    next_latest = v
+                    break
+            if next_latest:
+                self.release_repo.flip_is_latest(release.asset_id, next_latest.release_id)
+                logger.info(
+                    f"Flipped is_latest to {next_latest.release_id[:16]}... "
+                    f"({next_latest.version_id})"
+                )
+            else:
+                logger.info(f"No other approved releases for asset {release.asset_id[:16]}...")
 
-        # Get updated asset
-        updated_asset = self.asset_repo.get_by_id(asset_id)
+        # Get updated release
+        updated_release = self.release_repo.get_by_id(release_id)
 
-        # 19 FEB 2026: Version info cleared on revoke — asset returns to draft state
         logger.warning(
-            f"AUDIT: Asset {asset_id[:16]}... REVOKED by {revoker}. Reason: {reason}. "
-            f"Version info cleared (lineage_id, version_ordinal, version_id) — asset is now draft."
+            f"AUDIT: Release {release_id[:16]}... REVOKED by {revoker}. "
+            f"Reason: {reason}. Version: {release.version_id}."
         )
 
         return {
             'success': True,
-            'asset': updated_asset.to_dict() if updated_asset else None,
+            'release': updated_release.to_dict() if updated_release else None,
             'stac_updated': stac_result.get('success', False),
-            'warning': 'Approved asset has been revoked and version info cleared. Re-approval will require version assignment.'
+            'warning': (
+                'Approved release has been revoked. STAC item deleted from pgSTAC. '
+                'To re-publish, submit a new version.'
+            )
         }
 
     # =========================================================================
     # QUERY METHODS
     # =========================================================================
 
-    def list_pending_review(
-        self,
-        limit: int = 50,
-        include_processing_incomplete: bool = False
-    ) -> List[GeospatialAsset]:
+    def list_pending_review(self, limit: int = 50) -> List[AssetRelease]:
         """
-        List assets awaiting approval.
+        List releases awaiting approval (completed processing + pending_review).
+
+        Delegates to ReleaseRepository.list_pending_review which filters
+        for processing_status=COMPLETED and approval_state=PENDING_REVIEW.
 
         Args:
             limit: Maximum results
-            include_processing_incomplete: If True, include assets still processing
 
         Returns:
-            List of GeospatialAsset in PENDING_REVIEW state
+            List of AssetRelease in PENDING_REVIEW state with COMPLETED processing
         """
-        assets = self.asset_repo.list_by_approval_state(
-            state=ApprovalState.PENDING_REVIEW,
-            limit=limit
-        )
-
-        if not include_processing_incomplete:
-            # Filter to only completed processing
-            assets = [a for a in assets if a.processing_status == ProcessingStatus.COMPLETED]
-
-        return assets
-
-    def list_by_approval_state(
-        self,
-        approval_state: ApprovalState,
-        limit: int = 100
-    ) -> List[GeospatialAsset]:
-        """
-        List assets by approval state.
-
-        Args:
-            approval_state: State to filter by
-            limit: Maximum results
-
-        Returns:
-            List of GeospatialAsset
-        """
-        return self.asset_repo.list_by_approval_state(
-            state=approval_state,
-            limit=limit
-        )
+        return self.release_repo.list_pending_review(limit)
 
     def get_approval_stats(self) -> Dict[str, int]:
         """
-        Get counts of assets by approval_state.
+        Get counts of releases by approval_state.
 
         Returns:
             Dict like {'pending_review': 5, 'approved': 100, 'rejected': 2, 'revoked': 1}
         """
-        return self.asset_repo.count_by_approval_state()
+        return self.release_repo.count_by_approval_state()
 
     # =========================================================================
     # STAC INTEGRATION
@@ -411,71 +445,69 @@ class AssetApprovalService:
 
     def _materialize_stac(
         self,
-        asset: GeospatialAsset,
+        release: AssetRelease,
         reviewer: str,
         clearance_state: ClearanceState
     ) -> Dict[str, Any]:
         """
         Create pgSTAC item from cached STAC dict at approval time.
 
-        19 FEB 2026: STAC as B2C materialized view.
-        The STAC item dict was cached in cog_metadata.stac_item_json during processing.
+        V0.9 Change: Reads STAC from Release.stac_item_json (NOT from
+        cog_metadata table as in V0.8). The STAC item dict was cached
+        on the Release during processing.
+
         At approval, we:
-        1. Read the cached dict
+        1. Read the cached dict from release.stac_item_json
         2. Patch it with versioned ID and approval properties
         3. Build/upsert the STAC collection
         4. Insert the item into pgSTAC
 
-        The cached dict uses the DRAFT cog_id (before assign_version renamed it).
-        We reconstruct the draft cog_id deterministically from platform_refs.
+        Args:
+            release: The approved AssetRelease
+            reviewer: Who approved
+            clearance_state: OUO or PUBLIC
+
+        Returns:
+            Dict with success, pgstac_id, and optional error
         """
-        if not asset.stac_item_id or not asset.stac_collection_id:
+        if not release.stac_item_id or not release.stac_collection_id:
             return {
                 'success': False,
-                'error': 'Asset has no STAC item/collection ID'
+                'error': 'Release has no STAC item/collection ID'
+            }
+
+        if not release.stac_item_json:
+            logger.warning(
+                f"No cached STAC item JSON on release {release.release_id[:16]}..."
+            )
+            return {
+                'success': False,
+                'error': (
+                    f'STAC metadata not cached on release {release.release_id[:16]}... '
+                    f'-- resubmit data'
+                )
             }
 
         try:
-            from infrastructure.raster_metadata_repository import get_raster_metadata_repository
             from infrastructure.pgstac_repository import PgStacRepository
             from services.stac_collection import build_raster_stac_collection
-            from services.platform_translation import generate_stac_item_id
 
-            cog_repo = get_raster_metadata_repository()
+            # Copy to avoid mutating model
+            stac_item_json = dict(release.stac_item_json)
 
-            # Reconstruct the draft cog_id (before assign_version renamed it)
-            # Draft STAC item IDs use version_id=None → "draft" placeholder
-            platform_refs = asset.platform_refs or {}
-            draft_cog_id = generate_stac_item_id(
-                platform_refs.get('dataset_id', ''),
-                platform_refs.get('resource_id', ''),
-                None  # draft
-            )
+            # Patch with versioned ID and collection
+            stac_item_json['id'] = release.stac_item_id
+            stac_item_json['collection'] = release.stac_collection_id
 
-            # Read cached STAC item dict
-            stac_item_json = cog_repo.get_stac_item_json(draft_cog_id)
-            if not stac_item_json:
-                logger.warning(f"No cached STAC item for draft cog_id={draft_cog_id}")
-                return {
-                    'success': False,
-                    'error': f'STAC metadata not cached for {draft_cog_id} — resubmit data'
-                }
-
-            # Patch the dict with versioned ID and approval properties
-            stac_item_json['id'] = asset.stac_item_id  # Versioned ID from assign_version
-            stac_item_json['collection'] = asset.stac_collection_id
-
+            # Patch with approval properties
             now_iso = datetime.now(timezone.utc).isoformat()
             props = stac_item_json.setdefault('properties', {})
             props['geoetl:published'] = True
             props['geoetl:published_at'] = now_iso
             props['geoetl:approved_by'] = reviewer
             props['geoetl:clearance'] = clearance_state.value
-
-            # Add version info from platform_refs
-            version_id = platform_refs.get('version_id')
-            if version_id:
-                props['ddh:version_id'] = version_id
+            if release.version_id:
+                props['ddh:version_id'] = release.version_id
 
             # Build and upsert STAC collection
             pgstac = PgStacRepository()
@@ -483,18 +515,18 @@ class AssetApprovalService:
             item_bbox = stac_item_json.get('bbox', [-180, -90, 180, 90])
             item_dt = props.get('datetime')
             collection_dict = build_raster_stac_collection(
-                collection_id=asset.stac_collection_id,
+                collection_id=release.stac_collection_id,
                 bbox=item_bbox,
                 temporal_start=item_dt,
             )
             pgstac.insert_collection(collection_dict)
-            logger.info(f"Collection upserted: {asset.stac_collection_id}")
+            logger.info(f"Collection upserted: {release.stac_collection_id}")
 
             # Insert item into pgSTAC
-            pgstac_id = pgstac.insert_item(stac_item_json, asset.stac_collection_id)
+            pgstac_id = pgstac.insert_item(stac_item_json, release.stac_collection_id)
             logger.info(
-                f"Materialized STAC item {asset.stac_item_id} in collection "
-                f"{asset.stac_collection_id} (pgstac_id={pgstac_id})"
+                f"Materialized STAC item {release.stac_item_id} in collection "
+                f"{release.stac_collection_id} (pgstac_id={pgstac_id})"
             )
 
             return {'success': True, 'pgstac_id': pgstac_id}
@@ -506,35 +538,39 @@ class AssetApprovalService:
                 'error': str(e)
             }
 
-    def _delete_stac(self, asset: GeospatialAsset) -> Dict[str, Any]:
+    def _delete_stac(self, release: AssetRelease) -> Dict[str, Any]:
         """
         Delete pgSTAC item on revocation.
 
-        19 FEB 2026: STAC as B2C materialized view.
         Approved = visible in catalog, not approved = invisible.
         Revocation deletes the item from pgSTAC entirely.
-        The cached stac_item_json in cog_metadata is preserved for re-approval.
+        The cached stac_item_json on the Release is preserved for auditing.
 
-        Note: asset.stac_item_id is read BEFORE update_revocation() clears
-        version info. The SQL update doesn't mutate the Python object in memory.
+        Args:
+            release: The release being revoked
+
+        Returns:
+            Dict with success, deleted, and optional error
         """
-        if not asset.stac_item_id or not asset.stac_collection_id:
+        if not release.stac_item_id or not release.stac_collection_id:
             return {
                 'success': True,
                 'deleted': False,
-                'reason': 'Asset has no STAC item/collection ID (never materialized)'
+                'reason': 'Release has no STAC item/collection ID (never materialized)'
             }
 
         try:
             from infrastructure.pgstac_repository import PgStacRepository
             pgstac = PgStacRepository()
 
-            deleted = pgstac.delete_item(asset.stac_collection_id, asset.stac_item_id)
+            deleted = pgstac.delete_item(release.stac_collection_id, release.stac_item_id)
 
             if deleted:
-                logger.info(f"Deleted pgSTAC item {asset.stac_item_id}")
+                logger.info(f"Deleted pgSTAC item {release.stac_item_id}")
             else:
-                logger.info(f"pgSTAC item {asset.stac_item_id} not found (never materialized)")
+                logger.info(
+                    f"pgSTAC item {release.stac_item_id} not found (never materialized)"
+                )
 
             return {'success': True, 'deleted': deleted}
 
@@ -549,12 +585,12 @@ class AssetApprovalService:
     # ADF INTEGRATION
     # =========================================================================
 
-    def _trigger_adf_pipeline(self, asset: GeospatialAsset) -> Dict[str, Any]:
+    def _trigger_adf_pipeline(self, release: AssetRelease) -> Dict[str, Any]:
         """
         Trigger ADF pipeline for PUBLIC data export.
 
         Args:
-            asset: The approved asset
+            release: The approved release
 
         Returns:
             Dict with success, run_id, and optional error
@@ -572,12 +608,13 @@ class AssetApprovalService:
             result = adf_repo.trigger_pipeline(
                 pipeline_name='export_to_public',
                 parameters={
-                    'asset_id': asset.asset_id,
-                    'stac_item_id': asset.stac_item_id,
-                    'stac_collection_id': asset.stac_collection_id,
-                    'data_type': asset.data_type,
-                    'table_name': asset.table_name,
-                    'blob_path': asset.blob_path
+                    'release_id': release.release_id,
+                    'asset_id': release.asset_id,
+                    'stac_item_id': release.stac_item_id,
+                    'stac_collection_id': release.stac_collection_id,
+                    'data_type': 'raster' if release.blob_path else 'vector',
+                    'table_name': release.table_name,
+                    'blob_path': release.blob_path
                 }
             )
 

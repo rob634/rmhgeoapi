@@ -143,17 +143,11 @@ from .raster_metadata import (
     CogMetadataRecord
 )
 
-# Geospatial asset entity models (V0.8 Entity Architecture - 29 JAN 2026)
+# V0.9 Asset/Release entity models (21 FEB 2026 - Entity Split)
 from .asset import (
     ApprovalState,
     ClearanceState,
-    ProcessingStatus,  # DAG Orchestration (29 JAN 2026)
-    GeospatialAsset,
-    AssetRevision
-)
-
-# V0.9 Asset/Release entity models (21 FEB 2026 - Entity Split)
-from .asset_v2 import (
+    ProcessingStatus,
     Asset,
     AssetRelease,
 )
@@ -314,13 +308,10 @@ __all__ = [
     # Raster metadata models (F7.9)
     'CogMetadataRecord',
 
-    # Geospatial asset entity models (V0.8 Entity Architecture - 29 JAN 2026)
+    # V0.9 Asset/Release entity models (21 FEB 2026 - Entity Split)
     'ApprovalState',
     'ClearanceState',
-    'GeospatialAsset',
-    'AssetRevision',
-
-    # V0.9 Asset/Release entity models (21 FEB 2026 - Entity Split)
+    'ProcessingStatus',
     'Asset',
     'AssetRelease',
 

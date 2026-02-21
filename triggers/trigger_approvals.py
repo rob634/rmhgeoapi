@@ -5,7 +5,7 @@
 # PURPOSE: Platform API for approving and revoking dataset approvals
 # LAST_REVIEWED: 21 FEB 2026
 # EXPORTS: platform_approve, platform_reject, platform_revoke, platform_approvals_list
-# DEPENDENCIES: services.asset_approval_service_v2, infrastructure.release_repository
+# DEPENDENCIES: services.asset_approval_service, infrastructure.release_repository
 # ============================================================================
 """
 Approval Platform Triggers (V0.9 Release-Based).
@@ -20,7 +20,7 @@ HTTP endpoints for the dataset approval workflow:
 
 V0.9 Refactor (21 FEB 2026):
 - Approval targets AssetRelease, NOT Asset
-- Uses AssetApprovalServiceV2 (release-centric)
+- Uses AssetApprovalService (release-centric)
 - Replaces 3-tier asset_id fallback with simplified _resolve_release()
 - Version assignment handled internally by approve_release()
 - Response includes release_id as the primary identifier
@@ -41,7 +41,7 @@ from util_logger import LoggerFactory, ComponentType
 logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "ApprovalTriggers")
 
 # V0.9 Entity Architecture imports
-from core.models.asset_v2 import ClearanceState, ApprovalState
+from core.models.asset import ClearanceState, ApprovalState
 
 
 def _resolve_release(
@@ -77,7 +77,7 @@ def _resolve_release(
     Returns:
         Tuple of (AssetRelease, error_dict) - error_dict is None if found
     """
-    from infrastructure import ReleaseRepository, AssetRepositoryV2
+    from infrastructure import ReleaseRepository, AssetRepository
     release_repo = ReleaseRepository()
 
     # 1. Direct release_id (primary path)
@@ -128,7 +128,7 @@ def _resolve_release(
 
     # 5. By dataset_id + resource_id -- find asset first, then release
     if dataset_id and resource_id:
-        asset_repo = AssetRepositoryV2()
+        asset_repo = AssetRepository()
         asset = asset_repo.get_by_identity("ddh", dataset_id, resource_id)
         if asset:
             release = release_repo.get_draft(asset.asset_id)
@@ -289,8 +289,8 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
             )
 
         # V0.9: Approve release (version assignment handled internally)
-        from services.asset_approval_service_v2 import AssetApprovalServiceV2
-        approval_service = AssetApprovalServiceV2()
+        from services.asset_approval_service import AssetApprovalService
+        approval_service = AssetApprovalService()
 
         logger.info(
             f"Approving release {release.release_id[:16]}... by {reviewer} "
@@ -451,9 +451,9 @@ def platform_reject(req: func.HttpRequest) -> func.HttpResponse:
                 headers={"Content-Type": "application/json"}
             )
 
-        # Perform rejection using AssetApprovalServiceV2
-        from services.asset_approval_service_v2 import AssetApprovalServiceV2
-        approval_service = AssetApprovalServiceV2()
+        # Perform rejection using AssetApprovalService
+        from services.asset_approval_service import AssetApprovalService
+        approval_service = AssetApprovalService()
 
         logger.info(f"Rejecting release {release.release_id[:16]}... by {reviewer}. Reason: {reason[:50]}...")
 
@@ -601,9 +601,9 @@ def platform_revoke(req: func.HttpRequest) -> func.HttpResponse:
                 headers={"Content-Type": "application/json"}
             )
 
-        # Perform revocation using AssetApprovalServiceV2
-        from services.asset_approval_service_v2 import AssetApprovalServiceV2
-        approval_service = AssetApprovalServiceV2()
+        # Perform revocation using AssetApprovalService
+        from services.asset_approval_service import AssetApprovalService
+        approval_service = AssetApprovalService()
 
         logger.warning(f"AUDIT: Revoking release {release.release_id[:16]}... by {revoker}. Reason: {reason}")
 
@@ -699,8 +699,8 @@ def platform_approvals_list(req: func.HttpRequest) -> func.HttpResponse:
         offset = int(req.params.get('offset', 0))
 
         # Import V0.9 service
-        from services.asset_approval_service_v2 import AssetApprovalServiceV2
-        approval_service = AssetApprovalServiceV2()
+        from services.asset_approval_service import AssetApprovalService
+        approval_service = AssetApprovalService()
 
         # Parse status filter
         approval_state = None

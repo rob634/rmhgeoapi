@@ -148,9 +148,9 @@ def platform_unpublish(req: func.HttpRequest) -> func.HttpResponse:
         release_id = None
         if original_request and not dry_run:
             try:
-                from infrastructure import ReleaseRepository, AssetRepositoryV2
+                from infrastructure import ReleaseRepository, AssetRepository
                 release_repo = ReleaseRepository()
-                asset_repo = AssetRepositoryV2()
+                asset_repo = AssetRepository()
 
                 # Find release by job_id or stac_item_id
                 release = None
@@ -161,8 +161,8 @@ def platform_unpublish(req: func.HttpRequest) -> func.HttpResponse:
                     release_id = release.release_id
                     if release.approval_state.value == 'approved':
                         deleted_by = req_body.get('deleted_by', 'platform_unpublish')
-                        from services.asset_approval_service_v2 import AssetApprovalServiceV2
-                        approval_svc = AssetApprovalServiceV2()
+                        from services.asset_approval_service import AssetApprovalService
+                        approval_svc = AssetApprovalService()
                         approval_svc.revoke_release(
                             release_id=release.release_id,
                             revoker=deleted_by or 'system',

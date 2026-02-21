@@ -6,7 +6,7 @@
 # LAST_REVIEWED: 21 FEB 2026
 # REVIEW_STATUS: V0.9 Asset/Release split - returns Asset + Release + version history
 # EXPORTS: platform_request_status, platform_job_status, platform_health, platform_failures, platform_lineage, platform_validate
-# DEPENDENCIES: infrastructure.PlatformRepository, infrastructure.JobRepository, infrastructure.AssetRepositoryV2, infrastructure.ReleaseRepository
+# DEPENDENCIES: infrastructure.PlatformRepository, infrastructure.JobRepository, infrastructure.AssetRepository, infrastructure.ReleaseRepository
 # ============================================================================
 """
 Platform Status and Diagnostic HTTP Triggers.
@@ -46,7 +46,7 @@ from triggers.http_base import parse_request_json
 
 # Import infrastructure
 from infrastructure import PlatformRepository, JobRepository, TaskRepository, PostgreSQLRepository, RepositoryFactory
-# V0.9: AssetRepositoryV2 and ReleaseRepository imported lazily within functions
+# V0.9: AssetRepository and ReleaseRepository imported lazily within functions
 from config import get_config
 
 # Configure logging
@@ -174,8 +174,8 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
             if not platform_request:
                 # V0.9: Try as asset_id
                 try:
-                    from infrastructure import AssetRepositoryV2, ReleaseRepository
-                    asset_repo = AssetRepositoryV2()
+                    from infrastructure import AssetRepository, ReleaseRepository
+                    asset_repo = AssetRepository()
                     asset = asset_repo.get_by_id(lookup_id)
                     if asset:
                         # Get latest release with a job
@@ -634,8 +634,8 @@ def _build_single_status_response(
         }
         # Get asset info from release's asset_id
         try:
-            from infrastructure import AssetRepositoryV2
-            asset = AssetRepositoryV2().get_by_id(release.asset_id)
+            from infrastructure import AssetRepository
+            asset = AssetRepository().get_by_id(release.asset_id)
             if asset:
                 asset_data = {
                     "asset_id": asset.asset_id,
@@ -653,7 +653,7 @@ def _build_single_status_response(
         # V0.9: Look up release by job_id
         if platform_request.job_id:
             try:
-                from infrastructure import ReleaseRepository, AssetRepositoryV2
+                from infrastructure import ReleaseRepository, AssetRepository
                 release_repo = ReleaseRepository()
                 release = release_repo.get_by_job_id(platform_request.job_id)
                 if release:
@@ -667,7 +667,7 @@ def _build_single_status_response(
                         "revision": release.revision,
                     }
                     # Get asset info
-                    asset = AssetRepositoryV2().get_by_id(release.asset_id)
+                    asset = AssetRepository().get_by_id(release.asset_id)
                     if asset:
                         asset_data = {
                             "asset_id": asset.asset_id,
@@ -734,7 +734,7 @@ def _handle_platform_refs_lookup(
     """
     Lookup status by dataset_id + resource_id (platform refs).
 
-    V0.9 (21 FEB 2026): Uses AssetRepositoryV2 + ReleaseRepository instead of
+    V0.9 (21 FEB 2026): Uses AssetRepository + ReleaseRepository instead of
     GeospatialAssetRepository. Finds the Asset by identity triple, then lists
     all releases underneath it.
 
@@ -757,9 +757,9 @@ def _handle_platform_refs_lookup(
     Returns:
         func.HttpResponse with status JSON
     """
-    from infrastructure import AssetRepositoryV2, ReleaseRepository
+    from infrastructure import AssetRepository, ReleaseRepository
 
-    asset_repo = AssetRepositoryV2()
+    asset_repo = AssetRepository()
     release_repo = ReleaseRepository()
 
     # Find asset by identity triple

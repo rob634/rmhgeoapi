@@ -756,8 +756,8 @@ def delete_stac_and_audit(params: Dict[str, Any], context: Optional[Dict[str, An
                                     rel_row = rel_cur.fetchone()
 
                             if rel_row and rel_row['approval_state'] == 'approved':
-                                from services.asset_approval_service_v2 import AssetApprovalServiceV2
-                                approval_svc = AssetApprovalServiceV2()
+                                from services.asset_approval_service import AssetApprovalService
+                                approval_svc = AssetApprovalService()
                                 approval_svc.revoke_release(
                                     release_id=rel_row['release_id'],
                                     revoker=f"unpublish_job:{unpublish_job_id}",

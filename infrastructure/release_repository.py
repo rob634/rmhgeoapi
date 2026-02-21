@@ -6,7 +6,7 @@
 # PURPOSE: Database operations for app.asset_releases table
 # LAST_REVIEWED: 21 FEB 2026
 # EXPORTS: ReleaseRepository
-# DEPENDENCIES: psycopg, core.models.asset_v2
+# DEPENDENCIES: psycopg, core.models.asset
 # ============================================================================
 """
 Release Repository -- Versioned Artifact Lifecycle CRUD.
@@ -66,7 +66,7 @@ from datetime import datetime, timezone
 from psycopg import sql
 
 from util_logger import LoggerFactory, ComponentType
-from core.models.asset_v2 import AssetRelease, ApprovalState, ClearanceState, ProcessingStatus
+from core.models.asset import AssetRelease, ApprovalState, ClearanceState, ProcessingStatus
 from .postgresql import PostgreSQLRepository
 
 logger = LoggerFactory.create_logger(ComponentType.REPOSITORY, "ReleaseRepository")

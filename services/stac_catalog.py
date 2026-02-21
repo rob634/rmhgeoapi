@@ -397,7 +397,7 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
             }
 
         # V0.9: Also cache STAC item dict on Release entity (21 FEB 2026)
-        # This allows AssetApprovalServiceV2._materialize_stac() to read from Release
+        # This allows AssetApprovalService._materialize_stac() to read from Release
         release_id = params.get('release_id')
         if release_id:
             try:

@@ -7,7 +7,7 @@
 # CREATED: 31 JAN 2026
 # LAST_REVIEWED: 21 FEB 2026
 # EXPORTS: validate_version_lineage, VersionValidationResult
-# DEPENDENCIES: infrastructure.AssetRepositoryV2, infrastructure.ReleaseRepository
+# DEPENDENCIES: infrastructure.AssetRepository, infrastructure.ReleaseRepository
 # ============================================================================
 """
 Platform Validation Service - V0.9 Implicit Lineage.
@@ -22,7 +22,7 @@ This service is used by:
 V0.9 Simplification (21 FEB 2026):
 - Lineage is implicit: the Asset IS the lineage container
 - Replaced AssetService.get_lineage_state() with direct repo calls
-- Uses AssetRepositoryV2 for identity lookup
+- Uses AssetRepository for identity lookup
 - Uses ReleaseRepository for version/draft state
 
 V0.8.16 Approval-Aware Validation (09 FEB 2026):
@@ -129,14 +129,14 @@ def validate_version_lineage(
     Returns:
         VersionValidationResult with validation outcome and suggestions
     """
-    from infrastructure import AssetRepositoryV2, ReleaseRepository
-    from core.models.asset_v2 import Asset
+    from infrastructure import AssetRepository, ReleaseRepository
+    from core.models.asset import Asset
 
     dataset_id = platform_refs.get('dataset_id')
     resource_id = platform_refs.get('resource_id')
     version_id = platform_refs.get('version_id')
 
-    asset_repo = AssetRepositoryV2()
+    asset_repo = AssetRepository()
     release_repo = ReleaseRepository()
 
     # Find asset (lineage container) -- the Asset IS the lineage in V0.9

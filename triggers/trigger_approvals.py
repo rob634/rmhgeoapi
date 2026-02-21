@@ -1,31 +1,35 @@
 # ============================================================================
-# APPROVAL PLATFORM TRIGGERS
+# APPROVAL PLATFORM TRIGGERS (V0.9 - RELEASE-BASED)
 # ============================================================================
 # STATUS: Trigger - HTTP endpoints for dataset approval workflow
 # PURPOSE: Platform API for approving and revoking dataset approvals
-# LAST_REVIEWED: 08 FEB 2026
+# LAST_REVIEWED: 21 FEB 2026
 # EXPORTS: platform_approve, platform_reject, platform_revoke, platform_approvals_list
-# DEPENDENCIES: services.asset_approval_service
+# DEPENDENCIES: services.asset_approval_service_v2, infrastructure.release_repository
 # ============================================================================
 """
-Approval Platform Triggers.
+Approval Platform Triggers (V0.9 Release-Based).
 
 HTTP endpoints for the dataset approval workflow:
-- POST /api/platform/approve - Approve a pending dataset
-- POST /api/platform/reject - Reject a pending dataset
-- POST /api/platform/revoke - Revoke an approved dataset (unapprove)
-- GET /api/platform/approvals - List approvals with filters
+- POST /api/platform/approve - Approve a pending release
+- POST /api/platform/reject - Reject a pending release
+- POST /api/platform/revoke - Revoke an approved release (unapprove)
+- GET /api/platform/approvals - List releases with approval filters
+- GET /api/platform/approvals/{id} - Get a single release's approval state
+- GET /api/platform/approvals/status - Bulk status lookup by STAC IDs
 
-V0.8.11 Refactor (08 FEB 2026):
-- Uses AssetApprovalService (GeospatialAsset-centric)
-- GeospatialAsset.approval_state is the single source of truth
-- Removed legacy DatasetApproval dependency
+V0.9 Refactor (21 FEB 2026):
+- Approval targets AssetRelease, NOT Asset
+- Uses AssetApprovalServiceV2 (release-centric)
+- Replaces 3-tier asset_id fallback with simplified _resolve_release()
+- Version assignment handled internally by approve_release()
+- Response includes release_id as the primary identifier
 
 These are synchronous operations (no async jobs) since they're simple
 state changes to approval records and STAC properties.
 
 Created: 17 JAN 2026
-Updated: 08 FEB 2026 - V0.8.11 AssetApprovalService refactor
+Updated: 21 FEB 2026 - V0.9 Release-based approval
 """
 
 import json
@@ -36,203 +40,154 @@ from util_logger import LoggerFactory, ComponentType
 
 logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "ApprovalTriggers")
 
-# V0.8 Entity Architecture imports
-from core.models.asset import ClearanceState, ApprovalState
+# V0.9 Entity Architecture imports
+from core.models.asset_v2 import ClearanceState, ApprovalState
 
 
-def _resolve_asset_id(
+def _resolve_release(
+    release_id: str = None,
     asset_id: str = None,
-    stac_item_id: str = None,
     job_id: str = None,
     request_id: str = None,
     dataset_id: str = None,
     resource_id: str = None
 ) -> tuple:
     """
-    Resolve asset_id from various B2B identifiers.
+    Resolve an AssetRelease from various identifiers.
+
+    V0.9 simplified resolution -- no 3-tier fallback, no JSONB containment
+    queries. Each lookup path is a direct FK or indexed column on the
+    asset_releases table.
+
+    Resolution order:
+        1. release_id (primary path -- preferred)
+        2. job_id (direct FK on Release)
+        3. request_id (stored on Release)
+        4. asset_id (get draft first, then latest approved)
+        5. dataset_id + resource_id (find Asset first, then Release)
 
     Args:
-        asset_id: Direct asset ID
-        stac_item_id: STAC item ID
-        job_id: Job ID
-        request_id: Platform request ID
+        release_id: Direct release identifier (preferred)
+        asset_id: Asset identifier (finds latest draft or approved release)
+        job_id: Processing job identifier
+        request_id: Platform request identifier
         dataset_id: DDH dataset identifier (must be paired with resource_id)
         resource_id: DDH resource identifier (must be paired with dataset_id)
 
     Returns:
-        Tuple of (asset_id, error_response) - error_response is None if found
+        Tuple of (AssetRelease, error_dict) - error_dict is None if found
     """
-    from infrastructure.asset_repository import GeospatialAssetRepository
-    asset_repo = GeospatialAssetRepository()
+    from infrastructure import ReleaseRepository, AssetRepositoryV2
+    release_repo = ReleaseRepository()
 
-    # Direct asset_id
-    if asset_id:
-        asset = asset_repo.get_by_id(asset_id)
-        if asset:
-            return asset.asset_id, None
+    # 1. Direct release_id (primary path)
+    if release_id:
+        release = release_repo.get_by_id(release_id)
+        if release:
+            return release, None
         return None, {
             "success": False,
-            "error": f"Asset not found: {asset_id}",
+            "error": f"Release not found: {release_id}",
             "error_type": "NotFound"
         }
 
-    # By STAC item ID
-    if stac_item_id:
-        asset = asset_repo.get_by_stac_item_id(stac_item_id)
-        if asset:
-            return asset.asset_id, None
-        return None, {
-            "success": False,
-            "error": f"No asset found for STAC item: {stac_item_id}",
-            "error_type": "NotFound"
-        }
-
-    # By job ID - use direct FK on JobRecord (V0.8.16 - 09 FEB 2026)
+    # 2. By job_id -- direct FK on Release
     if job_id:
-        from infrastructure import JobRepository
-        job_repo = JobRepository()
-        job = job_repo.get_job(job_id)
-        if job and job.asset_id:
-            return job.asset_id, None
-
-        # FALLBACK: Legacy jobs (before V0.8.16) — asset_id in job parameters
-        if job and job.parameters and job.parameters.get('asset_id'):
-            legacy_asset_id = job.parameters['asset_id']
-            logger.info(f"Legacy job detected - using asset_id from job_params: {legacy_asset_id[:16]}...")
-            asset = asset_repo.get_by_id(legacy_asset_id)
-            if asset:
-                return legacy_asset_id, None
-
-        # FALLBACK 2: Very old jobs — lookup via api_requests by job_id
-        if job:
-            from infrastructure import PlatformRepository
-            platform_repo = PlatformRepository()
-            try:
-                from psycopg import sql
-                with platform_repo._get_connection() as conn:
-                    with conn.cursor() as cur:
-                        cur.execute(
-                            sql.SQL("""
-                                SELECT asset_id FROM {}.api_requests
-                                WHERE job_id = %s
-                            """).format(sql.Identifier(platform_repo.config.app_schema)),
-                            (job_id,)
-                        )
-                        row = cur.fetchone()
-                        if row and row['asset_id']:
-                            logger.info(f"Found asset via api_requests lookup: {row['asset_id'][:16]}...")
-                            return row['asset_id'], None
-            except Exception as lookup_err:
-                logger.warning(f"Legacy asset lookup failed: {lookup_err}")
-
+        release = release_repo.get_by_job_id(job_id)
+        if release:
+            return release, None
         return None, {
             "success": False,
-            "error": f"No asset found for job: {job_id}. This may be a legacy job from before V0.8.16.",
+            "error": f"No release found for job: {job_id}",
             "error_type": "NotFound"
         }
 
-    # By platform request ID - use direct FK on ApiRequest (V0.8.16 - 09 FEB 2026)
+    # 3. By request_id -- stored on Release
     if request_id:
-        from infrastructure import PlatformRepository
-        platform_repo = PlatformRepository()
-        platform_request = platform_repo.get_request(request_id)
-        if not platform_request:
-            return None, {
-                "success": False,
-                "error": f"No platform request found: {request_id}",
-                "error_type": "NotFound"
-            }
-        # Use direct FK on ApiRequest first, then Job
-        if platform_request.asset_id:
-            return platform_request.asset_id, None
-        # Fallback to Job.asset_id
-        from infrastructure import JobRepository
-        job_repo = JobRepository()
-        job = job_repo.get_job(platform_request.job_id)
-        if job and job.asset_id:
-            return job.asset_id, None
+        release = release_repo.get_by_request_id(request_id)
+        if release:
+            return release, None
         return None, {
             "success": False,
-            "error": f"No asset found for request: {request_id}",
+            "error": f"No release found for request: {request_id}",
             "error_type": "NotFound"
         }
 
-    # By dataset_id + resource_id (18 FEB 2026) — both must be provided explicitly
-    if dataset_id and resource_id:
-        from psycopg import sql as psql
-        import json as _json
-        # Use JSONB containment (@>) to find asset regardless of whether version_id exists
-        # Returns the latest (most recent) active asset for this dataset+resource pair
-        refs_filter = {"dataset_id": dataset_id, "resource_id": resource_id}
-        with asset_repo._get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    psql.SQL("""
-                        SELECT asset_id FROM {}.{}
-                        WHERE platform_id = 'ddh'
-                          AND platform_refs @> %s
-                          AND deleted_at IS NULL
-                        ORDER BY created_at DESC
-                        LIMIT 1
-                    """).format(
-                        psql.Identifier(asset_repo.schema),
-                        psql.Identifier(asset_repo.table)
-                    ),
-                    (_json.dumps(refs_filter),)
-                )
-                row = cur.fetchone()
-                if row:
-                    return row['asset_id'], None
+    # 4. By asset_id -- get draft first (for approve/reject), then latest approved (for revoke)
+    if asset_id:
+        release = release_repo.get_draft(asset_id)
+        if not release:
+            release = release_repo.get_latest(asset_id)
+        if release:
+            return release, None
         return None, {
             "success": False,
-            "error": f"No asset found for dataset_id={dataset_id}, resource_id={resource_id}",
+            "error": f"No release found for asset: {asset_id}",
+            "error_type": "NotFound"
+        }
+
+    # 5. By dataset_id + resource_id -- find asset first, then release
+    if dataset_id and resource_id:
+        asset_repo = AssetRepositoryV2()
+        asset = asset_repo.get_by_identity("ddh", dataset_id, resource_id)
+        if asset:
+            release = release_repo.get_draft(asset.asset_id)
+            if not release:
+                release = release_repo.get_latest(asset.asset_id)
+            if release:
+                return release, None
+        return None, {
+            "success": False,
+            "error": f"No release found for dataset_id={dataset_id}, resource_id={resource_id}",
             "error_type": "NotFound"
         }
 
     # No identifier provided
     return None, {
         "success": False,
-        "error": "Must provide asset_id, stac_item_id, job_id, request_id, or dataset_id+resource_id",
+        "error": "Must provide release_id, asset_id, job_id, request_id, or dataset_id+resource_id",
         "error_type": "ValidationError"
     }
 
 
 def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
     """
-    HTTP trigger to approve a pending dataset.
+    HTTP trigger to approve a pending release.
 
     POST /api/platform/approve
 
-    Approves a dataset for publication. Updates GeospatialAsset.approval_state
-    and STAC item with geoetl:published=true. For PUBLIC clearance, triggers ADF.
+    Approves a release for publication. Updates AssetRelease approval_state
+    and materializes STAC item from cached stac_item_json. For PUBLIC
+    clearance, triggers ADF pipeline.
+
+    V0.9: Version assignment is handled internally by approve_release() --
+    the caller provides version_id but does NOT need to call assign_version().
 
     Request Body:
     {
-        "asset_id": "abc123...",               // Asset ID (preferred)
-        "stac_item_id": "my-dataset-v1",       // Or by STAC item
-        "job_id": "def456...",                 // Or by job ID
+        "release_id": "abc123...",             // Release ID (preferred)
+        "asset_id": "def456...",               // Or by asset ID (finds draft/latest)
+        "job_id": "ghi789...",                 // Or by job ID
         "request_id": "a3f2c1b8...",           // Or by Platform request ID
+        "dataset_id": "floods",                // Or by dataset+resource
+        "resource_id": "jakarta",
         "reviewer": "user@example.com",        // Required: Who is approving
         "clearance_level": "ouo",              // Required: "ouo" or "public"
-        "notes": "Looks good",                 // Optional: Review notes
-        "version_id": "v1.0",                  // Required if asset is draft (no version_id)
-        "previous_version_id": "v0.9"          // Required if lineage exists (v1→v2)
+        "version_id": "v1",                    // Required: Version to assign
+        "notes": "Looks good"                  // Optional: Review notes
     }
-
-    Clearance Levels:
-    - "ouo": Official Use Only - internal access, no external export
-    - "public": Public access - triggers ADF pipeline for external zone export
 
     Response (success):
     {
         "success": true,
-        "asset_id": "abc123...",
+        "release_id": "abc123...",
+        "asset_id": "def456...",
         "approval_state": "approved",
         "clearance_state": "ouo",
         "action": "approved_ouo",
         "stac_updated": true,
         "adf_run_id": "...",
-        "message": "Dataset approved successfully"
+        "message": "Release approved successfully"
     }
     """
     logger.info("Platform approve endpoint called")
@@ -241,8 +196,8 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
         req_body = parse_request_json(req)
 
         # Extract identifiers (support multiple lookup methods)
+        release_id_param = req_body.get('release_id')
         asset_id_param = req_body.get('asset_id')
-        stac_item_id = req_body.get('stac_item_id')
         job_id = req_body.get('job_id')
         request_id = req_body.get('request_id')
         dataset_id = req_body.get('dataset_id')
@@ -254,9 +209,7 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
         reviewer = req_body.get('reviewer')
         notes = req_body.get('notes')
         clearance_level_str = req_body.get('clearance_level')
-        # Draft mode (17 FEB 2026): version assignment at approve time
         version_id = req_body.get('version_id')
-        previous_version_id = req_body.get('previous_version_id')
 
         # Validate reviewer is provided
         if not reviewer:
@@ -306,104 +259,49 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
                 headers={"Content-Type": "application/json"}
             )
 
-        # Resolve asset_id from various identifiers
-        asset_id, error = _resolve_asset_id(
+        # Validate version_id is provided
+        if not version_id:
+            return func.HttpResponse(
+                json.dumps({
+                    "success": False,
+                    "error": "version_id is required (e.g., 'v1', 'v2')",
+                    "error_type": "ValidationError"
+                }),
+                status_code=400,
+                headers={"Content-Type": "application/json"}
+            )
+
+        # Resolve release from various identifiers
+        release, error = _resolve_release(
+            release_id=release_id_param,
             asset_id=asset_id_param,
-            stac_item_id=stac_item_id,
             job_id=job_id,
             request_id=request_id,
             dataset_id=dataset_id,
             resource_id=resource_id
         )
         if error:
+            status_code = 404 if error.get('error_type') == 'NotFound' else 400
             return func.HttpResponse(
                 json.dumps(error),
-                status_code=404 if error.get('error_type') == 'NotFound' else 400,
+                status_code=status_code,
                 headers={"Content-Type": "application/json"}
             )
 
-        # =====================================================================
-        # DRAFT MODE: Version assignment at approve time (17 FEB 2026)
-        # If asset has no version_id in platform_refs, it's a draft.
-        # Reviewer must provide version_id to finalize.
-        # =====================================================================
-        from services.asset_service import AssetService, AssetNotFoundError, AssetStateError
-        asset_service = AssetService()
-        asset = asset_service.get_active_asset(asset_id)
+        # V0.9: Approve release (version assignment handled internally)
+        from services.asset_approval_service_v2 import AssetApprovalServiceV2
+        approval_service = AssetApprovalServiceV2()
 
-        if not asset:
-            return func.HttpResponse(
-                json.dumps({
-                    "success": False,
-                    "error": f"Asset not found: {asset_id}",
-                    "error_type": "NotFound"
-                }),
-                status_code=404,
-                headers={"Content-Type": "application/json"}
-            )
+        logger.info(
+            f"Approving release {release.release_id[:16]}... by {reviewer} "
+            f"(clearance: {clearance_state.value}, version: {version_id})"
+        )
 
-        is_draft = not asset.platform_refs.get('version_id')
-
-        if is_draft:
-            if not version_id:
-                return func.HttpResponse(
-                    json.dumps({
-                        "success": False,
-                        "error": "version_id is required when approving a draft asset (no version_id was set at submit time)",
-                        "error_type": "ValidationError",
-                        "asset_id": asset_id,
-                        "draft": True
-                    }),
-                    status_code=400,
-                    headers={"Content-Type": "application/json"}
-                )
-
-            # Assign version (validates lineage, updates platform_refs, rebuilds names)
-            try:
-                asset = asset_service.assign_version(
-                    asset_id=asset_id,
-                    version_id=version_id,
-                    previous_version_id=previous_version_id
-                )
-                logger.info(f"Draft asset {asset_id[:16]} assigned version_id={version_id}")
-            except AssetStateError as e:
-                return func.HttpResponse(
-                    json.dumps({
-                        "success": False,
-                        "error": str(e),
-                        "error_type": "StateError"
-                    }),
-                    status_code=400,
-                    headers={"Content-Type": "application/json"}
-                )
-            except ValueError as e:
-                # Lineage validation failure
-                return func.HttpResponse(
-                    json.dumps({
-                        "success": False,
-                        "error": str(e),
-                        "error_type": "LineageValidationError"
-                    }),
-                    status_code=400,
-                    headers={"Content-Type": "application/json"}
-                )
-        elif version_id:
-            # Asset already versioned but caller provided version_id — log and ignore
-            logger.info(
-                f"Asset {asset_id[:16]} already has version_id="
-                f"{asset.platform_refs.get('version_id')}, ignoring provided version_id={version_id}"
-            )
-
-        # Perform approval using AssetApprovalService
-        from services.asset_approval_service import AssetApprovalService
-        approval_service = AssetApprovalService()
-
-        logger.info(f"Approving asset {asset_id[:16]}... by {reviewer} (clearance: {clearance_state.value})")
-
-        result = approval_service.approve_asset(
-            asset_id=asset_id,
+        result = approval_service.approve_release(
+            release_id=release.release_id,
             reviewer=reviewer,
             clearance_state=clearance_state,
+            version_id=version_id,
             notes=notes
         )
 
@@ -418,19 +316,21 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
                 headers={"Content-Type": "application/json"}
             )
 
-        asset_data = result.get('asset', {})
+        release_data = result.get('release', {})
 
         response_data = {
             "success": True,
-            "asset_id": asset_id,
+            "release_id": release.release_id,
+            "asset_id": release.asset_id,
             "approval_state": "approved",
             "clearance_state": clearance_state.value,
             "action": result.get('action', 'approved_ouo'),
             "stac_updated": result.get('stac_updated', False),
             "adf_run_id": result.get('adf_run_id'),
-            "stac_item_id": asset_data.get('stac_item_id'),
-            "stac_collection_id": asset_data.get('stac_collection_id'),
-            "message": "Dataset approved successfully"
+            "stac_item_id": release_data.get('stac_item_id') if isinstance(release_data, dict) else None,
+            "stac_collection_id": release_data.get('stac_collection_id') if isinstance(release_data, dict) else None,
+            "version_id": version_id,
+            "message": "Release approved successfully"
         }
 
         return func.HttpResponse(
@@ -464,19 +364,21 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
 
 def platform_reject(req: func.HttpRequest) -> func.HttpResponse:
     """
-    HTTP trigger to reject a pending dataset.
+    HTTP trigger to reject a pending release.
 
     POST /api/platform/reject
 
-    Rejects a pending dataset that is not suitable for publication.
-    Updates GeospatialAsset.approval_state to REJECTED.
+    Rejects a pending release that is not suitable for publication.
+    Updates AssetRelease.approval_state to REJECTED.
 
     Request Body:
     {
-        "asset_id": "abc123...",               // Asset ID (preferred)
-        "stac_item_id": "my-dataset-v1",       // Or by STAC item
-        "job_id": "def456...",                 // Or by job ID
+        "release_id": "abc123...",             // Release ID (preferred)
+        "asset_id": "def456...",               // Or by asset ID
+        "job_id": "ghi789...",                 // Or by job ID
         "request_id": "a3f2c1b8...",           // Or by Platform request ID
+        "dataset_id": "floods",                // Or by dataset+resource
+        "resource_id": "jakarta",
         "reviewer": "user@example.com",        // Required: Who is rejecting
         "reason": "Data quality issue found"   // Required: Reason for rejection
     }
@@ -484,9 +386,10 @@ def platform_reject(req: func.HttpRequest) -> func.HttpResponse:
     Response (success):
     {
         "success": true,
-        "asset_id": "abc123...",
+        "release_id": "abc123...",
+        "asset_id": "def456...",
         "approval_state": "rejected",
-        "message": "Dataset rejected"
+        "message": "Release rejected"
     }
     """
     logger.info("Platform reject endpoint called")
@@ -495,8 +398,8 @@ def platform_reject(req: func.HttpRequest) -> func.HttpResponse:
         req_body = parse_request_json(req)
 
         # Extract identifiers
+        release_id_param = req_body.get('release_id')
         asset_id_param = req_body.get('asset_id')
-        stac_item_id = req_body.get('stac_item_id')
         job_id = req_body.get('job_id')
         request_id = req_body.get('request_id')
         dataset_id = req_body.get('dataset_id')
@@ -531,30 +434,31 @@ def platform_reject(req: func.HttpRequest) -> func.HttpResponse:
                 headers={"Content-Type": "application/json"}
             )
 
-        # Resolve asset_id
-        asset_id, error = _resolve_asset_id(
+        # Resolve release
+        release, error = _resolve_release(
+            release_id=release_id_param,
             asset_id=asset_id_param,
-            stac_item_id=stac_item_id,
             job_id=job_id,
             request_id=request_id,
             dataset_id=dataset_id,
             resource_id=resource_id
         )
         if error:
+            status_code = 404 if error.get('error_type') == 'NotFound' else 400
             return func.HttpResponse(
                 json.dumps(error),
-                status_code=404 if error.get('error_type') == 'NotFound' else 400,
+                status_code=status_code,
                 headers={"Content-Type": "application/json"}
             )
 
-        # Perform rejection using AssetApprovalService
-        from services.asset_approval_service import AssetApprovalService
-        approval_service = AssetApprovalService()
+        # Perform rejection using AssetApprovalServiceV2
+        from services.asset_approval_service_v2 import AssetApprovalServiceV2
+        approval_service = AssetApprovalServiceV2()
 
-        logger.info(f"Rejecting asset {asset_id[:16]}... by {reviewer}. Reason: {reason[:50]}...")
+        logger.info(f"Rejecting release {release.release_id[:16]}... by {reviewer}. Reason: {reason[:50]}...")
 
-        result = approval_service.reject_asset(
-            asset_id=asset_id,
+        result = approval_service.reject_release(
+            release_id=release.release_id,
             reviewer=reviewer,
             reason=reason
         )
@@ -573,9 +477,10 @@ def platform_reject(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             json.dumps({
                 "success": True,
-                "asset_id": asset_id,
+                "release_id": release.release_id,
+                "asset_id": release.asset_id,
                 "approval_state": "rejected",
-                "message": "Dataset rejected"
+                "message": "Release rejected"
             }),
             status_code=200,
             headers={"Content-Type": "application/json"}
@@ -606,23 +511,22 @@ def platform_reject(req: func.HttpRequest) -> func.HttpResponse:
 
 def platform_revoke(req: func.HttpRequest) -> func.HttpResponse:
     """
-    HTTP trigger to revoke an approved dataset (unapprove).
+    HTTP trigger to revoke an approved release (unapprove).
 
     POST /api/platform/revoke
 
-    Revokes an approved dataset. This is an audit-logged operation for
-    when approved data needs to be unpublished. Updates STAC item with
-    revocation properties. REVOKED is a terminal state.
-
-    IMPORTANT: This is a necessary but undesirable workflow. All revocations
-    are logged with full audit trail.
+    Revokes an approved release. This is an audit-logged operation for
+    when approved data needs to be unpublished. STAC item is deleted from
+    pgSTAC. REVOKED is a terminal state -- to re-publish, submit a new version.
 
     Request Body:
     {
-        "asset_id": "abc123...",               // Asset ID (preferred)
-        "stac_item_id": "my-dataset-v1",       // Or by STAC item
-        "job_id": "def456...",                 // Or by job ID
+        "release_id": "abc123...",             // Release ID (preferred)
+        "asset_id": "def456...",               // Or by asset ID
+        "job_id": "ghi789...",                 // Or by job ID
         "request_id": "a3f2c1b8...",           // Or by Platform request ID
+        "dataset_id": "floods",                // Or by dataset+resource
+        "resource_id": "jakarta",
         "revoker": "user@example.com",         // Required: Who is revoking
         "reason": "Data quality issue found"   // Required: Reason for revocation
     }
@@ -630,10 +534,11 @@ def platform_revoke(req: func.HttpRequest) -> func.HttpResponse:
     Response (success):
     {
         "success": true,
-        "asset_id": "abc123...",
+        "release_id": "abc123...",
+        "asset_id": "def456...",
         "approval_state": "revoked",
         "stac_updated": true,
-        "warning": "Approved dataset has been revoked - this action is logged for audit",
+        "warning": "Approved release has been revoked...",
         "message": "Approval revoked successfully"
     }
     """
@@ -643,8 +548,8 @@ def platform_revoke(req: func.HttpRequest) -> func.HttpResponse:
         req_body = parse_request_json(req)
 
         # Extract identifiers
+        release_id_param = req_body.get('release_id')
         asset_id_param = req_body.get('asset_id')
-        stac_item_id = req_body.get('stac_item_id')
         job_id = req_body.get('job_id')
         request_id = req_body.get('request_id')
         dataset_id = req_body.get('dataset_id')
@@ -679,30 +584,31 @@ def platform_revoke(req: func.HttpRequest) -> func.HttpResponse:
                 headers={"Content-Type": "application/json"}
             )
 
-        # Resolve asset_id
-        asset_id, error = _resolve_asset_id(
+        # Resolve release
+        release, error = _resolve_release(
+            release_id=release_id_param,
             asset_id=asset_id_param,
-            stac_item_id=stac_item_id,
             job_id=job_id,
             request_id=request_id,
             dataset_id=dataset_id,
             resource_id=resource_id
         )
         if error:
+            status_code = 404 if error.get('error_type') == 'NotFound' else 400
             return func.HttpResponse(
                 json.dumps(error),
-                status_code=404 if error.get('error_type') == 'NotFound' else 400,
+                status_code=status_code,
                 headers={"Content-Type": "application/json"}
             )
 
-        # Perform revocation using AssetApprovalService
-        from services.asset_approval_service import AssetApprovalService
-        approval_service = AssetApprovalService()
+        # Perform revocation using AssetApprovalServiceV2
+        from services.asset_approval_service_v2 import AssetApprovalServiceV2
+        approval_service = AssetApprovalServiceV2()
 
-        logger.warning(f"AUDIT: Revoking asset {asset_id[:16]}... by {revoker}. Reason: {reason}")
+        logger.warning(f"AUDIT: Revoking release {release.release_id[:16]}... by {revoker}. Reason: {reason}")
 
-        result = approval_service.revoke_asset(
-            asset_id=asset_id,
+        result = approval_service.revoke_release(
+            release_id=release.release_id,
             revoker=revoker,
             reason=reason
         )
@@ -721,7 +627,8 @@ def platform_revoke(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             json.dumps({
                 "success": True,
-                "asset_id": asset_id,
+                "release_id": release.release_id,
+                "asset_id": release.asset_id,
                 "approval_state": "revoked",
                 "stac_updated": result.get('stac_updated', False),
                 "warning": result.get('warning'),
@@ -756,9 +663,11 @@ def platform_revoke(req: func.HttpRequest) -> func.HttpResponse:
 
 def platform_approvals_list(req: func.HttpRequest) -> func.HttpResponse:
     """
-    HTTP trigger to list assets by approval state.
+    HTTP trigger to list releases by approval state.
 
     GET /api/platform/approvals
+
+    V0.9: Returns releases, not assets. Response key is "releases".
 
     Query Parameters:
         status: Filter by approval_state (pending_review, approved, rejected, revoked)
@@ -769,7 +678,7 @@ def platform_approvals_list(req: func.HttpRequest) -> func.HttpResponse:
     Response:
     {
         "success": true,
-        "assets": [...],
+        "releases": [...],
         "count": 25,
         "limit": 100,
         "offset": 0,
@@ -786,13 +695,12 @@ def platform_approvals_list(req: func.HttpRequest) -> func.HttpResponse:
     try:
         # Extract query parameters
         status_filter = req.params.get('status')
-        clearance_filter = req.params.get('clearance')
         limit = int(req.params.get('limit', 100))
         offset = int(req.params.get('offset', 0))
 
-        # Import service
-        from services.asset_approval_service import AssetApprovalService
-        approval_service = AssetApprovalService()
+        # Import V0.9 service
+        from services.asset_approval_service_v2 import AssetApprovalServiceV2
+        approval_service = AssetApprovalServiceV2()
 
         # Parse status filter
         approval_state = None
@@ -829,30 +737,32 @@ def platform_approvals_list(req: func.HttpRequest) -> func.HttpResponse:
                     headers={"Content-Type": "application/json"}
                 )
 
-        # Fetch assets
+        # Fetch releases
         if approval_state:
-            assets = approval_service.list_by_approval_state(
-                approval_state=approval_state,
+            from infrastructure import ReleaseRepository
+            release_repo = ReleaseRepository()
+            releases = release_repo.list_by_approval_state(
+                state=approval_state,
                 limit=limit
             )
         else:
-            # Default: list pending review
-            assets = approval_service.list_pending_review(limit=limit)
+            # Default: list pending review (completed + pending_review)
+            releases = approval_service.list_pending_review(limit=limit)
 
         # Get status counts
         status_counts = approval_service.get_approval_stats()
 
         # Convert to JSON-serializable format
-        assets_data = []
-        for asset in assets:
-            asset_dict = asset.to_dict()
-            assets_data.append(asset_dict)
+        releases_data = []
+        for release in releases:
+            release_dict = release.to_dict()
+            releases_data.append(release_dict)
 
         return func.HttpResponse(
             json.dumps({
                 "success": True,
-                "assets": assets_data,
-                "count": len(assets_data),
+                "releases": releases_data,
+                "count": len(releases_data),
                 "limit": limit,
                 "offset": offset,
                 "status_counts": status_counts
@@ -876,46 +786,57 @@ def platform_approvals_list(req: func.HttpRequest) -> func.HttpResponse:
 
 def platform_approval_get(req: func.HttpRequest) -> func.HttpResponse:
     """
-    HTTP trigger to get a single asset's approval state.
+    HTTP trigger to get a single release's approval state.
 
-    GET /api/platform/approvals/{asset_id}
+    GET /api/platform/approvals/{release_id}
 
-    Also accepts approval_id for backwards compatibility (resolved as asset_id).
+    Also accepts asset_id or approval_id for backwards compatibility
+    (resolved to the latest release for that asset).
 
     Response:
     {
         "success": true,
-        "asset": {...}
+        "release": {...}
     }
     """
     logger.info("Platform approval get endpoint called")
 
     try:
-        # Get asset_id from route (may be labeled as approval_id in legacy routes)
-        asset_id = req.route_params.get('approval_id') or req.route_params.get('asset_id')
+        # Get identifier from route (may be labeled as approval_id, asset_id, or release_id)
+        identifier = (
+            req.route_params.get('release_id')
+            or req.route_params.get('approval_id')
+            or req.route_params.get('asset_id')
+        )
 
-        if not asset_id:
+        if not identifier:
             return func.HttpResponse(
                 json.dumps({
                     "success": False,
-                    "error": "asset_id is required",
+                    "error": "release_id or asset_id is required",
                     "error_type": "ValidationError"
                 }),
                 status_code=400,
                 headers={"Content-Type": "application/json"}
             )
 
-        # Get asset
-        from infrastructure.asset_repository import GeospatialAssetRepository
-        asset_repo = GeospatialAssetRepository()
+        from infrastructure import ReleaseRepository
+        release_repo = ReleaseRepository()
 
-        asset = asset_repo.get_by_id(asset_id)
+        # Try as release_id first
+        release = release_repo.get_by_id(identifier)
 
-        if not asset:
+        if not release:
+            # Try as asset_id -- get draft first, then latest
+            release = release_repo.get_draft(identifier)
+            if not release:
+                release = release_repo.get_latest(identifier)
+
+        if not release:
             return func.HttpResponse(
                 json.dumps({
                     "success": False,
-                    "error": f"Asset not found: {asset_id}",
+                    "error": f"Release not found: {identifier}",
                     "error_type": "NotFound"
                 }),
                 status_code=404,
@@ -925,7 +846,7 @@ def platform_approval_get(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             json.dumps({
                 "success": True,
-                "asset": asset.to_dict()
+                "release": release.to_dict()
             }),
             status_code=200,
             headers={"Content-Type": "application/json"}
@@ -951,7 +872,8 @@ def platform_approvals_status(req: func.HttpRequest) -> func.HttpResponse:
     GET /api/platform/approvals/status?stac_item_ids=item1,item2,item3
     GET /api/platform/approvals/status?stac_collection_ids=col1,col2
 
-    Returns a map of ID -> approval status for quick UI lookups.
+    V0.9: Queries releases (asset_releases table) instead of assets.
+    Returns release-centric status with release_id.
 
     Query Parameters:
         stac_item_ids: Comma-separated list of STAC item IDs
@@ -963,15 +885,16 @@ def platform_approvals_status(req: func.HttpRequest) -> func.HttpResponse:
         "success": true,
         "statuses": {
             "item1": {
-                "has_asset": true,
-                "asset_id": "abc123",
+                "has_release": true,
+                "release_id": "abc123",
+                "asset_id": "def456",
                 "approval_state": "approved",
                 "is_approved": true,
                 "reviewer": "user@example.com",
-                "reviewed_at": "2026-01-17T..."
+                "reviewed_at": "2026-02-17T..."
             },
             "item2": {
-                "has_asset": false
+                "has_release": false
             }
         }
     }
@@ -1000,91 +923,22 @@ def platform_approvals_status(req: func.HttpRequest) -> func.HttpResponse:
                 headers={"Content-Type": "application/json"}
             )
 
-        from infrastructure.asset_repository import GeospatialAssetRepository
-        asset_repo = GeospatialAssetRepository()
+        from infrastructure import ReleaseRepository
+        release_repo = ReleaseRepository()
 
         statuses = {}
 
-        # Look up by STAC item IDs
-        for item_id in stac_item_ids:
-            asset = asset_repo.get_by_stac_item_id(item_id)
-            if asset:
-                is_approved = asset.approval_state == ApprovalState.APPROVED
-                statuses[item_id] = {
-                    "has_asset": True,
-                    "asset_id": asset.asset_id,
-                    "approval_state": asset.approval_state.value if asset.approval_state else None,
-                    "is_approved": is_approved,
-                    "clearance_state": asset.clearance_state.value if asset.clearance_state else None,
-                    "reviewer": asset.reviewer,
-                    "reviewed_at": asset.reviewed_at.isoformat() if asset.reviewed_at else None
-                }
-            else:
-                statuses[item_id] = {"has_asset": False}
+        # Look up by STAC item IDs -- query releases by stac_item_id
+        if stac_item_ids:
+            _lookup_releases_by_stac_item_ids(release_repo, stac_item_ids, statuses)
 
-        # Look up by STAC collection IDs
-        # For collections, we check assets with matching stac_collection_id
-        for collection_id in stac_collection_ids:
-            assets = asset_repo.list_by_stac_collection(collection_id) if hasattr(asset_repo, 'list_by_stac_collection') else []
-            if assets:
-                approved_count = sum(1 for a in assets if a.approval_state == ApprovalState.APPROVED)
-                any_approved = approved_count > 0
-                statuses[collection_id] = {
-                    "has_asset": True,
-                    "asset_count": len(assets),
-                    "approved_count": approved_count,
-                    "is_approved": any_approved,
-                    "approval_state": "approved" if any_approved else (assets[0].approval_state.value if assets[0].approval_state else None)
-                }
-            else:
-                statuses[collection_id] = {"has_asset": False}
+        # Look up by STAC collection IDs -- query releases by stac_collection_id
+        if stac_collection_ids:
+            _lookup_releases_by_stac_collection_ids(release_repo, stac_collection_ids, statuses)
 
         # Look up by table names (for OGC Features / vector tables)
         if table_names:
-            try:
-                from infrastructure.postgresql import PostgreSQLRepository
-                repo = PostgreSQLRepository()
-
-                with repo._get_connection() as conn:
-                    with conn.cursor() as cur:
-                        for table_name in table_names:
-                            cur.execute(
-                                """
-                                SELECT stac_item_id, stac_collection_id
-                                FROM geo.table_catalog
-                                WHERE table_name = %s
-                                """,
-                                (table_name,)
-                            )
-                            row = cur.fetchone()
-
-                            if row and row.get('stac_item_id'):
-                                stac_item_id = row['stac_item_id']
-                                asset = asset_repo.get_by_stac_item_id(stac_item_id)
-
-                                if asset:
-                                    is_approved = asset.approval_state == ApprovalState.APPROVED
-                                    statuses[table_name] = {
-                                        "has_asset": True,
-                                        "asset_id": asset.asset_id,
-                                        "approval_state": asset.approval_state.value if asset.approval_state else None,
-                                        "is_approved": is_approved,
-                                        "stac_item_id": stac_item_id,
-                                        "reviewer": asset.reviewer,
-                                        "reviewed_at": asset.reviewed_at.isoformat() if asset.reviewed_at else None
-                                    }
-                                else:
-                                    statuses[table_name] = {
-                                        "has_asset": False,
-                                        "stac_item_id": stac_item_id
-                                    }
-                            else:
-                                statuses[table_name] = {"has_asset": False, "no_stac_item": True}
-            except Exception as e:
-                logger.warning(f"Error looking up table approvals: {e}")
-                for table_name in table_names:
-                    if table_name not in statuses:
-                        statuses[table_name] = {"has_asset": False, "error": str(e)}
+            _lookup_releases_by_table_names(release_repo, table_names, statuses)
 
         return func.HttpResponse(
             json.dumps({
@@ -1106,6 +960,192 @@ def platform_approvals_status(req: func.HttpRequest) -> func.HttpResponse:
             status_code=500,
             headers={"Content-Type": "application/json"}
         )
+
+
+# =============================================================================
+# INTERNAL HELPERS for platform_approvals_status
+# =============================================================================
+
+def _lookup_releases_by_stac_item_ids(release_repo, stac_item_ids, statuses):
+    """
+    Query asset_releases by stac_item_id for bulk status lookup.
+
+    Uses a single SQL query with IN clause for efficiency instead of
+    N+1 individual lookups.
+    """
+    from psycopg import sql as psql
+
+    try:
+        with release_repo._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    psql.SQL("""
+                        SELECT stac_item_id, release_id, asset_id, approval_state,
+                               clearance_state, reviewer, reviewed_at, version_id
+                        FROM {}.{}
+                        WHERE stac_item_id = ANY(%s)
+                        ORDER BY created_at DESC
+                    """).format(
+                        psql.Identifier(release_repo.schema),
+                        psql.Identifier(release_repo.table)
+                    ),
+                    (stac_item_ids,)
+                )
+                rows = cur.fetchall()
+
+        # Group by stac_item_id, take the first (newest) release
+        seen = set()
+        for row in rows:
+            item_id = row['stac_item_id']
+            if item_id in seen:
+                continue
+            seen.add(item_id)
+
+            is_approved = row['approval_state'] == ApprovalState.APPROVED.value
+            statuses[item_id] = {
+                "has_release": True,
+                "release_id": row['release_id'],
+                "asset_id": row['asset_id'],
+                "approval_state": row['approval_state'],
+                "is_approved": is_approved,
+                "clearance_state": row.get('clearance_state'),
+                "reviewer": row.get('reviewer'),
+                "reviewed_at": row['reviewed_at'].isoformat() if row.get('reviewed_at') else None,
+                "version_id": row.get('version_id')
+            }
+
+        # Mark missing items
+        for item_id in stac_item_ids:
+            if item_id not in statuses:
+                statuses[item_id] = {"has_release": False}
+
+    except Exception as e:
+        logger.warning(f"Error looking up releases by stac_item_ids: {e}")
+        for item_id in stac_item_ids:
+            if item_id not in statuses:
+                statuses[item_id] = {"has_release": False, "error": str(e)}
+
+
+def _lookup_releases_by_stac_collection_ids(release_repo, stac_collection_ids, statuses):
+    """
+    Query asset_releases by stac_collection_id for bulk status lookup.
+
+    For collections, we report aggregate stats: total releases, approved count.
+    """
+    from psycopg import sql as psql
+
+    try:
+        with release_repo._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    psql.SQL("""
+                        SELECT stac_collection_id,
+                               COUNT(*) as total_count,
+                               COUNT(*) FILTER (WHERE approval_state = %s) as approved_count
+                        FROM {}.{}
+                        WHERE stac_collection_id = ANY(%s)
+                        GROUP BY stac_collection_id
+                    """).format(
+                        psql.Identifier(release_repo.schema),
+                        psql.Identifier(release_repo.table)
+                    ),
+                    (ApprovalState.APPROVED.value, stac_collection_ids)
+                )
+                rows = cur.fetchall()
+
+        for row in rows:
+            collection_id = row['stac_collection_id']
+            approved_count = row['approved_count']
+            any_approved = approved_count > 0
+            statuses[collection_id] = {
+                "has_release": True,
+                "release_count": row['total_count'],
+                "approved_count": approved_count,
+                "is_approved": any_approved,
+                "approval_state": "approved" if any_approved else "pending_review"
+            }
+
+        # Mark missing collections
+        for collection_id in stac_collection_ids:
+            if collection_id not in statuses:
+                statuses[collection_id] = {"has_release": False}
+
+    except Exception as e:
+        logger.warning(f"Error looking up releases by stac_collection_ids: {e}")
+        for collection_id in stac_collection_ids:
+            if collection_id not in statuses:
+                statuses[collection_id] = {"has_release": False, "error": str(e)}
+
+
+def _lookup_releases_by_table_names(release_repo, table_names, statuses):
+    """
+    Look up releases by OGC Features table names.
+
+    First resolves table_name -> stac_item_id via geo.table_catalog,
+    then looks up the release by stac_item_id.
+    """
+    from psycopg import sql as psql
+
+    try:
+        with release_repo._get_connection() as conn:
+            with conn.cursor() as cur:
+                for table_name in table_names:
+                    # Resolve table_name -> stac_item_id from table_catalog
+                    cur.execute(
+                        """
+                        SELECT stac_item_id, stac_collection_id
+                        FROM geo.table_catalog
+                        WHERE table_name = %s
+                        """,
+                        (table_name,)
+                    )
+                    row = cur.fetchone()
+
+                    if row and row.get('stac_item_id'):
+                        stac_item_id = row['stac_item_id']
+
+                        # Query release by stac_item_id
+                        cur.execute(
+                            psql.SQL("""
+                                SELECT release_id, asset_id, approval_state,
+                                       reviewer, reviewed_at, version_id
+                                FROM {}.{}
+                                WHERE stac_item_id = %s
+                                ORDER BY created_at DESC
+                                LIMIT 1
+                            """).format(
+                                psql.Identifier(release_repo.schema),
+                                psql.Identifier(release_repo.table)
+                            ),
+                            (stac_item_id,)
+                        )
+                        release_row = cur.fetchone()
+
+                        if release_row:
+                            is_approved = release_row['approval_state'] == ApprovalState.APPROVED.value
+                            statuses[table_name] = {
+                                "has_release": True,
+                                "release_id": release_row['release_id'],
+                                "asset_id": release_row['asset_id'],
+                                "approval_state": release_row['approval_state'],
+                                "is_approved": is_approved,
+                                "stac_item_id": stac_item_id,
+                                "reviewer": release_row.get('reviewer'),
+                                "reviewed_at": release_row['reviewed_at'].isoformat() if release_row.get('reviewed_at') else None
+                            }
+                        else:
+                            statuses[table_name] = {
+                                "has_release": False,
+                                "stac_item_id": stac_item_id
+                            }
+                    else:
+                        statuses[table_name] = {"has_release": False, "no_stac_item": True}
+
+    except Exception as e:
+        logger.warning(f"Error looking up table approvals: {e}")
+        for table_name in table_names:
+            if table_name not in statuses:
+                statuses[table_name] = {"has_release": False, "error": str(e)}
 
 
 # Module exports

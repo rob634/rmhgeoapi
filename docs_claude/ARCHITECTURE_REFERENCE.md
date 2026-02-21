@@ -140,6 +140,56 @@ This is read-only access - Platform never writes to jobs/tasks tables directly.
 | CoreMachine | `core/machine.py` | Job/task orchestration |
 | Job Queue Consumer | `triggers/jobs/job_queue_trigger.py` | Service Bus trigger |
 
+### CoreMachine Components
+
+**Size Comparison:** CoreMachine (450 lines) vs deprecated BaseController (2,290 lines) - 80% reduction through composition.
+
+CoreMachine achieves this reduction by delegating all work to specialized components rather than implementing logic directly. It is a **coordinator**, not an executor.
+
+| Component | File | Lines | Responsibility | Key Methods |
+|-----------|------|-------|----------------|-------------|
+| **StateManager** | `core/state_manager.py` | ~540 | All database operations | `create_job()`, `create_tasks()`, `complete_task_and_check_stage()`, `advance_job_stage()`, `complete_job()`, `get_job()`, `get_tasks_for_stage()` |
+| **OrchestrationManager** | `core/orchestration_manager.py` | ~400 | Dynamic task creation and batching | `create_tasks_for_stage()`, `prepare_batch_tasks()` |
+| **Workflow Registry** | `jobs/registry.py` | N/A | Job type → Workflow mapping | `ALL_JOBS` dict (e.g., `"hello_world": HelloWorldWorkflow`) |
+| **Handler Registry** | `services/registry.py` | N/A | Task type → Handler mapping | `ALL_HANDLERS` dict (e.g., `"tiling_scheme": generate_tiling_scheme`) |
+
+**Critical Features:**
+- **StateManager**: Uses PostgreSQL advisory locks for atomic "last task turns out lights" detection
+- **OrchestrationManager**: Handles "fan-out" pattern where 1 task creates N tasks (e.g., 1 raster → 204 tiles)
+- **Registries**: Both are injected at CoreMachine initialization - zero hard dependencies
+
+**CoreMachine Coordination Pattern:**
+```python
+# CoreMachine does NOT create these - they are INJECTED
+machine = CoreMachine(
+    all_jobs=ALL_JOBS,              # From jobs/__init__.py
+    all_handlers=ALL_HANDLERS,      # From services/__init__.py
+    state_manager=StateManager(...), # Database operations
+    config=AppConfig()              # Configuration
+)
+
+# CoreMachine delegates everything
+job_class = machine.jobs[job_type]           # → Workflow Registry
+tasks = orchestration.create_tasks(...)      # → OrchestrationManager
+state.create_tasks(tasks)                    # → StateManager
+handler = machine.handlers[task_type]        # → Handler Registry
+```
+
+**What CoreMachine DOES:**
+- ✅ Coordinate workflow execution
+- ✅ Route messages to appropriate handlers
+- ✅ Manage stage advancement timing
+- ✅ Choose optimal queue strategy (batch vs individual)
+
+**What CoreMachine DOES NOT DO:**
+- ❌ Database operations → StateManager
+- ❌ Task creation → OrchestrationManager
+- ❌ Parameter validation → Workflow instances
+- ❌ Business logic → Task handlers
+- ❌ Queue communication → Repository abstractions
+
+**Analogy:** CoreMachine is the conductor, not the orchestra.
+
 ---
 
 ## Job Declaration Pattern (Pattern B)

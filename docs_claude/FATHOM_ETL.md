@@ -1,11 +1,13 @@
 # FATHOM Flood Data ETL Pipeline
 
-**Last Updated**: 07 JAN 2026
+**Last Updated**: 21 FEB 2026
 **Status**: Phase 1 & 2 Complete (RWA), Region Filtering Fixed
 **Author**: Robert and Claude
 
 > **User-Facing Documentation**: See [docs/wiki/WIKI_JOB_FATHOM_ETL.md](../docs/wiki/WIKI_JOB_FATHOM_ETL.md) for the canonical wiki version.
 > This file (`docs_claude/`) provides AI context; the wiki file is the user-readable reference.
+>
+> **Changelog**: Data discovery content consolidated from FATHOM.md (21 FEB 2026)
 
 ---
 
@@ -24,6 +26,149 @@ FATHOM is a global flood hazard dataset providing flood depth rasters at 3-arcse
 | **Defense Scenarios** | Defended, Undefended |
 | **Climate Scenarios** | 2020 (baseline), 2030/2050/2080 (SSP126/245/370/585) |
 | **Coverage** | Global (land areas) |
+
+---
+
+## Data Discovery & Source Format Reference
+
+**Source**: Fathom (SSBN) Global Flood Hazard Maps v3 (2023)
+**Bronze Storage**: `bronze-fathom` container in `rmhazuregeo` storage account
+
+### Global Dataset Scale
+
+| Metric | Côte d'Ivoire (Sample) | Global (Estimated) |
+|--------|------------------------|-------------------|
+| **Files** | 15,392 | ~11 million |
+| **Storage** | ~500 MB | ~8 TB |
+| **1° Tiles** | 44 | ~17,000-25,000 |
+
+### Dimension Values
+
+#### Flood Types (5)
+| Code | Description |
+|------|-------------|
+| `COASTAL_DEFENDED` | Coastal flooding with flood defenses |
+| `COASTAL_UNDEFENDED` | Coastal flooding without defenses |
+| `FLUVIAL_DEFENDED` | River flooding with defenses |
+| `FLUVIAL_UNDEFENDED` | River flooding without defenses |
+| `PLUVIAL_DEFENDED` | Surface water/rainfall flooding with defenses |
+
+#### Years (4)
+- `2020` - Baseline/current conditions
+- `2030` - Near-term projection
+- `2050` - Mid-century projection
+- `2080` - End-century projection
+
+#### Return Periods (8)
+Annual Exceedance Probability (AEP):
+| Return Period | AEP | Description |
+|---------------|-----|-------------|
+| `1in5` | 20% | Very frequent |
+| `1in10` | 10% | Frequent |
+| `1in20` | 5% | Common |
+| `1in50` | 2% | Moderate |
+| `1in100` | 1% | Infrequent (standard design flood) |
+| `1in200` | 0.5% | Rare |
+| `1in500` | 0.2% | Very rare |
+| `1in1000` | 0.1% | Extreme |
+
+#### Climate Scenarios (4) - For Future Years
+| Scenario | Description |
+|----------|-------------|
+| `SSP1_2.6` | Sustainability pathway, low emissions |
+| `SSP2_4.5` | Middle of the road |
+| `SSP3_7.0` | Regional rivalry, high emissions |
+| `SSP5_8.5` | Fossil-fueled development, very high emissions |
+
+### Filename Patterns
+
+#### Baseline Year (2020)
+```
+{RETURN_PERIOD}-{FLOOD_TYPE}-{YEAR}_{TILE}.tif
+
+Examples:
+  1in10-COASTAL-DEFENDED-2020_n04w006.tif
+  1in100-FLUVIAL-UNDEFENDED-2020_n07w005.tif
+  1in1000-PLUVIAL-DEFENDED-2020_n09w008.tif
+```
+
+#### Future Years (2030, 2050, 2080)
+```
+{RETURN_PERIOD}-{FLOOD_TYPE}-{YEAR}-{SSP_SCENARIO}_{TILE}.tif
+
+Examples:
+  1in10-COASTAL-DEFENDED-2030-SSP1_2.6_n04w006.tif
+  1in100-FLUVIAL-UNDEFENDED-2050-SSP3_7.0_n07w005.tif
+  1in1000-PLUVIAL-DEFENDED-2080-SSP5_8.5_n09w008.tif
+```
+
+### Tile Coordinate System
+- **Format**: `{n|s}{lat}{e|w}{lon}` (1-degree grid cells)
+- **Example**: `n04w006` = North 4°, West 6° (covers 4°N-5°N, 6°W-7°W)
+- **Côte d'Ivoire Coverage**: Latitude 4°N to 10°N (7 rows), Longitude 3°W to 9°W (7 cols) = 44 tiles
+
+### Raster Technical Specifications
+
+| Property | Value |
+|----------|-------|
+| **Format** | GeoTIFF with COG layout |
+| **Already COG?** | YES - no conversion needed |
+| **Compression** | DEFLATE |
+| **Internal Tiling** | 256x256 pixels |
+| **CRS** | EPSG:4326 (WGS84) |
+| **Pixel Size** | 0.000277778° (~1 arc-second, ~30m at equator) |
+| **Data Type** | Int16 (signed 16-bit integer) |
+| **Tile Dimensions** | 3600 × 3600 pixels (1° × 1°) |
+
+### Value Encoding
+
+| Value | Meaning |
+|-------|---------|
+| **-32768** | NoData (outside model domain, e.g., ocean) |
+| **-32767** | Sentinel value (used in some tiles for no-data areas) |
+| **0** | Dry land / no flooding |
+| **1-32767** | Flood depth in **CENTIMETERS** |
+
+**Note**: Values are in CENTIMETERS, not meters. Max value ~10m (1000cm).
+
+### Compression Efficiency
+
+The data is extremely sparse - most pixels are dry land or ocean:
+
+| Flood Type | Data Density | Compression Ratio | File Size |
+|------------|--------------|-------------------|-----------|
+| **Coastal** | 0.04% flooded | 237x | ~100 KB |
+| **Fluvial** | 2.09% flooded | 52x | ~500 KB |
+| **Pluvial** | 16.73% flooded | 8x | ~3.3 MB |
+
+Raw uncompressed size per tile: 24.7 MB (3600×3600×2 bytes)
+
+### Flood Depth Distribution (Sample Analysis)
+
+**Coastal Flooding** (1in100, 2020):
+- Min: 5 cm, Max: 142 cm
+- Mean: 34 cm, Median: 29 cm
+- 86% of flooded pixels: 10-100 cm depth
+
+**Fluvial Flooding** (1in100, 2020):
+- Min: 5 cm, Max: 757 cm (~7.5m)
+- Mean: 149 cm, Median: 130 cm
+- 62% of flooded pixels: 50-200 cm depth
+
+**Pluvial Flooding** (1in100, 2020):
+- Min: 5 cm, Max: 1000 cm (10m, likely capped)
+- Mean: 50 cm, Median: 30 cm
+- 66% of flooded pixels: 10-100 cm depth
+
+### STAC Catalog Structure Rationale
+
+**Selected Approach**: Hierarchical collections by flood type (5 collections total)
+
+**Why this design**:
+1. Flood type is the primary analytical dimension
+2. 5 collections is manageable (vs 100+ if per-scenario, or 1 with complex filtering)
+3. Properties handle temporal/scenario filtering
+4. Matches how users typically query flood data
 
 ---
 

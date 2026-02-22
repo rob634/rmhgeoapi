@@ -81,6 +81,16 @@ SYSTEM_PARAMETERS_SCHEMA = {
     },
 
     # ========================================================================
+    # V0.9 RELEASE LINKAGE
+    # ========================================================================
+    'release_id': {
+        'type': 'str',
+        'required': False,
+        'max_length': 64,
+        'description': 'FK to AssetRelease - the versioned artifact this job produces'
+    },
+
+    # ========================================================================
     # LINEAGE (Version tracking - V0.8 Release Control)
     # ========================================================================
     'lineage_id': {

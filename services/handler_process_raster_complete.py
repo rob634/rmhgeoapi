@@ -2285,6 +2285,17 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                 stac_result['degraded'] = True
                 stac_result['error'] = "No STAC item dict available (extraction failed in Phase 3)"
 
+            # V0.9: Cache STAC item dict on Release for approval materialization
+            release_id = params.get('release_id')
+            if release_id and stac_item_dict:
+                try:
+                    from infrastructure import ReleaseRepository
+                    release_repo = ReleaseRepository()
+                    release_repo.update_stac_item_json(release_id, stac_item_dict)
+                    logger.info(f"✅ STAC item cached on Release {release_id[:16]}...")
+                except Exception as release_cache_err:
+                    logger.warning(f"Failed to cache STAC on Release (non-fatal): {release_cache_err}")
+
             phase4_duration = time.time() - phase4_start
             logger.info(f"✅ PHASE 4 complete: {phase4_duration:.2f}s (STAC cached, pgSTAC deferred)")
             _report_progress(docker_context, 100, 4, 4, "STAC Cached", f"Complete ({phase4_duration:.1f}s)")

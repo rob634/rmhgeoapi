@@ -2,15 +2,15 @@
 # PLATFORM VALIDATION SERVICE
 # ============================================================================
 # EPOCH: 5 - ACTIVE
-# STATUS: Service - V0.9 version lineage validation using Asset + Release repos
-# PURPOSE: Validate previous_version_id before job creation (dry_run support)
+# STATUS: Service - V0.9 validation using Asset + Release repos
+# PURPOSE: Validate submit parameters before job creation (dry_run support)
 # CREATED: 31 JAN 2026
-# LAST_REVIEWED: 21 FEB 2026
+# LAST_REVIEWED: 22 FEB 2026
 # EXPORTS: validate_version_lineage, VersionValidationResult
 # DEPENDENCIES: infrastructure.AssetRepository, infrastructure.ReleaseRepository
 # ============================================================================
 """
-Platform Validation Service - V0.9 Implicit Lineage.
+Platform Validation Service - V0.9 Asset/Release semantics.
 
 Provides validation logic for platform submit operations, specifically
 for version lineage validation to prevent race conditions.
@@ -19,22 +19,32 @@ This service is used by:
 - dry_run=true requests (return validation result without job creation)
   via triggers/trigger_platform_status.py
 
-V0.9 Simplification (21 FEB 2026):
-- Lineage is implicit: the Asset IS the lineage container
-- Replaced AssetService.get_lineage_state() with direct repo calls
-- Uses AssetRepository for identity lookup
-- Uses ReleaseRepository for version/draft state
+V0.9 Semantics (22 FEB 2026):
+- Asset IS the lineage container — asset_id replaces lineage_id
+- Overwrite targets draft releases only — approved releases are immutable
+- No revoke-first workflow — drafts coexist with approved versions
+- Multiple approved releases allowed (v1+v2 simultaneously)
+- Version assigned at approval, not at submit
 
-V0.8.16 Approval-Aware Validation (09 FEB 2026):
-- Overwrite blocked if asset is APPROVED (must revoke first)
-- Overwrite allowed for PENDING_REVIEW, REJECTED, REVOKED
-- Semantic versions require previous version to be APPROVED
+Overwrite Rules (V0.9):
+| Release State    | overwrite=True | Result                                   |
+|------------------|----------------|------------------------------------------|
+| Draft exists     | True           | OK - Re-process draft (revision++)       |
+| Draft exists     | False          | OK - Idempotent return of existing draft  |
+| No draft exists  | True or False  | OK - Create new draft release             |
+| (Approved releases are never overwritten — they are immutable)            |
 
-See: docs_claude/DRY_RUN_IMPLEMENTATION.md
-See: docs_claude/APPROVAL_OVERWRITE_VALIDATION.md
+Version Chaining Rules (V0.9):
+| previous_version_id | Asset State               | Result                          |
+|---------------------|---------------------------|---------------------------------|
+| null                | No asset or no releases   | OK - First submission           |
+| null                | Has approved versions     | OK - Creates new draft release  |
+| v2.0                | v2.0 exists and approved  | OK - Chain from v2.0            |
+| v2.0                | v2.0 not approved         | WARN - v2.0 not yet approved    |
+| v2.0                | v2.0 doesn't exist        | REJECT - v2.0 not found         |
 
 Exports:
-    validate_version_lineage: Validate previous_version_id against lineage state
+    validate_version_lineage: Validate submit parameters against asset/release state
     VersionValidationResult: Typed result from validation
 """
 
@@ -53,28 +63,43 @@ class VersionValidationResult:
 
     Attributes:
         valid: True if validation passed
-        lineage_id: Asset ID (the asset IS the lineage in V0.9)
-        lineage_exists: True if asset has existing releases
-        current_latest: Info about current latest version (if exists)
+        asset_id: Asset ID (the asset IS the lineage container)
+        asset_exists: True if asset has existing releases
+        current_latest: Info about current latest approved version (if exists)
+        draft_in_progress: Info about existing draft release (if exists)
         warnings: List of validation warnings/errors
         suggested_params: Suggested parameters for submit
     """
     valid: bool
-    lineage_id: str
-    lineage_exists: bool
+    asset_id: str
+    asset_exists: bool
     current_latest: Optional[Dict[str, Any]] = None
+    draft_in_progress: Optional[Dict[str, Any]] = None
     warnings: List[str] = field(default_factory=list)
     suggested_params: Dict[str, Any] = field(default_factory=dict)
+
+    # Backward-compat aliases for callers that still use lineage_id
+    @property
+    def lineage_id(self) -> str:
+        return self.asset_id
+
+    @property
+    def lineage_exists(self) -> bool:
+        return self.asset_exists
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON response."""
         return {
             'valid': self.valid,
-            'lineage_id': self.lineage_id,
-            'lineage_exists': self.lineage_exists,
+            'asset_id': self.asset_id,
+            'asset_exists': self.asset_exists,
             'current_latest': self.current_latest,
+            'draft_in_progress': self.draft_in_progress,
             'warnings': self.warnings,
-            'suggested_params': self.suggested_params
+            'suggested_params': self.suggested_params,
+            # Backward-compat keys for existing callers
+            'lineage_id': self.asset_id,
+            'lineage_exists': self.asset_exists,
         }
 
 
@@ -83,48 +108,21 @@ def validate_version_lineage(
     platform_refs: Dict[str, Any],
     previous_version_id: Optional[str],
     overwrite: bool = False,
-    **kwargs  # Accept but ignore legacy asset_service param
+    **kwargs  # Accept but ignore legacy params
 ) -> VersionValidationResult:
     """
-    Validate version lineage for platform submit.
+    Validate submit parameters for platform submit.
 
-    V0.9: Uses Asset + Release repos directly instead of AssetService.
-    The Asset IS the lineage container -- lineage_id = asset_id.
-
-    Implements the validation matrix from DRY_RUN_IMPLEMENTATION.md with
-    approval-aware extensions from APPROVAL_OVERWRITE_VALIDATION.md.
-
-    Version Lineage Rules:
-    | previous_version_id | Lineage State         | Result                           |
-    |---------------------|----------------------|----------------------------------|
-    | null                | Empty (no versions)  | OK - First version               |
-    | null                | Has versions (v2.0)  | REJECT - "v2.0 exists, specify"  |
-    | v2.0                | Empty                | REJECT - "v2.0 doesn't exist"    |
-    | v2.0                | Latest is v2.0       | OK - Proceed (if v2.0 APPROVED)  |
-    | v2.0                | Latest is v3.0       | REJECT - "v2.0 is not latest"    |
-
-    Overwrite Rules (09 FEB 2026):
-    | Approval State   | overwrite=True | Result                              |
-    |------------------|----------------|-------------------------------------|
-    | APPROVED         | True           | REJECT - Must revoke first          |
-    | PENDING_REVIEW   | True           | OK - Overwrite, keep pending        |
-    | REJECTED         | True           | OK - Overwrite, reset to pending    |
-    | REVOKED          | True           | OK - Overwrite, reset to pending    |
-
-    Semantic Version Rules (09 FEB 2026):
-    | Previous State   | Result                                      |
-    |------------------|---------------------------------------------|
-    | APPROVED         | OK - Chain allowed                          |
-    | PENDING_REVIEW   | REJECT - Previous must be approved first    |
-    | REJECTED         | REJECT - Previous must be approved first    |
-    | REVOKED          | REJECT - Previous must be approved first    |
+    V0.9: Uses Asset + Release repos directly. The Asset IS the lineage.
+    Drafts coexist with approved versions — no revoke-first workflow.
+    Overwrite targets draft releases only — approved releases are immutable.
 
     Args:
         platform_id: Platform identifier (e.g., "ddh")
         platform_refs: Full platform refs including version_id
         previous_version_id: The previous version ID provided by B2B app (or None)
-        overwrite: If True, attempting to replace existing version
-        **kwargs: Accepts legacy params (e.g., asset_service) silently
+        overwrite: If True, attempting to re-process existing draft
+        **kwargs: Accepts legacy params silently
 
     Returns:
         VersionValidationResult with validation outcome and suggestions
@@ -134,15 +132,14 @@ def validate_version_lineage(
 
     dataset_id = platform_refs.get('dataset_id')
     resource_id = platform_refs.get('resource_id')
-    version_id = platform_refs.get('version_id')
 
     asset_repo = AssetRepository()
     release_repo = ReleaseRepository()
 
-    # Find asset (lineage container) -- the Asset IS the lineage in V0.9
+    # Find asset (the lineage container in V0.9)
     asset = asset_repo.get_by_identity(platform_id, dataset_id, resource_id)
-    lineage_id = asset.asset_id if asset else Asset.generate_asset_id(platform_id, dataset_id, resource_id)
-    lineage_exists = asset is not None
+    asset_id = asset.asset_id if asset else Asset.generate_asset_id(platform_id, dataset_id, resource_id)
+    asset_exists = asset is not None
 
     # Get latest approved release
     latest_release = release_repo.get_latest(asset.asset_id) if asset else None
@@ -153,30 +150,20 @@ def validate_version_lineage(
             'approval_state': latest_release.approval_state.value if hasattr(latest_release.approval_state, 'value') else str(latest_release.approval_state)
         }
 
-    # Check if this specific version exists (as a release)
-    existing_release = None
-    version_exists = False
-    if asset:
-        if version_id:
-            existing_release = release_repo.get_by_version(asset.asset_id, version_id)
-        if not existing_release:
-            existing_release = release_repo.get_draft(asset.asset_id)
-        version_exists = existing_release is not None
-
-    # Build existing_asset equivalent for overwrite checks
-    existing_asset = None
-    if existing_release:
-        existing_asset = {
-            'asset_id': existing_release.asset_id,
-            'release_id': existing_release.release_id,
-            'approval_state': existing_release.approval_state.value if hasattr(existing_release.approval_state, 'value') else str(existing_release.approval_state)
+    # Get existing draft (if any)
+    existing_draft = release_repo.get_draft(asset.asset_id) if asset else None
+    draft_in_progress = None
+    if existing_draft:
+        draft_in_progress = {
+            'release_id': existing_draft.release_id,
+            'processing_status': existing_draft.processing_status.value if hasattr(existing_draft.processing_status, 'value') else str(existing_draft.processing_status),
+            'revision': existing_draft.revision,
         }
 
     warnings: List[str] = []
     valid = True
 
-    # Build suggested params
-    # Compute suggested version ordinal from release count
+    # Compute suggested version ordinal
     suggested_version_ordinal = 1
     if asset:
         releases = release_repo.list_by_asset(asset.asset_id)
@@ -189,128 +176,136 @@ def validate_version_lineage(
         suggested_previous = current_latest.get('version_id')
 
     logger.debug(
-        f"Validating version lineage: previous_version_id={previous_version_id}, "
-        f"lineage_exists={lineage_exists}, current_latest={current_latest}, "
-        f"overwrite={overwrite}, version_exists={version_exists}"
+        f"Validating: previous_version_id={previous_version_id}, "
+        f"asset_exists={asset_exists}, current_latest={current_latest}, "
+        f"overwrite={overwrite}, draft_exists={existing_draft is not None}"
     )
 
     # =========================================================================
-    # PHASE 1: Overwrite Approval Check (09 FEB 2026)
+    # PHASE 1: Overwrite Validation (V0.9 semantics)
+    # Overwrite targets DRAFT releases only. Approved releases are immutable.
     # =========================================================================
-    if overwrite and version_exists and existing_asset:
-        approval_state = existing_asset.get('approval_state', 'pending_review')
+    if overwrite and existing_draft:
+        # Draft exists and overwrite requested — always valid
+        # The draft will be re-processed (revision incremented)
+        draft_state = existing_draft.approval_state.value if hasattr(existing_draft.approval_state, 'value') else str(existing_draft.approval_state)
+        if draft_state in ('rejected', 'revoked'):
+            warnings.append(
+                f"Draft release state '{draft_state}' will be reset to "
+                f"'pending_review' after overwrite."
+            )
 
-        if approval_state == 'approved':
-            # APPROVED assets cannot be overwritten - must revoke first
+        if current_latest:
+            warnings.append(
+                f"Approved version '{current_latest.get('version_id')}' "
+                f"remains active — overwrite targets the draft only."
+            )
+
+        result = VersionValidationResult(
+            valid=True,
+            asset_id=asset_id,
+            asset_exists=asset_exists,
+            current_latest=current_latest,
+            draft_in_progress=draft_in_progress,
+            warnings=warnings,
+            suggested_params={
+                'version_ordinal': suggested_version_ordinal,
+                'previous_version_id': suggested_previous,
+            }
+        )
+        logger.info(
+            f"Overwrite validation passed: asset_id={asset_id[:8]}..., "
+            f"draft_state={draft_state}"
+        )
+        return result
+
+    if overwrite and not existing_draft:
+        # Overwrite requested but no draft to overwrite — informational
+        warnings.append(
+            "overwrite=true specified but no draft release exists. "
+            "A new draft release will be created."
+        )
+        # Fall through to normal validation — still valid
+
+    # =========================================================================
+    # PHASE 2: Draft coexistence check
+    # V0.9: Drafts coexist with approved versions. Inform the caller.
+    # =========================================================================
+    if existing_draft and not overwrite:
+        # Draft already in progress, no overwrite — idempotent return
+        warnings.append(
+            "Draft release already in progress. Submit will return the "
+            "existing draft (idempotent). Use overwrite=true to re-process."
+        )
+        result = VersionValidationResult(
+            valid=True,
+            asset_id=asset_id,
+            asset_exists=asset_exists,
+            current_latest=current_latest,
+            draft_in_progress=draft_in_progress,
+            warnings=warnings,
+            suggested_params={
+                'version_ordinal': suggested_version_ordinal,
+                'previous_version_id': suggested_previous,
+            }
+        )
+        logger.info(
+            f"Draft exists (idempotent): asset_id={asset_id[:8]}..., "
+            f"release_id={existing_draft.release_id[:8]}..."
+        )
+        return result
+
+    # =========================================================================
+    # PHASE 3: Version Chaining Validation (previous_version_id)
+    # =========================================================================
+    if previous_version_id is not None:
+        # Caller specified a previous version — validate it exists
+        if not asset or not latest_release:
             valid = False
             warnings.append(
-                "Asset is approved. Revoke approval before overwriting. "
-                "Use POST /api/platform/revoke first."
+                f"previous_version_id '{previous_version_id}' specified but "
+                f"no approved versions exist. Omit previous_version_id for "
+                f"first submission."
             )
             logger.warning(
-                f"Validation failed: overwrite blocked - asset is APPROVED. "
-                f"asset_id={existing_asset.get('asset_id', 'unknown')[:16]}"
-            )
-        elif approval_state in ('rejected', 'revoked'):
-            # Info message - approval will be reset to pending_review
-            warnings.append(
-                f"Asset state '{approval_state}' will be reset to 'pending_review' after overwrite."
-            )
-            logger.info(
-                f"Overwrite will reset approval state from '{approval_state}' to 'pending_review'"
-            )
-        # PENDING_REVIEW: no message needed, just proceed
-
-        # If overwrite is valid (not APPROVED), skip the normal version checks
-        if valid:
-            result = VersionValidationResult(
-                valid=True,
-                lineage_id=lineage_id,
-                lineage_exists=lineage_exists,
-                current_latest=current_latest,
-                warnings=warnings,
-                suggested_params={
-                    'version_ordinal': suggested_version_ordinal,
-                    'previous_version_id': suggested_previous,
-                    'reset_approval': approval_state in ('rejected', 'revoked')
-                }
-            )
-            logger.info(
-                f"Overwrite validation passed: lineage_id={lineage_id[:8]}..., "
-                f"approval_state={approval_state}"
-            )
-            return result
-
-    # =========================================================================
-    # PHASE 2: Version Lineage Validation
-    # =========================================================================
-    if previous_version_id is None:
-        # First version case - lineage must be empty OR overwrite=True for same version
-        if current_latest and not (overwrite and version_exists):
-            valid = False
-            latest_version = current_latest.get('version_id') or 'draft'
-            warnings.append(
-                f"Version '{latest_version}' already exists for this dataset/resource. "
-                f"Specify previous_version_id='{latest_version}' to submit a new version, "
-                f"or use overwrite=true to replace the existing version."
-            )
-            logger.warning(
-                f"Validation failed: lineage exists but previous_version_id not provided. "
-                f"Current latest: {latest_version}"
-            )
-    else:
-        # Subsequent version case - must match current latest AND be approved
-        if not current_latest:
-            valid = False
-            warnings.append(
-                f"previous_version_id '{previous_version_id}' specified but no versions exist. "
-                f"Omit previous_version_id for first version."
-            )
-            logger.warning(
-                f"Validation failed: previous_version_id='{previous_version_id}' but lineage is empty"
+                f"Validation failed: previous_version_id='{previous_version_id}' "
+                f"but no approved releases"
             )
         elif current_latest.get('version_id') != previous_version_id:
-            valid = False
+            # Specified version doesn't match latest — warn but allow
             latest_version = current_latest.get('version_id')
             warnings.append(
-                f"previous_version_id '{previous_version_id}' is not the current latest version. "
-                f"Current latest is '{latest_version}'."
+                f"previous_version_id '{previous_version_id}' is not the "
+                f"current latest version ('{latest_version}'). Submission "
+                f"will still create a new draft release."
             )
-            logger.warning(
-                f"Validation failed: previous_version_id='{previous_version_id}' != "
-                f"current_latest='{latest_version}'"
+            logger.info(
+                f"Version chain mismatch (non-blocking): "
+                f"previous='{previous_version_id}' != latest='{latest_version}'"
             )
-        else:
-            # =========================================================================
-            # PHASE 2 continued: Semantic Version Approval Check (09 FEB 2026)
-            # Previous version must be APPROVED to chain a new version
-            # =========================================================================
-            prev_approval_state = current_latest.get('approval_state', 'pending_review')
-            if prev_approval_state != 'approved':
-                valid = False
-                warnings.append(
-                    f"Previous version '{previous_version_id}' must be approved before creating "
-                    f"a new version. Current state: '{prev_approval_state}'."
-                )
-                logger.warning(
-                    f"Validation failed: previous version '{previous_version_id}' "
-                    f"is not approved (state={prev_approval_state})"
-                )
+
+    # Informational: if approved versions exist and this is a new submission
+    if current_latest and not overwrite and not existing_draft:
+        warnings.append(
+            f"Approved version '{current_latest.get('version_id')}' exists. "
+            f"New submission will create a draft release alongside it."
+        )
 
     result = VersionValidationResult(
         valid=valid,
-        lineage_id=lineage_id,
-        lineage_exists=lineage_exists,
+        asset_id=asset_id,
+        asset_exists=asset_exists,
         current_latest=current_latest,
+        draft_in_progress=draft_in_progress,
         warnings=warnings,
         suggested_params={
             'version_ordinal': suggested_version_ordinal,
-            'previous_version_id': suggested_previous
+            'previous_version_id': suggested_previous,
         }
     )
 
     logger.info(
-        f"Version validation complete: valid={valid}, lineage_id={lineage_id[:8]}..., "
+        f"Version validation complete: valid={valid}, asset_id={asset_id[:8]}..., "
         f"warnings={len(warnings)}"
     )
 

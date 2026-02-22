@@ -215,8 +215,7 @@ class AssetService:
             clearance_state=ClearanceState.UNCLEARED,
         )
 
-        created = self.release_repo.create(release)
-        self.asset_repo.increment_release_count(asset_id)
+        created = self.release_repo.create_and_count_atomic(release)
 
         logger.info(
             f"Created draft release {release_id[:16]}... for asset {asset_id[:16]}... "

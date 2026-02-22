@@ -193,6 +193,128 @@ class ReleaseRepository(PostgreSQLRepository):
                 logger.info(f"Created release: {release.release_id}")
                 return self._row_to_model(row)
 
+    def create_and_count_atomic(self, release: AssetRelease) -> AssetRelease:
+        """
+        Create a release and increment the parent asset's release_count atomically.
+
+        Bundles INSERT into asset_releases + UPDATE assets.release_count in a
+        single connection/transaction. Both succeed or both roll back.
+
+        Follows the same pattern as approve_release_atomic().
+
+        Args:
+            release: AssetRelease model to insert
+
+        Returns:
+            Created AssetRelease with database-assigned timestamps
+
+        Raises:
+            psycopg.errors.UniqueViolation: If release_id already exists
+            RuntimeError: If asset not found (release_count update affected 0 rows)
+        """
+        logger.info(
+            f"Atomic create+count: release={release.release_id} "
+            f"asset={release.asset_id}"
+        )
+
+        now = datetime.now(timezone.utc)
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                # Step 1: INSERT release
+                cur.execute(
+                    sql.SQL("""
+                        INSERT INTO {}.{} (
+                            release_id, asset_id,
+                            version_id, suggested_version_id, version_ordinal,
+                            revision, previous_release_id,
+                            is_latest, is_served, request_id,
+                            blob_path, table_name, stac_item_id, stac_collection_id,
+                            stac_item_json, content_hash, source_file_hash, output_file_hash,
+                            job_id, processing_status, processing_started_at,
+                            processing_completed_at, last_error, workflow_id, node_summary,
+                            approval_state, reviewer, reviewed_at, rejection_reason,
+                            approval_notes, clearance_state, adf_run_id,
+                            cleared_at, cleared_by, made_public_at, made_public_by,
+                            revoked_at, revoked_by, revocation_reason,
+                            created_at, updated_at, priority
+                        ) VALUES (
+                            %s, %s,
+                            %s, %s, %s,
+                            %s, %s,
+                            %s, %s, %s,
+                            %s, %s, %s, %s,
+                            %s, %s, %s, %s,
+                            %s, %s, %s,
+                            %s, %s, %s, %s,
+                            %s, %s, %s, %s,
+                            %s, %s, %s,
+                            %s, %s, %s, %s,
+                            %s, %s, %s,
+                            %s, %s, %s
+                        )
+                        RETURNING *
+                    """).format(
+                        sql.Identifier(self.schema),
+                        sql.Identifier(self.table)
+                    ),
+                    (
+                        release.release_id, release.asset_id,
+                        release.version_id, release.suggested_version_id,
+                        release.version_ordinal,
+                        release.revision, release.previous_release_id,
+                        release.is_latest, release.is_served, release.request_id,
+                        release.blob_path, release.table_name,
+                        release.stac_item_id, release.stac_collection_id,
+                        release.stac_item_json, release.content_hash,
+                        release.source_file_hash, release.output_file_hash,
+                        release.job_id, release.processing_status,
+                        release.processing_started_at,
+                        release.processing_completed_at, release.last_error,
+                        release.workflow_id, release.node_summary,
+                        release.approval_state, release.reviewer,
+                        release.reviewed_at, release.rejection_reason,
+                        release.approval_notes, release.clearance_state,
+                        release.adf_run_id,
+                        release.cleared_at, release.cleared_by,
+                        release.made_public_at, release.made_public_by,
+                        release.revoked_at, release.revoked_by,
+                        release.revocation_reason,
+                        now, now,
+                        release.priority,
+                    )
+                )
+                row = cur.fetchone()
+
+                # Step 2: Increment asset.release_count
+                cur.execute(
+                    sql.SQL("""
+                        UPDATE {}.{}
+                        SET release_count = release_count + 1,
+                            updated_at = %s
+                        WHERE asset_id = %s
+                    """).format(
+                        sql.Identifier(self.schema),
+                        sql.Identifier("assets")
+                    ),
+                    (now, release.asset_id)
+                )
+
+                if cur.rowcount == 0:
+                    conn.rollback()
+                    raise RuntimeError(
+                        f"Asset {release.asset_id} not found — "
+                        f"cannot increment release_count"
+                    )
+
+                conn.commit()
+
+                logger.info(
+                    f"Atomic create+count complete: release={release.release_id}, "
+                    f"asset={release.asset_id}"
+                )
+                return self._row_to_model(row)
+
     # =========================================================================
     # READ
     # =========================================================================
@@ -962,6 +1084,149 @@ class ReleaseRepository(PostgreSQLRepository):
 
                 return target_updated
 
+    def approve_release_atomic(
+        self,
+        release_id: str,
+        asset_id: str,
+        version_id: str,
+        version_ordinal: int,
+        approval_state: ApprovalState,
+        reviewer: str,
+        reviewed_at: datetime,
+        clearance_state: ClearanceState,
+        approval_notes: str = None
+    ) -> bool:
+        """
+        Atomically approve a release: flip is_latest + assign version +
+        set approval state + set clearance in a single transaction.
+
+        Combines flip_is_latest(), update_version_assignment(),
+        update_approval_state(), and update_clearance() into one
+        connection/commit to prevent partial state on failure.
+
+        The WHERE guard 'approval_state = pending_review' ensures
+        idempotent safety — concurrent approvals fail cleanly (0 rows).
+
+        Args:
+            release_id: Release to approve
+            asset_id: Parent asset (for flip_is_latest across siblings)
+            version_id: Version to assign (e.g., "v1")
+            version_ordinal: Numeric ordering (1, 2, 3...)
+            approval_state: Must be APPROVED
+            reviewer: Who approved
+            reviewed_at: When approved
+            clearance_state: OUO or PUBLIC
+            approval_notes: Optional reviewer notes
+
+        Returns:
+            True if approved, False if release not found or not in
+            pending_review state (concurrent approval or stale request)
+        """
+        logger.info(
+            f"Atomic approve: release {release_id[:16]}... "
+            f"version={version_id}, ordinal={version_ordinal}, "
+            f"clearance={clearance_state.value}, reviewer={reviewer}"
+        )
+
+        is_public = (clearance_state == ClearanceState.PUBLIC)
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                # Step 1: Clear is_latest for all releases of this asset
+                cur.execute(
+                    sql.SQL("""
+                        UPDATE {}.{}
+                        SET is_latest = false, updated_at = %s
+                        WHERE asset_id = %s AND is_latest = true
+                    """).format(
+                        sql.Identifier(self.schema),
+                        sql.Identifier(self.table)
+                    ),
+                    (reviewed_at, asset_id)
+                )
+
+                # Step 2: Approve + version + is_latest + clearance in one UPDATE
+                if is_public:
+                    cur.execute(
+                        sql.SQL("""
+                            UPDATE {}.{}
+                            SET version_id = %s,
+                                version_ordinal = %s,
+                                is_latest = true,
+                                approval_state = %s,
+                                reviewer = %s,
+                                reviewed_at = %s,
+                                approval_notes = %s,
+                                clearance_state = %s,
+                                cleared_at = %s,
+                                cleared_by = %s,
+                                made_public_at = %s,
+                                made_public_by = %s,
+                                updated_at = %s
+                            WHERE release_id = %s
+                              AND approval_state = 'pending_review'
+                        """).format(
+                            sql.Identifier(self.schema),
+                            sql.Identifier(self.table)
+                        ),
+                        (
+                            version_id, version_ordinal,
+                            approval_state, reviewer, reviewed_at,
+                            approval_notes,
+                            clearance_state, reviewed_at, reviewer,
+                            reviewed_at, reviewer,
+                            reviewed_at,
+                            release_id
+                        )
+                    )
+                else:
+                    cur.execute(
+                        sql.SQL("""
+                            UPDATE {}.{}
+                            SET version_id = %s,
+                                version_ordinal = %s,
+                                is_latest = true,
+                                approval_state = %s,
+                                reviewer = %s,
+                                reviewed_at = %s,
+                                approval_notes = %s,
+                                clearance_state = %s,
+                                cleared_at = %s,
+                                cleared_by = %s,
+                                updated_at = %s
+                            WHERE release_id = %s
+                              AND approval_state = 'pending_review'
+                        """).format(
+                            sql.Identifier(self.schema),
+                            sql.Identifier(self.table)
+                        ),
+                        (
+                            version_id, version_ordinal,
+                            approval_state, reviewer, reviewed_at,
+                            approval_notes,
+                            clearance_state, reviewed_at, reviewer,
+                            reviewed_at,
+                            release_id
+                        )
+                    )
+
+                approved = cur.rowcount > 0
+
+                if approved:
+                    conn.commit()
+                    logger.info(
+                        f"Atomic approve committed: {release_id[:16]}... "
+                        f"-> {version_id} (ordinal={version_ordinal})"
+                    )
+                else:
+                    conn.rollback()
+                    logger.warning(
+                        f"Atomic approve failed: {release_id[:16]}... "
+                        f"not found or not in pending_review state"
+                    )
+
+                return approved
+
     def count_by_approval_state(self) -> Dict[str, int]:
         """
         Get counts of releases grouped by approval_state.
@@ -1001,7 +1266,8 @@ class ReleaseRepository(PostgreSQLRepository):
         """
         Convert database row to AssetRelease model.
 
-        Parses enum fields from string values with try/except for safety.
+        Parses enum fields from string values — raises ValueError on invalid
+        or missing values (no silent fallbacks per project convention).
         JSONB columns (stac_item_json, node_summary, platform_refs) are
         passed directly from the row -- psycopg3 returns them as dicts.
 
@@ -1011,26 +1277,21 @@ class ReleaseRepository(PostgreSQLRepository):
         Returns:
             AssetRelease model instance
         """
-        # Parse approval_state
-        approval_state_value = row.get('approval_state', 'pending_review')
-        try:
-            approval_state = ApprovalState(approval_state_value) if approval_state_value else ApprovalState.PENDING_REVIEW
-        except ValueError:
-            approval_state = ApprovalState.PENDING_REVIEW
+        # Parse enums — fail explicitly on invalid values (no silent fallbacks)
+        approval_state_value = row.get('approval_state')
+        if not approval_state_value:
+            raise ValueError(f"Missing approval_state for release {row.get('release_id', '?')}")
+        approval_state = ApprovalState(approval_state_value)
 
-        # Parse clearance_state
-        clearance_state_value = row.get('clearance_state', 'uncleared')
-        try:
-            clearance_state = ClearanceState(clearance_state_value) if clearance_state_value else ClearanceState.UNCLEARED
-        except ValueError:
-            clearance_state = ClearanceState.UNCLEARED
+        clearance_state_value = row.get('clearance_state')
+        if not clearance_state_value:
+            raise ValueError(f"Missing clearance_state for release {row.get('release_id', '?')}")
+        clearance_state = ClearanceState(clearance_state_value)
 
-        # Parse processing_status
-        processing_status_value = row.get('processing_status', 'pending')
-        try:
-            processing_status = ProcessingStatus(processing_status_value) if processing_status_value else ProcessingStatus.PENDING
-        except ValueError:
-            processing_status = ProcessingStatus.PENDING
+        processing_status_value = row.get('processing_status')
+        if not processing_status_value:
+            raise ValueError(f"Missing processing_status for release {row.get('release_id', '?')}")
+        processing_status = ProcessingStatus(processing_status_value)
 
         return AssetRelease(
             # Identity

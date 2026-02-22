@@ -214,6 +214,7 @@ class ProcessRasterDockerJob(JobBaseMixin, JobBase):
                 'resource_id': job_params.get('resource_id'),
                 'version_id': job_params.get('version_id'),
                 'access_level': job_params.get('access_level'),
+                'release_id': job_params.get('release_id'),
 
                 # Docker-specific
                 'use_windowed_read': job_params.get('use_windowed_read', True),

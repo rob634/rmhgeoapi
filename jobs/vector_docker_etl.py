@@ -372,6 +372,7 @@ class VectorDockerETLJob(JobBaseMixin, JobBase):
                 'dataset_id': job_params.get('dataset_id'),
                 'resource_id': job_params.get('resource_id'),
                 'version_id': job_params.get('version_id'),
+                'release_id': job_params.get('release_id'),
                 'stac_item_id': job_params.get('stac_item_id'),
                 # NOTE: 'title' already set in Metadata section above
                 'tags': job_params.get('tags'),

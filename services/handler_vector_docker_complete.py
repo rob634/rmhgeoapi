@@ -292,8 +292,9 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
         if parameters.get('release_id'):
             try:
                 from infrastructure import ReleaseRepository
+                from core.models.asset import ProcessingStatus
                 release_repo = ReleaseRepository()
-                release_repo.update_processing_status(parameters['release_id'], status='completed')
+                release_repo.update_processing_status(parameters['release_id'], status=ProcessingStatus.COMPLETED)
                 logger.info(f"[{job_id[:8]}] Updated release {parameters['release_id'][:16]}... processing_status=completed")
             except Exception as release_err:
                 logger.warning(f"[{job_id[:8]}] Failed to update release processing status: {release_err}")

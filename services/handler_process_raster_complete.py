@@ -808,8 +808,9 @@ def _process_raster_tiled(
         if params.get('release_id'):
             try:
                 from infrastructure import ReleaseRepository
+                from core.models.asset import ProcessingStatus
                 release_repo = ReleaseRepository()
-                release_repo.update_processing_status(params['release_id'], status='completed')
+                release_repo.update_processing_status(params['release_id'], status=ProcessingStatus.COMPLETED)
                 logger.info(f"Updated release {params['release_id'][:16]}... processing_status=completed")
             except Exception as release_err:
                 logger.warning(f"Failed to update release processing status: {release_err}")
@@ -1563,8 +1564,9 @@ def _process_raster_tiled_mount(
         if params.get('release_id'):
             try:
                 from infrastructure import ReleaseRepository
+                from core.models.asset import ProcessingStatus
                 release_repo = ReleaseRepository()
-                release_repo.update_processing_status(params['release_id'], status='completed')
+                release_repo.update_processing_status(params['release_id'], status=ProcessingStatus.COMPLETED)
                 logger.info(f"Updated release {params['release_id'][:16]}... processing_status=completed")
             except Exception as release_err:
                 logger.warning(f"Failed to update release processing status: {release_err}")
@@ -2443,8 +2445,9 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
         if params.get('release_id'):
             try:
                 from infrastructure import ReleaseRepository
+                from core.models.asset import ProcessingStatus
                 release_repo = ReleaseRepository()
-                release_repo.update_processing_status(params['release_id'], status='completed')
+                release_repo.update_processing_status(params['release_id'], status=ProcessingStatus.COMPLETED)
                 logger.info(f"Updated release {params['release_id'][:16]}... processing_status=completed")
             except Exception as release_err:
                 logger.warning(f"Failed to update release processing status: {release_err}")

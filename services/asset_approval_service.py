@@ -150,37 +150,36 @@ class AssetApprovalService:
 
         now = datetime.now(timezone.utc)
 
-        # Assign version (version_id, ordinal, is_latest) via asset_service
-        try:
-            self.asset_service.assign_version(release_id, version_id, reviewer)
-        except Exception as e:
-            logger.error(f"Failed to assign version {version_id} to {release_id[:16]}...: {e}")
-            return {
-                'success': False,
-                'error': f"Version assignment failed: {e}"
-            }
+        # Compute version_ordinal from existing versioned releases (read-only)
+        existing_releases = self.release_repo.list_by_asset(release.asset_id)
+        versioned_count = sum(
+            1 for r in existing_releases
+            if r.version_id is not None and r.release_id != release_id
+        )
+        version_ordinal = versioned_count + 1
 
-        # Update approval state
-        success = self.release_repo.update_approval_state(
+        # Atomic approval: flip_is_latest + version assignment + approval
+        # state + clearance in a single transaction. All-or-nothing.
+        success = self.release_repo.approve_release_atomic(
             release_id=release_id,
+            asset_id=release.asset_id,
+            version_id=version_id,
+            version_ordinal=version_ordinal,
             approval_state=ApprovalState.APPROVED,
             reviewer=reviewer,
             reviewed_at=now,
+            clearance_state=clearance_state,
             approval_notes=notes
         )
 
         if not success:
             return {
                 'success': False,
-                'error': "Failed to update release approval state"
+                'error': (
+                    "Atomic approval failed: release not found or not in "
+                    "pending_review state (concurrent approval?)"
+                )
             }
-
-        # Update clearance
-        self.release_repo.update_clearance(
-            release_id=release_id,
-            clearance_state=clearance_state,
-            cleared_by=reviewer
-        )
 
         # Materialize STAC item to pgSTAC from cached stac_item_json
         stac_result = self._materialize_stac(release, reviewer, clearance_state)

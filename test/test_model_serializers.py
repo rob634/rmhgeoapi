@@ -1,23 +1,25 @@
 # ============================================================================
-# UNIT TESTS - Pydantic V2 @field_serializer on domain models
+# UNIT TESTS - Pydantic V2 model_dump() on domain models
 # ============================================================================
-# PURPOSE: Verify model_dump() produces DB-ready values (EN-TD.2 Phase 2)
+# PURPOSE: Verify model_dump() produces values compatible with psycopg3 type adapters
 # CREATED: 18 FEB 2026
+# UPDATED: 22 FEB 2026 - V0.9: psycopg3 adapters handle enum/JSONB conversion
 # RUN: conda activate azgeo && python -m pytest test/test_model_serializers.py -v
 # ============================================================================
 """
-Unit tests for @field_serializer on Asset, AssetRelease, JobRecord, TaskRecord, Artifact.
+Unit tests for model_dump() on Asset, AssetRelease, JobRecord, TaskRecord, Artifact.
 
 Verifies that model_dump() (mode='python') produces values ready for psycopg3:
-- Enums → string values
-- Dicts/lists → JSON strings (for JSONB columns)
+- Enums → enum objects (psycopg3 _EnumDumper handles .value at write time)
+- Dicts/lists → Python dicts/lists (psycopg3 JsonbBinaryDumper handles JSONB serialization)
 - Datetimes → datetime objects (psycopg3 handles natively)
 - Scalars → passthrough
 
 V0.9 (21 FEB 2026): GeospatialAsset tests replaced with Asset + AssetRelease tests.
+V0.9 (22 FEB 2026): Removed @field_serializer expectations — psycopg3 type adapters
+    handle enum-to-string and dict-to-JSONB conversion at the database layer.
 """
 
-import json
 from datetime import datetime, timezone
 
 import sys
@@ -208,30 +210,35 @@ class TestAssetReleaseModelDump:
 class TestJobRecordModelDump:
 
     def test_status_enum_serializes(self):
+        """V0.9: model_dump() returns enum object; psycopg3 _EnumDumper handles .value at write time."""
         job = _make_job(status=JobStatus.PROCESSING)
         data = job.model_dump()
-        assert data["status"] == "processing"
+        assert data["status"] is JobStatus.PROCESSING
+        assert data["status"].value == "processing"
 
     def test_jsonb_parameters_serializes(self):
+        """V0.9: JSONB fields stay as dicts; psycopg3 JsonbBinaryDumper handles serialization."""
         params = {"input": "test.tif", "options": {"compress": True}}
         job = _make_job(parameters=params)
         data = job.model_dump()
-        assert isinstance(data["parameters"], str)
-        assert json.loads(data["parameters"]) == params
+        assert isinstance(data["parameters"], dict)
+        assert data["parameters"] == params
 
     def test_jsonb_metadata_serializes(self):
+        """V0.9: JSONB fields stay as dicts; psycopg3 JsonbBinaryDumper handles serialization."""
         meta = {"source": "upload", "user": "robert"}
         job = _make_job(metadata=meta)
         data = job.model_dump()
-        assert isinstance(data["metadata"], str)
-        assert json.loads(data["metadata"]) == meta
+        assert isinstance(data["metadata"], dict)
+        assert data["metadata"] == meta
 
     def test_jsonb_stage_results_serializes(self):
+        """V0.9: JSONB fields stay as dicts; psycopg3 JsonbBinaryDumper handles serialization."""
         results = {"1": {"tasks_completed": 3}}
         job = _make_job(stage_results=results)
         data = job.model_dump()
-        assert isinstance(data["stage_results"], str)
-        assert json.loads(data["stage_results"]) == results
+        assert isinstance(data["stage_results"], dict)
+        assert data["stage_results"] == results
 
     def test_jsonb_result_data_none(self):
         job = _make_job()
@@ -239,11 +246,12 @@ class TestJobRecordModelDump:
         assert data["result_data"] is None
 
     def test_jsonb_result_data_serializes(self):
+        """V0.9: JSONB fields stay as dicts; psycopg3 JsonbBinaryDumper handles serialization."""
         result = {"output_path": "silver-cogs/test.tif"}
         job = _make_job(result_data=result)
         data = job.model_dump()
-        assert isinstance(data["result_data"], str)
-        assert json.loads(data["result_data"]) == result
+        assert isinstance(data["result_data"], dict)
+        assert data["result_data"] == result
 
     def test_datetime_stays_as_object(self):
         job = _make_job()
@@ -258,44 +266,51 @@ class TestJobRecordModelDump:
 class TestTaskRecordModelDump:
 
     def test_status_enum_serializes(self):
+        """V0.9: model_dump() returns enum object; psycopg3 _EnumDumper handles .value at write time."""
         task = _make_task(status=TaskStatus.COMPLETED)
         data = task.model_dump()
-        assert data["status"] == "completed"
+        assert data["status"] is TaskStatus.COMPLETED
+        assert data["status"].value == "completed"
 
     def test_jsonb_parameters_serializes(self):
+        """V0.9: JSONB fields stay as dicts; psycopg3 JsonbBinaryDumper handles serialization."""
         params = {"chunk": 0, "bbox": [-70, -56, -69, -55]}
         task = _make_task(parameters=params)
         data = task.model_dump()
-        assert isinstance(data["parameters"], str)
-        assert json.loads(data["parameters"]) == params
+        assert isinstance(data["parameters"], dict)
+        assert data["parameters"] == params
 
     def test_jsonb_result_data_serializes(self):
+        """V0.9: JSONB fields stay as dicts; psycopg3 JsonbBinaryDumper handles serialization."""
         result = {"rows_inserted": 42}
         task = _make_task(result_data=result)
         data = task.model_dump()
-        assert isinstance(data["result_data"], str)
-        assert json.loads(data["result_data"]) == result
+        assert isinstance(data["result_data"], dict)
+        assert data["result_data"] == result
 
     def test_jsonb_checkpoint_data_serializes(self):
+        """V0.9: JSONB fields stay as dicts; psycopg3 JsonbBinaryDumper handles serialization."""
         checkpoint = {"phase": 2, "rows_done": 1000}
         task = _make_task(checkpoint_data=checkpoint)
         data = task.model_dump()
-        assert isinstance(data["checkpoint_data"], str)
-        assert json.loads(data["checkpoint_data"]) == checkpoint
+        assert isinstance(data["checkpoint_data"], dict)
+        assert data["checkpoint_data"] == checkpoint
 
     def test_jsonb_next_stage_params_serializes(self):
+        """V0.9: JSONB fields stay as dicts; psycopg3 JsonbBinaryDumper handles serialization."""
         nsp = {"output_table": "geo.floods"}
         task = _make_task(next_stage_params=nsp)
         data = task.model_dump()
-        assert isinstance(data["next_stage_params"], str)
-        assert json.loads(data["next_stage_params"]) == nsp
+        assert isinstance(data["next_stage_params"], dict)
+        assert data["next_stage_params"] == nsp
 
     def test_jsonb_metadata_serializes(self):
+        """V0.9: JSONB fields stay as dicts; psycopg3 JsonbBinaryDumper handles serialization."""
         meta = {"queue": "raster-tasks"}
         task = _make_task(metadata=meta)
         data = task.model_dump()
-        assert isinstance(data["metadata"], str)
-        assert json.loads(data["metadata"]) == meta
+        assert isinstance(data["metadata"], dict)
+        assert data["metadata"] == meta
 
     def test_datetime_stays_as_object(self):
         task = _make_task()
@@ -315,24 +330,27 @@ class TestArtifactModelDump:
         assert data["status"] == "superseded"
 
     def test_jsonb_client_refs_serializes(self):
+        """V0.9: JSONB fields stay as dicts; psycopg3 JsonbBinaryDumper handles serialization."""
         refs = {"dataset_id": "floods", "resource_id": "jakarta"}
         art = _make_artifact(client_refs=refs)
         data = art.model_dump()
-        assert isinstance(data["client_refs"], str)
-        assert json.loads(data["client_refs"]) == refs
+        assert isinstance(data["client_refs"], dict)
+        assert data["client_refs"] == refs
 
     def test_jsonb_metadata_serializes(self):
+        """V0.9: JSONB fields stay as dicts; psycopg3 JsonbBinaryDumper handles serialization."""
         meta = {"band_count": 1, "crs": "EPSG:4326"}
         art = _make_artifact(metadata=meta)
         data = art.model_dump()
-        assert isinstance(data["metadata"], str)
-        assert json.loads(data["metadata"]) == meta
+        assert isinstance(data["metadata"], dict)
+        assert data["metadata"] == meta
 
     def test_jsonb_metadata_empty_dict(self):
+        """V0.9: Empty dict stays as dict, not serialized to JSON string."""
         art = _make_artifact()
         data = art.model_dump()
-        assert isinstance(data["metadata"], str)
-        assert json.loads(data["metadata"]) == {}
+        assert isinstance(data["metadata"], dict)
+        assert data["metadata"] == {}
 
     def test_datetime_stays_as_object(self):
         art = _make_artifact()

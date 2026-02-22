@@ -190,22 +190,8 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
             )
             logger.info(f"  Asset {asset_op}: {asset.asset_id[:16]}")
 
-            # Step 2: Get or overwrite Release
-            try:
-                release, release_op = asset_service.get_or_overwrite_release(
-                    asset_id=asset.asset_id,
-                    overwrite=overwrite,
-                    stac_item_id=generate_stac_item_id(platform_req.dataset_id, platform_req.resource_id, platform_req.version_id),
-                    stac_collection_id=job_params.get('collection_id', platform_req.dataset_id.lower()),
-                    blob_path=job_params.get('blob_name') if platform_req.data_type.value == 'raster' else None,
-                    table_name=job_params.get('table_name') if platform_req.data_type.value == 'vector' else None,
-                    request_id=request_id,
-                    suggested_version_id=platform_req.version_id,
-                )
-            except ReleaseStateError as e:
-                return error_response(str(e), "ReleaseStateError", status_code=409)
-
-            # Step 3: Handle dry_run — return validation result
+            # Step 2: Handle dry_run — return validation result WITHOUT creating Release
+            # dry_run only needs asset lookup + job_type translation to confirm validity.
             if dry_run:
                 return func.HttpResponse(
                     json.dumps({
@@ -219,6 +205,21 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                     status_code=200,
                     mimetype="application/json"
                 )
+
+            # Step 3: Get or overwrite Release
+            try:
+                release, release_op = asset_service.get_or_overwrite_release(
+                    asset_id=asset.asset_id,
+                    overwrite=overwrite,
+                    stac_item_id=generate_stac_item_id(platform_req.dataset_id, platform_req.resource_id, platform_req.version_id),
+                    stac_collection_id=job_params.get('collection_id', platform_req.dataset_id.lower()),
+                    blob_path=job_params.get('blob_name') if platform_req.data_type.value == 'raster' else None,
+                    table_name=job_params.get('table_name') if platform_req.data_type.value == 'vector' else None,
+                    request_id=request_id,
+                    suggested_version_id=platform_req.version_id,
+                )
+            except ReleaseStateError as e:
+                return error_response(str(e), "ReleaseStateError", status_code=409)
 
             # Step 4: Handle idempotent case (existing draft, no overwrite)
             if release_op == "existing":

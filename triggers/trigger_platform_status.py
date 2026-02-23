@@ -206,7 +206,7 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
                     headers={"Content-Type": "application/json"}
                 )
 
-            logger.debug(f"Found platform request via {lookup_type}: {platform_request.request_id}")
+            logger.debug(f"Found platform request via {lookup_type}: {platform_request.request_id if platform_request else 'release-only'}")
 
             # Build response using shared helper (V0.9: pre_resolved_release)
             result = _build_single_status_response(
@@ -565,134 +565,142 @@ def _build_single_status_response(
     pre_resolved_release=None
 ) -> dict:
     """
-    Build the standard status response dict for a single Platform request.
+    Build clean B2B status response for a single Platform request.
 
-    V0.9 (21 FEB 2026): Returns both "asset" and "release" sections.
-    Asset = stable identity container, Release = versioned artifact with lifecycle.
+    V0.9.1 (23 FEB 2026): Restructured for B2B clarity.
+    - Reads outputs from Release record (authoritative), not job_result
+    - Separates concerns: identity (asset), lifecycle (release), artifacts (outputs),
+      access (services), workflow (approval)
+    - Drops internal operational detail from default response (job_result,
+      task_summary, admin URLs). Available via ?detail=full (future).
 
     Args:
-        platform_request: ApiRequest record
+        platform_request: ApiRequest record (can be None for release/asset lookups)
         job_repo: JobRepository instance
         task_repo: TaskRepository instance
-        verbose: Include full task details in task_summary
+        verbose: Include full task details (future: ?detail=full)
         pre_resolved_release: AssetRelease if already fetched (skips re-query)
 
     Returns:
         Response dict ready for JSON serialization
     """
-    # Get CoreMachine job status
-    job = job_repo.get_job(platform_request.job_id)
+    from infrastructure import ReleaseRepository, AssetRepository
+
+    # =====================================================================
+    # 1. Resolve Release and Asset
+    # =====================================================================
+    release = pre_resolved_release
+    asset = None
+
+    if not release and platform_request and platform_request.job_id:
+        try:
+            release = ReleaseRepository().get_by_job_id(platform_request.job_id)
+        except Exception:
+            pass
+
+    if release:
+        try:
+            asset = AssetRepository().get_by_id(release.asset_id)
+        except Exception:
+            pass
+
+    # Fallback asset from platform_request.asset_id if release didn't resolve
+    if not asset and platform_request and getattr(platform_request, 'asset_id', None):
+        try:
+            asset = AssetRepository().get_by_id(platform_request.asset_id)
+        except Exception:
+            pass
+
+    # =====================================================================
+    # 2. Resolve Job status (single field, not the full result blob)
+    # =====================================================================
+    job = None
+    job_status = "unknown"
+    job_result = None
+    job_id = None
+
+    if platform_request and platform_request.job_id:
+        job_id = platform_request.job_id
+    elif release and release.job_id:
+        job_id = release.job_id
+
+    if job_id:
+        job = job_repo.get_job(job_id)
 
     if job:
         job_status = job.status.value if hasattr(job.status, 'value') else job.status
-        job_stage = job.stage
         job_result = job.result_data
-        job_type = job.job_type
-    else:
-        job_status = "unknown"
-        job_stage = None
-        job_result = None
-        job_type = None
-        logger.warning(f"CoreMachine job {platform_request.job_id} not found")
+    elif release:
+        # Use release processing_status as proxy if job not found
+        job_status = release.processing_status.value if hasattr(release.processing_status, 'value') else str(release.processing_status)
 
-    # Get task summary
-    task_summary = _get_task_summary(task_repo, platform_request.job_id, verbose=verbose)
+    # =====================================================================
+    # 3. Determine data_type
+    # =====================================================================
+    data_type = None
+    if asset:
+        data_type = asset.data_type
+    elif platform_request:
+        data_type = platform_request.data_type
 
-    # Build response
+    # =====================================================================
+    # 4. Build response
+    # =====================================================================
     result = {
         "success": True,
-        "request_id": platform_request.request_id,
-        "dataset_id": platform_request.dataset_id,
-        "resource_id": platform_request.resource_id,
-        "version_id": platform_request.version_id,
-        "data_type": platform_request.data_type,
-        "created_at": platform_request.created_at.isoformat() if platform_request.created_at else None,
-        "job_id": platform_request.job_id,
-        "job_type": job_type,
-        "job_status": job_status,
-        "job_stage": job_stage,
-        "job_result": job_result,
-        "task_summary": task_summary,
-        "asset": None,
-        "release": None,
-        "urls": {
-            "job_status": f"/api/jobs/status/{platform_request.job_id}",
-            "job_tasks": f"/api/dbadmin/tasks/{platform_request.job_id}"
-        }
+        "request_id": platform_request.request_id if platform_request else None,
     }
 
-    # V0.9: Resolve release and asset info
-    release_data = None
-    asset_data = None
-    resolved_asset_id = None
+    # Asset block
+    if asset:
+        result["asset"] = {
+            "asset_id": asset.asset_id,
+            "dataset_id": asset.dataset_id,
+            "resource_id": asset.resource_id,
+            "data_type": asset.data_type,
+            "release_count": asset.release_count,
+        }
+    else:
+        result["asset"] = None
 
-    if pre_resolved_release:
-        release = pre_resolved_release
-        release_data = {
+    # Release block (with version_ordinal — new)
+    if release:
+        result["release"] = {
             "release_id": release.release_id,
             "version_id": release.version_id,
+            "version_ordinal": release.version_ordinal,
+            "revision": release.revision,
+            "is_latest": release.is_latest,
+            "processing_status": release.processing_status.value if hasattr(release.processing_status, 'value') else str(release.processing_status),
             "approval_state": release.approval_state.value if hasattr(release.approval_state, 'value') else str(release.approval_state),
             "clearance_state": release.clearance_state.value if hasattr(release.clearance_state, 'value') else str(release.clearance_state),
-            "processing_status": release.processing_status.value if hasattr(release.processing_status, 'value') else str(release.processing_status),
-            "is_latest": release.is_latest,
-            "revision": release.revision,
         }
-        # Get asset info from release's asset_id
+    else:
+        result["release"] = None
+
+    # Job status (single field)
+    result["job_status"] = job_status
+
+    # Outputs (from Release record, not job_result)
+    result["outputs"] = _build_outputs_block(release, job_result)
+
+    # Services (focused URLs)
+    result["services"] = _build_services_block(release, data_type) if data_type else None
+
+    # Approval (only when pending_review + completed)
+    asset_id = asset.asset_id if asset else None
+    result["approval"] = _build_approval_block(release, asset_id, data_type) if (asset_id and data_type) else None
+
+    # Version history (always include if asset has releases)
+    result["versions"] = None
+    if asset:
         try:
-            from infrastructure import AssetRepository
-            asset = AssetRepository().get_by_id(release.asset_id)
-            if asset:
-                asset_data = {
-                    "asset_id": asset.asset_id,
-                    "dataset_id": asset.dataset_id,
-                    "resource_id": asset.resource_id,
-                    "data_type": asset.data_type,
-                    "release_count": asset.release_count,
-                }
-                resolved_asset_id = asset.asset_id
+            release_repo = ReleaseRepository()
+            all_releases = release_repo.list_by_asset(asset.asset_id)
+            if all_releases:
+                result["versions"] = _build_version_summary(all_releases)
         except Exception:
             pass
-    else:
-        # Try to resolve from job or ApiRequest
-        release_id_source = None
-        # V0.9: Look up release by job_id
-        if platform_request.job_id:
-            try:
-                from infrastructure import ReleaseRepository, AssetRepository
-                release_repo = ReleaseRepository()
-                release = release_repo.get_by_job_id(platform_request.job_id)
-                if release:
-                    release_data = {
-                        "release_id": release.release_id,
-                        "version_id": release.version_id,
-                        "approval_state": release.approval_state.value if hasattr(release.approval_state, 'value') else str(release.approval_state),
-                        "clearance_state": release.clearance_state.value if hasattr(release.clearance_state, 'value') else str(release.clearance_state),
-                        "processing_status": release.processing_status.value if hasattr(release.processing_status, 'value') else str(release.processing_status),
-                        "is_latest": release.is_latest,
-                        "revision": release.revision,
-                    }
-                    # Get asset info
-                    asset = AssetRepository().get_by_id(release.asset_id)
-                    if asset:
-                        asset_data = {
-                            "asset_id": asset.asset_id,
-                            "dataset_id": asset.dataset_id,
-                            "resource_id": asset.resource_id,
-                            "data_type": asset.data_type,
-                            "release_count": asset.release_count,
-                        }
-                        resolved_asset_id = asset.asset_id
-            except Exception:
-                pass  # Non-fatal
-
-    result["asset"] = asset_data
-    result["release"] = release_data
-
-    # Add data access URLs if job completed
-    if job_status == "completed" and job_result:
-        result["data_access"] = _generate_data_access_urls(
-            platform_request, job_type, job_result, asset_id=resolved_asset_id
-        )
 
     return result
 
@@ -887,17 +895,14 @@ def _handle_platform_refs_lookup(
     """
     Lookup status by dataset_id + resource_id (platform refs).
 
-    V0.9 (21 FEB 2026): Uses AssetRepository + ReleaseRepository instead of
-    GeospatialAssetRepository. Finds the Asset by identity triple, then lists
-    all releases underneath it.
+    V0.9.1 (23 FEB 2026): Simplified — delegates to _build_single_status_response()
+    which now handles None platform_request and always includes versions.
 
     Priority logic for selecting the primary release:
-        1. Release with active processing (PENDING or PROCESSING) — currently running
-        2. Completed draft (no version_id, processing done) — awaiting approval
-        3. Latest approved release — most recent published version
-        4. Most recent release overall — fallback
-
-    If multiple releases exist, includes a "versions" summary array.
+        1. Release with active processing (PENDING or PROCESSING)
+        2. Completed draft (no version_id, processing done)
+        3. Latest approved release
+        4. Most recent release overall
 
     Args:
         dataset_id: Platform dataset identifier
@@ -931,7 +936,6 @@ def _handle_platform_refs_lookup(
     # Get all releases for this asset
     releases = release_repo.list_by_asset(asset.asset_id)
     if not releases:
-        # Asset exists but no releases yet
         return func.HttpResponse(
             json.dumps({
                 "success": True,
@@ -951,8 +955,6 @@ def _handle_platform_refs_lookup(
 
     # Priority: active processing > completed draft > latest approved > most recent
     primary_release = None
-    workflow_status = None
-    workflow_message = None
 
     for r in releases:
         proc = r.processing_status.value if hasattr(r.processing_status, 'value') else str(r.processing_status)
@@ -970,81 +972,21 @@ def _handle_platform_refs_lookup(
                 primary_release = r
                 break
     if not primary_release:
-        primary_release = releases[0]  # list_by_asset sorts by version_ordinal/created_at
-
-    # Check if all releases are approved (no open workflow)
-    if all(
-        (r.approval_state.value if hasattr(r.approval_state, 'value') else str(r.approval_state)) == 'approved'
-        for r in releases
-    ):
-        workflow_status = "no_open_workflow"
-        workflow_message = "All versions approved. No active draft or processing job."
+        primary_release = releases[0]
 
     # Get platform request for primary release's job
     platform_request = None
     if primary_release.job_id:
         platform_request = platform_repo.get_request_by_job(primary_release.job_id)
 
-    if platform_request:
-        result = _build_single_status_response(
-            platform_request, job_repo, task_repo,
-            verbose=verbose, pre_resolved_release=primary_release
-        )
-    else:
-        # Edge case: no ApiRequest found — build response from release + job directly
-        job = job_repo.get_job(primary_release.job_id) if primary_release.job_id else None
-        result = {
-            "success": True,
-            "request_id": None,
-            "dataset_id": dataset_id,
-            "resource_id": resource_id,
-            "version_id": primary_release.version_id,
-            "data_type": asset.data_type,
-            "created_at": primary_release.created_at.isoformat() if primary_release.created_at else None,
-            "job_id": primary_release.job_id,
-            "job_type": job.job_type if job else None,
-            "job_status": (job.status.value if hasattr(job.status, 'value') else str(job.status)) if job else "unknown",
-            "job_stage": job.stage if job else None,
-            "job_result": job.result_data if job else None,
-            "task_summary": _get_task_summary(task_repo, primary_release.job_id, verbose=verbose) if primary_release.job_id else {"total": 0},
-            "asset": {
-                "asset_id": asset.asset_id,
-                "dataset_id": asset.dataset_id,
-                "resource_id": asset.resource_id,
-                "data_type": asset.data_type,
-                "release_count": asset.release_count,
-            },
-            "release": {
-                "release_id": primary_release.release_id,
-                "version_id": primary_release.version_id,
-                "approval_state": primary_release.approval_state.value if hasattr(primary_release.approval_state, 'value') else str(primary_release.approval_state),
-                "clearance_state": primary_release.clearance_state.value if hasattr(primary_release.clearance_state, 'value') else str(primary_release.clearance_state),
-                "processing_status": primary_release.processing_status.value if hasattr(primary_release.processing_status, 'value') else str(primary_release.processing_status),
-                "is_latest": primary_release.is_latest,
-                "revision": primary_release.revision,
-            },
-            "urls": {
-                "job_status": f"/api/jobs/status/{primary_release.job_id}" if primary_release.job_id else None,
-                "job_tasks": f"/api/dbadmin/tasks/{primary_release.job_id}" if primary_release.job_id else None,
-            }
-        }
-        # Add data access URLs if job completed
-        if job and (job.status.value if hasattr(job.status, 'value') else str(job.status)) == "completed" and job.result_data:
-            result["data_access"] = _generate_data_access_urls(
-                platform_request, job.job_type, job.result_data, asset_id=asset.asset_id
-            )
+    # Build response using shared builder
+    result = _build_single_status_response(
+        platform_request, job_repo, task_repo,
+        verbose=verbose, pre_resolved_release=primary_release
+    )
 
-    # Add lookup_type
+    # Add lookup_type marker
     result["lookup_type"] = "platform_refs"
-
-    # Add workflow_status if applicable
-    if workflow_status:
-        result["workflow_status"] = workflow_status
-        result["message"] = workflow_message
-
-    # Add version summary if multiple releases
-    if len(releases) > 1:
-        result["versions"] = _build_version_summary(releases)
 
     return func.HttpResponse(
         json.dumps(result, indent=2, default=str),

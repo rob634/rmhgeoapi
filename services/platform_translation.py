@@ -62,7 +62,12 @@ def normalize_data_type(data_type: str) -> Optional[str]:
     return dt_lower
 
 
-def generate_table_name(dataset_id: str, resource_id: str, version_id: Optional[str] = None) -> str:
+def generate_table_name(
+    dataset_id: str,
+    resource_id: str,
+    version_id: Optional[str] = None,
+    version_ordinal: Optional[int] = None
+) -> str:
     """
     Generate PostGIS table name from DDH identifiers.
 
@@ -71,16 +76,24 @@ def generate_table_name(dataset_id: str, resource_id: str, version_id: Optional[
     Args:
         dataset_id: DDH dataset identifier
         resource_id: DDH resource identifier
-        version_id: DDH version identifier (None for draft mode → "draft")
+        version_id: DDH version identifier (None for draft mode)
+        version_ordinal: Release ordinal (1, 2, 3...) for draft naming
 
     Returns:
         URL-safe table name
     """
     config = get_config()
-    return config.platform.generate_vector_table_name(dataset_id, resource_id, version_id)
+    return config.platform.generate_vector_table_name(
+        dataset_id, resource_id, version_id, version_ordinal=version_ordinal
+    )
 
 
-def generate_stac_item_id(dataset_id: str, resource_id: str, version_id: Optional[str] = None) -> str:
+def generate_stac_item_id(
+    dataset_id: str,
+    resource_id: str,
+    version_id: Optional[str] = None,
+    version_ordinal: Optional[int] = None
+) -> str:
     """
     Generate STAC item ID from DDH identifiers.
 
@@ -89,18 +102,25 @@ def generate_stac_item_id(dataset_id: str, resource_id: str, version_id: Optiona
     Args:
         dataset_id: DDH dataset identifier
         resource_id: DDH resource identifier
-        version_id: DDH version identifier (None for draft mode → "draft")
+        version_id: DDH version identifier (None for draft mode)
+        version_ordinal: Release ordinal (1, 2, 3...) for draft naming
 
     Returns:
         URL-safe STAC item ID
     """
     config = get_config()
-    return config.platform.generate_stac_item_id(dataset_id, resource_id, version_id)
+    return config.platform.generate_stac_item_id(
+        dataset_id, resource_id, version_id, version_ordinal=version_ordinal
+    )
 
 
 def get_unpublish_params_from_request(request: ApiRequest, data_type: str) -> dict:
     """
     Extract unpublish parameters from a platform request.
+
+    For vectors, reads stored table_name from Release record (authoritative
+    source since ordinal-based naming). Falls back to reconstruction for
+    pre-ordinal data only.
 
     Args:
         request: ApiRequest record from platform layer
@@ -110,7 +130,20 @@ def get_unpublish_params_from_request(request: ApiRequest, data_type: str) -> di
         Dict with unpublish parameters (table_name or stac_item_id/collection_id)
     """
     if data_type == "vector":
-        table_name = generate_table_name(request.dataset_id, request.resource_id, request.version_id)
+        # Read stored table_name from Release (authoritative source)
+        table_name = None
+        if request.job_id:
+            from infrastructure import ReleaseRepository
+            release_repo = ReleaseRepository()
+            release = release_repo.get_by_job_id(request.job_id)
+            if release and release.table_name:
+                table_name = release.table_name
+
+        if not table_name:
+            # Fallback: reconstruct (pre-ordinal data only)
+            table_name = generate_table_name(request.dataset_id, request.resource_id, request.version_id)
+            logger.warning(f"Reconstructed table_name (no release): {table_name}")
+
         return {'table_name': table_name}
     elif data_type == "raster":
         stac_item_id = generate_stac_item_id(request.dataset_id, request.resource_id, request.version_id)

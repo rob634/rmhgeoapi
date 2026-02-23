@@ -235,6 +235,54 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
             job_params['release_id'] = release.release_id
             job_params['asset_id'] = asset.asset_id  # Keep for backward compat during migration
 
+            # Step 6: Override output_folder with version ordinal (22 FEB 2026)
+            # Each ordinal gets its own folder — no collision between versions.
+            # Before this fix, all drafts wrote to …/draft/… which meant v2
+            # overwrote v1's COG when both existed as approved+draft.
+            if 'output_folder' in job_params and release.version_ordinal:
+                platform_cfg = config.platform
+                job_params['output_folder'] = platform_cfg.generate_raster_output_folder(
+                    platform_req.dataset_id,
+                    platform_req.resource_id,
+                    str(release.version_ordinal)
+                )
+                logger.info(f"  Output folder (ordinal): {job_params['output_folder']}")
+
+            # Sync stac_item_id from release to job params (may be disambiguated for new versions)
+            if release.stac_item_id and 'stac_item_id' in job_params:
+                job_params['stac_item_id'] = release.stac_item_id
+
+            # Update title to reflect ordinal instead of "(draft)"
+            if 'title' in job_params:
+                job_params['title'] = f"{platform_req.dataset_id} / {platform_req.resource_id} (ordinal {release.version_ordinal})"
+
+            # Step 6b: Finalize ordinal-based names for vector drafts (22 FEB 2026)
+            # Translation generates placeholder "draft" names (ordinal not yet known).
+            # Now that the release exists with a reserved ordinal, overwrite with
+            # stable ordinal-based names (e.g. *_ord1 instead of *_draft).
+            if (
+                platform_req.data_type.value == 'vector'
+                and not platform_req.version_id
+                and not getattr(platform_req.processing_options, 'table_name', None)
+            ):
+                ordinal = release.version_ordinal
+                final_table = generate_table_name(
+                    platform_req.dataset_id, platform_req.resource_id,
+                    version_ordinal=ordinal
+                )
+                final_stac = generate_stac_item_id(
+                    platform_req.dataset_id, platform_req.resource_id,
+                    version_ordinal=ordinal
+                )
+                job_params['table_name'] = final_table
+                job_params['stac_item_id'] = final_stac
+
+                # Update Release record to match finalized names
+                asset_service.update_physical_outputs(
+                    release.release_id, table_name=final_table, stac_item_id=final_stac
+                )
+                logger.info(f"  Finalized vector names: table={final_table}, stac={final_stac} (ord={ordinal})")
+
         except ReleaseStateError:
             raise  # Already handled above, but guard against re-wrapping
         except Exception as asset_err:

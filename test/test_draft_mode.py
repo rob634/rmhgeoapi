@@ -139,36 +139,78 @@ class TestRequestIdGeneration:
 
 
 # ============================================================================
-# TEST 6, 7: Naming functions with draft placeholders
+# TEST 6, 7: Naming functions with ordinal and draft placeholders
 # ============================================================================
 
 class TestNamingFunctions:
-    """generate_stac_item_id and generate_table_name draft placeholder behavior."""
+    """generate_stac_item_id and generate_table_name ordinal and draft behavior."""
 
-    def test_stac_item_id_uses_draft_placeholder(self):
-        """Test 6: generate_stac_item_id uses 'draft' placeholder when no version."""
+    def test_stac_item_id_with_ordinal(self):
+        """Test 6a: generate_stac_item_id uses 'ord{N}' when version_ordinal provided."""
+        from services.platform_translation import generate_stac_item_id
+
+        item_id = generate_stac_item_id("aerial-imagery", "site-alpha", version_ordinal=1)
+        assert "ord1" in item_id
+        assert "draft" not in item_id
+        assert "none" not in item_id.lower()
+
+        # Higher ordinal
+        item_id_2 = generate_stac_item_id("aerial-imagery", "site-alpha", version_ordinal=3)
+        assert "ord3" in item_id_2
+
+    def test_stac_item_id_legacy_draft_fallback(self):
+        """Test 6b: generate_stac_item_id uses 'draft' when no version and no ordinal."""
         from services.platform_translation import generate_stac_item_id
 
         item_id = generate_stac_item_id("aerial-imagery", "site-alpha")
         assert "draft" in item_id
         assert "none" not in item_id.lower()
 
-        # Versioned should NOT contain "draft"
+    def test_stac_item_id_with_version(self):
+        """Test 6c: generate_stac_item_id with explicit version_id."""
+        from services.platform_translation import generate_stac_item_id
+
         versioned_id = generate_stac_item_id("aerial-imagery", "site-alpha", "v1.0")
         assert "draft" not in versioned_id
+        assert "ord" not in versioned_id
         assert "v1" in versioned_id
 
-    def test_table_name_uses_draft_placeholder(self):
-        """Test 7: generate_table_name uses 'draft' placeholder when no version."""
+    def test_stac_item_id_version_id_takes_precedence(self):
+        """Test 6d: version_id takes precedence over version_ordinal."""
+        from services.platform_translation import generate_stac_item_id
+
+        item_id = generate_stac_item_id("aerial-imagery", "site-alpha", "v2.0", version_ordinal=1)
+        assert "v2" in item_id
+        assert "ord" not in item_id
+
+    def test_table_name_with_ordinal(self):
+        """Test 7a: generate_table_name uses 'ord{N}' when version_ordinal provided."""
+        from services.platform_translation import generate_table_name
+
+        table = generate_table_name("aerial-imagery", "site-alpha", version_ordinal=1)
+        assert "ord1" in table
+        assert "draft" not in table
+        assert "none" not in table.lower()
+
+        # Higher ordinal
+        table_2 = generate_table_name("aerial-imagery", "site-alpha", version_ordinal=2)
+        assert "ord2" in table_2
+
+    def test_table_name_legacy_draft_fallback(self):
+        """Test 7b: generate_table_name uses 'draft' when no version and no ordinal."""
         from services.platform_translation import generate_table_name
 
         table = generate_table_name("aerial-imagery", "site-alpha")
         assert "draft" in table
         assert "none" not in table.lower()
 
-        # Versioned
+    def test_table_name_with_version(self):
+        """Test 7c: generate_table_name with explicit version_id."""
+        from services.platform_translation import generate_table_name
+
         versioned = generate_table_name("aerial-imagery", "site-alpha", "v1.0")
         assert "draft" not in versioned
+        assert "ord" not in versioned
 
 
 # ============================================================================

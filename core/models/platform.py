@@ -440,7 +440,10 @@ class PlatformRequest(BaseModel):
         Example: "aerial-imagery-2024", "site-alpha", "v1.0" → "aerial-imagery-2024_site-alpha_v1-0"
         Draft mode: "aerial-imagery-2024", "site-alpha", None → "aerial-imagery-2024_site-alpha_draft"
 
-        Note: Uses PlatformConfig pattern for consistency with generate_stac_item_id().
+        ⚠️ PLACEHOLDER ONLY: This property uses "draft" because the version ordinal
+        is not available on the request model. The authoritative STAC item ID is set
+        by the submit trigger's finalization step (e.g. *_ord1). This property is
+        only used for logging and dry_run responses.
         """
         # Build from DDH identifiers (same pattern as PlatformConfig)
         version_part = self.version_id if self.version_id else "draft"

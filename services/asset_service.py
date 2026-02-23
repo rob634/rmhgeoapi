@@ -321,17 +321,15 @@ class AssetService:
         if existing_versions > 0:
             # NEW VERSION: Approved releases exist, this is a succeeding version
             next_ordinal = self.release_repo.get_next_version_ordinal(asset_id)
-            # Disambiguate STAC item ID for this draft (prevents collision with
-            # prior approved items). Final ID is set at approval time.
-            versioned_stac_item_id = f"{stac_item_id}-{next_ordinal}"
+            # Ordinal-based names are finalized by submit trigger after release
+            # creation (e.g. *_ord2 instead of *_draft). No pre-append needed.
             logger.info(
                 f"New version release for asset {asset_id[:16]}... "
-                f"(existing releases: {existing_versions}, next ordinal: {next_ordinal}, "
-                f"stac_item_id: {versioned_stac_item_id})"
+                f"(existing releases: {existing_versions}, next ordinal: {next_ordinal})"
             )
             release = self.create_release(
                 asset_id=asset_id,
-                stac_item_id=versioned_stac_item_id,
+                stac_item_id=stac_item_id,
                 stac_collection_id=stac_collection_id,
                 blob_path=blob_path,
                 table_name=table_name,

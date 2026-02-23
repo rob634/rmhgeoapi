@@ -294,7 +294,8 @@ class PlatformConfig(BaseModel):
         self,
         dataset_id: str,
         resource_id: str,
-        version_id: Optional[str] = None
+        version_id: Optional[str] = None,
+        version_ordinal: Optional[int] = None
     ) -> str:
         """
         Generate PostGIS table name from DDH identifiers.
@@ -302,21 +303,33 @@ class PlatformConfig(BaseModel):
         Args:
             dataset_id: DDH dataset identifier
             resource_id: DDH resource identifier
-            version_id: DDH version identifier (None for draft mode → "draft")
+            version_id: DDH version identifier (None for draft mode)
+            version_ordinal: Release ordinal (1, 2, 3...) for draft naming
 
         Returns:
             URL-safe, lowercase table name suitable for PostgreSQL
 
+        Version segment priority:
+            1. version_id (explicit version like "v1.0")
+            2. version_ordinal → "ord{N}" (draft with reserved ordinal)
+            3. "draft" (legacy fallback, overwritten by submit finalization)
+
         Example:
             >>> config.generate_vector_table_name("Aerial-Imagery", "Site Alpha", "v1.0")
             'aerial_imagery_site_alpha_v1_0'
-            >>> config.generate_vector_table_name("Aerial-Imagery", "Site Alpha")
-            'aerial_imagery_site_alpha_draft'
+            >>> config.generate_vector_table_name("Aerial-Imagery", "Site Alpha", version_ordinal=1)
+            'aerial_imagery_site_alpha_ord1'
         """
+        if version_id:
+            segment = version_id
+        elif version_ordinal is not None:
+            segment = f"ord{version_ordinal}"
+        else:
+            segment = "draft"
         name = self.vector_table_pattern.format(
             dataset_id=dataset_id,
             resource_id=resource_id,
-            version_id=version_id or "draft"
+            version_id=segment
         )
         return _slugify_for_postgres(name)
 
@@ -378,7 +391,8 @@ class PlatformConfig(BaseModel):
         self,
         dataset_id: str,
         resource_id: str,
-        version_id: Optional[str] = None
+        version_id: Optional[str] = None,
+        version_ordinal: Optional[int] = None
     ) -> str:
         """
         Generate STAC item ID from DDH identifiers.
@@ -386,15 +400,27 @@ class PlatformConfig(BaseModel):
         Args:
             dataset_id: DDH dataset identifier
             resource_id: DDH resource identifier
-            version_id: DDH version identifier (None for draft mode → "draft")
+            version_id: DDH version identifier (None for draft mode)
+            version_ordinal: Release ordinal (1, 2, 3...) for draft naming
 
         Returns:
             URL-safe STAC item ID
+
+        Version segment priority:
+            1. version_id (explicit version like "v1.0")
+            2. version_ordinal → "ord{N}" (draft with reserved ordinal)
+            3. "draft" (legacy fallback, overwritten by submit finalization)
         """
+        if version_id:
+            segment = version_id
+        elif version_ordinal is not None:
+            segment = f"ord{version_ordinal}"
+        else:
+            segment = "draft"
         item_id = self.stac_item_pattern.format(
             dataset_id=dataset_id,
             resource_id=resource_id,
-            version_id=version_id or "draft"
+            version_id=segment
         )
         return _slugify_for_stac(item_id)
 

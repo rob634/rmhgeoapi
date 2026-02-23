@@ -604,6 +604,7 @@ class PlatformDefaults:
     ]
 
     # Naming patterns (use placeholders: {dataset_id}, {resource_id}, {version_id})
+    # {version_id} resolves to: explicit version_id, "ord{N}" for drafts, or "draft" (legacy)
     VECTOR_TABLE_PATTERN = "{dataset_id}_{resource_id}_{version_id}"
     RASTER_OUTPUT_FOLDER_PATTERN = "{dataset_id}/{resource_id}/{version_id}"
     STAC_COLLECTION_PATTERN = "{dataset_id}"

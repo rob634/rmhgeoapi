@@ -2258,6 +2258,47 @@ class BaseInterface(ABC):
         safe_status = status.lower() if status else "unknown"
         return f'<span class="status-badge status-{safe_status}">{safe_status}</span>'
 
+    def render_approval_badge(self, state: str) -> str:
+        """Render a V0.9 approval state badge."""
+        if not state:
+            return ''
+        safe = state.lower().replace(' ', '_')
+        label = safe.replace('_', ' ')
+        return f'<span class="approval-badge approval-{safe}">{label}</span>'
+
+    def render_clearance_badge(self, state: str) -> str:
+        """Render a V0.9 clearance state badge."""
+        if not state:
+            return ''
+        safe = state.lower()
+        return f'<span class="clearance-badge clearance-{safe}">{safe}</span>'
+
+    def render_version_chip(self, version_id: str | None, ordinal: int, is_latest: bool = False) -> str:
+        """Render a V0.9 version chip (navy pill for versions, dashed for drafts)."""
+        if version_id:
+            star = '<span class="latest-star">&#9733;</span>' if is_latest else ''
+            return f'<span class="version-chip">{version_id}{star}</span>'
+        else:
+            return f'<span class="version-chip version-draft">ord {ordinal}</span>'
+
+    def render_asset_header(self, asset: dict) -> str:
+        """Render a V0.9 asset identity header block."""
+        dataset_id = asset.get('dataset_id', '\u2014')
+        resource_id = asset.get('resource_id', '\u2014')
+        data_type = asset.get('data_type', '\u2014')
+        asset_id = asset.get('asset_id', '\u2014')
+        release_count = asset.get('release_count', 0)
+        return f"""
+    <div class="asset-header">
+        <div class="asset-title">{dataset_id} / {resource_id}</div>
+        <div class="asset-meta">
+            <span>{data_type}</span>
+            <span>{release_count} release{'s' if release_count != 1 else ''}</span>
+            <span>asset_id: <code>{asset_id[:12]}...</code></span>
+        </div>
+    </div>
+    """
+
     def render_stat_card(
         self,
         label: str,

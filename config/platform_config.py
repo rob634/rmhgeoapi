@@ -21,8 +21,7 @@ ARCHITECTURE
 Key Responsibilities:
     1. Translate DDH identifiers to CoreMachine parameters
     2. Generate deterministic output paths from DDH IDs
-    3. Validate DDH input containers and access levels
-    4. Define URL patterns for vector tables, raster collections, STAC items
+    3. Define URL patterns for vector tables, raster collections, STAC items
 
 DDH Core Identifiers:
     - dataset_id: Top-level organizational unit (e.g., "aerial-imagery-2024")
@@ -42,13 +41,7 @@ Client Configuration:
     PLATFORM_PRIMARY_CLIENT        Default: "ddh"
                                    Primary client application identifier
 
-Container Validation:
-    PLATFORM_VALID_CONTAINERS      Default: "bronze-vectors,bronze-rasters,bronze-misc,bronze-temp"
-                                   Comma-separated list of valid input containers
-
-Access Levels:
-    PLATFORM_ACCESS_LEVELS         Default: "public,OUO,restricted"
-                                   Comma-separated list of valid access levels
+Access Level Default:
     PLATFORM_DEFAULT_ACCESS_LEVEL  Default: "OUO"
                                    Default access level if not specified
 
@@ -84,7 +77,7 @@ Exports:
 import os
 import re
 import hashlib
-from typing import List, Optional
+from typing import Optional
 from pydantic import BaseModel, Field, field_validator
 
 from .defaults import PlatformDefaults
@@ -118,22 +111,8 @@ class PlatformConfig(BaseModel):
     )
 
     # ========================================================================
-    # Valid Input Containers (DDH Bronze Tier)
+    # Access Level Default
     # ========================================================================
-
-    valid_input_containers: List[str] = Field(
-        default=PlatformDefaults.VALID_INPUT_CONTAINERS,
-        description="Valid Azure containers for DDH input data (Bronze tier)"
-    )
-
-    # ========================================================================
-    # Access Levels (for future APIM enforcement)
-    # ========================================================================
-
-    valid_access_levels: List[str] = Field(
-        default=PlatformDefaults.VALID_ACCESS_LEVELS,
-        description="Valid access level values for DDH data"
-    )
 
     default_access_level: str = Field(
         default=PlatformDefaults.DEFAULT_ACCESS_LEVEL,
@@ -227,27 +206,11 @@ class PlatformConfig(BaseModel):
     def from_environment(cls) -> 'PlatformConfig':
         """Load from environment variables with PlatformDefaults fallbacks."""
 
-        # Parse valid containers from comma-separated list
-        containers_env = os.environ.get(
-            "PLATFORM_VALID_CONTAINERS",
-            ",".join(PlatformDefaults.VALID_INPUT_CONTAINERS)
-        )
-        valid_containers = [c.strip() for c in containers_env.split(",") if c.strip()]
-
-        # Parse access levels from comma-separated list
-        access_env = os.environ.get(
-            "PLATFORM_ACCESS_LEVELS",
-            ",".join(PlatformDefaults.VALID_ACCESS_LEVELS)
-        )
-        access_levels = [a.strip() for a in access_env.split(",") if a.strip()]
-
         return cls(
             primary_client=os.environ.get(
                 "PLATFORM_PRIMARY_CLIENT",
                 PlatformDefaults.PRIMARY_CLIENT
             ),
-            valid_input_containers=valid_containers,
-            valid_access_levels=access_levels,
             default_access_level=os.environ.get(
                 "PLATFORM_DEFAULT_ACCESS_LEVEL",
                 PlatformDefaults.DEFAULT_ACCESS_LEVEL
@@ -424,20 +387,10 @@ class PlatformConfig(BaseModel):
         )
         return _slugify_for_stac(item_id)
 
-    def is_valid_container(self, container_name: str) -> bool:
-        """Check if container is in the allowed list."""
-        return container_name in self.valid_input_containers
-
-    def is_valid_access_level(self, access_level: str) -> bool:
-        """Check if access level is valid."""
-        return access_level in self.valid_access_levels
-
     def debug_dict(self) -> dict:
         """Return sanitized config for debugging."""
         return {
             'primary_client': self.primary_client,
-            'valid_input_containers': self.valid_input_containers,
-            'valid_access_levels': self.valid_access_levels,
             'vector_table_pattern': self.vector_table_pattern,
             'raster_output_folder_pattern': self.raster_output_folder_pattern,
             'stac_collection_pattern': self.stac_collection_pattern,

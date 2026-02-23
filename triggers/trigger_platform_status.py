@@ -71,7 +71,8 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
         - An asset_id (V0.9 Asset identifier)
         The endpoint auto-detects which type of ID was provided.
         Query params:
-            - verbose=true: Include full task details (default: false)
+            - detail=full: Include operational detail (job_result, task_summary, admin URLs)
+            - verbose=true: Include full task details within detail block
 
     GET /api/platform/status?dataset_id=X&resource_id=Y
         Lookup by platform identifiers (18 FEB 2026).
@@ -107,6 +108,7 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
         # Check if specific ID provided (can be request_id OR job_id)
         lookup_id = req.route_params.get('request_id')
         verbose = req.params.get('verbose', 'false').lower() == 'true'
+        detail_full = req.params.get('detail', '').lower() == 'full'
 
         # V0.8.16.1: Reject deprecated query param lookups (09 FEB 2026)
         # Query params like ?job_id=xxx or ?request_id=xxx are not supported.
@@ -198,7 +200,8 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
             # Build response using shared helper (V0.9: pre_resolved_release)
             result = _build_single_status_response(
                 platform_request, job_repo, task_repo,
-                verbose=verbose, pre_resolved_release=pre_resolved_release
+                verbose=verbose, pre_resolved_release=pre_resolved_release,
+                detail_full=detail_full
             )
 
             return func.HttpResponse(
@@ -220,7 +223,7 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
                 return _handle_platform_refs_lookup(
                     dataset_id, resource_id,
                     job_repo, task_repo, platform_repo,
-                    verbose=verbose
+                    verbose=verbose, detail_full=detail_full
                 )
 
             # List all requests (existing behavior)
@@ -549,7 +552,8 @@ def _build_single_status_response(
     job_repo,
     task_repo,
     verbose: bool = False,
-    pre_resolved_release=None
+    pre_resolved_release=None,
+    detail_full: bool = False
 ) -> dict:
     """
     Build clean B2B status response for a single Platform request.
@@ -558,15 +562,15 @@ def _build_single_status_response(
     - Reads outputs from Release record (authoritative), not job_result
     - Separates concerns: identity (asset), lifecycle (release), artifacts (outputs),
       access (services), workflow (approval)
-    - Drops internal operational detail from default response (job_result,
-      task_summary, admin URLs). Available via ?detail=full (future).
+    - ?detail=full appends operational detail: job_result, task_summary, admin URLs
 
     Args:
         platform_request: ApiRequest record (can be None for release/asset lookups)
         job_repo: JobRepository instance
         task_repo: TaskRepository instance
-        verbose: Include full task details (future: ?detail=full)
+        verbose: Include full task details in task_summary
         pre_resolved_release: AssetRelease if already fetched (skips re-query)
+        detail_full: If True, append job_result, task_summary, internal URLs
 
     Returns:
         Response dict ready for JSON serialization
@@ -679,7 +683,6 @@ def _build_single_status_response(
     result["approval"] = _build_approval_block(release, asset_id, data_type) if (asset_id and data_type) else None
 
     # Version history (always include if asset has releases)
-    # TODO(V0.9.2): Implement ?detail=full using verbose flag
     result["versions"] = None
     if asset:
         try:
@@ -689,6 +692,23 @@ def _build_single_status_response(
                 result["versions"] = _build_version_summary(all_releases)
         except Exception as e:
             logger.warning(f"Version history resolution failed: {e}")
+
+    # =====================================================================
+    # 5. ?detail=full — append operational detail for debugging/internal use
+    # =====================================================================
+    if detail_full:
+        result["detail"] = {
+            "job_id": job_id,
+            "job_type": job.job_type if job else None,
+            "job_stage": job.stage if job else None,
+            "job_result": job_result,
+            "task_summary": _get_task_summary(task_repo, job_id, verbose=verbose) if job_id else None,
+            "urls": {
+                "job_status": f"/api/jobs/status/{job_id}" if job_id else None,
+                "job_tasks": f"/api/dbadmin/tasks/{job_id}" if job_id else None,
+            },
+            "created_at": platform_request.created_at.isoformat() if platform_request and platform_request.created_at else None,
+        }
 
     return result
 
@@ -879,7 +899,8 @@ def _handle_platform_refs_lookup(
     job_repo,
     task_repo,
     platform_repo,
-    verbose: bool = False
+    verbose: bool = False,
+    detail_full: bool = False
 ) -> func.HttpResponse:
     """
     Lookup status by dataset_id + resource_id (platform refs).
@@ -971,7 +992,8 @@ def _handle_platform_refs_lookup(
     # Build response using shared builder
     result = _build_single_status_response(
         platform_request, job_repo, task_repo,
-        verbose=verbose, pre_resolved_release=primary_release
+        verbose=verbose, pre_resolved_release=primary_release,
+        detail_full=detail_full
     )
 
     # Add lookup_type marker

@@ -1,44 +1,44 @@
 {
   "_type": "export",
   "__export_format": 4,
-  "__export_date": "2026-02-01T00:00:00.000Z",
+  "__export_date": "2026-02-23T00:00:00.000Z",
   "__export_source": "insomnia.desktop.app:v2023.5.8",
   "resources": [
     {
       "_id": "wrk_platform_api",
       "parentId": null,
-      "modified": 1706832000000,
+      "modified": 1740268800000,
       "created": 1706572800000,
       "name": "Platform API - QA",
-      "description": "B2B Integration Guide for Platform API v0.8.6.2 (API Version 1.5.0)\n\nWorkflow: Validate -> Submit -> Poll -> Approve -> Access\n\nNew in 1.5.0:\n- Version lineage with previous_version_id\n- dry_run query parameter on submit\n- Expanded catalog endpoints",
+      "description": "B2B Integration Guide for Platform API v0.8.24.0 — V0.9 Asset/Release Model\n\nWorkflow: Validate -> Submit (draft) -> Poll -> Approve (assign version) -> Access\n\nV0.9 Changes:\n- Submit creates draft (no version_id required)\n- Approve assigns version_id + clearance\n- Coexisting versions (v1 approved + v2 draft)\n- Auto-detect ID lookups\n- Clean B2B response shape",
       "scope": "collection",
       "_type": "workspace"
     },
     {
       "_id": "env_qa",
       "parentId": "wrk_platform_api",
-      "modified": 1706832000000,
+      "modified": 1740268800000,
       "created": 1706572800000,
       "name": "QA Environment",
       "data": {
-        "base_url": "https://fngddatahubetlqa-qa.ocappsaseqa2.appserviceenvironment.net",
-        "titiler_url": "https://gddatahubpyfeqa.ocappsaseqa2.appserviceenvironment.net",
-        "bronze_container": "gddathub-bronze-qa",
-        "dataset_id": "your-dataset-id",
-        "resource_id": "your-resource-id",
-        "version_id": "v1",
-        "previous_version_id": "",
-        "vector_file": "roads.gpkg",
+        "base_url": "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net",
+        "titiler_url": "https://rmhtitiler-btaxdjf5aqezb5cd.eastus-01.azurewebsites.net",
+        "tipg_url": "https://rmhtipg-dmh0etecdzgrhkcp.eastus-01.azurewebsites.net",
+        "bronze_container": "rmhazuregeobronze",
+        "dataset_id": "v09-raster-test",
+        "resource_id": "dctest",
         "raster_file": "dctest.tif",
+        "vector_dataset_id": "v09-vector-test",
+        "vector_resource_id": "cutlines",
+        "vector_file": "0403c87a-0c6c-4767-a6ad-78a8026258db/Vivid_Standard_30_CO02_24Q2/cutlines.gpkg",
         "request_id": "",
+        "release_id": "",
+        "asset_id": "",
         "job_id": "",
-        "approval_id": "",
-        "stac_collection_id": "",
-        "stac_item_id": "",
         "reviewer_email": "qa-tester@example.com"
       },
       "dataPropertyOrder": {
-        "&": ["base_url", "titiler_url", "bronze_container", "dataset_id", "resource_id", "version_id", "previous_version_id", "vector_file", "raster_file", "request_id", "job_id", "approval_id", "stac_collection_id", "stac_item_id", "reviewer_email"]
+        "&": ["base_url", "titiler_url", "tipg_url", "bronze_container", "dataset_id", "resource_id", "raster_file", "vector_dataset_id", "vector_resource_id", "vector_file", "request_id", "release_id", "asset_id", "job_id", "reviewer_email"]
       },
       "color": null,
       "isPrivate": false,
@@ -47,7 +47,7 @@
     {
       "_id": "fld_0_health",
       "parentId": "wrk_platform_api",
-      "modified": 1706832000000,
+      "modified": 1740268800000,
       "created": 1706572800000,
       "name": "0. Health & Platforms",
       "description": "Platform health and registry",
@@ -56,9 +56,9 @@
     {
       "_id": "req_health",
       "parentId": "fld_0_health",
-      "modified": 1706832000000,
+      "modified": 1740268800000,
       "created": 1706572800000,
-      "name": "Platform Health",
+      "name": "0.1 Platform Health",
       "description": "Check if the platform is ready to accept jobs.\n\nReturns: ready_for_jobs, queue_backlog, version",
       "url": "{{ _.base_url }}/api/platform/health",
       "method": "GET",
@@ -72,9 +72,9 @@
     {
       "_id": "req_platforms_list",
       "parentId": "fld_0_health",
-      "modified": 1706832000000,
-      "created": 1706832000000,
-      "name": "List Platforms",
+      "modified": 1740268800000,
+      "created": 1706572800000,
+      "name": "0.2 List Platforms",
       "description": "List all supported B2B platforms and their identifier requirements.",
       "url": "{{ _.base_url }}/api/platforms",
       "method": "GET",
@@ -88,9 +88,9 @@
     {
       "_id": "req_platforms_detail",
       "parentId": "fld_0_health",
-      "modified": 1706832000000,
-      "created": 1706832000000,
-      "name": "Get Platform Details",
+      "modified": 1740268800000,
+      "created": 1706572800000,
+      "name": "0.3 Get Platform Details",
       "description": "Get details for a specific platform (e.g., 'ddh').",
       "url": "{{ _.base_url }}/api/platforms/ddh",
       "method": "GET",
@@ -104,9 +104,9 @@
     {
       "_id": "req_failures",
       "parentId": "fld_0_health",
-      "modified": 1706832000000,
-      "created": 1706832000000,
-      "name": "Platform Failures",
+      "modified": 1740268800000,
+      "created": 1706572800000,
+      "name": "0.4 Platform Failures",
       "description": "Get recent failures with error patterns.",
       "url": "{{ _.base_url }}/api/platform/failures",
       "method": "GET",
@@ -131,24 +131,24 @@
     {
       "_id": "fld_1_validate",
       "parentId": "wrk_platform_api",
-      "modified": 1706832000000,
-      "created": 1706832000000,
-      "name": "1. Validate & Lineage",
-      "description": "Pre-flight validation with version lineage checking.\n\nTwo equivalent options:\n- POST /api/platform/validate\n- POST /api/platform/submit?dry_run=true",
+      "modified": 1740268800000,
+      "created": 1706572800000,
+      "name": "1. Validate",
+      "description": "Pre-flight validation using dry_run.\n\nV0.9: No version_id needed. Submit with dry_run=true to validate dataset_id, resource_id, container, and file existence.",
       "_type": "request_group"
     },
     {
       "_id": "req_validate_dryrun_raster",
       "parentId": "fld_1_validate",
-      "modified": 1706832000000,
-      "created": 1706832000000,
-      "name": "1.1a Validate with dry_run (Raster)",
-      "description": "Pre-flight validation using submit?dry_run=true.\n\nReturns:\n- valid: true/false\n- lineage_state: current version chain\n- suggested_params: recommended previous_version_id\n- warnings: validation messages",
+      "modified": 1740268800000,
+      "created": 1706572800000,
+      "name": "1.1 Validate Raster (dry_run)",
+      "description": "Pre-flight validation for raster data.\n\nReturns:\n- valid: true/false\n- dry_run: true\n- asset_id: computed asset identity\n- No release created (dry_run returns before release creation)",
       "url": "{{ _.base_url }}/api/platform/submit",
       "method": "POST",
       "body": {
         "mimeType": "application/json",
-        "text": "{\n  \"dataset_id\": \"{{ _.dataset_id }}\",\n  \"resource_id\": \"{{ _.resource_id }}\",\n  \"version_id\": \"{{ _.version_id }}\",\n  \"container_name\": \"{{ _.bronze_container }}\",\n  \"file_name\": \"{{ _.raster_file }}\"\n}"
+        "text": "{\n  \"dataset_id\": \"{{ _.dataset_id }}\",\n  \"resource_id\": \"{{ _.resource_id }}\",\n  \"container_name\": \"{{ _.bronze_container }}\",\n  \"file_name\": \"{{ _.raster_file }}\"\n}"
       },
       "parameters": [
         {
@@ -170,15 +170,15 @@
     {
       "_id": "req_validate_dryrun_vector",
       "parentId": "fld_1_validate",
-      "modified": 1706832000000,
-      "created": 1706832000000,
-      "name": "1.1b Validate with dry_run (Vector)",
-      "description": "Pre-flight validation using submit?dry_run=true.\n\nReturns:\n- valid: true/false\n- lineage_state: current version chain\n- suggested_params: recommended previous_version_id\n- warnings: validation messages",
+      "modified": 1740268800000,
+      "created": 1706572800000,
+      "name": "1.2 Validate Vector (dry_run)",
+      "description": "Pre-flight validation for vector data.\n\nReturns:\n- valid: true/false\n- dry_run: true\n- asset_id: computed asset identity\n- No release created (dry_run returns before release creation)",
       "url": "{{ _.base_url }}/api/platform/submit",
       "method": "POST",
       "body": {
         "mimeType": "application/json",
-        "text": "{\n  \"dataset_id\": \"{{ _.dataset_id }}\",\n  \"resource_id\": \"{{ _.resource_id }}\",\n  \"version_id\": \"{{ _.version_id }}\",\n  \"container_name\": \"{{ _.bronze_container }}\",\n  \"file_name\": \"{{ _.vector_file }}\"\n}"
+        "text": "{\n  \"dataset_id\": \"{{ _.vector_dataset_id }}\",\n  \"resource_id\": \"{{ _.vector_resource_id }}\",\n  \"container_name\": \"{{ _.bronze_container }}\",\n  \"file_name\": \"{{ _.vector_file }}\"\n}"
       },
       "parameters": [
         {
@@ -198,80 +198,26 @@
       "_type": "request"
     },
     {
-      "_id": "req_validate_v2_example",
-      "parentId": "fld_1_validate",
-      "modified": 1706832000000,
-      "created": 1706832000000,
-      "name": "1.2 Validate v2.0 (Lineage Example)",
-      "description": "Example: Check lineage before submitting v2.0.\n\nIf v1.0 exists, response will show:\n- valid: false\n- suggested_params.previous_version_id: 'v1'\n\nAdd previous_version_id to submit v2.0 successfully.",
-      "url": "{{ _.base_url }}/api/platform/submit",
-      "method": "POST",
-      "body": {
-        "mimeType": "application/json",
-        "text": "{\n  \"dataset_id\": \"{{ _.dataset_id }}\",\n  \"resource_id\": \"{{ _.resource_id }}\",\n  \"version_id\": \"v2.0\",\n  \"container_name\": \"{{ _.bronze_container }}\",\n  \"file_name\": \"{{ _.raster_file }}\"\n}"
-      },
-      "parameters": [
-        {
-          "name": "dry_run",
-          "value": "true",
-          "disabled": false
-        }
-      ],
-      "headers": [
-        {
-          "name": "Content-Type",
-          "value": "application/json"
-        }
-      ],
-      "authentication": {},
-      "metaSortKey": 3,
-      "_type": "request"
-    },
-    {
-      "_id": "req_validate_legacy",
-      "parentId": "fld_1_validate",
-      "modified": 1706832000000,
-      "created": 1706572800000,
-      "name": "1.3 Validate (Legacy Endpoint)",
-      "description": "Legacy validation endpoint - still works.\n\nAlternative to submit?dry_run=true",
-      "url": "{{ _.base_url }}/api/platform/validate",
-      "method": "POST",
-      "body": {
-        "mimeType": "application/json",
-        "text": "{\n  \"data_type\": \"raster\",\n  \"container_name\": \"{{ _.bronze_container }}\",\n  \"blob_name\": \"{{ _.raster_file }}\"\n}"
-      },
-      "parameters": [],
-      "headers": [
-        {
-          "name": "Content-Type",
-          "value": "application/json"
-        }
-      ],
-      "authentication": {},
-      "metaSortKey": 4,
-      "_type": "request"
-    },
-    {
       "_id": "fld_2_submit",
       "parentId": "wrk_platform_api",
-      "modified": 1706832000000,
+      "modified": 1740268800000,
       "created": 1706572800000,
       "name": "2. Submit & Poll",
-      "description": "Submit data for processing and monitor progress",
+      "description": "Submit data for processing and monitor progress.\n\nV0.9: Submit creates a draft release (no version_id). Version assigned at approval.\nAuto-detect ID lookups: request_id, asset_id, release_id, job_id all resolve via /status/{id}.",
       "_type": "request_group"
     },
     {
       "_id": "req_submit_raster",
       "parentId": "fld_2_submit",
-      "modified": 1706832000000,
+      "modified": 1740268800000,
       "created": 1706572800000,
-      "name": "2.1a Submit (Raster v1)",
-      "description": "Submit raster data for processing (first version).\n\nFor first version: omit previous_version_id\nFor subsequent versions: add previous_version_id\n\nSave the request_id from the response for polling.",
+      "name": "2.1a Submit Raster",
+      "description": "Submit raster data for processing.\n\nV0.9: No version_id needed. Creates a draft release with ordinal reserved at creation.\nCoexisting versions: can submit v2 while v1 is still approved.\n\nCapture request_id and job_id from response for polling.",
       "url": "{{ _.base_url }}/api/platform/submit",
       "method": "POST",
       "body": {
         "mimeType": "application/json",
-        "text": "{\n  \"dataset_id\": \"{{ _.dataset_id }}\",\n  \"resource_id\": \"{{ _.resource_id }}\",\n  \"version_id\": \"{{ _.version_id }}\",\n  \"container_name\": \"{{ _.bronze_container }}\",\n  \"file_name\": \"{{ _.raster_file }}\",\n  \"access_level\": \"ouo\"\n}"
+        "text": "{\n  \"dataset_id\": \"{{ _.dataset_id }}\",\n  \"resource_id\": \"{{ _.resource_id }}\",\n  \"container_name\": \"{{ _.bronze_container }}\",\n  \"file_name\": \"{{ _.raster_file }}\"\n}"
       },
       "parameters": [],
       "headers": [
@@ -287,15 +233,15 @@
     {
       "_id": "req_submit_vector",
       "parentId": "fld_2_submit",
-      "modified": 1706832000000,
+      "modified": 1740268800000,
       "created": 1706572800000,
-      "name": "2.1b Submit (Vector v1)",
-      "description": "Submit vector data for processing (first version).\n\nFor first version: omit previous_version_id\nFor subsequent versions: add previous_version_id\n\nSave the request_id from the response for polling.",
+      "name": "2.1b Submit Vector",
+      "description": "Submit vector data for processing.\n\nV0.9: No version_id needed. Creates a draft release with ordinal reserved at creation.\nVector tables use ordinal-based naming (*_ord1, *_ord2).\n\nCapture request_id and job_id from response for polling.",
       "url": "{{ _.base_url }}/api/platform/submit",
       "method": "POST",
       "body": {
         "mimeType": "application/json",
-        "text": "{\n  \"dataset_id\": \"{{ _.dataset_id }}\",\n  \"resource_id\": \"{{ _.resource_id }}\",\n  \"version_id\": \"{{ _.version_id }}\",\n  \"container_name\": \"{{ _.bronze_container }}\",\n  \"file_name\": \"{{ _.vector_file }}\",\n  \"access_level\": \"ouo\"\n}"
+        "text": "{\n  \"dataset_id\": \"{{ _.vector_dataset_id }}\",\n  \"resource_id\": \"{{ _.vector_resource_id }}\",\n  \"container_name\": \"{{ _.bronze_container }}\",\n  \"file_name\": \"{{ _.vector_file }}\"\n}"
       },
       "parameters": [],
       "headers": [
@@ -309,37 +255,29 @@
       "_type": "request"
     },
     {
-      "_id": "req_submit_v2",
+      "_id": "req_poll_status",
       "parentId": "fld_2_submit",
-      "modified": 1706832000000,
-      "created": 1706832000000,
-      "name": "2.1c Submit v2.0 (Version Advance)",
-      "description": "Submit a new version with previous_version_id.\n\nREQUIRED for v2+: previous_version_id must match current latest.\n\nSet previous_version_id in environment from validation response.",
-      "url": "{{ _.base_url }}/api/platform/submit",
-      "method": "POST",
-      "body": {
-        "mimeType": "application/json",
-        "text": "{\n  \"dataset_id\": \"{{ _.dataset_id }}\",\n  \"resource_id\": \"{{ _.resource_id }}\",\n  \"version_id\": \"v2.0\",\n  \"previous_version_id\": \"{{ _.previous_version_id }}\",\n  \"container_name\": \"{{ _.bronze_container }}\",\n  \"file_name\": \"{{ _.raster_file }}\",\n  \"access_level\": \"ouo\"\n}"
-      },
+      "modified": 1740268800000,
+      "created": 1706572800000,
+      "name": "2.2 Poll Status (by request_id)",
+      "description": "Monitor job progress using the request_id.\n\nSet request_id in environment from submit response.\nRepeat until job_status is 'completed' or 'failed'.\n\nResponse includes: asset, release, job_status, outputs, services, approval, versions.",
+      "url": "{{ _.base_url }}/api/platform/status/{{ _.request_id }}",
+      "method": "GET",
+      "body": {},
       "parameters": [],
-      "headers": [
-        {
-          "name": "Content-Type",
-          "value": "application/json"
-        }
-      ],
+      "headers": [],
       "authentication": {},
       "metaSortKey": 3,
       "_type": "request"
     },
     {
-      "_id": "req_poll_status",
+      "_id": "req_status_by_asset",
       "parentId": "fld_2_submit",
-      "modified": 1706832000000,
-      "created": 1706572800000,
-      "name": "2.2 Poll Status",
-      "description": "Monitor job progress using the request ID.\n\nSet request_id in environment from submit response.\nRepeat until job_status is 'completed' or 'failed'.",
-      "url": "{{ _.base_url }}/api/platform/status/{{ _.request_id }}",
+      "modified": 1740268800000,
+      "created": 1740268800000,
+      "name": "2.3 Status by asset_id",
+      "description": "Look up status by asset_id (auto-detected).\n\nReturns latest release for this asset.\nAdded in v0.8.24.0.",
+      "url": "{{ _.base_url }}/api/platform/status/{{ _.asset_id }}",
       "method": "GET",
       "body": {},
       "parameters": [],
@@ -349,12 +287,77 @@
       "_type": "request"
     },
     {
+      "_id": "req_status_by_release",
+      "parentId": "fld_2_submit",
+      "modified": 1740268800000,
+      "created": 1740268800000,
+      "name": "2.4 Status by release_id",
+      "description": "Look up status by release_id (auto-detected).\n\nReturns the specific release looked up.\nAdded in v0.8.24.0.",
+      "url": "{{ _.base_url }}/api/platform/status/{{ _.release_id }}",
+      "method": "GET",
+      "body": {},
+      "parameters": [],
+      "headers": [],
+      "authentication": {},
+      "metaSortKey": 5,
+      "_type": "request"
+    },
+    {
+      "_id": "req_status_by_refs",
+      "parentId": "fld_2_submit",
+      "modified": 1740268800000,
+      "created": 1740268800000,
+      "name": "2.5 Status by platform refs",
+      "description": "Look up status by dataset_id + resource_id query parameters.\n\nReturns full status + version history for a dataset/resource pair.\nPriority: active processing > completed draft > latest approved > most recent.",
+      "url": "{{ _.base_url }}/api/platform/status",
+      "method": "GET",
+      "body": {},
+      "parameters": [
+        {
+          "name": "dataset_id",
+          "value": "{{ _.dataset_id }}",
+          "disabled": false
+        },
+        {
+          "name": "resource_id",
+          "value": "{{ _.resource_id }}",
+          "disabled": false
+        }
+      ],
+      "headers": [],
+      "authentication": {},
+      "metaSortKey": 6,
+      "_type": "request"
+    },
+    {
+      "_id": "req_status_detail_full",
+      "parentId": "fld_2_submit",
+      "modified": 1740268800000,
+      "created": 1740268800000,
+      "name": "2.6 Status with detail=full",
+      "description": "Append operational detail to the clean B2B response.\n\nAdds a 'detail' block with: job_id, job_type, job_stage, job_result (raw worker output),\ntask_summary, admin urls, created_at.\n\nAdded in v0.8.24.0.",
+      "url": "{{ _.base_url }}/api/platform/status/{{ _.request_id }}",
+      "method": "GET",
+      "body": {},
+      "parameters": [
+        {
+          "name": "detail",
+          "value": "full",
+          "disabled": false
+        }
+      ],
+      "headers": [],
+      "authentication": {},
+      "metaSortKey": 7,
+      "_type": "request"
+    },
+    {
       "_id": "req_list_status",
       "parentId": "fld_2_submit",
-      "modified": 1706832000000,
-      "created": 1706832000000,
-      "name": "2.3 List All Requests",
-      "description": "List all platform requests with optional filters.",
+      "modified": 1740268800000,
+      "created": 1706572800000,
+      "name": "2.7 List All Requests",
+      "description": "List all platform requests (api_requests table).\n\nReturns thin records — no job details, no release info.",
       "url": "{{ _.base_url }}/api/platform/status",
       "method": "GET",
       "body": {},
@@ -373,46 +376,30 @@
       ],
       "headers": [],
       "authentication": {},
-      "metaSortKey": 5,
-      "_type": "request"
-    },
-    {
-      "_id": "req_lineage",
-      "parentId": "fld_2_submit",
-      "modified": 1706832000000,
-      "created": 1706832000000,
-      "name": "2.4 Data Lineage",
-      "description": "Trace data lineage (source -> processing -> outputs).",
-      "url": "{{ _.base_url }}/api/platform/lineage/{{ _.request_id }}",
-      "method": "GET",
-      "body": {},
-      "parameters": [],
-      "headers": [],
-      "authentication": {},
-      "metaSortKey": 6,
+      "metaSortKey": 8,
       "_type": "request"
     },
     {
       "_id": "fld_3_approval",
       "parentId": "wrk_platform_api",
-      "modified": 1706832000000,
+      "modified": 1740268800000,
       "created": 1706572800000,
       "name": "3. Approval Workflow",
-      "description": "Approve, reject, or revoke datasets",
+      "description": "Approve, reject, or revoke releases.\n\nV0.9: All approval actions use release_id (not job_id).\nApprove assigns version_id + clearance_level, materializes STAC item.\nRevoke deletes STAC item from catalog.",
       "_type": "request_group"
     },
     {
       "_id": "req_approve",
       "parentId": "fld_3_approval",
-      "modified": 1706832000000,
+      "modified": 1740268800000,
       "created": 1706572800000,
       "name": "3.1 Approve",
-      "description": "Approve a completed job for publication.\n\nSet job_id in environment from poll status response.\nclearance_level is REQUIRED: 'ouo' or 'public'",
+      "description": "Approve a completed release for publication.\n\nV0.9: Uses release_id (preferred). Assigns version_id + clearance at approval time.\nMaterializes STAC item (renames from ordinal to version name).\n\nSet release_id from status response: release.release_id",
       "url": "{{ _.base_url }}/api/platform/approve",
       "method": "POST",
       "body": {
         "mimeType": "application/json",
-        "text": "{\n  \"job_id\": \"{{ _.job_id }}\",\n  \"clearance_level\": \"ouo\",\n  \"reviewer\": \"{{ _.reviewer_email }}\",\n  \"notes\": \"QA test approval\"\n}"
+        "text": "{\n  \"release_id\": \"{{ _.release_id }}\",\n  \"reviewer\": \"{{ _.reviewer_email }}\",\n  \"clearance_level\": \"ouo\",\n  \"version_id\": \"v1\"\n}"
       },
       "parameters": [],
       "headers": [
@@ -428,15 +415,15 @@
     {
       "_id": "req_reject",
       "parentId": "fld_3_approval",
-      "modified": 1706832000000,
+      "modified": 1740268800000,
       "created": 1706572800000,
       "name": "3.2 Reject",
-      "description": "Reject a dataset that fails review.\n\nreason is REQUIRED for audit trail.",
+      "description": "Reject a release that fails review.\n\nV0.9: Uses release_id (preferred).\nreason is REQUIRED for audit trail.\nRejected releases can be resubmitted via /api/platform/resubmit.",
       "url": "{{ _.base_url }}/api/platform/reject",
       "method": "POST",
       "body": {
         "mimeType": "application/json",
-        "text": "{\n  \"job_id\": \"{{ _.job_id }}\",\n  \"reviewer\": \"{{ _.reviewer_email }}\",\n  \"reason\": \"Data quality issue: missing CRS metadata\"\n}"
+        "text": "{\n  \"release_id\": \"{{ _.release_id }}\",\n  \"reviewer\": \"{{ _.reviewer_email }}\",\n  \"reason\": \"Data quality issue\"\n}"
       },
       "parameters": [],
       "headers": [
@@ -452,15 +439,15 @@
     {
       "_id": "req_revoke",
       "parentId": "fld_3_approval",
-      "modified": 1706832000000,
+      "modified": 1740268800000,
       "created": 1706572800000,
-      "name": "3.3 Revoke Approval",
-      "description": "Revoke approval (required before unpublish).\n\nreason is REQUIRED for audit trail.",
+      "name": "3.3 Revoke",
+      "description": "Revoke an approved release — removes from catalog.\n\nV0.9: Uses release_id (preferred).\nreason is REQUIRED for audit trail.\nDeletes STAC item from pgSTAC. Release state becomes terminal 'revoked'.",
       "url": "{{ _.base_url }}/api/platform/revoke",
       "method": "POST",
       "body": {
         "mimeType": "application/json",
-        "text": "{\n  \"job_id\": \"{{ _.job_id }}\",\n  \"revoker\": \"{{ _.reviewer_email }}\",\n  \"reason\": \"QA test cleanup - removing test data\"\n}"
+        "text": "{\n  \"release_id\": \"{{ _.release_id }}\",\n  \"revoker\": \"{{ _.reviewer_email }}\",\n  \"reason\": \"Removing from catalog\"\n}"
       },
       "parameters": [],
       "headers": [
@@ -476,25 +463,18 @@
     {
       "_id": "req_approvals_list",
       "parentId": "fld_3_approval",
-      "modified": 1706832000000,
-      "created": 1706832000000,
-      "name": "3.4 List Approvals",
-      "description": "List approvals with optional filters.",
+      "modified": 1740268800000,
+      "created": 1706572800000,
+      "name": "3.4 List Releases",
+      "description": "List releases with optional status filter.\n\nReturns full release records with version_id, version_ordinal, is_latest, stac_item_id.\nIncludes status_counts summary.",
       "url": "{{ _.base_url }}/api/platform/approvals",
       "method": "GET",
       "body": {},
       "parameters": [
         {
           "name": "status",
-          "value": "pending",
-          "disabled": true,
-          "description": "pending, approved, rejected, revoked"
-        },
-        {
-          "name": "classification",
-          "value": "",
-          "disabled": true,
-          "description": "ouo, public"
+          "value": "approved",
+          "disabled": false
         },
         {
           "name": "limit",
@@ -510,11 +490,11 @@
     {
       "_id": "req_approvals_detail",
       "parentId": "fld_3_approval",
-      "modified": 1706832000000,
-      "created": 1706832000000,
-      "name": "3.5 Get Approval Details",
-      "description": "Get details for a specific approval.",
-      "url": "{{ _.base_url }}/api/platform/approvals/{{ _.approval_id }}",
+      "modified": 1740268800000,
+      "created": 1706572800000,
+      "name": "3.5 Get Release Detail",
+      "description": "Get full details for a specific release.\n\nReturns complete release record: release_id, asset_id, version_id, version_ordinal,\nrevision, is_latest, is_served, blob_path, stac_item_id, stac_item_json,\nprocessing_status, approval_state, clearance_state, reviewer, reviewed_at.",
+      "url": "{{ _.base_url }}/api/platform/approvals/{{ _.release_id }}",
       "method": "GET",
       "body": {},
       "parameters": [],
@@ -524,48 +504,26 @@
       "_type": "request"
     },
     {
-      "_id": "req_approvals_batch",
-      "parentId": "fld_3_approval",
-      "modified": 1706832000000,
-      "created": 1706832000000,
-      "name": "3.6 Batch Approval Status",
-      "description": "Get approval status for multiple STAC items.\n\nUseful for UI dashboards.",
-      "url": "{{ _.base_url }}/api/platform/approvals/status",
-      "method": "GET",
-      "body": {},
-      "parameters": [
-        {
-          "name": "stac_item_ids",
-          "value": "item1,item2,item3",
-          "disabled": false
-        }
-      ],
-      "headers": [],
-      "authentication": {},
-      "metaSortKey": 6,
-      "_type": "request"
-    },
-    {
-      "_id": "fld_4_unpublish",
+      "_id": "fld_4_overwrite",
       "parentId": "wrk_platform_api",
-      "modified": 1706832000000,
-      "created": 1706572800000,
-      "name": "4. Unpublish & Resubmit",
-      "description": "Remove published datasets and retry failed jobs",
+      "modified": 1740268800000,
+      "created": 1740268800000,
+      "name": "4. Overwrite & Resubmit",
+      "description": "Overwrite draft releases and resubmit rejected jobs.\n\nV0.9: Overwrite reuses existing release (increments revision, same ordinal).\nResubmit uses request_id to clean up and re-create the job.",
       "_type": "request_group"
     },
     {
-      "_id": "req_unpublish_dry",
-      "parentId": "fld_4_unpublish",
-      "modified": 1706832000000,
-      "created": 1706572800000,
-      "name": "4.1a Unpublish (Dry Run)",
-      "description": "Preview what would be deleted without actually deleting.\n\ndry_run=true (default) - no changes made.",
-      "url": "{{ _.base_url }}/api/platform/unpublish",
+      "_id": "req_submit_overwrite",
+      "parentId": "fld_4_overwrite",
+      "modified": 1740268800000,
+      "created": 1740268800000,
+      "name": "4.1 Submit with Overwrite",
+      "description": "Overwrite an existing draft release.\n\nV0.9: processing_options.overwrite=true replaces draft artifacts.\nSame release_id, same ordinal, but revision increments.\nOnly works on draft releases — approved releases are not overwritten.",
+      "url": "{{ _.base_url }}/api/platform/submit",
       "method": "POST",
       "body": {
         "mimeType": "application/json",
-        "text": "{\n  \"dataset_id\": \"{{ _.dataset_id }}\",\n  \"resource_id\": \"{{ _.resource_id }}\",\n  \"version_id\": \"{{ _.version_id }}\",\n  \"dry_run\": true\n}"
+        "text": "{\n  \"dataset_id\": \"{{ _.dataset_id }}\",\n  \"resource_id\": \"{{ _.resource_id }}\",\n  \"container_name\": \"{{ _.bronze_container }}\",\n  \"file_name\": \"{{ _.raster_file }}\",\n  \"processing_options\": {\"overwrite\": true}\n}"
       },
       "parameters": [],
       "headers": [
@@ -579,17 +537,17 @@
       "_type": "request"
     },
     {
-      "_id": "req_unpublish_execute",
-      "parentId": "fld_4_unpublish",
-      "modified": 1706832000000,
-      "created": 1706572800000,
-      "name": "4.1b Unpublish (Execute)",
-      "description": "Actually delete the data (STAC item, table/COG).\n\nWARNING: This is destructive. Run dry_run first!\nNote: Must revoke first, or use force_approved=true",
-      "url": "{{ _.base_url }}/api/platform/unpublish",
+      "_id": "req_resubmit",
+      "parentId": "fld_4_overwrite",
+      "modified": 1740268800000,
+      "created": 1740268800000,
+      "name": "4.2 Resubmit (by request_id)",
+      "description": "Resubmit a rejected or failed job.\n\nV0.9: Uses request_id to look up original parameters.\nCleans up old artifacts, creates new job with same parameters.\nReturns original_job_id, new_job_id, cleanup_summary, monitor_url.",
+      "url": "{{ _.base_url }}/api/platform/resubmit",
       "method": "POST",
       "body": {
         "mimeType": "application/json",
-        "text": "{\n  \"dataset_id\": \"{{ _.dataset_id }}\",\n  \"resource_id\": \"{{ _.resource_id }}\",\n  \"version_id\": \"{{ _.version_id }}\",\n  \"dry_run\": false\n}"
+        "text": "{\n  \"request_id\": \"{{ _.request_id }}\"\n}"
       },
       "parameters": [],
       "headers": [
@@ -603,66 +561,18 @@
       "_type": "request"
     },
     {
-      "_id": "req_resubmit_dry",
-      "parentId": "fld_4_unpublish",
-      "modified": 1706832000000,
-      "created": 1706572800000,
-      "name": "4.2a Resubmit (Dry Run)",
-      "description": "Preview cleanup plan for resubmitting a failed job.",
-      "url": "{{ _.base_url }}/api/platform/resubmit",
-      "method": "POST",
-      "body": {
-        "mimeType": "application/json",
-        "text": "{\n  \"dataset_id\": \"{{ _.dataset_id }}\",\n  \"resource_id\": \"{{ _.resource_id }}\",\n  \"version_id\": \"{{ _.version_id }}\",\n  \"dry_run\": true,\n  \"delete_blobs\": false\n}"
-      },
-      "parameters": [],
-      "headers": [
-        {
-          "name": "Content-Type",
-          "value": "application/json"
-        }
-      ],
-      "authentication": {},
-      "metaSortKey": 3,
-      "_type": "request"
-    },
-    {
-      "_id": "req_resubmit_execute",
-      "parentId": "fld_4_unpublish",
-      "modified": 1706832000000,
-      "created": 1706572800000,
-      "name": "4.2b Resubmit (Execute)",
-      "description": "Clean up failed job and resubmit with same parameters.",
-      "url": "{{ _.base_url }}/api/platform/resubmit",
-      "method": "POST",
-      "body": {
-        "mimeType": "application/json",
-        "text": "{\n  \"dataset_id\": \"{{ _.dataset_id }}\",\n  \"resource_id\": \"{{ _.resource_id }}\",\n  \"version_id\": \"{{ _.version_id }}\",\n  \"dry_run\": false,\n  \"delete_blobs\": false\n}"
-      },
-      "parameters": [],
-      "headers": [
-        {
-          "name": "Content-Type",
-          "value": "application/json"
-        }
-      ],
-      "authentication": {},
-      "metaSortKey": 4,
-      "_type": "request"
-    },
-    {
       "_id": "fld_5_catalog",
       "parentId": "wrk_platform_api",
-      "modified": 1706832000000,
+      "modified": 1740268800000,
       "created": 1706572800000,
       "name": "5. Catalog Discovery",
-      "description": "Query published assets and STAC items",
+      "description": "Query published assets, catalog views, and STAC items",
       "_type": "request_group"
     },
     {
       "_id": "req_catalog_list",
       "parentId": "fld_5_catalog",
-      "modified": 1706832000000,
+      "modified": 1740268800000,
       "created": 1706572800000,
       "name": "5.1 List Assets",
       "description": "List all assets with optional filters.\n\nQuery params: limit, approval_state, clearance_state",
@@ -694,12 +604,28 @@
       "_type": "request"
     },
     {
+      "_id": "req_catalog_asset",
+      "parentId": "fld_5_catalog",
+      "modified": 1740268800000,
+      "created": 1740268800000,
+      "name": "5.2 Get Asset by ID",
+      "description": "High-level catalog view of an asset with service URLs.\n\nReturns latest served version, tile URLs (raster) or collection URLs (vector), DDH refs, lineage.",
+      "url": "{{ _.base_url }}/api/platform/catalog/asset/{{ _.asset_id }}",
+      "method": "GET",
+      "body": {},
+      "parameters": [],
+      "headers": [],
+      "authentication": {},
+      "metaSortKey": 2,
+      "_type": "request"
+    },
+    {
       "_id": "req_catalog_lookup",
       "parentId": "fld_5_catalog",
-      "modified": 1706832000000,
+      "modified": 1740268800000,
       "created": 1706572800000,
-      "name": "5.2 Lookup by DDH Identifiers",
-      "description": "Find asset by dataset_id, resource_id, version_id.\n\nOmit version_id to get latest version.",
+      "name": "5.3 Lookup by DDH Identifiers",
+      "description": "Find asset by dataset_id and resource_id.",
       "url": "{{ _.base_url }}/api/platform/catalog/lookup",
       "method": "GET",
       "body": {},
@@ -713,51 +639,24 @@
           "name": "resource_id",
           "value": "{{ _.resource_id }}",
           "disabled": false
-        },
-        {
-          "name": "version_id",
-          "value": "{{ _.version_id }}",
-          "disabled": false
         }
       ],
-      "headers": [],
-      "authentication": {},
-      "metaSortKey": 2,
-      "_type": "request"
-    },
-    {
-      "_id": "req_catalog_stac_item",
-      "parentId": "fld_5_catalog",
-      "modified": 1706832000000,
-      "created": 1706832000000,
-      "name": "5.3 Get STAC Item",
-      "description": "Get full STAC item as GeoJSON Feature.\n\nSet stac_collection_id and stac_item_id in environment.",
-      "url": "{{ _.base_url }}/api/platform/catalog/item/{{ _.stac_collection_id }}/{{ _.stac_item_id }}",
-      "method": "GET",
-      "body": {},
-      "parameters": [],
       "headers": [],
       "authentication": {},
       "metaSortKey": 3,
       "_type": "request"
     },
     {
-      "_id": "req_catalog_assets_titiler",
+      "_id": "req_catalog_stac_item",
       "parentId": "fld_5_catalog",
-      "modified": 1706832000000,
-      "created": 1706832000000,
-      "name": "5.4 Get Asset URLs with TiTiler",
-      "description": "Get asset URLs with pre-built TiTiler links.\n\nIncludes: preview, tiles, info, tilejson URLs",
-      "url": "{{ _.base_url }}/api/platform/catalog/assets/{{ _.stac_collection_id }}/{{ _.stac_item_id }}",
+      "modified": 1740268800000,
+      "created": 1706572800000,
+      "name": "5.4 Get STAC Item",
+      "description": "Get full STAC item as GeoJSON Feature.\n\nCollection and item IDs use version names after approval (e.g., dataset-resource-v1).\nBefore approval, uses ordinal names (e.g., dataset-resource-ord1).",
+      "url": "{{ _.base_url }}/api/platform/catalog/item/{{ _.dataset_id }}/{{ _.dataset_id }}-{{ _.resource_id }}-v1",
       "method": "GET",
       "body": {},
-      "parameters": [
-        {
-          "name": "include_titiler",
-          "value": "true",
-          "disabled": false
-        }
-      ],
+      "parameters": [],
       "headers": [],
       "authentication": {},
       "metaSortKey": 4,
@@ -766,8 +665,8 @@
     {
       "_id": "req_catalog_dataset",
       "parentId": "fld_5_catalog",
-      "modified": 1706832000000,
-      "created": 1706832000000,
+      "modified": 1740268800000,
+      "created": 1706572800000,
       "name": "5.5 List Items for Dataset",
       "description": "List all STAC items for a dataset (across all resources/versions).",
       "url": "{{ _.base_url }}/api/platform/catalog/dataset/{{ _.dataset_id }}",
@@ -788,19 +687,19 @@
     {
       "_id": "fld_6_service_layer",
       "parentId": "wrk_platform_api",
-      "modified": 1706832000000,
+      "modified": 1740268800000,
       "created": 1706572800000,
       "name": "6. Service Layer",
-      "description": "Data access via TiTiler/STAC/TiPG",
+      "description": "Data access via TiTiler (raster), pgSTAC (STAC catalog), and TiPG (vector OGC Features)",
       "_type": "request_group"
     },
     {
       "_id": "req_titiler_health",
       "parentId": "fld_6_service_layer",
-      "modified": 1706832000000,
+      "modified": 1740268800000,
       "created": 1706572800000,
-      "name": "6.1 Service Layer Health",
-      "description": "Check TiTiler service health.",
+      "name": "6.1 TiTiler Health",
+      "description": "Check TiTiler raster tile service health.",
       "url": "{{ _.titiler_url }}/health",
       "method": "GET",
       "body": {},
@@ -811,13 +710,13 @@
       "_type": "request"
     },
     {
-      "_id": "req_stac_collections",
+      "_id": "req_stac_health",
       "parentId": "fld_6_service_layer",
-      "modified": 1706832000000,
-      "created": 1706572800000,
-      "name": "6.2 STAC Collections",
-      "description": "List all STAC collections.",
-      "url": "{{ _.titiler_url }}/stac/collections",
+      "modified": 1740268800000,
+      "created": 1740268800000,
+      "name": "6.2 pgSTAC Health",
+      "description": "Check STAC catalog health (via platform API).",
+      "url": "{{ _.base_url }}/api/health",
       "method": "GET",
       "body": {},
       "parameters": [],
@@ -827,13 +726,13 @@
       "_type": "request"
     },
     {
-      "_id": "req_vector_collections",
+      "_id": "req_tipg_health",
       "parentId": "fld_6_service_layer",
-      "modified": 1706832000000,
-      "created": 1706572800000,
-      "name": "6.3 Vector Collections",
-      "description": "List all vector collections (OGC Features).",
-      "url": "{{ _.titiler_url }}/vector/collections",
+      "modified": 1740268800000,
+      "created": 1740268800000,
+      "name": "6.3 TiPG Health",
+      "description": "Check TiPG vector feature service health (OGC Features API).",
+      "url": "{{ _.tipg_url }}/health",
       "method": "GET",
       "body": {},
       "parameters": [],
@@ -843,19 +742,35 @@
       "_type": "request"
     },
     {
-      "_id": "req_openapi_docs",
+      "_id": "req_stac_collections",
       "parentId": "fld_6_service_layer",
-      "modified": 1706832000000,
+      "modified": 1740268800000,
       "created": 1706572800000,
-      "name": "6.4 API Documentation",
-      "description": "OpenAPI documentation for service layer.",
-      "url": "{{ _.titiler_url }}/docs",
+      "name": "6.4 STAC Collections",
+      "description": "List all STAC collections from pgSTAC.",
+      "url": "{{ _.base_url }}/api/collections",
       "method": "GET",
       "body": {},
       "parameters": [],
       "headers": [],
       "authentication": {},
       "metaSortKey": 4,
+      "_type": "request"
+    },
+    {
+      "_id": "req_tipg_collections",
+      "parentId": "fld_6_service_layer",
+      "modified": 1740268800000,
+      "created": 1740268800000,
+      "name": "6.5 TiPG Vector Collections",
+      "description": "List all vector collections available via TiPG (OGC Features).",
+      "url": "{{ _.tipg_url }}/collections",
+      "method": "GET",
+      "body": {},
+      "parameters": [],
+      "headers": [],
+      "authentication": {},
+      "metaSortKey": 5,
       "_type": "request"
     }
   ]

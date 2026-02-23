@@ -595,13 +595,6 @@ class PlatformDefaults:
 
     PRIMARY_CLIENT = "ddh"
     DEFAULT_ACCESS_LEVEL = "OUO"
-    VALID_ACCESS_LEVELS = ["public", "OUO", "restricted"]
-    VALID_INPUT_CONTAINERS = [
-        "bronze-vectors",
-        "bronze-rasters",
-        "bronze-misc",
-        "bronze-temp",
-    ]
 
     # Naming patterns (use placeholders: {dataset_id}, {resource_id}, {version_id})
     # {version_id} resolves to: explicit version_id, "ord{N}" for drafts, or "draft" (legacy)

@@ -3,8 +3,8 @@
 # ============================================================================
 # STATUS: Trigger layer - Platform status and diagnostic endpoints
 # PURPOSE: Query Platform request/job status and diagnostics for gateway integration
-# LAST_REVIEWED: 21 FEB 2026
-# REVIEW_STATUS: V0.9 Asset/Release split - returns Asset + Release + version history
+# LAST_REVIEWED: 23 FEB 2026
+# REVIEW_STATUS: V0.9.1 Clean B2B response - outputs/services/approval from Release record
 # EXPORTS: platform_request_status, platform_job_status, platform_health, platform_failures, platform_lineage, platform_validate
 # DEPENDENCIES: infrastructure.PlatformRepository, infrastructure.JobRepository, infrastructure.AssetRepository, infrastructure.ReleaseRepository
 # ============================================================================
@@ -88,26 +88,13 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
     {
         "success": true,
         "request_id": "a3f2c1b8...",
-        "dataset_id": "aerial-2024",
-        "resource_id": "site-alpha",
-        "version_id": "v1.0",
-        "job_id": "abc123...",
+        "asset": {"asset_id": "...", "dataset_id": "...", "resource_id": "...", "data_type": "raster", "release_count": 2},
+        "release": {"release_id": "...", "version_id": "v1", "version_ordinal": 1, "approval_state": "approved", ...},
         "job_status": "completed",
-        "job_stage": 3,
-        "job_result": {...},
-        "task_summary": {
-            "total": 5,
-            "completed": 4,
-            "failed": 0,
-            "processing": 1,
-            "pending": 0,
-            "by_stage": {
-                "1": {"total": 3, "completed": 3},
-                "2": {"total": 2, "completed": 1, "processing": 1}
-            }
-        },
-        "data_type": "raster",
-        "created_at": "2025-11-22T10:00:00Z"
+        "outputs": {"blob_path": "...", "stac_item_id": "...", "stac_collection_id": "..."},
+        "services": {"preview": "...", "tiles": "...", "viewer": "..."},
+        "approval": null,
+        "versions": [{"release_id": "...", "version_id": "v1", ...}]
     }
     """
     logger.info("Platform status endpoint called")
@@ -995,163 +982,6 @@ def _handle_platform_refs_lookup(
     )
 
 
-def _generate_data_access_urls(
-    platform_request,
-    job_type: str,
-    job_result: Dict[str, Any],
-    asset_id: Optional[str] = None
-) -> Dict[str, Any]:
-    """
-    Generate data access URLs for completed jobs.
-
-    Uses config properties to build URLs for the correct services:
-    - OGC Features: TiPG at {TITILER_BASE_URL}/vector (28 JAN 2026)
-    - STAC API: ETL_APP_URL/api/stac (on ETL Function App)
-    - TiTiler: TITILER_BASE_URL (dedicated tile server)
-    - Vector Viewer: ETL_APP_URL (admin/ETL app)
-    - Approval UI: PLATFORM_URL/api/interface/* with embed mode (07 FEB 2026)
-    - Approve Action: POST endpoint for B2B apps to approve (09 FEB 2026)
-
-    URL Configuration:
-        PLATFORM_URL: Public URL for this app instance. Used for approval URLs
-                      that B2B clients will embed in iframes. Falls back to
-                      ETL_APP_URL if not set. Gateway and Orchestrator each
-                      set their own PLATFORM_URL.
-
-    Args:
-        platform_request: ApiRequest record
-        job_type: Type of CoreMachine job
-        job_result: Job result data
-        asset_id: GeospatialAsset ID for approval workflow (09 FEB 2026)
-
-    Returns:
-        Dictionary with OGC Features, STAC, TiTiler, approval URLs as applicable
-    """
-    from config import get_config
-    config = get_config()
-
-    # Get service URLs from config (no hardcoded fallbacks - fail-fast design)
-    # TiPG provides OGC Features at {TITILER_BASE_URL}/vector (28 JAN 2026)
-    tipg_base = config.tipg_base_url
-
-    # STAC API on ETL Function App
-    etl_app_base = config.etl_app_base_url
-
-    # TiTiler for raster tiles
-    titiler_base = config.titiler_base_url
-
-    # Platform URL for B2B-facing responses (07 FEB 2026)
-    # This is the public URL for THIS app instance (Gateway or Orchestrator)
-    # Used for approval iframe URLs that B2B apps will embed
-    platform_base = config.platform_url.rstrip('/')
-
-    urls = {}
-
-    # Vector job → TiPG OGC Features URLs + approval UI
-    # Updated 07 FEB 2026: Added vector_docker_etl (current active job type)
-    if job_type in ['process_vector', 'vector_docker_etl']:
-        table_name = job_result.get('table_name')
-        if table_name:
-            # TiPG requires schema-qualified names
-            qualified_name = f"geo.{table_name}" if '.' not in table_name else table_name
-            urls['postgis'] = {
-                'schema': 'geo',
-                'table': table_name
-            }
-            urls['ogc_features'] = {
-                'collection': f"{tipg_base}/collections/{qualified_name}",
-                'items': f"{tipg_base}/collections/{qualified_name}/items",
-                'viewer': f"{etl_app_base}/api/interface/vector?collection={table_name}"
-            }
-            # Approval UI for B2B iframe embedding (07 FEB 2026, updated 09 FEB 2026)
-            # Uses platform_base (PLATFORM_URL) for B2B-accessible URLs
-            # Vector viewer at /api/interface/vector-viewer with asset_id for approve/reject
-            # Native viewer uses OGC Features endpoint (TiPG /vector)
-            approval_urls = {
-                'viewer': f"{tipg_base}/collections/{qualified_name}",  # Native OGC Features
-                'embed': f"{platform_base}/api/interface/vector-viewer?collection={table_name}&embed=true"
-            }
-            # Add asset_id to viewer URLs if available (enables approve/reject buttons)
-            if asset_id:
-                approval_urls['embed'] = f"{platform_base}/api/interface/vector-viewer?collection={table_name}&asset_id={asset_id}&embed=true"
-                approval_urls['approve'] = f"{platform_base}/api/platform/approve"
-                approval_urls['approve_asset_id'] = asset_id  # B2B knows what to POST
-            urls['approval'] = approval_urls
-
-    # Raster job → STAC + TiTiler URLs + approval UI
-    # Updated 07 FEB 2026: Added process_raster_docker (current active job type)
-    # Updated 09 FEB 2026: Handle nested result structure (cog.cog_blob, stac.item_id)
-    elif job_type in ['process_raster_v2', 'process_large_raster_v2', 'process_raster_collection_v2',
-                      'process_raster_docker', 'process_large_raster_docker', 'process_raster_collection_docker']:
-        collection_id = job_result.get('collection_id')
-
-        # Extract COG URL - try nested structure first (current), then flat (legacy)
-        cog_url = None
-        cog_data = job_result.get('cog', {})
-        if isinstance(cog_data, dict):
-            # Current nested structure: job_result.cog.cog_blob
-            cog_blob = cog_data.get('cog_blob') or cog_data.get('cog_url')
-            if cog_blob:
-                cog_url = cog_blob
-        if not cog_url:
-            # Legacy flat structure or fallback
-            cog_url = job_result.get('cog_url') or job_result.get('cog_blob')
-
-        # Extract STAC item ID - try nested structure first, then flat
-        stac_item_id = None
-        stac_data = job_result.get('stac', {})
-        if isinstance(stac_data, dict):
-            # Current nested structure: job_result.stac.item_id
-            stac_item_id = stac_data.get('item_id') or stac_data.get('stac_item_id')
-        if not stac_item_id:
-            # Legacy flat structure
-            stac_item_id = job_result.get('stac_item_id') or job_result.get('item_id')
-
-        # Also get collection_id from nested if not at top level
-        if not collection_id and isinstance(stac_data, dict):
-            collection_id = stac_data.get('collection_id')
-
-        if collection_id:
-            urls['stac'] = {
-                'collection': f"{etl_app_base}/api/collections/{collection_id}",
-                'items': f"{etl_app_base}/api/collections/{collection_id}/items",
-                'search': f"{etl_app_base}/api/search"
-            }
-
-        if cog_url:
-            urls['titiler'] = {
-                'preview': f"{titiler_base}/cog/preview?url={cog_url}",
-                'info': f"{titiler_base}/cog/info?url={cog_url}",
-                'tiles': f"{titiler_base}/cog/tiles/{{z}}/{{x}}/{{y}}?url={cog_url}"
-            }
-
-            # Approval UI for B2B iframe embedding (07 FEB 2026, updated 09 FEB 2026)
-            # Uses platform_base (PLATFORM_URL) for B2B-accessible URLs
-            # Native viewer uses TiTiler /cog endpoint
-            from urllib.parse import quote
-            encoded_url = quote(cog_url, safe='')
-            approval_urls = {
-                'viewer': f"{titiler_base}/cog/viewer?url={encoded_url}",  # Native COG viewer
-                'embed': f"{platform_base}/api/interface/raster-viewer?url={encoded_url}&embed=true"
-            }
-            # Add asset_id for approve/reject workflow
-            if asset_id:
-                approval_urls['embed'] = f"{platform_base}/api/interface/raster-viewer?url={encoded_url}&asset_id={asset_id}&embed=true"
-                approval_urls['approve'] = f"{platform_base}/api/platform/approve"
-                approval_urls['approve_asset_id'] = asset_id
-
-            # If STAC item ID available, prefer that for approval workflow
-            if stac_item_id:
-                approval_urls['viewer'] = f"{titiler_base}/stac/viewer?item_id={stac_item_id}"  # Native STAC viewer
-                approval_urls['embed'] = f"{platform_base}/api/interface/raster-viewer?item_id={stac_item_id}&embed=true"
-                if asset_id:
-                    approval_urls['embed'] = f"{platform_base}/api/interface/raster-viewer?item_id={stac_item_id}&asset_id={asset_id}&embed=true"
-
-            urls['approval'] = approval_urls
-
-    return urls
-
-
 # ============================================================================
 # PLATFORM DIAGNOSTICS FOR EXTERNAL APPS (15 JAN 2026 - F7.12)
 # ============================================================================
@@ -1673,12 +1503,19 @@ async def platform_lineage(req: func.HttpRequest) -> func.HttpResponse:
             outputs['table_name'] = result_data['table_name']
             outputs['schema'] = 'geo'
 
-        # Generate data access URLs (V0.8.12: include asset_id for approval - 09 FEB 2026)
+        # Generate data access URLs via Release-based helpers (V0.9.1 - 23 FEB 2026)
         data_access = {}
         if job_status == "completed":
-            # Get asset_id from job record if available
-            lineage_asset_id = getattr(job, 'asset_id', None)
-            data_access = _generate_data_access_urls(platform_request, job.job_type, result_data, asset_id=lineage_asset_id)
+            try:
+                from infrastructure import ReleaseRepository
+                lineage_release = ReleaseRepository().get_by_job_id(job.job_id)
+                if lineage_release:
+                    data_type = platform_request.data_type if platform_request else None
+                    services = _build_services_block(lineage_release, data_type) if data_type else None
+                    if services:
+                        data_access = services
+            except Exception as e:
+                logger.debug(f"Could not resolve release for lineage data_access: {e}")
 
         lineage = {
             "request_id": request_id,

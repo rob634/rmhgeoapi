@@ -261,6 +261,15 @@ class PlatformInterface(BaseInterface):
                         <strong>Success Rate:</strong>
                         <span id="success-rate">--</span>
                     </div>
+                    <div>
+                        <strong>Pending Review:</strong>
+                        <span id="pending-review-count" style="font-weight: 700;">--</span>
+                    </div>
+                    <div>
+                        <a href="/api/interface/asset-versions" style="color: var(--ds-blue-primary); text-decoration: none; font-weight: 600;">
+                            Asset Versions &rarr;
+                        </a>
+                    </div>
                 </div>
             </div>
 
@@ -452,6 +461,23 @@ class PlatformInterface(BaseInterface):
                 console.error('Failed to load platform health:', error);
                 statusEl.className = 'live-status error';
                 statusEl.innerHTML = '<span class="pulse"></span> Error';
+            }
+
+            // V0.9 approval stats
+            try {
+                const approvalResp = await fetch(`${API_BASE_URL}/api/assets/approval-stats`);
+                if (approvalResp.ok) {
+                    const stats = await approvalResp.json();
+                    const pendingEl = document.getElementById('pending-review-count');
+                    if (pendingEl && stats.pending_review !== undefined) {
+                        pendingEl.textContent = stats.pending_review;
+                        if (stats.pending_review > 0) {
+                            pendingEl.style.color = '#d97706';
+                        }
+                    }
+                }
+            } catch (e) {
+                console.warn('Could not fetch approval stats:', e);
             }
         }
 

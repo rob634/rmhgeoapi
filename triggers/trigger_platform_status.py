@@ -164,12 +164,15 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
                     from infrastructure import ReleaseRepository
                     release_repo = ReleaseRepository()
                     release = release_repo.get_by_id(lookup_id)
-                    if release and release.job_id:
-                        platform_request = platform_repo.get_request_by_job(release.job_id)
+                    if release:
+                        if release.job_id:
+                            platform_request = platform_repo.get_request_by_job(release.job_id)
                         lookup_type = "release_id"
                         pre_resolved_release = release
-                except Exception:
-                    pass
+                except ImportError:
+                    logger.warning("ReleaseRepository not available for release_id lookup")
+                except Exception as e:
+                    logger.warning(f"Release lookup failed for {lookup_id}: {e}")
 
             if not platform_request:
                 # V0.9: Try as asset_id
@@ -178,19 +181,21 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
                     asset_repo = AssetRepository()
                     asset = asset_repo.get_by_id(lookup_id)
                     if asset:
-                        # Get latest release with a job
                         release_repo = ReleaseRepository()
                         release = release_repo.get_latest(asset.asset_id)
                         if not release:
                             release = release_repo.get_draft(asset.asset_id)
-                        if release and release.job_id:
-                            platform_request = platform_repo.get_request_by_job(release.job_id)
+                        if release:
+                            if release.job_id:
+                                platform_request = platform_repo.get_request_by_job(release.job_id)
                             lookup_type = "asset_id"
                             pre_resolved_release = release
-                except Exception as asset_err:
-                    logger.debug(f"Asset lookup failed (non-fatal): {asset_err}")
+                except ImportError:
+                    logger.warning("AssetRepository/ReleaseRepository not available for asset_id lookup")
+                except Exception as e:
+                    logger.warning(f"Asset lookup failed for {lookup_id}: {e}")
 
-            if not platform_request:
+            if not platform_request and not pre_resolved_release:
                 return func.HttpResponse(
                     json.dumps({
                         "success": False,
@@ -721,6 +726,154 @@ def _build_version_summary(releases: list) -> list:
     # Sort by created_at descending (most recent first)
     summaries.sort(key=lambda x: x["created_at"] or "", reverse=True)
     return summaries
+
+
+def _build_outputs_block(release, job_result: Optional[dict] = None) -> Optional[dict]:
+    """
+    Build the outputs block from Release physical fields.
+
+    Reads blob_path, table_name, stac_item_id, stac_collection_id directly
+    from the Release record. Falls back to job_result for container name
+    (not stored on Release).
+
+    Args:
+        release: AssetRelease object
+        job_result: Optional job result dict for supplementary fields
+
+    Returns:
+        Dict with output artifact locations, or None if no outputs yet
+    """
+    if not release:
+        return None
+
+    # No outputs if processing hasn't completed
+    proc_status = release.processing_status.value if hasattr(release.processing_status, 'value') else str(release.processing_status)
+    if proc_status != 'completed':
+        return None
+
+    outputs = {
+        "stac_item_id": release.stac_item_id,
+        "stac_collection_id": release.stac_collection_id,
+    }
+
+    # Raster outputs
+    if release.blob_path:
+        outputs["blob_path"] = release.blob_path
+        # Container from job_result (not stored on release)
+        container = None
+        if job_result:
+            cog_data = job_result.get('cog', {})
+            if isinstance(cog_data, dict):
+                container = cog_data.get('cog_container')
+        outputs["container"] = container or "silver-cogs"
+
+    # Vector outputs
+    if release.table_name:
+        outputs["table_name"] = release.table_name
+        outputs["schema"] = "geo"
+
+    return outputs
+
+
+def _build_services_block(release, data_type: str) -> Optional[dict]:
+    """
+    Build focused service URLs for accessing the output data.
+
+    Raster: preview, tiles, viewer (from titiler)
+    Vector: collection, items (from OGC Features/TiPG)
+
+    Args:
+        release: AssetRelease object
+        data_type: "raster" or "vector"
+
+    Returns:
+        Dict with service URLs, or None if no outputs
+    """
+    if not release:
+        return None
+
+    proc_status = release.processing_status.value if hasattr(release.processing_status, 'value') else str(release.processing_status)
+    if proc_status != 'completed':
+        return None
+
+    from config import get_config
+    config = get_config()
+
+    services = {}
+
+    if data_type == "raster" and release.blob_path:
+        titiler_base = config.titiler_base_url
+        from urllib.parse import quote
+        cog_url = quote(f"/vsiaz/silver-cogs/{release.blob_path}", safe='')
+        services["preview"] = f"{titiler_base}/cog/preview.png?url={cog_url}&max_size=512"
+        services["tiles"] = f"{titiler_base}/cog/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}.png?url={cog_url}"
+        services["viewer"] = f"{titiler_base}/cog/WebMercatorQuad/map.html?url={cog_url}"
+
+    elif data_type == "vector" and release.table_name:
+        tipg_base = config.tipg_base_url
+        qualified = f"geo.{release.table_name}" if '.' not in release.table_name else release.table_name
+        services["collection"] = f"{tipg_base}/collections/{qualified}"
+        services["items"] = f"{tipg_base}/collections/{qualified}/items"
+
+    # STAC URLs (both raster and vector)
+    if release.stac_collection_id:
+        etl_base = config.etl_app_base_url
+        services["stac_collection"] = f"{etl_base}/api/collections/{release.stac_collection_id}"
+        if release.stac_item_id:
+            services["stac_item"] = f"{etl_base}/api/collections/{release.stac_collection_id}/items/{release.stac_item_id}"
+
+    return services if services else None
+
+
+def _build_approval_block(release, asset_id: str, data_type: str) -> Optional[dict]:
+    """
+    Build approval workflow URLs.
+
+    Only included when the release is in pending_review state.
+
+    Args:
+        release: AssetRelease object
+        asset_id: Asset ID for approve/reject POST
+        data_type: "raster" or "vector"
+
+    Returns:
+        Dict with approval URLs, or None if not pending
+    """
+    if not release:
+        return None
+
+    approval_state = release.approval_state.value if hasattr(release.approval_state, 'value') else str(release.approval_state)
+    if approval_state != 'pending_review':
+        return None
+
+    proc_status = release.processing_status.value if hasattr(release.processing_status, 'value') else str(release.processing_status)
+    if proc_status != 'completed':
+        return None
+
+    from config import get_config
+    config = get_config()
+    platform_base = config.platform_url.rstrip('/')
+
+    approval = {
+        "approve_url": f"{platform_base}/api/platform/approve",
+        "asset_id": asset_id,
+    }
+
+    if data_type == "raster" and release.blob_path:
+        from urllib.parse import quote
+        cog_url = quote(f"/vsiaz/silver-cogs/{release.blob_path}", safe='')
+        if release.stac_item_id:
+            approval["viewer_url"] = f"{platform_base}/api/interface/raster-viewer?item_id={release.stac_item_id}&asset_id={asset_id}"
+            approval["embed_url"] = f"{platform_base}/api/interface/raster-viewer?item_id={release.stac_item_id}&asset_id={asset_id}&embed=true"
+        else:
+            approval["viewer_url"] = f"{platform_base}/api/interface/raster-viewer?url={cog_url}&asset_id={asset_id}"
+            approval["embed_url"] = f"{platform_base}/api/interface/raster-viewer?url={cog_url}&asset_id={asset_id}&embed=true"
+
+    elif data_type == "vector" and release.table_name:
+        approval["viewer_url"] = f"{platform_base}/api/interface/vector-viewer?collection={release.table_name}&asset_id={asset_id}"
+        approval["embed_url"] = f"{platform_base}/api/interface/vector-viewer?collection={release.table_name}&asset_id={asset_id}&embed=true"
+
+    return approval
 
 
 def _handle_platform_refs_lookup(

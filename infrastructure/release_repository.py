@@ -517,7 +517,7 @@ class ReleaseRepository(PostgreSQLRepository):
             with conn.cursor() as cur:
                 cur.execute(
                     sql.SQL("""
-                        SELECT COALESCE(MAX(version_ordinal), 0) + 1
+                        SELECT COALESCE(MAX(version_ordinal), 0) + 1 AS next_ordinal
                         FROM {}.{}
                         WHERE asset_id = %s
                           AND version_id IS NOT NULL
@@ -527,7 +527,7 @@ class ReleaseRepository(PostgreSQLRepository):
                     ),
                     (asset_id,)
                 )
-                return cur.fetchone()[0]
+                return cur.fetchone()['next_ordinal']
 
     def list_by_approval_state(
         self,

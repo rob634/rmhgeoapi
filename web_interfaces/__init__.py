@@ -478,6 +478,12 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Could not import Unified Submit interface: {e}")
 
+try:
+    from .asset_versions import interface as _asset_versions
+    logger.info("Imported Asset Versions interface module")
+except ImportError as e:
+    logger.warning(f"Could not import Asset Versions interface: {e}")
+
 
 # Public API
 __all__ = [

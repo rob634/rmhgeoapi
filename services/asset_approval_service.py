@@ -176,6 +176,25 @@ class AssetApprovalService:
                 )
             }
 
+        # Update stac_item_id to final versioned form (draft-N -> version_id)
+        from services.platform_translation import generate_stac_item_id
+        from infrastructure import AssetRepository
+        asset_repo = AssetRepository()
+        asset = asset_repo.get_by_id(release.asset_id)
+        if asset:
+            final_stac_item_id = generate_stac_item_id(
+                asset.dataset_id, asset.resource_id, version_id
+            )
+            if final_stac_item_id != release.stac_item_id:
+                self.release_repo.update_physical_outputs(
+                    release_id=release_id,
+                    stac_item_id=final_stac_item_id
+                )
+                logger.info(
+                    f"Updated stac_item_id: {release.stac_item_id} -> {final_stac_item_id}"
+                )
+                release.stac_item_id = final_stac_item_id
+
         # Materialize STAC item to pgSTAC from cached stac_item_json
         stac_result = self._materialize_stac(release, reviewer, clearance_state)
 

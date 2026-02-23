@@ -642,18 +642,15 @@ class StacInterface(BaseInterface):
                 const data = await fetchJSON(`${API_BASE_URL}/api/stac/collections`);
                 allCollections = data.collections || [];
 
-                // Fetch approval statuses for all collections (17 JAN 2026)
-                if (allCollections.length > 0) {
-                    const collectionIds = allCollections.map(c => c.id).join(',');
-                    try {
-                        const approvalData = await fetchJSON(
-                            `${API_BASE_URL}/api/platform/approvals/status?stac_collection_ids=${encodeURIComponent(collectionIds)}`
-                        );
-                        window.approvalStatuses = approvalData.statuses || {};
-                    } catch (e) {
-                        console.warn('Could not fetch approval statuses:', e);
-                        window.approvalStatuses = {};
+                // V0.9 approval stats
+                try {
+                    const approvalResp = await fetch(`${API_BASE_URL}/api/assets/approval-stats`);
+                    if (approvalResp.ok) {
+                        window.approvalStats = await approvalResp.json();
                     }
+                } catch (e) {
+                    console.warn('Could not fetch approval stats:', e);
+                    window.approvalStats = {};
                 }
 
                 spinner.classList.add('hidden');
@@ -690,11 +687,7 @@ class StacInterface(BaseInterface):
                     `[${bbox.map(v => v.toFixed(2)).join(', ')}]` :
                     'No extent';
 
-                // Check approval status
-                const approvalStatus = window.approvalStatuses?.[c.id] || {};
-                const isApproved = approvalStatus.is_approved === true;
-
-                // Build action buttons - Items, Map, Delete only (no Promote)
+                // Build action buttons - Items, Map, Versions, Delete
                 let actionButtons = `
                     <a class="link-badge link-badge-info"
                        href="/api/interface/stac-collection?id=${c.id}"
@@ -706,26 +699,21 @@ class StacInterface(BaseInterface):
                             onclick="openMapView('${c.id}', event)"
                             title="Open in viewer">
                         🗺️
+                    </button>
+                    <a class="link-badge" style="background:var(--ds-navy);color:white;"
+                       href="/api/interface/asset-versions?dataset_id=${encodeURIComponent(c.id)}"
+                       onclick="event.stopPropagation()"
+                       title="View versions">
+                        📋
+                    </a>
+                    <button class="link-badge link-badge-delete"
+                            onclick="deleteCollection('${c.id}', event)"
+                            title="Delete collection">
+                        🗑️
                     </button>`;
 
-                // Show delete or protected based on approval status
-                if (isApproved) {
-                    actionButtons += `
-                        <span class="link-badge link-badge-disabled" title="Protected">🔒</span>`;
-                } else {
-                    actionButtons += `
-                        <button class="link-badge link-badge-delete"
-                                onclick="deleteCollection('${c.id}', event)"
-                                title="Delete collection">
-                            🗑️
-                        </button>`;
-                }
-
-                // Build badges HTML
-                const badgesHtml = isApproved ? `
-                    <div class="card-badges">
-                        <span class="approved-badge">✓</span>
-                    </div>` : '';
+                // No per-collection approval badges in V0.9
+                const badgesHtml = '';
 
                 return `
                     <div class="collection-card" onclick="showCollectionDetail('${c.id}')" title="${title}">

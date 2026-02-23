@@ -89,6 +89,22 @@ class BaseInterface(ABC):
             --ds-status-completed-fg: #059669;
             --ds-status-failed-bg: #fee2e2;
             --ds-status-failed-fg: #dc2626;
+            /* V0.9 Approval state colors */
+            --ds-approval-pending-bg: #fef3c7;
+            --ds-approval-pending-fg: #92400e;
+            --ds-approval-approved-bg: #d1fae5;
+            --ds-approval-approved-fg: #065f46;
+            --ds-approval-rejected-bg: #fee2e2;
+            --ds-approval-rejected-fg: #991b1b;
+            --ds-approval-revoked-bg: #e5e7eb;
+            --ds-approval-revoked-fg: #6b7280;
+            /* V0.9 Clearance state colors */
+            --ds-clearance-uncleared-bg: #f3f4f6;
+            --ds-clearance-uncleared-fg: #6b7280;
+            --ds-clearance-ouo-bg: #fef3c7;
+            --ds-clearance-ouo-fg: #92400e;
+            --ds-clearance-public-bg: #d1fae5;
+            --ds-clearance-public-fg: #065f46;
         }
 
         /* CSS Reset */
@@ -244,6 +260,111 @@ class BaseInterface(ABC):
         .status-failed {
             background: var(--ds-status-failed-bg);
             color: var(--ds-status-failed-fg);
+        }
+
+        /* ============================================================
+           V0.9 APPROVAL BADGES
+           ============================================================ */
+        .approval-badge {
+            display: inline-block;
+            padding: 0.2rem 0.6rem;
+            border-radius: 12px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.025em;
+        }
+        .approval-badge.approval-pending_review {
+            background: var(--ds-approval-pending-bg);
+            color: var(--ds-approval-pending-fg);
+        }
+        .approval-badge.approval-approved {
+            background: var(--ds-approval-approved-bg);
+            color: var(--ds-approval-approved-fg);
+        }
+        .approval-badge.approval-rejected {
+            background: var(--ds-approval-rejected-bg);
+            color: var(--ds-approval-rejected-fg);
+        }
+        .approval-badge.approval-revoked {
+            background: var(--ds-approval-revoked-bg);
+            color: var(--ds-approval-revoked-fg);
+        }
+
+        /* V0.9 CLEARANCE BADGES */
+        .clearance-badge {
+            display: inline-block;
+            padding: 0.2rem 0.6rem;
+            border-radius: 12px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.025em;
+        }
+        .clearance-badge.clearance-uncleared {
+            background: var(--ds-clearance-uncleared-bg);
+            color: var(--ds-clearance-uncleared-fg);
+        }
+        .clearance-badge.clearance-ouo {
+            background: var(--ds-clearance-ouo-bg);
+            color: var(--ds-clearance-ouo-fg);
+        }
+        .clearance-badge.clearance-public {
+            background: var(--ds-clearance-public-bg);
+            color: var(--ds-clearance-public-fg);
+        }
+
+        /* V0.9 VERSION CHIP */
+        .version-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 0.15rem 0.5rem;
+            border-radius: 10px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            font-family: monospace;
+            background: var(--ds-navy);
+            color: white;
+        }
+        .version-chip.version-draft {
+            background: transparent;
+            color: var(--ds-gray);
+            border: 1.5px dashed var(--ds-gray);
+            font-weight: 600;
+        }
+        .version-chip .latest-star {
+            color: var(--ds-gold);
+            font-size: 0.85rem;
+        }
+
+        /* V0.9 ASSET HEADER */
+        .asset-header {
+            background: white;
+            border-left: 4px solid var(--ds-blue-primary);
+            padding: 16px 24px;
+            border-radius: 0 8px 8px 0;
+            margin-bottom: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .asset-header .asset-title {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--ds-navy);
+            margin: 0 0 4px 0;
+        }
+        .asset-header .asset-meta {
+            font-size: 0.85rem;
+            color: var(--ds-gray);
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .asset-header .asset-meta code {
+            font-size: 0.8rem;
+            background: #f1f3f5;
+            padding: 1px 6px;
+            border-radius: 4px;
         }
 
         /* ============================================================

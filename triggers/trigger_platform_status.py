@@ -739,6 +739,10 @@ def _build_version_summary(releases: list) -> list:
             "version_ordinal": release.version_ordinal,
             "revision": release.revision,
             "created_at": release.created_at.isoformat() if release.created_at else None,
+            "blob_path": getattr(release, 'blob_path', None),
+            "table_name": getattr(release, 'table_name', None),
+            "stac_item_id": getattr(release, 'stac_item_id', None),
+            "stac_collection_id": getattr(release, 'stac_collection_id', None),
         })
     # Sort by created_at descending (most recent first)
     summaries.sort(key=lambda x: x["created_at"] or "", reverse=True)

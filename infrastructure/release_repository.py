@@ -500,6 +500,35 @@ class ReleaseRepository(PostgreSQLRepository):
                 rows = cur.fetchall()
                 return [self._row_to_model(row) for row in rows]
 
+    def get_next_version_ordinal(self, asset_id: str) -> int:
+        """
+        Get the next version ordinal for a new release under this asset.
+
+        Returns MAX(version_ordinal) + 1 from approved releases (version_id IS NOT NULL).
+        Returns 1 if no approved releases exist (first release).
+
+        Args:
+            asset_id: Parent asset identifier
+
+        Returns:
+            Next sequential ordinal (1, 2, 3, ...)
+        """
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL("""
+                        SELECT COALESCE(MAX(version_ordinal), 0) + 1
+                        FROM {}.{}
+                        WHERE asset_id = %s
+                          AND version_id IS NOT NULL
+                    """).format(
+                        sql.Identifier(self.schema),
+                        sql.Identifier(self.table)
+                    ),
+                    (asset_id,)
+                )
+                return cur.fetchone()[0]
+
     def list_by_approval_state(
         self,
         state: ApprovalState,

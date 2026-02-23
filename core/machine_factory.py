@@ -205,10 +205,6 @@ def _default_platform_callback(job_id: str, job_type: str, status: str, result: 
     Note:
         All operations are non-fatal - failures are logged but don't affect job status.
     """
-    # Skip if job failed - no approval needed for failed jobs
-    if status != 'completed':
-        return
-
     # =========================================================================
     # V0.9: Update AssetRelease with job outputs (21 FEB 2026)
     # =========================================================================
@@ -232,37 +228,40 @@ def _default_platform_callback(job_id: str, job_type: str, status: str, result: 
             from core.models.asset import ProcessingStatus
             from datetime import datetime, timezone
             new_status = ProcessingStatus.COMPLETED if status == 'completed' else ProcessingStatus.FAILED
+            error_message = result.get('error') or result.get('message') if status != 'completed' else None
             release_repo.update_processing_status(
                 release.release_id,
                 status=new_status,
-                completed_at=datetime.now(timezone.utc) if status == 'completed' else None
+                completed_at=datetime.now(timezone.utc) if status == 'completed' else None,
+                error=str(error_message)[:500] if error_message else None
             )
 
-            # Update physical outputs if available
-            outputs = {}
+            # Update physical outputs only on success (failed jobs have no valid outputs)
+            if status == 'completed':
+                outputs = {}
 
-            # Vector: table_name from result
-            table_name = result.get('table_name')
-            if table_name:
-                outputs['table_name'] = table_name
+                # Vector: table_name from result
+                table_name = result.get('table_name')
+                if table_name:
+                    outputs['table_name'] = table_name
 
-            # Raster: blob_path from result
-            cog_blob = result.get('cog', {}).get('cog_blob') if isinstance(result.get('cog'), dict) else None
-            cog_url = cog_blob or result.get('cog_url') or result.get('output_blob_name')
-            if cog_url:
-                outputs['blob_path'] = cog_url
+                # Raster: blob_path from result
+                cog_blob = result.get('cog', {}).get('cog_blob') if isinstance(result.get('cog'), dict) else None
+                cog_url = cog_blob or result.get('cog_url') or result.get('output_blob_name')
+                if cog_url:
+                    outputs['blob_path'] = cog_url
 
-            # STAC IDs if available
-            stac_item_id = extract_stac_item_id(result)
-            if stac_item_id:
-                outputs['stac_item_id'] = stac_item_id
+                # STAC IDs if available
+                stac_item_id = extract_stac_item_id(result)
+                if stac_item_id:
+                    outputs['stac_item_id'] = stac_item_id
 
-            # Note: stac_collection_id is set at release creation, not updated here
+                # Note: stac_collection_id is set at release creation, not updated here
 
-            if outputs:
-                release_repo.update_physical_outputs(release.release_id, **outputs)
+                if outputs:
+                    release_repo.update_physical_outputs(release.release_id, **outputs)
 
-            logger.info(f"[RELEASE] Updated release {release.release_id[:12]}... status={new_status}, outputs: {list(outputs.keys())}")
+            logger.info(f"[RELEASE] Updated release {release.release_id[:12]}... status={new_status}")
 
     except Exception as e:
         # Non-fatal: release update failure should not affect job completion

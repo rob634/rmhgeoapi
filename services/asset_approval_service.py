@@ -150,13 +150,8 @@ class AssetApprovalService:
 
         now = datetime.now(timezone.utc)
 
-        # Compute version_ordinal from existing versioned releases (read-only)
-        existing_releases = self.release_repo.list_by_asset(release.asset_id)
-        versioned_count = sum(
-            1 for r in existing_releases
-            if r.version_id is not None and r.release_id != release_id
-        )
-        version_ordinal = versioned_count + 1
+        # Use pre-set ordinal from draft creation (reserved slot)
+        version_ordinal = release.version_ordinal
 
         # Atomic approval: flip_is_latest + version assignment + approval
         # state + clearance in a single transaction. All-or-nothing.

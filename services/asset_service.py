@@ -161,14 +161,18 @@ class AssetService:
         job_id: Optional[str] = None,
         request_id: Optional[str] = None,
         suggested_version_id: Optional[str] = None,
-        data_type: Optional[str] = None
+        data_type: Optional[str] = None,
+        version_ordinal: int = 1
     ) -> AssetRelease:
         """
         Create a new draft release under an asset.
 
-        Generates a deterministic release_id from asset_id + request_id/job_id.
+        Generates a deterministic release_id from asset_id + request_id/job_id
+        + release_count. The release_count disambiguates successive drafts
+        after prior releases are approved (prevents PK collision).
         The release starts as a draft (version_id=None) with
         approval_state=PENDING_REVIEW and processing_status=PENDING.
+        version_ordinal is set at creation (reserved slot), not at approval.
 
         Args:
             asset_id: Parent asset identifier
@@ -185,18 +189,23 @@ class AssetService:
             Created AssetRelease (draft)
         """
         # Generate deterministic release_id
+        # Include release_count so successive drafts (after approval) get unique IDs.
+        # Same inputs within a release cycle → same hash → idempotent.
+        # After approval increments release_count → different hash → no PK collision.
         uniquifier = request_id or job_id or str(uuid4())
+        asset = self.asset_repo.get_by_id(asset_id)
+        release_count = asset.release_count if asset else 0
         release_id = hashlib.sha256(
-            f"{asset_id}|{uniquifier}".encode()
+            f"{asset_id}|{uniquifier}|{release_count}".encode()
         ).hexdigest()[:32]
 
         release = AssetRelease(
             release_id=release_id,
             asset_id=asset_id,
-            # Version: None = draft (assigned at approval)
+            # Version: None = draft (assigned at approval), ordinal reserved at creation
             version_id=None,
             suggested_version_id=suggested_version_id,
-            version_ordinal=None,
+            version_ordinal=version_ordinal,
             revision=1,
             # Flags
             is_latest=False,
@@ -247,9 +256,12 @@ class AssetService:
            - Return (updated_release, "overwritten")
         3. If draft exists AND overwrite=False:
            - Return (existing_draft, "existing") -- idempotent
-        4. If no draft exists:
-           - Create a new release
+        4. If no draft exists AND no approved releases:
+           - First release for this asset
            - Return (new_release, "created")
+        5. If no draft exists AND approved releases exist:
+           - New version workflow (succeeding release)
+           - Return (new_release, "new_version")
 
         Args:
             asset_id: Parent asset identifier
@@ -265,9 +277,10 @@ class AssetService:
 
         Returns:
             Tuple of (AssetRelease, operation) where operation is:
-            - "created": New release created
+            - "created": First release created for this asset
             - "existing": Existing draft returned (idempotent, no overwrite)
             - "overwritten": Existing draft overwritten
+            - "new_version": New version release (prior approved versions exist)
 
         Raises:
             ReleaseStateError: If overwrite requested but draft is in
@@ -301,7 +314,32 @@ class AssetService:
                 )
                 return existing_draft, "existing"
 
-        # No draft -- create new release
+        # No draft -- check if approved releases exist (new version vs first release)
+        asset = self.asset_repo.get_by_id(asset_id)
+        existing_versions = asset.release_count if asset else 0
+
+        if existing_versions > 0:
+            # NEW VERSION: Approved releases exist, this is a succeeding version
+            next_ordinal = self.release_repo.get_next_version_ordinal(asset_id)
+            logger.info(
+                f"New version release for asset {asset_id[:16]}... "
+                f"(existing releases: {existing_versions}, next ordinal: {next_ordinal})"
+            )
+            release = self.create_release(
+                asset_id=asset_id,
+                stac_item_id=stac_item_id,
+                stac_collection_id=stac_collection_id,
+                blob_path=blob_path,
+                table_name=table_name,
+                job_id=job_id,
+                request_id=request_id,
+                suggested_version_id=suggested_version_id,
+                version_ordinal=next_ordinal,
+            )
+            return release, "new_version"
+
+        # FIRST RELEASE: No prior releases for this asset (ordinal=1)
+        logger.info(f"Creating first release for asset {asset_id[:16]}...")
         release = self.create_release(
             asset_id=asset_id,
             stac_item_id=stac_item_id,
@@ -311,6 +349,7 @@ class AssetService:
             job_id=job_id,
             request_id=request_id,
             suggested_version_id=suggested_version_id,
+            version_ordinal=1,
         )
         return release, "created"
 
@@ -357,13 +396,8 @@ class AssetService:
                 "assign_version"
             )
 
-        # Compute version_ordinal: count existing versioned releases + 1
-        existing_releases = self.release_repo.list_by_asset(release.asset_id)
-        versioned_count = sum(
-            1 for r in existing_releases
-            if r.version_id is not None and r.release_id != release_id
-        )
-        version_ordinal = versioned_count + 1
+        # Use pre-set ordinal from draft creation (reserved slot)
+        version_ordinal = release.version_ordinal
 
         # Flip is_latest atomically: clear all, then set this one
         self.release_repo.flip_is_latest(release.asset_id, release_id)

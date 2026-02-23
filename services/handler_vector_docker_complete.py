@@ -106,6 +106,22 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
 
     logger.info(f"[{job_id[:8]}] Docker Vector ETL starting: {blob_name} -> {schema}.{table_name}")
 
+    # V0.9: Mark Release as PROCESSING (handler entry)
+    _release_id = parameters.get('release_id')
+    if _release_id:
+        try:
+            from infrastructure import ReleaseRepository
+            from core.models.asset import ProcessingStatus
+            from datetime import datetime, timezone
+            release_repo = ReleaseRepository()
+            release_repo.update_processing_status(
+                _release_id,
+                status=ProcessingStatus.PROCESSING,
+                started_at=datetime.now(timezone.utc)
+            )
+        except Exception as e:
+            logger.warning(f"Failed to set PROCESSING on release (non-fatal): {e}")
+
     # =========================================================================
     # V0.8.16: Asset linking moved to CoreMachine factory (09 FEB 2026)
     # =========================================================================
@@ -328,6 +344,20 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
 
         # Map exception type to appropriate ErrorCode
         error_code = _map_exception_to_error_code(e)
+
+        # V0.9: Update Release to FAILED (defense-in-depth alongside callback)
+        if parameters.get('release_id'):
+            try:
+                from infrastructure import ReleaseRepository
+                from core.models.asset import ProcessingStatus
+                release_repo = ReleaseRepository()
+                release_repo.update_processing_status(
+                    parameters['release_id'],
+                    status=ProcessingStatus.FAILED,
+                    error=str(e)[:500]
+                )
+            except Exception:
+                pass  # Callback will handle
 
         # Create enhanced error response
         response, debug = create_error_response_v2(

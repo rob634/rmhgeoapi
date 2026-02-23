@@ -221,6 +221,8 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
             except ReleaseStateError as e:
                 return error_response(str(e), "ReleaseStateError", status_code=409)
 
+            logger.info(f"  Release {release_op}: {release.release_id[:16]}")
+
             # Step 4: Handle idempotent case (existing draft, no overwrite)
             if release_op == "existing":
                 return idempotent_response(

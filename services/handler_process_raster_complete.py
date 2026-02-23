@@ -836,6 +836,19 @@ def _process_raster_tiled(
 
     except Exception as e:
         logger.exception(f"❌ PROCESS RASTER (TILED) FAILED: {e}")
+        # V0.9: Update Release to FAILED (defense-in-depth alongside callback)
+        if params.get('release_id'):
+            try:
+                from infrastructure import ReleaseRepository
+                from core.models.asset import ProcessingStatus
+                release_repo = ReleaseRepository()
+                release_repo.update_processing_status(
+                    params['release_id'],
+                    status=ProcessingStatus.FAILED,
+                    error=str(e)[:500]
+                )
+            except Exception:
+                pass  # Callback will handle
         return {
             "success": False,
             "error": "PROCESSING_FAILED",
@@ -1591,6 +1604,19 @@ def _process_raster_tiled_mount(
 
     except Exception as e:
         logger.exception(f"❌ PROCESS RASTER (MOUNT-BASED TILED) FAILED: {e}")
+        # V0.9: Update Release to FAILED (defense-in-depth alongside callback)
+        if params.get('release_id'):
+            try:
+                from infrastructure import ReleaseRepository
+                from core.models.asset import ProcessingStatus
+                release_repo = ReleaseRepository()
+                release_repo.update_processing_status(
+                    params['release_id'],
+                    status=ProcessingStatus.FAILED,
+                    error=str(e)[:500]
+                )
+            except Exception:
+                pass  # Callback will handle
         return {
             "success": False,
             "error": "PROCESSING_FAILED",
@@ -1668,6 +1694,22 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
     if task_id:
         logger.info(f"   Task ID: {task_id[:8]}... (checkpoint enabled)")
     logger.info("=" * 70)
+
+    # V0.9: Mark Release as PROCESSING (handler entry)
+    _release_id = params.get('release_id')
+    if _release_id:
+        try:
+            from infrastructure import ReleaseRepository
+            from core.models.asset import ProcessingStatus
+            from datetime import datetime, timezone
+            release_repo = ReleaseRepository()
+            release_repo.update_processing_status(
+                _release_id,
+                status=ProcessingStatus.PROCESSING,
+                started_at=datetime.now(timezone.utc)
+            )
+        except Exception as e:
+            logger.warning(f"Failed to set PROCESSING on release (non-fatal): {e}")
 
     # V0.8: Route to tiled workflow if file exceeds threshold
     # V0.8.1: Use mount-based workflow when ETL mount available (27 JAN 2026)
@@ -2530,6 +2572,20 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
             logger.error(f"   📊 Peak memory (overall): {resource_stats['peak_memory_overall_mb']} MB")
         logger.error("=" * 70)
         logger.error(traceback.format_exc())
+
+        # V0.9: Update Release to FAILED (defense-in-depth alongside callback)
+        if params.get('release_id'):
+            try:
+                from infrastructure import ReleaseRepository
+                from core.models.asset import ProcessingStatus
+                release_repo = ReleaseRepository()
+                release_repo.update_processing_status(
+                    params['release_id'],
+                    status=ProcessingStatus.FAILED,
+                    error=str(e)[:500]
+                )
+            except Exception:
+                pass  # Callback will handle
 
         return {
             "success": False,

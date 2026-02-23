@@ -256,32 +256,46 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
             if 'title' in job_params:
                 job_params['title'] = f"{platform_req.dataset_id} / {platform_req.resource_id} (ordinal {release.version_ordinal})"
 
-            # Step 6b: Finalize ordinal-based names for vector drafts (22 FEB 2026)
+            # Step 6b: Finalize ordinal-based names for drafts (22 FEB 2026)
             # Translation generates placeholder "draft" names (ordinal not yet known).
             # Now that the release exists with a reserved ordinal, overwrite with
             # stable ordinal-based names (e.g. *_ord1 instead of *_draft).
-            if (
-                platform_req.data_type.value == 'vector'
-                and not platform_req.version_id
-                and not getattr(platform_req.processing_options, 'table_name', None)
-            ):
+            if not platform_req.version_id and release.version_ordinal:
                 ordinal = release.version_ordinal
-                final_table = generate_table_name(
-                    platform_req.dataset_id, platform_req.resource_id,
-                    version_ordinal=ordinal
-                )
-                final_stac = generate_stac_item_id(
-                    platform_req.dataset_id, platform_req.resource_id,
-                    version_ordinal=ordinal
-                )
-                job_params['table_name'] = final_table
-                job_params['stac_item_id'] = final_stac
 
-                # Update Release record to match finalized names
-                asset_service.update_physical_outputs(
-                    release.release_id, table_name=final_table, stac_item_id=final_stac
-                )
-                logger.info(f"  Finalized vector names: table={final_table}, stac={final_stac} (ord={ordinal})")
+                if (
+                    platform_req.data_type.value == 'vector'
+                    and not getattr(platform_req.processing_options, 'table_name', None)
+                ):
+                    # Vector: finalize table_name AND stac_item_id
+                    final_table = generate_table_name(
+                        platform_req.dataset_id, platform_req.resource_id,
+                        version_ordinal=ordinal
+                    )
+                    final_stac = generate_stac_item_id(
+                        platform_req.dataset_id, platform_req.resource_id,
+                        version_ordinal=ordinal
+                    )
+                    job_params['table_name'] = final_table
+                    job_params['stac_item_id'] = final_stac
+
+                    asset_service.update_physical_outputs(
+                        release.release_id, table_name=final_table, stac_item_id=final_stac
+                    )
+                    logger.info(f"  Finalized vector names: table={final_table}, stac={final_stac} (ord={ordinal})")
+
+                elif platform_req.data_type.value == 'raster':
+                    # Raster: finalize stac_item_id (output_folder already handled in Step 6)
+                    final_stac = generate_stac_item_id(
+                        platform_req.dataset_id, platform_req.resource_id,
+                        version_ordinal=ordinal
+                    )
+                    job_params['stac_item_id'] = final_stac
+
+                    asset_service.update_physical_outputs(
+                        release.release_id, stac_item_id=final_stac
+                    )
+                    logger.info(f"  Finalized raster stac_item_id: {final_stac} (ord={ordinal})")
 
         except ReleaseStateError:
             raise  # Already handled above, but guard against re-wrapping

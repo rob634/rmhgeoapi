@@ -285,6 +285,7 @@ def approve_dataset(req: func.HttpRequest) -> func.HttpResponse:
             )
 
         notes = body.get('notes')
+        version_id = body.get('version_id')  # Optional: auto-generated from ordinal if not provided
 
         # V0.9: Resolve asset_id -> release_id
         release_repo = ReleaseRepository()
@@ -298,13 +299,20 @@ def approve_dataset(req: func.HttpRequest) -> func.HttpResponse:
                 mimetype='application/json'
             )
 
-        logger.info(f"Approve request: release {release.release_id[:16]}... (asset {asset_id[:16]}...) by {reviewer} (clearance: {clearance_state.value})")
+        # Auto-generate version_id from ordinal if not provided in request body
+        if not version_id and release.version_ordinal:
+            version_id = f"v{release.version_ordinal}"
+        elif not version_id:
+            version_id = "v1"  # Safe default for legacy releases without ordinal
+
+        logger.info(f"Approve request: release {release.release_id[:16]}... (asset {asset_id[:16]}...) by {reviewer} (clearance: {clearance_state.value}, version: {version_id})")
 
         service = AssetApprovalService()
         result = service.approve_release(
             release_id=release.release_id,
             reviewer=reviewer,
             clearance_state=clearance_state,
+            version_id=version_id,
             notes=notes
         )
 

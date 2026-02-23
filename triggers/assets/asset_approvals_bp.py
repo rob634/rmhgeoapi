@@ -122,6 +122,7 @@ def approve_asset(req: func.HttpRequest) -> func.HttpResponse:
     reviewer = req_body.get('reviewer')
     clearance_state_str = req_body.get('clearance_state')
     notes = req_body.get('notes')
+    version_id = req_body.get('version_id')  # Optional: auto-generated from ordinal if not provided
 
     if not reviewer:
         return func.HttpResponse(
@@ -192,12 +193,19 @@ def approve_asset(req: func.HttpRequest) -> func.HttpResponse:
 
         service = AssetApprovalService()
 
-        logger.info(f"Approving release {release.release_id[:16]}... (asset {asset_id[:16]}...) by {reviewer} (clearance: {clearance_state.value})")
+        # Auto-generate version_id from ordinal if not provided in request body
+        if not version_id and release.version_ordinal:
+            version_id = f"v{release.version_ordinal}"
+        elif not version_id:
+            version_id = "v1"  # Safe default for legacy releases without ordinal
+
+        logger.info(f"Approving release {release.release_id[:16]}... (asset {asset_id[:16]}...) by {reviewer} (clearance: {clearance_state.value}, version: {version_id})")
 
         result = service.approve_release(
             release_id=release.release_id,
             reviewer=reviewer,
             clearance_state=clearance_state,
+            version_id=version_id,
             notes=notes
         )
 

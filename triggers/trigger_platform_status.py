@@ -882,13 +882,12 @@ def _build_approval_block(release, asset_id: str, data_type: str) -> Optional[di
 
     if data_type == "raster" and release.blob_path:
         from urllib.parse import quote
+        # Always use direct COG URL (?url=) for approval preview.
+        # STAC item doesn't exist yet — it's materialized AFTER approval.
+        # TiTiler works directly from blob_path, no STAC needed.
         cog_url = quote(f"/vsiaz/silver-cogs/{release.blob_path}", safe='')
-        if release.stac_item_id:
-            approval["viewer_url"] = f"{platform_base}/api/interface/raster-viewer?item_id={release.stac_item_id}&asset_id={asset_id}"
-            approval["embed_url"] = f"{platform_base}/api/interface/raster-viewer?item_id={release.stac_item_id}&asset_id={asset_id}&embed=true"
-        else:
-            approval["viewer_url"] = f"{platform_base}/api/interface/raster-viewer?url={cog_url}&asset_id={asset_id}"
-            approval["embed_url"] = f"{platform_base}/api/interface/raster-viewer?url={cog_url}&asset_id={asset_id}&embed=true"
+        approval["viewer_url"] = f"{platform_base}/api/interface/raster-viewer?url={cog_url}&asset_id={asset_id}"
+        approval["embed_url"] = f"{platform_base}/api/interface/raster-viewer?url={cog_url}&asset_id={asset_id}&embed=true"
 
     elif data_type == "vector" and release.table_name:
         approval["viewer_url"] = f"{platform_base}/api/interface/vector-viewer?collection={release.table_name}&asset_id={asset_id}"

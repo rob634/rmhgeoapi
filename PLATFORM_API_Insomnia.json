@@ -10,7 +10,7 @@
       "modified": 1740268800000,
       "created": 1706572800000,
       "name": "Platform API - QA",
-      "description": "B2B Integration Guide for Platform API v0.8.24.0 — V0.9 Asset/Release Model\n\nWorkflow: Validate -> Submit (draft) -> Poll -> Approve (assign version) -> Access\n\nV0.9 Changes:\n- Submit creates draft (no version_id required)\n- Approve assigns version_id + clearance\n- Coexisting versions (v1 approved + v2 draft)\n- Auto-detect ID lookups\n- Clean B2B response shape",
+      "description": "B2B Integration Guide for Platform API v0.9.0.0 — V0.9 Asset/Release Model\n\nWorkflow: Validate -> Submit (draft) -> Poll -> Approve (assign version) -> Access\n\nV0.9 Changes:\n- Submit creates draft (no version_id required)\n- Approve assigns version_id + clearance\n- Coexisting versions (v1 approved + v2 draft)\n- Auto-detect ID lookups\n- Clean B2B response shape",
       "scope": "collection",
       "_type": "workspace"
     },

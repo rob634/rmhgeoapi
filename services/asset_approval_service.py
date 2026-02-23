@@ -509,8 +509,23 @@ class AssetApprovalService:
             stac_item_json = dict(release.stac_item_json)
 
             # Patch with versioned ID and collection
-            stac_item_json['id'] = release.stac_item_id
+            versioned_id = release.stac_item_id
+            stac_item_json['id'] = versioned_id
             stac_item_json['collection'] = release.stac_collection_id
+
+            # Patch title and self-link with versioned item ID
+            # The cached dict was built at processing time with draft/ordinal names.
+            props = stac_item_json.setdefault('properties', {})
+            if versioned_id:
+                props['title'] = versioned_id
+                for link in stac_item_json.get('links', []):
+                    if link.get('rel') == 'self':
+                        href = link.get('href', '')
+                        # Replace /items/{old_id} with /items/{versioned_id}
+                        items_prefix = '/items/'
+                        idx = href.rfind(items_prefix)
+                        if idx >= 0:
+                            link['href'] = href[:idx + len(items_prefix)] + versioned_id
 
             # Patch with approval properties
             now_iso = datetime.now(timezone.utc).isoformat()
@@ -521,6 +536,54 @@ class AssetApprovalService:
             props['geoetl:clearance'] = clearance_state.value
             if release.version_id:
                 props['ddh:version_id'] = release.version_id
+
+            # Ensure TiTiler visualization URLs are present in STAC item
+            # The cached dict may or may not have them (depends on Docker worker config).
+            # Always inject from the Function App's config to guarantee correctness.
+            if release.blob_path:
+                try:
+                    from config import get_config
+                    import urllib.parse
+                    config = get_config()
+                    titiler_base = config.titiler_base_url.rstrip('/')
+                    vsiaz_url = f"/vsiaz/silver-cogs/{release.blob_path}"
+                    encoded_url = urllib.parse.quote(vsiaz_url, safe='')
+
+                    # Thumbnail asset
+                    assets = stac_item_json.setdefault('assets', {})
+                    thumbnail_params = f"url={encoded_url}&max_size=512"
+                    # Carry over render params from existing thumbnail if present
+                    existing_thumb = assets.get('thumbnail', {}).get('href', '')
+                    for param in ['rescale', 'colormap_name', 'bidx']:
+                        if f'&{param}=' in existing_thumb:
+                            val = existing_thumb.split(f'&{param}=')[1].split('&')[0]
+                            thumbnail_params += f"&{param}={val}"
+
+                    assets['thumbnail'] = {
+                        "href": f"{titiler_base}/cog/preview.png?{thumbnail_params}",
+                        "type": "image/png",
+                        "title": "Thumbnail",
+                        "roles": ["thumbnail"]
+                    }
+
+                    # TiTiler links (viewer, tilejson)
+                    links = stac_item_json.setdefault('links', [])
+                    # Remove stale tiles/viewer links, then re-add
+                    links[:] = [l for l in links if l.get('rel') not in ('tiles', 'viewer')]
+                    links.append({
+                        "rel": "tiles",
+                        "href": f"{titiler_base}/cog/tilejson.json?url={encoded_url}",
+                        "type": "application/json",
+                        "title": "TileJSON"
+                    })
+                    links.append({
+                        "rel": "viewer",
+                        "href": f"{titiler_base}/cog/WebMercatorQuad/map.html?url={encoded_url}",
+                        "type": "text/html",
+                        "title": "Map Viewer"
+                    })
+                except Exception as titiler_err:
+                    logger.warning(f"Failed to inject TiTiler URLs (non-fatal): {titiler_err}")
 
             # Build and upsert STAC collection
             pgstac = PgStacRepository()

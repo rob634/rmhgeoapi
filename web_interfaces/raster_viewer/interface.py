@@ -1736,7 +1736,7 @@ class RasterViewerInterface(BaseInterface):
             }}
         }}
 
-        // Check approval status and show appropriate form (07 FEB 2026)
+        // Check approval status and show appropriate form (07 FEB 2026, V0.9 23 FEB 2026)
         async function checkApprovalStatus() {{
             const assetId = QA_CONTEXT.asset_id;
             if (!assetId) {{
@@ -1758,7 +1758,9 @@ class RasterViewerInterface(BaseInterface):
                     return;
                 }}
 
-                const state = data.approval_state;
+                // V0.9: Read from primary_release (API nests release data)
+                const release = data.primary_release || {{}};
+                const state = release.approval_state || data.approval_state;
                 const statusDisplay = document.getElementById('qa-status-display');
                 const statusBadge = document.getElementById('qa-status-badge');
                 const statusInfo = document.getElementById('qa-status-info');
@@ -1770,14 +1772,13 @@ class RasterViewerInterface(BaseInterface):
                     statusBadge.textContent = 'APPROVED';
 
                     let infoHtml = '';
-                    if (data.reviewer) infoHtml += `Reviewer: ${{data.reviewer}}<br>`;
-                    if (data.reviewed_at) infoHtml += `Approved: ${{new Date(data.reviewed_at).toLocaleString()}}<br>`;
-                    if (data.clearance_state) infoHtml += `Clearance: ${{data.clearance_state.toUpperCase()}}`;
+                    if (release.reviewer) infoHtml += `Reviewer: ${{release.reviewer}}<br>`;
+                    if (release.reviewed_at) infoHtml += `Approved: ${{new Date(release.reviewed_at).toLocaleString()}}<br>`;
+                    if (release.clearance_state) infoHtml += `Clearance: ${{release.clearance_state.toUpperCase()}}`;
                     statusInfo.innerHTML = infoHtml;
 
-                    if (data.can_revoke) {{
-                        document.getElementById('qa-revoke-form').style.display = 'block';
-                    }}
+                    // Approved releases can be revoked
+                    document.getElementById('qa-revoke-form').style.display = 'block';
                 }} else if (state === 'rejected') {{
                     // Show rejected status
                     statusDisplay.style.display = 'block';
@@ -1785,15 +1786,13 @@ class RasterViewerInterface(BaseInterface):
                     statusBadge.textContent = 'REJECTED';
 
                     let infoHtml = '';
-                    if (data.reviewer) infoHtml += `Reviewer: ${{data.reviewer}}<br>`;
-                    if (data.reviewed_at) infoHtml += `Rejected: ${{new Date(data.reviewed_at).toLocaleString()}}<br>`;
-                    if (data.rejection_reason) infoHtml += `Reason: ${{data.rejection_reason}}`;
+                    if (release.reviewer) infoHtml += `Reviewer: ${{release.reviewer}}<br>`;
+                    if (release.reviewed_at) infoHtml += `Rejected: ${{new Date(release.reviewed_at).toLocaleString()}}<br>`;
+                    if (release.rejection_reason) infoHtml += `Reason: ${{release.rejection_reason}}`;
                     statusInfo.innerHTML = infoHtml;
 
-                    // Allow re-approval if permitted
-                    if (data.can_approve) {{
-                        document.getElementById('qa-pending-form').style.display = 'block';
-                    }}
+                    // Allow re-approval for rejected releases
+                    document.getElementById('qa-pending-form').style.display = 'block';
                 }} else {{
                     // Pending review or other state - show approval form
                     if (state) {{
@@ -1803,9 +1802,7 @@ class RasterViewerInterface(BaseInterface):
                         statusInfo.innerHTML = 'Awaiting curator review';
                     }}
 
-                    if (data.can_approve || data.can_reject) {{
-                        document.getElementById('qa-pending-form').style.display = 'block';
-                    }}
+                    document.getElementById('qa-pending-form').style.display = 'block';
                 }}
 
             }} catch (error) {{

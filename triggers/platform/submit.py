@@ -213,7 +213,7 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                     overwrite=overwrite,
                     stac_item_id=generate_stac_item_id(platform_req.dataset_id, platform_req.resource_id, platform_req.version_id),
                     stac_collection_id=job_params.get('collection_id', platform_req.dataset_id.lower()),
-                    blob_path=job_params.get('blob_name') if platform_req.data_type.value == 'raster' else None,
+                    blob_path=None,  # Set by handler after COG is created (silver path, not bronze input)
                     table_name=job_params.get('table_name') if platform_req.data_type.value == 'vector' else None,
                     request_id=request_id,
                     suggested_version_id=platform_req.version_id,

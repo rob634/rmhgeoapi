@@ -2340,6 +2340,16 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                 except Exception as release_cache_err:
                     logger.warning(f"Failed to cache STAC on Release (non-fatal): {release_cache_err}")
 
+            # V0.9: Update Release blob_path to silver COG path (not bronze input)
+            if release_id and cog_blob:
+                try:
+                    from infrastructure import ReleaseRepository
+                    release_repo = ReleaseRepository()
+                    release_repo.update_physical_outputs(release_id, blob_path=cog_blob)
+                    logger.info(f"✅ Release blob_path updated: {cog_blob}")
+                except Exception as blob_update_err:
+                    logger.warning(f"Failed to update Release blob_path (non-fatal): {blob_update_err}")
+
             phase4_duration = time.time() - phase4_start
             logger.info(f"✅ PHASE 4 complete: {phase4_duration:.2f}s (STAC cached, pgSTAC deferred)")
             _report_progress(docker_context, 100, 4, 4, "STAC Cached", f"Complete ({phase4_duration:.1f}s)")

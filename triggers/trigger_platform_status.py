@@ -582,21 +582,21 @@ def _build_single_status_response(
     if not release and platform_request and platform_request.job_id:
         try:
             release = ReleaseRepository().get_by_job_id(platform_request.job_id)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Release resolution from job_id failed: {e}")
 
     if release:
         try:
             asset = AssetRepository().get_by_id(release.asset_id)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Asset resolution from release failed: {e}")
 
     # Fallback asset from platform_request.asset_id if release didn't resolve
     if not asset and platform_request and getattr(platform_request, 'asset_id', None):
         try:
             asset = AssetRepository().get_by_id(platform_request.asset_id)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Asset fallback resolution failed: {e}")
 
     # =====================================================================
     # 2. Resolve Job status (single field, not the full result blob)
@@ -679,6 +679,7 @@ def _build_single_status_response(
     result["approval"] = _build_approval_block(release, asset_id, data_type) if (asset_id and data_type) else None
 
     # Version history (always include if asset has releases)
+    # TODO(V0.9.2): Implement ?detail=full using verbose flag
     result["versions"] = None
     if asset:
         try:
@@ -686,8 +687,8 @@ def _build_single_status_response(
             all_releases = release_repo.list_by_asset(asset.asset_id)
             if all_releases:
                 result["versions"] = _build_version_summary(all_releases)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Version history resolution failed: {e}")
 
     return result
 
@@ -715,6 +716,7 @@ def _build_version_summary(releases: list) -> list:
             "clearance_state": release.clearance_state.value if hasattr(release.clearance_state, 'value') else str(release.clearance_state),
             "processing_status": release.processing_status.value if hasattr(release.processing_status, 'value') else str(release.processing_status),
             "is_latest": release.is_latest,
+            "version_ordinal": release.version_ordinal,
             "revision": release.revision,
             "created_at": release.created_at.isoformat() if release.created_at else None,
         })

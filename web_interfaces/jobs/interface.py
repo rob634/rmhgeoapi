@@ -132,10 +132,20 @@ class JobsInterface(BaseInterface):
                 # Task counts HTML
                 task_counts_html = self._render_task_counts(tc)
 
+                # Extract dataset context from job parameters for asset link
+                job_params = job.get('parameters', {}) or {}
+                dataset_id = job_params.get('dataset_id', '')
+                resource_id = job_params.get('resource_id', '')
+                if dataset_id:
+                    asset_cell = f'<td><a href="/api/interface/asset-versions?dataset_id={dataset_id}&resource_id={resource_id}" title="{dataset_id}/{resource_id}">{dataset_id[:20]}</a></td>'
+                else:
+                    asset_cell = '<td style="color: #6b7280;">&mdash;</td>'
+
                 row = f'''
                 <tr>
                     <td><span class="job-id-short" title="{job_id}">{job_id_short}</span></td>
                     <td>{job_type}</td>
+                    {asset_cell}
                     <td>{self.render_status_badge(job_status)}</td>
                     <td><span class="stage-badge">Stage {stage}/{total_stages}</span></td>
                     <td>{task_counts_html}</td>
@@ -157,7 +167,7 @@ class JobsInterface(BaseInterface):
             logger.error(f"Error loading jobs: {e}", exc_info=True)
             return f'''
             <tr>
-                <td colspan="7">
+                <td colspan="8">
                     <div class="error-state" style="margin: 0; box-shadow: none;">
                         <p>Error loading jobs: {str(e)}</p>
                     </div>
@@ -229,7 +239,7 @@ class JobsInterface(BaseInterface):
         """Render empty state for jobs table."""
         return '''
         <tr>
-            <td colspan="7">
+            <td colspan="8">
                 <div class="empty-state" style="margin: 0; box-shadow: none;">
                     <div class="icon" style="font-size: 48px;">📋</div>
                     <h3>No Jobs Found</h3>
@@ -360,6 +370,7 @@ class JobsInterface(BaseInterface):
                     <tr>
                         <th>Job ID</th>
                         <th>Job Type</th>
+                        <th>Asset</th>
                         <th>Status</th>
                         <th>Stage</th>
                         <th>Tasks</th>

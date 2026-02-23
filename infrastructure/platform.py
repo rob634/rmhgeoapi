@@ -124,13 +124,17 @@ class ApiRequestRepository(PostgreSQLRepository):
                     sql.Identifier("api_requests")
                 )
             else:
-                # Normal mode: INSERT only, no update on conflict
+                # Normal mode: UPSERT — always point to the latest job (23 FEB 2026)
+                # When a new version is submitted for the same dataset+resource (same
+                # request_id), update job_id so status polling returns current job.
                 # V0.8.11: Added asset_id, platform_id columns (08 FEB 2026)
                 query = sql.SQL("""
                     INSERT INTO {}.{}
                     (request_id, dataset_id, resource_id, version_id, job_id, data_type, asset_id, platform_id, retry_count, created_at, updated_at)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 0, %s, %s)
-                    ON CONFLICT (request_id) DO NOTHING
+                    ON CONFLICT (request_id) DO UPDATE SET
+                        job_id = EXCLUDED.job_id,
+                        updated_at = EXCLUDED.updated_at
                     RETURNING *
                 """).format(
                     sql.Identifier(self.schema_name),

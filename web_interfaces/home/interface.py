@@ -103,6 +103,13 @@ class HomeInterface(BaseInterface):
                         <p class="card-description">Interactive Leaflet map for vector features</p>
                         <div class="card-footer">Open Map</div>
                     </a>
+
+                    <a href="/api/interface/asset-versions" class="card">
+                        <div class="card-icon">&#128209;</div>
+                        <h3 class="card-title">Asset Versions</h3>
+                        <p class="card-description">Browse asset release history and approval workflow</p>
+                        <div class="card-footer">View Assets</div>
+                    </a>
                 </div>
             </section>
 
@@ -122,6 +129,13 @@ class HomeInterface(BaseInterface):
                         <h3 class="card-title">Job Monitor</h3>
                         <p class="card-description">Track ETL job execution and task progress</p>
                         <div class="card-footer">Monitor Jobs</div>
+                    </a>
+
+                    <a href="/api/interface/asset-versions" class="card">
+                        <div class="card-icon">&#9989;</div>
+                        <h3 class="card-title">Approval Queue</h3>
+                        <p class="card-description">Review and approve pending dataset releases</p>
+                        <div class="card-footer">Review Queue</div>
                     </a>
 
                     <a href="/api/interface/pipeline" class="card">

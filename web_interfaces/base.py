@@ -2135,9 +2135,10 @@ class BaseInterface(ABC):
             This is called automatically by wrap_html() unless
             include_navbar=False is specified.
 
-        Navigation structure (02 FEB 2026):
+        Navigation structure (23 FEB 2026):
             - System (includes links to Storage, Queues, Database)
             - Pipelines (includes Submit, Jobs, Tasks)
+            - Assets (asset version management)
             - STAC
             - OGC Features (includes link to Promote Vector)
             - API Docs (includes link to Swagger)
@@ -2168,6 +2169,13 @@ class BaseInterface(ABC):
                    onmouseover="this.style.color='#00A3DA'"
                    onmouseout="this.style.color='#0071BC'">
                     Pipelines
+                </a>
+                <a href="/api/interface/asset-versions"
+                   style="color: #0071BC; text-decoration: none; font-weight: 600;
+                          transition: color 0.2s;"
+                   onmouseover="this.style.color='#00A3DA'"
+                   onmouseout="this.style.color='#0071BC'">
+                    Assets
                 </a>
                 <a href="/api/interface/stac"
                    style="color: #0071BC; text-decoration: none; font-weight: 600;

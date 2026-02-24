@@ -37,6 +37,7 @@ Exports:
 # Standard library imports
 import os
 import logging
+import threading
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional, Union
 from pathlib import Path
@@ -137,6 +138,7 @@ class DuckDBRepository(IDuckDBRepository):
 
     _instance: Optional['DuckDBRepository'] = None
     _initialized: bool = False
+    _instance_lock: threading.Lock = threading.Lock()
 
     def __init__(
         self,
@@ -171,7 +173,11 @@ class DuckDBRepository(IDuckDBRepository):
     @classmethod
     def instance(cls, **kwargs) -> 'DuckDBRepository':
         """
-        Get or create singleton instance.
+        Get or create singleton instance with double-checked locking.
+
+        Thread-safe: uses _instance_lock to prevent race conditions
+        during first initialization. Subsequent calls skip locking
+        via the outer None check (fast path).
 
         Args:
             **kwargs: Passed to __init__ on first call only
@@ -180,9 +186,11 @@ class DuckDBRepository(IDuckDBRepository):
             DuckDBRepository singleton
         """
         if cls._instance is None:
-            cls._instance = cls(**kwargs)
-            cls._initialized = True
-            logger.info("DuckDBRepository singleton created")
+            with cls._instance_lock:
+                if cls._instance is None:
+                    cls._instance = cls(**kwargs)
+                    cls._initialized = True
+                    logger.info("DuckDBRepository singleton created")
         return cls._instance
 
     def get_connection(self) -> duckdb.DuckDBPyConnection:

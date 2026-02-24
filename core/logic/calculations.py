@@ -181,8 +181,8 @@ def get_error_summary(task_results: List[TaskResult]) -> Optional[List[str]]:
     seen = set()
 
     for result in task_results:
-        if result.error_message and result.error_message not in seen:
-            errors.append(result.error_message)
-            seen.add(result.error_message)
+        if result.error_details and result.error_details not in seen:
+            errors.append(result.error_details)
+            seen.add(result.error_details)
 
     return errors if errors else None

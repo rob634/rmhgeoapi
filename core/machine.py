@@ -1905,10 +1905,37 @@ class CoreMachine:
                 }
             )
             # Send to job queue (modern pattern - 30 NOV 2025)
-            self.service_bus.send_message(
-                self.config.queues.jobs_queue,
-                next_message
-            )
+            # C1.6 FIX (24 FEB 2026): Rollback status if send fails to prevent
+            # job stuck in QUEUED with no message on the bus.
+            try:
+                self.service_bus.send_message(
+                    self.config.queues.jobs_queue,
+                    next_message
+                )
+            except Exception as send_err:
+                self.logger.error(
+                    f"❌ [STAGE_ADVANCE] Service Bus send failed, rolling back QUEUED → PROCESSING: {send_err}",
+                    extra={
+                        'checkpoint': 'STAGE_ADVANCE_SEND_FAILED_ROLLBACK',
+                        'job_id': job_id,
+                        'next_stage': next_stage,
+                        'error_type': type(send_err).__name__,
+                        'error_message': str(send_err)
+                    }
+                )
+                try:
+                    self.state_manager.update_job_status(job_id, JobStatus.PROCESSING)
+                except Exception as rollback_err:
+                    self.logger.error(
+                        f"❌ [STAGE_ADVANCE] Rollback also failed — job {job_id[:16]} may be stuck QUEUED: {rollback_err}",
+                        extra={
+                            'checkpoint': 'STAGE_ADVANCE_ROLLBACK_FAILED',
+                            'job_id': job_id,
+                            'next_stage': next_stage
+                        }
+                    )
+                raise send_err
+
             self.logger.info(
                 f"✅ [STAGE_ADVANCE] Message queued for stage {next_stage} - job will restart at stage {next_stage}",
                 extra={

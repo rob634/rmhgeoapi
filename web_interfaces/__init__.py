@@ -275,215 +275,24 @@ def unified_interface_handler(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
-# Auto-import all interface modules to trigger registration
-# These imports cause the @InterfaceRegistry.register() decorators to execute
-try:
-    from .home import interface as _home
-    logger.info("✅ Imported Home interface module")
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import Home interface: {e}")
+# Auto-import all interface modules to trigger @InterfaceRegistry.register() decorators.
+# Uses pkgutil auto-discovery instead of manual try/except per module.
+import importlib
+import pkgutil
 
-try:
-    from .stac import interface as _stac
-    logger.info("✅ Imported STAC interface module")
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import STAC interface: {e}")
+_SKIP_MODULES = {'__pycache__'}
 
-try:
-    from .vector import interface as _vector
-    logger.info("✅ Imported Vector interface module")
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import Vector interface: {e}")
-
-try:
-    from .vector_viewer import interface as _vector_viewer
-    logger.info("✅ Imported Vector Viewer interface module")
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import Vector Viewer interface: {e}")
-
-try:
-    from .jobs import interface as _jobs
-    logger.info("✅ Imported Jobs interface module")
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import Jobs interface: {e}")
-
-try:
-    from .docs import interface as _docs
-    logger.info("✅ Imported Docs interface module")
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import Docs interface: {e}")
-
-try:
-    from .tasks import interface as _tasks
-    logger.info("✅ Imported Tasks interface module")
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import Tasks interface: {e}")
-
-try:
-    from .storage import interface as _storage
-    logger.info("✅ Imported Storage interface module")
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import Storage interface: {e}")
-
-try:
-    from .pipeline import interface as _pipeline
-    logger.info("✅ Imported Pipeline interface module")
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import Pipeline interface: {e}")
-
-try:
-    from .health import interface as _health
-    logger.info("✅ Imported Health interface module")
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import Health interface: {e}")
-
-try:
-    from .map import interface as _map
-    logger.info("✅ Imported Map interface module")
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import Map interface: {e}")
-
-# H3 interface archived (13 FEB 2026) → docs/archive/v08_archive_feb2026/web_interfaces/
-
-try:
-    from .queues import interface as _queues
-    logger.info("✅ Imported Queues interface module")
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import Queues interface: {e}")
-
-try:
-    from .zarr import interface as _zarr
-    logger.info("✅ Imported Zarr interface module")
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import Zarr interface: {e}")
-
-try:
-    from .gallery import interface as _gallery
-    logger.info("✅ Imported Gallery interface module")
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import Gallery interface: {e}")
-
-try:
-    from .swagger import interface as _swagger
-    logger.info("✅ Imported Swagger interface module")
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import Swagger interface: {e}")
-
-try:
-    from .stac_map import interface as _stac_map
-    logger.info("✅ Imported STAC Map interface module")
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import STAC Map interface: {e}")
-
-try:
-    from .submit_vector import interface as _submit_vector
-    logger.info("✅ Imported Submit Vector interface module")
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import Submit Vector interface: {e}")
-
-try:
-    from .promote_vector import interface as _promote_vector
-    logger.info("✅ Imported Promote Vector interface module")
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import Promote Vector interface: {e}")
-
-try:
-    from .submit_raster import interface as _submit_raster
-    logger.info("✅ Imported Submit Raster interface module")
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import Submit Raster interface: {e}")
-
-try:
-    from .raster_viewer import interface as _raster_viewer
-    logger.info("✅ Imported Raster Viewer interface module")
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import Raster Viewer interface: {e}")
-
-try:
-    from .metrics import interface as _metrics
-    logger.info("✅ Imported Metrics interface module")
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import Metrics interface: {e}")
-
-try:
-    from .execution import interface as _execution
-    logger.info("✅ Imported Execution interface module")
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import Execution interface: {e}")
-
-try:
-    from .promoted_viewer import interface as _promoted_viewer
-    logger.info("✅ Imported Promoted Viewer interface module")
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import Promoted Viewer interface: {e}")
-
-try:
-    from .submit_raster_collection import interface as _submit_raster_collection
-    logger.info("✅ Imported Submit Raster Collection interface module")
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import Submit Raster Collection interface: {e}")
-
-try:
-    from .database import interface as _database
-    logger.info("✅ Imported Database interface module")
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import Database interface: {e}")
-
-try:
-    from .stac_collection import interface as _stac_collection
-    logger.info("✅ Imported STAC Collection interface module")
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import STAC Collection interface: {e}")
-
-# Fathom Viewer, H3 Map archived (13 FEB 2026) → docs/archive/v08_archive_feb2026/web_interfaces/
-
-try:
-    from .integration import interface as _integration
-    logger.info("✅ Imported Integration interface module")
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import Integration interface: {e}")
-
-try:
-    from .vector_tiles import interface as _vector_tiles
-    logger.info("✅ Imported Vector Tiles interface module")
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import Vector Tiles interface: {e}")
-
-try:
-    from .upload import interface as _upload
-    logger.info("✅ Imported Upload interface module")
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import Upload interface: {e}")
-
-try:
-    from .redoc import interface as _redoc
-    logger.info("✅ Imported ReDoc interface module")
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import ReDoc interface: {e}")
-
-try:
-    from .external_services import interface as _external_services
-    logger.info("✅ Imported External Services interface module")
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import External Services interface: {e}")
-
-try:
-    from .service_preview import interface as _service_preview
-    logger.info("✅ Imported Service Preview interface module")
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import Service Preview interface: {e}")
-
-try:
-    from .submit import interface as _submit
-    logger.info("✅ Imported Unified Submit interface module")
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import Unified Submit interface: {e}")
-
-try:
-    from .asset_versions import interface as _asset_versions
-    logger.info("Imported Asset Versions interface module")
-except ImportError as e:
-    logger.warning(f"Could not import Asset Versions interface: {e}")
+for _importer, _module_name, _is_pkg in pkgutil.iter_modules(__path__):
+    if _module_name in _SKIP_MODULES:
+        continue
+    try:
+        importlib.import_module(f'.{_module_name}.interface', package=__name__)
+        logger.info(f"Imported {_module_name} interface module")
+    except (ImportError, ModuleNotFoundError):
+        # Module doesn't follow the .interface convention — skip silently
+        pass
+    except Exception as e:
+        logger.warning(f"Could not import {_module_name} interface: {e}")
 
 
 # Public API

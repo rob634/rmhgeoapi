@@ -56,6 +56,8 @@ Debug Output Example (when METRICS_DEBUG_MODE=true):
 import os
 from pydantic import BaseModel, Field
 
+from .defaults import parse_bool
+
 
 class MetricsConfig(BaseModel):
     """
@@ -159,10 +161,6 @@ class MetricsConfig(BaseModel):
         Returns:
             MetricsConfig: Configured metrics settings
         """
-        def parse_bool(value: str) -> bool:
-            """Parse boolean from environment variable."""
-            return value.lower() in ("true", "1", "yes")
-
         return cls(
             enabled=parse_bool(
                 os.environ.get("METRICS_ENABLED", "true")

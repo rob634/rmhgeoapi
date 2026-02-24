@@ -83,6 +83,8 @@ import os
 from typing import Optional
 from pydantic import BaseModel, Field
 
+from .defaults import parse_bool
+
 
 class H3Config(BaseModel):
     """
@@ -203,10 +205,6 @@ class H3Config(BaseModel):
         Returns:
             H3Config: Configured H3 settings
         """
-        def parse_bool(value: str) -> bool:
-            """Parse boolean from environment variable."""
-            return value.lower() in ("true", "1", "yes")
-
         return cls(
             system_admin0_table=os.environ.get(
                 "H3_SYSTEM_ADMIN0_TABLE",

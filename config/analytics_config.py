@@ -26,6 +26,8 @@ from enum import Enum
 from typing import Optional
 from pydantic import BaseModel, Field
 
+from .defaults import AnalyticsDefaults, parse_bool
+
 
 class DuckDBConnectionType(str, Enum):
     """DuckDB connection types."""
@@ -156,26 +158,22 @@ class AnalyticsConfig(BaseModel):
         Returns:
             AnalyticsConfig: Configured analytics settings
         """
-        def parse_bool(value: str) -> bool:
-            """Parse boolean from environment variable."""
-            return value.lower() in ("true", "1", "yes")
-
         return cls(
             connection_type=DuckDBConnectionType(
-                os.environ.get("DUCKDB_CONNECTION_TYPE", "memory")
+                os.environ.get("DUCKDB_CONNECTION_TYPE", AnalyticsDefaults.CONNECTION_TYPE)
             ),
             database_path=os.environ.get("DUCKDB_DATABASE_PATH"),
             enable_spatial=parse_bool(
-                os.environ.get("DUCKDB_ENABLE_SPATIAL", "true")
+                os.environ.get("DUCKDB_ENABLE_SPATIAL", str(AnalyticsDefaults.ENABLE_SPATIAL).lower())
             ),
             enable_azure=parse_bool(
-                os.environ.get("DUCKDB_ENABLE_AZURE", "true")
+                os.environ.get("DUCKDB_ENABLE_AZURE", str(AnalyticsDefaults.ENABLE_AZURE).lower())
             ),
             enable_httpfs=parse_bool(
-                os.environ.get("DUCKDB_ENABLE_HTTPFS", "true")
+                os.environ.get("DUCKDB_ENABLE_HTTPFS", str(AnalyticsDefaults.ENABLE_HTTPFS).lower())
             ),
-            memory_limit=os.environ.get("DUCKDB_MEMORY_LIMIT", "4GB"),
-            threads=int(os.environ.get("DUCKDB_THREADS", "4"))
+            memory_limit=os.environ.get("DUCKDB_MEMORY_LIMIT", AnalyticsDefaults.MEMORY_LIMIT),
+            threads=int(os.environ.get("DUCKDB_THREADS", str(AnalyticsDefaults.THREADS)))
         )
 
     def debug_dict(self) -> dict:

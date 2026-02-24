@@ -383,10 +383,10 @@ class AppModeDefaults:
     # App name used for task tracking (INTENTIONALLY INVALID - set APP_NAME env var)
     DEFAULT_APP_NAME = "your-function-app-name"
 
-    # Docker worker integration (08 JAN 2026, updated 06 FEB 2026)
-    # Docker worker is REQUIRED infrastructure - all GDAL operations run there.
-    # App is degraded without a functional docker worker (limited to small files).
-    DOCKER_WORKER_ENABLED = True
+    # Docker worker integration (08 JAN 2026, updated 24 FEB 2026)
+    # Aligned with app_mode_config.py runtime default (False).
+    # Set DOCKER_WORKER_ENABLED=true in env when Docker worker is deployed.
+    DOCKER_WORKER_ENABLED = False
 
 
 # =============================================================================
@@ -752,6 +752,15 @@ class KeyVaultDefaults:
 
 
 # =============================================================================
+# SHARED UTILITIES
+# =============================================================================
+
+def parse_bool(value: str) -> bool:
+    """Canonical boolean parser for environment variables."""
+    return value.lower() in ("true", "1", "yes")
+
+
+# =============================================================================
 # EXPORTS
 # =============================================================================
 
@@ -770,4 +779,5 @@ __all__ = [
     "ObservabilityDefaults",
     "AppDefaults",
     "KeyVaultDefaults",
+    "parse_bool",
 ]

@@ -1333,7 +1333,7 @@ class ReleaseRepository(PostgreSQLRepository):
             # Version
             version_id=row.get('version_id'),
             suggested_version_id=row.get('suggested_version_id'),
-            version_ordinal=row.get('version_ordinal'),
+            version_ordinal=row.get('version_ordinal') or 0,
             revision=row.get('revision', 1),
             previous_release_id=row.get('previous_release_id'),
             # Flags

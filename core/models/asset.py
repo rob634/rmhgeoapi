@@ -403,10 +403,10 @@ class AssetRelease(BaseModel):
         max_length=100,
         description="Submitter's suggested version ID (metadata only, not authoritative)"
     )
-    version_ordinal: Optional[int] = Field(
-        default=None,
-        ge=1,
-        description="Numeric version ordering: 1, 2, 3... assigned at approval"
+    version_ordinal: int = Field(
+        default=0,
+        ge=0,
+        description="Numeric version ordering: 1, 2, 3... reserved at draft creation. 0 = unassigned (legacy)"
     )
     revision: int = Field(
         default=1,

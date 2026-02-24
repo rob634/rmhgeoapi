@@ -87,6 +87,7 @@ import logging
 from typing import Optional, Dict, Any
 from contextlib import contextmanager
 
+from psycopg import sql
 from psycopg_pool import ConnectionPool
 from psycopg.rows import dict_row
 
@@ -255,8 +256,9 @@ class ConnectionPoolManager:
         if hasattr(config.database, 'h3_schema') and config.database.h3_schema:
             schemas.append(config.database.h3_schema)
 
-        search_path = ', '.join(schemas)
-        conn.execute(f"SET search_path TO {search_path}")
+        conn.execute(sql.SQL("SET search_path TO {}").format(
+            sql.SQL(', ').join(sql.Identifier(s) for s in schemas)
+        ))
         conn.commit()  # Required: psycopg_pool expects clean connection state after configure
 
     @classmethod

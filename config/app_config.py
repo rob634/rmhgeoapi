@@ -413,8 +413,9 @@ class AppConfig(BaseModel):
     # ========================================================================
     # Legacy Compatibility Properties (During Migration)
     # ========================================================================
-    # These delegate to domain configs for backward compatibility
-    # Will be removed after migration is complete
+    # DEFERRED (C2.8, 24 FEB 2026): 50+ callers across codebase still use these.
+    # Removal requires migrating all callers to config.{domain}.{field} pattern.
+    # These delegate to domain configs for backward compatibility.
 
     @property
     def postgis_host(self) -> str:

@@ -172,7 +172,7 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
         "dataset_id": "floods",                // Or by dataset+resource
         "resource_id": "jakarta",
         "reviewer": "user@example.com",        // Required: Who is approving
-        "clearance_level": "ouo",              // Required: "ouo" or "public"
+        "clearance_state": "ouo",              // Required: "ouo" or "public"
         "version_id": "v1",                    // Required: Version to assign
         "notes": "Looks good"                  // Optional: Review notes
     }
@@ -208,7 +208,7 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
 
         reviewer = req_body.get('reviewer')
         notes = req_body.get('notes')
-        clearance_level_str = req_body.get('clearance_level')
+        clearance_level_str = req_body.get('clearance_state') or req_body.get('clearance_level')
         version_id = req_body.get('version_id')
 
         # Validate reviewer is provided
@@ -223,26 +223,26 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
                 headers={"Content-Type": "application/json"}
             )
 
-        # Validate clearance_level is provided
+        # Validate clearance_state is provided
         if not clearance_level_str:
             return func.HttpResponse(
                 json.dumps({
                     "success": False,
-                    "error": "clearance_level is required. Must be 'ouo' or 'public'",
+                    "error": "clearance_state is required. Must be 'ouo' or 'public'",
                     "error_type": "ValidationError"
                 }),
                 status_code=400,
                 headers={"Content-Type": "application/json"}
             )
 
-        # Parse clearance level
+        # Parse clearance state
         try:
             clearance_state = ClearanceState(clearance_level_str.lower())
             if clearance_state == ClearanceState.UNCLEARED:
                 return func.HttpResponse(
                     json.dumps({
                         "success": False,
-                        "error": "clearance_level must be 'ouo' or 'public', not 'uncleared'",
+                        "error": "clearance_state must be 'ouo' or 'public', not 'uncleared'",
                         "error_type": "ValidationError"
                     }),
                     status_code=400,
@@ -252,7 +252,7 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
             return func.HttpResponse(
                 json.dumps({
                     "success": False,
-                    "error": f"Invalid clearance_level: '{clearance_level_str}'. Must be 'ouo' or 'public'",
+                    "error": f"Invalid clearance_state: '{clearance_level_str}'. Must be 'ouo' or 'public'",
                     "error_type": "ValidationError"
                 }),
                 status_code=400,

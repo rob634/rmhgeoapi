@@ -288,10 +288,66 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
         checkpoint("tipg_refresh", tipg_refresh_data)
 
         # =====================================================================
+        # POST-UPLOAD VALIDATION (24 FEB 2026 - False Success Prevention)
+        # =====================================================================
+        total_rows = upload_result.get('total_rows', 0)
+
+        # G2: Hard gate — fail the job if 0 rows inserted
+        if total_rows == 0:
+            raise ValueError(
+                f"Vector ETL completed all phases but inserted 0 rows into "
+                f"{schema}.{table_name}. Table exists but is empty. "
+                f"Source had {len(gdf)} features after validation — "
+                f"data was lost during chunk upload."
+            )
+
+        # G1: Cross-check actual table row count against chunk sum
+        try:
+            from psycopg import sql as psql
+            from services.vector.postgis_handler import VectorToPostGISHandler
+            _handler = VectorToPostGISHandler()
+            with _handler._pg_repo._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        psql.SQL("SELECT COUNT(*) FROM {schema}.{table}").format(
+                            schema=psql.Identifier(schema),
+                            table=psql.Identifier(table_name)
+                        )
+                    )
+                    db_total = cur.fetchone()[0]
+
+            if db_total != total_rows:
+                logger.warning(
+                    f"[{job_id[:8]}] Row count discrepancy: "
+                    f"chunk sum={total_rows}, table COUNT(*)={db_total}"
+                )
+                total_rows = db_total  # Use DB truth
+        except Exception as count_err:
+            logger.warning(f"[{job_id[:8]}] Could not verify table row count: {count_err}")
+
+        # Update metadata feature_count with actual DB count (registered in Phase 2 with len(gdf))
+        if total_rows != len(gdf):
+            try:
+                from services.vector.postgis_handler import VectorToPostGISHandler
+                _meta_handler = VectorToPostGISHandler()
+                with _meta_handler._pg_repo._get_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            psql.SQL(
+                                "UPDATE {schema}.table_catalog SET feature_count = %s "
+                                "WHERE table_name = %s AND schema_name = %s"
+                            ).format(schema=psql.Identifier("geo")),
+                            (total_rows, table_name, schema)
+                        )
+                        conn.commit()
+                logger.info(f"[{job_id[:8]}] Updated metadata feature_count: {len(gdf)} -> {total_rows}")
+            except Exception as meta_err:
+                logger.warning(f"[{job_id[:8]}] Could not update metadata feature_count: {meta_err}")
+
+        # =====================================================================
         # COMPLETE
         # =====================================================================
         elapsed = time.time() - start_time
-        total_rows = upload_result.get('total_rows', 0)
 
         checkpoint("complete", {
             "total_rows": total_rows,
@@ -439,6 +495,25 @@ def _load_and_validate_source(
     converter_params = parameters.get('converter_params', {}) or {}
     if file_extension == 'csv':
         converter_params = build_csv_converter_params(parameters, converter_params)
+    # GPKG layer selection (24 FEB 2026)
+    if file_extension == 'gpkg' and parameters.get('layer_name'):
+        converter_params['layer_name'] = parameters['layer_name']
+
+    # GPKG layer validation (24 FEB 2026)
+    if file_extension == 'gpkg':
+        import pyogrio
+        from infrastructure.blob import BlobRepository
+        blob_repo = BlobRepository.for_zone("bronze")
+        blob_url = blob_repo.get_blob_url_with_sas(container_name, blob_name)
+        available_layers = pyogrio.list_layers(blob_url)
+        layer_names = [name for name, _ in available_layers]
+
+        requested_layer = converter_params.get('layer_name')
+        if requested_layer and requested_layer not in layer_names:
+            raise ValueError(
+                f"Layer '{requested_layer}' not found in GeoPackage '{blob_name}'. "
+                f"Available layers: {layer_names}"
+            )
 
     # Emit file download start event
     emit("file_download_start", {

@@ -1705,9 +1705,24 @@ class VectorToPostGISHandler:
 
                 # Bulk insert all rows in single batched operation
                 cur.executemany(insert_stmt, all_values)
-                rows_inserted = len(all_values)
 
                 conn.commit()
+
+                # Verify actual row count in DB (24 FEB 2026 - G1 false success prevention)
+                cur.execute(
+                    sql.SQL("SELECT COUNT(*) FROM {schema}.{table} WHERE etl_batch_id = %s").format(
+                        schema=sql.Identifier(schema),
+                        table=sql.Identifier(table_name)
+                    ),
+                    (batch_id,)
+                )
+                rows_inserted = cur.fetchone()[0]
+
+                if rows_inserted != len(all_values):
+                    logger.warning(
+                        f"[{batch_id}] Row count mismatch: prepared={len(all_values)}, "
+                        f"actual={rows_inserted} in {schema}.{table_name}"
+                    )
 
         logger.info(f"✅ Chunk {batch_id}: deleted={rows_deleted}, inserted={rows_inserted}")
         return {'rows_deleted': rows_deleted, 'rows_inserted': rows_inserted}

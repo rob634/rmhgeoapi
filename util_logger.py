@@ -174,6 +174,7 @@ _prime_cpu_tracking()
 # Key format: "{context_id}:last"
 # Includes TTL-based cleanup to prevent memory leaks (20 DEC 2025)
 _checkpoint_times: Dict[str, Tuple[float, float]] = {}  # key -> (timestamp, last_access_time)
+_checkpoint_lock = threading.Lock()  # Thread-safe access to _checkpoint_times (C7.3)
 _CHECKPOINT_TTL_SECONDS = 3600  # Clean up entries older than 1 hour
 
 
@@ -292,7 +293,10 @@ def get_runtime_environment() -> Optional[Dict[str, Any]]:
 
 
 def _cleanup_stale_checkpoints():
-    """Remove checkpoint entries older than TTL to prevent memory leaks."""
+    """Remove checkpoint entries older than TTL to prevent memory leaks.
+
+    Note: Caller must hold _checkpoint_lock before calling this function.
+    """
     current_time = time.time()
     stale_keys = [
         key for key, (_, access_time) in _checkpoint_times.items()
@@ -339,21 +343,23 @@ def log_memory_checkpoint(
     if resource_stats:
         current_time = time.time()
 
-        # Periodic cleanup of stale entries (every ~100 calls via simple modulo check)
-        if len(_checkpoint_times) > 100:
-            _cleanup_stale_checkpoints()
-
         # Build checkpoint key for duration tracking
         checkpoint_key = f"{context_id}:last" if context_id else "_global:last"
 
-        # Calculate duration since last checkpoint
-        duration_ms = None
-        if checkpoint_key in _checkpoint_times:
-            last_time, _ = _checkpoint_times[checkpoint_key]
-            duration_ms = round((current_time - last_time) * 1000, 1)
+        # Thread-safe access to _checkpoint_times (C7.3)
+        with _checkpoint_lock:
+            # Periodic cleanup of stale entries (every ~100 calls via simple modulo check)
+            if len(_checkpoint_times) > 100:
+                _cleanup_stale_checkpoints()
 
-        # Update checkpoint time with access time for TTL tracking
-        _checkpoint_times[checkpoint_key] = (current_time, current_time)
+            # Calculate duration since last checkpoint
+            duration_ms = None
+            if checkpoint_key in _checkpoint_times:
+                last_time, _ = _checkpoint_times[checkpoint_key]
+                duration_ms = round((current_time - last_time) * 1000, 1)
+
+            # Update checkpoint time with access time for TTL tracking
+            _checkpoint_times[checkpoint_key] = (current_time, current_time)
 
         # Merge all fields
         all_fields = {
@@ -390,8 +396,9 @@ def clear_checkpoint_context(context_id: str):
         context_id: The context ID used in log_memory_checkpoint calls
     """
     checkpoint_key = f"{context_id}:last"
-    if checkpoint_key in _checkpoint_times:
-        del _checkpoint_times[checkpoint_key]
+    with _checkpoint_lock:
+        if checkpoint_key in _checkpoint_times:
+            del _checkpoint_times[checkpoint_key]
 
 
 # ============================================================================

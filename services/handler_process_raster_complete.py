@@ -2148,10 +2148,10 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
         # V0.9 P2.7: Now includes raster_bands, rescale_range, transform,
         # resolution extracted from the STAC item built above.
         try:
-            from infrastructure.raster_metadata_repository import get_raster_metadata_repository
+            from infrastructure.raster_metadata_repository import RasterMetadataRepository
             from services.stac_renders import recommend_colormap
 
-            cog_repo = get_raster_metadata_repository()
+            cog_repo = RasterMetadataRepository.instance()
 
             # /vsiaz/ path for GDAL/TiTiler access
             cog_url = f"/vsiaz/{cog_container}/{cog_blob}"

@@ -41,12 +41,13 @@ Usage:
     items = repo.list_by_collection("fathom-flood-data")
 
 Exports:
-    RasterMetadataRepository: Repository for app.cog_metadata CRUD
-    get_raster_metadata_repository: Singleton factory
+    RasterMetadataRepository: Repository for app.cog_metadata CRUD (use .instance())
+    get_raster_metadata_repository: DEPRECATED -- use RasterMetadataRepository.instance()
 """
 
 import logging
 import json
+import threading
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
 
@@ -61,7 +62,28 @@ class RasterMetadataRepository:
 
     Provides CRUD operations for COG metadata records.
     Gracefully handles missing table (logs warning, returns None).
+
+    Singleton Pattern:
+        Use RasterMetadataRepository.instance() for the global singleton.
+        Multiple calls return the same instance.
     """
+
+    _instance: Optional['RasterMetadataRepository'] = None
+    _instance_lock: threading.Lock = threading.Lock()
+
+    @classmethod
+    def instance(cls) -> 'RasterMetadataRepository':
+        """
+        Get or create singleton instance with double-checked locking.
+
+        Returns:
+            RasterMetadataRepository singleton
+        """
+        if cls._instance is None:
+            with cls._instance_lock:
+                if cls._instance is None:
+                    cls._instance = cls()
+        return cls._instance
 
     def __init__(self):
         """Initialize with PostgreSQL connection."""
@@ -616,16 +638,14 @@ class RasterMetadataRepository:
             return 0
 
 
-# Singleton instance
-_instance: Optional[RasterMetadataRepository] = None
-
-
 def get_raster_metadata_repository() -> RasterMetadataRepository:
-    """Get singleton RasterMetadataRepository instance."""
-    global _instance
-    if _instance is None:
-        _instance = RasterMetadataRepository()
-    return _instance
+    """
+    Get singleton RasterMetadataRepository instance.
+
+    DEPRECATED: Use RasterMetadataRepository.instance() directly.
+    Kept for backward compatibility with existing callers.
+    """
+    return RasterMetadataRepository.instance()
 
 
 __all__ = ['RasterMetadataRepository', 'get_raster_metadata_repository']

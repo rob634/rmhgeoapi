@@ -47,6 +47,7 @@ Usage:
 # V0.9 - Asset and Release data models and semantic versioning workflows
 __version__ = "0.9.2.3"
 
+import threading
 from typing import Optional
 
 # Export defaults module (single source of truth for all default values)
@@ -108,11 +109,14 @@ from .env_validation import (
 # ============================================================================
 
 _config_instance: Optional[AppConfig] = None
+_config_lock = threading.Lock()
 
 
 def get_config() -> AppConfig:
     """
     Get global configuration singleton - backward compatible.
+
+    Thread-safe via double-checked locking pattern.
 
     Returns:
         AppConfig instance loaded from environment
@@ -124,7 +128,9 @@ def get_config() -> AppConfig:
     """
     global _config_instance
     if _config_instance is None:
-        _config_instance = AppConfig.from_environment()
+        with _config_lock:
+            if _config_instance is None:
+                _config_instance = AppConfig.from_environment()
     return _config_instance
 
 

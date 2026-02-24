@@ -91,6 +91,7 @@ EXPORTS
 """
 
 import os
+import threading
 from enum import Enum
 from typing import Optional
 
@@ -512,6 +513,7 @@ class AppModeConfig(BaseModel):
 # Create singleton instance for use at module import time
 # This is needed because Azure Functions decorators are evaluated at import
 _app_mode_config: Optional[AppModeConfig] = None
+_app_mode_lock = threading.Lock()
 
 
 def get_app_mode_config() -> AppModeConfig:
@@ -519,10 +521,13 @@ def get_app_mode_config() -> AppModeConfig:
     Get the singleton AppModeConfig instance.
 
     Lazily initializes from environment on first call.
+    Thread-safe via double-checked locking pattern.
     """
     global _app_mode_config
     if _app_mode_config is None:
-        _app_mode_config = AppModeConfig.from_environment()
+        with _app_mode_lock:
+            if _app_mode_config is None:
+                _app_mode_config = AppModeConfig.from_environment()
     return _app_mode_config
 
 

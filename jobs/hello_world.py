@@ -44,19 +44,25 @@ class HelloWorldJob(JobBaseMixin, JobBase):  # ← Mixin FIRST for correct MRO!
     description = "Simple two-stage greeting workflow for testing"
 
     # Stage definitions (pure data!)
+    # Parallelism values [C4.5]:
+    #   "single"         - Fixed single task (or small known count) created at orchestration time
+    #   "dynamic"        - Task count determined at runtime from job parameters (see count_param)
+    #   "match_previous" - Creates same number of tasks as the previous stage
+    #   "fan_out"        - Task count driven by previous stage execution results
+    #   "fan_in"         - CoreMachine auto-creates 1 aggregation task with all previous results
     stages = [
         {
             "number": 1,
             "name": "greeting",
             "task_type": "hello_world_greeting",
-            "parallelism": "dynamic",  # Creates n tasks based on params
-            "count_param": "n"         # Which parameter controls count
+            "parallelism": "dynamic",  # Task count from params[count_param] at submission time
+            "count_param": "n"         # Which parameter controls task count
         },
         {
             "number": 2,
             "name": "reply",
             "task_type": "hello_world_reply",
-            "parallelism": "match_previous",  # Same count as stage 1
+            "parallelism": "match_previous",  # Creates same number of tasks as stage 1
             "depends_on": 1,
             "uses_lineage": True  # Can access stage 1 results
         }

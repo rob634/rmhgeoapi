@@ -423,8 +423,8 @@ ENV_VAR_RULES: Dict[str, EnvVarRule] = {
         pattern_description="COG compression algorithm",
         required=False,
         fix_suggestion="Set compression: LZW, DEFLATE, ZSTD, JPEG, WEBP, or NONE",
-        example="LZW",
-        default_value="LZW",
+        example="DEFLATE",
+        default_value="DEFLATE",
     ),
 
     "RASTER_TARGET_CRS": EnvVarRule(
@@ -488,12 +488,12 @@ ENV_VAR_RULES: Dict[str, EnvVarRule] = {
     # PLATFORM / CLASSIFICATION CONFIG (26 JAN 2026)
     # =========================================================================
     "PLATFORM_DEFAULT_ACCESS_LEVEL": EnvVarRule(
-        pattern=re.compile(r"^(public|internal|restricted|confidential)$", re.IGNORECASE),
-        pattern_description="Default data classification level (public, internal, restricted, confidential)",
+        pattern=re.compile(r"^(public|internal|restricted|confidential|OUO)$", re.IGNORECASE),
+        pattern_description="Default data classification level (public, internal, restricted, confidential, OUO)",
         required=False,
         fix_suggestion="Set default access level for datasets without explicit classification",
-        example="internal",
-        default_value="internal",
+        example="OUO",
+        default_value="OUO",
     ),
 
     "PLATFORM_WEBHOOK_ENABLED": EnvVarRule(

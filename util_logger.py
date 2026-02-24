@@ -1673,8 +1673,8 @@ class LoggerFactory:
         ),
         ComponentType.REPOSITORY: ComponentConfig(
             component_type=ComponentType.REPOSITORY,
-            log_level=LogLevel.DEBUG,  # Always debug for repositories to track SQL
-            enable_debug_context=True
+            log_level=_default_level,  # Respects LOG_LEVEL env var (C7.7)
+            enable_debug_context=True if _default_level == LogLevel.DEBUG else False
         ),
         ComponentType.FACTORY: ComponentConfig(
             component_type=ComponentType.FACTORY,

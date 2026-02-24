@@ -188,9 +188,9 @@ class PydanticSchemaDeployTrigger:
             if confirm != 'yes':
                 return func.HttpResponse(
                     json.dumps({
-                        "status": "error",
-                        "error": "Confirmation required",
-                        "message": "Add ?confirm=yes to deploy Pydantic-generated schema",
+                        "success": False,
+                        "error": "Confirmation required: add ?confirm=yes to deploy Pydantic-generated schema",
+                        "error_type": "ValidationError",
                         "warning": "This will replace the current schema with Pydantic-generated DDL"
                     }),
                     status_code=400,
@@ -216,9 +216,9 @@ class PydanticSchemaDeployTrigger:
             self.logger.error(f"Pydantic schema deployment failed: {e}")
             return func.HttpResponse(
                 json.dumps({
-                    "status": "error",
+                    "success": False,
                     "error": str(e),
-                    "message": "Failed to deploy schema"
+                    "error_type": "DeploymentError"
                 }),
                 status_code=500,
                 mimetype="application/json"
@@ -403,18 +403,19 @@ class PydanticSchemaDeployTrigger:
     def _error_response(self, message: str, status_code: int) -> func.HttpResponse:
         """
         Create error response.
-        
+
         Args:
             message: Error message
             status_code: HTTP status code
-            
+
         Returns:
             Error HTTP response
         """
         return func.HttpResponse(
             json.dumps({
-                "status": "error",
+                "success": False,
                 "error": message,
+                "error_type": "ValidationError" if status_code < 500 else "InternalError",
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }),
             status_code=status_code,

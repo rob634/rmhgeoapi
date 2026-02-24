@@ -232,6 +232,9 @@ def translate_to_coremachine(
                 'lat_name': opts.lat_column,
                 'wkt_column': opts.wkt_column
             }
+        # GPKG layer selection (24 FEB 2026)
+        if file_ext == 'gpkg' and opts.layer_name:
+            converter_params['layer_name'] = opts.layer_name
 
         # Docker worker always used for GDAL operations (06 FEB 2026)
         job_type = 'vector_docker_etl'
@@ -261,7 +264,10 @@ def translate_to_coremachine(
 
             # Processing options
             'converter_params': converter_params,
-            'overwrite': opts.overwrite
+            'overwrite': opts.overwrite,
+
+            # GPKG layer selection (24 FEB 2026)
+            'layer_name': opts.layer_name,
         }
 
     # ========================================================================

@@ -395,8 +395,14 @@ class PlatformRequest(BaseModel):
         # Map extension to data type
         if ext in ['geojson', 'gpkg', 'shp', 'zip', 'csv', 'gdb', 'kml', 'kmz']:
             return DataType.VECTOR
-        elif ext in ['tif', 'tiff', 'img', 'hdf', 'nc']:
+        elif ext in ['tif', 'tiff']:
             return DataType.RASTER
+        elif ext in ['img', 'hdf', 'hdf5', 'nc', 'jp2', 'ecw', 'vrt', 'geotiff']:
+            raise ValueError(
+                f"Unsupported raster format: '.{ext}'. "
+                f"Only GeoTIFF (.tif, .tiff) files are accepted. "
+                f"Convert your file to GeoTIFF: gdal_translate input.{ext} output.tif"
+            )
         elif ext in ['las', 'laz', 'e57']:
             return DataType.POINTCLOUD
         elif ext in ['obj', 'fbx', 'gltf', 'glb']:

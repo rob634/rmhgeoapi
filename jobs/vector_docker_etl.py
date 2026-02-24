@@ -144,6 +144,11 @@ class VectorDockerETLJob(JobBaseMixin, JobBase):
             'default': None,
             'description': 'CSV WKT geometry column name'
         },
+        'layer_name': {
+            'type': 'str',
+            'default': None,
+            'description': 'GeoPackage layer name to extract (optional, uses first layer if omitted)'
+        },
         'converter_params': {
             'type': 'dict',
             'default': {},
@@ -354,6 +359,7 @@ class VectorDockerETLJob(JobBaseMixin, JobBase):
                 'lat_name': job_params.get('lat_name'),
                 'lon_name': job_params.get('lon_name'),
                 'wkt_column': job_params.get('wkt_column'),
+                'layer_name': job_params.get('layer_name'),
                 'converter_params': job_params.get('converter_params', {}),
                 'geometry_params': job_params.get('geometry_params', {}),
 

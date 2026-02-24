@@ -76,6 +76,9 @@ class AssetVersionsInterface(BaseInterface):
                 </div>
             </div>
 
+            <!-- Asset List (shown when no params) -->
+            <div id="av-asset-list" class="hidden"></div>
+
             <!-- Asset Header (filled by JS) -->
             <div id="av-header" class="hidden"></div>
 
@@ -288,6 +291,57 @@ class AssetVersionsInterface(BaseInterface):
                 font-size: 0.9rem;
                 margin-left: 4px;
             }
+
+            /* Asset list (no-param landing) */
+            .av-list-header {
+                margin-bottom: 16px;
+            }
+            .av-list-header h2 {
+                margin: 0 0 4px 0;
+                font-size: 1.2rem;
+            }
+            .av-list-header p {
+                color: var(--ds-gray);
+                margin: 0;
+                font-size: 0.85rem;
+            }
+            .av-asset-table {
+                width: 100%;
+                background: white;
+                border-radius: 8px;
+                overflow: hidden;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+                border-collapse: collapse;
+            }
+            .av-asset-table thead {
+                background: var(--ds-navy);
+            }
+            .av-asset-table thead th {
+                padding: 10px 14px;
+                text-align: left;
+                font-size: 0.75rem;
+                font-weight: 600;
+                color: white;
+                text-transform: uppercase;
+                letter-spacing: 0.04em;
+            }
+            .av-asset-table tbody tr {
+                cursor: pointer;
+                transition: background 0.15s;
+                border-bottom: 1px solid #e5e7eb;
+            }
+            .av-asset-table tbody tr:hover {
+                background: #f0f7ff;
+            }
+            .av-asset-table tbody td {
+                padding: 8px 14px;
+                font-size: 0.83rem;
+                vertical-align: middle;
+            }
+            .av-asset-table .mono {
+                font-family: 'Courier New', monospace;
+                font-size: 0.78rem;
+            }
         """
 
     def _generate_custom_js(self, asset_id: str, dataset_id: str, resource_id: str) -> str:
@@ -305,11 +359,146 @@ class AssetVersionsInterface(BaseInterface):
         // Page load
         // ============================================================
         document.addEventListener('DOMContentLoaded', function() {{
-            loadAssetVersions();
+            if (!ASSET_ID && !DATASET_ID) {{
+                loadAssetList();
+            }} else {{
+                loadAssetVersions();
+            }}
         }});
 
         // ============================================================
-        // Data loading
+        // Asset list (no-param landing)
+        // ============================================================
+        async function loadAssetList() {{
+            try {{
+                // Fetch pending and approved releases in parallel
+                const [pendingResp, approvedResp, revokedResp] = await Promise.all([
+                    fetch(API_BASE_URL + '/api/assets/by-approval-state?state=pending_review&limit=100'),
+                    fetch(API_BASE_URL + '/api/assets/by-approval-state?state=approved&limit=100'),
+                    fetch(API_BASE_URL + '/api/assets/by-approval-state?state=revoked&limit=100'),
+                ]);
+                const [pendingData, approvedData, revokedData] = await Promise.all([
+                    pendingResp.json(), approvedResp.json(), revokedResp.json(),
+                ]);
+
+                // Group releases by asset_id
+                const assets = {{}};
+                const allReleases = [
+                    ...(pendingData.releases || []),
+                    ...(approvedData.releases || []),
+                    ...(revokedData.releases || []),
+                ];
+
+                for (const r of allReleases) {{
+                    const aid = r.asset_id;
+                    if (!assets[aid]) {{
+                        assets[aid] = {{
+                            asset_id: aid,
+                            dataset_id: r.stac_collection_id || '—',
+                            resource_id: '—',
+                            data_type: r.blob_path ? 'raster' : (r.table_name ? 'vector' : '—'),
+                            releases: 0,
+                            states: new Set(),
+                            latest_version: null,
+                            latest_ordinal: 0,
+                        }};
+                    }}
+                    const a = assets[aid];
+                    a.releases++;
+                    a.states.add(r.approval_state);
+
+                    // Extract resource_id from stac_item_id pattern: dataset-resource-version
+                    if (r.stac_item_id && a.resource_id === '—') {{
+                        const parts = r.stac_item_id.split('-');
+                        if (parts.length >= 3) {{
+                            // Remove first part (dataset) and last part (version)
+                            const dsId = a.dataset_id;
+                            const prefix = dsId + '-';
+                            if (r.stac_item_id.startsWith(prefix)) {{
+                                const rest = r.stac_item_id.slice(prefix.length);
+                                const lastDash = rest.lastIndexOf('-');
+                                if (lastDash > 0) a.resource_id = rest.slice(0, lastDash);
+                            }}
+                        }}
+                    }}
+
+                    if (r.version_ordinal > a.latest_ordinal) {{
+                        a.latest_ordinal = r.version_ordinal;
+                        a.latest_version = r.version_id || ('ord' + r.version_ordinal);
+                    }}
+                }}
+
+                const assetList = Object.values(assets).sort((a, b) => {{
+                    // Pending first, then by dataset_id
+                    const aP = a.states.has('pending_review') ? 0 : 1;
+                    const bP = b.states.has('pending_review') ? 0 : 1;
+                    if (aP !== bP) return aP - bP;
+                    return a.dataset_id.localeCompare(b.dataset_id);
+                }});
+
+                document.getElementById('av-loading').classList.add('hidden');
+
+                if (assetList.length === 0) {{
+                    const listEl = document.getElementById('av-asset-list');
+                    listEl.innerHTML = '<div class="av-empty">No assets found. Submit a dataset to get started.</div>';
+                    listEl.classList.remove('hidden');
+                    return;
+                }}
+
+                // Render asset list table
+                const stateLabel = (states) => {{
+                    const arr = [...states];
+                    return arr.map(s => {{
+                        const cls = s === 'approved' ? 'approval-badge-approved'
+                            : s === 'pending_review' ? 'approval-badge-pending_review'
+                            : s === 'revoked' ? 'approval-badge-revoked'
+                            : 'approval-badge-rejected';
+                        return `<span class="approval-badge ${{cls}}">${{s.replace('_', ' ')}}</span>`;
+                    }}).join(' ');
+                }};
+
+                const rows = assetList.map(a => `
+                    <tr onclick="window.location.href='/api/interface/asset-versions?asset_id=${{a.asset_id}}'">
+                        <td class="mono">${{a.dataset_id}}</td>
+                        <td class="mono">${{a.resource_id}}</td>
+                        <td>${{a.data_type}}</td>
+                        <td>${{a.releases}}</td>
+                        <td>${{a.latest_version || '—'}}</td>
+                        <td>${{stateLabel(a.states)}}</td>
+                    </tr>
+                `).join('');
+
+                const listEl = document.getElementById('av-asset-list');
+                listEl.innerHTML = `
+                    <div class="av-list-header">
+                        <h2>All Assets</h2>
+                        <p>${{assetList.length}} assets found — click a row to view versions</p>
+                    </div>
+                    <table class="av-asset-table">
+                        <thead>
+                            <tr>
+                                <th>Dataset</th>
+                                <th>Resource</th>
+                                <th>Type</th>
+                                <th>Releases</th>
+                                <th>Latest</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>${{rows}}</tbody>
+                    </table>
+                `;
+                listEl.classList.remove('hidden');
+
+            }} catch (err) {{
+                document.getElementById('av-loading').classList.add('hidden');
+                document.getElementById('av-error-msg').textContent = err.message;
+                document.getElementById('av-error').classList.remove('hidden');
+            }}
+        }}
+
+        // ============================================================
+        // Data loading (single asset)
         // ============================================================
         async function loadAssetVersions() {{
             try {{
@@ -319,7 +508,7 @@ class AssetVersionsInterface(BaseInterface):
                 }} else if (DATASET_ID && RESOURCE_ID) {{
                     url = API_BASE_URL + '/api/platform/status?dataset_id=' + encodeURIComponent(DATASET_ID) + '&resource_id=' + encodeURIComponent(RESOURCE_ID);
                 }} else {{
-                    throw new Error('No asset_id or dataset_id+resource_id provided. Use ?asset_id=XXX or ?dataset_id=XXX&resource_id=YYY');
+                    throw new Error('No asset_id or dataset_id+resource_id provided');
                 }}
 
                 const resp = await fetch(url);

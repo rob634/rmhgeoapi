@@ -826,6 +826,7 @@ def _build_services_block(release, data_type: str) -> Optional[dict]:
         titiler_base = config.titiler_base_url
         from urllib.parse import quote
         cog_url = quote(f"/vsiaz/silver-cogs/{release.blob_path}", safe='')
+        services["collection"] = f"{titiler_base}/cog/WebMercatorQuad/tilejson.json?url={cog_url}"
         services["preview"] = f"{titiler_base}/cog/preview.png?url={cog_url}&max_size=512"
         services["tiles"] = f"{titiler_base}/cog/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}.png?url={cog_url}"
         services["viewer"] = f"{titiler_base}/cog/WebMercatorQuad/map.html?url={cog_url}"

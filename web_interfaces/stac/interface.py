@@ -160,6 +160,20 @@ class StacInterface(BaseInterface):
             margin: 0;
         }
 
+        .collection-card .card-meta {
+            font-size: 9px;
+            font-family: 'Courier New', monospace;
+            color: var(--ds-gray);
+            margin: 1px 0 0 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .collection-card .card-meta span {
+            margin-right: 8px;
+        }
+
         /* Middle section: bbox */
         .collection-card .bbox {
             font-family: 'Courier New', monospace;
@@ -670,12 +684,18 @@ class StacInterface(BaseInterface):
                 // No per-collection approval badges in V0.9
                 const badgesHtml = '';
 
+                // V0.9 metadata line: dataset_id = collection id, items count from summaries
+                const itemCount = c.summaries?.total_items;
+                let metaHtml = `<span>dataset: ${c.id}</span>`;
+                if (itemCount !== undefined) metaHtml += `<span>items: ${itemCount}</span>`;
+
                 return `
                     <div class="collection-card" onclick="window.location.href='/api/interface/stac-collection?id=' + encodeURIComponent('${c.id}')" title="${title}">
                         <div class="card-info">
                             ${badgesHtml}
                             <h3>${title}</h3>
                             <div class="description">${desc}</div>
+                            <div class="card-meta">${metaHtml}</div>
                         </div>
                         <span class="bbox">${bboxStr}</span>
                         <div class="links">${actionButtons}</div>

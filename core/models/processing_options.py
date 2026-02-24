@@ -202,6 +202,10 @@ class VectorProcessingOptions(BaseProcessingOptions):
     lat_column: Optional[str] = Field(default=None, description="CSV latitude column name")
     lon_column: Optional[str] = Field(default=None, description="CSV longitude column name")
     wkt_column: Optional[str] = Field(default=None, description="CSV WKT geometry column name")
+    layer_name: Optional[str] = Field(
+        default=None,
+        description="GeoPackage layer name to extract (defaults to first layer)"
+    )
 
 
 class RasterProcessingOptions(BaseProcessingOptions):

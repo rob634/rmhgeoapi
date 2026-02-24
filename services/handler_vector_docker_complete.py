@@ -526,12 +526,26 @@ def _load_and_validate_source(
         blob_url = blob_repo.get_blob_url_with_sas(container_name, blob_name)
         available_layers = pyogrio.list_layers(blob_url)
         layer_names = [name for name, _ in available_layers]
+        spatial_layers = [(name, gtype) for name, gtype in available_layers if gtype is not None]
 
         requested_layer = converter_params.get('layer_name')
         if requested_layer and requested_layer not in layer_names:
             raise ValueError(
                 f"Layer '{requested_layer}' not found in GeoPackage '{blob_name}'. "
                 f"Available layers: {layer_names}"
+            )
+
+        # Fix A: Reject non-spatial (attributes-only) layers (24 FEB 2026)
+        # GeoPackage data_type='attributes' layers have no geometry column.
+        # Examples: layer_styles, qgis_projects metadata tables.
+        selected_layer = requested_layer or layer_names[0]
+        layer_geom_types = {name: gtype for name, gtype in available_layers}
+        if layer_geom_types.get(selected_layer) is None:
+            spatial_names = [name for name, _ in spatial_layers]
+            raise ValueError(
+                f"Layer '{selected_layer}' is a non-spatial (attributes-only) table, "
+                f"not a geospatial layer. Cannot upload to PostGIS. "
+                f"Spatial layers in this file: {spatial_names}"
             )
 
     # Emit file download start event
@@ -557,6 +571,46 @@ def _load_and_validate_source(
         "original_crs": load_info['original_crs'],
         "columns": len(load_info['columns'])
     })
+
+    # Fix B: Detect QGIS metadata layers (24 FEB 2026)
+    # QGIS dashboard/chart layers have valid geometry but contain project
+    # metadata (expressions, style defs), not real geospatial attribute data.
+    # Detect by checking for signature QGIS column names.
+    QGIS_SIGNATURE_COLUMNS = frozenset({
+        'geometry_generator',   # Virtual geometry expression
+        'label_expression',     # Label rendering expression
+        'stylename',            # layer_styles table
+        'styleqml',             # QML style definition
+        'stylesld',             # SLD style definition
+        'useasdefault',         # layer_styles boolean
+        'f_table_catalog',      # layer_styles reference
+        'f_geometry_column',    # layer_styles reference
+    })
+    if file_extension == 'gpkg':
+        gdf_cols_lower = {c.lower() for c in gdf.columns if c != 'geometry'}
+        qgis_overlap = gdf_cols_lower & QGIS_SIGNATURE_COLUMNS
+        if len(qgis_overlap) >= 2:
+            # Re-read available_layers if not already set (should be set from
+            # GPKG validation block above, but guard defensively)
+            spatial_hint = ""
+            try:
+                import pyogrio
+                from infrastructure.blob import BlobRepository
+                blob_repo = BlobRepository.for_zone("bronze")
+                blob_url = blob_repo.get_blob_url_with_sas(container_name, blob_name)
+                layers = pyogrio.list_layers(blob_url)
+                spatial_names = [n for n, g in layers if g is not None
+                                 and n.lower() not in ('dashboard', 'chart', 'layer_styles')]
+                if spatial_names:
+                    spatial_hint = f" Data layers in this file: {spatial_names}"
+            except Exception:
+                pass
+            raise ValueError(
+                f"Layer appears to be QGIS project metadata, not geospatial data. "
+                f"Detected QGIS columns: {sorted(qgis_overlap)}. "
+                f"Dashboard/chart/style layers contain rendering definitions, "
+                f"not uploadable features.{spatial_hint}"
+            )
 
     # Apply column mapping if provided
     column_mapping = parameters.get('column_mapping')

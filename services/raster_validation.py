@@ -209,6 +209,26 @@ def validate_raster(params: dict) -> dict:
         }
 
     # ================================================================
+    # STEP 2b: File extension validation (24 FEB 2026)
+    # Belt-and-suspenders check for jobs submitted directly (not through
+    # platform endpoint). Rejects non-GeoTIFF extensions early.
+    # ================================================================
+    logger.info("🔄 STEP 2b: Validating file extension...")
+    ext = blob_name.rsplit('.', 1)[-1].lower() if '.' in blob_name else ''
+    if ext not in {'tif', 'tiff'}:
+        from core.errors import ErrorCode, create_error_response
+        logger.error(f"❌ STEP 2b FAILED: Invalid extension '.{ext}' for '{blob_name}'")
+        return create_error_response(
+            ErrorCode.INVALID_FORMAT,
+            f"Invalid file extension '.{ext}' for file '{blob_name}'. "
+            f"Only GeoTIFF files (.tif, .tiff) are accepted. "
+            f"Convert: gdal_translate input.{ext} output.tif",
+            details={"blob_name": blob_name, "extension": ext,
+                     "accepted_extensions": [".tif", ".tiff"]}
+        )
+    logger.info(f"✅ STEP 2b: File extension '.{ext}' is valid")
+
+    # ================================================================
     # NEW STEP 3a (Phase 2-3 - 11 NOV 2025): Pre-flight blob validation
     # Validate container and blob exist before GDAL operation
     # Uses Phase 3 error classification for retry logic
@@ -281,12 +301,64 @@ def validate_raster(params: dict) -> dict:
         # Memory checkpoint 1 (DEBUG_MODE only)
         from util_logger import log_memory_checkpoint
         log_memory_checkpoint(logger, "After GDAL open", context_id=task_id)
+
+        # STEP 3b: GDAL driver check (24 FEB 2026)
+        # Catches renamed files (e.g., PNG renamed to .tif)
+        if src.driver != 'GTiff':
+            logger.error(f"❌ STEP 3b FAILED: File is {src.driver}, not GTiff")
+            return {
+                "success": False,
+                "error": "INVALID_FORMAT",
+                "message": (
+                    f"File '{blob_name}' has a .tif extension but is actually "
+                    f"a {src.driver} format (detected by GDAL). "
+                    f"This is not a GeoTIFF. "
+                    f"Convert: gdal_translate -of GTiff '{blob_name}' output.tif"
+                ),
+                "blob_name": blob_name,
+                "container_name": container_name,
+                "detected_driver": src.driver
+            }
     except Exception as e:
         logger.error(f"❌ STEP 3 FAILED: Cannot open raster file: {e}\n{traceback.format_exc()}")
+
+        # Parse GDAL error into human-readable message (24 FEB 2026)
+        error_str = str(e).lower()
+        if 'not recognized as a supported file format' in error_str:
+            user_message = (
+                f"File '{blob_name}' is not a valid raster image. "
+                f"It may be corrupted, a text file, PDF, ZIP archive, or other non-raster format. "
+                f"Verify the file opens in QGIS or with 'gdalinfo {blob_name}' before uploading."
+            )
+        elif 'http' in error_str or 'curl' in error_str:
+            user_message = (
+                f"Could not download file '{blob_name}' from storage. "
+                f"This is likely a transient network issue. "
+                f"Re-upload the file or resubmit the job."
+            )
+        elif 'ireadblock' in error_str or 'tiffread' in error_str:
+            user_message = (
+                f"File '{blob_name}' has a valid TIFF header but the pixel data is corrupted. "
+                f"The upload may have been interrupted or the source file is damaged. "
+                f"Re-upload the file or re-export from the source application."
+            )
+        elif 'no such file' in error_str or 'does not exist' in error_str:
+            user_message = (
+                f"File '{blob_name}' was not found at the expected storage path. "
+                f"Check the container name and file path are correct."
+            )
+        else:
+            user_message = (
+                f"Cannot open raster file '{blob_name}'. "
+                f"The file may be corrupted or in an unsupported format. "
+                f"Verify the file locally with 'gdalinfo {blob_name}' before re-uploading."
+            )
+
         return {
             "success": False,
             "error": "FILE_UNREADABLE",
-            "message": f"Cannot open raster file: {e}",
+            "message": user_message,
+            "gdal_error": str(e),
             "blob_name": blob_name,
             "container_name": container_name,
             "blob_url_prefix": blob_url[:100] if blob_url else None,

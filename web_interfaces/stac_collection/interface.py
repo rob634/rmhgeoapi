@@ -793,13 +793,48 @@ class StacCollectionInterface(BaseInterface):
 
                 const moreAssets = assetKeys.length > 4 ? `<span class="asset-badge">+${assetKeys.length - 4} more</span>` : '';
 
-                // Build key properties display
-                const propsToShow = ['datetime', 'created', 'updated', 'gsd', 'proj:epsg'];
+                // Build key properties display - V0.9 platform refs first
+                const platformProps = [
+                    ['ddh:dataset_id', 'Dataset'],
+                    ['ddh:resource_id', 'Resource'],
+                    ['ddh:access_level', 'Access'],
+                ];
+                const standardProps = ['datetime', 'proj:epsg', 'gsd'];
                 let propsHtml = '';
-                for (const key of propsToShow) {
+
+                // Platform references (V0.9)
+                for (const [key, label] of platformProps) {
                     if (props[key] !== undefined) {
                         let value = props[key];
-                        if (key === 'datetime' || key === 'created' || key === 'updated') {
+                        if (key === 'ddh:access_level') {
+                            value = value.toUpperCase();
+                        }
+                        propsHtml += `
+                            <div class="item-prop">
+                                <span class="item-prop-label">${label}</span>
+                                <span class="item-prop-value mono">${value}</span>
+                            </div>
+                        `;
+                    }
+                }
+
+                // Extract version from item ID (e.g. "collection-resource-v2" -> "v2")
+                const idParts = itemId.split('-');
+                const lastPart = idParts[idParts.length - 1];
+                if (lastPart && /^(v\d+|ord\d+)$/i.test(lastPart)) {
+                    propsHtml += `
+                        <div class="item-prop">
+                            <span class="item-prop-label">Version</span>
+                            <span class="item-prop-value mono">${lastPart}</span>
+                        </div>
+                    `;
+                }
+
+                // Standard properties
+                for (const key of standardProps) {
+                    if (props[key] !== undefined) {
+                        let value = props[key];
+                        if (key === 'datetime') {
                             value = formatDate(value);
                         } else if (key === 'gsd') {
                             value = value.toFixed(2) + ' m';

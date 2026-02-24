@@ -50,7 +50,7 @@ config = get_config()
 from infrastructure import PlatformRepository
 
 # Import core models
-from core.models import ApiRequest, PlatformRequest
+from core.models import ApiRequest, DataType, PlatformRequest
 
 # Import services (extracted from trigger_platform.py)
 from services.platform_translation import (
@@ -167,6 +167,26 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
 
         # Translate DDH request to CoreMachine job parameters
         job_type, job_params = translate_to_coremachine(platform_req, config)
+
+        # GPKG layer preflight warning (24 FEB 2026)
+        submit_warnings = []
+        if platform_req.data_type == DataType.VECTOR:
+            file_name = platform_req.file_name
+            if isinstance(file_name, list):
+                file_name = file_name[0]
+            file_ext = file_name.split('.')[-1].lower()
+
+            if file_ext == 'gpkg':
+                requested_layer = getattr(platform_req.processing_options, 'layer_name', None)
+                if not requested_layer:
+                    submit_warnings.append({
+                        "type": "GPKG_NO_LAYER_SPECIFIED",
+                        "message": (
+                            "No layer_name specified for GeoPackage file. "
+                            "The first layer will be used. If your file contains multiple layers, "
+                            "specify processing_options.layer_name to choose a specific layer."
+                        )
+                    })
 
         logger.info(f"  Translated to job_type: {job_type}")
 
@@ -338,7 +358,8 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
             request_id=request_id,
             job_id=job_id,
             job_type=job_type,
-            message="Platform request submitted. CoreMachine job created."
+            message="Platform request submitted. CoreMachine job created.",
+            **({"warnings": submit_warnings} if submit_warnings else {})
         )
 
     except ValueError as e:

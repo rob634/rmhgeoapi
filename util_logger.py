@@ -816,46 +816,35 @@ def _get_database_connection(timeout_seconds: int = _DATABASE_STATS_TIMEOUT_SECO
 
         config = get_config()
 
-        # Build connection string based on auth method
+        # Determine credentials based on auth method
         if config.database.use_managed_identity:
-            # Get token for managed identity auth
             from azure.identity import DefaultAzureCredential
             credential = DefaultAzureCredential()
             token = credential.get_token("https://ossrdbms-aad.database.windows.net/.default")
-
-            conn_str = (
-                f"host={config.database.host} "
-                f"port={config.database.port} "
-                f"dbname={config.database.database} "
-                f"user={config.database.managed_identity_admin_name} "
-                f"password={token.token} "
-                f"sslmode=require "
-                f"connect_timeout={timeout_seconds}"
-            )
+            db_user = config.database.managed_identity_admin_name
+            db_password = token.token
         else:
-            # Password auth
-            conn_str = (
-                f"host={config.database.host} "
-                f"port={config.database.port} "
-                f"dbname={config.database.database} "
-                f"user={config.database.user} "
-                f"password={config.database.password} "
-                f"sslmode=require "
-                f"connect_timeout={timeout_seconds}"
-            )
+            db_user = config.database.user
+            db_password = config.database.password
 
-        # Create connection with statement timeout
+        # Create connection with keyword args (no credentials in strings)
         conn = psycopg.connect(
-            conn_str,
+            host=config.database.host,
+            port=config.database.port,
+            dbname=config.database.database,
+            user=db_user,
+            password=db_password,
+            sslmode='require',
+            connect_timeout=timeout_seconds,
             autocommit=True,
-            options=f"-c statement_timeout={timeout_seconds * 1000}"  # Convert to ms
+            options=f"-c statement_timeout={timeout_seconds * 1000}"
         )
 
         return conn
 
     except Exception as e:
         _logger = logging.getLogger("util_logger.database_stats")
-        _logger.warning(f"⚠️ Database stats connection failed: {e}")
+        _logger.warning(f"Database stats connection failed: {type(e).__name__}")
         return None
 
 

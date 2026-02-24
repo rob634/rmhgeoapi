@@ -79,6 +79,12 @@ class PromoteService:
         """
         Promote a STAC collection or item.
 
+        Coordinator method [C4.6] that delegates to focused helpers:
+        1. _validate_stac_reference() - Validate and verify STAC/OGC reference
+        2. _handle_existing_promotion() - Update or gallery-add if already promoted
+        3. _validate_promotion_metadata() - Validate system_role and classification
+        4. _create_promoted_entry() - Build model, persist, attach STAC warnings
+
         If the item is already promoted:
         - If gallery=True, adds to gallery (if not already there)
         - Otherwise, updates the existing entry
@@ -96,6 +102,7 @@ class PromoteService:
             style_id: Optional OGC Style ID
             is_system_reserved: If True, marks as critical system dataset (protected from demotion)
             system_role: System role identifier (e.g., 'admin0_boundaries') for discovery
+            classification: Access level classification string
 
         Returns:
             {
@@ -110,7 +117,63 @@ class PromoteService:
         """
         logger.info(f"Promoting dataset: {promoted_id}")
 
-        # Validate STAC reference
+        # Step 1: Validate STAC reference
+        validation_error = self._validate_stac_reference(stac_collection_id, stac_item_id)
+        if validation_error:
+            return validation_error
+
+        # Step 2: Handle already-promoted datasets (update or gallery add)
+        existing = self._repo.get_by_id(promoted_id)
+        if existing:
+            return self._handle_existing_promotion(
+                promoted_id, existing, gallery, gallery_order,
+                title, description, tags, viewer_config, style_id
+            )
+
+        # Step 3: Validate system_role and classification for new entry
+        metadata_error = self._validate_promotion_metadata(
+            promoted_id, system_role, classification
+        )
+        if metadata_error:
+            return metadata_error
+
+        # Step 4: Create new promoted entry
+        # Parse classification (24 DEC 2025, unified 25 JAN 2026 - S4.DM)
+        classification_enum = AccessLevel.PUBLIC  # Default
+        if classification:
+            classification_enum = AccessLevel(classification)
+
+        return self._create_promoted_entry(
+            promoted_id=promoted_id,
+            stac_collection_id=stac_collection_id,
+            stac_item_id=stac_item_id,
+            title=title,
+            description=description,
+            tags=tags,
+            gallery=gallery,
+            gallery_order=gallery_order,
+            viewer_config=viewer_config,
+            style_id=style_id,
+            is_system_reserved=is_system_reserved,
+            system_role=system_role,
+            classification_enum=classification_enum
+        )
+
+    def _validate_stac_reference(
+        self,
+        stac_collection_id: Optional[str],
+        stac_item_id: Optional[str]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Validate that exactly one STAC reference is provided and exists.
+
+        Args:
+            stac_collection_id: STAC collection ID
+            stac_item_id: STAC item ID
+
+        Returns:
+            Error dict if validation fails, None if valid
+        """
         if not stac_collection_id and not stac_item_id:
             return {
                 "success": False,
@@ -143,57 +206,102 @@ class PromoteService:
                     "error": f"STAC item '{stac_item_id}' not found in PgSTAC"
                 }
 
-        # Check if already promoted
-        existing = self._repo.get_by_id(promoted_id)
+        return None  # Valid
 
-        if existing:
-            # Already promoted - handle update or gallery add
-            if gallery and not existing.in_gallery:
-                # Add to gallery
-                updated = self._repo.add_to_gallery(promoted_id, gallery_order)
-                logger.info(f"Added to gallery: {promoted_id}")
-                return {
-                    "success": True,
-                    "promoted_id": promoted_id,
-                    "action": "gallery_added",
-                    "in_gallery": True,
-                    "data": updated.model_dump() if updated else None
-                }
-            else:
-                # Update existing entry
-                updates = {}
-                if title is not None:
-                    updates['title'] = title
-                if description is not None:
-                    updates['description'] = description
-                if tags is not None:
-                    updates['tags'] = tags
-                if viewer_config is not None:
-                    updates['viewer_config'] = viewer_config
-                if style_id is not None:
-                    updates['style_id'] = style_id
-                if gallery and gallery_order is not None:
-                    updates['gallery_order'] = gallery_order
+    def _handle_existing_promotion(
+        self,
+        promoted_id: str,
+        existing: PromotedDataset,
+        gallery: bool,
+        gallery_order: Optional[int],
+        title: Optional[str],
+        description: Optional[str],
+        tags: Optional[List[str]],
+        viewer_config: Optional[Dict[str, Any]],
+        style_id: Optional[str]
+    ) -> Dict[str, Any]:
+        """
+        Handle promotion request for an already-promoted dataset.
 
-                if updates:
-                    updated = self._repo.update(promoted_id, updates)
-                    logger.info(f"Updated promoted dataset: {promoted_id}")
-                    return {
-                        "success": True,
-                        "promoted_id": promoted_id,
-                        "action": "updated",
-                        "in_gallery": updated.in_gallery if updated else existing.in_gallery,
-                        "data": updated.model_dump() if updated else existing.model_dump()
-                    }
-                else:
-                    return {
-                        "success": True,
-                        "promoted_id": promoted_id,
-                        "action": "no_changes",
-                        "in_gallery": existing.in_gallery,
-                        "data": existing.model_dump()
-                    }
+        Either adds to gallery or updates existing fields.
 
+        Args:
+            promoted_id: Dataset identifier
+            existing: Existing PromotedDataset record
+            gallery: Whether to add to gallery
+            gallery_order: Gallery ordering
+            title: Title override
+            description: Description override
+            tags: Tags override
+            viewer_config: Viewer config override
+            style_id: Style ID override
+
+        Returns:
+            Response dict with action taken
+        """
+        if gallery and not existing.in_gallery:
+            # Add to gallery
+            updated = self._repo.add_to_gallery(promoted_id, gallery_order)
+            logger.info(f"Added to gallery: {promoted_id}")
+            return {
+                "success": True,
+                "promoted_id": promoted_id,
+                "action": "gallery_added",
+                "in_gallery": True,
+                "data": updated.model_dump() if updated else None
+            }
+
+        # Update existing entry
+        updates = {}
+        if title is not None:
+            updates['title'] = title
+        if description is not None:
+            updates['description'] = description
+        if tags is not None:
+            updates['tags'] = tags
+        if viewer_config is not None:
+            updates['viewer_config'] = viewer_config
+        if style_id is not None:
+            updates['style_id'] = style_id
+        if gallery and gallery_order is not None:
+            updates['gallery_order'] = gallery_order
+
+        if updates:
+            updated = self._repo.update(promoted_id, updates)
+            logger.info(f"Updated promoted dataset: {promoted_id}")
+            return {
+                "success": True,
+                "promoted_id": promoted_id,
+                "action": "updated",
+                "in_gallery": updated.in_gallery if updated else existing.in_gallery,
+                "data": updated.model_dump() if updated else existing.model_dump()
+            }
+        else:
+            return {
+                "success": True,
+                "promoted_id": promoted_id,
+                "action": "no_changes",
+                "in_gallery": existing.in_gallery,
+                "data": existing.model_dump()
+            }
+
+    def _validate_promotion_metadata(
+        self,
+        promoted_id: str,
+        system_role: Optional[str],
+        classification: Optional[str]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Validate system_role and classification for a new promotion.
+
+        Args:
+            promoted_id: Dataset identifier (for role conflict checking)
+            system_role: System role to validate
+            classification: Classification string to validate
+
+        Returns:
+            Error dict if validation fails, None if valid
+        """
         # Validate system_role if provided
         if system_role:
             valid_roles = [r.value for r in SystemRole]
@@ -210,19 +318,56 @@ class PromoteService:
                     "error": f"System role '{system_role}' is already assigned to '{existing_role.promoted_id}'"
                 }
 
-        # Parse classification (24 DEC 2025, unified 25 JAN 2026 - S4.DM)
+        # Validate classification if provided
         # NOTE: RESTRICTED is defined but NOT YET SUPPORTED
-        classification_enum = AccessLevel.PUBLIC  # Default
         if classification:
             try:
-                classification_enum = AccessLevel(classification)
+                AccessLevel(classification)
             except ValueError:
                 return {
                     "success": False,
                     "error": f"Invalid classification '{classification}'. Valid: {AccessLevel.supported_values()} (restricted not yet supported)"
                 }
 
-        # Create new promoted entry
+        return None  # Valid
+
+    def _create_promoted_entry(
+        self,
+        promoted_id: str,
+        stac_collection_id: Optional[str],
+        stac_item_id: Optional[str],
+        title: Optional[str],
+        description: Optional[str],
+        tags: Optional[List[str]],
+        gallery: bool,
+        gallery_order: Optional[int],
+        viewer_config: Optional[Dict[str, Any]],
+        style_id: Optional[str],
+        is_system_reserved: bool,
+        system_role: Optional[str],
+        classification_enum: AccessLevel
+    ) -> Dict[str, Any]:
+        """
+        Create a new promoted dataset entry and return result with STAC warnings.
+
+        Args:
+            promoted_id: Dataset identifier
+            stac_collection_id: STAC collection reference
+            stac_item_id: STAC item reference
+            title: Display title
+            description: Display description
+            tags: Categorization tags
+            gallery: Whether to include in gallery
+            gallery_order: Gallery ordering
+            viewer_config: Viewer customization
+            style_id: OGC Style ID
+            is_system_reserved: System protection flag
+            system_role: System role identifier
+            classification_enum: Parsed AccessLevel enum
+
+        Returns:
+            Response dict with created entry and any STAC warnings
+        """
         dataset = PromotedDataset(
             promoted_id=promoted_id,
             stac_collection_id=stac_collection_id,
@@ -547,8 +692,6 @@ class PromoteService:
     def _verify_stac_item_exists(self, item_id: str) -> bool:
         """Check if a STAC item exists in PgSTAC."""
         try:
-            from infrastructure.pgstac_bootstrap import get_item_by_id
-
             result = get_item_by_id(item_id)
             # get_item_by_id returns error dict if not found
             if 'error' in result:
@@ -646,6 +789,8 @@ class PromoteService:
         Get a STAC item by ID for validation.
 
         Searches across all collections to find the item.
+        Routes through get_item_by_id (infrastructure layer) instead of
+        direct SQL access [C4.4].
 
         Args:
             item_id: Item ID to find
@@ -653,18 +798,13 @@ class PromoteService:
         Returns:
             Item dict or None
         """
-        from infrastructure.postgresql import PostgreSQLRepository
-
         try:
-            pg_repo = PostgreSQLRepository(schema_name='pgstac')
-            with pg_repo._get_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        "SELECT content FROM pgstac.items WHERE id = %s LIMIT 1",
-                        (item_id,)
-                    )
-                    row = cur.fetchone()
-                    return row['content'] if row else None
+            result = get_item_by_id(item_id)
+            # get_item_by_id returns error dict if not found
+            if isinstance(result, dict) and 'error' in result:
+                logger.warning(f"Item not found for validation: {item_id}")
+                return None
+            return result
         except Exception as e:
             logger.warning(f"Failed to get item '{item_id}': {e}")
             return None

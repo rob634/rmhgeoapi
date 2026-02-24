@@ -54,11 +54,19 @@ class JobBase(ABC):
             - number (int): Stage number (1-based)
             - name (str): Stage name
             - task_type (str): Handler name from services registry
-            - parallelism (str): One of "single", "fan_out", or "fan_in"
-                * "single": Orchestration-time parallelism
+            - parallelism (str): Describes how task count is determined
+                * "single": Fixed task count at orchestration time
                     - Job creates tasks BEFORE any execution
                     - N can be from params (n=10), calculation, or hardcoded (1 task)
                     - Example: n=10 from request, or always create 1 analysis task
+                * "dynamic": Task count determined at runtime from job parameters
+                    - Similar to "single" but count comes from a named parameter
+                    - Use with "count_param" to specify which parameter controls N
+                    - Example: count_param="n", params={n: 5} creates 5 tasks
+                * "match_previous": Same task count as the previous stage
+                    - Creates one task per task in the prior stage
+                    - Often paired with "depends_on" and "uses_lineage"
+                    - Example: Stage 1 has 5 greetings, Stage 2 has 5 replies
                 * "fan_out": Result-driven parallelism
                     - Job creates tasks FROM previous stage execution results
                     - N discovered at runtime (from previous_results data)

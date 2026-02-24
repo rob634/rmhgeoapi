@@ -1580,8 +1580,8 @@ class SubmitRasterInterface(BaseInterface):
             const shortName = blobName.split('/').pop();
             document.getElementById('selected-file').innerHTML = `
                 <div class="file-info">
-                    <span class="file-path">${shortName}</span>
-                    <span class="file-meta">${container} / ${blobName} (${sizeMb.toFixed(2)} MB)</span>
+                    <span class="file-path">${escapeHtml(shortName)}</span>
+                    <span class="file-meta">${escapeHtml(container)} / ${escapeHtml(blobName)} (${sizeMb.toFixed(2)} MB)</span>
                 </div>
             `;
 

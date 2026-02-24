@@ -505,7 +505,7 @@ class PlatformInterface(BaseInterface):
                     // Show storage account info
                     accountEl.textContent = `Storage Account: ${bronzeData.account} (${bronzeData.container_count} containers)`;
                 } else if (bronzeData?.error) {
-                    containersEl.innerHTML = `<span class="tag" style="background: #f8d7da; color: #721c24;">Error: ${bronzeData.error}</span>`;
+                    containersEl.innerHTML = `<span class="tag" style="background: #f8d7da; color: #721c24;">Error: ${escapeHtml(bronzeData.error)}</span>`;
                     accountEl.textContent = '';
                 } else {
                     containersEl.innerHTML = '<span class="tag" style="background: #fff3cd; color: #856404;">No containers found</span>';

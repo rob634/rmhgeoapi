@@ -1772,9 +1772,9 @@ class RasterViewerInterface(BaseInterface):
                     statusBadge.textContent = 'APPROVED';
 
                     let infoHtml = '';
-                    if (release.reviewer) infoHtml += `Reviewer: ${{release.reviewer}}<br>`;
+                    if (release.reviewer) infoHtml += `Reviewer: ${{escapeHtml(release.reviewer)}}<br>`;
                     if (release.reviewed_at) infoHtml += `Approved: ${{new Date(release.reviewed_at).toLocaleString()}}<br>`;
-                    if (release.clearance_state) infoHtml += `Clearance: ${{release.clearance_state.toUpperCase()}}`;
+                    if (release.clearance_state) infoHtml += `Clearance: ${{escapeHtml(release.clearance_state.toUpperCase())}}`;
                     statusInfo.innerHTML = infoHtml;
 
                     // Approved releases can be revoked
@@ -1786,9 +1786,9 @@ class RasterViewerInterface(BaseInterface):
                     statusBadge.textContent = 'REJECTED';
 
                     let infoHtml = '';
-                    if (release.reviewer) infoHtml += `Reviewer: ${{release.reviewer}}<br>`;
+                    if (release.reviewer) infoHtml += `Reviewer: ${{escapeHtml(release.reviewer)}}<br>`;
                     if (release.reviewed_at) infoHtml += `Rejected: ${{new Date(release.reviewed_at).toLocaleString()}}<br>`;
-                    if (release.rejection_reason) infoHtml += `Reason: ${{release.rejection_reason}}`;
+                    if (release.rejection_reason) infoHtml += `Reason: ${{escapeHtml(release.rejection_reason)}}`;
                     statusInfo.innerHTML = infoHtml;
 
                     // Allow re-approval for rejected releases

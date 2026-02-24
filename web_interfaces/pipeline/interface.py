@@ -741,9 +741,9 @@ class PipelineInterface(BaseInterface):
                     loadingState.style.display = 'none';
                     errorState.style.display = 'block';
                     errorState.querySelector('.error-message').innerHTML = `
-                        <strong>Schema not deployed:</strong> ${data.message}<br>
+                        <strong>Schema not deployed:</strong> ${escapeHtml(data.message)}<br>
                         <span style="font-size: 12px; color: #666;">
-                            Hint: ${data.hint || 'Deploy the database schema first'}
+                            Hint: ${escapeHtml(data.hint || 'Deploy the database schema first')}
                         </span>
                     `;
                     return;

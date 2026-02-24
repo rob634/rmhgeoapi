@@ -1238,7 +1238,7 @@ class PromoteVectorInterface(BaseInterface):
         function renderTags() {
             const container = document.getElementById('tagsDisplay');
             container.innerHTML = tags.map(tag =>
-                `<span class="tag">${tag}<span class="tag-remove" onclick="removeTag('${tag}')">×</span></span>`
+                `<span class="tag">${escapeHtml(tag)}<span class="tag-remove" onclick="removeTag('${escapeHtml(tag)}')">×</span></span>`
             ).join('');
         }
 

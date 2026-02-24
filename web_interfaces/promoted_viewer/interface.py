@@ -541,7 +541,7 @@ class PromotedViewerInterface(BaseInterface):
             const tags = data.tags || [];
             if (tags.length > 0) {{
                 tagsContainer.innerHTML = tags.map(tag =>
-                    `<span class="tag">${{tag}}</span>`
+                    `<span class="tag">${{escapeHtml(tag)}}</span>`
                 ).join('');
             }} else {{
                 tagsContainer.innerHTML = '<span class="tag">vector</span>';

@@ -689,16 +689,16 @@ class VectorInterface(BaseInterface):
                 modal.innerHTML = `
                     <div class="modal-content">
                         <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
-                        <h2>${data.title || data.id}</h2>
+                        <h2>${escapeHtml(data.title || data.id)}</h2>
 
                         <div class="modal-section">
                             <h4>Description</h4>
-                            <p>${data.description || 'No description available'}</p>
+                            <p>${escapeHtml(data.description || 'No description available')}</p>
                         </div>
 
                         <div class="modal-section">
                             <h4>Collection ID</h4>
-                            <code>${data.id}</code>
+                            <code>${escapeHtml(data.id)}</code>
                         </div>
 
                         <div class="modal-section">

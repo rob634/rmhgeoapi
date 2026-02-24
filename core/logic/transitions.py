@@ -44,17 +44,19 @@ def can_job_transition(current: JobStatus, target: JobStatus) -> bool:
     if current == target:
         return True
 
-    # Define valid transitions
+    # NOTE: Must stay in sync with JobRecord.can_transition_to() in core/models/job.py
     transitions = {
         JobStatus.QUEUED: [JobStatus.PROCESSING, JobStatus.FAILED],
         JobStatus.PROCESSING: [
+            JobStatus.QUEUED,  # Stage advancement re-queuing
             JobStatus.COMPLETED,
             JobStatus.FAILED,
             JobStatus.COMPLETED_WITH_ERRORS
         ],
-        JobStatus.FAILED: [],  # Terminal state
-        JobStatus.COMPLETED: [],  # Terminal state
-        JobStatus.COMPLETED_WITH_ERRORS: []  # Terminal state
+        # Terminal states allow recovery transitions (error recovery/retry)
+        JobStatus.FAILED: [JobStatus.QUEUED],
+        JobStatus.COMPLETED: [JobStatus.QUEUED],
+        JobStatus.COMPLETED_WITH_ERRORS: [JobStatus.QUEUED]
     }
 
     return target in transitions.get(current, [])

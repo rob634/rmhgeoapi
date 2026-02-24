@@ -1193,7 +1193,7 @@ class ReleaseRepository(PostgreSQLRepository):
                                 made_public_by = %s,
                                 updated_at = %s
                             WHERE release_id = %s
-                              AND approval_state = 'pending_review'
+                              AND approval_state = %s
                         """).format(
                             sql.Identifier(self.schema),
                             sql.Identifier(self.table)
@@ -1205,7 +1205,8 @@ class ReleaseRepository(PostgreSQLRepository):
                             clearance_state, reviewed_at, reviewer,
                             reviewed_at, reviewer,
                             reviewed_at,
-                            release_id
+                            release_id,
+                            ApprovalState.PENDING_REVIEW
                         )
                     )
                 else:
@@ -1224,7 +1225,7 @@ class ReleaseRepository(PostgreSQLRepository):
                                 cleared_by = %s,
                                 updated_at = %s
                             WHERE release_id = %s
-                              AND approval_state = 'pending_review'
+                              AND approval_state = %s
                         """).format(
                             sql.Identifier(self.schema),
                             sql.Identifier(self.table)
@@ -1235,7 +1236,8 @@ class ReleaseRepository(PostgreSQLRepository):
                             approval_notes,
                             clearance_state, reviewed_at, reviewer,
                             reviewed_at,
-                            release_id
+                            release_id,
+                            ApprovalState.PENDING_REVIEW
                         )
                     )
 

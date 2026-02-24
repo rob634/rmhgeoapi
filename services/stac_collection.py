@@ -441,8 +441,8 @@ def _create_stac_collection_impl(
         # Extract STAC Items for each tile and cache in cog_metadata
         logger.info(f"📝 Extracting STAC Items for {len(tile_blobs)} COG tiles (caching, no pgSTAC)...")
 
-        from infrastructure.raster_metadata_repository import get_raster_metadata_repository
-        cog_repo = get_raster_metadata_repository()
+        from infrastructure.raster_metadata_repository import RasterMetadataRepository
+        cog_repo = RasterMetadataRepository.instance()
 
         created_items = []
         failed_items = []

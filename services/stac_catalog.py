@@ -362,8 +362,8 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
         inserted_to_pgstac = False
 
         try:
-            from infrastructure.raster_metadata_repository import get_raster_metadata_repository
-            cog_repo = get_raster_metadata_repository()
+            from infrastructure.raster_metadata_repository import RasterMetadataRepository
+            cog_repo = RasterMetadataRepository.instance()
 
             # item may be a pydantic model or dict
             if isinstance(item, dict):

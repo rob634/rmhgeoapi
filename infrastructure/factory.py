@@ -30,7 +30,6 @@ Exports:
 from typing import Dict, Any, Optional
 import logging
 
-from .jobs_tasks import JobRepository, TaskRepository, StageCompletionRepository
 from util_logger import LoggerFactory, ComponentType
 
 logger = LoggerFactory.create_logger(ComponentType.REPOSITORY, "RepositoryFactory")
@@ -80,10 +79,12 @@ class RepositoryFactory:
             task_repo = repos['task_repo']
             completion = repos['completion_detector']
         """
+        from .jobs_tasks import JobRepository, TaskRepository, StageCompletionRepository
+
         logger.info("🏭 Creating PostgreSQL repositories")
         logger.debug(f"  Connection string provided: {connection_string is not None}")
         logger.debug(f"  Schema name: {schema_name}")
-        
+
         # Create repositories
         logger.debug("📦 Creating JobRepository...")
         job_repo = JobRepository(connection_string, schema_name)
@@ -104,57 +105,60 @@ class RepositoryFactory:
     def create_job_repository(
         connection_string: Optional[str] = None,
         schema_name: str = "app"
-    ) -> JobRepository:
+    ) -> 'JobRepository':
         """
         Create only a job repository instance.
-        
+
         Use this when you only need job operations without tasks.
-        
+
         Args:
             connection_string: PostgreSQL connection string
             schema_name: Database schema name
-            
+
         Returns:
             JobRepository instance
         """
+        from .jobs_tasks import JobRepository
         return JobRepository(connection_string, schema_name)
     
     @staticmethod
     def create_task_repository(
         connection_string: Optional[str] = None,
         schema_name: str = "app"
-    ) -> TaskRepository:
+    ) -> 'TaskRepository':
         """
         Create only a task repository instance.
-        
+
         Use this when you only need task operations without jobs.
-        
+
         Args:
             connection_string: PostgreSQL connection string
             schema_name: Database schema name
-            
+
         Returns:
             TaskRepository instance
         """
+        from .jobs_tasks import TaskRepository
         return TaskRepository(connection_string, schema_name)
     
     @staticmethod
     def create_completion_detector(
         connection_string: Optional[str] = None,
         schema_name: str = "app"
-    ) -> StageCompletionRepository:
+    ) -> 'StageCompletionRepository':
         """
         Create only a completion detector instance.
-        
+
         Use this for atomic completion detection operations.
-        
+
         Args:
             connection_string: PostgreSQL connection string
             schema_name: Database schema name
-            
+
         Returns:
             StageCompletionRepository instance
         """
+        from .jobs_tasks import StageCompletionRepository
         return StageCompletionRepository(connection_string, schema_name)
     
     # ========================================================================

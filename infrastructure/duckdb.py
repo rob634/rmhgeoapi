@@ -27,7 +27,7 @@ Extensions Enabled:
 
 Exports:
     DuckDBRepository: Singleton analytical database repository
-    IDuckDBRepository: Abstract interface for dependency injection
+    IDuckDBRepository: Imported from infrastructure.interface_repository (canonical)
 """
 
 # ============================================================================
@@ -37,7 +37,7 @@ Exports:
 # Standard library imports
 import os
 import logging
-from abc import ABC, abstractmethod
+import threading
 from typing import List, Dict, Any, Optional, Union
 from pathlib import Path
 import traceback
@@ -53,61 +53,9 @@ except ImportError:
 
 # Application imports
 from util_logger import LoggerFactory, ComponentType
+from infrastructure.interface_repository import IDuckDBRepository
 
 logger = LoggerFactory.create_logger(ComponentType.REPOSITORY, __name__)
-
-
-# ============================================================================
-# DUCKDB REPOSITORY INTERFACE
-# ============================================================================
-
-class IDuckDBRepository(ABC):
-    """
-    Interface for DuckDB analytical operations.
-
-    Enables dependency injection and testing/mocking of DuckDB operations.
-    All DuckDB repositories must implement this interface.
-    """
-
-    @abstractmethod
-    def get_connection(self) -> duckdb.DuckDBPyConnection:
-        """Get or create DuckDB connection with extensions loaded"""
-        pass
-
-    @abstractmethod
-    def query(self, sql: str, parameters: Optional[List[Any]] = None) -> duckdb.DuckDBPyRelation:
-        """Execute SQL query with optional parameters"""
-        pass
-
-    @abstractmethod
-    def query_to_df(self, sql: str, parameters: Optional[List[Any]] = None):
-        """Execute SQL query and return pandas DataFrame"""
-        pass
-
-    @abstractmethod
-    def execute(self, sql: str, parameters: Optional[List[Any]] = None) -> None:
-        """Execute SQL statement without returning results"""
-        pass
-
-    @abstractmethod
-    def read_parquet_from_blob(self, container: str, blob_pattern: str) -> duckdb.DuckDBPyRelation:
-        """Read Parquet files from Azure Blob Storage (serverless query)"""
-        pass
-
-    @abstractmethod
-    def export_geoparquet(self, data: Any, output_path: str) -> Dict[str, Any]:
-        """Export data to GeoParquet format"""
-        pass
-
-    @abstractmethod
-    def close(self) -> None:
-        """Close DuckDB connection and cleanup resources"""
-        pass
-
-    @abstractmethod
-    def health_check(self) -> Dict[str, Any]:
-        """Check DuckDB health and extension availability"""
-        pass
 
 
 # ============================================================================
@@ -137,6 +85,7 @@ class DuckDBRepository(IDuckDBRepository):
 
     _instance: Optional['DuckDBRepository'] = None
     _initialized: bool = False
+    _instance_lock: threading.Lock = threading.Lock()
 
     def __init__(
         self,
@@ -171,7 +120,11 @@ class DuckDBRepository(IDuckDBRepository):
     @classmethod
     def instance(cls, **kwargs) -> 'DuckDBRepository':
         """
-        Get or create singleton instance.
+        Get or create singleton instance with double-checked locking.
+
+        Thread-safe: uses _instance_lock to prevent race conditions
+        during first initialization. Subsequent calls skip locking
+        via the outer None check (fast path).
 
         Args:
             **kwargs: Passed to __init__ on first call only
@@ -180,9 +133,11 @@ class DuckDBRepository(IDuckDBRepository):
             DuckDBRepository singleton
         """
         if cls._instance is None:
-            cls._instance = cls(**kwargs)
-            cls._initialized = True
-            logger.info("DuckDBRepository singleton created")
+            with cls._instance_lock:
+                if cls._instance is None:
+                    cls._instance = cls(**kwargs)
+                    cls._initialized = True
+                    logger.info("DuckDBRepository singleton created")
         return cls._instance
 
     def get_connection(self) -> duckdb.DuckDBPyConnection:

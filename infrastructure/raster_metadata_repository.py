@@ -41,12 +41,13 @@ Usage:
     items = repo.list_by_collection("fathom-flood-data")
 
 Exports:
-    RasterMetadataRepository: Repository for app.cog_metadata CRUD
-    get_raster_metadata_repository: Singleton factory
+    RasterMetadataRepository: Repository for app.cog_metadata CRUD (use .instance())
+    get_raster_metadata_repository: DEPRECATED -- use RasterMetadataRepository.instance()
 """
 
 import logging
 import json
+import threading
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
 
@@ -61,7 +62,28 @@ class RasterMetadataRepository:
 
     Provides CRUD operations for COG metadata records.
     Gracefully handles missing table (logs warning, returns None).
+
+    Singleton Pattern:
+        Use RasterMetadataRepository.instance() for the global singleton.
+        Multiple calls return the same instance.
     """
+
+    _instance: Optional['RasterMetadataRepository'] = None
+    _instance_lock: threading.Lock = threading.Lock()
+
+    @classmethod
+    def instance(cls) -> 'RasterMetadataRepository':
+        """
+        Get or create singleton instance with double-checked locking.
+
+        Returns:
+            RasterMetadataRepository singleton
+        """
+        if cls._instance is None:
+            with cls._instance_lock:
+                if cls._instance is None:
+                    cls._instance = cls()
+        return cls._instance
 
     def __init__(self):
         """Initialize with PostgreSQL connection."""
@@ -205,20 +227,9 @@ class RasterMetadataRepository:
         try:
             now = datetime.now(timezone.utc)
 
-            # Convert lists/dicts to JSON strings
-            transform_json = json.dumps(transform) if transform else None
-            resolution_json = json.dumps(resolution) if resolution else None
-            band_names_json = json.dumps(band_names) if band_names else None
-            band_units_json = json.dumps(band_units) if band_units else None
-            overview_levels_json = json.dumps(overview_levels) if overview_levels else None
-            blocksize_json = json.dumps(blocksize) if blocksize else None
-            rescale_range_json = json.dumps(rescale_range) if rescale_range else None
-            eo_bands_json = json.dumps(eo_bands) if eo_bands else None
-            raster_bands_json = json.dumps(raster_bands) if raster_bands else None
-            providers_json = json.dumps(providers) if providers else None
-            stac_extensions_json = json.dumps(stac_extensions) if stac_extensions else None
-            custom_properties_json = json.dumps(custom_properties) if custom_properties else None
-            stac_item_json_val = json.dumps(stac_item_json) if stac_item_json else None
+            # psycopg3 type adapters handle dict/list -> JSONB automatically
+            # via PostgreSQLRepository._register_type_adapters() (JsonbBinaryDumper)
+            # No manual json.dumps() needed for SQL parameters.
 
             with self._pg_repo._get_connection() as conn:
                 with conn.cursor() as cur:
@@ -302,17 +313,17 @@ class RasterMetadataRepository:
                     """, (
                         cog_id, container, blob_path, cog_url,
                         width, height, band_count, dtype, nodata, crs,
-                        transform_json, resolution_json, band_names_json, band_units_json,
+                        transform, resolution, band_names, band_units,
                         bbox_minx, bbox_miny, bbox_maxx, bbox_maxy,
                         temporal_start, temporal_end,
-                        is_cog, overview_levels_json, compression, blocksize_json,
-                        colormap, rescale_range_json, eo_bands_json, raster_bands_json,
+                        is_cog, overview_levels, compression, blocksize,
+                        colormap, rescale_range, eo_bands, raster_bands,
                         title, description, keywords, license,
-                        providers_json, stac_extensions_json,
+                        providers, stac_extensions,
                         stac_item_id, stac_collection_id,
                         etl_job_id, source_file, source_format, source_crs,
-                        sci_doi, sci_citation, custom_properties_json,
-                        stac_item_json_val,
+                        sci_doi, sci_citation, custom_properties,
+                        stac_item_json,
                         now, now
                     ))
                     conn.commit()
@@ -576,7 +587,6 @@ class RasterMetadataRepository:
 
         try:
             now = datetime.now(timezone.utc)
-            stac_json_val = json.dumps(stac_item_json) if stac_item_json else None
 
             with self._pg_repo._get_connection() as conn:
                 with conn.cursor() as cur:
@@ -585,7 +595,7 @@ class RasterMetadataRepository:
                         SET stac_item_json = %s,
                             updated_at = %s
                         WHERE cog_id = %s
-                    """, (stac_json_val, now, cog_id))
+                    """, (stac_item_json, now, cog_id))
                     updated = cur.rowcount > 0
                     conn.commit()
 
@@ -628,16 +638,14 @@ class RasterMetadataRepository:
             return 0
 
 
-# Singleton instance
-_instance: Optional[RasterMetadataRepository] = None
-
-
 def get_raster_metadata_repository() -> RasterMetadataRepository:
-    """Get singleton RasterMetadataRepository instance."""
-    global _instance
-    if _instance is None:
-        _instance = RasterMetadataRepository()
-    return _instance
+    """
+    Get singleton RasterMetadataRepository instance.
+
+    DEPRECATED: Use RasterMetadataRepository.instance() directly.
+    Kept for backward compatibility with existing callers.
+    """
+    return RasterMetadataRepository.instance()
 
 
 __all__ = ['RasterMetadataRepository', 'get_raster_metadata_repository']

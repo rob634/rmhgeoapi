@@ -1178,8 +1178,6 @@ class H3Repository(PostgreSQLRepository):
         ...     unit='meters'
         ... )
         """
-        import json
-
         # Validate theme
         if theme not in self.VALID_THEMES:
             raise ValueError(f"Invalid theme '{theme}'. Must be one of: {self.VALID_THEMES}")
@@ -1227,7 +1225,7 @@ class H3Repository(PostgreSQLRepository):
             with conn.cursor() as cur:
                 cur.execute(query, (
                     id, display_name, description, theme, data_category,
-                    source_type, json.dumps(source_config), stat_types, unit,
+                    source_type, source_config, stat_types, unit,
                     source_name, source_url, source_license,
                     recommended_h3_res, nodata_value
                 ))
@@ -1489,13 +1487,11 @@ class H3Repository(PostgreSQLRepository):
             table=sql.Identifier('dataset_registry')
         )
 
-        import json
-
         with self._get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(query, (
                     id, display_name, description, theme, stat_category,
-                    'url', json.dumps(source_config),  # source_type defaults to 'url'
+                    'url', source_config,  # source_type defaults to 'url'
                     source_name, source_url, source_license,
                     resolution_range, stat_types, unit
                 ))

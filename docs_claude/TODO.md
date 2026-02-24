@@ -258,6 +258,17 @@ Items below are tracked here but not yet added to ADO. Add to ADO when prioritiz
 | T-TD3.5: Remove obsolete TaskRecord fields (schema migration) | 🔲 Ready | `core/models/task.py` — requires ALTER TABLE or model-only removal |
 | T-TD3.6: Remove 410 Gone endpoint stubs | 🔲 Blocked | `triggers/platform/platform_bp.py` — keep until DDH migration complete |
 
+### EN-TD.4: Core Orchestration Refactors `[DEFERRED 24 FEB 2026]`
+
+**Source**: Architecture Review 24 FEB 2026 — findings C1.5, C1.8, C2.8
+**Reason deferred**: Noncritical changes to core orchestration code paths — high risk, low urgency
+
+| Task | Status | File | Details |
+|------|--------|------|---------|
+| C1.5: Consolidate repository bundles | 🔲 Deferred | `core/machine.py`, `core/state_manager.py` | Both create independent repo instances via `RepositoryFactory` — works correctly but duplicates objects |
+| C1.8: Decompose `process_task_message` | 🔲 Deferred | `core/machine.py:746-1556` | 811-line method (success path + failure path) — most critical code path in the system |
+| C2.8: Remove legacy AppConfig property aliases | 🔲 Deferred | `config/app_config.py` | 50+ callers use legacy aliases — too many call sites for safe batch update |
+
 ### EN-TD.1: Raw JSON Parsing in HTTP Triggers `[DONE 12 FEB 2026]`
 
 Migrated 37 occurrences across 22 code files from raw `req.get_json()` to `parse_request_json(req)` with fallback + type guard. See [EN_TD1_JSON_PARSING_MIGRATION.md](./EN_TD1_JSON_PARSING_MIGRATION.md).

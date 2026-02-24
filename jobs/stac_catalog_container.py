@@ -24,10 +24,11 @@ import hashlib
 import json
 
 from jobs.base import JobBase
+from jobs.mixins import JobBaseMixin
 from config.defaults import STACDefaults
 
 
-class StacCatalogContainerWorkflow(JobBase):
+class StacCatalogContainerWorkflow(JobBaseMixin, JobBase):
     """
     Two-stage fan-out job for bulk STAC cataloging.
 

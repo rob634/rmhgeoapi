@@ -28,9 +28,10 @@ import hashlib
 import json
 
 from jobs.base import JobBase
+from jobs.mixins import JobBaseMixin
 
 
-class ValidateRasterJob(JobBase):
+class ValidateRasterJob(JobBaseMixin, JobBase):
     """
     Standalone raster validation job.
 

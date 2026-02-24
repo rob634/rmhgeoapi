@@ -11,6 +11,7 @@ Exports:
 """
 
 from typing import Dict, Type, Optional, List
+import html
 import azure.functions as func
 import logging
 
@@ -229,7 +230,7 @@ def unified_interface_handler(req: func.HttpRequest) -> func.HttpResponse:
         <!DOCTYPE html>
         <html>
         <head>
-            <title>Error - {interface_name}</title>
+            <title>Error - {html.escape(str(interface_name))}</title>
             <style>
                 body {{
                     font-family: sans-serif;
@@ -258,9 +259,9 @@ def unified_interface_handler(req: func.HttpRequest) -> func.HttpResponse:
         <body>
             <div class="error-box">
                 <h1>❌ Error Rendering Interface</h1>
-                <p><strong>Interface:</strong> {interface_name}</p>
+                <p><strong>Interface:</strong> {html.escape(str(interface_name))}</p>
                 <p><strong>Error:</strong></p>
-                <pre>{str(e)}</pre>
+                <pre>{html.escape(str(e))}</pre>
                 <p><a href="/api/interface/stac">← Back to interfaces</a></p>
             </div>
         </body>

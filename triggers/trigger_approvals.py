@@ -160,8 +160,8 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
     and materializes STAC item from cached stac_item_json. For PUBLIC
     clearance, triggers ADF pipeline.
 
-    V0.9: Version assignment is handled internally by approve_release() --
-    the caller provides version_id but does NOT need to call assign_version().
+    V0.9: Version assignment is handled atomically by approve_release() --
+    the caller provides version_id and approve_release_atomic() handles the rest.
 
     Request Body:
     {

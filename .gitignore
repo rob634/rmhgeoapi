@@ -197,3 +197,6 @@ docker.env
 
 # Backup files (should never be deployed)
 *.backup
+
+# Git worktrees
+.worktrees/

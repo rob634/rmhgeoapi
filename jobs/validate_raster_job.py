@@ -201,7 +201,8 @@ class ValidateRasterJob(JobBase):
         Same parameters = same job ID (idempotency).
         """
         # Sort keys for consistent hashing
-        param_str = json.dumps(params, sort_keys=True)
+        hash_input = {"job_type": "validate_raster_job", **params}
+        param_str = json.dumps(hash_input, sort_keys=True)
         job_hash = hashlib.sha256(param_str.encode()).hexdigest()
         return job_hash
 

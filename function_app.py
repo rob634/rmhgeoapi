@@ -1462,7 +1462,7 @@ _expected_triggers = sum([
 ])
 
 logger.info("-" * 70)
-logger.info(f"🔌 SERVICE BUS TRIGGER REGISTRATION COMPLETE (V0.8)")
+logger.info(f"🔌 SERVICE BUS TRIGGER REGISTRATION COMPLETE (V0.9)")
 logger.info(f"   Triggers registered: {len(_registered_triggers)}/{_expected_triggers}")
 logger.info(f"   Queues: {_registered_triggers}")
 if not STARTUP_STATE.all_passed:

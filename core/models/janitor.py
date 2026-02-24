@@ -21,7 +21,7 @@ Exports:
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 from enum import Enum
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_serializer
 import uuid
 
 
@@ -59,9 +59,12 @@ class JanitorRun(BaseModel):
     - duration_ms: Run duration in milliseconds
     """
 
-    model_config = ConfigDict(
-        json_encoders={datetime: lambda v: v.isoformat()}
-    )
+    model_config = ConfigDict()
+
+    @field_serializer('started_at', 'completed_at')
+    @classmethod
+    def serialize_datetime(cls, v: datetime) -> Optional[str]:
+        return v.isoformat() if v else None
 
     # Primary key
     run_id: str = Field(

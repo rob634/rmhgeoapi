@@ -30,7 +30,7 @@ Dependencies:
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 from enum import Enum
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_serializer
 
 
 class SnapshotTriggerType(str, Enum):
@@ -66,9 +66,12 @@ class SystemSnapshotRecord(BaseModel):
         - If different, has_drift=True and drift_details shows what changed
     """
 
-    model_config = ConfigDict(
-        json_encoders={datetime: lambda v: v.isoformat()}
-    )
+    model_config = ConfigDict()
+
+    @field_serializer('captured_at')
+    @classmethod
+    def serialize_datetime(cls, v: datetime) -> Optional[str]:
+        return v.isoformat() if v else None
 
     # Primary key - auto-generated serial
     snapshot_id: Optional[int] = Field(default=None, description="Auto-generated snapshot ID")

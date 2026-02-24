@@ -39,7 +39,7 @@ Dependencies:
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List, ClassVar
 from enum import Enum
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_serializer
 import hashlib
 
 
@@ -141,11 +141,12 @@ class ExternalService(BaseModel):
         );
     """
 
-    model_config = ConfigDict(
-        json_encoders={
-            datetime: lambda v: v.isoformat()
-        }
-    )
+    model_config = ConfigDict()
+
+    @field_serializer('last_check_at', 'next_check_at', 'created_at', 'updated_at')
+    @classmethod
+    def serialize_datetime(cls, v: datetime) -> Optional[str]:
+        return v.isoformat() if v else None
 
     # ========================================================================
     # SQL DDL METADATA (Used by PydanticToSQL generator)

@@ -21,7 +21,7 @@ the two-entity design:
 Key Flows:
     - Submit: find_or_create_asset() -> get_or_overwrite_release()
     - Overwrite: find_or_create_asset() -> get_or_overwrite_release(overwrite=True)
-    - Approval: assign_version() (called by AssetApprovalService)
+    - Approval: handled by AssetApprovalService.approve_release() (atomic)
     - Status: get_release(), get_latest_release(), get_version_history()
 
 Exports:
@@ -98,7 +98,7 @@ class AssetService:
     Key flows:
     - Submit: find_or_create_asset() -> get_or_overwrite_release()
     - Overwrite: find_or_create_asset() -> get_or_overwrite_release()
-    - Approval: assign_version() (called by AssetApprovalService)
+    - Approval: handled by AssetApprovalService.approve_release() (atomic)
     - Status: get_release(), get_latest_release(), get_version_history()
     """
 
@@ -354,71 +354,6 @@ class AssetService:
             version_ordinal=1,
         )
         return release, "created"
-
-    # =========================================================================
-    # VERSION ASSIGNMENT (called by AssetApprovalService)
-    # =========================================================================
-
-    def assign_version(
-        self,
-        release_id: str,
-        version_id: str,
-        reviewer: str
-    ) -> AssetRelease:
-        """
-        Assign an official version to a draft release at approval time.
-
-        Called by AssetApprovalService when approving a release. This:
-        1. Validates the release exists and is a draft (version_id is None)
-        2. Computes version_ordinal from existing versioned releases
-        3. Flips is_latest atomically
-        4. Updates version fields on the release
-
-        Args:
-            release_id: Release to assign version to
-            version_id: Version identifier (e.g., "v1", "v2")
-            reviewer: Who is assigning the version (audit trail)
-
-        Returns:
-            Updated AssetRelease with version assigned
-
-        Raises:
-            ReleaseNotFoundError: If release not found
-            ReleaseStateError: If release already has a version (not a draft)
-        """
-        release = self.release_repo.get_by_id(release_id)
-        if not release:
-            raise ReleaseNotFoundError(release_id)
-
-        if release.version_id is not None:
-            raise ReleaseStateError(
-                release_id,
-                f"versioned ({release.version_id})",
-                "draft (version_id=None)",
-                "assign_version"
-            )
-
-        # Use pre-set ordinal from draft creation (reserved slot)
-        version_ordinal = release.version_ordinal
-
-        # Flip is_latest atomically: clear all, then set this one
-        self.release_repo.flip_is_latest(release.asset_id, release_id)
-
-        # Assign version fields
-        self.release_repo.update_version_assignment(
-            release_id=release_id,
-            version_id=version_id,
-            version_ordinal=version_ordinal,
-            is_latest=True
-        )
-
-        # Re-fetch and return
-        updated = self.release_repo.get_by_id(release_id)
-        logger.info(
-            f"assign_version: {release_id[:16]}... -> version_id={version_id}, "
-            f"ordinal={version_ordinal}, reviewer={reviewer}"
-        )
-        return updated
 
     # =========================================================================
     # READ -- ASSET

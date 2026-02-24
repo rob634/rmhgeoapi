@@ -23,7 +23,7 @@ Exports:
 
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_serializer
 
 from core.contracts import TaskData
 from .enums import TaskStatus
@@ -51,9 +51,15 @@ class TaskRecord(TaskData):
     They collaborate via composition in TaskExecutionService.
     """
 
-    model_config = ConfigDict(
-        json_encoders={datetime: lambda v: v.isoformat()}
+    model_config = ConfigDict()
+
+    @field_serializer(
+        'last_pulse', 'checkpoint_updated_at', 'execution_started_at',
+        'created_at', 'updated_at'
     )
+    @classmethod
+    def serialize_datetime(cls, v: datetime) -> Optional[str]:
+        return v.isoformat() if v else None
 
     # Status tracking (Database-specific)
     # 16 DEC 2025: Default changed from QUEUED to PENDING

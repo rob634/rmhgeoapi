@@ -31,7 +31,7 @@ Dependencies:
 
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
-from pydantic import Field, ConfigDict
+from pydantic import Field, ConfigDict, field_serializer
 
 from core.contracts import JobData
 from .enums import JobStatus
@@ -63,9 +63,12 @@ class JobRecord(JobData):
     They collaborate via composition in CoreMachine.
     """
 
-    model_config = ConfigDict(
-        json_encoders={datetime: lambda v: v.isoformat()}
-    )
+    model_config = ConfigDict()
+
+    @field_serializer('created_at', 'updated_at')
+    @classmethod
+    def serialize_datetime(cls, v: datetime) -> Optional[str]:
+        return v.isoformat() if v else None
 
     # Status tracking (Database-specific)
     status: JobStatus = Field(default=JobStatus.QUEUED, description="Current job status")

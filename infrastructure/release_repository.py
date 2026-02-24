@@ -1101,14 +1101,18 @@ class ReleaseRepository(PostgreSQLRepository):
                 )
                 target_updated = cur.rowcount > 0
 
-                # Single commit for atomicity
-                conn.commit()
-
                 if target_updated:
+                    conn.commit()
                     logger.info(f"Flipped is_latest: asset {asset_id[:16]}... -> release {new_latest_release_id[:16]}...")
                 else:
+                    # Target release not found -- rollback Step 1 (which
+                    # cleared is_latest on ALL sibling releases). Without
+                    # rollback, every release for this asset would have
+                    # is_latest=false with no latest release.
+                    conn.rollback()
                     logger.warning(
-                        f"flip_is_latest: target release {new_latest_release_id[:16]}... not found"
+                        f"flip_is_latest: target release {new_latest_release_id[:16]}... "
+                        f"not found, rolled back is_latest clear for asset {asset_id[:16]}..."
                     )
 
                 return target_updated

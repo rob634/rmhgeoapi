@@ -33,7 +33,7 @@ Created: 29 JAN 2026 as part of V0.8 Entity Architecture
 
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any, ClassVar
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_serializer
 
 
 class Platform(BaseModel):
@@ -57,8 +57,12 @@ class Platform(BaseModel):
         use_enum_values=True,
         extra='ignore',
         str_strip_whitespace=True,
-        json_encoders={datetime: lambda v: v.isoformat() if v else None}
     )
+
+    @field_serializer('created_at', 'updated_at')
+    @classmethod
+    def serialize_datetime(cls, v: datetime) -> Optional[str]:
+        return v.isoformat() if v else None
 
     # =========================================================================
     # DDL GENERATION HINTS (ClassVar = not a model field)

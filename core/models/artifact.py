@@ -38,7 +38,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 from uuid import UUID, uuid4
 from enum import Enum
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_serializer
 
 
 # ============================================================================
@@ -112,12 +112,17 @@ class Artifact(BaseModel):
         );
     """
 
-    model_config = ConfigDict(
-        json_encoders={
-            datetime: lambda v: v.isoformat(),
-            UUID: lambda v: str(v)
-        }
-    )
+    model_config = ConfigDict()
+
+    @field_serializer('created_at', 'updated_at', 'deleted_at')
+    @classmethod
+    def serialize_datetime(cls, v: datetime) -> Optional[str]:
+        return v.isoformat() if v else None
+
+    @field_serializer('artifact_id', 'supersedes', 'superseded_by')
+    @classmethod
+    def serialize_uuid(cls, v: UUID) -> Optional[str]:
+        return str(v) if v else None
 
     # ========================================================================
     # INTERNAL IDENTIFIER (Our System's ID - Never Changes)

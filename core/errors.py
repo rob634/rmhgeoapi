@@ -56,7 +56,7 @@ from datetime import datetime, timezone
 import traceback as tb_module
 import uuid
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_serializer
 
 
 # ============================================================================
@@ -258,8 +258,12 @@ class ErrorDebug(BaseModel):
 
     model_config = ConfigDict(
         extra="allow",  # Forward compatibility for new fields
-        json_encoders={datetime: lambda v: v.isoformat()}
     )
+
+    @field_serializer('timestamp')
+    @classmethod
+    def serialize_datetime(cls, v: datetime) -> Optional[str]:
+        return v.isoformat() if v else None
 
     # Identity
     error_id: str = Field(..., description="Unique error ID for support tickets")
@@ -298,7 +302,6 @@ class ErrorResponse(BaseModel):
     model_config = ConfigDict(
         use_enum_values=True,
         extra="forbid",  # Strict schema for API responses
-        json_encoders={datetime: lambda v: v.isoformat()}
     )
 
     # Status

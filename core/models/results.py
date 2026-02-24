@@ -21,7 +21,7 @@ Exports:
 
 from datetime import datetime
 from typing import Dict, Any, Optional, List
-from pydantic import BaseModel, Field, field_validator, ConfigDict
+from pydantic import BaseModel, Field, field_validator, field_serializer, ConfigDict
 
 from .enums import TaskStatus
 
@@ -33,9 +33,12 @@ class TaskResult(BaseModel):
     Pure data structure - success/failure logic is in core.logic.
     """
 
-    model_config = ConfigDict(
-        json_encoders={datetime: lambda v: v.isoformat()}
-    )
+    model_config = ConfigDict()
+
+    @field_serializer('timestamp')
+    @classmethod
+    def serialize_datetime(cls, v: datetime) -> Optional[str]:
+        return v.isoformat() if v else None
 
     task_id: str = Field(..., description="Task identifier")
     task_type: str = Field(..., description="Type of task")
@@ -59,9 +62,12 @@ class StageResultContract(BaseModel):
     Ensures consistent structure for stage results stored in the database.
     """
 
-    model_config = ConfigDict(
-        json_encoders={datetime: lambda v: v.isoformat()}
-    )
+    model_config = ConfigDict()
+
+    @field_serializer('completion_time')
+    @classmethod
+    def serialize_datetime(cls, v: datetime) -> Optional[str]:
+        return v.isoformat() if v else None
 
     stage: int = Field(..., ge=1, description="Stage number")
     status: str = Field(..., description="Stage completion status")
@@ -89,9 +95,12 @@ class StageAdvancementResult(BaseModel):
     Returned by PostgreSQL function or stage advancement logic.
     """
 
-    model_config = ConfigDict(
-        json_encoders={datetime: lambda v: v.isoformat()}
-    )
+    model_config = ConfigDict()
+
+    @field_serializer('timestamp')
+    @classmethod
+    def serialize_datetime(cls, v: datetime) -> Optional[str]:
+        return v.isoformat() if v else None
 
     job_updated: bool = Field(..., description="Whether job was updated")
     new_stage: int = Field(..., description="New stage number")

@@ -33,7 +33,7 @@ Created: 22 DEC 2025
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 from enum import Enum
-from pydantic import BaseModel, Field, ConfigDict, model_validator
+from pydantic import BaseModel, Field, ConfigDict, model_validator, field_serializer
 
 from .stac import AccessLevel
 
@@ -92,9 +92,12 @@ class PromotedDataset(BaseModel):
         )
     """
 
-    model_config = ConfigDict(
-        json_encoders={datetime: lambda v: v.isoformat() if v else None}
-    )
+    model_config = ConfigDict()
+
+    @field_serializer('thumbnail_generated_at', 'promoted_at', 'updated_at')
+    @classmethod
+    def serialize_datetime(cls, v: datetime) -> Optional[str]:
+        return v.isoformat() if v else None
 
     # Identity
     promoted_id: str = Field(

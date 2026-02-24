@@ -26,7 +26,7 @@ Exports:
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 from enum import Enum
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_serializer
 import uuid
 
 
@@ -67,9 +67,12 @@ class UnpublishJobRecord(BaseModel):
     - collection_deleted: Whether empty collection was removed
     """
 
-    model_config = ConfigDict(
-        json_encoders={datetime: lambda v: v.isoformat()}
-    )
+    model_config = ConfigDict()
+
+    @field_serializer('created_at', 'completed_at')
+    @classmethod
+    def serialize_datetime(cls, v: datetime) -> Optional[str]:
+        return v.isoformat() if v else None
 
     # =========================================================================
     # Primary Key

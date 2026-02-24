@@ -124,9 +124,7 @@ class TaskData(BaseModel):
         description="Task input parameters (passed to TaskExecutor.execute())"
     )
 
-    model_config = ConfigDict(
-        json_encoders={datetime: lambda v: v.isoformat()}
-    )
+    model_config = ConfigDict()
 
     @field_validator('task_type')
     @classmethod
@@ -209,9 +207,7 @@ class JobData(BaseModel):
             raise ValueError(f"job_id must be hexadecimal, got: {v}")
         return v
 
-    model_config = ConfigDict(
-        json_encoders={datetime: lambda v: v.isoformat()}
-    )
+    model_config = ConfigDict()
 
     @field_validator('job_type')
     @classmethod
@@ -288,7 +284,6 @@ class JobEventData(BaseModel):
 
     model_config = ConfigDict(
         extra='forbid',
-        json_encoders={datetime: lambda v: v.isoformat()}
     )
 
 

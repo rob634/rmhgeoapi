@@ -30,7 +30,7 @@ Created: 21 FEB 2026 as part of V0.9 Asset/Release entity split
 
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List, ClassVar, Literal
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_serializer
 from enum import Enum
 import hashlib
 
@@ -114,11 +114,12 @@ class Asset(BaseModel):
     model_config = ConfigDict(
         extra='ignore',
         str_strip_whitespace=True,
-        # TODO (21 FEB 2026): json_encoders is deprecated in Pydantic V2.
-        # Replace with @field_serializer when cleaning up. Currently dead code --
-        # all serialization goes through hand-written to_dict() methods.
-        json_encoders={datetime: lambda v: v.isoformat() if v else None}
     )
+
+    @field_serializer('created_at', 'updated_at', 'deleted_at')
+    @classmethod
+    def serialize_datetime(cls, v: datetime) -> Optional[str]:
+        return v.isoformat() if v else None
 
     # =========================================================================
     # DDL GENERATION HINTS (ClassVar = not a model field)
@@ -329,11 +330,16 @@ class AssetRelease(BaseModel):
     model_config = ConfigDict(
         extra='ignore',
         str_strip_whitespace=True,
-        # TODO (21 FEB 2026): json_encoders is deprecated in Pydantic V2.
-        # Replace with @field_serializer when cleaning up. Currently dead code --
-        # all serialization goes through hand-written to_dict() methods.
-        json_encoders={datetime: lambda v: v.isoformat() if v else None}
     )
+
+    @field_serializer(
+        'processing_started_at', 'processing_completed_at',
+        'reviewed_at', 'cleared_at', 'made_public_at',
+        'revoked_at', 'created_at', 'updated_at'
+    )
+    @classmethod
+    def serialize_datetime(cls, v: datetime) -> Optional[str]:
+        return v.isoformat() if v else None
 
     # =========================================================================
     # DDL GENERATION HINTS (ClassVar = not a model field)

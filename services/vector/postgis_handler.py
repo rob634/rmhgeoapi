@@ -577,16 +577,9 @@ class VectorToPostGISHandler:
                 "features": len(gdf)
             })
 
-        # Clean column names (lowercase, replace spaces/special chars)
-        gdf.columns = [
-            col.lower()
-            .replace(' ', '_')
-            .replace('-', '_')
-            .replace('.', '_')
-            .replace('(', '')
-            .replace(')', '')
-            for col in gdf.columns
-        ]
+        # Clean column names (lowercase, PG reserved word protection, special chars)
+        from services.vector.column_sanitizer import sanitize_columns
+        gdf.columns = sanitize_columns(list(gdf.columns))
 
         # ========================================================================
         # GEOMETRY PROCESSING - Simplification & Quantization (Phase 2 - 9 NOV 2025)
@@ -1270,17 +1263,9 @@ class VectorToPostGISHandler:
         # Get attribute columns (exclude geometry)
         attr_cols = [col for col in chunk.columns if col != 'geometry']
 
-        # Clean column names to match table
-        import re
-        def clean_col(name):
-            cleaned = name.lower()
-            cleaned = re.sub(r'[^a-z0-9_]', '_', cleaned)
-            cleaned = re.sub(r'_+', '_', cleaned).strip('_')
-            if cleaned and cleaned[0].isdigit():
-                cleaned = 'col_' + cleaned
-            return cleaned or 'unnamed_column'
-
-        cleaned_attr_cols = [clean_col(col) for col in attr_cols]
+        # Clean column names to match table (PG reserved word protection)
+        from services.vector.column_sanitizer import sanitize_column_name
+        cleaned_attr_cols = [sanitize_column_name(col) for col in attr_cols]
 
         # Build column list including metadata
         all_cols = [geom_col]  # Geometry first

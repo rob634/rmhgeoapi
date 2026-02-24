@@ -1031,5 +1031,6 @@ class AppConfig(BaseModel):
             queues=QueueConfig.from_environment(),
             analytics=AnalyticsConfig.from_environment(),
             h3=H3Config.from_environment(),
-            platform=PlatformConfig.from_environment()
+            platform=PlatformConfig.from_environment(),
+            metrics=MetricsConfig.from_environment(),
         )

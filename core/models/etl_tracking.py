@@ -64,7 +64,7 @@ Epic: E7 Infrastructure as Code → F7.IaC Separation of Concerns
 Story: S7.IaC.2 Create ETL Tracking Pydantic Models
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List, ClassVar
 from enum import Enum
 from pydantic import BaseModel, Field, ConfigDict
@@ -305,7 +305,7 @@ class VectorEtlTracking(BaseModel):
             pipeline_version=row.get('pipeline_version'),
             error_message=row.get('error_message'),
             error_details=row.get('error_details'),
-            created_at=row.get('created_at', datetime.utcnow()),
+            created_at=row.get('created_at', datetime.now(timezone.utc)),
             created_by=row.get('created_by')
         )
 
@@ -344,7 +344,7 @@ class VectorEtlTracking(BaseModel):
             source_hash=additional.get('source_hash'),
             status=additional.get('status', EtlStatus.COMPLETED),
             processing_started_at=additional.get('processing_started_at'),
-            processing_completed_at=additional.get('processing_completed_at', datetime.utcnow()),
+            processing_completed_at=additional.get('processing_completed_at', datetime.now(timezone.utc)),
             processing_duration_ms=additional.get('processing_duration_ms'),
             target_crs=additional.get('target_crs', 'EPSG:4326'),
             rows_read=additional.get('rows_read'),
@@ -356,7 +356,7 @@ class VectorEtlTracking(BaseModel):
             pipeline_version=additional.get('pipeline_version'),
             error_message=additional.get('error_message'),
             error_details=additional.get('error_details'),
-            created_at=metadata.created_at or datetime.utcnow(),
+            created_at=metadata.created_at or datetime.now(timezone.utc),
             created_by=additional.get('created_by')
         )
 
@@ -372,7 +372,7 @@ class VectorEtlTracking(BaseModel):
     def mark_started(self) -> None:
         """Mark ETL processing as started (mutates self)."""
         self.status = EtlStatus.PROCESSING
-        self.processing_started_at = datetime.utcnow()
+        self.processing_started_at = datetime.now(timezone.utc)
 
     def mark_completed(self, rows_written: int, duration_ms: Optional[int] = None) -> None:
         """
@@ -383,7 +383,7 @@ class VectorEtlTracking(BaseModel):
             duration_ms: Optional processing duration
         """
         self.status = EtlStatus.COMPLETED
-        self.processing_completed_at = datetime.utcnow()
+        self.processing_completed_at = datetime.now(timezone.utc)
         self.rows_written = rows_written
         if duration_ms:
             self.processing_duration_ms = duration_ms
@@ -400,7 +400,7 @@ class VectorEtlTracking(BaseModel):
             error_details: Optional detailed error information
         """
         self.status = EtlStatus.FAILED
-        self.processing_completed_at = datetime.utcnow()
+        self.processing_completed_at = datetime.now(timezone.utc)
         self.error_message = error_message
         self.error_details = error_details
         if self.processing_started_at:

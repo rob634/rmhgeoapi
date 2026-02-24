@@ -217,7 +217,7 @@ def approve_dataset(req: func.HttpRequest) -> func.HttpResponse:
     Body:
         {
             "reviewer": "analyst@example.com",   // Required
-            "clearance_level": "ouo",            // Required: "ouo" or "public"
+            "clearance_state": "ouo",            // Required: "ouo" or "public"
             "notes": "Looks good"                // Optional
         }
 
@@ -260,26 +260,26 @@ def approve_dataset(req: func.HttpRequest) -> func.HttpResponse:
                 mimetype='application/json'
             )
 
-        clearance_level_str = body.get('clearance_level')
+        clearance_level_str = body.get('clearance_state') or body.get('clearance_level')
         if not clearance_level_str:
             return func.HttpResponse(
-                json.dumps({'error': "clearance_level is required. Must be 'ouo' or 'public'"}),
+                json.dumps({'error': "clearance_state is required. Must be 'ouo' or 'public'"}),
                 status_code=400,
                 mimetype='application/json'
             )
 
-        # Parse clearance level
+        # Parse clearance state
         try:
             clearance_state = ClearanceState(clearance_level_str.lower())
             if clearance_state == ClearanceState.UNCLEARED:
                 return func.HttpResponse(
-                    json.dumps({'error': "clearance_level must be 'ouo' or 'public', not 'uncleared'"}),
+                    json.dumps({'error': "clearance_state must be 'ouo' or 'public', not 'uncleared'"}),
                     status_code=400,
                     mimetype='application/json'
                 )
         except ValueError:
             return func.HttpResponse(
-                json.dumps({'error': f"Invalid clearance_level: '{clearance_level_str}'. Must be 'ouo' or 'public'"}),
+                json.dumps({'error': f"Invalid clearance_state: '{clearance_level_str}'. Must be 'ouo' or 'public'"}),
                 status_code=400,
                 mimetype='application/json'
             )

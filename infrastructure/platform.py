@@ -29,7 +29,7 @@ Exports:
 """
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 from psycopg import sql
 
@@ -104,7 +104,7 @@ class ApiRequestRepository(PostgreSQLRepository):
             ApiRequest (newly created, updated, or existing)
         """
         with self._error_context("platform request creation", request.request_id):
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
 
             if is_retry:
                 # Retry mode: UPSERT with retry_count increment (01 JAN 2026)

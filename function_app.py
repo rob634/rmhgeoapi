@@ -310,18 +310,7 @@ _app_mode = get_app_mode_config()
 # NOTE: CoreMachine import moved to core/machine_factory.py (APP_CLEANUP Phase 4)
 # The factory function handles the import internally
 
-# Import service modules - no longer needed for registration (Phase 4 complete)
-# Services are now explicitly registered in initialize_catalogs()
-# Auto-discovery no longer needed since we use explicit registration
-
-# Auto-discover is deprecated after Phase 4 migration
-# from task_factory import auto_discover_handlers
-# auto_discover_handlers()
-
 # Application modules (our code) - HTTP Trigger Classes
-# Import directly from modules to control when instances are created
-# NOTE: health_check_trigger moved to admin_system blueprint (12 JAN 2026)
-# NOTE: livez is now provided by triggers/probes.py (registered in Phase 1)
 from triggers.submit_job import submit_job_trigger
 from triggers.get_job_status import get_job_status_trigger
 from triggers.get_job_events import get_job_events_trigger  # Job event timeline (23 JAN 2026)
@@ -329,24 +318,7 @@ from triggers.get_job_logs import get_job_logs_trigger
 from triggers.jobs.resubmit import job_resubmit
 from triggers.jobs.delete import job_delete
 from triggers.schema_pydantic_deploy import pydantic_deploy_trigger
-# ⚠️ LEGACY IMPORTS - DEPRECATED (10 NOV 2025) - COMMENTED OUT 16 NOV 2025
-# These imports are kept temporarily for backward compatibility
-# All functionality has been migrated to triggers/admin/
-# File triggers/db_query.py has been deleted - routes no longer needed
-# from triggers.db_query import (
-#     schema_nuke_trigger  # Still used temporarily by db_maintenance.py
-# )
 
-# NOTE: analyze_container_trigger REMOVED (04 FEB 2026 - APP_MODE refactor)
-# NOTE: All STAC triggers moved to triggers/stac/stac_bp.py (24 JAN 2026 - V0.8 Phase 17.3)
-# stac_extract_trigger and stac_vector_trigger now called from blueprint
-
-# STAC Blueprint - Unified STAC API & Admin (24 JAN 2026 - V0.8 Phase 17.3)
-# All 19 stac/* endpoints now in triggers/stac/stac_bp.py
-
-# ingest_vector REMOVED (27 NOV 2025) - Platform now uses process_vector
-# test_raster_create excluded by funcignore (30 NOV 2025) - *test* files not deployed
-# from triggers.test_raster_create import test_raster_create_trigger
 
 # Admin API triggers (10 NOV 2025) - Consolidated under /api/admin/*
 from triggers.admin.db_schemas import admin_db_schemas_trigger
@@ -372,31 +344,10 @@ from ogc_features import get_ogc_triggers
 # Now at /api/interface/vector-viewer instead of /api/vector/viewer
 # from vector_viewer import get_vector_viewer_triggers
 
-# Raster Collection Viewer - DISABLED (04 FEB 2026) - In development
-# from raster_collection_viewer import get_raster_collection_viewer_triggers
-
-# Raster API - DISABLED (04 FEB 2026) - In development
-# from raster_api import get_raster_triggers
-
-# xarray API - Direct Zarr access for time-series (18 DEC 2025)
-# DISABLED 11 FEB 2026 - US 6.1 APP_MODE cleanup, re-enable when needed
-# from xarray_api import get_xarray_triggers
 
 # OGC Styles API - CartoSym-JSON style storage and multi-format output (18 DEC 2025)
 from ogc_styles import get_styles_triggers
 
-# Raster Render Configs API - DISABLED (04 FEB 2026) - In development
-# from triggers.trigger_raster_renders import (
-#     list_renders, get_render, get_default_render,
-#     create_render, update_render, delete_render,
-#     set_default_render, create_default_render
-# )
-
-# Map State API - DISABLED (04 FEB 2026) - In development
-# from triggers.trigger_map_states import (
-#     list_maps, get_map, create_map, update_map, delete_map,
-#     list_snapshots, get_snapshot, restore_snapshot
-# )
 
 # Pipeline Dashboard - Container blob browser (21 NOV 2025) - Read-only UI operations
 from triggers.list_container_blobs import list_container_blobs_handler
@@ -404,31 +355,6 @@ from triggers.get_blob_metadata import get_blob_metadata_handler
 from triggers.list_storage_containers import list_storage_containers_handler
 from triggers.storage_upload import storage_upload_handler
 
-# Janitor handler imports removed (23 JAN 2026 - APP_CLEANUP Phase 3)
-# Timer triggers now in triggers/timers/timer_bp.py blueprint
-
-# ========================================================================
-# PHASE 2: EXPLICIT REGISTRATION PATTERN (Parallel with decorators)
-# ========================================================================
-# During migration, both decorator-based and explicit registration work
-# simultaneously. This allows gradual migration without breaking changes.
-
-# ============================================================================
-# EPOCH 3 REGISTRATION REMOVED (1 OCT 2025)
-# ============================================================================
-# Previous imports removed:
-#   - from registration import JobCatalog, TaskCatalog
-#   - from controller_factories import JobFactory
-#   - from task_factory import TaskHandlerFactory
-#   - from controller_hello_world import HelloWorldController
-#   - from controller_container import SummarizeContainerController, ListContainerController
-#   - from controller_stac_setup import STACSetupController
-#   - from controller_service_bus_hello import ServiceBusHelloWorldController
-#   - from controller_service_bus_container import ServiceBusContainerController
-#
-# Reason: Epoch 3 controllers deprecated, CoreMachine handles all orchestration
-# Migration: Use Epoch 4 @register_job and @register_task decorators instead
-# ============================================================================
 
 # ========================================================================
 # EPOCH 4: INITIALIZE COREMACHINE (Universal Orchestrator with Explicit Registries)
@@ -679,122 +605,6 @@ def job_delete_route(req: func.HttpRequest) -> func.HttpResponse:
     return job_delete(req)
 
 
-# ============================================================================
-# DATABASE ADMIN DATA/DIAGNOSTICS - MOVED TO BLUEPRINTS (15 DEC 2025)
-# ============================================================================
-# Routes moved to routes/admin_db.py:
-#   - dbadmin/jobs, dbadmin/jobs/{job_id}
-#   - dbadmin/tasks, dbadmin/tasks/{job_id}
-#   - dbadmin/platform/requests, dbadmin/platform/requests/{request_id}
-#   - dbadmin/platform/orchestration, dbadmin/platform/orchestration/{request_id}
-#   - dbadmin/diagnostics?type={stats|enums|functions|all|config|errors|lineage}
-# ============================================================================
-
-
-# NOTE: H3 routes moved to triggers/admin/admin_h3.py blueprint (12 JAN 2026)
-# - /api/h3/debug
-# - /api/h3/datasets
-# - /api/h3/admin/stats
-
-
-# NOTE: Data Migration routes moved to triggers/admin/admin_data_migration.py blueprint (22 JAN 2026)
-# - /api/data-migration/trigger
-# - /api/data-migration/status/{run_id}
-# - /api/data-migration/cancel/{run_id}
-
-
-# ============================================================================
-# PROMOTE API - DISABLED (04 FEB 2026)
-# ============================================================================
-# In development - will be re-enabled later
-# Dataset promotion system for galleries and featured datasets
-# ============================================================================
-# from triggers.promote import (
-#     handle_promote, handle_promote_item, handle_gallery,
-#     handle_gallery_list, handle_system_reserved
-# )
-#
-# @app.route(route="promote", methods=["GET", "POST"])
-# def promote_handler(req): return handle_promote(req)
-#
-# @app.route(route="promote/gallery", methods=["GET"])
-# def promote_gallery_list_handler(req): return handle_gallery_list(req)
-#
-# @app.route(route="promote/system", methods=["GET"])
-# def promote_system_reserved_handler(req): return handle_system_reserved(req)
-#
-# @app.route(route="promote/{promoted_id}", methods=["GET", "PUT", "DELETE"])
-# def promote_item_handler(req): return handle_promote_item(req)
-#
-# @app.route(route="promote/{promoted_id}/gallery", methods=["POST", "DELETE"])
-# def promote_gallery_handler(req): return handle_gallery(req)
-# ============================================================================
-
-
-# 🚨 NUCLEAR RED BUTTON - DEVELOPMENT ONLY (⚠️ DEPRECATED - COMMENTED OUT 16 NOV 2025)
-# Use /api/dbadmin/maintenance/nuke instead
-# @app.route(route="db/schema/nuke", methods=["POST"])
-# def nuclear_schema_reset(req: func.HttpRequest) -> func.HttpResponse:
-#     """⚠️ DEPRECATED: Use /api/dbadmin/maintenance/nuke instead. POST /api/db/schema/nuke?confirm=yes"""
-#     return admin_db_maintenance_trigger.handle_request(req)
-
-
-# 🔄 CONSOLIDATED REBUILD - DEVELOPMENT ONLY (⚠️ DEPRECATED - COMMENTED OUT 16 NOV 2025)
-# Use /api/dbadmin/maintenance/redeploy instead
-# @app.route(route="db/schema/redeploy", methods=["POST"])
-# def redeploy_schema(req: func.HttpRequest) -> func.HttpResponse:
-#     """⚠️ DEPRECATED: Use /api/dbadmin/maintenance/redeploy instead. POST /api/db/schema/redeploy?confirm=yes"""
-#     return admin_db_maintenance_trigger.handle_request(req)
-
-
-# Note: Legacy inline redeploy code (150+ lines) has been removed (10 NOV 2025)
-# It has been migrated to triggers/admin/db_maintenance.py AdminDbMaintenanceTrigger._redeploy_schema()
-# Old routes /api/db/schema/nuke and /api/db/schema/redeploy commented out (16 NOV 2025)
-
-
-# ============================================================================
-# CONTAINER ANALYSIS ENDPOINTS - REMOVED (04 FEB 2026 - APP_MODE refactor)
-# ============================================================================
-# Removed /api/analysis/container and /api/analysis/delivery
-# These were internal analysis tools, not B2B endpoints
-
-# ============================================================================
-# STAC API v1.0.0 PORTABLE MODULE (10 NOV 2025)
-# ============================================================================
-# Specification: https://api.stacspec.org/v1.0.0/core
-# Portable module pattern - mirrors ogc_features/ architecture
-# Can be moved to separate Function App for APIM routing
-# ============================================================================
-
-# ============================================================================
-# STAC ENDPOINTS - MOVED TO BLUEPRINT (24 JAN 2026 - V0.8 Phase 17.3)
-# ============================================================================
-# All 19 stac/* endpoints consolidated into triggers/stac/stac_bp.py
-# Blueprint registered conditionally above via: app.register_functions(stac_bp)
-#
-# Categories:
-#   STAC API v1.0.0 Core (6): /stac, /stac/conformance, /stac/collections, etc.
-#   Admin - Initialization (3): /stac/init, /stac/collections/{tier}, /stac/nuke
-#   Admin - Repair (3): /stac/repair/test, /stac/repair/inventory, /stac/repair/item
-#   Admin - Catalog Ops (2): /stac/extract, /stac/vector
-#   Admin - Inspection (5): /stac/schema/info, /stac/collections/summary, etc.
-# ============================================================================
-
-
-# ============================================================================
-# PLATFORM SERVICE LAYER ENDPOINTS - MOVED TO BLUEPRINT (23 JAN 2026)
-# ============================================================================
-# Platform orchestration layer moved to: triggers/platform/platform_bp.py
-# All 17 platform endpoints registered via blueprint below.
-# See APP_CLEANUP Phase 5 for details.
-# ============================================================================
-
-
-
-
-# NOTE: stac/vector moved to triggers/stac/stac_bp.py (24 JAN 2026)
-
-# NOTE: pgstac inspection endpoints moved to triggers/stac/stac_bp.py (24 JAN 2026)
 
 
 
@@ -906,67 +716,7 @@ def ogc_styles_item(req: func.HttpRequest) -> func.HttpResponse:
     return _styles_item(req)
 
 
-# ============================================================================
-# RASTER RENDER CONFIG ENDPOINTS - DISABLED (04 FEB 2026)
-# ============================================================================
-# In development - will be re-enabled later
-# TiTiler render configuration storage for raster COG visualization
-# ============================================================================
-# @app.route(route="raster/{cog_id}/renders", methods=["GET"])
-# def raster_renders_list(req): return list_renders(req)
-#
-# @app.route(route="raster/{cog_id}/renders/default", methods=["GET"])
-# def raster_renders_default(req): return get_default_render(req)
-#
-# @app.route(route="raster/{cog_id}/renders/auto-default", methods=["POST"])
-# def raster_renders_auto_default(req): return create_default_render(req)
-#
-# @app.route(route="raster/{cog_id}/renders/{render_id}", methods=["GET"])
-# def raster_renders_get(req): return get_render(req)
-#
-# @app.route(route="raster/{cog_id}/renders", methods=["POST"])
-# def raster_renders_create(req): return create_render(req)
-#
-# @app.route(route="raster/{cog_id}/renders/{render_id}", methods=["PUT"])
-# def raster_renders_update(req): return update_render(req)
-#
-# @app.route(route="raster/{cog_id}/renders/{render_id}", methods=["DELETE"])
-# def raster_renders_delete(req): return delete_render(req)
-#
-# @app.route(route="raster/{cog_id}/renders/{render_id}/default", methods=["POST"])
-# def raster_renders_set_default(req): return set_default_render(req)
-# ============================================================================
 
-# ============================================================================
-# MAP STATE API ENDPOINTS - DISABLED (04 FEB 2026)
-# ============================================================================
-# In development - will be re-enabled later
-# Saveable web map configurations with layer management and version history
-# ============================================================================
-# @app.route(route="maps", methods=["GET"])
-# def maps_list(req): return list_maps(req)
-#
-# @app.route(route="maps", methods=["POST"])
-# def maps_create(req): return create_map(req)
-#
-# @app.route(route="maps/{map_id}", methods=["GET"])
-# def maps_get(req): return get_map(req)
-#
-# @app.route(route="maps/{map_id}", methods=["PUT"])
-# def maps_update(req): return update_map(req)
-#
-# @app.route(route="maps/{map_id}", methods=["DELETE"])
-# def maps_delete(req): return delete_map(req)
-#
-# @app.route(route="maps/{map_id}/snapshots", methods=["GET"])
-# def maps_snapshots_list(req): return list_snapshots(req)
-#
-# @app.route(route="maps/{map_id}/snapshots/{version}", methods=["GET"])
-# def maps_snapshot_get(req): return get_snapshot(req)
-#
-# @app.route(route="maps/{map_id}/restore/{version}", methods=["POST"])
-# def maps_restore(req): return restore_snapshot(req)
-# ============================================================================
 
 # ============================================================================
 # STAC API v1.0.0 ENDPOINTS - MOVED TO BLUEPRINT (24 JAN 2026 - V0.8 Phase 17.3)
@@ -985,29 +735,8 @@ def ogc_styles_item(req: func.HttpRequest) -> func.HttpResponse:
 # New route: /api/interface/vector-viewer?collection={collection_id}
 # Old route /api/vector/viewer is deprecated
 # ============================================================================
-# _vector_viewer_triggers = get_vector_viewer_triggers()
-# _vector_viewer_handler = _vector_viewer_triggers[0]['handler']
-# @app.route(route="vector/viewer", methods=["GET"])
-# def vector_collection_viewer(req: func.HttpRequest) -> func.HttpResponse:
-#     return _vector_viewer_handler(req)
 
 
-# ============================================================================
-# RASTER COLLECTION VIEWER - DISABLED (04 FEB 2026)
-# ============================================================================
-# In development - will be re-enabled later
-# STAC-integrated raster viewer with TiTiler XYZ tiles
-# ============================================================================
-# _raster_collection_viewer_triggers = get_raster_collection_viewer_triggers()
-# _raster_collection_viewer_handler = _raster_collection_viewer_triggers[0]['handler']
-# _raster_qa_handler = _raster_collection_viewer_triggers[1]['handler']
-#
-# @app.route(route="raster/viewer", methods=["GET"])
-# def raster_collection_viewer(req): return _raster_collection_viewer_handler(req)
-#
-# @app.route(route="raster/qa", methods=["POST"])
-# def raster_qa_status(req): return _raster_qa_handler(req)
-# ============================================================================
 
 # ============================================================================
 # PIPELINE DASHBOARD - CONTAINER BLOB BROWSER (21 NOV 2025)
@@ -1219,34 +948,7 @@ def openapi_spec(req: func.HttpRequest) -> func.HttpResponse:
 # =============================================================================
 
 
-# ingest_vector HTTP endpoint REMOVED (27 NOV 2025)
-# Platform layer now routes vector requests to process_vector (idempotent DELETE+INSERT)
-# Direct vector job submission should use: POST /api/jobs/submit/process_vector
 
-
-# ============================================================================
-# TEST UTILITIES - DEVELOPMENT ONLY
-# ============================================================================
-# test/create-rasters endpoint DISABLED (30 NOV 2025)
-# test_raster_create trigger excluded by funcignore (*test* pattern)
-# Uncomment locally if needed for development testing
-#
-# @app.route(route="test/create-rasters", methods=["POST"])
-# def test_create_rasters(req: func.HttpRequest) -> func.HttpResponse:
-#     """Create test raster files in Azure Blob Storage for pipeline testing."""
-#     return test_raster_create_trigger.handle_request(req)
-
-
-
-
-# dbadmin/debug/all - MOVED TO routes/admin_db.py (15 DEC 2025)
-
-
-# ============================================================================
-# DUPLICATE SERVICE BUS TRIGGERS REMOVED (2 OCT 2025)
-# Removed duplicate process_job_service_bus() and process_task_service_bus()
-# Keeping process_service_bus_job() and process_service_bus_task() below
-# ============================================================================
 
 
 # ============================================================================
@@ -1462,7 +1164,7 @@ _expected_triggers = sum([
 ])
 
 logger.info("-" * 70)
-logger.info(f"🔌 SERVICE BUS TRIGGER REGISTRATION COMPLETE (V0.8)")
+logger.info(f"🔌 SERVICE BUS TRIGGER REGISTRATION COMPLETE (V0.9)")
 logger.info(f"   Triggers registered: {len(_registered_triggers)}/{_expected_triggers}")
 logger.info(f"   Queues: {_registered_triggers}")
 if not STARTUP_STATE.all_passed:
@@ -1478,107 +1180,12 @@ logger.info("=" * 70)
 
 
 # ============================================================================
-# QUEUE ERROR HANDLING HELPER FUNCTIONS
+# TIMER TRIGGERS (conditional on app mode)
 # ============================================================================
-# APP_CLEANUP Phase 2 (23 JAN 2026): Helper functions moved to:
-#   triggers/service_bus/error_handler.py
-#
-# Available via import:
-#   from triggers.service_bus import (
-#       extract_job_id_from_raw_message,
-#       extract_task_id_from_raw_message,
-#       mark_job_failed,
-#       mark_task_failed,
-#   )
-# ============================================================================
+if _app_mode.has_timer_triggers:
+    from triggers.timers import timer_bp
+    app.register_functions(timer_bp)
+    logger.info("✅ Timer triggers blueprint registered (APP_MODE=%s)", _app_mode.mode.value)
+else:
+    logger.info("⏭️ SKIPPING timer triggers (APP_MODE=%s)", _app_mode.mode.value)
 
-
-# ============================================================================
-# TIMER TRIGGERS BLUEPRINT (23 JAN 2026 - APP_CLEANUP Phase 3)
-# ============================================================================
-# All timer triggers moved to triggers/timers/timer_bp.py blueprint.
-#
-# Includes:
-# - Janitor timers: task_watchdog, job_health, orphan_detector
-# - Geo maintenance: geo_orphan_check, metadata_consistency, geo_integrity_check
-# - System monitoring: system_snapshot, log_cleanup, external_service_health
-#
-# Timer Schedule Overview:
-#   - janitor_task_watchdog: Every 5 minutes
-#   - janitor_job_health: :15 and :45 past each hour
-#   - janitor_orphan_detector: Every hour
-#   - geo_orphan_check_timer: Every 6 hours
-#   - metadata_consistency_timer: 03:00, 09:00, 15:00, 21:00 UTC
-#   - geo_integrity_check_timer: 02:00, 08:00, 14:00, 20:00 UTC
-#   - system_snapshot_timer: Every hour
-#   - log_cleanup_timer: Daily 3 AM UTC
-#   - external_service_health_timer: Every hour
-# ============================================================================
-
-from triggers.timers import timer_bp
-app.register_functions(timer_bp)
-
-
-# NOTE: Cleanup/janitor routes in triggers/admin/admin_janitor.py blueprint (12 JAN 2026)
-
-
-# ============================================================================
-# RASTER API - DISABLED (04 FEB 2026)
-# ============================================================================
-# In development - will be re-enabled later
-# Convenience endpoints that proxy to TiTiler (extract, point, clip, preview)
-# ============================================================================
-# _raster_triggers = get_raster_triggers()
-# _raster_extract = _raster_triggers[0]['handler']
-# _raster_point = _raster_triggers[1]['handler']
-# _raster_clip = _raster_triggers[2]['handler']
-# _raster_preview = _raster_triggers[3]['handler']
-#
-# @app.route(route="raster/extract/{collection}/{item}", methods=["GET"])
-# def raster_api_extract(req): return _raster_extract(req)
-#
-# @app.route(route="raster/point/{collection}/{item}", methods=["GET"])
-# def raster_api_point(req): return _raster_point(req)
-#
-# @app.route(route="raster/clip/{collection}/{item}", methods=["GET", "POST"])
-# def raster_api_clip(req): return _raster_clip(req)
-#
-# @app.route(route="raster/preview/{collection}/{item}", methods=["GET"])
-# def raster_api_preview(req): return _raster_preview(req)
-# ============================================================================
-
-# ============================================================================
-# XARRAY API - Direct Zarr Access for Time-Series (18 DEC 2025)
-# ============================================================================
-# DISABLED 11 FEB 2026 - US 6.1 APP_MODE cleanup, re-enable when needed
-# Direct xarray access to Zarr datasets for time-series operations.
-# More efficient than TiTiler for multi-timestep queries (single read vs N requests).
-#
-# Endpoints:
-#   GET /api/xarray/point/{collection}/{item}       - Time-series at a point
-#   GET /api/xarray/statistics/{collection}/{item}  - Regional stats over time
-#   GET /api/xarray/aggregate/{collection}/{item}   - Temporal aggregation export
-# ============================================================================
-
-# _xarray_triggers = get_xarray_triggers()
-# _xarray_point = _xarray_triggers[0]['handler']
-# _xarray_statistics = _xarray_triggers[1]['handler']
-# _xarray_aggregate = _xarray_triggers[2]['handler']
-#
-# @app.route(route="xarray/point/{collection}/{item}", methods=["GET"])
-# def xarray_api_point(req: func.HttpRequest) -> func.HttpResponse:
-#     return _xarray_point(req)
-#
-# @app.route(route="xarray/statistics/{collection}/{item}", methods=["GET"])
-# def xarray_api_statistics(req: func.HttpRequest) -> func.HttpResponse:
-#     return _xarray_statistics(req)
-#
-# @app.route(route="xarray/aggregate/{collection}/{item}", methods=["GET"])
-# def xarray_api_aggregate(req: func.HttpRequest) -> func.HttpResponse:
-#     return _xarray_aggregate(req)
-
-
-# NOTE: STAC repair routes moved to triggers/admin/admin_stac.py blueprint (12 JAN 2026)
-# - /api/stac/repair/test
-# - /api/stac/repair/inventory
-# - /api/stac/repair/item

@@ -27,7 +27,7 @@ Exports:
 
 from typing import Dict, List, Any, Optional, Union, Literal
 from enum import Enum
-from datetime import datetime
+from datetime import datetime, timezone
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 
@@ -298,7 +298,7 @@ class DynamicOrchestrationResult(BaseModel):
     )
 
     analysis_timestamp: datetime = Field(
-        default_factory=lambda: datetime.utcnow(),
+        default_factory=lambda: datetime.now(timezone.utc),
         description="When analysis was performed"
     )
 

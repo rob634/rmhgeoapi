@@ -834,7 +834,7 @@ class MapInterface(BaseInterface):
             try {
                 const payload = {
                     reviewer: reviewer,
-                    clearance_level: clearance,
+                    clearance_state: clearance,
                     notes: notes || 'Approved via Vector Map Viewer QA'
                 };
                 if (QA_CONTEXT.approval_id) {

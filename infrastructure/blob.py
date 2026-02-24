@@ -85,7 +85,7 @@ import logging
 import threading
 import concurrent.futures
 from abc import ABC, abstractmethod
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from typing import List, Dict, Any, Optional, Iterator, BinaryIO, Union
 
@@ -1386,7 +1386,7 @@ class BlobRepository(IBlobRepository):
             blob_client = self._get_container_client(container_name).get_blob_client(blob_name)
 
             # Calculate expiry time
-            start_time = datetime.now(datetime.timezone.utc) if hasattr(datetime, 'timezone') else datetime.utcnow()
+            start_time = datetime.now(timezone.utc)
             expiry_time = start_time + timedelta(hours=hours)
 
             # Get user delegation key (works with managed identity)

@@ -44,7 +44,7 @@ class ApprovalState(str, Enum):
     Approval workflow state for geospatial assets.
 
     Transitions:
-    - PENDING_REVIEW -> APPROVED (approve with clearance_level)
+    - PENDING_REVIEW -> APPROVED (approve with clearance_state)
     - PENDING_REVIEW -> REJECTED (reject with reason)
     - REJECTED -> PENDING_REVIEW (only via overwrite submit)
     - APPROVED -> REVOKED (unpublish - requires audit trail)

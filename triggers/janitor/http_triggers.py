@@ -53,8 +53,9 @@ def janitor_run_handler(req: func.HttpRequest) -> func.HttpResponse:
     if not run_type:
         return func.HttpResponse(
             json.dumps({
-                "status": "error",
+                "success": False,
                 "error": "Missing required parameter: type",
+                "error_type": "ValidationError",
                 "valid_types": ["task_watchdog", "job_health", "orphan_detector", "metadata_consistency", "log_cleanup", "all"],
                 "usage": "POST /api/admin/janitor/run?type=task_watchdog"
             }),
@@ -66,8 +67,9 @@ def janitor_run_handler(req: func.HttpRequest) -> func.HttpResponse:
     if run_type not in valid_types:
         return func.HttpResponse(
             json.dumps({
-                "status": "error",
+                "success": False,
                 "error": f"Invalid type: {run_type}",
+                "error_type": "ValidationError",
                 "valid_types": valid_types
             }),
             status_code=400,
@@ -136,8 +138,9 @@ def janitor_run_handler(req: func.HttpRequest) -> func.HttpResponse:
         logger.error(f"Manual janitor run failed: {e}")
         return func.HttpResponse(
             json.dumps({
-                "status": "error",
+                "success": False,
                 "error": str(e),
+                "error_type": "InternalError",
                 "run_type": run_type
             }),
             status_code=500,
@@ -174,8 +177,9 @@ def janitor_status_handler(req: func.HttpRequest) -> func.HttpResponse:
         logger.error(f"Failed to get janitor status: {e}")
         return func.HttpResponse(
             json.dumps({
-                "status": "error",
-                "error": str(e)
+                "success": False,
+                "error": str(e),
+                "error_type": "InternalError"
             }),
             status_code=500,
             mimetype="application/json"
@@ -259,8 +263,9 @@ def janitor_history_handler(req: func.HttpRequest) -> func.HttpResponse:
         logger.error(f"Failed to get janitor history: {e}")
         return func.HttpResponse(
             json.dumps({
-                "status": "error",
-                "error": str(e)
+                "success": False,
+                "error": str(e),
+                "error_type": "InternalError"
             }),
             status_code=500,
             mimetype="application/json"

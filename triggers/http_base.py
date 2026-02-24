@@ -358,16 +358,26 @@ class BaseHttpTrigger(ABC):
         return str(uuid.uuid4())[:8]
     
     def _create_success_response(self, data: Dict[str, Any], request_id: str) -> func.HttpResponse:
-        """Create standardized success response."""
+        """Create standardized success response.
+
+        If the response data contains a 'status_code' key, it is used as the
+        HTTP status code and removed from the JSON body.  This allows
+        process_request() implementations to signal non-200 outcomes (e.g. 400
+        for validation errors, 500 for downstream failures) without raising
+        exceptions.
+        """
+        # Extract explicit status_code from response data (default 200)
+        status_code = data.pop("status_code", 200) if isinstance(data, dict) else 200
+
         response_data = {
             **data,
             "request_id": request_id,
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
-        
+
         return func.HttpResponse(
             json.dumps(response_data, default=str),
-            status_code=200,
+            status_code=status_code,
             mimetype="application/json",
             headers={"X-Request-ID": request_id}
         )

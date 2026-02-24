@@ -528,7 +528,7 @@ class AdminDbMaintenanceTrigger:
 
             return func.HttpResponse(
                 body=json.dumps({
-                    "status": "error",
+                    "success": False,
                     "error": error_msg,
                     "error_type": error_type,
                     "traceback": traceback.format_exc(),

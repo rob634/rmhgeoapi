@@ -4967,7 +4967,7 @@ class TasksInterface(BaseInterface):
                         <strong>Approved</strong>
                         ${{state.reviewer ? ` by ${{state.reviewer}}` : ''}}
                         ${{state.approved_at ? ` on ${{new Date(state.approved_at).toLocaleString()}}` : ''}}
-                        ${{state.clearance_level ? ` — Clearance: ${{state.clearance_level}}` : ''}}
+                        ${{state.clearance_state ? ` — Clearance: ${{state.clearance_state}}` : ''}}
                     </div>
                 `;
                 if (state.can_revoke) {{
@@ -5123,7 +5123,7 @@ class TasksInterface(BaseInterface):
             const payload = {{
                 job_id: JOB_ID,
                 reviewer: reviewer,
-                clearance_level: document.getElementById('approval-clearance').value,
+                clearance_state: document.getElementById('approval-clearance').value,
                 notes: document.getElementById('approval-notes').value.trim() || undefined
             }};
 

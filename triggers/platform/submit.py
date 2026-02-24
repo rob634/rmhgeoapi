@@ -152,17 +152,17 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
 
         overwrite = platform_req.processing_options.overwrite
 
-        # Extract optional clearance_level (V0.8 - 29 JAN 2026)
+        # Extract optional clearance_state (V0.9 - 24 FEB 2026)
         # Most assets start UNCLEARED and are cleared at approval time.
         # Optional: specify clearance at submit for pre-approved data sources.
         clearance_level = None
-        clearance_level_str = req_body.get('clearance_level') or req_body.get('access_level')
+        clearance_level_str = req_body.get('clearance_state') or req_body.get('clearance_level') or req_body.get('access_level')
         if clearance_level_str:
             try:
                 clearance_level = ClearanceState(clearance_level_str.lower())
-                logger.info(f"  Clearance level specified at submit: {clearance_level.value}")
+                logger.info(f"  Clearance state specified at submit: {clearance_level.value}")
             except ValueError:
-                logger.warning(f"  Invalid clearance_level '{clearance_level_str}', ignoring")
+                logger.warning(f"  Invalid clearance_state '{clearance_level_str}', ignoring")
                 clearance_level = None
 
         # Translate DDH request to CoreMachine job parameters

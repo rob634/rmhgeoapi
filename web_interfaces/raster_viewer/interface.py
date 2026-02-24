@@ -1552,7 +1552,7 @@ class RasterViewerInterface(BaseInterface):
 
                 const payload = {{
                     reviewer: reviewer,
-                    clearance_level: clearance,
+                    clearance_state: clearance,
                     notes: notes || 'Approved via Raster Viewer QA'
                 }};
                 if (versionId) payload.version_id = versionId;

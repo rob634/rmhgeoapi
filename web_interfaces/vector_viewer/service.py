@@ -1457,7 +1457,7 @@ class VectorViewerService:
                 const approvePayload = {{
                     asset_id: ASSET_ID,
                     reviewer: reviewer,
-                    clearance_level: clearance,
+                    clearance_state: clearance,
                     notes: notes || undefined
                 }};
                 if (versionId) approvePayload.version_id = versionId;

@@ -23,7 +23,6 @@ Architecture:
     - Workflow instances (define stages and parameters) via ALL_JOBS registry
     - Task handlers (execute business logic) via ALL_HANDLERS registry
     - StateManager (database operations)
-    - OrchestrationManager (stage advancement)
     - Repositories (external services via RepositoryFactory)
 
 Exports:
@@ -32,7 +31,7 @@ Exports:
 Dependencies:
     jobs.registry: Job workflow definitions (ALL_JOBS)
     services.registry: Task handler implementations (ALL_HANDLERS)
-    core: StateManager, OrchestrationManager
+    core: StateManager
     infrastructure: Repository implementations
 
 Entry Points:
@@ -54,7 +53,7 @@ import traceback
 # Now using explicit registration - registries passed to constructor
 
 # Core components (composition, not inheritance)
-from core import StateManager, OrchestrationManager
+from core import StateManager
 
 # Pydantic models
 from core.models import (
@@ -2145,7 +2144,10 @@ class CoreMachine:
         """Mark job as failed."""
         try:
             self.logger.info(f"🚫 Marking job {job_id[:16]}... as FAILED")
-            self.state_manager.update_job_status(job_id, JobStatus.FAILED)
+            self.state_manager.update_job_status(
+                job_id, JobStatus.FAILED,
+                error_details=error_message[:2000] if error_message else None
+            )
             self.logger.info(f"✅ Job marked as FAILED: {error_message}")
 
             # Record JOB_FAILED event (23 JAN 2026 - Job Event Tracking)

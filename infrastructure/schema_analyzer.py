@@ -39,7 +39,7 @@ Exports:
 
 from typing import Dict, Any, List, Optional, Set, Tuple
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from psycopg import sql
 import traceback
@@ -522,7 +522,7 @@ class SchemaAnalyzer:
         """
         report = SchemaReport(
             schema_name=schema_name,
-            timestamp=datetime.utcnow().isoformat(),
+            timestamp=datetime.now(timezone.utc).isoformat(),
             exists=False
         )
 
@@ -706,7 +706,7 @@ class SchemaAnalyzer:
         """
         report = DriftReport(
             schema_name=schema_name,
-            timestamp=datetime.utcnow().isoformat(),
+            timestamp=datetime.now(timezone.utc).isoformat(),
             has_drift=False
         )
 
@@ -898,7 +898,7 @@ class SchemaAnalyzer:
         lines = []
         lines.append("=" * 70)
         lines.append("DATABASE SCHEMA MIGRATION REPORT")
-        lines.append(f"Generated: {datetime.utcnow().isoformat()}")
+        lines.append(f"Generated: {datetime.now(timezone.utc).isoformat()}")
         lines.append("=" * 70)
 
         for schema_name, drift in all_drift.items():

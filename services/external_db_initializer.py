@@ -70,7 +70,7 @@ Usage:
 
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 import subprocess
 import sys
@@ -261,7 +261,7 @@ class ExternalDatabaseInitializer:
             Dict with prerequisite status and any required DBA actions
         """
         prereqs = {
-            "checked_at": datetime.utcnow().isoformat(),
+            "checked_at": datetime.now(timezone.utc).isoformat(),
             "target_host": self.target_host,
             "target_database": self.target_database,
             "ready": False,
@@ -355,7 +355,7 @@ class ExternalDatabaseInitializer:
             target_host=self.target_host,
             target_database=self.target_database,
             admin_umi_client_id=self.admin_umi_client_id,
-            timestamp=datetime.utcnow().isoformat(),
+            timestamp=datetime.now(timezone.utc).isoformat(),
             dry_run=dry_run,
             success=False
         )

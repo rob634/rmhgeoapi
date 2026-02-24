@@ -34,7 +34,7 @@ Usage:
 """
 
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from psycopg import sql
 import traceback
 
@@ -97,7 +97,7 @@ class H3SchemaDeployer:
         """
         results = {
             "schema": self.SCHEMA_NAME,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "steps": [],
             "success": False,
             "errors": []
@@ -1060,7 +1060,7 @@ class H3SchemaDeployer:
 
         results = {
             "operation": "drop_normalized_tables",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "dropped": [],
             "errors": []
         }

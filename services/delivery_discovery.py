@@ -386,9 +386,9 @@ def analyze_delivery_structure(blob_list: List[str], folder_path: str = None) ->
             "total_other": len(other_files)
         },
         "recommended_workflow": recommended_workflow,
-        "analysis_timestamp": datetime.utcnow().isoformat() + 'Z'
+        "analysis_timestamp": datetime.now(timezone.utc).isoformat() + 'Z'
     }
 
 
 # Import datetime for timestamp
-from datetime import datetime
+from datetime import datetime, timezone

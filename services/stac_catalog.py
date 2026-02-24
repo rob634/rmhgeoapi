@@ -17,7 +17,7 @@ Stage 2: extract_stac_metadata - Extracts STAC metadata and inserts into PgSTAC
 """
 
 from typing import Any
-from datetime import datetime
+from datetime import datetime, timezone
 from infrastructure.blob import BlobRepository
 
 # F7.21: Type-safe result models (25 JAN 2026)
@@ -62,7 +62,7 @@ def list_raster_files(params: dict) -> dict[str, Any]:
         # Silver zone - STAC catalog references processed data
         blob_repo = BlobRepository.for_zone("silver")
 
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         # Get all blobs
         blobs = blob_repo.list_blobs(
@@ -82,7 +82,7 @@ def list_raster_files(params: dict) -> dict[str, Any]:
                 if file_limit and len(raster_files) >= file_limit:
                     break
 
-        duration = (datetime.utcnow() - start_time).total_seconds()
+        duration = (datetime.now(timezone.utc) - start_time).total_seconds()
 
         # SUCCESS - return raster file names for Stage 2
         return {
@@ -237,7 +237,7 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
             logger.error(f"❌ STEP 1 FAILED: Parameter extraction error: {e}")
             raise
 
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         # STEP 2: Initialize STAC service
         try:
@@ -251,7 +251,7 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
         # STEP 3: Extract STAC item from blob (THIS IS THE SLOW PART)
         try:
             logger.info(f"📡 STEP 3: Starting STAC extraction from blob (this may take 30-60s)...")
-            extract_start = datetime.utcnow()
+            extract_start = datetime.now(timezone.utc)
 
             # STEP 3A: Extract platform and provenance metadata for STAC enrichment
             # V0.9 P2.6: Uses Pydantic models from core.models.stac
@@ -296,11 +296,11 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
                 file_size=params.get('file_size'),
             )
 
-            extract_duration = (datetime.utcnow() - extract_start).total_seconds()
+            extract_duration = (datetime.now(timezone.utc) - extract_start).total_seconds()
             item_id_str = item.get('id', 'unknown') if isinstance(item, dict) else item.id
             logger.info(f"✅ STEP 3: STAC extraction completed in {extract_duration:.2f}s - item_id={item_id_str}")
         except Exception as e:
-            extract_duration = (datetime.utcnow() - extract_start).total_seconds() if 'extract_start' in locals() else 0
+            extract_duration = (datetime.now(timezone.utc) - extract_start).total_seconds() if 'extract_start' in locals() else 0
             logger.error(f"❌ STEP 3 FAILED after {extract_duration:.2f}s: STAC extraction error: {e}\n{traceback.format_exc()}")
             raise
 
@@ -417,7 +417,7 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
             except Exception as release_cache_err:
                 logger.warning(f"Failed to cache STAC on Release (non-fatal): {release_cache_err}")
 
-        duration = (datetime.utcnow() - start_time).total_seconds()
+        duration = (datetime.now(timezone.utc) - start_time).total_seconds()
 
         # STEP 6: Extract metadata for summary
         try:
@@ -508,7 +508,7 @@ def extract_stac_metadata(params: dict) -> dict[str, Any]:
 
     except Exception as e:
         # FAILURE - return error with context using typed result (F7.21)
-        duration = (datetime.utcnow() - start_time).total_seconds() if 'start_time' in locals() else 0
+        duration = (datetime.now(timezone.utc) - start_time).total_seconds() if 'start_time' in locals() else 0
         error_msg = str(e) or type(e).__name__
         logger.error(f"💥 COMPLETE FAILURE after {duration:.2f}s: {error_msg}\n{traceback.format_exc()}")
 

@@ -157,7 +157,7 @@ class ContainerAnalysisService:
 
         # Add metadata
         results['job_id'] = job_id
-        results['analyzed_at'] = datetime.utcnow().isoformat() + 'Z'
+        results['analyzed_at'] = datetime.now(timezone.utc).isoformat() + 'Z'
 
         # Optionally save to blob storage
         if save_output and self.blob_repo:
@@ -682,7 +682,7 @@ class ContainerAnalysisService:
         # Generate output path
         from config import get_config
         config = get_config()
-        timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+        timestamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
         # Use silver misc container for analysis output
         container = config.storage.silver.misc
         blob_path = f"container-analysis/{job_id}/{timestamp}.json"

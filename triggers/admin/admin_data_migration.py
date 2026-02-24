@@ -32,7 +32,7 @@ Environment Variables:
 
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 import azure.functions as func
@@ -120,8 +120,8 @@ def get_pipeline_status(run_id: str) -> Dict[str, Any]:
     activity_runs = []
     try:
         filter_params = {
-            "lastUpdatedAfter": datetime.utcnow() - timedelta(days=1),
-            "lastUpdatedBefore": datetime.utcnow() + timedelta(days=1),
+            "lastUpdatedAfter": datetime.now(timezone.utc) - timedelta(days=1),
+            "lastUpdatedBefore": datetime.now(timezone.utc) + timedelta(days=1),
         }
         activities = client.activity_runs.query_by_pipeline_run(
             resource_group_name=ADF_RESOURCE_GROUP,
@@ -246,7 +246,7 @@ def data_migration_trigger(req: func.HttpRequest) -> func.HttpResponse:
             "factory_name": result["factory_name"],
             "message": f"{pipeline_type.capitalize()} migration pipeline triggered successfully",
             "monitor_url": f"/api/data-migration/status/{result['run_id']}",
-            "triggered_at": datetime.utcnow().isoformat() + "Z",
+            "triggered_at": datetime.now(timezone.utc).isoformat() + "Z",
         }
 
         if parameters:

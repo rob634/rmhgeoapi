@@ -22,7 +22,7 @@ NOTE: /api/system-health (cross-app) is in triggers/system_health.py (admin only
 import azure.functions as func
 from azure.functions import Blueprint
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 bp = Blueprint()
 
@@ -106,7 +106,7 @@ def system_stats(req: func.HttpRequest) -> func.HttpResponse:
             "memory": memory_stats,
             "cpu": cpu_stats,
             "jobs": job_stats,
-            "timestamp": datetime.utcnow().isoformat() + "Z"
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
         return func.HttpResponse(

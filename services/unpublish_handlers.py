@@ -28,6 +28,8 @@ Date: 13 DEC 2025 - Refactored vector to use geo.table_metadata as primary sourc
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
 
+from psycopg import sql as psql
+
 from util_logger import LoggerFactory, ComponentType
 from config.defaults import STACDefaults
 from config.vector_config import VectorConfig
@@ -236,16 +238,19 @@ def inventory_vector_item(params: Dict[str, Any], context: Optional[Dict[str, An
             with conn.cursor() as cur:
                 # Query geo.table_catalog for SERVICE LAYER metadata
                 cur.execute(
-                    """
+                    psql.SQL("""
                     SELECT
                         table_name, schema_name,
                         stac_item_id, stac_collection_id,
                         feature_count, geometry_type,
                         created_at, updated_at,
                         bbox_minx, bbox_miny, bbox_maxx, bbox_maxy
-                    FROM geo.table_catalog
+                    FROM {}.{}
                     WHERE table_name = %s
-                    """,
+                    """).format(
+                        psql.Identifier('geo'),
+                        psql.Identifier('table_catalog')
+                    ),
                     (table_name,)
                 )
                 catalog_row = cur.fetchone()
@@ -253,15 +258,18 @@ def inventory_vector_item(params: Dict[str, Any], context: Optional[Dict[str, An
                 # Query app.vector_etl_tracking for ETL INTERNAL metadata
                 # (Get latest ETL run for this table)
                 cur.execute(
-                    """
+                    psql.SQL("""
                     SELECT
                         etl_job_id, source_file, source_format, source_crs,
                         created_at
-                    FROM app.vector_etl_tracking
+                    FROM {}.{}
                     WHERE table_name = %s
                     ORDER BY created_at DESC
                     LIMIT 1
-                    """,
+                    """).format(
+                        psql.Identifier('app'),
+                        psql.Identifier('vector_etl_tracking')
+                    ),
                     (table_name,)
                 )
                 etl_row = cur.fetchone()

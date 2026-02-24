@@ -41,6 +41,7 @@ from core.schema.updates import TaskUpdateModel, JobUpdateModel
 # Task ID generation moved to Controller layer (hierarchically correct)
 # Repository no longer generates IDs - Controller provides them
 from config import __version__ as etl_version  # V0.8.12: ETL version tracking
+from psycopg import sql
 from .postgresql import (
     PostgreSQLRepository,
     PostgreSQLJobRepository,
@@ -1046,23 +1047,26 @@ class TaskRepository(PostgreSQLTaskRepository):
             with self._get_connection() as conn:
                 cursor = conn.cursor()
 
-                # Build update query
-                set_clauses = [f"status = %s", f"updated_at = %s"]
+                # Build update query with safe SQL composition
+                set_clauses = [
+                    sql.SQL("{} = %s").format(sql.Identifier("status")),
+                    sql.SQL("{} = %s").format(sql.Identifier("updated_at")),
+                ]
                 params = [new_status, datetime.now(timezone.utc)]
 
                 if additional_updates:
                     for key, value in additional_updates.items():
-                        set_clauses.append(f"{key} = %s")
+                        set_clauses.append(sql.SQL("{} = %s").format(sql.Identifier(key)))
                         params.append(value)
 
                 # Add task IDs to params
                 params.append(tuple(task_ids))
 
-                query = f"""
-                    UPDATE {self.schema_name}.tasks
-                    SET {', '.join(set_clauses)}
-                    WHERE task_id = ANY(%s)
-                """
+                query = sql.SQL("UPDATE {}.{} SET {} WHERE task_id = ANY(%s)").format(
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier('tasks'),
+                    sql.SQL(', ').join(set_clauses)
+                )
 
                 cursor.execute(query, params)
                 conn.commit()

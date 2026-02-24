@@ -268,6 +268,7 @@ Items below are tracked here but not yet added to ADO. Add to ADO when prioritiz
 | C1.5: Consolidate repository bundles | 🔲 Deferred | `core/machine.py`, `core/state_manager.py` | Both create independent repo instances via `RepositoryFactory` — works correctly but duplicates objects |
 | C1.8: Decompose `process_task_message` | 🔲 Deferred | `core/machine.py:746-1556` | 811-line method (success path + failure path) — most critical code path in the system |
 | C2.8: Remove legacy AppConfig property aliases | 🔲 Deferred | `config/app_config.py` | 50+ callers use legacy aliases — too many call sites for safe batch update |
+| C8.4: Split `base.py` monolith | 🔲 Deferred | `web_interfaces/base.py` (3,100 lines) | Extract CSS → `design_system.py`, JS → `common_js.py`, navbar → `navbar.py` |
 
 ### EN-TD.1: Raw JSON Parsing in HTTP Triggers `[DONE 12 FEB 2026]`
 

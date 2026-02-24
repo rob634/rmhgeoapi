@@ -989,17 +989,18 @@ class TaskRepository(PostgreSQLTaskRepository):
                 cursor = conn.cursor()
 
                 # Use executemany for batch insert
-                cursor.executemany(
-                    f"""
-                    INSERT INTO {self.schema_name}.tasks (
+                query = sql.SQL("""
+                    INSERT INTO {}.{} (
                         task_id, parent_job_id, task_type, status,
                         stage_number, parameters, batch_id, retry_count,
                         metadata, created_at, updated_at
                     )
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """,
-                    data
+                """).format(
+                    sql.Identifier(self.schema_name),
+                    sql.Identifier('tasks')
                 )
+                cursor.executemany(query, data)
 
                 conn.commit()
                 affected = cursor.rowcount

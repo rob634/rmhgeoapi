@@ -547,8 +547,6 @@ class PromoteService:
     def _verify_stac_item_exists(self, item_id: str) -> bool:
         """Check if a STAC item exists in PgSTAC."""
         try:
-            from infrastructure.pgstac_bootstrap import get_item_by_id
-
             result = get_item_by_id(item_id)
             # get_item_by_id returns error dict if not found
             if 'error' in result:
@@ -646,6 +644,8 @@ class PromoteService:
         Get a STAC item by ID for validation.
 
         Searches across all collections to find the item.
+        Routes through get_item_by_id (infrastructure layer) instead of
+        direct SQL access [C4.4].
 
         Args:
             item_id: Item ID to find
@@ -653,18 +653,13 @@ class PromoteService:
         Returns:
             Item dict or None
         """
-        from infrastructure.postgresql import PostgreSQLRepository
-
         try:
-            pg_repo = PostgreSQLRepository(schema_name='pgstac')
-            with pg_repo._get_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        "SELECT content FROM pgstac.items WHERE id = %s LIMIT 1",
-                        (item_id,)
-                    )
-                    row = cur.fetchone()
-                    return row['content'] if row else None
+            result = get_item_by_id(item_id)
+            # get_item_by_id returns error dict if not found
+            if isinstance(result, dict) and 'error' in result:
+                logger.warning(f"Item not found for validation: {item_id}")
+                return None
+            return result
         except Exception as e:
             logger.warning(f"Failed to get item '{item_id}': {e}")
             return None

@@ -65,9 +65,9 @@ ENV PYTHONUNBUFFERED=1
 # Expose port 80 for Azure Web App (default port)
 EXPOSE 80
 
-# Health check - hit the /health endpoint
+# Health check - liveness probe (lightweight, no external deps)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD curl -f http://localhost:80/health || exit 1
+    CMD curl -f http://localhost:80/livez || exit 1
 
 # Entry point - Docker Service (HTTP + Queue Worker)
 # Runs FastAPI for health checks + background thread polling Service Bus

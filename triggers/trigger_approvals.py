@@ -50,7 +50,8 @@ def _resolve_release(
     job_id: str = None,
     request_id: str = None,
     dataset_id: str = None,
-    resource_id: str = None
+    resource_id: str = None,
+    operation: str = "approve"  # "approve", "reject", or "revoke"
 ) -> tuple:
     """
     Resolve an AssetRelease from various identifiers.
@@ -113,11 +114,16 @@ def _resolve_release(
             "error_type": "NotFound"
         }
 
-    # 4. By asset_id -- get draft first (for approve/reject), then latest approved (for revoke)
+    # 4. By asset_id -- get draft first (for approve/reject), or latest approved (for revoke)
     if asset_id:
-        release = release_repo.get_draft(asset_id)
-        if not release:
+        if operation == "revoke":
+            # Revoke targets approved releases, not drafts
             release = release_repo.get_latest(asset_id)
+        else:
+            # Approve/reject targets drafts first, then falls back to latest
+            release = release_repo.get_draft(asset_id)
+            if not release:
+                release = release_repo.get_latest(asset_id)
         if release:
             return release, None
         return None, {
@@ -131,9 +137,12 @@ def _resolve_release(
         asset_repo = AssetRepository()
         asset = asset_repo.get_by_identity("ddh", dataset_id, resource_id)
         if asset:
-            release = release_repo.get_draft(asset.asset_id)
-            if not release:
+            if operation == "revoke":
                 release = release_repo.get_latest(asset.asset_id)
+            else:
+                release = release_repo.get_draft(asset.asset_id)
+                if not release:
+                    release = release_repo.get_latest(asset.asset_id)
             if release:
                 return release, None
         return None, {
@@ -278,7 +287,8 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
             job_id=job_id,
             request_id=request_id,
             dataset_id=dataset_id,
-            resource_id=resource_id
+            resource_id=resource_id,
+            operation="approve"
         )
         if error:
             status_code = 404 if error.get('error_type') == 'NotFound' else 400
@@ -441,7 +451,8 @@ def platform_reject(req: func.HttpRequest) -> func.HttpResponse:
             job_id=job_id,
             request_id=request_id,
             dataset_id=dataset_id,
-            resource_id=resource_id
+            resource_id=resource_id,
+            operation="reject"
         )
         if error:
             status_code = 404 if error.get('error_type') == 'NotFound' else 400
@@ -591,7 +602,8 @@ def platform_revoke(req: func.HttpRequest) -> func.HttpResponse:
             job_id=job_id,
             request_id=request_id,
             dataset_id=dataset_id,
-            resource_id=resource_id
+            resource_id=resource_id,
+            operation="revoke"
         )
         if error:
             status_code = 404 if error.get('error_type') == 'NotFound' else 400

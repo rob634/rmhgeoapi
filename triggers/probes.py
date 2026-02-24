@@ -493,6 +493,16 @@ def appinsights_query(req: func.HttpRequest) -> func.HttpResponse:
         {"query": "traces | take 10"}
     """
     try:
+        # Guard: Only available in standalone/orchestrator mode
+        from config import get_app_mode_config
+        mode_config = get_app_mode_config()
+        if mode_config.app_mode.value not in ('standalone', 'orchestrator'):
+            return func.HttpResponse(
+                json.dumps({"status": "error", "error": "Endpoint not available in this app mode"}),
+                status_code=403,
+                mimetype="application/json"
+            )
+
         from infrastructure.appinsights_exporter import query_logs
 
         # Parse request body
@@ -509,6 +519,13 @@ def appinsights_query(req: func.HttpRequest) -> func.HttpResponse:
         if not query:
             return func.HttpResponse(
                 json.dumps({"status": "error", "error": "Missing 'query' field"}),
+                status_code=400,
+                mimetype="application/json"
+            )
+
+        if len(query) > 2000:
+            return func.HttpResponse(
+                json.dumps({"status": "error", "error": "Query too long (max 2000 chars)"}),
                 status_code=400,
                 mimetype="application/json"
             )

@@ -285,6 +285,25 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
             }
             logger.warning(f"[{job_id[:8]}] TiPG catalog refresh for {tipg_collection_id} failed (non-fatal): {e}")
 
+        # G3: Probe TiPG to verify collection is actually servable (non-fatal)
+        try:
+            probe = sl_client.probe_collection(tipg_collection_id)
+            tipg_refresh_data['probe'] = probe
+
+            if probe['number_matched'] == 0:
+                logger.warning(
+                    f"[{job_id[:8]}] TiPG probe: {tipg_collection_id} has 0 features "
+                    f"(expected {upload_result.get('total_rows', '?')}). Data may not be servable."
+                )
+            else:
+                logger.info(
+                    f"[{job_id[:8]}] TiPG probe: {tipg_collection_id} confirmed "
+                    f"{probe['number_matched']} features servable"
+                )
+        except Exception as probe_err:
+            tipg_refresh_data['probe'] = {'status': 'failed', 'error': str(probe_err)}
+            logger.warning(f"[{job_id[:8]}] TiPG probe failed (non-fatal): {probe_err}")
+
         checkpoint("tipg_refresh", tipg_refresh_data)
 
         # =====================================================================

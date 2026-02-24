@@ -145,6 +145,49 @@ class ServiceLayerClient:
 
             return result
 
+    def probe_collection(self, collection_id: str, limit: int = 1) -> dict:
+        """
+        Probe a TiPG collection to verify it is servable.
+
+        GET /collections/{collection_id}/items?limit={limit}
+
+        This is an end-to-end validation: if TiPG can serve features,
+        the PostGIS table is queryable and the data is live.
+
+        Args:
+            collection_id: TiPG collection ID (format: schema.table_name)
+            limit: Number of features to request (default 1, just enough to prove servability)
+
+        Returns:
+            dict with 'number_matched', 'number_returned', 'servable'
+
+        Raises:
+            httpx.HTTPStatusError: If the collection is not found or query fails
+        """
+        url = f"{self._base_url}/collections/{collection_id}/items?limit={limit}"
+        headers = self._get_auth_headers()
+
+        logger.info(f"Probing TiPG collection: {collection_id}")
+
+        with httpx.Client(timeout=15.0) as client:
+            response = client.get(url, headers=headers)
+            response.raise_for_status()
+
+            data = response.json()
+            number_matched = data.get('numberMatched', 0)
+            number_returned = data.get('numberReturned', 0)
+
+            logger.info(
+                f"TiPG probe: {collection_id} — "
+                f"matched={number_matched}, returned={number_returned}"
+            )
+
+            return {
+                'number_matched': number_matched,
+                'number_returned': number_returned,
+                'servable': number_returned > 0
+            }
+
     def health_check(self) -> ServiceLayerHealth:
         """
         Check Service Layer health.

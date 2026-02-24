@@ -167,35 +167,28 @@ class SharedInfrastructureSubsystem(WorkerSubsystem):
 
     def _test_database_connectivity(self) -> dict:
         """
-        Test PostgreSQL connectivity using psycopg.
+        Test PostgreSQL connectivity using ConnectionPoolManager.
+
+        Uses the shared connection pool instead of creating a raw connection,
+        which avoids redundant authentication and connection setup (C7.6).
 
         Returns:
             Dict with connection status, version, user, database
         """
         try:
-            import psycopg
-            from infrastructure.auth import get_postgres_token
-            from config import get_config
+            from infrastructure.connection_pool import ConnectionPoolManager
 
-            config = get_config()
-
-            # Get OAuth token for managed identity auth
-            token = get_postgres_token()
-
-            conn_params = {
-                "host": config.database.host,
-                "port": config.database.port,
-                "dbname": config.database.database,
-                "user": config.database.managed_identity_admin_name,
-                "password": token,
-                "sslmode": "require",
-                "connect_timeout": 10,
-            }
-
-            with psycopg.connect(**conn_params) as conn:
+            with ConnectionPoolManager.get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute("SELECT version(), current_user, current_database()")
-                    version, user, database = cur.fetchone()
+                    row = cur.fetchone()
+                    # dict_row returns a dict; fall back to tuple indexing
+                    if isinstance(row, dict):
+                        version = row.get("version", "")
+                        user = row.get("current_user", "")
+                        database = row.get("current_database", "")
+                    else:
+                        version, user, database = row
 
             return {
                 "connected": True,

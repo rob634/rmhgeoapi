@@ -142,7 +142,7 @@ class RuntimeSubsystem(WorkerSubsystem):
                 "process_rss_mb": round(mem_info.rss / (1024**2), 1),
                 "process_vms_mb": round(mem_info.vms / (1024**2), 1),
                 "process_percent": round(process.memory_percent(), 2),
-                "cpu_percent": round(psutil.cpu_percent(interval=0.1), 1),
+                "cpu_percent": round(psutil.cpu_percent(interval=None), 1),
             }
 
             # Capacity thresholds

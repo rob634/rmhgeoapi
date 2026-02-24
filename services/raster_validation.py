@@ -231,10 +231,11 @@ def validate_raster(params: dict) -> dict:
             return create_error_response(
                 ErrorCode.CONTAINER_NOT_FOUND,
                 error_msg,
-                error_type="ResourceNotFoundError",
-                container_name=container_name,
-                storage_account=blob_repo.account_name,
-                blob_name=blob_name
+                details={
+                    "container_name": container_name,
+                    "storage_account": blob_repo.account_name,
+                    "blob_name": blob_name,
+                }
             )
 
         # Check blob exists in container
@@ -247,11 +248,12 @@ def validate_raster(params: dict) -> dict:
             return create_error_response(
                 ErrorCode.FILE_NOT_FOUND,
                 error_msg,
-                error_type="ResourceNotFoundError",
-                blob_name=blob_name,
-                container_name=container_name,
-                storage_account=blob_repo.account_name,
-                suggestion=f"Verify blob path spelling. Use /api/containers/{container_name}/blobs to list available files."
+                remediation=f"Verify blob path spelling. Use /api/containers/{container_name}/blobs to list available files.",
+                details={
+                    "blob_name": blob_name,
+                    "container_name": container_name,
+                    "storage_account": blob_repo.account_name,
+                }
             )
 
         logger.info("✅ STEP 3a: Blob exists validation passed")
@@ -262,9 +264,11 @@ def validate_raster(params: dict) -> dict:
         return create_error_response(
             ErrorCode.VALIDATION_ERROR,
             f"Failed to validate blob existence: {e}",
-            blob_name=blob_name,
-            container_name=container_name,
-            traceback=traceback.format_exc()
+            details={
+                "blob_name": blob_name,
+                "container_name": container_name,
+                "traceback": traceback.format_exc(),
+            }
         )
 
     # STEP 3: Open raster file

@@ -67,6 +67,8 @@ LOG_LEVEL: Controls logging verbosity (DEBUG, INFO, WARNING, ERROR)
 import os
 from pydantic import BaseModel, Field
 
+from .defaults import parse_bool
+
 
 class ObservabilityConfig(BaseModel):
     """
@@ -196,10 +198,6 @@ class ObservabilityConfig(BaseModel):
         Returns:
             ObservabilityConfig with enabled status from environment
         """
-        def parse_bool(value: str) -> bool:
-            """Parse boolean from environment variable."""
-            return value.lower() in ("true", "1", "yes")
-
         def parse_int(value: str, default: int) -> int:
             """Parse integer from environment variable."""
             try:

@@ -26,7 +26,7 @@ from enum import Enum
 from typing import Optional
 from pydantic import BaseModel, Field
 
-from .defaults import AnalyticsDefaults
+from .defaults import AnalyticsDefaults, parse_bool
 
 
 class DuckDBConnectionType(str, Enum):
@@ -158,10 +158,6 @@ class AnalyticsConfig(BaseModel):
         Returns:
             AnalyticsConfig: Configured analytics settings
         """
-        def parse_bool(value: str) -> bool:
-            """Parse boolean from environment variable."""
-            return value.lower() in ("true", "1", "yes")
-
         return cls(
             connection_type=DuckDBConnectionType(
                 os.environ.get("DUCKDB_CONNECTION_TYPE", AnalyticsDefaults.CONNECTION_TYPE)

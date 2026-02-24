@@ -752,6 +752,15 @@ class KeyVaultDefaults:
 
 
 # =============================================================================
+# SHARED UTILITIES
+# =============================================================================
+
+def parse_bool(value: str) -> bool:
+    """Canonical boolean parser for environment variables."""
+    return value.lower() in ("true", "1", "yes")
+
+
+# =============================================================================
 # EXPORTS
 # =============================================================================
 
@@ -770,4 +779,5 @@ __all__ = [
     "ObservabilityDefaults",
     "AppDefaults",
     "KeyVaultDefaults",
+    "parse_bool",
 ]

@@ -65,6 +65,7 @@ from .defaults import (
     ObservabilityDefaults,
     AppDefaults,
     KeyVaultDefaults,
+    parse_bool,
 )
 
 # Export domain configs
@@ -221,6 +222,7 @@ __all__ = [
     'ObservabilityDefaults',
     'AppDefaults',
     'KeyVaultDefaults',
+    'parse_bool',
 
     # Main config
     'AppConfig',

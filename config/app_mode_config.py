@@ -284,6 +284,20 @@ class AppModeConfig(BaseModel):
         ]
 
     @property
+    def has_timer_triggers(self) -> bool:
+        """Whether this mode should register timer triggers (maintenance, monitoring).
+
+        Timer triggers run scheduled maintenance (janitor, geo checks, snapshots,
+        log cleanup, external service health). Only standalone and orchestrator
+        modes should run these -- the gateway (platform) and Docker worker do not
+        need background timers.
+        """
+        return self.mode in [
+            AppMode.STANDALONE,
+            AppMode.ORCHESTRATOR,
+        ]
+
+    @property
     def listens_to_jobs_queue(self) -> bool:
         """Whether this mode processes the jobs queue (orchestration)."""
         return self.mode in [

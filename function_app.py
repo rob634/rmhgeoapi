@@ -1515,8 +1515,12 @@ logger.info("=" * 70)
 #   - external_service_health_timer: Every hour
 # ============================================================================
 
-from triggers.timers import timer_bp
-app.register_functions(timer_bp)
+if _app_mode.has_timer_triggers:
+    from triggers.timers import timer_bp
+    app.register_functions(timer_bp)
+    logger.info("✅ Timer triggers blueprint registered (APP_MODE=%s)", _app_mode.mode.value)
+else:
+    logger.info("⏭️ SKIPPING timer triggers (APP_MODE=%s)", _app_mode.mode.value)
 
 
 # NOTE: Cleanup/janitor routes in triggers/admin/admin_janitor.py blueprint (12 JAN 2026)

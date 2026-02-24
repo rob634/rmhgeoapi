@@ -1,6 +1,6 @@
 # ERRORS_AND_FIXES.md - Error Tracking and Resolution Log
 
-**Last Updated**: 19 FEB 2026
+**Last Updated**: 24 FEB 2026
 **Purpose**: Canonical error tracking for pattern analysis and faster troubleshooting
 
 ---
@@ -386,6 +386,53 @@ curl -X POST "https://rmhazuregeoapi-.../api/dbadmin/maintenance?action=rebuild&
 - For auto-increment primary keys not named `id`, add `__sql_serial_columns` metadata
 - Verify DDL output during schema deployment for new tables
 - Test INSERT operations without explicit ID values
+
+---
+
+### DB-007: TiPG PostgresSyntaxError on vector tables
+
+**Date**: 24 FEB 2026
+**Version**: 0.9.x
+**Severity**: Feature-breaking (vector table unservable via OGC Features API)
+
+**Error Message**:
+```
+PostgresSyntaxError: syntax error at or near "type"
+```
+(Also seen with `name`, `date`, `order`, `comment`, `level`, `position`, etc.)
+
+**Location**: TiPG runtime — when serving PostGIS tables via `/collections/{id}/items`
+
+**Root Cause**:
+Source geodata files (Shapefiles, GeoJSON, KML) commonly use column names that
+are PostgreSQL reserved words (`type`, `name`, `date`, `order`, `comment`, etc.).
+Our ETL uses `psycopg sql.Identifier()` which quotes these correctly during INSERT,
+but TiPG generates its own SQL from `information_schema` introspection and may
+not quote all column identifiers — causing PostgresSyntaxError at query time.
+
+**Fix Applied**:
+Created canonical column sanitizer `services/vector/column_sanitizer.py` with:
+- `PG_RESERVED_WORDS` frozenset (~70 common reserved words from geodata)
+- `sanitize_column_name()` — lowercase, regex clean, prefix reserved words with `f_`
+- `sanitize_columns()` — batch version preserving `geometry` column
+
+Integrated at both column-cleaning call sites in `services/vector/postgis_handler.py`:
+- `prepare_gdf()` (line ~580) — primary ETL path, all Docker uploads flow through here
+- `insert_features_with_metadata()` (line ~1267) — secondary code path
+
+**Example Transformations**:
+- `Type` → `f_type`
+- `ORDER` → `f_order`
+- `Feature Name` → `feature_name`
+- `2024_population` → `col_2024_population`
+
+**Note**: Existing tables with reserved-word columns will need re-upload to get
+sanitized names. The fix only applies to new uploads going forward.
+
+**Prevention**:
+- All column cleaning MUST go through `column_sanitizer.py` (single source of truth)
+- If new reserved words cause issues, add them to `PG_RESERVED_WORDS` frozenset
+- Test with known-problematic sources (Shapefiles with `type`, `name` columns)
 
 ---
 

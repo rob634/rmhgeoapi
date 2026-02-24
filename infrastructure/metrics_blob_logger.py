@@ -50,6 +50,7 @@ JSON Lines Format (one JSON object per line):
 """
 
 import json
+import logging
 import os
 import threading
 import time
@@ -303,6 +304,9 @@ class MetricsBlobLogger:
                 self.records_flushed += len(records)
         except Exception as e:
             self.flush_errors += 1
+            logging.getLogger("metrics_blob_logger").warning(
+                f"Metrics blob flush failed ({self.flush_errors} total): {type(e).__name__}"
+            )
             # Re-add records to buffer on failure (best effort)
             for record in records[:self.buffer_size]:
                 self.buffer.appendleft(record)

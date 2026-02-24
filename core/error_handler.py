@@ -122,7 +122,7 @@ class CoreMachineErrorHandler:
             # Structured error logging (Application Insights friendly)
             logger.error(
                 f"❌ Operation failed: {operation_name}",
-                extra=error_context
+                extra={'custom_dimensions': error_context}
             )
             logger.debug(f"Traceback: {traceback.format_exc()}")
 
@@ -216,7 +216,7 @@ def log_nested_error(
         f"❌ Nested error: {operation} failed, cleanup also failed. "
         f"PRIMARY: {type(primary_error).__name__}: {primary_error} | "
         f"CLEANUP: {type(cleanup_error).__name__}: {cleanup_error}",
-        extra=error_context
+        extra={'custom_dimensions': error_context}
     )
 
     # Also log traceback at debug level for detailed investigation

@@ -31,8 +31,7 @@ Created: 15 JAN 2026
 """
 
 import json
-import cgi
-import io
+import re
 from datetime import datetime, timezone
 from typing import Dict, Any, Tuple, Optional
 
@@ -51,6 +50,9 @@ MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024
 def _parse_multipart(req: func.HttpRequest) -> Tuple[Optional[bytes], Dict[str, str]]:
     """
     Parse multipart/form-data from Azure Functions request.
+
+    Uses stdlib boundary-based parsing instead of the deprecated cgi module
+    (removed in Python 3.13) [C5.2].
 
     Args:
         req: Azure Functions HTTP request
@@ -82,16 +84,10 @@ def _parse_multipart(req: func.HttpRequest) -> Tuple[Optional[bytes], Dict[str, 
     # Get request body
     body = req.get_body()
 
-    # Parse using cgi.FieldStorage
-    # Need to create a file-like object and environment dict for cgi module
-    environ = {
-        "REQUEST_METHOD": "POST",
-        "CONTENT_TYPE": content_type,
-        "CONTENT_LENGTH": str(len(body)),
-    }
-
-    fp = io.BytesIO(body)
-    fs = cgi.FieldStorage(fp=fp, environ=environ, keep_blank_values=True)
+    # Parse multipart body by splitting on boundary markers
+    # Each part is separated by --boundary, with --boundary-- at the end
+    boundary_bytes = ("--" + boundary).encode("utf-8")
+    parts = body.split(boundary_bytes)
 
     # Extract form fields
     form_fields = {
@@ -102,21 +98,48 @@ def _parse_multipart(req: func.HttpRequest) -> Tuple[Optional[bytes], Dict[str, 
     }
     file_data = None
 
-    for key in fs.keys():
-        field = fs[key]
+    for part in parts:
+        # Skip empty parts and the closing boundary marker
+        part = part.strip(b"\r\n")
+        if not part or part == b"--":
+            continue
 
-        if hasattr(field, "filename") and field.filename:
+        # Split headers from body (separated by double CRLF)
+        header_end = part.find(b"\r\n\r\n")
+        if header_end == -1:
+            continue
+
+        header_section = part[:header_end].decode("utf-8", errors="replace")
+        part_body = part[header_end + 4:]
+        # Strip trailing CRLF from body
+        if part_body.endswith(b"\r\n"):
+            part_body = part_body[:-2]
+
+        # Parse Content-Disposition header for name and filename
+        name_match = re.search(r'name="([^"]*)"', header_section)
+        filename_match = re.search(r'filename="([^"]*)"', header_section)
+        part_content_type_match = re.search(
+            r'Content-Type:\s*(.+)', header_section, re.IGNORECASE
+        )
+
+        if not name_match:
+            continue
+
+        field_name = name_match.group(1)
+
+        if filename_match and filename_match.group(1):
             # This is a file field
-            file_data = field.file.read()
-            form_fields["filename"] = field.filename
-            if field.type:
-                form_fields["content_type"] = field.type
-        elif hasattr(field, "value"):
+            file_data = part_body
+            form_fields["filename"] = filename_match.group(1)
+            if part_content_type_match:
+                form_fields["content_type"] = part_content_type_match.group(1).strip()
+        else:
             # This is a regular form field
-            if key == "container":
-                form_fields["container"] = field.value
-            elif key == "path":
-                form_fields["path"] = field.value
+            field_value = part_body.decode("utf-8", errors="replace")
+            if field_name == "container":
+                form_fields["container"] = field_value
+            elif field_name == "path":
+                form_fields["path"] = field_value
 
     return file_data, form_fields
 

@@ -327,10 +327,6 @@ class ErrorResponse(BaseModel):
     # Debug section (conditional - only in debug mode)
     debug: Optional[ErrorDebug] = Field(None, description="Debug info (only in debug mode)")
 
-    # Legacy field for backward compatibility
-    error: Optional[str] = Field(None, description="Legacy: same as error_code")
-    error_type: Optional[str] = Field(None, description="Legacy: exception class name")
-
 
 # ============================================================================
 # MAPPINGS
@@ -627,7 +623,6 @@ def create_error_response(
     message: str,
     remediation: Optional[str] = None,
     details: Optional[Dict[str, Any]] = None,
-    error_type: Optional[str] = None,
 ) -> ErrorResponse:
     """
     Create a standardized ErrorResponse model.
@@ -637,7 +632,6 @@ def create_error_response(
         message: Human-readable error message
         remediation: How user can fix this error
         details: Structured error context
-        error_type: Legacy exception class name
 
     Returns:
         ErrorResponse Pydantic model
@@ -663,8 +657,6 @@ def create_error_response(
         remediation=remediation,
         details=details,
         error_id=generate_error_id(),
-        error=error_code.value,  # Legacy
-        error_type=error_type or "ValidationError",  # Legacy
     )
 
 
@@ -768,8 +760,6 @@ def create_error_response_v2(
         details=details,
         error_id=error_id,
         debug=debug if include_debug else None,
-        error=error_code.value,  # Legacy
-        error_type=exception_info.type if exception_info else "ValidationError",
     )
 
     return response, debug

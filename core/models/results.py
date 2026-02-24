@@ -19,7 +19,7 @@ Exports:
     JobCompletionResult: Result of job completion
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 
@@ -81,6 +81,48 @@ class StageResultContract(BaseModel):
             raise ValueError(f"Invalid status: {v}. Must be one of {valid_statuses}")
         return v
 
+    @classmethod
+    def from_task_results(
+        cls,
+        stage_number: int,
+        task_results: List['TaskResult'],
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> 'StageResultContract':
+        """
+        Aggregate individual task results into a stage result contract.
+
+        Args:
+            stage_number: The stage number
+            task_results: List of TaskResult objects from the stage
+            metadata: Optional additional metadata
+
+        Returns:
+            StageResultContract with aggregated results
+        """
+        from core.logic.calculations import get_error_summary
+
+        successful = sum(1 for r in task_results if r.success)
+        failed = len(task_results) - successful
+
+        if failed == 0:
+            status = 'completed'
+        elif successful == 0:
+            status = 'failed'
+        else:
+            status = 'completed_with_errors'
+
+        return cls(
+            stage=stage_number,
+            status=status,
+            task_count=len(task_results),
+            successful_count=successful,
+            failed_count=failed,
+            task_results=[r.model_dump() for r in task_results],
+            aggregated_data=metadata,
+            error_summary=get_error_summary(task_results),
+            completion_time=datetime.now(timezone.utc)
+        )
+
 
 class StageAdvancementResult(BaseModel):
     """
@@ -97,7 +139,7 @@ class StageAdvancementResult(BaseModel):
     new_stage: int = Field(..., description="New stage number")
     is_final_stage: bool = Field(..., description="Whether this is the final stage")
     all_tasks_complete: Optional[bool] = Field(default=None, description="Whether all tasks completed")
-    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Advancement timestamp")
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Advancement timestamp")
 
 
 class TaskCompletionResult(BaseModel):

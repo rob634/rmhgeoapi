@@ -1083,7 +1083,7 @@ class VectorToPostGISHandler:
 
             insert_stmt = sql.SQL("""
                 INSERT INTO {schema}.{table} (geom, {cols})
-                VALUES (ST_GeomFromText(%s, 4326), {placeholders})
+                VALUES (ST_GeomFromWKB(%s, 4326), {placeholders})
             """).format(
                 schema=sql.Identifier(schema),
                 table=sql.Identifier(table_name),
@@ -1093,7 +1093,7 @@ class VectorToPostGISHandler:
         else:
             insert_stmt = sql.SQL("""
                 INSERT INTO {schema}.{table} (geom)
-                VALUES (ST_GeomFromText(%s, 4326))
+                VALUES (ST_GeomFromWKB(%s, 4326))
             """).format(
                 schema=sql.Identifier(schema),
                 table=sql.Identifier(table_name)
@@ -1103,11 +1103,11 @@ class VectorToPostGISHandler:
         # Build all values upfront, then bulk insert
         all_values = []
         for idx, row in chunk.iterrows():
-            geom_wkt = row.geometry.wkt
+            geom_wkb = row.geometry.wkb
             if attr_cols:
-                values = (geom_wkt, *[row[col] for col in attr_cols])
+                values = (geom_wkb, *[row[col] for col in attr_cols])
             else:
-                values = (geom_wkt,)
+                values = (geom_wkb,)
             all_values.append(values)
 
         # Bulk insert all rows in single batched operation
@@ -1296,11 +1296,11 @@ class VectorToPostGISHandler:
         with self._pg_repo._get_connection() as conn:
             with conn.cursor() as cur:
                 for idx, row in chunk.iterrows():
-                    # Geometry as WKT with ST_GeomFromText
-                    geom_wkt = row.geometry.wkt
+                    # Geometry as WKB (binary, more compact than WKT)
+                    geom_wkb = row.geometry.wkb
 
                     # Build values list
-                    values = [f"SRID=4326;{geom_wkt}"]  # EWKT format
+                    values = [geom_wkb]
 
                     # Add attribute values
                     for col in attr_cols:
@@ -1317,10 +1317,10 @@ class VectorToPostGISHandler:
                         etl_batch_id
                     ])
 
-                    # Use ST_GeomFromEWKT for geometry
+                    # Use ST_GeomFromWKB for geometry
                     insert_with_geom = sql.SQL("""
                         INSERT INTO {schema}.{table} ({cols})
-                        VALUES (ST_GeomFromEWKT(%s), {attr_placeholders}, %s, %s, %s, %s, %s, %s, %s)
+                        VALUES (ST_GeomFromWKB(%s, 4326), {attr_placeholders}, %s, %s, %s, %s, %s, %s, %s)
                     """).format(
                         schema=sql.Identifier(schema),
                         table=sql.Identifier(table_name),
@@ -1447,10 +1447,9 @@ class VectorToPostGISHandler:
         - etl_batch_id: TEXT (for DELETE+INSERT pattern)
         - [user columns from GeoDataFrame]
 
-        Indexes created:
-        - idx_{table}_geom: GIST spatial index (if indexes.spatial=True)
-        - idx_{table}_etl_batch_id: BTREE for fast DELETE lookups
-        - idx_{table}_{col}: BTREE for each column in indexes.attributes
+        Only the etl_batch_id index is created here (needed for DELETE in idempotent
+        pattern during retry). Spatial, attribute, and temporal indexes are deferred
+        to create_deferred_indexes() for better bulk INSERT performance.
 
         Args:
             table_name: Target table name
@@ -1537,21 +1536,9 @@ class VectorToPostGISHandler:
                 )
                 cur.execute(create_table)
 
-                # Get column names for index validation
-                column_names = [col for col in gdf.columns if col != 'geometry']
-
-                # Create spatial index
-                if indexes.get('spatial', True):
-                    cur.execute(sql.SQL("""
-                        CREATE INDEX IF NOT EXISTS {idx_name}
-                        ON {schema}.{table} USING GIST (geom)
-                    """).format(
-                        idx_name=sql.Identifier(f"idx_{table_name}_geom"),
-                        schema=sql.Identifier(schema),
-                        table=sql.Identifier(table_name)
-                    ))
-
-                # Create etl_batch_id index (CRITICAL for DELETE performance)
+                # Create etl_batch_id index (CRITICAL for DELETE performance in idempotent pattern)
+                # NOTE: Spatial, attribute, and temporal indexes are deferred to after
+                # bulk INSERT via create_deferred_indexes() for better performance.
                 cur.execute(sql.SQL("""
                     CREATE INDEX IF NOT EXISTS {idx_name}
                     ON {schema}.{table} (etl_batch_id)
@@ -1560,32 +1547,6 @@ class VectorToPostGISHandler:
                     schema=sql.Identifier(schema),
                     table=sql.Identifier(table_name)
                 ))
-
-                # Create attribute indexes
-                for attr_col in indexes.get('attributes', []):
-                    if attr_col in column_names:
-                        cur.execute(sql.SQL("""
-                            CREATE INDEX IF NOT EXISTS {idx_name}
-                            ON {schema}.{table} ({col})
-                        """).format(
-                            idx_name=sql.Identifier(f"idx_{table_name}_{attr_col}"),
-                            schema=sql.Identifier(schema),
-                            table=sql.Identifier(table_name),
-                            col=sql.Identifier(attr_col)
-                        ))
-
-                # Create temporal indexes (DESC for time-series queries)
-                for temp_col in indexes.get('temporal', []):
-                    if temp_col in column_names:
-                        cur.execute(sql.SQL("""
-                            CREATE INDEX IF NOT EXISTS {idx_name}
-                            ON {schema}.{table} ({col} DESC)
-                        """).format(
-                            idx_name=sql.Identifier(f"idx_{table_name}_{temp_col}_desc"),
-                            schema=sql.Identifier(schema),
-                            table=sql.Identifier(table_name),
-                            col=sql.Identifier(temp_col)
-                        ))
 
                 conn.commit()
                 logger.info(f"✅ Created table {schema}.{table_name} with etl_batch_id tracking")
@@ -1660,7 +1621,7 @@ class VectorToPostGISHandler:
 
                     insert_stmt = sql.SQL("""
                         INSERT INTO {schema}.{table} (geom, etl_batch_id, {cols})
-                        VALUES (ST_GeomFromText(%s, 4326), %s, {placeholders})
+                        VALUES (ST_GeomFromWKB(%s, 4326), %s, {placeholders})
                     """).format(
                         schema=sql.Identifier(schema),
                         table=sql.Identifier(table_name),
@@ -1670,7 +1631,7 @@ class VectorToPostGISHandler:
                 else:
                     insert_stmt = sql.SQL("""
                         INSERT INTO {schema}.{table} (geom, etl_batch_id)
-                        VALUES (ST_GeomFromText(%s, 4326), %s)
+                        VALUES (ST_GeomFromWKB(%s, 4326), %s)
                     """).format(
                         schema=sql.Identifier(schema),
                         table=sql.Identifier(table_name)
@@ -1681,11 +1642,11 @@ class VectorToPostGISHandler:
                 # New pattern: executemany = 1 batched operation
                 all_values = []
                 for idx, row in chunk.iterrows():
-                    geom_wkt = row.geometry.wkt
+                    geom_wkb = row.geometry.wkb
                     if attr_cols:
-                        values = (geom_wkt, batch_id, *[row[col] for col in attr_cols])
+                        values = (geom_wkb, batch_id, *[row[col] for col in attr_cols])
                     else:
-                        values = (geom_wkt, batch_id)
+                        values = (geom_wkb, batch_id)
                     all_values.append(values)
 
                 # Bulk insert all rows in single batched operation
@@ -1711,6 +1672,92 @@ class VectorToPostGISHandler:
 
         logger.info(f"✅ Chunk {batch_id}: deleted={rows_deleted}, inserted={rows_inserted}")
         return {'rows_deleted': rows_deleted, 'rows_inserted': rows_inserted}
+
+    def analyze_table(self, table_name: str, schema: str = "geo") -> None:
+        """
+        Run ANALYZE on table to update query planner statistics.
+
+        Should be called after bulk INSERT completes so the planner
+        can use spatial index effectively on first query.
+        """
+        with self._pg_repo._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql.SQL("ANALYZE {schema}.{table}").format(
+                    schema=sql.Identifier(schema),
+                    table=sql.Identifier(table_name)
+                ))
+                conn.commit()
+                logger.info(f"[ANALYZE] Updated statistics for {schema}.{table_name}")
+
+    def create_deferred_indexes(
+        self,
+        table_name: str,
+        schema: str,
+        gdf: 'gpd.GeoDataFrame',
+        indexes: dict = None
+    ) -> None:
+        """
+        Create spatial, attribute, and temporal indexes after bulk data INSERT.
+
+        Building indexes after all data is loaded is significantly faster than
+        maintaining them incrementally during INSERT. The etl_batch_id index is
+        created with the table (needed for idempotent DELETE during retry).
+
+        Args:
+            table_name: Target table name
+            schema: Target schema
+            gdf: GeoDataFrame (used for column name validation)
+            indexes: Index configuration dict with keys:
+                - spatial: bool (default True) — GIST index on geom
+                - attributes: list of column names — BTREE indexes
+                - temporal: list of column names — BTREE DESC indexes
+        """
+        if indexes is None:
+            indexes = {'spatial': True, 'attributes': [], 'temporal': []}
+
+        column_names = [col for col in gdf.columns if col != 'geometry']
+
+        with self._pg_repo._get_connection() as conn:
+            with conn.cursor() as cur:
+                # Spatial index (GIST)
+                if indexes.get('spatial', True):
+                    cur.execute(sql.SQL("""
+                        CREATE INDEX IF NOT EXISTS {idx_name}
+                        ON {schema}.{table} USING GIST (geom)
+                    """).format(
+                        idx_name=sql.Identifier(f"idx_{table_name}_geom"),
+                        schema=sql.Identifier(schema),
+                        table=sql.Identifier(table_name)
+                    ))
+
+                # Attribute indexes (BTREE)
+                for attr_col in indexes.get('attributes', []):
+                    if attr_col in column_names:
+                        cur.execute(sql.SQL("""
+                            CREATE INDEX IF NOT EXISTS {idx_name}
+                            ON {schema}.{table} ({col})
+                        """).format(
+                            idx_name=sql.Identifier(f"idx_{table_name}_{attr_col}"),
+                            schema=sql.Identifier(schema),
+                            table=sql.Identifier(table_name),
+                            col=sql.Identifier(attr_col)
+                        ))
+
+                # Temporal indexes (BTREE DESC for time-series queries)
+                for temp_col in indexes.get('temporal', []):
+                    if temp_col in column_names:
+                        cur.execute(sql.SQL("""
+                            CREATE INDEX IF NOT EXISTS {idx_name}
+                            ON {schema}.{table} ({col} DESC)
+                        """).format(
+                            idx_name=sql.Identifier(f"idx_{table_name}_{temp_col}_desc"),
+                            schema=sql.Identifier(schema),
+                            table=sql.Identifier(table_name),
+                            col=sql.Identifier(temp_col)
+                        ))
+
+                conn.commit()
+                logger.info(f"[INDEXES] Created deferred indexes for {schema}.{table_name}")
 
     # =========================================================================
     # TABLE METADATA REGISTRY (21 JAN 2026 - Split Architecture)

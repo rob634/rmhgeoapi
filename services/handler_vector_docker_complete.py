@@ -234,6 +234,29 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
         )
 
         # =====================================================================
+        # PHASE 3.5: Deferred Indexes + ANALYZE
+        # =====================================================================
+        # Build indexes after all data is loaded (faster than pre-insert).
+        # Then run ANALYZE so the query planner has statistics immediately.
+        # =====================================================================
+        logger.info(f"[{job_id[:8]}] Phase 3.5: Creating deferred indexes")
+        from services.vector.postgis_handler import VectorToPostGISHandler
+        _post_handler = VectorToPostGISHandler()
+
+        indexes = parameters.get('indexes', {'spatial': True, 'attributes': [], 'temporal': []})
+        _post_handler.create_deferred_indexes(
+            table_name=table_name,
+            schema=schema,
+            gdf=gdf,
+            indexes=indexes
+        )
+        checkpoint("indexes_created", {"table": f"{schema}.{table_name}"})
+
+        logger.info(f"[{job_id[:8]}] Phase 3.5: Running ANALYZE for query planner")
+        _post_handler.analyze_table(table_name, schema)
+        checkpoint("table_analyzed", {"table": f"{schema}.{table_name}"})
+
+        # =====================================================================
         # PHASE 4: Refresh TiPG Collection Catalog (05 FEB 2026 - F1.6)
         # =====================================================================
         # Notify the Service Layer to re-scan PostGIS so TiPG immediately

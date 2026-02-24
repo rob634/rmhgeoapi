@@ -581,14 +581,20 @@ def drop_postgis_table(params: Dict[str, Any], context: Optional[Dict[str, Any]]
                 if delete_metadata:
                     # Delete from geo.table_catalog (service layer)
                     cur.execute(
-                        "DELETE FROM geo.table_catalog WHERE table_name = %s RETURNING table_name",
+                        psql.SQL("DELETE FROM {}.{} WHERE table_name = %s RETURNING table_name").format(
+                            psql.Identifier('geo'),
+                            psql.Identifier('table_catalog')
+                        ),
                         (table_name,)
                     )
                     catalog_deleted = cur.fetchone()
 
                     # Delete from app.vector_etl_tracking (ETL internal - all rows for this table)
                     cur.execute(
-                        "DELETE FROM app.vector_etl_tracking WHERE table_name = %s RETURNING table_name",
+                        psql.SQL("DELETE FROM {}.{} WHERE table_name = %s RETURNING table_name").format(
+                            psql.Identifier('app'),
+                            psql.Identifier('vector_etl_tracking')
+                        ),
                         (table_name,)
                     )
                     etl_deleted = cur.fetchone()

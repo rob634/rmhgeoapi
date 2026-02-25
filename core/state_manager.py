@@ -822,7 +822,7 @@ class StateManager:
         Raises:
             Exception: If database update fails (propagated to caller)
         """
-        self.repos['task_repo'].mark_task_failed(task_id, error_msg)
+        self.repos['task_repo'].fail_task(task_id, error_msg)
         self.logger.info(
             f"Task {task_id} marked as FAILED",
             extra={

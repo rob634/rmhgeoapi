@@ -5428,8 +5428,10 @@ class TasksInterface(BaseInterface):
         }}
 
         function renderApprovalPanel(container, job, state) {{
-            const approvalState = state.approval_state || 'unknown';
-            const processingStatus = state.processing_status || 'unknown';
+            // approval_state may be at top level or inside primary_release
+            const rel = state.primary_release || {{}};
+            const approvalState = state.approval_state || rel.approval_state || 'unknown';
+            const processingStatus = state.processing_status || rel.processing_status || 'unknown';
             const isDraft = !job.parameters?.version_id;
 
             let html = `<div class="approval-panel">`;
@@ -5461,12 +5463,15 @@ class TasksInterface(BaseInterface):
 
             // Already approved — read-only
             if (approvalState === 'approved') {{
+                const reviewer = state.reviewer || rel.reviewer;
+                const approvedAt = state.approved_at || rel.reviewed_at;
+                const clearance = state.clearance_state || rel.clearance_state;
                 html += `
                     <div class="approval-readonly">
                         <strong>Approved</strong>
-                        ${{state.reviewer ? ` by ${{state.reviewer}}` : ''}}
-                        ${{state.approved_at ? ` on ${{new Date(state.approved_at).toLocaleString()}}` : ''}}
-                        ${{state.clearance_state ? ` — Clearance: ${{state.clearance_state}}` : ''}}
+                        ${{reviewer ? ` by ${{reviewer}}` : ''}}
+                        ${{approvedAt ? ` on ${{new Date(approvedAt).toLocaleString()}}` : ''}}
+                        ${{clearance ? ` — Clearance: ${{clearance}}` : ''}}
                     </div>
                 `;
                 if (state.can_revoke) {{
@@ -5485,12 +5490,15 @@ class TasksInterface(BaseInterface):
 
             // Rejected — read-only
             if (approvalState === 'rejected') {{
+                const rejReviewer = state.reviewer || rel.reviewer;
+                const rejAt = state.rejected_at || rel.reviewed_at;
+                const rejReason = state.rejection_reason || rel.rejection_reason;
                 html += `
                     <div class="approval-readonly">
                         <strong>Rejected</strong>
-                        ${{state.reviewer ? ` by ${{state.reviewer}}` : ''}}
-                        ${{state.rejected_at ? ` on ${{new Date(state.rejected_at).toLocaleString()}}` : ''}}
-                        ${{state.rejection_reason ? `<br>Reason: ${{state.rejection_reason}}` : ''}}
+                        ${{rejReviewer ? ` by ${{rejReviewer}}` : ''}}
+                        ${{rejAt ? ` on ${{new Date(rejAt).toLocaleString()}}` : ''}}
+                        ${{rejReason ? `<br>Reason: ${{rejReason}}` : ''}}
                     </div>
                 `;
                 html += `</div>`;
@@ -5500,10 +5508,11 @@ class TasksInterface(BaseInterface):
 
             // Revoked — read-only
             if (approvalState === 'revoked') {{
+                const revReviewer = state.reviewer || rel.revoked_by;
                 html += `
                     <div class="approval-readonly">
                         <strong>Revoked</strong>
-                        ${{state.reviewer ? ` by ${{state.reviewer}}` : ''}}
+                        ${{revReviewer ? ` by ${{revReviewer}}` : ''}}
                     </div>
                 `;
                 html += `</div>`;

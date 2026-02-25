@@ -130,14 +130,6 @@ class PipelineInterface(BaseInterface):
                 line-height: 1.4;
             }
 
-            .pipeline-stages {
-                display: flex;
-                align-items: center;
-                gap: 4px;
-                margin-bottom: 10px;
-                flex-wrap: wrap;
-            }
-
             .stage {
                 background: white;
                 border: 1px solid var(--ds-gray-light);
@@ -146,11 +138,6 @@ class PipelineInterface(BaseInterface):
                 font-size: 10px;
                 font-weight: 600;
                 color: var(--ds-navy);
-            }
-
-            .stage-arrow {
-                color: var(--ds-blue-primary);
-                font-size: 12px;
             }
 
             .pipeline-stats {
@@ -474,96 +461,6 @@ class PipelineInterface(BaseInterface):
                 </div>
             </div>
 
-            <!-- Pipeline Types Reference -->
-            <div class="section">
-                <h2>Pipeline Types</h2>
-                <div class="pipeline-grid">
-                    <!-- Vector Pipeline Info -->
-                    <div class="pipeline-card">
-                        <h3><span class="icon">🗺️</span> Vector Pipeline</h3>
-                        <p class="description">
-                            Ingest vector files (GeoJSON, Shapefile, GeoPackage, CSV) into PostGIS
-                            with automatic CRS detection and STAC cataloging.
-                        </p>
-                        <div class="pipeline-stages">
-                            <span class="stage">Validate</span>
-                            <span class="stage-arrow">→</span>
-                            <span class="stage">Transform</span>
-                            <span class="stage-arrow">→</span>
-                            <span class="stage">Load PostGIS</span>
-                            <span class="stage-arrow">→</span>
-                            <span class="stage">STAC Catalog</span>
-                        </div>
-                        <div class="pipeline-stats">
-                            <div class="stat">
-                                <div class="stat-value" id="vector-24h">--</div>
-                                <div class="stat-label">Last 24h</div>
-                            </div>
-                            <div class="stat">
-                                <div class="stat-value" id="vector-success">--</div>
-                                <div class="stat-label">Success Rate</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Raster Pipeline Info -->
-                    <div class="pipeline-card">
-                        <h3><span class="icon">🛰️</span> Raster Pipeline</h3>
-                        <p class="description">
-                            Convert raster files to Cloud-Optimized GeoTIFF (COG) format with
-                            automatic tiling, compression, and STAC cataloging.
-                        </p>
-                        <div class="pipeline-stages">
-                            <span class="stage">Validate</span>
-                            <span class="stage-arrow">→</span>
-                            <span class="stage">COG Convert</span>
-                            <span class="stage-arrow">→</span>
-                            <span class="stage">Upload Silver</span>
-                            <span class="stage-arrow">→</span>
-                            <span class="stage">STAC</span>
-                        </div>
-                        <div class="pipeline-stats">
-                            <div class="stat">
-                                <div class="stat-value" id="raster-24h">--</div>
-                                <div class="stat-label">Last 24h</div>
-                            </div>
-                            <div class="stat">
-                                <div class="stat-value" id="raster-success">--</div>
-                                <div class="stat-label">Success Rate</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Raster Collection Pipeline Info -->
-                    <div class="pipeline-card">
-                        <h3><span class="icon">🗂️</span> Raster Collection</h3>
-                        <p class="description">
-                            Process multiple raster tiles as a unified collection with MosaicJSON
-                            generation for seamless visualization via TiTiler.
-                        </p>
-                        <div class="pipeline-stages">
-                            <span class="stage">Validate All</span>
-                            <span class="stage-arrow">→</span>
-                            <span class="stage">Parallel COG</span>
-                            <span class="stage-arrow">→</span>
-                            <span class="stage">MosaicJSON</span>
-                            <span class="stage-arrow">→</span>
-                            <span class="stage">STAC</span>
-                        </div>
-                        <div class="pipeline-stats">
-                            <div class="stat">
-                                <div class="stat-value" id="collection-24h">--</div>
-                                <div class="stat-label">Last 24h</div>
-                            </div>
-                            <div class="stat">
-                                <div class="stat-value" id="collection-success">--</div>
-                                <div class="stat-label">Success Rate</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
             <!-- Recent Jobs -->
             <div class="section">
                 <h2>Recent Jobs</h2>
@@ -670,17 +567,6 @@ class PipelineInterface(BaseInterface):
     def _generate_custom_js(self) -> str:
         """JavaScript for loading job data."""
         return """
-        // Pipeline job types to track for stats (includes docker job types)
-        const PIPELINE_TYPES = [
-            'process_vector',
-            'process_vector_docker',
-            'process_raster_v2',
-            'process_raster_docker',
-            'process_raster_collection_v2',
-            'process_raster_collection_docker',
-            'process_large_raster_v2'
-        ];
-
         // Job filters
         let currentFilters = {
             status: '',
@@ -789,43 +675,17 @@ class PipelineInterface(BaseInterface):
         }
 
         function updatePipelineStats(jobs) {
-            // Calculate stats by pipeline type
+            // Calculate unified submit stats (all pipeline jobs)
             const now = new Date();
             const last24h = new Date(now - 24 * 60 * 60 * 1000);
 
-            // Vector stats
-            const vectorJobs = jobs.filter(j => j.job_type === 'process_vector' || j.job_type === 'process_vector_docker');
-            const vectorRecent = vectorJobs.filter(j => new Date(j.created_at) > last24h);
-            const vectorSuccess = vectorJobs.filter(j => j.status === 'completed').length;
-            document.getElementById('vector-24h').textContent = vectorRecent.length;
-            document.getElementById('vector-success').textContent =
-                vectorJobs.length > 0 ? Math.round(vectorSuccess / vectorJobs.length * 100) + '%' : '--';
-
-            // Raster stats (includes all raster job types)
-            const rasterJobs = jobs.filter(j =>
-                j.job_type === 'process_raster_v2' ||
-                j.job_type === 'process_large_raster_v2' ||
-                j.job_type === 'process_raster_docker'
-            );
-            const rasterRecent = rasterJobs.filter(j => new Date(j.created_at) > last24h);
-            const rasterSuccess = rasterJobs.filter(j => j.status === 'completed').length;
-            document.getElementById('raster-24h').textContent = rasterRecent.length;
-            document.getElementById('raster-success').textContent =
-                rasterJobs.length > 0 ? Math.round(rasterSuccess / rasterJobs.length * 100) + '%' : '--';
-
-            // Collection stats
-            const collectionJobs = jobs.filter(j =>
-                j.job_type === 'process_raster_collection_v2' ||
-                j.job_type === 'process_raster_collection_docker'
-            );
-            const collectionRecent = collectionJobs.filter(j => new Date(j.created_at) > last24h);
-            const collectionSuccess = collectionJobs.filter(j => j.status === 'completed').length;
-            document.getElementById('collection-24h').textContent = collectionRecent.length;
-            document.getElementById('collection-success').textContent =
-                collectionJobs.length > 0 ? Math.round(collectionSuccess / collectionJobs.length * 100) + '%' : '--';
-
-            // Unified Submit stats (all vector + raster + collection jobs)
-            const allSubmitJobs = [...vectorJobs, ...rasterJobs, ...collectionJobs];
+            const pipelineTypes = [
+                'process_vector', 'process_vector_docker',
+                'process_raster_v2', 'process_raster_docker',
+                'process_raster_collection_v2', 'process_raster_collection_docker',
+                'process_large_raster_v2'
+            ];
+            const allSubmitJobs = jobs.filter(j => pipelineTypes.includes(j.job_type));
             const submitRecent = allSubmitJobs.filter(j => new Date(j.created_at) > last24h);
             const submitSuccess = allSubmitJobs.filter(j => j.status === 'completed').length;
             document.getElementById('submit-24h').textContent = submitRecent.length;

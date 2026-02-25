@@ -73,12 +73,10 @@ class PlatformInterface(BaseInterface):
         Handle status lookup form submission.
 
         Reads lookup_type and identifier(s) from POST form body,
-        calls the Platform status API, and renders the result.
+        then redirects to the Status Monitor page via JS redirect
+        (HTMX POST cannot do HTTP redirects).
         """
-        import urllib.request
-        import urllib.error
-        import os
-        from urllib.parse import parse_qs
+        from urllib.parse import parse_qs, quote
 
         # Parse POST form body
         body = request.get_body().decode('utf-8')
@@ -88,59 +86,21 @@ class PlatformInterface(BaseInterface):
         if not lookup_type:
             return self._render_status_error("No lookup type selected.")
 
-        # Build URL based on lookup type
-        website_hostname = os.environ.get('WEBSITE_HOSTNAME')
-        if not website_hostname:
-            return self._render_status_error("WEBSITE_HOSTNAME not set — cannot call Platform API.")
-
-        base_url = f"https://{website_hostname}"
-
         if lookup_type == 'dataset_resource':
             dataset_id = (form.get('dataset_id', [''])[0]).strip()
             resource_id = (form.get('resource_id', [''])[0]).strip()
             if not dataset_id or not resource_id:
                 return self._render_status_error("Both dataset_id and resource_id are required for dataset+resource lookup.")
-            from urllib.parse import quote
-            api_url = f"{base_url}/api/platform/status?dataset_id={quote(dataset_id)}&resource_id={quote(resource_id)}&detail=full"
+            redirect_url = f"/api/interface/status?dataset_id={quote(dataset_id)}&resource_id={quote(resource_id)}"
         else:
-            # request_id, job_id, asset_id, release_id — all use the same pattern
+            # request_id, job_id, asset_id, release_id — all use the same param pattern
             lookup_id = (form.get('lookup_id', [''])[0]).strip()
             if not lookup_id:
                 return self._render_status_error(f"An identifier is required for {lookup_type} lookup.")
-            from urllib.parse import quote
-            api_url = f"{base_url}/api/platform/status/{quote(lookup_id)}?detail=full"
+            redirect_url = f"/api/interface/status?{quote(lookup_type)}={quote(lookup_id)}"
 
-        logger.info(f"[PlatformStatus] Lookup: type={lookup_type}, url={api_url}")
-
-        # Call Platform status API (GET request)
-        http_request = urllib.request.Request(api_url, method='GET')
-
-        try:
-            with urllib.request.urlopen(http_request, timeout=30) as response:
-                response_data = json.loads(response.read().decode('utf-8'))
-                logger.info(f"[PlatformStatus] Success: request_id={response_data.get('request_id', 'N/A')}")
-                return self._render_status_result(response_data)
-
-        except urllib.error.HTTPError as http_err:
-            error_body = http_err.read().decode('utf-8')
-            try:
-                error_json = json.loads(error_body)
-                error_msg = error_json.get('error', str(http_err))
-                hint = error_json.get('hint', '')
-                if hint:
-                    error_msg = f"{error_msg} — {hint}"
-            except Exception:
-                error_msg = error_body or str(http_err)
-            logger.error(f"[PlatformStatus] HTTP {http_err.code}: {error_msg}")
-            return self._render_status_error(error_msg)
-
-        except urllib.error.URLError as url_err:
-            logger.error(f"[PlatformStatus] Connection error: {url_err}")
-            return self._render_status_error(f"Connection error: {url_err.reason}")
-
-        except Exception as exc:
-            logger.error(f"[PlatformStatus] Unexpected error: {exc}")
-            return self._render_status_error(f"Unexpected error: {exc}")
+        logger.info(f"[PlatformStatus] Redirect: type={lookup_type}, url={redirect_url}")
+        return f'<script>window.location.href="{redirect_url}";</script>'
 
     # ========================================================================
     # STATUS RESULT RENDERER

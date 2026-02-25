@@ -55,11 +55,12 @@ class TasksInterface(BaseInterface):
         job_id = request.params.get('job_id', '')
         request_id = request.params.get('request_id', '')
         asset_id = request.params.get('asset_id', '')
+        release_id = request.params.get('release_id', '')
         dataset_id = request.params.get('dataset_id', '')
         resource_id = request.params.get('resource_id', '')
 
         # Determine lookup_id (first available)
-        lookup_id = job_id or request_id or asset_id or ''
+        lookup_id = job_id or request_id or asset_id or release_id or ''
 
         # HTML content
         content = self._generate_html_content(lookup_id)
@@ -68,7 +69,7 @@ class TasksInterface(BaseInterface):
         custom_css = self._generate_custom_css()
 
         # Custom JavaScript for Status Monitor
-        custom_js = self._generate_custom_js(lookup_id, dataset_id, resource_id)
+        custom_js = self._generate_custom_js(lookup_id, dataset_id, resource_id, release_id)
 
         display_id = lookup_id[:8] if lookup_id else (dataset_id or 'Loading...')
 
@@ -493,6 +494,148 @@ class TasksInterface(BaseInterface):
         }
         .ps-approval {
             margin-top: 6px;
+        }
+        .ps-clearance-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .clearance-cleared {
+            background: #ecfdf5;
+            color: #059669;
+        }
+        .clearance-pending {
+            background: #fffbeb;
+            color: #d97706;
+        }
+        .clearance-unknown {
+            background: #f3f4f6;
+            color: #626F86;
+        }
+        .ps-error-card {
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            border-radius: 6px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+        .ps-error-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .ps-error-code {
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            font-weight: 700;
+            color: #991b1b;
+        }
+        .ps-error-category {
+            display: inline-block;
+            padding: 2px 8px;
+            background: #fee2e2;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: 600;
+            color: #991b1b;
+            text-transform: uppercase;
+        }
+        .ps-error-message {
+            color: #991b1b;
+            font-size: 13px;
+            margin-bottom: 8px;
+            line-height: 1.5;
+        }
+        .ps-error-remediation {
+            background: white;
+            border: 1px solid #fecaca;
+            border-radius: 4px;
+            padding: 10px 12px;
+            font-size: 12px;
+            color: #374151;
+            margin-bottom: 8px;
+        }
+        .ps-error-remediation strong {
+            color: #059669;
+        }
+        .ps-error-detail {
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            color: #6b7280;
+            background: #f9fafb;
+            padding: 8px;
+            border-radius: 3px;
+            word-break: break-all;
+            max-height: 100px;
+            overflow-y: auto;
+        }
+        .ps-error-user-fixable {
+            display: inline-block;
+            padding: 2px 6px;
+            background: #dbeafe;
+            color: #1d4ed8;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: 600;
+            margin-left: 8px;
+        }
+        .ps-viewer-prominent {
+            display: inline-block;
+            padding: 8px 16px;
+            background: #059669;
+            color: white;
+            border-radius: 4px;
+            font-size: 13px;
+            font-weight: 600;
+            text-decoration: none;
+            margin-top: 8px;
+        }
+        .ps-viewer-prominent:hover {
+            background: #047857;
+        }
+        .ps-approve-context {
+            font-size: 11px;
+            color: #626F86;
+            margin-top: 4px;
+        }
+        .ps-version-table-wrap {
+            margin-top: 12px;
+            grid-column: 1 / -1;
+        }
+        .ps-version-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+        .ps-version-table th {
+            text-align: left;
+            padding: 6px 10px;
+            background: #f3f4f6;
+            font-weight: 600;
+            color: #374151;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+        .ps-version-table td {
+            padding: 5px 10px;
+            border-bottom: 1px solid #e5e7eb;
+            color: #374151;
+        }
+        .ps-version-table tbody tr:hover {
+            background: #f9fafb;
+        }
+        .ps-is-latest {
+            display: inline-block;
+            padding: 1px 6px;
+            background: #dbeafe;
+            color: #1d4ed8;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: 600;
         }
 
         .dashboard-header {
@@ -2925,12 +3068,13 @@ class TasksInterface(BaseInterface):
         }
         """
 
-    def _generate_custom_js(self, lookup_id: str, dataset_id: str = '', resource_id: str = '') -> str:
+    def _generate_custom_js(self, lookup_id: str, dataset_id: str = '', resource_id: str = '', release_id: str = '') -> str:
         """Generate custom JavaScript for Status Monitor with platform status + workflow visualization."""
         return f"""
         const LOOKUP_ID = '{lookup_id}';
         const DATASET_ID = '{dataset_id}';
         const RESOURCE_ID = '{resource_id}';
+        const RELEASE_ID = '{release_id}';
         let JOB_ID = '{lookup_id}';  // Will be resolved from platform/status
         let platformData = null;
 
@@ -3173,6 +3317,7 @@ class TasksInterface(BaseInterface):
                     try {{
                         const statusResponse = await fetchJSON(statusUrl);
                         platformData = statusResponse;
+                        window._platformData = statusResponse;
 
                         // Extract job_id from detail block
                         if (statusResponse.detail?.job_id) {{
@@ -3295,24 +3440,72 @@ class TasksInterface(BaseInterface):
             // Build approval action
             let approvalHtml = '';
             if (approval.viewer_url) {{
-                approvalHtml = `<div class="ps-approval"><a href="${{approval.viewer_url}}" class="ps-viewer-link">Open Viewer</a></div>`;
+                approvalHtml = `<div class="ps-approval">
+                    <a href="${{approval.viewer_url}}" class="ps-viewer-prominent" target="_blank">Open Viewer for Review</a>
+                    ${{approval.approve_url ? `<div class="ps-approve-context">Approve endpoint: <span class="mono" style="font-size:10px;">${{approval.approve_url}}</span></div>` : ''}}
+                </div>`;
             }}
 
-            // Version list
+            // Version history table (collapsible, full list)
             let versionsHtml = '';
             if (versions.length > 1) {{
-                versionsHtml = '<div class="ps-versions">';
-                for (const v of versions.slice(0, 5)) {{
+                let vRows = '';
+                for (const v of versions) {{
                     const vLabel = v.version_id || `ord${{v.version_ordinal}}`;
-                    const vState = v.approval_state || '';
-                    const vClass = vState === 'approved' ? 'status-completed' : vState === 'pending_review' ? 'status-pending' : '';
-                    versionsHtml += `<span class="ps-version-tag ${{vClass}}">${{vLabel}}</span>`;
+                    const vProc = v.processing_status || '';
+                    const vAppr = v.approval_state || '';
+                    const vClear = v.clearance_state || '';
+                    const vDate = v.created_at ? new Date(v.created_at).toLocaleDateString() : '';
+                    const vLatest = v.is_latest ? '<span class="ps-is-latest">Latest</span>' : '';
+                    vRows += `<tr>
+                        <td class="mono">${{vLabel}}</td>
+                        <td>${{v.version_ordinal || ''}}</td>
+                        <td><span class="status-badge status-${{vProc}}">${{vProc}}</span></td>
+                        <td>${{vAppr.replace('_', ' ')}}</td>
+                        <td>${{vClear}}</td>
+                        <td>${{vDate}} ${{vLatest}}</td>
+                    </tr>`;
                 }}
-                if (versions.length > 5) versionsHtml += `<span class="ps-version-tag">+${{versions.length - 5}} more</span>`;
-                versionsHtml += '</div>';
+                versionsHtml = `
+                    <div class="ps-version-table-wrap">
+                        <details>
+                            <summary style="cursor:pointer;font-size:13px;font-weight:600;color:#374151;margin-bottom:8px;">Version History (${{versions.length}})</summary>
+                            <table class="ps-version-table">
+                                <thead><tr>
+                                    <th>Version</th><th>Ordinal</th><th>Processing</th><th>Approval</th><th>Clearance</th><th>Created</th>
+                                </tr></thead>
+                                <tbody>${{vRows}}</tbody>
+                            </table>
+                        </details>
+                    </div>
+                `;
             }}
 
+            // Build structured error card
+            let errorHtml = '';
+            if (data.error && typeof data.error === 'object') {{
+                const err = data.error;
+                errorHtml = `
+                    <div class="ps-error-card">
+                        <div class="ps-error-header">
+                            <span class="ps-error-code">${{err.code || 'ERROR'}}</span>
+                            ${{err.category ? `<span class="ps-error-category">${{err.category}}</span>` : ''}}
+                            ${{err.user_fixable ? '<span class="ps-error-user-fixable">User Fixable</span>' : ''}}
+                        </div>
+                        <div class="ps-error-message">${{err.message || 'An error occurred'}}</div>
+                        ${{err.remediation ? `<div class="ps-error-remediation"><strong>Remediation:</strong> ${{err.remediation}}</div>` : ''}}
+                        ${{err.detail ? `<div class="ps-error-detail">${{err.detail}}</div>` : ''}}
+                    </div>
+                `;
+            }}
+
+            // Clearance badge
+            const clearanceState = release.clearance_state || 'unknown';
+            const clearanceClass = clearanceState === 'cleared' ? 'clearance-cleared' :
+                                   clearanceState === 'pending' ? 'clearance-pending' : 'clearance-unknown';
+
             card.innerHTML = `
+                ${{errorHtml}}
                 <div class="ps-grid">
                     <div class="ps-section">
                         <div class="ps-section-header">Asset</div>
@@ -3324,9 +3517,12 @@ class TasksInterface(BaseInterface):
                     <div class="ps-section">
                         <div class="ps-section-header">Release</div>
                         <div class="ps-row"><span class="ps-label">Version</span><span class="ps-value">${{release.version_id || 'draft'}} <span style="color:#999;">(ord ${{release.version_ordinal || '?'}})</span></span></div>
+                        <div class="ps-row"><span class="ps-label">Revision</span><span class="ps-value">${{release.revision || '\u2014'}}</span></div>
                         <div class="ps-row"><span class="ps-label">Processing</span><span class="status-badge ${{procClass}}">${{procStatus}}</span></div>
                         ${{approvalState ? `<div class="ps-row"><span class="ps-label">Approval</span><span class="status-badge ${{approvalClass}}">${{approvalState.replace('_', ' ')}}</span></div>` : ''}}
-                        ${{versionsHtml}}
+                        <div class="ps-row"><span class="ps-label">Clearance</span><span class="ps-clearance-badge ${{clearanceClass}}">${{clearanceState}}</span></div>
+                        ${{release.is_latest ? '<div class="ps-row"><span class="ps-label">Latest</span><span class="ps-is-latest">Latest Release</span></div>' : ''}}
+                        ${{release.release_id ? `<div class="ps-row"><span class="ps-label">Release ID</span><span class="ps-value mono" title="${{release.release_id}}">${{release.release_id.substring(0, 16)}}...</span></div>` : ''}}
                     </div>
                     <div class="ps-section">
                         <div class="ps-section-header">Outputs</div>
@@ -3338,6 +3534,7 @@ class TasksInterface(BaseInterface):
                         ${{approvalHtml}}
                     </div>
                 </div>
+                ${{versionsHtml}}
             `;
 
             card.classList.remove('hidden');
@@ -3390,12 +3587,23 @@ class TasksInterface(BaseInterface):
 
             // Error banner if failed
             if (job.status === 'failed') {{
-                html += `
-                    <div class="error-banner">
-                        <strong>Job Failed</strong>
-                        <p>${{job.error_details || 'No error details available'}}</p>
-                    </div>
-                `;
+                const platformError = window._platformData?.error;
+                if (platformError && typeof platformError === 'object') {{
+                    html += `
+                        <div class="error-banner">
+                            <strong>Job Failed — ${{platformError.code || ''}}</strong>
+                            <p>${{platformError.message || job.error_details || 'No error details available'}}</p>
+                            ${{platformError.remediation ? `<p style="margin-top:6px;font-size:12px;color:#374151;"><strong>Remediation:</strong> ${{platformError.remediation}}</p>` : ''}}
+                        </div>
+                    `;
+                }} else {{
+                    html += `
+                        <div class="error-banner">
+                            <strong>Job Failed</strong>
+                            <p>${{job.error_details || 'No error details available'}}</p>
+                        </div>
+                    `;
+                }}
             }}
 
             // Calculate overall progress

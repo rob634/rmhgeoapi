@@ -328,8 +328,7 @@ class AssetApprovalService:
         Revoke a previously approved release (unpublish).
 
         This is a terminal state - to re-publish, submit a new version.
-        STAC item is deleted BEFORE state change to ensure consumers
-        see the item disappear cleanly.
+        DB is updated first (source of truth), then STAC item is deleted.
 
         If the revoked release was is_latest, the next most recent
         approved release is promoted to is_latest.
@@ -373,10 +372,10 @@ class AssetApprovalService:
                 )
             }
 
-        # Delete STAC item FIRST (before state change)
-        stac_result = self._delete_stac(release)
-
-        # Update release with revocation
+        # Update DB first (source of truth), then delete STAC.
+        # If STAC delete fails, release is correctly REVOKED and orphaned
+        # STAC item can be cleaned up. Reverse order (STAC first) risks
+        # inconsistent state if DB update fails after STAC deletion.
         success = self.release_repo.update_revocation(
             release_id=release_id,
             revoked_by=revoker,
@@ -386,8 +385,11 @@ class AssetApprovalService:
         if not success:
             return {
                 'success': False,
-                'error': "Failed to update release revocation state"
+                'error': "Failed to update release revocation state (may have been revoked concurrently)"
             }
+
+        # Delete STAC item (after DB state is authoritative)
+        stac_result = self._delete_stac(release)
 
         # If revoked release was is_latest, flip to next most recent approved release
         if release.is_latest:
@@ -398,11 +400,20 @@ class AssetApprovalService:
                     next_latest = v
                     break
             if next_latest:
-                self.release_repo.flip_is_latest(release.asset_id, next_latest.release_id)
-                logger.info(
-                    f"Flipped is_latest to {next_latest.release_id[:16]}... "
-                    f"({next_latest.version_id})"
-                )
+                # Guard: check if another release already became is_latest
+                # (e.g., concurrent approval flipped it while we were revoking)
+                current_latest = self.release_repo.get_latest(release.asset_id)
+                if current_latest and current_latest.release_id != release_id:
+                    logger.info(
+                        f"Skipping is_latest flip — {current_latest.release_id[:16]}... "
+                        f"already promoted"
+                    )
+                else:
+                    self.release_repo.flip_is_latest(release.asset_id, next_latest.release_id)
+                    logger.info(
+                        f"Flipped is_latest to {next_latest.release_id[:16]}... "
+                        f"({next_latest.version_id})"
+                    )
             else:
                 logger.info(f"No other approved releases for asset {release.asset_id[:16]}...")
 
@@ -414,12 +425,23 @@ class AssetApprovalService:
             f"Reason: {reason}. Version: {release.version_id}."
         )
 
+        # Build response warning based on STAC result
+        if stac_result.get('success') and stac_result.get('deleted'):
+            stac_warning = 'STAC item deleted from pgSTAC.'
+        elif not stac_result.get('success'):
+            stac_warning = (
+                'WARNING: STAC item deletion failed — item may still be visible in catalog. '
+                'Manual cleanup required.'
+            )
+        else:
+            stac_warning = 'No STAC item to delete (never materialized).'
+
         return {
             'success': True,
             'release': updated_release.to_dict() if updated_release else None,
-            'stac_updated': stac_result.get('success', False),
+            'stac_updated': stac_result.get('success', False) and stac_result.get('deleted', False),
             'warning': (
-                'Approved release has been revoked. STAC item deleted from pgSTAC. '
+                f'Approved release has been revoked. {stac_warning} '
                 'To re-publish, submit a new version.'
             )
         }

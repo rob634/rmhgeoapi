@@ -752,15 +752,15 @@ class ReleaseRepository(PostgreSQLRepository):
                             is_latest = false,
                             updated_at = NOW()
                         WHERE release_id = %s
+                          AND approval_state = %s
                     """).format(
                         sql.Identifier(self.schema),
                         sql.Identifier(self.table)
                     ),
-                    (ApprovalState.REVOKED, revoked_by, revocation_reason, release_id)
+                    (ApprovalState.REVOKED, revoked_by, revocation_reason, release_id, ApprovalState.APPROVED)
                 )
-                conn.commit()
-
                 updated = cur.rowcount > 0
+                conn.commit()
                 if updated:
                     logger.warning(f"AUDIT: Release {release_id[:16]}... REVOKED by {revoked_by}")
                 return updated

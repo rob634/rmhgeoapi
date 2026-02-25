@@ -266,7 +266,10 @@ class ProcessRasterDockerJob(JobBaseMixin, JobBase):
         unwrapped = result_data.get('result', {})
 
         # V0.8: Detect output mode (24 JAN 2026)
+        # Normalize tiled_mount → tiled (mount-based handler returns "tiled_mount")
         output_mode = unwrapped.get('output_mode', 'single_cog')
+        if output_mode == 'tiled_mount':
+            output_mode = 'tiled'
 
         # Common fields
         stac = unwrapped.get('stac', {})

@@ -499,15 +499,80 @@ def _create_stac_collection_impl(
                     f"Error: {e}"
                 )
 
-        logger.info(f"✅ Cached {len(created_items)} STAC Items (pgSTAC deferred to approval)")
+        logger.info(f"✅ Cached {len(created_items)} STAC Items in cog_metadata")
 
-        # No pgSTAC search registration at processing time
-        # Search registration will happen at approval via _materialize_stac
+        # =========================================================================
+        # 25 FEB 2026: Insert items into pgSTAC + register search at processing time
+        # Enables mosaic preview before approval. Items get geoetl:published=false.
+        # All pgSTAC ops are NON-FATAL — job succeeds with degraded output if they fail.
+        # Approval fallback in _materialize_stac handles the case where these fail.
+        # =========================================================================
         search_id = None
         viewer_url = None
         tilejson_url = None
         tiles_url = None
         pgstac_id = None
+
+        try:
+            pgstac = PgStacRepository()
+
+            # Build and upsert collection into pgSTAC
+            collection_dict = collection.to_dict()
+            pgstac.insert_collection(collection_dict)
+            pgstac_id = collection_id
+            logger.info(f"   pgSTAC collection upserted: {collection_id}")
+
+            # Insert each cached item with geoetl:published=false
+            items_inserted = 0
+            for i, tile_blob in enumerate(tile_blobs):
+                tile_name = tile_blob.split('/')[-1].replace('_cog.tif', '').replace('.tif', '')
+                item_id = f"{collection_id}_{tile_name}"
+
+                # Retrieve cached item dict from cog_metadata
+                cog_record = cog_repo.get_by_id(item_id)
+                if not cog_record or not cog_record.get('stac_item_json'):
+                    logger.warning(f"   No cached STAC item for {item_id}, skipping pgSTAC insert")
+                    continue
+
+                item_dict = dict(cog_record['stac_item_json'])
+
+                # Set unpublished flag
+                item_props = item_dict.setdefault('properties', {})
+                item_props['geoetl:published'] = False
+
+                pgstac.insert_item(item_dict, collection_id)
+                items_inserted += 1
+
+            logger.info(f"   Inserted {items_inserted} items into pgSTAC (geoetl:published=false)")
+
+            # Register pgSTAC search for mosaic preview
+            registrar = PgSTACSearchRegistration()
+            search_id = registrar.register_collection_search(
+                collection_id=collection_id,
+                bbox=spatial_extent
+            )
+            logger.info(f"   pgSTAC search registered: {search_id}")
+
+            # Build TiTiler mosaic URLs
+            search_urls = registrar.get_search_urls(
+                search_id=search_id,
+                titiler_base_url=config.titiler_base_url,
+                assets=['data']
+            )
+            viewer_url = search_urls.get('viewer')
+            tilejson_url = search_urls.get('tilejson')
+            tiles_url = search_urls.get('tiles')
+            logger.info(f"   Mosaic viewer URL: {viewer_url}")
+
+        except Exception as pgstac_err:
+            # Non-fatal: job succeeds with search_id=None, approval fallback handles it
+            logger.warning(
+                f"pgSTAC insertion/search registration failed (non-fatal): {pgstac_err}"
+            )
+            search_id = None
+            viewer_url = None
+            tilejson_url = None
+            tiles_url = None
 
         # V0.8 FIX (27 JAN 2026): Return with "result" wrapper to match handler contract
         # Handler expects: {"success": True, "result": {...}}

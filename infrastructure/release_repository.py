@@ -125,6 +125,7 @@ class ReleaseRepository(PostgreSQLRepository):
                             is_latest, is_served, request_id,
                             blob_path, table_name, stac_item_id, stac_collection_id,
                             stac_item_json, content_hash, source_file_hash, output_file_hash,
+                            output_mode, tile_count, search_id,
                             job_id, processing_status, processing_started_at,
                             processing_completed_at, last_error, workflow_id, node_summary,
                             approval_state, reviewer, reviewed_at, rejection_reason,
@@ -139,6 +140,7 @@ class ReleaseRepository(PostgreSQLRepository):
                             %s, %s, %s,
                             %s, %s, %s, %s,
                             %s, %s, %s, %s,
+                            %s, %s, %s,
                             %s, %s, %s,
                             %s, %s, %s, %s,
                             %s, %s, %s, %s,
@@ -166,6 +168,8 @@ class ReleaseRepository(PostgreSQLRepository):
                         release.stac_item_id, release.stac_collection_id,
                         release.stac_item_json, release.content_hash,
                         release.source_file_hash, release.output_file_hash,
+                        # Tiled output metadata
+                        release.output_mode, release.tile_count, release.search_id,
                         # Processing lifecycle
                         release.job_id, release.processing_status,
                         release.processing_started_at,
@@ -231,6 +235,7 @@ class ReleaseRepository(PostgreSQLRepository):
                             is_latest, is_served, request_id,
                             blob_path, table_name, stac_item_id, stac_collection_id,
                             stac_item_json, content_hash, source_file_hash, output_file_hash,
+                            output_mode, tile_count, search_id,
                             job_id, processing_status, processing_started_at,
                             processing_completed_at, last_error, workflow_id, node_summary,
                             approval_state, reviewer, reviewed_at, rejection_reason,
@@ -245,6 +250,7 @@ class ReleaseRepository(PostgreSQLRepository):
                             %s, %s, %s,
                             %s, %s, %s, %s,
                             %s, %s, %s, %s,
+                            %s, %s, %s,
                             %s, %s, %s,
                             %s, %s, %s, %s,
                             %s, %s, %s, %s,
@@ -268,6 +274,7 @@ class ReleaseRepository(PostgreSQLRepository):
                         release.stac_item_id, release.stac_collection_id,
                         release.stac_item_json, release.content_hash,
                         release.source_file_hash, release.output_file_hash,
+                        release.output_mode, release.tile_count, release.search_id,
                         release.job_id, release.processing_status,
                         release.processing_started_at,
                         release.processing_completed_at, release.last_error,
@@ -982,7 +989,10 @@ class ReleaseRepository(PostgreSQLRepository):
         stac_item_id: str = None,
         content_hash: str = None,
         source_file_hash: str = None,
-        output_file_hash: str = None
+        output_file_hash: str = None,
+        output_mode: str = None,
+        tile_count: int = None,
+        search_id: str = None
     ) -> bool:
         """
         Update physical output fields (dynamic -- only provided fields).
@@ -998,6 +1008,9 @@ class ReleaseRepository(PostgreSQLRepository):
             content_hash: Hash of processed output content
             source_file_hash: Hash of original source file
             output_file_hash: Hash of final output file
+            output_mode: Output format ('single' or 'tiled')
+            tile_count: Number of COG tiles (tiled output only)
+            search_id: pgSTAC search hash (tiled output only)
 
         Returns:
             True if updated, False if release not found or no fields provided
@@ -1013,6 +1026,9 @@ class ReleaseRepository(PostgreSQLRepository):
             'content_hash': content_hash,
             'source_file_hash': source_file_hash,
             'output_file_hash': output_file_hash,
+            'output_mode': output_mode,
+            'tile_count': tile_count,
+            'search_id': search_id,
         }
 
         for col_name, col_value in field_map.items():
@@ -1351,6 +1367,10 @@ class ReleaseRepository(PostgreSQLRepository):
             content_hash=row.get('content_hash'),
             source_file_hash=row.get('source_file_hash'),
             output_file_hash=row.get('output_file_hash'),
+            # Tiled output metadata
+            output_mode=row.get('output_mode'),
+            tile_count=row.get('tile_count'),
+            search_id=row.get('search_id'),
             # Processing lifecycle
             job_id=row.get('job_id'),
             processing_status=processing_status,

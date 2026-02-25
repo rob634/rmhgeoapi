@@ -46,7 +46,7 @@ ETL Mount Settings:
     RASTER_ETL_MOUNT_PATH = /mounts/etl-temp  # Azure Files mount path
 
 Tiling Settings:
-    RASTER_TILING_THRESHOLD_MB = 2000 # Files above this produce tiled output
+    RASTER_TILING_THRESHOLD_MB = 500 # Files above this produce tiled output (lowered from 2000 for testing)
     RASTER_TILE_TARGET_MB = 400       # Target tile size for large file splitting
     RASTER_COLLECTION_MAX_FILES = 1000  # Max files per collection
 

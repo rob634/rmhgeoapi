@@ -486,6 +486,24 @@ class AssetRelease(BaseModel):
     )
 
     # =========================================================================
+    # TILED OUTPUT METADATA
+    # =========================================================================
+    output_mode: Optional[str] = Field(
+        default=None,
+        max_length=20,
+        description="Output format: 'single' or 'tiled' (None for legacy/vector)"
+    )
+    tile_count: Optional[int] = Field(
+        default=None,
+        description="Number of COG tiles (tiled output only)"
+    )
+    search_id: Optional[str] = Field(
+        default=None,
+        max_length=64,
+        description="pgSTAC search hash for mosaic discovery (tiled output only)"
+    )
+
+    # =========================================================================
     # PROCESSING LIFECYCLE
     # =========================================================================
     job_id: Optional[str] = Field(
@@ -666,6 +684,10 @@ class AssetRelease(BaseModel):
             'content_hash': self.content_hash,
             'source_file_hash': self.source_file_hash,
             'output_file_hash': self.output_file_hash,
+            # Tiled output metadata
+            'output_mode': self.output_mode,
+            'tile_count': self.tile_count,
+            'search_id': self.search_id,
             # Processing lifecycle
             'job_id': self.job_id,
             'processing_status': self.processing_status.value if isinstance(self.processing_status, Enum) else self.processing_status,

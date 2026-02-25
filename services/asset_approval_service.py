@@ -229,13 +229,19 @@ class AssetApprovalService:
             f"(clearance: {clearance_state.value}, version: {version_id})"
         )
 
-        return {
+        response = {
             'success': True,
             'release': updated_release.to_dict() if updated_release else None,
             'action': action,
             'stac_updated': stac_result.get('success', False),
             'adf_run_id': adf_run_id
         }
+
+        # Include mosaic viewer URL for tiled outputs
+        if stac_result.get('mosaic_viewer_url'):
+            response['mosaic_viewer_url'] = stac_result['mosaic_viewer_url']
+
+        return response
 
     # =========================================================================
     # REJECT
@@ -527,6 +533,94 @@ class AssetApprovalService:
             from infrastructure.pgstac_repository import PgStacRepository
             from services.stac_collection import build_raster_stac_collection
 
+            now_iso = datetime.now(timezone.utc).isoformat()
+            pgstac = PgStacRepository()
+
+            # =================================================================
+            # TILED OUTPUT: Items already in pgSTAC from processing (Step 4).
+            # Patch each with geoetl:published=true + approval metadata.
+            # =================================================================
+            if release.output_mode == 'tiled':
+                approval_props = {
+                    'geoetl:published': True,
+                    'geoetl:published_at': now_iso,
+                    'geoetl:approved_by': reviewer,
+                    'geoetl:clearance': clearance_state.value,
+                }
+                if release.version_id:
+                    approval_props['ddh:version_id'] = release.version_id
+
+                item_ids = pgstac.get_collection_item_ids(release.stac_collection_id)
+
+                if not item_ids:
+                    # Fallback: items weren't inserted at processing time.
+                    # Insert from cog_metadata now.
+                    logger.warning(
+                        f"No pgSTAC items found for tiled collection "
+                        f"{release.stac_collection_id} — inserting from cog_metadata"
+                    )
+                    from infrastructure.raster_metadata_repository import RasterMetadataRepository
+                    cog_repo = RasterMetadataRepository.instance()
+                    cog_records = cog_repo.list_by_collection(release.stac_collection_id)
+
+                    # Upsert collection first
+                    if cog_records:
+                        first_item = cog_records[0].get('stac_item_json', {})
+                        bbox = first_item.get('bbox', [-180, -90, 180, 90])
+                        collection_dict = build_raster_stac_collection(
+                            collection_id=release.stac_collection_id,
+                            bbox=bbox,
+                        )
+                        pgstac.insert_collection(collection_dict)
+
+                    item_ids = []
+                    for rec in cog_records:
+                        stac_json = rec.get('stac_item_json')
+                        if not stac_json:
+                            continue
+                        item_dict = dict(stac_json)
+                        props = item_dict.setdefault('properties', {})
+                        props.update(approval_props)
+                        pgstac.insert_item(item_dict, release.stac_collection_id)
+                        item_ids.append(item_dict.get('id'))
+
+                    logger.info(
+                        f"Inserted {len(item_ids)} tiled items from cog_metadata "
+                        f"with geoetl:published=true"
+                    )
+                else:
+                    # Patch each existing item with approval properties
+                    for item_id in item_ids:
+                        pgstac.update_item_properties(
+                            item_id, release.stac_collection_id, approval_props
+                        )
+                    logger.info(
+                        f"Patched {len(item_ids)} tiled items with "
+                        f"geoetl:published=true in {release.stac_collection_id}"
+                    )
+
+                # Build mosaic URL from search_id
+                mosaic_viewer_url = None
+                if release.search_id:
+                    from services.pgstac_search_registration import PgSTACSearchRegistration
+                    from config import get_config
+                    config = get_config()
+                    registrar = PgSTACSearchRegistration()
+                    urls = registrar.get_search_urls(
+                        release.search_id, config.titiler_base_url, assets=['data']
+                    )
+                    mosaic_viewer_url = urls.get('viewer')
+
+                return {
+                    'success': True,
+                    'items_updated': len(item_ids),
+                    'mosaic_viewer_url': mosaic_viewer_url,
+                }
+
+            # =================================================================
+            # SINGLE COG OUTPUT: Original behavior (unchanged)
+            # =================================================================
+
             # Copy to avoid mutating model
             stac_item_json = dict(release.stac_item_json)
 
@@ -550,8 +644,6 @@ class AssetApprovalService:
                             link['href'] = href[:idx + len(items_prefix)] + versioned_id
 
             # Patch with approval properties
-            now_iso = datetime.now(timezone.utc).isoformat()
-            props = stac_item_json.setdefault('properties', {})
             props['geoetl:published'] = True
             props['geoetl:published_at'] = now_iso
             props['geoetl:approved_by'] = reviewer
@@ -608,8 +700,6 @@ class AssetApprovalService:
                     logger.warning(f"Failed to inject TiTiler URLs (non-fatal): {titiler_err}")
 
             # Build and upsert STAC collection
-            pgstac = PgStacRepository()
-
             item_bbox = stac_item_json.get('bbox', [-180, -90, 180, 90])
             item_dt = props.get('datetime')
             collection_dict = build_raster_stac_collection(
@@ -661,6 +751,21 @@ class AssetApprovalService:
             from infrastructure.pgstac_repository import PgStacRepository
             pgstac = PgStacRepository()
 
+            # Tiled output: delete all items in the collection
+            if release.output_mode == 'tiled':
+                item_ids = pgstac.get_collection_item_ids(release.stac_collection_id)
+                deleted_count = 0
+                for item_id in item_ids:
+                    if pgstac.delete_item(release.stac_collection_id, item_id):
+                        deleted_count += 1
+                logger.info(
+                    f"Deleted {deleted_count}/{len(item_ids)} tiled items "
+                    f"from {release.stac_collection_id}"
+                )
+                # Leave collection + search (harmless, search returns empty)
+                return {'success': True, 'deleted': deleted_count > 0, 'items_deleted': deleted_count}
+
+            # Single COG: delete the single item
             deleted = pgstac.delete_item(release.stac_collection_id, release.stac_item_id)
 
             if deleted:

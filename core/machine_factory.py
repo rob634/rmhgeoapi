@@ -258,6 +258,18 @@ def _default_platform_callback(job_id: str, job_type: str, status: str, result: 
 
                 # Note: stac_collection_id is set at release creation, not updated here
 
+                # Tiled output metadata
+                output_mode = result.get('output_mode')
+                if output_mode == 'tiled':
+                    outputs['output_mode'] = 'tiled'
+                    stac_data = result.get('stac', {})
+                    tile_count = stac_data.get('tile_count') or stac_data.get('items_created')
+                    if tile_count:
+                        outputs['tile_count'] = tile_count
+                    search_id = stac_data.get('search_id')
+                    if search_id:
+                        outputs['search_id'] = search_id
+
                 if outputs:
                     release_repo.update_physical_outputs(release.release_id, **outputs)
 

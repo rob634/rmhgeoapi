@@ -62,12 +62,63 @@ git commit -m "feat: Add VECTOR_FORMAT_MISMATCH and VECTOR_MIXED_GEOMETRY ErrorC
 
 ---
 
-## Task 2: Update error mapping and remediation in handler
+## Task 2: Fix error message propagation + add new error mappings
 
 **Files:**
-- Modify: `services/handler_vector_docker_complete.py:997-1060` (`_map_exception_to_error_code`), `:1062-1130` (`_get_vector_remediation`)
+- Modify: `services/handler_vector_docker_complete.py:435-493` (error handling block), `:997-1060` (`_map_exception_to_error_code`), `:1062-1130` (`_get_vector_remediation`)
 
-**Step 1: Add pattern matches to `_map_exception_to_error_code()`**
+**Problem:** Currently the `message` field wraps the ValueError in boilerplate:
+```
+"message": "Vector Docker ETL failed: ValueError: Shapefile ZIP is missing..."
+```
+And the `remediation` field is always generic per-error-code text. The specific diagnostic
+from our detailed ValueError is buried inside the boilerplate message, and there's no
+dedicated field that contains JUST the data quality details.
+
+**Step 1: Add `data_quality_detail` field to error response**
+
+At line ~437, change the error_msg construction and add a detail extraction:
+
+```python
+    except Exception as e:
+        elapsed = time.time() - start_time
+        # Extract the raw diagnostic (the ValueError message itself)
+        raw_detail = str(e)
+        error_msg = f"Vector Docker ETL failed: {type(e).__name__}: {e}"
+        logger.error(f"[{job_id[:8]}] {error_msg}\n{traceback.format_exc()}")
+```
+
+Then at line ~476, add `data_quality_detail` to the return dict (after `"error_type"`):
+
+```python
+        return {
+            "success": False,
+            "error": response.error_code,
+            "error_code": response.error_code,
+            "error_category": response.error_category,
+            "error_scope": response.error_scope,
+            "message": response.message,
+            "detail": raw_detail,  # <-- Raw diagnostic from ValueError
+            "remediation": response.remediation,
+            "user_fixable": response.user_fixable,
+            "retryable": response.retryable,
+            "http_status": response.http_status,
+            "error_id": response.error_id,
+            "error_type": type(e).__name__,
+            "last_checkpoint": checkpoints[-1] if checkpoints else None,
+            "checkpoint_data": checkpoint_data,
+            "elapsed_seconds": round(elapsed, 2),
+            "_debug": debug.model_dump(),
+        }
+```
+
+This means a failed job result now includes:
+- `error_code`: Machine-readable code (`"VECTOR_UNREADABLE"`)
+- `message`: Full wrapped message (backwards compat)
+- **`detail`**: Raw diagnostic — the exact ValueError text e.g. `"Shapefile ZIP is missing required component files: .shx (spatial index), .dbf (attribute table). A valid shapefile requires..."`
+- `remediation`: Generic how-to-fix guidance per error code
+
+**Step 2: Add pattern matches to `_map_exception_to_error_code()`**
 
 At line ~1017, BEFORE the existing file/parsing block, add a new format mismatch block:
 
@@ -89,7 +140,7 @@ At line ~1027, BEFORE the existing geometry block, add mixed geometry:
         return ErrorCode.VECTOR_MIXED_GEOMETRY
 ```
 
-**Step 2: Add remediation entries to `_get_vector_remediation()`**
+**Step 3: Add remediation entries to `_get_vector_remediation()`**
 
 In the `remediation_map` dict (after `VECTOR_ENCODING_ERROR` entry, around line 1090):
 
@@ -98,21 +149,22 @@ In the `remediation_map` dict (after `VECTOR_ENCODING_ERROR` entry, around line 
             "The file content does not match the declared format. Verify the file "
             "extension matches the actual data. For example, ensure .geojson files "
             "contain valid GeoJSON (RFC 7946) and .kml files contain valid KML/XML. "
-            "The error message above describes what was found instead."
+            "See the 'detail' field for the specific parsing error."
         ),
         ErrorCode.VECTOR_MIXED_GEOMETRY: (
             "Your file contains multiple geometry types (e.g., points and polygons) "
             "that cannot coexist in a single PostGIS table. Split your file by "
             "geometry type using QGIS (Vector > Geometry Tools > Explode) or ogr2ogr "
-            "with a WHERE clause on geometry type, then submit each file separately."
+            "with a WHERE clause on geometry type, then submit each file separately. "
+            "See the 'detail' field for the geometry type breakdown."
         ),
 ```
 
-**Step 3: Commit**
+**Step 4: Commit**
 
 ```bash
 git add services/handler_vector_docker_complete.py
-git commit -m "feat: Error mapping + remediation for VECTOR_FORMAT_MISMATCH and VECTOR_MIXED_GEOMETRY"
+git commit -m "feat: Add 'detail' field to error response + VECTOR_FORMAT_MISMATCH/VECTOR_MIXED_GEOMETRY mappings"
 ```
 
 ---

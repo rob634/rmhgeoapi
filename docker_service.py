@@ -454,13 +454,10 @@ class BackgroundQueueWorker:
             self._queue_name = self._config.queues.container_tasks_queue
 
         if self._core_machine is None:
-            from core.machine import CoreMachine
+            from core.machine_factory import create_core_machine
             from jobs import ALL_JOBS
             from services import ALL_HANDLERS
-            self._core_machine = CoreMachine(
-                all_jobs=ALL_JOBS,
-                all_handlers=ALL_HANDLERS
-            )
+            self._core_machine = create_core_machine(ALL_JOBS, ALL_HANDLERS)
 
     def _get_sb_client(self) -> ServiceBusClient:
         """

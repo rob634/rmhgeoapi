@@ -5432,7 +5432,7 @@ class TasksInterface(BaseInterface):
             const rel = state.primary_release || {{}};
             const approvalState = state.approval_state || rel.approval_state || 'unknown';
             const processingStatus = state.processing_status || rel.processing_status || 'unknown';
-            const isDraft = !job.parameters?.version_id;
+            const isDraft = !job.parameters?.version_id && approvalState !== 'approved' && approvalState !== 'rejected' && approvalState !== 'revoked';
 
             let html = `<div class="approval-panel">`;
             html += `<h4>Approval</h4>`;

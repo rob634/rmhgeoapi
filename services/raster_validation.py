@@ -837,13 +837,23 @@ def _validate_crs(src, input_crs: Optional[str], bounds, skip_validation: bool =
             }
         else:
             # No CRS available anywhere - FAIL
-            logger.error(f"❌ VALIDATION CRS: Missing CRS, no user override")
+            logger.error(f"❌ VALIDATION CRS: Missing CRS, rejecting file")
             return {
                 "success": False,
                 "error": "CRS_MISSING",
-                "message": "Raster has no CRS in metadata and no source_crs parameter provided. "
-                           "Provide source_crs parameter (e.g., 'EPSG:32611') to proceed.",
-                "suggestion": "Resubmit job with 'source_crs' parameter",
+                "message": (
+                    "Raster file has no coordinate reference system (CRS) in its metadata. "
+                    "This file cannot be processed. Re-export from the source application "
+                    "with the correct CRS embedded, or assign one with: "
+                    "gdal_edit.py -a_srs EPSG:XXXX your_file.tif"
+                ),
+                "remediation": (
+                    "Fix the source file to include CRS metadata. Common CRS codes: "
+                    "EPSG:4326 (WGS84 lat/lon), EPSG:3857 (Web Mercator), "
+                    "EPSG:326xx (UTM North), EPSG:327xx (UTM South)."
+                ),
+                "user_fixable": True,
+                "retryable": False,
                 "file_info": {
                     "bounds": list(bounds),
                     "shape": src.shape

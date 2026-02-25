@@ -123,6 +123,8 @@ class ErrorCode(str, Enum):
     VECTOR_ENCODING_ERROR = "VECTOR_ENCODING_ERROR"  # Character encoding issue
     VECTOR_ATTRIBUTE_ERROR = "VECTOR_ATTRIBUTE_ERROR"  # Column type issue
     VECTOR_TABLE_NAME_INVALID = "VECTOR_TABLE_NAME_INVALID"  # Bad table name
+    VECTOR_FORMAT_MISMATCH = "VECTOR_FORMAT_MISMATCH"  # Content doesn't match declared format
+    VECTOR_MIXED_GEOMETRY = "VECTOR_MIXED_GEOMETRY"  # Multiple incompatible geometry types
     TABLE_EXISTS = "TABLE_EXISTS"  # Table already exists (overwrite=false)
 
     # ========================================================================
@@ -370,6 +372,8 @@ _ERROR_CLASSIFICATION: Dict[ErrorCode, ErrorClassification] = {
     ErrorCode.VECTOR_ENCODING_ERROR: ErrorClassification.PERMANENT,
     ErrorCode.VECTOR_ATTRIBUTE_ERROR: ErrorClassification.PERMANENT,
     ErrorCode.VECTOR_TABLE_NAME_INVALID: ErrorClassification.PERMANENT,
+    ErrorCode.VECTOR_FORMAT_MISMATCH: ErrorClassification.PERMANENT,
+    ErrorCode.VECTOR_MIXED_GEOMETRY: ErrorClassification.PERMANENT,
     ErrorCode.TABLE_EXISTS: ErrorClassification.PERMANENT,
 
     # Collection-specific (PERMANENT - user must fix collection)
@@ -441,6 +445,8 @@ _ERROR_CATEGORY: Dict[ErrorCode, ErrorCategory] = {
     ErrorCode.VECTOR_COORDINATE_ERROR: ErrorCategory.DATA_QUALITY,
     ErrorCode.VECTOR_ENCODING_ERROR: ErrorCategory.DATA_QUALITY,
     ErrorCode.VECTOR_ATTRIBUTE_ERROR: ErrorCategory.DATA_QUALITY,
+    ErrorCode.VECTOR_FORMAT_MISMATCH: ErrorCategory.DATA_QUALITY,
+    ErrorCode.VECTOR_MIXED_GEOMETRY: ErrorCategory.DATA_QUALITY,
 
     # DATA_INCOMPATIBLE - Collection files don't match (WORKFLOW errors)
     ErrorCode.COLLECTION_BAND_MISMATCH: ErrorCategory.DATA_INCOMPATIBLE,
@@ -540,6 +546,8 @@ _ERROR_SCOPE: Dict[ErrorCode, ErrorScope] = {
     ErrorCode.VECTOR_ENCODING_ERROR: ErrorScope.NODE,
     ErrorCode.VECTOR_ATTRIBUTE_ERROR: ErrorScope.NODE,
     ErrorCode.VECTOR_TABLE_NAME_INVALID: ErrorScope.NODE,
+    ErrorCode.VECTOR_FORMAT_MISMATCH: ErrorScope.NODE,
+    ErrorCode.VECTOR_MIXED_GEOMETRY: ErrorScope.NODE,
 
     # WORKFLOW errors - Collection relationship failures
     ErrorCode.COLLECTION_BAND_MISMATCH: ErrorScope.WORKFLOW,

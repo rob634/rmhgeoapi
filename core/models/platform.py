@@ -397,11 +397,15 @@ class PlatformRequest(BaseModel):
             return DataType.VECTOR
         elif ext in ['tif', 'tiff']:
             return DataType.RASTER
-        elif ext in ['img', 'hdf', 'hdf5', 'nc', 'jp2', 'ecw', 'vrt', 'geotiff']:
+        elif ext == 'nc':
             raise ValueError(
-                f"Unsupported raster format: '.{ext}'. "
-                f"Only GeoTIFF (.tif, .tiff) files are accepted. "
-                f"Convert your file to GeoTIFF: gdal_translate input.{ext} output.tif"
+                "NetCDF (.nc) support is under development. "
+                "Currently only GeoTIFF (.tif, .tiff) files are accepted."
+            )
+        elif ext in ['img', 'hdf', 'hdf5', 'jp2', 'ecw', 'vrt', 'geotiff']:
+            raise ValueError(
+                f"Unsupported file format '.{ext}'. "
+                f"Only GeoTIFF (.tif, .tiff) files are accepted."
             )
         elif ext in ['las', 'laz', 'e57']:
             return DataType.POINTCLOUD

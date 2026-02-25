@@ -454,6 +454,33 @@ class VectorToPostGISHandler:
             })
 
         # ========================================================================
+        # MIXED GEOMETRY TYPE DETECTION (25 FEB 2026)
+        # ========================================================================
+        # After normalization, all geometries should be the same Multi-type.
+        # If multiple Multi-types exist (e.g., MultiPoint + MultiPolygon), the
+        # table can only be typed to one — mismatched rows would fail on INSERT
+        # or produce an unusable mixed-type table.
+        # ========================================================================
+        multi_types = set(gdf.geometry.geom_type.unique())
+        if len(multi_types) > 1:
+            type_counts = gdf.geometry.geom_type.value_counts().to_dict()
+            type_summary = ", ".join(
+                f"{t}: {c} features" for t, c in type_counts.items()
+            )
+            raise ValueError(
+                f"File contains mixed geometry types that cannot be stored in a "
+                f"single PostGIS table: {type_summary}. "
+                f"Each table requires a uniform geometry type. "
+                f"Split the source file by geometry type (e.g., polygons in one "
+                f"file, points in another) and submit separately."
+            )
+
+        emit("geometry_type_uniform", {
+            "geometry_type": list(multi_types)[0],
+            "features": len(gdf)
+        })
+
+        # ========================================================================
         # VALIDATE POSTGIS GEOMETRY TYPE SUPPORT (12 NOV 2025)
         # ========================================================================
         # PostGIS CREATE TABLE only supports specific geometry types.
@@ -513,12 +540,20 @@ class VectorToPostGISHandler:
         MIN_YEAR = 1
         MAX_YEAR = 9999
 
-        for col in gdf.columns:
+        for col in list(gdf.columns):
             if col == 'geometry':
                 continue
 
             # Check if column is datetime type
             if pd.api.types.is_datetime64_any_dtype(gdf[col]):
+                # Drop all-NaT datetime columns (provide no value, waste storage)
+                if gdf[col].isna().all():
+                    warning_msg = f"Column '{col}': all datetime values are NaT — dropping empty column"
+                    logger.warning(f"⚠️  {warning_msg}")
+                    self.last_warnings.append(warning_msg)
+                    gdf.drop(columns=[col], inplace=True)
+                    continue
+
                 # Find out-of-range values
                 # pandas datetime64 stores as nanoseconds, can handle wider range than Python
                 # We need to check the actual year values
@@ -551,6 +586,35 @@ class VectorToPostGISHandler:
             emit("datetime_validation", {
                 "warnings": len(self.last_warnings),
                 "columns_checked": len([c for c in gdf.columns if c != 'geometry' and pd.api.types.is_datetime64_any_dtype(gdf[c])])
+            })
+
+        # ====================================================================
+        # ALL-NULL COLUMN PRUNING — "No Garbage Principle" (25 FEB 2026)
+        # ====================================================================
+        # Drop columns where every value is null/NaN/NaT. These provide zero
+        # information value, waste PostGIS storage, and can cause downstream
+        # errors (e.g., TiPG OverflowError on empty TIMESTAMP columns).
+        # Note: all-NaT datetime columns are already handled above; this pass
+        # catches remaining null columns of any dtype (string, numeric, etc.).
+        # ====================================================================
+        null_columns_dropped = []
+        for col in list(gdf.columns):
+            if col == 'geometry':
+                continue
+            if gdf[col].isna().all():
+                null_columns_dropped.append(col)
+                gdf.drop(columns=[col], inplace=True)
+
+        if null_columns_dropped:
+            warning_msg = (
+                f"Dropped {len(null_columns_dropped)} all-null column(s): "
+                f"{', '.join(null_columns_dropped)}"
+            )
+            logger.warning(f"⚠️  {warning_msg}")
+            self.last_warnings.append(warning_msg)
+            emit("null_columns_pruned", {
+                "columns_dropped": null_columns_dropped,
+                "count": len(null_columns_dropped)
             })
 
         # Reproject to EPSG:4326 if needed
@@ -1101,11 +1165,20 @@ class VectorToPostGISHandler:
 
         # PERF FIX (26 JAN 2026): Use executemany instead of row-by-row
         # Build all values upfront, then bulk insert
+        #
+        # BUG FIX (25 FEB 2026): Convert pd.NaT to None for psycopg3 compatibility.
+        # pd.NaT inherits from datetime.datetime, so psycopg3's DatetimeNoTzBinaryDumper
+        # treats it as a real datetime instead of NULL. The internal NaT representation
+        # gets dumped as year ~48113, which PostgreSQL accepts but Python can't read back
+        # (OverflowError: date value out of range). Converting to None produces SQL NULL.
         all_values = []
         for idx, row in chunk.iterrows():
             geom_wkb = row.geometry.wkb
             if attr_cols:
-                values = (geom_wkb, *[row[col] for col in attr_cols])
+                values = (geom_wkb, *[
+                    None if val is pd.NaT else val
+                    for val in (row[col] for col in attr_cols)
+                ])
             else:
                 values = (geom_wkb,)
             all_values.append(values)

@@ -217,12 +217,20 @@ def validate_raster(params: dict) -> dict:
     ext = blob_name.rsplit('.', 1)[-1].lower() if '.' in blob_name else ''
     if ext not in {'tif', 'tiff'}:
         from core.errors import ErrorCode, create_error_response
-        logger.error(f"❌ STEP 2b FAILED: Invalid extension '.{ext}' for '{blob_name}'")
+        if ext == 'nc':
+            msg = (
+                f"NetCDF (.nc) support is under development. "
+                f"Currently only GeoTIFF (.tif, .tiff) files are accepted."
+            )
+        else:
+            msg = (
+                f"Unsupported file format '.{ext}' for file '{blob_name}'. "
+                f"Only GeoTIFF (.tif, .tiff) files are accepted."
+            )
+        logger.error(f"❌ STEP 2b FAILED: {msg}")
         return create_error_response(
             ErrorCode.INVALID_FORMAT,
-            f"Invalid file extension '.{ext}' for file '{blob_name}'. "
-            f"Only GeoTIFF files (.tif, .tiff) are accepted. "
-            f"Convert: gdal_translate input.{ext} output.tif",
+            msg,
             details={"blob_name": blob_name, "extension": ext,
                      "accepted_extensions": [".tif", ".tiff"]}
         )

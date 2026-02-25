@@ -346,6 +346,10 @@ class UnifiedSubmitInterface(BaseInterface):
             if version_id:
                 platform_payload['version_id'] = version_id
 
+            previous_version_id = get_param('previous_version_id')
+            if previous_version_id:
+                platform_payload['previous_version_id'] = previous_version_id
+
             # Set data_type for API (raster_collection is detected by list)
             if data_type == 'vector':
                 platform_payload['data_type'] = 'vector'
@@ -393,11 +397,30 @@ class UnifiedSubmitInterface(BaseInterface):
                 if input_crs:
                     processing_options['crs'] = input_crs
 
-            # Vector-specific (CSV columns)
+                # Collection-specific options
+                if data_type == 'raster_collection':
+                    jpeg_quality = get_param('jpeg_quality')
+                    if jpeg_quality:
+                        try:
+                            processing_options['jpeg_quality'] = int(jpeg_quality)
+                        except ValueError:
+                            pass
+
+                    license_val = get_param('license')
+                    if license_val:
+                        processing_options['license'] = license_val
+
+                    strict_mode = get_param('strict_mode')
+                    if strict_mode == 'true':
+                        processing_options['strict_mode'] = True
+
+            # Vector-specific
             if data_type == 'vector':
                 lat_name = get_param('lat_name')
                 lon_name = get_param('lon_name')
                 wkt_column = get_param('wkt_column')
+                table_name = get_param('table_name')
+                layer_name = get_param('layer_name')
 
                 if lat_name:
                     processing_options['lat_column'] = lat_name
@@ -405,6 +428,10 @@ class UnifiedSubmitInterface(BaseInterface):
                     processing_options['lon_column'] = lon_name
                 if wkt_column:
                     processing_options['wkt_column'] = wkt_column
+                if table_name:
+                    processing_options['table_name'] = table_name
+                if layer_name:
+                    processing_options['layer_name'] = layer_name
 
             if processing_options:
                 platform_payload['processing_options'] = processing_options
@@ -624,6 +651,10 @@ class UnifiedSubmitInterface(BaseInterface):
             if version_id:
                 platform_payload['version_id'] = version_id
 
+            previous_version_id = get_param('previous_version_id')
+            if previous_version_id:
+                platform_payload['previous_version_id'] = previous_version_id
+
             if data_type == 'vector':
                 platform_payload['data_type'] = 'vector'
             else:
@@ -668,10 +699,29 @@ class UnifiedSubmitInterface(BaseInterface):
                 if input_crs:
                     processing_options['crs'] = input_crs
 
+                # Collection-specific options
+                if data_type == 'raster_collection':
+                    jpeg_quality = get_param('jpeg_quality')
+                    if jpeg_quality:
+                        try:
+                            processing_options['jpeg_quality'] = int(jpeg_quality)
+                        except ValueError:
+                            pass
+
+                    license_val = get_param('license')
+                    if license_val:
+                        processing_options['license'] = license_val
+
+                    strict_mode = get_param('strict_mode')
+                    if strict_mode == 'true':
+                        processing_options['strict_mode'] = True
+
             if data_type == 'vector':
                 lat_name = get_param('lat_name')
                 lon_name = get_param('lon_name')
                 wkt_column = get_param('wkt_column')
+                table_name = get_param('table_name')
+                layer_name = get_param('layer_name')
 
                 if lat_name:
                     processing_options['lat_column'] = lat_name
@@ -679,6 +729,10 @@ class UnifiedSubmitInterface(BaseInterface):
                     processing_options['lon_column'] = lon_name
                 if wkt_column:
                     processing_options['wkt_column'] = wkt_column
+                if table_name:
+                    processing_options['table_name'] = table_name
+                if layer_name:
+                    processing_options['layer_name'] = layer_name
 
             if processing_options:
                 platform_payload['processing_options'] = processing_options
@@ -785,7 +839,7 @@ class UnifiedSubmitInterface(BaseInterface):
                 </div>
             </div>
             <div class="result-actions">
-                <a href="/api/interface/tasks?job_id={job_id}" class="btn btn-primary">Workflow Monitor</a>
+                <a href="/api/interface/status?job_id={job_id}" class="btn btn-primary">Workflow Monitor</a>
                 <button onclick="resetForm()" class="btn btn-secondary">Submit Another</button>
             </div>
         </div>
@@ -1030,10 +1084,9 @@ class UnifiedSubmitInterface(BaseInterface):
                                     <div class="form-group">
                                         <label for="access_level">Access Level</label>
                                         <select id="access_level" name="access_level">
-                                            <option value="">Not specified</option>
+                                            <option value="">Not specified (defaults to OUO)</option>
                                             <option value="OUO">OUO</option>
                                             <option value="PUBLIC">PUBLIC</option>
-                                            <option value="restricted">Restricted</option>
                                         </select>
                                     </div>
                                     <div class="form-group">
@@ -1059,6 +1112,14 @@ class UnifiedSubmitInterface(BaseInterface):
                                             <option value="rgba">RGBA</option>
                                             <option value="multispectral">Multispectral</option>
                                             <option value="categorical">Categorical</option>
+                                            <option value="nir">NIR</option>
+                                            <option value="continuous">Continuous</option>
+                                            <option value="vegetation_index">Vegetation Index</option>
+                                            <option value="flood_depth">Flood Depth</option>
+                                            <option value="flood_probability">Flood Probability</option>
+                                            <option value="hydrology">Hydrology</option>
+                                            <option value="temporal">Temporal</option>
+                                            <option value="population">Population</option>
                                         </select>
                                     </div>
                                     <div class="form-group">
@@ -1067,6 +1128,7 @@ class UnifiedSubmitInterface(BaseInterface):
                                             <option value="analysis" selected>Analysis (LZW)</option>
                                             <option value="visualization">Visualization (JPEG)</option>
                                             <option value="archive">Archive (DEFLATE)</option>
+                                            <option value="all">All Tiers</option>
                                         </select>
                                     </div>
                                 </div>
@@ -1081,9 +1143,24 @@ class UnifiedSubmitInterface(BaseInterface):
 
                         <!-- Vector Processing Parameters -->
                         <div id="vector-options" class="processing-section hidden">
-                            <div class="form-group-header">Vector Processing (CSV)</div>
+                            <div class="form-group-header">Vector Processing</div>
                             <div class="processing-fields">
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="table_name">Table Name (optional)</label>
+                                        <input type="text" id="table_name" name="table_name"
+                                               placeholder="Custom PostGIS table name">
+                                        <span class="field-hint">Auto-generated from DDH IDs if blank</span>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="layer_name">Layer Name (optional)</label>
+                                        <input type="text" id="layer_name" name="layer_name"
+                                               placeholder="GeoPackage layer to extract">
+                                        <span class="field-hint">For .gpkg files - defaults to first layer</span>
+                                    </div>
+                                </div>
                                 <div id="csv-fields">
+                                    <div class="form-group-header" style="font-size:12px; margin: 12px 0 8px 0; color: var(--ds-gray);">CSV Column Mapping</div>
                                     <div class="form-row">
                                         <div class="form-group">
                                             <label for="lat_name">Latitude Column</label>
@@ -1102,6 +1179,33 @@ class UnifiedSubmitInterface(BaseInterface):
                                         <input type="text" id="wkt_column" name="wkt_column"
                                                placeholder="e.g., geometry, geom">
                                     </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Raster Collection Options (shown only for raster_collection) -->
+                        <div id="collection-options" class="processing-section hidden">
+                            <div class="form-group-header">Collection Options</div>
+                            <div class="processing-fields">
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="jpeg_quality">JPEG Quality (optional)</label>
+                                        <input type="number" id="jpeg_quality" name="jpeg_quality"
+                                               min="1" max="100" placeholder="1-100 (default: auto)">
+                                        <span class="field-hint">Compression quality for visualization tier</span>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="license">License (optional)</label>
+                                        <input type="text" id="license" name="license"
+                                               placeholder="proprietary" value="">
+                                        <span class="field-hint">STAC license identifier</span>
+                                    </div>
+                                </div>
+                                <div class="form-group checkbox-group">
+                                    <label>
+                                        <input type="checkbox" id="strict_mode" name="strict_mode" value="true">
+                                        Strict mode (fail on warnings)
+                                    </label>
                                 </div>
                             </div>
                         </div>
@@ -2070,7 +2174,8 @@ class UnifiedSubmitInterface(BaseInterface):
             const formInputs = ['dataset_id', 'resource_id', 'version_id', 'previous_version_id',
                                 'title', 'description', 'access_level', 'tags', 'collection_id',
                                 'raster_type', 'output_tier', 'input_crs',
-                                'lat_name', 'lon_name', 'wkt_column', 'overwrite'];
+                                'lat_name', 'lon_name', 'wkt_column', 'table_name', 'layer_name',
+                                'jpeg_quality', 'license', 'strict_mode', 'overwrite'];
             formInputs.forEach(id => {{
                 const el = document.getElementById(id);
                 if (el) {{
@@ -2117,6 +2222,7 @@ class UnifiedSubmitInterface(BaseInterface):
             // Show/hide options sections
             document.getElementById('raster-options').classList.toggle('hidden', type === 'vector');
             document.getElementById('vector-options').classList.toggle('hidden', type !== 'vector');
+            document.getElementById('collection-options').classList.toggle('hidden', type !== 'raster_collection');
 
             // Show/hide selection banner
             document.getElementById('selection-banner').classList.toggle('hidden', type !== 'raster_collection');
@@ -2346,6 +2452,11 @@ class UnifiedSubmitInterface(BaseInterface):
             document.getElementById('collection_id').value = '';
             document.getElementById('title').value = '';
             document.getElementById('description').value = '';
+            document.getElementById('table_name').value = '';
+            document.getElementById('layer_name').value = '';
+            document.getElementById('jpeg_quality').value = '';
+            document.getElementById('license').value = '';
+            document.getElementById('strict_mode').checked = false;
 
             // Hide config form (reset progressive disclosure)
             hideConfigForm();
@@ -2425,14 +2536,29 @@ class UnifiedSubmitInterface(BaseInterface):
 
                 // Docker worker always used for GDAL operations (06 FEB 2026)
                 processingOptions.processing_mode = 'docker';
+                // Collection-specific options
+                if (currentDataType === 'raster_collection') {{
+                    const jpegQuality = document.getElementById('jpeg_quality').value;
+                    if (jpegQuality) processingOptions.jpeg_quality = parseInt(jpegQuality);
+
+                    const license = document.getElementById('license').value;
+                    if (license) processingOptions.license = license;
+
+                    const strictMode = document.getElementById('strict_mode').checked;
+                    if (strictMode) processingOptions.strict_mode = true;
+                }}
             }} else {{
                 const latName = document.getElementById('lat_name').value;
                 const lonName = document.getElementById('lon_name').value;
                 const wktColumn = document.getElementById('wkt_column').value;
+                const tableName = document.getElementById('table_name').value;
+                const layerName = document.getElementById('layer_name').value;
 
                 if (latName) processingOptions.lat_column = latName;
                 if (lonName) processingOptions.lon_column = lonName;
                 if (wktColumn) processingOptions.wkt_column = wktColumn;
+                if (tableName) processingOptions.table_name = tableName;
+                if (layerName) processingOptions.layer_name = layerName;
             }}
 
             if (Object.keys(processingOptions).length > 0) {{

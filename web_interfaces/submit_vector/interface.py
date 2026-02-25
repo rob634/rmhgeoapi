@@ -421,7 +421,7 @@ class SubmitVectorInterface(BaseInterface):
                 </div>
             </div>
             <div class="result-actions">
-                <a href="/api/interface/tasks?job_id={job_id}" class="btn btn-primary">Workflow Monitor</a>
+                <a href="/api/interface/status?job_id={job_id}" class="btn btn-primary">Workflow Monitor</a>
             </div>
         </div>
         '''
@@ -448,7 +448,7 @@ class SubmitVectorInterface(BaseInterface):
                 </div>
             </div>
             <div class="result-actions">
-                <a href="/api/interface/tasks?job_id={job_id}" class="btn btn-primary">Workflow Monitor</a>
+                <a href="/api/interface/status?job_id={job_id}" class="btn btn-primary">Workflow Monitor</a>
             </div>
         </div>
         '''

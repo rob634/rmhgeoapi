@@ -158,6 +158,19 @@ def unified_interface_handler(req: func.HttpRequest) -> func.HttpResponse:
             headers={"Location": "/api/interface/home"}
         )
 
+    # Backward-compatible aliases (24 FEB 2026)
+    _ALIASES = {'tasks': 'status'}
+    if interface_name in _ALIASES:
+        alias_target = _ALIASES[interface_name]
+        # Preserve query params in redirect
+        qs = req.url.split('?', 1)[1] if '?' in req.url else ''
+        redirect_url = f"/api/interface/{alias_target}" + (f"?{qs}" if qs else "")
+        return func.HttpResponse(
+            body="",
+            status_code=302,
+            headers={"Location": redirect_url}
+        )
+
     # Get interface class from registry
     interface_class = InterfaceRegistry.get(interface_name)
 

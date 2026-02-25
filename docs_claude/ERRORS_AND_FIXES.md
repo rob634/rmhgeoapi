@@ -1374,6 +1374,46 @@ Then stop/start the container.
 
 ---
 
+## VECTOR INPUT Errors
+
+### VEC-010: VECTOR_FORMAT_MISMATCH
+
+**Date**: 25 FEB 2026
+
+**Error Message**: "File is not valid JSON" / "File is valid JSON but not valid GeoJSON" / "not valid XML" / "not a KML document"
+
+**Likely Causes**:
+1. File extension doesn't match actual content (e.g., .geojson file contains HTML)
+2. File is corrupted or truncated
+3. Wrong file selected for upload
+
+**Fix**: Verify the file is the correct format. Open it in a text editor — GeoJSON should start with `{`, KML should start with `<?xml`.
+
+**ErrorCode**: `VECTOR_FORMAT_MISMATCH` (PERMANENT, DATA_QUALITY, NODE)
+
+**Related Change**: Vector input hardening — converter-level structural validation (25 FEB 2026)
+
+---
+
+### VEC-011: VECTOR_MIXED_GEOMETRY
+
+**Date**: 25 FEB 2026
+
+**Error Message**: "File contains mixed geometry types that cannot be stored in a single PostGIS table"
+
+**Likely Causes**:
+1. GeoJSON FeatureCollection with both Point and Polygon features
+2. KML with Placemarks of different geometry types
+3. Shapefile converted from mixed-type source
+
+**Fix**: Split the file by geometry type in QGIS (Vector > Geometry Tools > Explode) or use ogr2ogr with a WHERE clause, then submit each file separately.
+
+**ErrorCode**: `VECTOR_MIXED_GEOMETRY` (PERMANENT, DATA_QUALITY, NODE)
+
+**Related Change**: Vector input hardening — mixed geometry detection in postgis_handler (25 FEB 2026)
+
+---
+
 ## Adding New Errors
 
 Use this template:

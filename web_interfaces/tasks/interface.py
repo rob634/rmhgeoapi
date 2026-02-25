@@ -29,40 +29,51 @@ from web_interfaces.base import BaseInterface
 from web_interfaces import InterfaceRegistry
 
 
-@InterfaceRegistry.register('tasks')
+@InterfaceRegistry.register('status')
 class TasksInterface(BaseInterface):
     """
-    Task Monitoring Dashboard interface with workflow visualization.
+    Status Monitor interface with platform status + workflow visualization.
 
-    Displays predefined workflow stages with task counts and status indicators.
-    Uses HTMX for auto-refresh.
+    Accepts flexible ID params (job_id, request_id, asset_id, or
+    dataset_id+resource_id) and resolves via /api/platform/status.
+    Displays platform status (asset, release, outputs, services, approval)
+    alongside detailed workflow stage/task monitoring.
     """
 
     def render(self, request: func.HttpRequest) -> str:
         """
-        Generate Task Monitoring dashboard HTML.
+        Generate Status Monitor dashboard HTML.
 
         Args:
             request: Azure Functions HttpRequest object
-                     Expected query param: job_id
+                     Accepts: job_id, request_id, asset_id, or dataset_id+resource_id
 
         Returns:
             Complete HTML document string
         """
-        # Get job_id from query params
+        # Accept flexible params (same as platform/status)
         job_id = request.params.get('job_id', '')
+        request_id = request.params.get('request_id', '')
+        asset_id = request.params.get('asset_id', '')
+        dataset_id = request.params.get('dataset_id', '')
+        resource_id = request.params.get('resource_id', '')
+
+        # Determine lookup_id (first available)
+        lookup_id = job_id or request_id or asset_id or ''
 
         # HTML content
-        content = self._generate_html_content(job_id)
+        content = self._generate_html_content(lookup_id)
 
-        # Custom CSS for Task Monitor
+        # Custom CSS for Status Monitor
         custom_css = self._generate_custom_css()
 
-        # Custom JavaScript for Task Monitor
-        custom_js = self._generate_custom_js(job_id)
+        # Custom JavaScript for Status Monitor
+        custom_js = self._generate_custom_js(lookup_id, dataset_id, resource_id)
+
+        display_id = lookup_id[:8] if lookup_id else (dataset_id or 'Loading...')
 
         return self.wrap_html(
-            title=f"Task Monitor - {job_id[:8] if job_id else 'No Job'}",
+            title=f"Status - {display_id}",
             content=content,
             custom_css=custom_css,
             custom_js=custom_js,
@@ -70,7 +81,7 @@ class TasksInterface(BaseInterface):
             include_status_bar=True
         )
 
-    def _generate_html_content(self, job_id: str) -> str:
+    def _generate_html_content(self, lookup_id: str) -> str:
         """Generate HTML content structure."""
         return f"""
         <div class="container">
@@ -78,8 +89,8 @@ class TasksInterface(BaseInterface):
             <header class="dashboard-header">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <div>
-                        <h1>Workflow Monitor</h1>
-                        <p class="subtitle">Job: <span id="job-id-display" style="font-family: 'Courier New', monospace; color: #0071BC; font-size: 14px;">{job_id[:16] if job_id else 'Loading...'}...</span></p>
+                        <h1>Status Monitor</h1>
+                        <p class="subtitle" id="header-subtitle">ID: <span id="job-id-display" style="font-family: 'Courier New', monospace; color: #0071BC; font-size: 14px;">{lookup_id[:16] if lookup_id else 'Resolving...'}...</span></p>
                     </div>
                     <div style="display: flex; gap: 10px; align-items: center;">
                         <div class="auto-refresh-toggle">
@@ -109,6 +120,10 @@ class TasksInterface(BaseInterface):
                     </div>
                 </div>
             </header>
+
+            <!-- Platform Status Card (populated from /api/platform/status) -->
+            <div id="platform-status-card" class="platform-status-card hidden">
+            </div>
 
             <!-- Job Summary Card -->
             <div id="job-summary-card" class="job-summary-card">
@@ -354,8 +369,132 @@ class TasksInterface(BaseInterface):
         """
 
     def _generate_custom_css(self) -> str:
-        """Generate custom CSS for Task Monitor with workflow diagram."""
+        """Generate custom CSS for Status Monitor with platform summary + workflow diagram."""
         return """
+        /* Platform Status Card */
+        .platform-status-card {
+            background: white;
+            border-radius: 6px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-bottom: 16px;
+            border-left: 4px solid #0071BC;
+            padding: 16px 20px;
+        }
+        .ps-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr 1fr;
+            gap: 16px;
+        }
+        @media (max-width: 900px) {
+            .ps-grid { grid-template-columns: 1fr 1fr; }
+        }
+        .ps-section-header {
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #626F86;
+            margin-bottom: 8px;
+            padding-bottom: 4px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        .ps-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 3px 0;
+            font-size: 13px;
+        }
+        .ps-label {
+            color: #626F86;
+            font-weight: 500;
+        }
+        .ps-value {
+            color: #053657;
+        }
+        .ps-value.mono {
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            word-break: break-all;
+        }
+        .ps-output-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            padding: 3px 0;
+            font-size: 13px;
+            gap: 8px;
+        }
+        .ps-output-item .ps-label {
+            white-space: nowrap;
+        }
+        .ps-output-item .ps-value {
+            text-align: right;
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .ps-services {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 4px;
+        }
+        .ps-service-link {
+            display: inline-block;
+            padding: 3px 8px;
+            background: #f0f7ff;
+            border: 1px solid #0071BC;
+            border-radius: 3px;
+            font-size: 11px;
+            color: #0071BC;
+            text-decoration: none;
+            text-transform: capitalize;
+        }
+        .ps-service-link:hover {
+            background: #0071BC;
+            color: white;
+        }
+        .ps-viewer-link {
+            display: inline-block;
+            padding: 4px 10px;
+            background: #0071BC;
+            color: white;
+            border-radius: 3px;
+            font-size: 12px;
+            text-decoration: none;
+            margin-top: 6px;
+        }
+        .ps-viewer-link:hover {
+            background: #005a96;
+        }
+        .ps-versions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-top: 6px;
+        }
+        .ps-version-tag {
+            display: inline-block;
+            padding: 2px 6px;
+            background: #f3f4f6;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: 600;
+            color: #626F86;
+        }
+        .ps-version-tag.status-completed {
+            background: #ecfdf5;
+            color: #059669;
+        }
+        .ps-version-tag.status-pending {
+            background: #fffbeb;
+            color: #d97706;
+        }
+        .ps-approval {
+            margin-top: 6px;
+        }
+
         .dashboard-header {
             background: white;
             padding: 25px 30px;
@@ -2786,10 +2925,14 @@ class TasksInterface(BaseInterface):
         }
         """
 
-    def _generate_custom_js(self, job_id: str) -> str:
-        """Generate custom JavaScript for Task Monitor with workflow visualization."""
+    def _generate_custom_js(self, lookup_id: str, dataset_id: str = '', resource_id: str = '') -> str:
+        """Generate custom JavaScript for Status Monitor with platform status + workflow visualization."""
         return f"""
-        const JOB_ID = '{job_id}';
+        const LOOKUP_ID = '{lookup_id}';
+        const DATASET_ID = '{dataset_id}';
+        const RESOURCE_ID = '{resource_id}';
+        let JOB_ID = '{lookup_id}';  // Will be resolved from platform/status
+        let platformData = null;
 
         // Auto-refresh state
         let autoRefreshInterval = null;
@@ -2995,19 +3138,19 @@ class TasksInterface(BaseInterface):
             }}
         }}
 
-        // Load job + tasks data
+        // Load platform status + job/tasks data
         async function loadData() {{
-            if (!JOB_ID) {{
-                showError('No job ID provided');
+            if (!LOOKUP_ID && !DATASET_ID) {{
+                showError('No ID provided. Use ?job_id=, ?request_id=, ?asset_id=, or ?dataset_id=&resource_id=');
                 return;
             }}
 
+            const platformCard = document.getElementById('platform-status-card');
             const jobSummaryCard = document.getElementById('job-summary-card');
             const workflowDiagram = document.getElementById('workflow-diagram');
             const tasksContainer = document.getElementById('tasks-container');
             const emptyState = document.getElementById('empty-state');
             const errorState = document.getElementById('error-state');
-            const spinner = document.getElementById('loading-spinner');
 
             // Show loading
             jobSummaryCard.innerHTML = '<div class="spinner"></div>';
@@ -3018,7 +3161,51 @@ class TasksInterface(BaseInterface):
             errorState.classList.add('hidden');
 
             try {{
-                // Fetch job + tasks in parallel
+                // Step 1: Resolve via platform/status
+                let statusUrl;
+                if (DATASET_ID && RESOURCE_ID) {{
+                    statusUrl = `${{API_BASE_URL}}/api/platform/status?dataset_id=${{DATASET_ID}}&resource_id=${{RESOURCE_ID}}&detail=full`;
+                }} else if (LOOKUP_ID) {{
+                    statusUrl = `${{API_BASE_URL}}/api/platform/status/${{LOOKUP_ID}}?detail=full`;
+                }}
+
+                if (statusUrl) {{
+                    try {{
+                        const statusResponse = await fetchJSON(statusUrl);
+                        platformData = statusResponse;
+
+                        // Extract job_id from detail block
+                        if (statusResponse.detail?.job_id) {{
+                            JOB_ID = statusResponse.detail.job_id;
+                        }}
+
+                        // Update header subtitle with platform context
+                        const subtitle = document.getElementById('header-subtitle');
+                        if (statusResponse.asset) {{
+                            const a = statusResponse.asset;
+                            subtitle.innerHTML = `<span style="font-family: 'Courier New', monospace; font-size: 13px; color: #0071BC;">${{a.dataset_id}} / ${{a.resource_id}}</span> <span style="color: #666; font-size: 12px;">(${{a.data_type}})</span>`;
+                        }}
+
+                        // Render platform summary
+                        renderPlatformSummary(statusResponse);
+                    }} catch (e) {{
+                        console.warn('Platform status lookup failed, using direct job_id:', e.message);
+                        // Fall back to direct job_id usage
+                    }}
+                }}
+
+                if (!JOB_ID) {{
+                    showError('Could not resolve job ID from the provided identifier');
+                    return;
+                }}
+
+                // Update display (skip if platform subtitle already replaced the content)
+                const jobIdEl = document.getElementById('job-id-display');
+                if (jobIdEl) {{
+                    jobIdEl.textContent = JOB_ID.substring(0, 16) + '...';
+                }}
+
+                // Step 2: Fetch job + tasks using resolved job_id
                 const [jobResponse, tasksData] = await Promise.all([
                     fetchJSON(`${{API_BASE_URL}}/api/dbadmin/jobs/${{JOB_ID}}`),
                     fetchJSON(`${{API_BASE_URL}}/api/dbadmin/tasks/${{JOB_ID}}`)
@@ -3050,6 +3237,110 @@ class TasksInterface(BaseInterface):
                 console.error('Error loading data:', error);
                 showError(error.message || 'Failed to load data');
             }}
+        }}
+
+        // Render platform status summary card
+        function renderPlatformSummary(data) {{
+            const card = document.getElementById('platform-status-card');
+            if (!data || !data.asset) {{
+                card.classList.add('hidden');
+                return;
+            }}
+
+            const asset = data.asset || {{}};
+            const release = data.release || {{}};
+            const outputs = data.outputs || {{}};
+            const services = data.services || {{}};
+            const approval = data.approval || {{}};
+            const versions = data.versions || [];
+
+            // Processing status badge
+            const procStatus = release.processing_status || data.job_status || 'unknown';
+            const procClass = 'status-' + procStatus;
+
+            // Approval state badge
+            const approvalState = release.approval_state || '';
+            const approvalClass = approvalState === 'approved' ? 'status-completed' :
+                                  approvalState === 'pending_review' ? 'status-pending' :
+                                  approvalState === 'rejected' ? 'status-failed' :
+                                  approvalState === 'revoked' ? 'status-failed' : '';
+
+            // Build output items
+            let outputsHtml = '';
+            if (outputs.stac_item_id) {{
+                outputsHtml += `<div class="ps-output-item"><span class="ps-label">STAC Item</span><span class="ps-value mono">${{outputs.stac_item_id}}</span></div>`;
+            }}
+            if (outputs.stac_collection_id) {{
+                outputsHtml += `<div class="ps-output-item"><span class="ps-label">STAC Collection</span><span class="ps-value mono">${{outputs.stac_collection_id}}</span></div>`;
+            }}
+            if (outputs.blob_path) {{
+                outputsHtml += `<div class="ps-output-item"><span class="ps-label">Blob</span><span class="ps-value mono">${{outputs.container}}/${{outputs.blob_path}}</span></div>`;
+            }}
+            if (outputs.table_name) {{
+                outputsHtml += `<div class="ps-output-item"><span class="ps-label">Table</span><span class="ps-value mono">${{outputs.schema}}.${{outputs.table_name}}</span></div>`;
+            }}
+
+            // Build service links
+            let servicesHtml = '';
+            const serviceEntries = Object.entries(services);
+            if (serviceEntries.length > 0) {{
+                servicesHtml = '<div class="ps-services">';
+                for (const [key, url] of serviceEntries) {{
+                    const label = key.replace(/_/g, ' ');
+                    servicesHtml += `<a href="${{url}}" target="_blank" class="ps-service-link">${{label}}</a>`;
+                }}
+                servicesHtml += '</div>';
+            }}
+
+            // Build approval action
+            let approvalHtml = '';
+            if (approval.viewer_url) {{
+                approvalHtml = `<div class="ps-approval"><a href="${{approval.viewer_url}}" class="ps-viewer-link">Open Viewer</a></div>`;
+            }}
+
+            // Version list
+            let versionsHtml = '';
+            if (versions.length > 1) {{
+                versionsHtml = '<div class="ps-versions">';
+                for (const v of versions.slice(0, 5)) {{
+                    const vLabel = v.version_id || `ord${{v.version_ordinal}}`;
+                    const vState = v.approval_state || '';
+                    const vClass = vState === 'approved' ? 'status-completed' : vState === 'pending_review' ? 'status-pending' : '';
+                    versionsHtml += `<span class="ps-version-tag ${{vClass}}">${{vLabel}}</span>`;
+                }}
+                if (versions.length > 5) versionsHtml += `<span class="ps-version-tag">+${{versions.length - 5}} more</span>`;
+                versionsHtml += '</div>';
+            }}
+
+            card.innerHTML = `
+                <div class="ps-grid">
+                    <div class="ps-section">
+                        <div class="ps-section-header">Asset</div>
+                        <div class="ps-row"><span class="ps-label">Dataset</span><span class="ps-value mono">${{asset.dataset_id}}</span></div>
+                        <div class="ps-row"><span class="ps-label">Resource</span><span class="ps-value mono">${{asset.resource_id}}</span></div>
+                        <div class="ps-row"><span class="ps-label">Type</span><span class="ps-value">${{asset.data_type}}</span></div>
+                        <div class="ps-row"><span class="ps-label">Releases</span><span class="ps-value">${{asset.release_count || versions.length}}</span></div>
+                    </div>
+                    <div class="ps-section">
+                        <div class="ps-section-header">Release</div>
+                        <div class="ps-row"><span class="ps-label">Version</span><span class="ps-value">${{release.version_id || 'draft'}} <span style="color:#999;">(ord ${{release.version_ordinal || '?'}})</span></span></div>
+                        <div class="ps-row"><span class="ps-label">Processing</span><span class="status-badge ${{procClass}}">${{procStatus}}</span></div>
+                        ${{approvalState ? `<div class="ps-row"><span class="ps-label">Approval</span><span class="status-badge ${{approvalClass}}">${{approvalState.replace('_', ' ')}}</span></div>` : ''}}
+                        ${{versionsHtml}}
+                    </div>
+                    <div class="ps-section">
+                        <div class="ps-section-header">Outputs</div>
+                        ${{outputsHtml || '<div class="ps-row"><span class="ps-label" style="color:#999;">Processing...</span></div>'}}
+                    </div>
+                    <div class="ps-section">
+                        <div class="ps-section-header">Services</div>
+                        ${{servicesHtml || '<div class="ps-row"><span class="ps-label" style="color:#999;">Not available yet</span></div>'}}
+                        ${{approvalHtml}}
+                    </div>
+                </div>
+            `;
+
+            card.classList.remove('hidden');
         }}
 
         // Helper: Get Stage 1 metadata from completed task or job result
@@ -4773,7 +5064,7 @@ class TasksInterface(BaseInterface):
                 // Redirect to new job after delay
                 const newJobId = data.new_job_id || data.original_job_id;
                 setTimeout(() => {{
-                    window.location.href = `/api/interface/tasks?job_id=${{newJobId}}`;
+                    window.location.href = `/api/interface/status?job_id=${{newJobId}}`;
                 }}, 1500);
 
             }} catch (err) {{

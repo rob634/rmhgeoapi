@@ -1397,6 +1397,107 @@ def validate_csv_geometry_params(params: Dict[str, Any], config: Dict[str, Any])
     return ValidatorResult(valid=False, message=error_msg)
 
 
+@register_validator("bare_shp_rejection")
+def validate_bare_shp_rejection(params: Dict[str, Any], config: Dict[str, Any]) -> ValidatorResult:
+    """
+    Reject bare .shp files — shapefiles must be submitted as ZIP archives.
+
+    Shapefiles consist of multiple component files (.shp, .shx, .dbf, .prj).
+    Submitting a bare .shp without companions will always fail at processing.
+    Users must ZIP all components together.
+
+    Config options:
+        file_extension_param: str - Parameter name for file extension
+        blob_param: str - Parameter name for blob path
+        error: str - Custom error message
+    """
+    file_ext_param = config.get('file_extension_param', 'file_extension')
+    blob_param = config.get('blob_param', 'blob_name')
+
+    file_extension = (params.get(file_ext_param) or '').lower()
+    blob_name = params.get(blob_param) or ''
+
+    # Only trigger for shp extension with a bare .shp blob
+    if file_extension == 'shp' and blob_name.lower().endswith('.shp'):
+        error_msg = config.get('error') or (
+            "Shapefiles must be submitted as a ZIP archive containing all required "
+            "component files (.shp, .shx, .dbf, and .prj). Upload a .zip file "
+            "containing your shapefile components, then select file_extension='zip'."
+        )
+        logger.warning(f"❌ bare_shp_rejection: {error_msg}")
+        return ValidatorResult(valid=False, message=error_msg)
+
+    return ValidatorResult(valid=True, message=None)
+
+
+@register_validator("table_name_syntax")
+def validate_table_name_syntax(params: Dict[str, Any], config: Dict[str, Any]) -> ValidatorResult:
+    """
+    Validate PostGIS table name syntax before job creation.
+
+    Rules:
+        - Lowercase letters, numbers, underscores only
+        - Cannot start with a digit
+        - Max 63 characters (PostgreSQL NAMEDATALEN)
+        - Cannot be a SQL reserved word
+
+    Config options:
+        table_param: str - Parameter name for table name (default: 'table_name')
+        error: str - Custom error message prefix
+    """
+    import re
+
+    table_param = config.get('table_param', 'table_name')
+    table_name = params.get(table_param)
+
+    if not table_name:
+        # Other validators handle required field checks
+        return ValidatorResult(valid=True, message=None)
+
+    # Lowercase for validation
+    name = table_name.lower()
+
+    # Check pattern: lowercase alphanumeric + underscore, starts with letter/underscore
+    if not re.match(r'^[a-z_][a-z0-9_]*$', name):
+        if name[0].isdigit():
+            reason = "starts with a digit"
+        else:
+            reason = "contains invalid characters (only a-z, 0-9, underscore allowed)"
+        return ValidatorResult(
+            valid=False,
+            message=(
+                f"Table name '{table_name}' is invalid for PostGIS: {reason}. "
+                f"Rules: lowercase letters, numbers, underscores only. Cannot start "
+                f"with a number. Max 63 characters. Cannot be a SQL reserved word."
+            )
+        )
+
+    # Check length
+    if len(name) > 63:
+        return ValidatorResult(
+            valid=False,
+            message=(
+                f"Table name '{table_name}' is invalid for PostGIS: exceeds 63 "
+                f"character limit ({len(name)} chars). PostgreSQL identifiers are "
+                f"limited to 63 characters (NAMEDATALEN)."
+            )
+        )
+
+    # Check reserved words (reuse from column_sanitizer)
+    from services.vector.column_sanitizer import PG_RESERVED_WORDS
+    if name in PG_RESERVED_WORDS:
+        return ValidatorResult(
+            valid=False,
+            message=(
+                f"Table name '{table_name}' is invalid for PostGIS: '{name}' is a "
+                f"PostgreSQL reserved word. Choose a different name (e.g., "
+                f"'{name}_data' or '{name}_layer')."
+            )
+        )
+
+    return ValidatorResult(valid=True, message=None)
+
+
 # ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================

@@ -873,7 +873,7 @@ class PipelineInterface(BaseInterface):
                     </td>
                     <td>${createdAt}</td>
                     <td>
-                        <a href="/api/interface/tasks?job_id=${jobId}" class="btn btn-sm btn-primary">View Tasks</a>
+                        <a href="/api/interface/status?job_id=${jobId}" class="btn btn-sm btn-primary">View Status</a>
                     </td>
                 `;
 

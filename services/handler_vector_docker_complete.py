@@ -434,6 +434,8 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
 
     except Exception as e:
         elapsed = time.time() - start_time
+        # Extract the raw diagnostic (the ValueError message itself)
+        raw_detail = str(e)
         error_msg = f"Vector Docker ETL failed: {type(e).__name__}: {e}"
         logger.error(f"[{job_id[:8]}] {error_msg}\n{traceback.format_exc()}")
 
@@ -480,6 +482,7 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
             "error_category": response.error_category,
             "error_scope": response.error_scope,
             "message": response.message,
+            "detail": raw_detail,  # Raw diagnostic from ValueError
             "remediation": response.remediation,
             "user_fixable": response.user_fixable,
             "retryable": response.retryable,
@@ -1011,6 +1014,14 @@ def _map_exception_to_error_code(e: Exception) -> 'ErrorCode':
     error_str = str(e).lower()
     error_type = type(e).__name__
 
+    # Format mismatch (file content doesn't match declared type)
+    if 'not valid json' in error_str or 'not valid geojson' in error_str:
+        return ErrorCode.VECTOR_FORMAT_MISMATCH
+    if 'not valid xml' in error_str or 'not a kml document' in error_str:
+        return ErrorCode.VECTOR_FORMAT_MISMATCH
+    if 'missing required component' in error_str:
+        return ErrorCode.VECTOR_UNREADABLE
+
     # File/parsing errors
     if 'unable to open' in error_str or 'no such file' in error_str:
         return ErrorCode.FILE_NOT_FOUND
@@ -1018,6 +1029,10 @@ def _map_exception_to_error_code(e: Exception) -> 'ErrorCode':
         return ErrorCode.VECTOR_UNREADABLE
     if 'encoding' in error_str or 'codec' in error_str or 'utf' in error_str:
         return ErrorCode.VECTOR_ENCODING_ERROR
+
+    # Mixed geometry types
+    if 'mixed geometry types' in error_str:
+        return ErrorCode.VECTOR_MIXED_GEOMETRY
 
     # Geometry errors
     if 'geometry' in error_str and 'invalid' in error_str:
@@ -1085,6 +1100,19 @@ def _get_vector_remediation(error_code: 'ErrorCode', e: Exception) -> str:
         ErrorCode.VECTOR_ENCODING_ERROR: (
             "Your file contains invalid characters. Re-export the file using UTF-8 encoding. "
             "Most GIS software has an option to specify encoding during export."
+        ),
+        ErrorCode.VECTOR_FORMAT_MISMATCH: (
+            "The file content does not match the declared format. Verify the file "
+            "extension matches the actual data. For example, ensure .geojson files "
+            "contain valid GeoJSON (RFC 7946) and .kml files contain valid KML/XML. "
+            "See the 'detail' field for the specific parsing error."
+        ),
+        ErrorCode.VECTOR_MIXED_GEOMETRY: (
+            "Your file contains multiple geometry types (e.g., points and polygons) "
+            "that cannot coexist in a single PostGIS table. Split your file by "
+            "geometry type using QGIS (Vector > Geometry Tools > Explode) or ogr2ogr "
+            "with a WHERE clause on geometry type, then submit each file separately. "
+            "See the 'detail' field for the geometry type breakdown."
         ),
         ErrorCode.VECTOR_GEOMETRY_INVALID: (
             "Some geometries in your file are invalid (self-intersecting, unclosed rings, etc.). "

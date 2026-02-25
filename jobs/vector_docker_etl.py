@@ -276,6 +276,15 @@ class VectorDockerETLJob(JobBaseMixin, JobBase):
     # Pre-flight resource validation
     resource_validators = [
         {
+            'type': 'bare_shp_rejection',
+            'blob_param': 'blob_name',
+            'file_extension_param': 'file_extension',
+        },
+        {
+            'type': 'table_name_syntax',
+            'table_param': 'table_name',
+        },
+        {
             'type': 'blob_exists',
             'container_param': 'container_name',
             'blob_param': 'blob_name',

@@ -2064,7 +2064,7 @@ class BaseInterface(ABC):
         # Skip navbar in embed mode (for iframe integration) - 02 FEB 2026
         show_navbar = include_navbar and not self.embed_mode
         navbar_html = self._render_navbar() if show_navbar else ""
-        htmx_script = f'<script src="https://unpkg.com/htmx.org@{self.HTMX_VERSION}" integrity="sha384-YwQSRkoBOUtKKVfHQ8C2zCPslUZHuxiPHts6X/xQCuGHipTtRXd7ImqS1VTLlpiT" crossorigin="anonymous"></script>' if include_htmx else ""
+        htmx_script = f'<script src="https://unpkg.com/htmx.org@{self.HTMX_VERSION}/dist/htmx.min.js" integrity="sha384-D1Kt99CQMDuVetoL1lrYwg5t+9QdHe7NLX/SoJYkXDFfX37iInKRy5xLSi8nO7UC" crossorigin="anonymous"></script>' if include_htmx else ""
         status_bar_html = self.render_system_status_bar() if include_status_bar else ""
 
         # Inject orchestrator URL for cross-app API calls (06 FEB 2026)

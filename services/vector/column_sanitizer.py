@@ -61,7 +61,7 @@ PG_RESERVED_WORDS = frozenset({
     # PostgreSQL-specific reserved words common in geodata
     'access', 'action', 'add', 'alter', 'begin', 'comment', 'commit',
     'date', 'drop', 'key', 'level', 'name', 'position', 'range',
-    'result', 'role', 'row', 'rows', 'rule', 'some', 'time',
+    'result', 'role', 'row', 'rows', 'rule', 'some', 'time', 'timestamp',
     'type', 'user', 'value', 'zone',
     # Common abbreviations that clash
     'abort', 'analyse', 'analyze',

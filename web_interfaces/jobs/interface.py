@@ -151,7 +151,7 @@ class JobsInterface(BaseInterface):
                     <td>{task_counts_html}</td>
                     <td>{created_str}</td>
                     <td>
-                        <a href="/api/interface/tasks?job_id={job_id}" class="btn btn-sm btn-primary">View Tasks</a>
+                        <a href="/api/interface/status?job_id={job_id}" class="btn btn-sm btn-primary">View Status</a>
                     </td>
                 </tr>'''
                 rows.append(row)

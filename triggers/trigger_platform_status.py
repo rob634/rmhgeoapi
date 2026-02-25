@@ -672,6 +672,36 @@ def _build_single_status_response(
     # Job status (single field)
     result["job_status"] = job_status
 
+    # Error block (25 FEB 2026): Surface structured error info when job failed.
+    # The handler response in job_result already contains error_code, error_category,
+    # remediation, user_fixable, detail — just not exposed in the default response.
+    if job_status == "failed" and job_result and isinstance(job_result, dict):
+        error_block = {}
+        if job_result.get("error_code"):
+            error_block["code"] = job_result["error_code"]
+        if job_result.get("error_category"):
+            error_block["category"] = job_result["error_category"]
+        if job_result.get("message"):
+            error_block["message"] = job_result["message"]
+        if job_result.get("remediation"):
+            error_block["remediation"] = job_result["remediation"]
+        if "user_fixable" in job_result:
+            error_block["user_fixable"] = job_result["user_fixable"]
+        if job_result.get("detail"):
+            error_block["detail"] = job_result["detail"]
+        # Fallback: if handler didn't use structured errors (e.g., raster),
+        # pull what we can from the flat response
+        if not error_block and job_result.get("error"):
+            error_block["code"] = job_result.get("error")
+            error_block["message"] = job_result.get("message") or job_result.get("error")
+        # Also fallback to job-level error_details string
+        if not error_block and job and job.error_details:
+            error_block["message"] = job.error_details
+
+        result["error"] = error_block if error_block else None
+    else:
+        result["error"] = None
+
     # Outputs (from Release record, not job_result)
     result["outputs"] = _build_outputs_block(release, job_result)
 

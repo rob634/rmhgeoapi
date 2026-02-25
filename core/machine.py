@@ -861,7 +861,7 @@ class CoreMachine:
                 primary_error = RuntimeError(error_msg)
                 try:
                     self.state_manager.mark_task_failed(task_message.task_id, error_msg)
-                    self.state_manager.mark_job_failed(
+                    self._mark_job_failed(
                         task_message.parent_job_id,
                         f"Task {task_message.task_id} failed to enter PROCESSING state: {error_msg}"
                     )
@@ -896,7 +896,7 @@ class CoreMachine:
             primary_error = RuntimeError(error_msg)
             try:
                 self.state_manager.mark_task_failed(task_message.task_id, error_msg)
-                self.state_manager.mark_job_failed(
+                self._mark_job_failed(
                     task_message.parent_job_id,
                     f"Task {task_message.task_id} status update exception: {e}"
                 )
@@ -1189,7 +1189,7 @@ class CoreMachine:
                         )
 
                         try:
-                            self.state_manager.mark_job_failed(
+                            self._mark_job_failed(
                                 task_message.parent_job_id,
                                 error_msg
                             )
@@ -1249,7 +1249,7 @@ class CoreMachine:
                 # Try to mark task and job as failed
                 try:
                     self.state_manager.mark_task_failed(task_message.task_id, str(e))
-                    self.state_manager.mark_job_failed(
+                    self._mark_job_failed(
                         task_message.parent_job_id,
                         f"Task {task_message.task_id} completion SQL failed: {e}"
                     )
@@ -1292,9 +1292,10 @@ class CoreMachine:
                         task_message.task_id,
                         f"Permanent failure ({error_type}): {result.error_details}"
                     )
-                    self.state_manager.mark_job_failed(
+                    self._mark_job_failed(
                         task_message.parent_job_id,
-                        f"Task {task_message.task_id[:16]}... failed permanently: {result.error_details}"
+                        f"Task {task_message.task_id[:16]}... failed permanently: {result.error_details}",
+                        result_data=result.result_data
                     )
                     self.logger.info(
                         f"✅ Task and job marked as FAILED (permanent error)",
@@ -1378,7 +1379,7 @@ class CoreMachine:
                 )
                 # Mark job as failed since we can't process this task
                 try:
-                    self.state_manager.mark_job_failed(
+                    self._mark_job_failed(
                         task_message.parent_job_id,
                         f"Task {task_message.task_id[:16]}... not found in database during retry logic"
                     )
@@ -1522,9 +1523,10 @@ class CoreMachine:
                         f"Job failed due to task {task_message.task_id} exceeding max retries "
                         f"({config.task_max_retries}). Task error: {result.error_details}"
                     )
-                    self.state_manager.mark_job_failed(
+                    self._mark_job_failed(
                         task_message.parent_job_id,
-                        job_error_msg
+                        job_error_msg,
+                        result_data=result.result_data
                     )
                     self.logger.error(
                         f"❌ Job {task_message.parent_job_id[:16]} marked as FAILED "
@@ -2167,62 +2169,76 @@ class CoreMachine:
             )
             raise  # Must re-raise to fail the message
 
-    def _mark_job_failed(self, job_id: str, error_message: str):
-        """Mark job as failed."""
+    def _mark_job_failed(self, job_id: str, error_message: str, result_data: dict = None, job_type: str = None):
+        """
+        Mark job as failed — THE SINGLE PATH for failing jobs from CoreMachine.
+
+        25 FEB 2026: Consolidated to ensure platform callback is ALWAYS invoked
+        when a job fails. Previously, task-execution failures used
+        state_manager.mark_job_failed() directly, which bypassed the callback
+        and left release.processing_status stuck at 'processing'.
+
+        DB update exceptions propagate to callers. Event recording and
+        callback invocation are non-fatal.
+
+        Args:
+            job_id: Job identifier
+            error_message: Error description
+            result_data: Optional structured error response from handler
+            job_type: Optional job type for callback context
+        """
+        self.logger.info(f"🚫 Marking job {job_id[:16]}... as FAILED")
+
+        # DB update — let exceptions propagate (25 FEB 2026)
+        self.state_manager.mark_job_failed(
+            job_id,
+            error_message[:2000] if error_message else 'Unknown error',
+            result_data=result_data
+        )
+        self.logger.info(f"✅ Job marked as FAILED: {error_message}")
+
+        # Record JOB_FAILED event (23 JAN 2026 - Job Event Tracking) — non-fatal
         try:
-            self.logger.info(f"🚫 Marking job {job_id[:16]}... as FAILED")
-            self.state_manager.update_job_status(
-                job_id, JobStatus.FAILED,
-                error_details=error_message[:2000] if error_message else None
+            self.event_repo.record_job_event(
+                job_id=job_id,
+                event_type=JobEventType.JOB_FAILED,
+                event_status=JobEventStatus.FAILURE,
+                error_message=error_message[:1000] if error_message else None
             )
-            self.logger.info(f"✅ Job marked as FAILED: {error_message}")
+        except Exception as event_err:
+            self.logger.warning(f"⚠️ Failed to record JOB_FAILED event: {event_err}")
 
-            # Record JOB_FAILED event (23 JAN 2026 - Job Event Tracking)
+        # Invoke platform callback — non-fatal (updates release.processing_status)
+        if self.on_job_complete:
             try:
-                self.event_repo.record_job_event(
+                callback_result = {'error': error_message}
+                if result_data:
+                    callback_result.update(result_data)
+                self.logger.debug(f"Invoking job failure callback for {job_id[:16]}...")
+                self.on_job_complete(
                     job_id=job_id,
-                    event_type=JobEventType.JOB_FAILED,
-                    event_status=JobEventStatus.FAILURE,
-                    error_message=error_message[:1000] if error_message else None
+                    job_type=job_type or 'unknown',
+                    status='failed',
+                    result=callback_result
                 )
-            except Exception as event_err:
-                self.logger.warning(f"⚠️ Failed to record JOB_FAILED event: {event_err}")
-
-            # Invoke completion callback for failures (Platform integration - 30 OCT 2025)
-            if self.on_job_complete:
-                try:
-                    self.logger.debug(f"Invoking job failure callback for {job_id[:16]}...")
-                    self.on_job_complete(
-                        job_id=job_id,
-                        job_type='unknown',  # job_type not available in this context
-                        status='failed',
-                        result={'error': error_message}
-                    )
-                    # GAP-7 FIX (23 JAN 2026): Add checkpoint for failure callback success
-                    self.logger.info(
-                        f"✅ Job failure callback completed",
-                        extra={
-                            'checkpoint': 'JOB_FAILED_CALLBACK_SUCCESS',
-                            'job_id': job_id,
-                            'callback_status': 'success'
-                        }
-                    )
-                except Exception as e:
-                    # GAP-7 FIX (23 JAN 2026): Add checkpoint for callback failure
-                    # Callback failure should not affect failure handling
-                    self.logger.warning(
-                        f"⚠️ Job failure callback failed (non-fatal): {e}",
-                        extra={
-                            'checkpoint': 'JOB_FAILED_CALLBACK_FAILED',
-                            'job_id': job_id,
-                            'callback_status': 'failed',
-                            'callback_error': str(e)
-                        }
-                    )
-
-        except Exception as e:
-            self.logger.error(f"❌ Failed to mark job as FAILED: {e}")
-            # Best effort - don't raise
+                self.logger.info(
+                    f"✅ Job failure callback completed",
+                    extra={
+                        'checkpoint': 'JOB_FAILED_CALLBACK_SUCCESS',
+                        'job_id': job_id,
+                        'callback_status': 'success'
+                    }
+                )
+            except Exception as e:
+                self.logger.warning(
+                    f"⚠️ Job failure callback failed (non-fatal): {e}",
+                    extra={
+                        'checkpoint': 'JOB_FAILED_CALLBACK_FAILED',
+                        'job_id': job_id,
+                        'callback_status': 'failed',
+                        'callback_error': str(e)
+                    }
+                )
 
     def _get_completed_stage_results(self, job_id: str, stage: int) -> list[dict]:
         """

@@ -232,7 +232,7 @@ def _default_platform_callback(job_id: str, job_type: str, status: str, result: 
             release_repo.update_processing_status(
                 release.release_id,
                 status=new_status,
-                completed_at=datetime.now(timezone.utc) if status == 'completed' else None,
+                completed_at=datetime.now(timezone.utc),  # 25 FEB 2026: Set for both success AND failure
                 error=str(error_message)[:500] if error_message else None
             )
 

@@ -290,21 +290,27 @@ class JobRepository(PostgreSQLJobRepository):
             {'result_data': result_data}
         )
     
-    def fail_job(self, job_id: str, error_details: str) -> bool:
+    def fail_job(self, job_id: str, error_details: str, result_data: dict = None) -> bool:
         """
         Mark job as failed with error details.
 
         Args:
             job_id: Job ID to fail
             error_details: Error description
+            result_data: Optional structured error response from handler
+                         (25 FEB 2026: enables platform status to surface
+                         error_code, remediation, user_fixable, etc.)
 
         Returns:
             True if failed successfully
         """
+        additional = {'error_details': error_details}
+        if result_data:
+            additional['result_data'] = result_data
         return self.update_job_status_with_validation(
             job_id,
             JobStatus.FAILED,
-            {'error_details': error_details}
+            additional
         )
 
     def set_asset_id(self, job_id: str, asset_id: str) -> bool:

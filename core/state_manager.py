@@ -777,74 +777,60 @@ class StateManager:
     def mark_job_failed(
         self,
         job_id: str,
-        error_msg: str
-    ) -> bool:
+        error_msg: str,
+        result_data: dict = None
+    ) -> None:
         """
         Mark job as failed with error details.
 
-        Safe method that won't raise exceptions.
+        25 FEB 2026: No longer swallows exceptions. If the job can't be marked
+        failed, callers MUST know — silent failure creates orphaned jobs.
 
         Args:
             job_id: Job identifier
             error_msg: Error message
+            result_data: Optional structured error response from handler
 
-        Returns:
-            True if marked successfully
+        Raises:
+            Exception: If database update fails (propagated to caller)
         """
-        try:
-
-            self.repos['job_repo'].fail_job(job_id, error_msg)
-            self.logger.info(f"Job {job_id[:16]}... marked as FAILED")
-            return True
-
-        except Exception as e:
-            self.logger.error(
-                f"Failed to mark job as failed: {e}",
-                extra={
-                    'checkpoint': 'STATE_MARK_JOB_FAILED_ERROR',
-                    'error_source': 'state',  # 29 NOV 2025: For Application Insights filtering
-                    'job_id': job_id,
-                    'error_type': type(e).__name__,
-                    'error_message': str(e)
-                }
-            )
-            return False
+        self.repos['job_repo'].fail_job(job_id, error_msg, result_data=result_data)
+        self.logger.info(
+            f"Job {job_id[:16]}... marked as FAILED",
+            extra={
+                'checkpoint': 'JOB_MARKED_FAILED',
+                'error_source': 'state',
+                'job_id': job_id
+            }
+        )
 
     def mark_task_failed(
         self,
         task_id: str,
         error_msg: str
-    ) -> bool:
+    ) -> None:
         """
         Mark task as failed with error details.
 
-        Safe method that won't raise exceptions.
+        25 FEB 2026: No longer swallows exceptions. If the task can't be marked
+        failed, callers MUST know — silent failure creates orphaned tasks.
 
         Args:
             task_id: Task identifier
             error_msg: Error message
 
-        Returns:
-            True if marked successfully
+        Raises:
+            Exception: If database update fails (propagated to caller)
         """
-        try:
-
-            self.repos['task_repo'].mark_task_failed(task_id, error_msg)
-            self.logger.info(f"Task {task_id} marked as FAILED")
-            return True
-
-        except Exception as e:
-            self.logger.error(
-                f"Failed to mark task as failed: {e}",
-                extra={
-                    'checkpoint': 'STATE_MARK_TASK_FAILED_ERROR',
-                    'error_source': 'state',  # 29 NOV 2025: For Application Insights filtering
-                    'task_id': task_id,
-                    'error_type': type(e).__name__,
-                    'error_message': str(e)
-                }
-            )
-            return False
+        self.repos['task_repo'].mark_task_failed(task_id, error_msg)
+        self.logger.info(
+            f"Task {task_id} marked as FAILED",
+            extra={
+                'checkpoint': 'TASK_MARKED_FAILED',
+                'error_source': 'state',
+                'task_id': task_id
+            }
+        )
 
     def fail_all_job_tasks(
         self,

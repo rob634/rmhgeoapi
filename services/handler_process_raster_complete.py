@@ -1844,6 +1844,7 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                     "error": "CHECKPOINT_MISSING_DATA",
                     "message": "Checkpoint missing source_crs from phase 1",
                     "phase": "resume_validation",
+                    "retryable": False,
                 }
         else:
             logger.info("🔄 PHASE 1: Validating raster...")
@@ -1874,6 +1875,7 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                     "message": validation_response.get('message', 'Validation failed'),
                     "phase": "validation",
                     "validation": validation_response,
+                    "retryable": False,
                 }
 
             validation_result = validation_response.get('result', {})
@@ -1887,6 +1889,7 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                     "message": "Validation did not return source CRS",
                     "phase": "validation",
                     "validation": validation_result,
+                    "retryable": False,
                 }
 
             phase1_duration = time.time() - phase1_start
@@ -1951,6 +1954,7 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                     "error": "CHECKPOINT_MISSING_DATA",
                     "message": "Checkpoint missing cog_blob from phase 2",
                     "phase": "resume_cog",
+                    "retryable": False,
                 }
         else:
             logger.info("🔄 PHASE 2: Creating COG...")

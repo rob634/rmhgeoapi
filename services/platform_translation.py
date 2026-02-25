@@ -306,6 +306,13 @@ def translate_to_coremachine(
 
         # Check if this is a raster collection (multiple files)
         if request.is_raster_collection:
+            # DISABLED (25 FEB 2026): Raster collections not yet production-ready.
+            # Only individual raster and vector submissions are supported.
+            raise ValueError(
+                "Raster collection submission is not yet implemented. "
+                "Please submit individual raster files (.tif) one at a time. "
+                "Multi-file raster collection support is under development."
+            )
             # Multiple rasters → process_raster_collection_docker (V0.8 - 30 JAN 2026)
             # Sequential checkpoint-based processing on Docker worker
             logger.info(f"  Raster collection: {len(request.file_name)} files → process_raster_collection_docker")

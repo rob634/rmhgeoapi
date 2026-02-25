@@ -1662,7 +1662,7 @@ class VectorToPostGISHandler:
                     ),
                     (batch_id,)
                 )
-                rows_inserted = cur.fetchone()[0]
+                rows_inserted = cur.fetchone()['count']
 
                 if rows_inserted != len(all_values):
                     logger.warning(

@@ -123,6 +123,7 @@ class ErrorCode(str, Enum):
     VECTOR_ENCODING_ERROR = "VECTOR_ENCODING_ERROR"  # Character encoding issue
     VECTOR_ATTRIBUTE_ERROR = "VECTOR_ATTRIBUTE_ERROR"  # Column type issue
     VECTOR_TABLE_NAME_INVALID = "VECTOR_TABLE_NAME_INVALID"  # Bad table name
+    TABLE_EXISTS = "TABLE_EXISTS"  # Table already exists (overwrite=false)
 
     # ========================================================================
     # COLLECTION-SPECIFIC ERRORS (Phase 2 - 06 FEB 2026)
@@ -369,6 +370,7 @@ _ERROR_CLASSIFICATION: Dict[ErrorCode, ErrorClassification] = {
     ErrorCode.VECTOR_ENCODING_ERROR: ErrorClassification.PERMANENT,
     ErrorCode.VECTOR_ATTRIBUTE_ERROR: ErrorClassification.PERMANENT,
     ErrorCode.VECTOR_TABLE_NAME_INVALID: ErrorClassification.PERMANENT,
+    ErrorCode.TABLE_EXISTS: ErrorClassification.PERMANENT,
 
     # Collection-specific (PERMANENT - user must fix collection)
     ErrorCode.COLLECTION_BAND_MISMATCH: ErrorClassification.PERMANENT,

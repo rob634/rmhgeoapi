@@ -356,7 +356,7 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
                             table=psql.Identifier(table_name)
                         )
                     )
-                    db_total = cur.fetchone()[0]
+                    db_total = cur.fetchone()['count']
 
             if db_total != total_rows:
                 logger.warning(
@@ -613,16 +613,10 @@ def _load_and_validate_source(
         gdf_cols_lower = {c.lower() for c in gdf.columns if c != 'geometry'}
         qgis_overlap = gdf_cols_lower & QGIS_SIGNATURE_COLUMNS
         if len(qgis_overlap) >= 2:
-            # Re-read available_layers if not already set (should be set from
-            # GPKG validation block above, but guard defensively)
+            # Reuse spatial_layers from GPKG validation block above (line ~552)
             spatial_hint = ""
             try:
-                import pyogrio
-                from infrastructure.blob import BlobRepository
-                blob_repo = BlobRepository.for_zone("bronze")
-                blob_url = blob_repo.get_blob_url_with_sas(container_name, blob_name)
-                layers = pyogrio.list_layers(blob_url)
-                spatial_names = [n for n, g in layers if g is not None
+                spatial_names = [n for n, g in spatial_layers if g is not None
                                  and n.lower() not in ('dashboard', 'chart', 'layer_styles')]
                 if spatial_names:
                     spatial_hint = f" Data layers in this file: {spatial_names}"
@@ -1030,7 +1024,7 @@ def _map_exception_to_error_code(e: Exception) -> 'ErrorCode':
         return ErrorCode.VECTOR_GEOMETRY_INVALID
     if 'geometry' in error_str and ('null' in error_str or 'empty' in error_str):
         return ErrorCode.VECTOR_GEOMETRY_EMPTY
-    if 'no features' in error_str or 'empty' in error_str and 'geodataframe' in error_str:
+    if 'no features' in error_str or ('empty' in error_str and 'geodataframe' in error_str) or 'contains 0 features' in error_str:
         return ErrorCode.VECTOR_NO_FEATURES
 
     # Coordinate/CRS errors
@@ -1042,7 +1036,9 @@ def _map_exception_to_error_code(e: Exception) -> 'ErrorCode':
     # Database errors
     if 'database' in error_str or 'postgres' in error_str or 'connection' in error_str:
         return ErrorCode.DATABASE_ERROR
-    if 'table' in error_str and ('exists' in error_str or 'invalid' in error_str):
+    if 'table' in error_str and 'already exists' in error_str:
+        return ErrorCode.TABLE_EXISTS
+    if 'table' in error_str and 'invalid' in error_str:
         return ErrorCode.VECTOR_TABLE_NAME_INVALID
 
     # Column/attribute errors
@@ -1114,6 +1110,10 @@ def _get_vector_remediation(error_code: 'ErrorCode', e: Exception) -> str:
         ErrorCode.VECTOR_TABLE_NAME_INVALID: (
             "The table name is invalid for PostGIS. Use lowercase letters, numbers, and underscores. "
             "Table names cannot start with a number and must not use reserved SQL keywords."
+        ),
+        ErrorCode.TABLE_EXISTS: (
+            "A table with this name already exists from a previous attempt. "
+            "Resubmit with processing_options.overwrite=true to replace it."
         ),
         ErrorCode.VECTOR_ATTRIBUTE_ERROR: (
             "Column data types could not be reconciled. Ensure each column has a consistent data type "

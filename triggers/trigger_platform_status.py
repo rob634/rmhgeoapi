@@ -1101,31 +1101,32 @@ async def platform_health(req: func.HttpRequest) -> func.HttpResponse:
             component_status["storage"] = "unavailable"
             status = "degraded"
 
-        # Check Service Bus (fixed 29 JAN 2026 - correct config path)
+        # Check Service Bus (fixed 24 FEB 2026 - field is 'namespace', not 'service_bus_fqdn')
         try:
-            if config.queues and config.queues.service_bus_fqdn:
+            if config.queues and (config.queues.namespace or config.queues.connection_string):
                 component_status["service_bus"] = "healthy"
             else:
                 component_status["service_bus"] = "not_configured"
+                status = "degraded"
         except Exception:
             component_status["service_bus"] = "unknown"
 
-        # Check Docker worker (added 29 JAN 2026)
+        # Check Docker worker (always deployed in 3-app architecture)
         try:
-            if app_mode_config.docker_worker_enabled and app_mode_config.docker_worker_url:
-                worker_url = app_mode_config.docker_worker_url.rstrip('/')
-                try:
-                    resp = requests.get(f"{worker_url}/health", timeout=10)
-                    if resp.status_code == 200:
-                        component_status["docker_worker"] = "healthy"
-                    else:
-                        component_status["docker_worker"] = "degraded"
-                        status = "degraded"
-                except requests.exceptions.RequestException:
-                    component_status["docker_worker"] = "unavailable"
+            worker_url = (
+                (app_mode_config.docker_worker_url or "").rstrip('/')
+                or "https://rmhheavyapi-ebdffqhkcsevg7f3.eastus-01.azurewebsites.net"
+            )
+            try:
+                resp = requests.get(f"{worker_url}/health", timeout=10)
+                if resp.status_code == 200:
+                    component_status["docker_worker"] = "healthy"
+                else:
+                    component_status["docker_worker"] = "degraded"
                     status = "degraded"
-            else:
-                component_status["docker_worker"] = "disabled"
+            except requests.exceptions.RequestException:
+                component_status["docker_worker"] = "unavailable"
+                status = "degraded"
         except Exception:
             component_status["docker_worker"] = "unknown"
 

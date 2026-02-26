@@ -395,17 +395,17 @@ class PlatformRequest(BaseModel):
         # Map extension to data type
         if ext in ['geojson', 'json', 'gpkg', 'shp', 'zip', 'csv', 'gdb', 'kml', 'kmz']:
             return DataType.VECTOR
-        elif ext in ['tif', 'tiff']:
+        elif ext in ['tif', 'tiff', 'geotiff']:
             return DataType.RASTER
         elif ext == 'nc':
             raise ValueError(
                 "NetCDF (.nc) support is under development. "
-                "Currently only GeoTIFF (.tif, .tiff) files are accepted."
+                "Currently only GeoTIFF (.tif, .tiff, .geotiff) files are accepted."
             )
-        elif ext in ['img', 'hdf', 'hdf5', 'jp2', 'ecw', 'vrt', 'geotiff']:
+        elif ext in ['img', 'hdf', 'hdf5', 'jp2', 'ecw', 'vrt']:
             raise ValueError(
                 f"Unsupported file format '.{ext}'. "
-                f"Only GeoTIFF (.tif, .tiff) files are accepted."
+                f"Only GeoTIFF (.tif, .tiff, .geotiff) files are accepted."
             )
         elif ext in ['las', 'laz', 'e57']:
             return DataType.POINTCLOUD

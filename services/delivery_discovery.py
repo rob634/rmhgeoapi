@@ -294,7 +294,7 @@ def analyze_delivery_structure(blob_list: List[str], folder_path: str = None) ->
     logger.info(f"🔍 Analyzing delivery structure: {len(blob_list)} files in {folder_path or 'unknown path'}")
 
     # Categorize files
-    raster_extensions = {'.tif', '.tiff', '.img', '.vrt'}
+    raster_extensions = {'.tif', '.tiff', '.geotiff', '.img', '.vrt'}
     metadata_extensions = {'.xml', '.json', '.txt', '.man', '.til'}
 
     raster_files = []

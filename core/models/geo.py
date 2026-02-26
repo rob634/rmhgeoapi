@@ -111,6 +111,7 @@ class GeoTableCatalog(BaseModel):
         {"columns": ["table_type"], "name": "idx_table_catalog_type"},
         {"columns": ["stac_collection_id"], "name": "idx_table_catalog_stac_coll", "partial_where": "stac_collection_id IS NOT NULL"},
         {"columns": ["created_at"], "name": "idx_table_catalog_created", "descending": True},
+        {"columns": ["table_group"], "name": "idx_table_catalog_group", "partial_where": "table_group IS NOT NULL"},
     ]
 
     # ==========================================================================
@@ -283,6 +284,15 @@ class GeoTableCatalog(BaseModel):
     column_definitions: Optional[Dict[str, Any]] = Field(
         default=None,
         description="Column metadata for STAC Table Extension"
+    )
+
+    # ==========================================================================
+    # MULTI-TABLE GROUPING (26 FEB 2026)
+    # ==========================================================================
+    table_group: Optional[str] = Field(
+        default=None,
+        max_length=63,
+        description="Groups related tables (geometry splits share same group). NULL for single-table uploads."
     )
 
     # ==========================================================================

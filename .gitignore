@@ -137,12 +137,11 @@ __azurite_db*__.json
 
 # Test files and directories
 test/
-tests/
 testing/
-*test*
-test*
-*Test*
-Test*
+# Exception: tests/ directory is the active test suite
+!tests/
+!tests/**
+!pytest.ini
 # Exception: Testing and QA documentation
 !docs_claude/V0.8_TESTING_PLAN.md
 !qa_test.md

@@ -91,6 +91,8 @@ if TYPE_CHECKING:
     # V0.9 Asset/Release entity split (21 FEB 2026)
     from .asset_repository import AssetRepository as _AssetRepository
     from .release_repository import ReleaseRepository as _ReleaseRepository
+    # Release→tables junction (26 FEB 2026 - Multi-table Release)
+    from .release_table_repository import ReleaseTableRepository as _ReleaseTableRepository
     from .connection_pool import ConnectionPoolManager as _ConnectionPoolManager
     from .schema_analyzer import (
         SchemaAnalyzer as _SchemaAnalyzer,
@@ -211,6 +213,11 @@ def __getattr__(name: str):
         from .release_repository import ReleaseRepository
         return ReleaseRepository
 
+    # Release→tables junction (26 FEB 2026 - Multi-table Release)
+    elif name == "ReleaseTableRepository":
+        from .release_table_repository import ReleaseTableRepository
+        return ReleaseTableRepository
+
     # Pipeline Observability (E13)
     elif name == "MetricsRepository":
         from .metrics_repository import MetricsRepository
@@ -301,6 +308,8 @@ __all__ = [
     # V0.9 Asset/Release entity split (21 FEB 2026)
     "AssetRepository",
     "ReleaseRepository",
+    # Release→tables junction (26 FEB 2026 - Multi-table Release)
+    "ReleaseTableRepository",
     "MetricsRepository",
     "JobProgressTracker",
     "JobProgressSnapshot",

@@ -190,6 +190,9 @@ from .geo import (
     FeatureCollectionStyles  # OGC API Styles (22 JAN 2026)
 )
 
+# Release → table junction (26 FEB 2026 - Multi-table Release)
+from .release_table import ReleaseTable
+
 # ETL tracking models - Internal App Schema (21 JAN 2026 - F7.IaC)
 from .etl_tracking import (
     VectorEtlTracking,
@@ -336,6 +339,9 @@ __all__ = [
     # Geo schema models - Service Layer (21 JAN 2026 - F7.IaC)
     'GeoTableCatalog',
     'FeatureCollectionStyles',  # OGC API Styles (22 JAN 2026)
+
+    # Release → table junction (26 FEB 2026 - Multi-table Release)
+    'ReleaseTable',
 
     # ETL tracking models - Internal App Schema (21 JAN 2026 - F7.IaC)
     'VectorEtlTracking',

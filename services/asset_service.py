@@ -543,7 +543,6 @@ class AssetService:
         self,
         release_id: str,
         blob_path: Optional[str] = None,
-        table_name: Optional[str] = None,
         stac_item_id: Optional[str] = None,
         content_hash: Optional[str] = None,
         source_file_hash: Optional[str] = None,
@@ -553,11 +552,11 @@ class AssetService:
         Update physical output fields on a release.
 
         Only provided fields are updated (dynamic SET clause).
+        Note: table_name removed (26 FEB 2026) — now in app.release_tables.
 
         Args:
             release_id: Release to update
             blob_path: Azure Blob Storage path for raster outputs
-            table_name: PostGIS table name for vector outputs
             stac_item_id: STAC item identifier
             content_hash: Hash of processed output content
             source_file_hash: Hash of original source file
@@ -569,7 +568,6 @@ class AssetService:
         return self.release_repo.update_physical_outputs(
             release_id=release_id,
             blob_path=blob_path,
-            table_name=table_name,
             stac_item_id=stac_item_id,
             content_hash=content_hash,
             source_file_hash=source_file_hash,

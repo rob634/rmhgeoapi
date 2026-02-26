@@ -450,11 +450,7 @@ class AssetRelease(BaseModel):
         max_length=500,
         description="Azure Blob Storage path for raster outputs (COG)"
     )
-    table_name: Optional[str] = Field(
-        default=None,
-        max_length=63,
-        description="PostGIS table name for vector outputs"
-    )
+    # table_name: REMOVED (26 FEB 2026) — moved to app.release_tables junction table
     stac_item_id: str = Field(
         ...,
         max_length=200,
@@ -677,7 +673,7 @@ class AssetRelease(BaseModel):
             'request_id': self.request_id,
             # Physical outputs
             'blob_path': self.blob_path,
-            'table_name': self.table_name,
+            # table_name: REMOVED — read from app.release_tables
             'stac_item_id': self.stac_item_id,
             'stac_collection_id': self.stac_collection_id,
             'stac_item_json': self.stac_item_json,

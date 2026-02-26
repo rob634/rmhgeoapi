@@ -915,7 +915,7 @@ def _get_mount_paths(job_id: str, config, instance_prefix: Optional[str] = None)
     else:
         dir_name = job_id[:8]
 
-    base = Path(config.raster.etl_mount_path) / dir_name
+    base = Path(config.docker.etl_mount_path) / dir_name
     return {
         'base': base,
         'source': base / 'source',
@@ -1168,7 +1168,7 @@ def _process_raster_tiled_mount(
         logger.info(f"   File size: {file_size_mb:.1f} MB")
     logger.info(f"   Job ID: {job_id[:16]}...")
     logger.info(f"   Instance prefix: {instance_prefix}")
-    logger.info(f"   Mount path: {config.raster.etl_mount_path}")
+    logger.info(f"   Mount path: {config.docker.etl_mount_path}")
     logger.info("=" * 70)
 
     # Initialize repositories
@@ -1184,9 +1184,64 @@ def _process_raster_tiled_mount(
     cog_results = []
     stac_result = {}
 
+    # ==========================================================================
+    # PHASE 0: HEADER VALIDATION (pre-download, catches garbage early)
+    # ==========================================================================
+    # Runs cheap header-only checks on blob URL BEFORE downloading to mount.
+    # Catches: wrong format, missing CRS, missing blob, corrupt header.
+    logger.info("🔄 PHASE 0: Header validation (pre-download)...")
+    _report_progress(docker_context, 1, 0, 6, "Header Check", "Validating header")
+
+    try:
+        from .raster_validation import validate_raster_header, validate_raster_data
+
+        # Generate SAS URL for header validation
+        header_blob_url = bronze_repo.get_blob_url_with_sas(container_name, blob_name)
+
+        header_params = {
+            'blob_url': header_blob_url,
+            'blob_name': blob_name,
+            'container_name': container_name,
+            'input_crs': params.get('input_crs'),
+            'strict_mode': params.get('strict_mode', False),
+        }
+
+        header_response = validate_raster_header(header_params)
+
+        if not header_response.get('success'):
+            error_code = header_response.get('error_code') or header_response.get('error', 'UNKNOWN')
+            logger.error(f"❌ PHASE 0: Header validation failed: {error_code}")
+            return {
+                "success": False,
+                "error": "VALIDATION_FAILED",
+                "error_type": error_code,
+                "message": header_response.get('message', 'Header validation failed'),
+                "phase": 0,
+                "output_mode": "tiled_mount",
+                "validation": header_response,
+                "retryable": False,
+            }
+
+        header_result = header_response.get('result', {})
+        source_crs = header_result.get('source_crs')
+        logger.info(f"✅ PHASE 0: Header valid - CRS={source_crs}, "
+                    f"bands={header_result.get('band_count')}, dtype={header_result.get('dtype')}")
+        _report_progress(docker_context, 3, 0, 6, "Header Check", "Passed")
+
+    except Exception as e:
+        logger.error(f"❌ PHASE 0: Header validation error: {e}")
+        return {
+            "success": False,
+            "error": "VALIDATION_FAILED",
+            "message": f"Header validation failed: {e}",
+            "phase": 0,
+            "output_mode": "tiled_mount",
+            "retryable": False,
+        }
+
     try:
         # =====================================================================
-        # PHASE 1: DOWNLOAD SOURCE TO MOUNT (0-10%)
+        # PHASE 1: DOWNLOAD SOURCE TO MOUNT (3-10%)
         # =====================================================================
         source_mount_path = None
 
@@ -1234,7 +1289,68 @@ def _process_raster_tiled_mount(
             _report_progress(docker_context, 10, 1, 5, "Download", f"Complete ({throughput:.1f} MB/s)")
 
         # =====================================================================
-        # PHASE 2: GENERATE TILING SCHEME (10-15%)
+        # PHASE 1.5: DATA VALIDATION ON LOCAL FILE (10-15%)
+        # =====================================================================
+        # Full GDAL statistics on the local mount file (fast, no network I/O).
+        # This is where the old false-positive RASTER_EMPTY bug is fixed —
+        # block-by-block scan instead of corner sampling.
+        logger.info("🔄 PHASE 1.5: Data validation on local file (GDAL stats)...")
+        _report_progress(docker_context, 12, 2, 6, "Data Validation", "Computing GDAL statistics")
+
+        try:
+            data_params = {
+                'file_path': str(source_mount_path),
+                'blob_name': blob_name,
+                'container_name': container_name,
+                'raster_type': params.get('raster_type', 'auto'),
+                'strict_mode': params.get('strict_mode', False),
+            }
+
+            data_response = validate_raster_data(data_params, header_result)
+
+            if not data_response.get('success'):
+                error_code = data_response.get('error_code') or data_response.get('error', 'UNKNOWN')
+                logger.error(f"❌ PHASE 1.5: Data validation failed: {error_code}")
+
+                # Cleanup mount directory on validation failure
+                import shutil
+                try:
+                    shutil.rmtree(mount_paths['base'], ignore_errors=True)
+                    logger.info(f"   Cleaned up mount directory: {mount_paths['base']}")
+                except Exception as cleanup_err:
+                    logger.warning(f"   Mount cleanup failed: {cleanup_err}")
+
+                return {
+                    "success": False,
+                    "error": "VALIDATION_FAILED",
+                    "error_type": error_code,
+                    "message": data_response.get('message', 'Data validation failed'),
+                    "phase": 1.5,
+                    "output_mode": "tiled_mount",
+                    "validation": data_response,
+                    "retryable": False,
+                }
+
+            # Use full validation result (merged header + data)
+            validation_result = data_response.get('result', {})
+            raster_type_info = validation_result.get('raster_type', {})
+            logger.info(f"✅ PHASE 1.5: Data validated - type={raster_type_info.get('detected_type')}, "
+                        f"CRS={source_crs}")
+            _report_progress(docker_context, 15, 2, 6, "Data Validation", "Passed")
+
+        except Exception as e:
+            logger.error(f"❌ PHASE 1.5: Data validation error: {e}")
+            return {
+                "success": False,
+                "error": "VALIDATION_FAILED",
+                "message": f"Data validation failed: {e}",
+                "phase": 1.5,
+                "output_mode": "tiled_mount",
+                "retryable": False,
+            }
+
+        # =====================================================================
+        # PHASE 2: GENERATE TILING SCHEME (15-20%)
         # =====================================================================
         logger.info("🔄 PHASE 2: Generating tiling scheme from local file...")
         _report_progress(docker_context, 12, 2, 5, "Tiling Scheme", "Analyzing raster")
@@ -1714,7 +1830,7 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
     # V0.8: Route to tiled workflow if file exceeds threshold
     # V0.8.1: Use mount-based workflow when ETL mount available (27 JAN 2026)
     if use_tiling:
-        if config.raster.use_etl_mount:
+        if config.docker.use_etl_mount:
             logger.info("📦 Routing to MOUNT-BASED tiled workflow (V0.8.1)...")
             return _process_raster_tiled_mount(params, context, start_time)
         else:
@@ -1847,50 +1963,81 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
                     "retryable": False,
                 }
         else:
-            logger.info("🔄 PHASE 1: Validating raster...")
-            _report_progress(docker_context, 5, 1, 4, "Validation", "Starting validation")
+            logger.info("🔄 PHASE 1: Validating raster (split: header + data)...")
+            _report_progress(docker_context, 3, 1, 4, "Validation", "Header validation")
             phase1_start = time.time()
 
             _emit_job_event(job_id, task_id, 1, 'raster_validation_started',
                             {'blob_name': blob_name, 'raster_type_param': params.get('raster_type', 'auto')})
 
-            from .raster_validation import validate_raster
+            from .raster_validation import validate_raster_header, validate_raster_data
 
-            validation_params = {
+            # Phase 1A: Header validation (cheap, no pixel reads)
+            header_params = {
                 'blob_url': params.get('blob_url'),
                 'blob_name': blob_name,
                 'container_name': container_name,
                 'input_crs': params.get('input_crs'),
+                'strict_mode': params.get('strict_mode', False),
+            }
+
+            header_response = validate_raster_header(header_params)
+
+            if not header_response.get('success'):
+                error_code = header_response.get('error_code') or header_response.get('error', 'UNKNOWN')
+                logger.error(f"❌ Header validation failed: {error_code}")
+                return {
+                    "success": False,
+                    "error": "VALIDATION_FAILED",
+                    "error_type": error_code,
+                    "message": header_response.get('message', 'Header validation failed'),
+                    "phase": "validation_header",
+                    "validation": header_response,
+                    "retryable": False,
+                }
+
+            header_result = header_response.get('result', {})
+            source_crs = header_result.get('source_crs')
+
+            if not source_crs:
+                logger.error("❌ No source_crs in header validation results")
+                return {
+                    "success": False,
+                    "error": "NO_SOURCE_CRS",
+                    "message": "Header validation did not return source CRS",
+                    "phase": "validation_header",
+                    "validation": header_result,
+                    "retryable": False,
+                }
+
+            logger.info(f"✅ PHASE 1A: Header validated - CRS={source_crs}")
+            _report_progress(docker_context, 8, 1, 4, "Validation", "Data validation (GDAL stats)")
+
+            # Phase 1B: Data validation (GDAL statistics on SAS URL)
+            data_params = {
+                'file_path': params.get('blob_url'),
+                'blob_name': blob_name,
+                'container_name': container_name,
                 'raster_type': params.get('raster_type', 'auto'),
                 'strict_mode': params.get('strict_mode', False),
             }
 
-            validation_response = validate_raster(validation_params)
+            validation_response = validate_raster_data(data_params, header_result)
 
             if not validation_response.get('success'):
-                logger.error(f"❌ Validation failed: {validation_response.get('error')}")
+                error_code = validation_response.get('error_code') or validation_response.get('error', 'UNKNOWN')
+                logger.error(f"❌ Data validation failed: {error_code}")
                 return {
                     "success": False,
                     "error": "VALIDATION_FAILED",
-                    "message": validation_response.get('message', 'Validation failed'),
-                    "phase": "validation",
+                    "error_type": error_code,
+                    "message": validation_response.get('message', 'Data validation failed'),
+                    "phase": "validation_data",
                     "validation": validation_response,
                     "retryable": False,
                 }
 
             validation_result = validation_response.get('result', {})
-            source_crs = validation_result.get('source_crs')
-
-            if not source_crs:
-                logger.error("❌ No source_crs in validation results")
-                return {
-                    "success": False,
-                    "error": "NO_SOURCE_CRS",
-                    "message": "Validation did not return source CRS",
-                    "phase": "validation",
-                    "validation": validation_result,
-                    "retryable": False,
-                }
 
             phase1_duration = time.time() - phase1_start
             raster_type_info = validation_result.get('raster_type', {})

@@ -865,21 +865,25 @@ class TaskRepository(PostgreSQLTaskRepository):
             {'result_data': result_data}
         )
     
-    def fail_task(self, task_id: str, error_details: str) -> bool:
+    def fail_task(self, task_id: str, error_details: str, result_data: dict = None) -> bool:
         """
-        Mark task as failed with error details.
-        
+        Mark task as failed with error details and optional result data.
+
         Args:
             task_id: Task ID to fail
             error_details: Error description
-            
+            result_data: Optional handler result dict (preserved for diagnostics)
+
         Returns:
             True if failed successfully
         """
+        extra_fields = {'error_details': error_details}
+        if result_data is not None:
+            extra_fields['result_data'] = result_data
         return self.update_task_status_with_validation(
             task_id,
             TaskStatus.FAILED,
-            {'error_details': error_details}
+            extra_fields
         )
     
     def update_task_with_model(self, task_id: str, update_model: TaskUpdateModel) -> bool:

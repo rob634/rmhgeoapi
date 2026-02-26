@@ -41,9 +41,10 @@ ENVIRONMENT VARIABLES
 V0.8 Architecture (24 JAN 2026):
     ALL raster processing goes to Docker worker. Tiling decision is internal.
 
-ETL Mount Settings:
-    RASTER_USE_ETL_MOUNT = true       # V0.8: Mount is expected (false = degraded)
-    RASTER_ETL_MOUNT_PATH = /mounts/etl-temp  # Azure Files mount path
+ETL Mount Settings (26 FEB 2026):
+    Moved to DockerConfig (config/docker_config.py).
+    Use DOCKER_USE_ETL_MOUNT and DOCKER_ETL_MOUNT_PATH env vars.
+    Legacy RASTER_USE_ETL_MOUNT / RASTER_ETL_MOUNT_PATH still supported as fallback.
 
 Tiling Settings:
     RASTER_TILING_THRESHOLD_MB = 500 # Files above this produce tiled output (lowered from 2000 for testing)
@@ -133,39 +134,13 @@ class RasterConfig(BaseModel):
         - Tiling decision is internal based on raster_tiling_threshold_mb
 
     Key Settings:
-        use_etl_mount: Expected True in production (False = degraded state)
         raster_tiling_threshold_mb: When to produce tiled output vs single COG
         raster_tile_target_mb: Target size per tile when tiling
+
+    Note (26 FEB 2026):
+        ETL mount settings (use_etl_mount, etl_mount_path) moved to DockerConfig.
+        Access via config.docker.use_etl_mount / config.docker.etl_mount_path.
     """
-
-    # ==========================================================================
-    # V0.8 ETL MOUNT SETTINGS (24 JAN 2026)
-    # ==========================================================================
-
-    use_etl_mount: bool = Field(
-        default=RasterDefaults.USE_ETL_MOUNT,
-        description="""V0.8: Enable Azure Files mount for Docker temp files.
-
-        Expected True in production. False indicates degraded state.
-
-        When True (mount enabled - expected state):
-        - Docker workers use /mounts/etl-temp for GDAL temp files (CPL_TMPDIR)
-        - No size limit for raster processing (mount provides ~100TB)
-        - in_memory always forced to False (disk-based processing)
-        - Tiling decision based on raster_tiling_threshold_mb
-
-        When False (mount disabled - degraded state):
-        - Docker startup logs warning
-        - Limited to smaller files that fit in container temp space
-
-        Docker worker validates mount at startup.
-        """
-    )
-
-    etl_mount_path: str = Field(
-        default=RasterDefaults.ETL_MOUNT_PATH,
-        description="Path where Azure Files is mounted in Docker container"
-    )
 
     # ==========================================================================
     # TILING SETTINGS (V0.8 - 24 JAN 2026)
@@ -281,9 +256,7 @@ class RasterConfig(BaseModel):
     def from_environment(cls):
         """Load from environment variables."""
         return cls(
-            # V0.8 ETL Mount settings (24 JAN 2026)
-            use_etl_mount=os.environ.get("RASTER_USE_ETL_MOUNT", str(RasterDefaults.USE_ETL_MOUNT).lower()).lower() == "true",
-            etl_mount_path=os.environ.get("RASTER_ETL_MOUNT_PATH", RasterDefaults.ETL_MOUNT_PATH),
+            # ETL mount settings moved to DockerConfig (26 FEB 2026)
             # V0.8 Tiling settings (24 JAN 2026)
             raster_tiling_threshold_mb=int(os.environ.get(
                 "RASTER_TILING_THRESHOLD_MB",

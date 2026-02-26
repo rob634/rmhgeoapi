@@ -21,10 +21,11 @@ Exports:
 """
 
 from io import BytesIO
+from pathlib import Path
 import os
 import tempfile
 import zipfile
-from typing import Optional
+from typing import Optional, Union
 import pandas as pd
 import geopandas as gpd
 from shapely import wkt
@@ -119,33 +120,45 @@ def wkt_df_to_gdf(
 
 
 def extract_zip_file(
-    zip_data: BytesIO,
+    zip_data: Union[BytesIO, str, Path],
     target_extension: str,
-    target_name: Optional[str] = None
+    target_name: Optional[str] = None,
+    extract_dir: Optional[str] = None,
 ) -> str:
     """
-    Extract file from ZIP archive to temp directory.
+    Extract file from ZIP archive to temp or mount directory.
 
     Args:
-        zip_data: BytesIO containing ZIP data
+        zip_data: BytesIO containing ZIP data, or file path string (mount-based).
+            zipfile.ZipFile() accepts both natively.
         target_extension: File extension to find (e.g., '.shp', '.kml')
         target_name: Specific filename (optional, defaults to first match)
+        extract_dir: Optional extraction directory (mount subdir). If provided,
+            used instead of tempfile.mkdtemp(). Created with exist_ok=True.
+            Mount dirs are cleaned up by the calling handler's finally block.
 
     Returns:
-        Path to extracted file in temp directory
+        Path to extracted file in extract directory
 
     Raises:
         FileNotFoundError: If target file not found in ZIP
         zipfile.BadZipFile: If data is not a valid ZIP
     """
-    temp_dir = tempfile.mkdtemp()
+    if extract_dir:
+        os.makedirs(extract_dir, exist_ok=True)
+        dest_dir = extract_dir
+    else:
+        dest_dir = tempfile.mkdtemp()
 
-    with zipfile.ZipFile(zip_data) as zf:
+    # zipfile.ZipFile accepts both BytesIO and file path strings natively
+    zip_target = str(zip_data) if isinstance(zip_data, Path) else zip_data
+
+    with zipfile.ZipFile(zip_target) as zf:
         # Extract all files
-        zf.extractall(temp_dir)
+        zf.extractall(dest_dir)
 
         # Find target file
-        for root, dirs, files in os.walk(temp_dir):
+        for root, dirs, files in os.walk(dest_dir):
             for file in files:
                 # Check for specific filename match
                 if target_name and file == target_name:

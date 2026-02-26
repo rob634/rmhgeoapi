@@ -807,22 +807,25 @@ class StateManager:
     def mark_task_failed(
         self,
         task_id: str,
-        error_msg: str
+        error_msg: str,
+        result_data: dict = None
     ) -> None:
         """
-        Mark task as failed with error details.
+        Mark task as failed with error details and optional result data.
 
         25 FEB 2026: No longer swallows exceptions. If the task can't be marked
         failed, callers MUST know — silent failure creates orphaned tasks.
+        26 FEB 2026: Now stores result_data on failed tasks for diagnostics.
 
         Args:
             task_id: Task identifier
             error_msg: Error message
+            result_data: Optional handler result dict (preserved for diagnostics)
 
         Raises:
             Exception: If database update fails (propagated to caller)
         """
-        self.repos['task_repo'].fail_task(task_id, error_msg)
+        self.repos['task_repo'].fail_task(task_id, error_msg, result_data=result_data)
         self.logger.info(
             f"Task {task_id} marked as FAILED",
             extra={

@@ -255,18 +255,18 @@ class RasterValidationData(BaseModel):
     # File info
     size_mb: float = Field(default=0, ge=0, description="File size in MB")
 
-    # Nested analysis results
-    raster_type: RasterTypeInfo = Field(
-        ...,
-        description="Raster type detection results"
+    # Nested analysis results (Optional for header-only validation)
+    raster_type: Optional[RasterTypeInfo] = Field(
+        default=None,
+        description="Raster type detection results (populated by data phase)"
     )
-    cog_tiers: COGTierInfo = Field(
-        ...,
-        description="COG tier compatibility info"
+    cog_tiers: Optional[COGTierInfo] = Field(
+        default=None,
+        description="COG tier compatibility info (populated by data phase)"
     )
-    bit_depth_check: BitDepthCheck = Field(
-        ...,
-        description="Bit-depth efficiency analysis"
+    bit_depth_check: Optional[BitDepthCheck] = Field(
+        default=None,
+        description="Bit-depth efficiency analysis (populated by data phase)"
     )
     memory_estimation: Optional[MemoryEstimation] = Field(
         default=None,

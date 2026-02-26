@@ -393,9 +393,9 @@ ENV_VAR_RULES: Dict[str, EnvVarRule] = {
 
     "RASTER_USE_ETL_MOUNT": EnvVarRule(
         pattern=_BOOLEAN,
-        pattern_description="Enable Azure Files mount for Docker temp files",
+        pattern_description="(Legacy) Enable Azure Files mount - use DOCKER_USE_ETL_MOUNT instead",
         required=False,
-        fix_suggestion="Set to 'true' to enable mount (expected in V0.8 production)",
+        fix_suggestion="Set DOCKER_USE_ETL_MOUNT instead (legacy fallback still supported)",
         example="true",
         default_value="true",
     ),
@@ -471,15 +471,33 @@ ENV_VAR_RULES: Dict[str, EnvVarRule] = {
     ),
 
     # =========================================================================
-    # V0.8 DOCKER WORKER CONFIG (26 JAN 2026)
+    # V0.8 DOCKER WORKER CONFIG (26 JAN 2026, updated 26 FEB 2026)
     # =========================================================================
     "RASTER_ETL_MOUNT_PATH": EnvVarRule(
         pattern=re.compile(r"^(/[a-zA-Z0-9._-]+)+$"),
+        pattern_description="(Legacy) Mount path - use DOCKER_ETL_MOUNT_PATH instead",
+        required=False,
+        fix_suggestion="Set DOCKER_ETL_MOUNT_PATH instead (legacy fallback still supported)",
+        example="/mounts/etl-temp",
+        default_value="/mounts/etl-temp",
+    ),
+
+    "DOCKER_USE_ETL_MOUNT": EnvVarRule(
+        pattern=_BOOLEAN,
+        pattern_description="Enable Azure Files mount for Docker worker (raster + vector)",
+        required=False,
+        fix_suggestion="Set to 'true' to enable mount (expected in production)",
+        example="true",
+        default_value="true",
+    ),
+
+    "DOCKER_ETL_MOUNT_PATH": EnvVarRule(
+        pattern=re.compile(r"^(/[a-zA-Z0-9._-]+)+$"),
         pattern_description="Unix path for Azure Files mount in Docker container",
         required=False,
-        fix_suggestion="Set to mount path like '/mnt/etl' for Docker worker temp files",
-        example="/mnt/etl",
-        default_value="/mnt/etl",
+        fix_suggestion="Set to mount path like '/mounts/etl-temp' for Docker worker temp files",
+        example="/mounts/etl-temp",
+        default_value="/mounts/etl-temp",
     ),
 
     # SERVICE_BUS_FUNCTIONAPP_TASKS_QUEUE removed 19 FEB 2026 (V0.9 Docker-only)

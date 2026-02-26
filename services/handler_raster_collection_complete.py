@@ -141,7 +141,7 @@ def _get_mount_paths(job_id: str, config) -> Dict[str, Path]:
     """
     Get mount paths for temp storage.
 
-    Uses config.raster.etl_mount_path for Azure Files mount in Docker.
+    Uses config.docker.etl_mount_path for Azure Files mount in Docker.
     Falls back to /tmp for local development.
 
     Args:
@@ -152,7 +152,7 @@ def _get_mount_paths(job_id: str, config) -> Dict[str, Path]:
         Dict with 'base', 'source', 'cogs' paths
     """
     # Use configured mount path (default: /mounts/etl-temp)
-    mount_path = config.raster.etl_mount_path
+    mount_path = config.docker.etl_mount_path
 
     # Check for mounted storage
     if os.path.exists(mount_path) and os.access(mount_path, os.W_OK):
@@ -723,7 +723,9 @@ def _process_files_to_cogs(
             validation_result = validate_raster(validation_params)
 
             if not validation_result.get('success'):
-                raise ValueError(f"Validation failed: {validation_result.get('error')}")
+                # ErrorResponse uses 'error_code' field, not 'error'
+                error_code = validation_result.get('error_code') or validation_result.get('error', 'UNKNOWN')
+                raise ValueError(f"Validation failed: {error_code}")
 
             validated = validation_result.get('result', {})
 
@@ -990,7 +992,7 @@ def raster_collection_complete(
     cleanup_result = {}
 
     try:
-        # Setup mount paths (uses config.raster.etl_mount_path)
+        # Setup mount paths (uses config.docker.etl_mount_path)
         mount_paths = _get_mount_paths(job_id, config)
         _ensure_mount_paths(mount_paths)
         logger.info(f"   Mount base: {mount_paths['base']}")

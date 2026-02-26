@@ -3,9 +3,9 @@
 # ============================================================================
 # STATUS: Service layer - Raster file validation and analysis
 # PURPOSE: Validate raster files before COG processing, determine output tiers
-# LAST_REVIEWED: 12 FEB 2026
-# REVIEW_STATUS: Phase 4 BUG_REFORM - Enhanced data quality checks
-# EXPORTS: validate_raster
+# LAST_REVIEWED: 26 FEB 2026
+# REVIEW_STATUS: Split into header/data phases for accurate GDAL statistics
+# EXPORTS: validate_raster, validate_raster_header, validate_raster_data
 # ============================================================================
 """
 Raster Validation Service - Stage 1 of Raster Pipeline.
@@ -88,47 +88,65 @@ def _lazy_imports():
     return np, rasterio, ColorInterp, Window
 
 
-def validate_raster(params: dict) -> dict:
+def validate_raster_header(params: dict) -> dict:
     """
-    Validate raster file for COG pipeline processing.
+    Header-only validation of a raster file (no pixel data reads).
 
-    Stage 1 of raster processing pipeline. Checks:
-    - File readability
-    - CRS presence and validity
-    - Bit-depth efficiency (flags 64-bit data as CRITICAL)
-    - Raster type detection and validation
-    - Bounds sanity checks
+    Performs cheap checks that catch garbage files before download:
+    - File extension validation
+    - Blob existence verification
+    - TIFF header readability (rasterio.open — header only)
+    - GDAL driver check (must be GTiff)
+    - Metadata extraction (band_count, dtype, shape, bounds, nodata)
+    - Memory footprint estimation
+    - CRS validation
+
+    Does NOT read pixel data. For data quality checks (nodata percentage,
+    extreme values, raster type detection), use validate_raster_data().
 
     Args:
         params: Task parameters dict with:
-            - blob_url: Azure blob URL with SAS token
+            - blob_url: Azure blob URL with SAS token (or local file path)
             - blob_name: Blob path (for logging)
             - container_name: Container name (for logging)
             - input_crs: (Optional) User-provided CRS override
-            - raster_type: (Optional) Expected raster type (auto, rgb, rgba, dem, etc.)
             - strict_mode: (Optional) Fail on warnings
             - _skip_validation: (Optional) TESTING ONLY - skip all validation
 
     Returns:
         dict: {
             "success": True/False,
-            "result": {...validation metadata...},
+            "result": {
+                "valid": True,
+                "source_blob": str,
+                "container_name": str,
+                "source_crs": str,
+                "crs_source": str,
+                "bounds": [minx, miny, maxx, maxy],
+                "shape": [height, width],
+                "band_count": int,
+                "dtype": str,
+                "data_type": str,
+                "nodata": value,
+                "size_mb": float,
+                "memory_estimation": {...},
+                "warnings": [...]
+            },
             "error": "ERROR_CODE" (if failed),
             "message": "Error description" (if failed)
         }
     """
     import traceback
 
-    # STEP 0: Initialize logger BEFORE any other operations
+    # STEP 0: Initialize logger
     logger = None
-    task_id = params.get('_task_id')  # For checkpoint context tracking (20 DEC 2025)
+    task_id = params.get('_task_id')
     try:
         from util_logger import LoggerFactory, ComponentType
-        logger = LoggerFactory.create_logger(ComponentType.SERVICE, "validate_raster")
-        logger.info("🚀 [CHECKPOINT_ENTRY] Handler entry - validate_raster called")
+        logger = LoggerFactory.create_logger(ComponentType.SERVICE, "validate_raster_header")
+        logger.info("🚀 [HEADER] Handler entry - validate_raster_header called")
         logger.debug(f"   Params keys: {list(params.keys())}")
         logger.debug(f"   blob_name: {params.get('blob_name', 'MISSING')}")
-        logger.info("✅ STEP 0: Logger initialized successfully")
     except Exception as e:
         print(f"❌ STEP 0 FAILED: Logger initialization error: {e}", file=sys.stderr, flush=True)
         return {
@@ -140,19 +158,17 @@ def validate_raster(params: dict) -> dict:
 
     # STEP 1: Extract and validate parameters
     try:
-        logger.info("🔄 STEP 1: Extracting parameters...")
         blob_url = params.get('blob_url')
         blob_name = params.get('blob_name', 'unknown')
         container_name = params.get('container_name', params.get('container', 'unknown'))
         input_crs = params.get('input_crs') or params.get('source_crs')
-        raster_type_param = params.get('raster_type', 'auto')
         strict_mode = params.get('strict_mode', False)
         skip_validation = params.get('_skip_validation', False)
 
-        logger.info(f"✅ STEP 1: Parameters extracted - blob={blob_name}, container={container_name}")
+        logger.info(f"✅ [HEADER] STEP 1: Parameters extracted - blob={blob_name}, container={container_name}")
 
         if not blob_url:
-            logger.error("❌ STEP 1 FAILED: blob_url parameter is required")
+            logger.error("❌ [HEADER] STEP 1 FAILED: blob_url parameter is required")
             return {
                 "success": False,
                 "error": "MISSING_PARAMETER",
@@ -161,7 +177,7 @@ def validate_raster(params: dict) -> dict:
                 "container_name": container_name
             }
     except Exception as e:
-        logger.error(f"❌ STEP 1 FAILED: Parameter extraction error: {e}\n{traceback.format_exc()}")
+        logger.error(f"❌ [HEADER] STEP 1 FAILED: Parameter extraction error: {e}\n{traceback.format_exc()}")
         return {
             "success": False,
             "error": "PARAMETER_ERROR",
@@ -183,11 +199,11 @@ def validate_raster(params: dict) -> dict:
 
     # STEP 2: Lazy import rasterio and numpy
     try:
-        logger.info("🔄 STEP 2: Lazy loading rasterio dependencies...")
+        logger.info("🔄 [HEADER] STEP 2: Lazy loading rasterio dependencies...")
         np, rasterio, ColorInterp, Window = _lazy_imports()
-        logger.info("✅ STEP 2: Dependencies loaded successfully")
+        logger.info("✅ [HEADER] STEP 2: Dependencies loaded successfully")
     except ImportError as e:
-        logger.error(f"❌ STEP 2 FAILED: Import error: {e}\n{traceback.format_exc()}")
+        logger.error(f"❌ [HEADER] STEP 2 FAILED: Import error: {e}\n{traceback.format_exc()}")
         return {
             "success": False,
             "error": "IMPORT_ERROR",
@@ -197,7 +213,7 @@ def validate_raster(params: dict) -> dict:
             "traceback": traceback.format_exc()
         }
     except Exception as e:
-        logger.error(f"❌ STEP 2 FAILED: Unexpected error during import: {e}\n{traceback.format_exc()}")
+        logger.error(f"❌ [HEADER] STEP 2 FAILED: Unexpected error during import: {e}\n{traceback.format_exc()}")
         return {
             "success": False,
             "error": "IMPORT_ERROR",
@@ -208,12 +224,8 @@ def validate_raster(params: dict) -> dict:
             "traceback": traceback.format_exc()
         }
 
-    # ================================================================
-    # STEP 2b: File extension validation (24 FEB 2026)
-    # Belt-and-suspenders check for jobs submitted directly (not through
-    # platform endpoint). Rejects non-GeoTIFF extensions early.
-    # ================================================================
-    logger.info("🔄 STEP 2b: Validating file extension...")
+    # STEP 2b: File extension validation
+    logger.info("🔄 [HEADER] STEP 2b: Validating file extension...")
     ext = blob_name.rsplit('.', 1)[-1].lower() if '.' in blob_name else ''
     if ext not in {'tif', 'tiff', 'geotiff'}:
         from core.errors import ErrorCode, create_error_response
@@ -227,93 +239,87 @@ def validate_raster(params: dict) -> dict:
                 f"Unsupported file format '.{ext}' for file '{blob_name}'. "
                 f"Only GeoTIFF (.tif, .tiff, .geotiff) files are accepted."
             )
-        logger.error(f"❌ STEP 2b FAILED: {msg}")
+        logger.error(f"❌ [HEADER] STEP 2b FAILED: {msg}")
         return create_error_response(
             ErrorCode.INVALID_FORMAT,
             msg,
             details={"blob_name": blob_name, "extension": ext,
                      "accepted_extensions": [".tif", ".tiff", ".geotiff"]}
         )
-    logger.info(f"✅ STEP 2b: File extension '.{ext}' is valid")
+    logger.info(f"✅ [HEADER] STEP 2b: File extension '.{ext}' is valid")
 
-    # ================================================================
-    # NEW STEP 3a (Phase 2-3 - 11 NOV 2025): Pre-flight blob validation
-    # Validate container and blob exist before GDAL operation
-    # Uses Phase 3 error classification for retry logic
-    # ================================================================
-    try:
-        logger.info("🔄 STEP 3a: Pre-flight blob validation...")
+    # STEP 3a: Pre-flight blob existence check
+    # Skip for local file paths (used in data phase and tiled mount)
+    is_local_path = blob_url.startswith('/') or blob_url.startswith('.')
+    if not is_local_path:
+        try:
+            logger.info("🔄 [HEADER] STEP 3a: Pre-flight blob validation...")
 
-        from infrastructure.blob import BlobRepository
-        from core.errors import ErrorCode, create_error_response
-        # Use Bronze zone for input rasters (08 DEC 2025)
-        blob_repo = BlobRepository.for_zone("bronze")
+            from infrastructure.blob import BlobRepository
+            from core.errors import ErrorCode, create_error_response
+            blob_repo = BlobRepository.for_zone("bronze")
 
-        # Check container exists first
-        if not blob_repo.container_exists(container_name):
-            error_msg = (
-                f"Container '{container_name}' does not exist in storage account "
-                f"'{blob_repo.account_name}'"
-            )
-            logger.error(f"❌ STEP 3a FAILED: {error_msg}")
+            if not blob_repo.container_exists(container_name):
+                error_msg = (
+                    f"Container '{container_name}' does not exist in storage account "
+                    f"'{blob_repo.account_name}'"
+                )
+                logger.error(f"❌ [HEADER] STEP 3a FAILED: {error_msg}")
+                return create_error_response(
+                    ErrorCode.CONTAINER_NOT_FOUND,
+                    error_msg,
+                    details={
+                        "container_name": container_name,
+                        "storage_account": blob_repo.account_name,
+                        "blob_name": blob_name,
+                    }
+                )
+
+            if not blob_repo.blob_exists(container_name, blob_name):
+                error_msg = (
+                    f"File '{blob_name}' not found in existing container '{container_name}' "
+                    f"(storage account: '{blob_repo.account_name}')"
+                )
+                logger.error(f"❌ [HEADER] STEP 3a FAILED: {error_msg}")
+                return create_error_response(
+                    ErrorCode.FILE_NOT_FOUND,
+                    error_msg,
+                    remediation=f"Verify blob path spelling. Use /api/containers/{container_name}/blobs to list available files.",
+                    details={
+                        "blob_name": blob_name,
+                        "container_name": container_name,
+                        "storage_account": blob_repo.account_name,
+                    }
+                )
+
+            logger.info("✅ [HEADER] STEP 3a: Blob exists validation passed")
+
+        except Exception as e:
+            from core.errors import ErrorCode, create_error_response
+            logger.error(f"❌ [HEADER] STEP 3a FAILED: Validation error: {e}\n{traceback.format_exc()}")
             return create_error_response(
-                ErrorCode.CONTAINER_NOT_FOUND,
-                error_msg,
+                ErrorCode.VALIDATION_ERROR,
+                f"Failed to validate blob existence: {e}",
                 details={
-                    "container_name": container_name,
-                    "storage_account": blob_repo.account_name,
                     "blob_name": blob_name,
+                    "container_name": container_name,
+                    "traceback": traceback.format_exc(),
                 }
             )
 
-        # Check blob exists in container
-        if not blob_repo.blob_exists(container_name, blob_name):
-            error_msg = (
-                f"File '{blob_name}' not found in existing container '{container_name}' "
-                f"(storage account: '{blob_repo.account_name}')"
-            )
-            logger.error(f"❌ STEP 3a FAILED: {error_msg}")
-            return create_error_response(
-                ErrorCode.FILE_NOT_FOUND,
-                error_msg,
-                remediation=f"Verify blob path spelling. Use /api/containers/{container_name}/blobs to list available files.",
-                details={
-                    "blob_name": blob_name,
-                    "container_name": container_name,
-                    "storage_account": blob_repo.account_name,
-                }
-            )
-
-        logger.info("✅ STEP 3a: Blob exists validation passed")
-
-    except Exception as e:
-        from core.errors import ErrorCode, create_error_response
-        logger.error(f"❌ STEP 3a FAILED: Validation error: {e}\n{traceback.format_exc()}")
-        return create_error_response(
-            ErrorCode.VALIDATION_ERROR,
-            f"Failed to validate blob existence: {e}",
-            details={
-                "blob_name": blob_name,
-                "container_name": container_name,
-                "traceback": traceback.format_exc(),
-            }
-        )
-
-    # STEP 3: Open raster file
+    # STEP 3: Open raster file (header read only)
     try:
-        logger.info(f"🔄 STEP 3: Opening raster file via SAS URL...")
-        logger.debug(f"   Blob URL: {blob_url[:100]}...")
+        logger.info(f"🔄 [HEADER] STEP 3: Opening raster file...")
+        logger.debug(f"   URL/Path: {blob_url[:100]}...")
         src = rasterio.open(blob_url)
-        logger.info(f"✅ STEP 3: File opened successfully - {src.count} bands, {src.shape}")
+        logger.info(f"✅ [HEADER] STEP 3: File opened successfully - {src.count} bands, {src.shape}")
 
-        # Memory checkpoint 1 (DEBUG_MODE only)
         from util_logger import log_memory_checkpoint
-        log_memory_checkpoint(logger, "After GDAL open", context_id=task_id)
+        log_memory_checkpoint(logger, "After GDAL open (header)", context_id=task_id)
 
-        # STEP 3b: GDAL driver check (24 FEB 2026)
-        # Catches renamed files (e.g., PNG renamed to .tif)
+        # STEP 3b: GDAL driver check
         if src.driver != 'GTiff':
-            logger.error(f"❌ STEP 3b FAILED: File is {src.driver}, not GTiff")
+            logger.error(f"❌ [HEADER] STEP 3b FAILED: File is {src.driver}, not GTiff")
             return {
                 "success": False,
                 "error": "INVALID_FORMAT",
@@ -328,9 +334,8 @@ def validate_raster(params: dict) -> dict:
                 "detected_driver": src.driver
             }
     except Exception as e:
-        logger.error(f"❌ STEP 3 FAILED: Cannot open raster file: {e}\n{traceback.format_exc()}")
+        logger.error(f"❌ [HEADER] STEP 3 FAILED: Cannot open raster file: {e}\n{traceback.format_exc()}")
 
-        # Parse GDAL error into human-readable message (24 FEB 2026)
         error_str = str(e).lower()
         if 'not recognized as a supported file format' in error_str:
             user_message = (
@@ -374,36 +379,29 @@ def validate_raster(params: dict) -> dict:
             "traceback": traceback.format_exc()
         }
 
-    # STEP 4: Extract basic file information
+    # STEP 4: Extract basic file information (header metadata only)
     try:
-        logger.info("🔄 STEP 4: Extracting basic file information...")
         with src:
             band_count = src.count
             dtype = src.dtypes[0]
             shape = src.shape
             bounds = src.bounds
             nodata = src.nodata
-            logger.info(f"✅ STEP 4: File info extracted - {band_count} bands, {dtype}, shape {shape}")
+            logger.info(f"✅ [HEADER] STEP 4: File info - {band_count} bands, {dtype}, shape {shape}")
             logger.debug(f"   Bounds: {bounds}, nodata: {nodata}")
 
-            # Memory checkpoint 2 (DEBUG_MODE only)
             from util_logger import log_memory_checkpoint
-            log_memory_checkpoint(logger, "After metadata extraction",
+            log_memory_checkpoint(logger, "After metadata extraction (header)",
                                   context_id=task_id,
                                   band_count=band_count,
                                   shape_height=shape[0],
                                   shape_width=shape[1])
 
-            # Warnings list
             warnings = []
 
-            # ================================================================
-            # STEP 4b: MEMORY FOOTPRINT ESTIMATION (30 NOV 2025)
-            # ================================================================
-            # Estimate uncompressed size and peak memory to determine
-            # processing strategy and GDAL configuration
+            # STEP 4b: Memory footprint estimation
             try:
-                logger.info("🔄 STEP 4b: Estimating memory footprint...")
+                logger.info("🔄 [HEADER] STEP 4b: Estimating memory footprint...")
                 memory_estimation = _estimate_memory_footprint(
                     width=shape[1],
                     height=shape[0],
@@ -411,51 +409,36 @@ def validate_raster(params: dict) -> dict:
                     dtype=dtype
                 )
                 logger.info(
-                    f"✅ STEP 4b: Memory estimation complete - "
+                    f"✅ [HEADER] STEP 4b: Memory estimation - "
                     f"uncompressed: {memory_estimation['uncompressed_gb']:.2f}GB, "
-                    f"peak: {memory_estimation['estimated_peak_gb']:.2f}GB, "
                     f"strategy: {memory_estimation['processing_strategy']}"
                 )
-                logger.info(
-                    f"   System: {memory_estimation['system_ram_gb']:.1f}GB RAM, "
-                    f"{memory_estimation['cpu_count']} CPUs, "
-                    f"safe threshold: {memory_estimation['safe_threshold_gb']:.2f}GB"
-                )
-
-                # Add any memory warnings to the main warnings list
                 for mem_warning in memory_estimation.get("warnings", []):
                     warnings.append(mem_warning)
-                    severity = mem_warning.get("severity", "INFO")
-                    logger.warning(f"   ⚠️  Memory warning ({severity}): {mem_warning.get('message', 'unknown')}")
-
             except Exception as e:
-                logger.warning(f"⚠️  STEP 4b: Memory estimation failed (non-fatal): {e}")
+                logger.warning(f"⚠️  [HEADER] STEP 4b: Memory estimation failed (non-fatal): {e}")
                 memory_estimation = {
                     "error": str(e),
                     "uncompressed_gb": None,
                     "processing_strategy": "unknown"
                 }
 
-            # ================================================================
-            # STEP 5: CRS VALIDATION
-            # ================================================================
+            # STEP 5: CRS validation
             try:
-                logger.info("🔄 STEP 5: Validating CRS...")
+                logger.info("🔄 [HEADER] STEP 5: Validating CRS...")
                 crs_result = _validate_crs(src, input_crs, bounds, skip_validation)
                 if not crs_result["success"]:
-                    logger.error(f"❌ STEP 5 FAILED: CRS validation failed - {crs_result.get('message', 'unknown error')}")
+                    logger.error(f"❌ [HEADER] STEP 5 FAILED: CRS validation failed - {crs_result.get('message', 'unknown')}")
                     return crs_result
 
                 source_crs = crs_result["source_crs"]
                 crs_source = crs_result["crs_source"]
-                logger.info(f"✅ STEP 5: CRS validated - {source_crs} (source: {crs_source})")
+                logger.info(f"✅ [HEADER] STEP 5: CRS validated - {source_crs} (source: {crs_source})")
 
-                # Add CRS warnings if any
                 if "warning" in crs_result:
                     warnings.append(crs_result["warning"])
-                    logger.warning(f"   ⚠️  CRS warning: {crs_result['warning'].get('message', 'unknown')}")
             except Exception as e:
-                logger.error(f"❌ STEP 5 FAILED: CRS validation error: {e}\n{traceback.format_exc()}")
+                logger.error(f"❌ [HEADER] STEP 5 FAILED: CRS validation error: {e}\n{traceback.format_exc()}")
                 return {
                     "success": False,
                     "error": "CRS_VALIDATION_ERROR",
@@ -465,21 +448,200 @@ def validate_raster(params: dict) -> dict:
                     "traceback": traceback.format_exc()
                 }
 
-            # ================================================================
-            # STEP 6: BIT-DEPTH EFFICIENCY CHECK
-            # ================================================================
+            # Build header-only result (no raster_type, cog_tiers, bit_depth_check)
             try:
-                logger.info("🔄 STEP 6: Checking bit-depth efficiency...")
-                bit_depth_result = _check_bit_depth_efficiency(src, dtype, strict_mode)
+                memory_estimation_model = None
+                if memory_estimation and not memory_estimation.get("error"):
+                    memory_estimation_model = MemoryEstimation(
+                        uncompressed_gb=memory_estimation.get("uncompressed_gb"),
+                        estimated_peak_gb=memory_estimation.get("estimated_peak_gb"),
+                        system_ram_gb=memory_estimation.get("system_ram_gb"),
+                        cpu_count=memory_estimation.get("cpu_count"),
+                        safe_threshold_gb=memory_estimation.get("safe_threshold_gb"),
+                        processing_strategy=memory_estimation.get("processing_strategy"),
+                        gdal_config=memory_estimation.get("gdal_config"),
+                        warnings=memory_estimation.get("warnings", [])
+                    )
 
-                # Add bit-depth warnings
+                validation_data = RasterValidationData(
+                    valid=True,
+                    source_blob=blob_name,
+                    container_name=container_name,
+                    source_crs=str(source_crs),
+                    crs_source=crs_source,
+                    bounds=list(bounds),
+                    shape=list(shape),
+                    band_count=band_count,
+                    dtype=str(dtype),
+                    data_type=str(dtype),
+                    size_mb=params.get('size_mb', 0),
+                    nodata=nodata,
+                    memory_estimation=memory_estimation_model,
+                    warnings=warnings
+                )
+
+                result = RasterValidationResult(
+                    success=True,
+                    result=validation_data
+                )
+
+                logger.info(f"✅ [HEADER] COMPLETE: CRS={source_crs}, bands={band_count}, dtype={dtype}")
+                return result.model_dump()
+
+            except Exception as e:
+                logger.error(f"❌ [HEADER] Result build error: {e}\n{traceback.format_exc()}")
+                return {
+                    "success": False,
+                    "error": "RESULT_BUILD_ERROR",
+                    "message": f"Failed to build header validation result: {e}",
+                    "blob_name": blob_name,
+                    "container_name": container_name,
+                    "traceback": traceback.format_exc()
+                }
+
+    except Exception as e:
+        logger.error(f"❌ [HEADER] Unexpected error: {e}\n{traceback.format_exc()}")
+        return {
+            "success": False,
+            "error": "VALIDATION_ERROR",
+            "error_type": type(e).__name__,
+            "message": f"Unexpected header validation error: {e}",
+            "blob_name": blob_name,
+            "container_name": container_name,
+            "traceback": traceback.format_exc()
+        }
+
+
+def validate_raster_data(data_params: dict, header_result: dict) -> dict:
+    """
+    Data-phase validation using GDAL statistics on a file (local or remote).
+
+    Runs pixel-level quality checks that require reading data:
+    - GDAL band statistics (streaming, O(1) memory)
+    - Block-by-block nodata percentage (accurate across ALL pixels)
+    - Bit-depth efficiency analysis
+    - Data quality checks (empty, nodata conflict, extreme values)
+    - Raster type detection (DEM, RGB, categorical, etc.)
+    - COG tier compatibility
+
+    Merges data-phase results into header_result to produce a complete
+    RasterValidationResult-compatible dict.
+
+    Args:
+        data_params: Dict with:
+            - file_path: Local file path or SAS URL to read data from
+            - blob_name: Blob path (for logging/error messages)
+            - container_name: Container name (for logging/error messages)
+            - raster_type: Expected raster type ('auto', 'rgb', 'dem', etc.)
+            - strict_mode: If True, fail on warnings
+        header_result: The 'result' dict from validate_raster_header()
+
+    Returns:
+        dict: Complete validation result compatible with RasterValidationResult:
+            {
+                "success": True/False,
+                "result": {
+                    ...header fields...,
+                    "raster_type": RasterTypeInfo,
+                    "cog_tiers": COGTierInfo,
+                    "bit_depth_check": BitDepthCheck,
+                },
+                "error": "ERROR_CODE" (if failed),
+                "message": "Error description" (if failed)
+            }
+    """
+    import traceback
+
+    # Initialize logger
+    try:
+        from util_logger import LoggerFactory, ComponentType
+        logger = LoggerFactory.create_logger(ComponentType.SERVICE, "validate_raster_data")
+        logger.info("🚀 [DATA] Handler entry - validate_raster_data called")
+    except Exception as e:
+        print(f"❌ [DATA] Logger init failed: {e}", file=sys.stderr, flush=True)
+        return {
+            "success": False,
+            "error": "LOGGER_INIT_FAILED",
+            "message": f"Failed to initialize logger: {e}",
+        }
+
+    # Extract parameters
+    file_path = data_params.get('file_path')
+    blob_name = data_params.get('blob_name', 'unknown')
+    container_name = data_params.get('container_name', 'unknown')
+    raster_type_param = data_params.get('raster_type', 'auto')
+    strict_mode = data_params.get('strict_mode', False)
+
+    # Extract header metadata
+    dtype = header_result.get('dtype', 'unknown')
+    band_count = header_result.get('band_count', 1)
+    nodata = header_result.get('nodata')
+
+    if not file_path:
+        logger.error("❌ [DATA] file_path parameter is required")
+        return {
+            "success": False,
+            "error": "MISSING_PARAMETER",
+            "message": "file_path parameter is required for data validation",
+        }
+
+    try:
+        np, rasterio, ColorInterp, Window = _lazy_imports()
+    except Exception as e:
+        logger.error(f"❌ [DATA] Import error: {e}")
+        return {
+            "success": False,
+            "error": "IMPORT_ERROR",
+            "message": f"Failed to import dependencies: {e}",
+            "traceback": traceback.format_exc()
+        }
+
+    try:
+        # Open file for data reads
+        logger.info(f"🔄 [DATA] Opening file for data validation...")
+        with rasterio.open(file_path) as src:
+
+            # ============================================================
+            # STEP D1: Compute GDAL band statistics
+            # ============================================================
+            logger.info("🔄 [DATA] STEP D1: Computing GDAL band statistics...")
+            try:
+                band_stats = _compute_band_statistics(src)
+                stats_band1 = band_stats.get(1)
+                if stats_band1:
+                    logger.info(f"✅ [DATA] STEP D1: Band stats computed - "
+                                f"min={stats_band1['min']:.4f}, max={stats_band1['max']:.4f}")
+                else:
+                    logger.warning("⚠️ [DATA] STEP D1: Band 1 statistics unavailable")
+            except Exception as e:
+                logger.warning(f"⚠️ [DATA] STEP D1: Band statistics failed (non-fatal): {e}")
+                band_stats = {}
+
+            # ============================================================
+            # STEP D2: Compute accurate nodata percentage
+            # ============================================================
+            logger.info("🔄 [DATA] STEP D2: Computing nodata percentage (full scan)...")
+            try:
+                nodata_percent = _compute_nodata_percentage(src, nodata)
+                logger.info(f"✅ [DATA] STEP D2: Nodata percentage: {nodata_percent:.1f}%")
+            except Exception as e:
+                logger.warning(f"⚠️ [DATA] STEP D2: Nodata scan failed (non-fatal): {e}")
+                nodata_percent = 0.0
+
+            # Collect warnings from data phase
+            warnings = list(header_result.get('warnings', []))
+
+            # ============================================================
+            # STEP D3: Bit-depth efficiency check
+            # ============================================================
+            try:
+                logger.info("🔄 [DATA] STEP D3: Checking bit-depth efficiency...")
+                bit_depth_result = _check_bit_depth_efficiency(band_stats, dtype, strict_mode)
+
                 if "warning" in bit_depth_result:
                     warnings.append(bit_depth_result["warning"])
-                    logger.warning(f"   ⚠️  Bit-depth warning: {bit_depth_result['warning'].get('message', 'unknown')}")
-
-                    # CRITICAL warnings in strict mode = FAIL
                     if strict_mode and bit_depth_result["warning"].get("severity") == "CRITICAL":
-                        logger.error("❌ STEP 6 FAILED: CRITICAL bit-depth policy violation in strict mode")
+                        logger.error("❌ [DATA] STEP D3: CRITICAL bit-depth policy violation")
                         return {
                             "success": False,
                             "error": "BIT_DEPTH_POLICY_VIOLATION",
@@ -489,68 +651,53 @@ def validate_raster(params: dict) -> dict:
                             "container_name": container_name
                         }
 
-                logger.info(f"✅ STEP 6: Bit-depth check complete - efficient: {bit_depth_result.get('efficient', True)}")
+                logger.info(f"✅ [DATA] STEP D3: Bit-depth check - efficient: {bit_depth_result.get('efficient', True)}")
             except Exception as e:
-                logger.error(f"❌ STEP 6 FAILED: Bit-depth check error: {e}\n{traceback.format_exc()}")
-                return {
-                    "success": False,
-                    "error": "BIT_DEPTH_CHECK_ERROR",
-                    "message": f"Bit-depth check failed: {e}",
-                    "blob_name": blob_name,
-                    "container_name": container_name,
-                    "traceback": traceback.format_exc()
-                }
+                logger.error(f"❌ [DATA] STEP D3: Bit-depth check error: {e}\n{traceback.format_exc()}")
+                bit_depth_result = {"efficient": True, "current_dtype": str(dtype), "reason": f"Check failed: {e}"}
 
-            # ================================================================
-            # STEP 6b: DATA QUALITY CHECKS (Phase 4 - 06 FEB 2026)
-            # ================================================================
-            # Enhanced validation: nodata conflicts, extreme values, empty files
-            # Uses new RASTER_* error codes from BUG_REFORM
+            # ============================================================
+            # STEP D4: Data quality checks
+            # ============================================================
             try:
-                logger.info("🔄 STEP 6b: Performing data quality checks...")
-                from core.errors import ErrorCode, create_error_response
-
+                logger.info("🔄 [DATA] STEP D4: Performing data quality checks...")
                 data_quality_result = _check_data_quality(
-                    src, nodata, dtype, blob_name, container_name, strict_mode
+                    band_stats, nodata_percent, nodata, dtype,
+                    blob_name, container_name, strict_mode
                 )
 
                 if not data_quality_result["success"]:
-                    # Data quality check failed - return error
-                    logger.error(f"❌ STEP 6b FAILED: {data_quality_result.get('error', 'DATA_QUALITY_ERROR')}")
+                    logger.error(f"❌ [DATA] STEP D4: {data_quality_result.get('error_code') or data_quality_result.get('error', 'DATA_QUALITY_ERROR')}")
                     return data_quality_result
 
-                # Add any data quality warnings
                 for dq_warning in data_quality_result.get("warnings", []):
                     warnings.append(dq_warning)
-                    logger.warning(f"   ⚠️  Data quality warning: {dq_warning.get('message', 'unknown')}")
 
-                logger.info(f"✅ STEP 6b: Data quality checks passed")
-                logger.debug(f"   Nodata coverage: {data_quality_result.get('nodata_percent', 0):.1f}%")
-                logger.debug(f"   Value range: {data_quality_result.get('value_range', 'unknown')}")
-
+                logger.info(f"✅ [DATA] STEP D4: Data quality checks passed "
+                            f"(nodata: {nodata_percent:.1f}%)")
             except Exception as e:
-                logger.error(f"❌ STEP 6b FAILED: Data quality check error: {e}\n{traceback.format_exc()}")
-                # Non-critical - continue with warning
+                logger.error(f"❌ [DATA] STEP D4: Data quality check error: {e}\n{traceback.format_exc()}")
                 warnings.append({
                     "type": "DATA_QUALITY_CHECK_FAILED",
                     "severity": "LOW",
                     "message": f"Could not complete data quality checks: {e}"
                 })
 
-            # ================================================================
-            # STEP 7: RASTER TYPE DETECTION
-            # ================================================================
+            # ============================================================
+            # STEP D5: Raster type detection
+            # ============================================================
             try:
-                logger.info("🔄 STEP 7: Detecting raster type...")
-                type_result = _detect_raster_type(src, raster_type_param)
+                logger.info("🔄 [DATA] STEP D5: Detecting raster type...")
+                type_result = _detect_raster_type(src, band_stats, raster_type_param)
                 if not type_result["success"]:
-                    logger.error(f"❌ STEP 7 FAILED: Type detection failed - {type_result.get('message', 'unknown error')}")
+                    logger.error(f"❌ [DATA] STEP D5: Type detection failed")
                     return type_result
 
                 detected_type = type_result["detected_type"]
-                logger.info(f"✅ STEP 7: Raster type detected - {detected_type} (confidence: {type_result.get('confidence', 'UNKNOWN')})")
+                logger.info(f"✅ [DATA] STEP D5: Raster type: {detected_type} "
+                            f"(confidence: {type_result.get('confidence', 'UNKNOWN')})")
             except Exception as e:
-                logger.error(f"❌ STEP 7 FAILED: Type detection error: {e}\n{traceback.format_exc()}")
+                logger.error(f"❌ [DATA] STEP D5: Type detection error: {e}\n{traceback.format_exc()}")
                 return {
                     "success": False,
                     "error": "TYPE_DETECTION_ERROR",
@@ -560,76 +707,30 @@ def validate_raster(params: dict) -> dict:
                     "traceback": traceback.format_exc()
                 }
 
-            # ================================================================
-            # STEP 8: GET OPTIMAL COG SETTINGS
-            # ================================================================
+            # ============================================================
+            # STEP D6: Optimal COG settings
+            # ============================================================
             try:
-                logger.info("🔄 STEP 8: Determining optimal COG settings...")
                 optimal_settings = _get_optimal_cog_settings(detected_type)
-                logger.info(f"✅ STEP 8: Optimal settings determined - compression: {optimal_settings.get('compression', 'unknown')}")
             except Exception as e:
-                logger.error(f"❌ STEP 8 FAILED: COG settings error: {e}\n{traceback.format_exc()}")
-                return {
-                    "success": False,
-                    "error": "COG_SETTINGS_ERROR",
-                    "message": f"Failed to determine COG settings: {e}",
-                    "blob_name": blob_name,
-                    "container_name": container_name,
-                    "traceback": traceback.format_exc()
-                }
+                logger.warning(f"⚠️ [DATA] STEP D6: COG settings error (using defaults): {e}")
+                optimal_settings = {"compression": "deflate", "overview_resampling": "cubic", "reproject_resampling": "cubic"}
 
-            # ================================================================
-            # STEP 8b: DETERMINE APPLICABLE COG TIERS
-            # ================================================================
-            # Automatically detect which COG output tiers (VISUALIZATION, ANALYSIS,
-            # ARCHIVE) are compatible with this raster based on band count and data type.
-            #
-            # Why This Matters:
-            #   - JPEG (visualization tier) only works with RGB (3 bands, uint8)
-            #   - DEM, Landsat, RGBA rasters are incompatible with JPEG
-            #   - DEFLATE/LZW (analysis/archive) are universally compatible
-            #
-            # This metadata is used in Stage 2 COG creation to:
-            #   1. Validate user-requested tier is compatible
-            #   2. Auto-fallback to "analysis" if incompatible tier requested
-            #   3. Future: Multi-tier fan-out (create all compatible tiers)
-            #
-            # Examples:
-            #   RGB aerial photo (3 bands, uint8) → all 3 tiers available
-            #   DEM elevation (1 band, float32) → 2 tiers only (JPEG incompatible)
-            #   Landsat (8 bands, uint16) → 2 tiers only (JPEG incompatible)
-            #
-            # See: config.py → determine_applicable_tiers() for detection logic
-            # See: docs_claude/TIER_DETECTION_GUIDE.md for complete guide
-            # ================================================================
+            # ============================================================
+            # STEP D7: Determine applicable COG tiers
+            # ============================================================
             try:
-                logger.info("🔄 STEP 8b: Determining applicable COG tiers...")
                 from config import determine_applicable_tiers
-
-                # Determine which tiers are compatible with this raster
-                # Returns list of CogTier enums (e.g., [ANALYSIS, ARCHIVE] for DEM)
                 applicable_tiers = determine_applicable_tiers(band_count, str(dtype))
-
-                logger.info(f"✅ STEP 8b: Applicable tiers determined - {len(applicable_tiers)} tiers: {applicable_tiers}")
-
-                # Log tier compatibility details if not all 3 tiers available
-                if len(applicable_tiers) < 3:
-                    logger.info(f"   ℹ️  Tier compatibility: {band_count} bands, {dtype} → {', '.join(applicable_tiers)}")
-                    if 'visualization' not in applicable_tiers:
-                        logger.info(f"   ℹ️  JPEG visualization tier not compatible (requires RGB: 3 bands, uint8)")
-
+                logger.info(f"✅ [DATA] STEP D7: {len(applicable_tiers)} tiers: {applicable_tiers}")
             except Exception as e:
-                logger.error(f"❌ STEP 8b FAILED: Tier detection error: {e}\n{traceback.format_exc()}")
-                # Non-critical failure - default to all tiers if detection fails
-                # User may get error in Stage 2 if they request incompatible tier
+                logger.warning(f"⚠️ [DATA] STEP D7: Tier detection error: {e}")
                 applicable_tiers = ['visualization', 'analysis', 'archive']
-                logger.warning(f"   ⚠️  Using default tiers (detection failed): {applicable_tiers}")
 
-            # STEP 9: Build success result using Pydantic models (F7.21)
+            # ============================================================
+            # STEP D8: Build merged result
+            # ============================================================
             try:
-                logger.info("🔄 STEP 9: Building validation result with Pydantic models...")
-
-                # Build typed sub-models
                 raster_type_info = RasterTypeInfo(
                     detected_type=detected_type,
                     confidence=type_result.get("confidence", "UNKNOWN"),
@@ -654,33 +755,34 @@ def validate_raster(params: dict) -> dict:
                     potential_savings_percent=bit_depth_result.get("potential_savings_percent")
                 )
 
-                # Build memory estimation model if available
+                # Build memory estimation from header_result if available
                 memory_estimation_model = None
-                if memory_estimation and not memory_estimation.get("error"):
+                mem_est = header_result.get('memory_estimation')
+                if mem_est and not isinstance(mem_est, type(None)):
                     memory_estimation_model = MemoryEstimation(
-                        uncompressed_gb=memory_estimation.get("uncompressed_gb"),
-                        estimated_peak_gb=memory_estimation.get("estimated_peak_gb"),
-                        system_ram_gb=memory_estimation.get("system_ram_gb"),
-                        cpu_count=memory_estimation.get("cpu_count"),
-                        safe_threshold_gb=memory_estimation.get("safe_threshold_gb"),
-                        processing_strategy=memory_estimation.get("processing_strategy"),
-                        gdal_config=memory_estimation.get("gdal_config"),
-                        warnings=memory_estimation.get("warnings", [])
+                        uncompressed_gb=mem_est.get("uncompressed_gb") if isinstance(mem_est, dict) else getattr(mem_est, 'uncompressed_gb', None),
+                        estimated_peak_gb=mem_est.get("estimated_peak_gb") if isinstance(mem_est, dict) else getattr(mem_est, 'estimated_peak_gb', None),
+                        system_ram_gb=mem_est.get("system_ram_gb") if isinstance(mem_est, dict) else getattr(mem_est, 'system_ram_gb', None),
+                        cpu_count=mem_est.get("cpu_count") if isinstance(mem_est, dict) else getattr(mem_est, 'cpu_count', None),
+                        safe_threshold_gb=mem_est.get("safe_threshold_gb") if isinstance(mem_est, dict) else getattr(mem_est, 'safe_threshold_gb', None),
+                        processing_strategy=mem_est.get("processing_strategy") if isinstance(mem_est, dict) else getattr(mem_est, 'processing_strategy', None),
+                        gdal_config=mem_est.get("gdal_config") if isinstance(mem_est, dict) else getattr(mem_est, 'gdal_config', None),
+                        warnings=mem_est.get("warnings", []) if isinstance(mem_est, dict) else getattr(mem_est, 'warnings', []),
                     )
 
-                # Build the main validation data model
+                # Merge header fields with data fields
                 validation_data = RasterValidationData(
                     valid=True,
-                    source_blob=blob_name,
-                    container_name=container_name,
-                    source_crs=str(source_crs),
-                    crs_source=crs_source,
-                    bounds=list(bounds),
-                    shape=list(shape),
+                    source_blob=header_result.get('source_blob', blob_name),
+                    container_name=header_result.get('container_name', container_name),
+                    source_crs=header_result.get('source_crs', 'UNKNOWN'),
+                    crs_source=header_result.get('crs_source', 'file_metadata'),
+                    bounds=header_result.get('bounds', [0, 0, 0, 0]),
+                    shape=header_result.get('shape', [0, 0]),
                     band_count=band_count,
                     dtype=str(dtype),
                     data_type=str(dtype),
-                    size_mb=params.get('size_mb', 0),
+                    size_mb=header_result.get('size_mb', 0),
                     nodata=nodata,
                     raster_type=raster_type_info,
                     cog_tiers=cog_tier_info,
@@ -689,47 +791,79 @@ def validate_raster(params: dict) -> dict:
                     warnings=warnings
                 )
 
-                # Build the full result wrapper
                 result = RasterValidationResult(
                     success=True,
                     result=validation_data
                 )
 
-                logger.info(f"✅ STEP 9: Result built successfully (Pydantic validated)")
-                logger.info(f"✅ VALIDATION COMPLETE: Type={detected_type}, CRS={source_crs}, Tiers={len(applicable_tiers)}, Warnings={len(warnings)}")
+                logger.info(f"✅ [DATA] COMPLETE: Type={detected_type}, "
+                            f"Nodata={nodata_percent:.1f}%, Tiers={len(applicable_tiers)}")
 
-                # Memory checkpoint 3 (DEBUG_MODE only)
-                from util_logger import log_memory_checkpoint
-                log_memory_checkpoint(logger, "Validation complete",
-                                      context_id=task_id,
-                                      detected_type=detected_type,
-                                      warnings_count=len(warnings))
-
-                # Return as dict for backward compatibility with existing consumers
                 return result.model_dump()
 
             except Exception as e:
-                logger.error(f"❌ STEP 9 FAILED: Error building result: {e}\n{traceback.format_exc()}")
+                logger.error(f"❌ [DATA] Result build error: {e}\n{traceback.format_exc()}")
                 return {
                     "success": False,
                     "error": "RESULT_BUILD_ERROR",
-                    "message": f"Failed to build validation result: {e}",
+                    "message": f"Failed to build data validation result: {e}",
                     "blob_name": blob_name,
                     "container_name": container_name,
                     "traceback": traceback.format_exc()
                 }
 
     except Exception as e:
-        logger.error(f"❌ STEP 4+ FAILED: Unexpected error during validation: {e}\n{traceback.format_exc()}")
+        logger.error(f"❌ [DATA] Unexpected error: {e}\n{traceback.format_exc()}")
         return {
             "success": False,
             "error": "VALIDATION_ERROR",
             "error_type": type(e).__name__,
-            "message": f"Unexpected validation error: {e}",
+            "message": f"Unexpected data validation error: {e}",
             "blob_name": blob_name,
             "container_name": container_name,
             "traceback": traceback.format_exc()
         }
+
+
+def validate_raster(params: dict) -> dict:
+    """
+    Validate raster file for COG pipeline processing (backward-compatible wrapper).
+
+    Calls validate_raster_header() then validate_raster_data() in sequence.
+    Preserves the existing interface for handler registry and direct callers.
+
+    Args:
+        params: Task parameters dict with:
+            - blob_url: Azure blob URL with SAS token
+            - blob_name: Blob path (for logging)
+            - container_name: Container name (for logging)
+            - input_crs: (Optional) User-provided CRS override
+            - raster_type: (Optional) Expected raster type (auto, rgb, rgba, dem, etc.)
+            - strict_mode: (Optional) Fail on warnings
+            - _skip_validation: (Optional) TESTING ONLY - skip all validation
+
+    Returns:
+        dict: {
+            "success": True/False,
+            "result": {...validation metadata...},
+            "error": "ERROR_CODE" (if failed),
+            "message": "Error description" (if failed)
+        }
+    """
+    # Phase 1: Header validation (cheap, no pixel reads)
+    header_response = validate_raster_header(params)
+    if not header_response.get('success'):
+        return header_response
+
+    # Phase 2: Data validation (GDAL statistics, pixel analysis)
+    data_params = {
+        'file_path': params.get('blob_url'),
+        'blob_name': params.get('blob_name', 'unknown'),
+        'container_name': params.get('container_name', params.get('container', 'unknown')),
+        'raster_type': params.get('raster_type', 'auto'),
+        'strict_mode': params.get('strict_mode', False),
+    }
+    return validate_raster_data(data_params, header_response.get('result', {}))
 
 
 def _validate_crs(src, input_crs: Optional[str], bounds, skip_validation: bool = False) -> dict:
@@ -900,12 +1034,22 @@ def _check_bounds_sanity(crs, bounds) -> Optional[dict]:
     return None
 
 
-def _check_bit_depth_efficiency(src, dtype, strict_mode: bool) -> dict:
+def _check_bit_depth_efficiency(band_stats: dict, dtype: str, strict_mode: bool) -> dict:
     """
     Check if raster uses inefficient bit-depth.
 
+    Refactored 26 FEB 2026: Uses pre-computed GDAL band statistics instead
+    of reading a pixel window from the top-left corner.
+
+    Args:
+        band_stats: Pre-computed stats from _compute_band_statistics().
+                    {bidx: {"min", "max", "mean", "std"}} or {bidx: None}
+        dtype: Data type string (e.g., 'uint8', 'float32')
+        strict_mode: If True, CRITICAL warnings cause failure
+
     ORGANIZATIONAL POLICY: All 64-bit data types are flagged as CRITICAL.
     """
+    import numpy as np
 
     # ORGANIZATIONAL POLICY: Flag ALL 64-bit data types immediately
     if dtype in ['float64', 'int64', 'uint64', 'complex64', 'complex128']:
@@ -931,59 +1075,65 @@ def _check_bit_depth_efficiency(src, dtype, strict_mode: bool) -> dict:
             }
         }
 
-    # Sample data to analyze (for 32-bit and smaller types)
-    try:
-        np, rasterio, ColorInterp, Window = _lazy_imports()
-        sample_size = min(1000, src.width), min(1000, src.height)
-        sample = src.read(1, window=Window(0, 0, sample_size[0], sample_size[1]))
-        unique_values = np.unique(sample[~np.isnan(sample)])
-        value_range = (float(sample.min()), float(sample.max()))
-    except Exception as e:
+    # Use GDAL stats for value range analysis (replaces corner sample)
+    stats_band1 = band_stats.get(1)
+    if not stats_band1:
         from util_logger import LoggerFactory, ComponentType
         logger = LoggerFactory.create_logger(ComponentType.SERVICE, "validate_raster")
-        logger.warning(f"⚠️ VALIDATION BIT-DEPTH: Could not sample data: {e}")
+        logger.warning(f"⚠️ VALIDATION BIT-DEPTH: No band statistics available")
         return {
             "efficient": True,
             "current_dtype": str(dtype),
-            "reason": "Could not sample data for analysis"
+            "reason": "Could not compute statistics for analysis"
         }
+
+    min_val = stats_band1["min"]
+    max_val = stats_band1["max"]
+    std_val = stats_band1["std"]
+    value_range_span = max_val - min_val
 
     # Check for categorical data in float types
-    if dtype in ['float32', 'float16'] and len(unique_values) < 256:
-        if len(unique_values) <= 255:
-            recommended = "uint8"
-            savings = ((np.dtype(dtype).itemsize - 1) / np.dtype(dtype).itemsize) * 100
-        else:
-            recommended = "uint16"
-            savings = ((np.dtype(dtype).itemsize - 2) / np.dtype(dtype).itemsize) * 100
+    # Heuristic: small value range + low std/range ratio suggests discrete values
+    if dtype in ['float32', 'float16'] and value_range_span > 0:
+        # If std is very small relative to range, data is likely categorical
+        # (clustered around a few discrete values)
+        std_ratio = std_val / value_range_span if value_range_span > 0 else 0
 
-        from util_logger import LoggerFactory, ComponentType
-        logger = LoggerFactory.create_logger(ComponentType.SERVICE, "validate_raster")
-        logger.warning(f"⚠️ VALIDATION BIT-DEPTH: HIGH - Categorical {len(unique_values)} values in {dtype}")
-        return {
-            "efficient": False,
-            "current_dtype": str(dtype),
-            "recommended_dtype": recommended,
-            "reason": f"Categorical/discrete data with {len(unique_values)} unique values stored as {dtype}",
-            "unique_value_count": len(unique_values),
-            "potential_savings_percent": round(savings, 1),
-            "warning": {
-                "type": "INEFFICIENT_BIT_DEPTH",
-                "severity": "HIGH",
+        if std_ratio < 0.05 and value_range_span < 256:
+            # Likely categorical with few discrete values
+            estimated_categories = max(2, int(value_range_span) + 1)
+            if estimated_categories <= 255:
+                recommended = "uint8"
+                savings = ((np.dtype(dtype).itemsize - 1) / np.dtype(dtype).itemsize) * 100
+            else:
+                recommended = "uint16"
+                savings = ((np.dtype(dtype).itemsize - 2) / np.dtype(dtype).itemsize) * 100
+
+            from util_logger import LoggerFactory, ComponentType
+            logger = LoggerFactory.create_logger(ComponentType.SERVICE, "validate_raster")
+            logger.warning(f"⚠️ VALIDATION BIT-DEPTH: HIGH - Likely categorical data in {dtype}")
+            return {
+                "efficient": False,
                 "current_dtype": str(dtype),
                 "recommended_dtype": recommended,
+                "reason": f"Likely categorical data (range: {value_range_span:.0f}, std/range: {std_ratio:.3f}) stored as {dtype}",
                 "potential_savings_percent": round(savings, 1),
-                "message": f"Raster uses {dtype} for categorical data with {len(unique_values)} classes. "
-                           f"Converting to {recommended} would reduce size by {savings:.1f}%. "
-                           f"Consider optimizing source data before reprocessing."
+                "warning": {
+                    "type": "INEFFICIENT_BIT_DEPTH",
+                    "severity": "HIGH",
+                    "current_dtype": str(dtype),
+                    "recommended_dtype": recommended,
+                    "potential_savings_percent": round(savings, 1),
+                    "message": f"Raster uses {dtype} for likely categorical data (range: {value_range_span:.0f}). "
+                               f"Converting to {recommended} would reduce size by {savings:.1f}%. "
+                               f"Consider optimizing source data before reprocessing."
+                }
             }
-        }
 
-    # Check for integer data in float types
+    # Check for integer data in float types (all values are whole numbers)
     if dtype in ['float32', 'float16']:
-        if np.allclose(sample, np.round(sample), equal_nan=True):
-            min_val, max_val = value_range
-
+        # If min and max are both integers, likely integer data in float container
+        if min_val == int(min_val) and max_val == int(max_val):
             # Determine smallest int type that fits
             if min_val >= 0:
                 if max_val <= 255:
@@ -1010,7 +1160,7 @@ def _check_bit_depth_efficiency(src, dtype, strict_mode: bool) -> dict:
                 "current_dtype": str(dtype),
                 "recommended_dtype": recommended,
                 "reason": f"Integer data (range: {min_val} to {max_val}) stored as {dtype}",
-                "value_range": value_range,
+                "value_range": (min_val, max_val),
                 "potential_savings_percent": round(savings, 1),
                 "warning": {
                     "type": "INEFFICIENT_BIT_DEPTH",
@@ -1031,9 +1181,19 @@ def _check_bit_depth_efficiency(src, dtype, strict_mode: bool) -> dict:
     }
 
 
-def _detect_raster_type(src, user_type: str) -> dict:
+def _detect_raster_type(src, band_stats: dict, user_type: str) -> dict:
     """
-    Detect raster type from file characteristics.
+    Detect raster type from file characteristics and GDAL statistics.
+
+    Refactored 26 FEB 2026: Uses pre-computed band statistics instead of
+    reading pixel windows from the top-left corner. Still accesses src for
+    color_interp and band 4 alpha detection.
+
+    Args:
+        src: Open rasterio dataset (for color_interp, alpha band check)
+        band_stats: Pre-computed stats from _compute_band_statistics().
+                    {bidx: {"min", "max", "mean", "std"}} or {bidx: None}
+        user_type: User-specified raster type or 'auto'
 
     If user_type specified, validate file matches - FAIL if mismatch.
     """
@@ -1043,21 +1203,15 @@ def _detect_raster_type(src, user_type: str) -> dict:
 
     band_count = src.count
     dtype = src.dtypes[0]
-
-    # Sample data for analysis
-    try:
-        sample_size = min(1000, src.width), min(1000, src.height)
-        sample = src.read(1, window=Window(0, 0, sample_size[0], sample_size[1]))
-    except Exception as e:
-        from util_logger import LoggerFactory, ComponentType
-        logger = LoggerFactory.create_logger(ComponentType.SERVICE, "validate_raster")
-        logger.warning(f"⚠️ VALIDATION TYPE: Could not sample data: {e}")
-        sample = None
+    stats_band1 = band_stats.get(1)
 
     # Detect type from file characteristics
     detected_type = RasterType.UNKNOWN.value
     confidence = "LOW"
     evidence = []
+
+    from util_logger import LoggerFactory, ComponentType
+    logger = LoggerFactory.create_logger(ComponentType.SERVICE, "validate_raster_data")
 
     # RGB Detection (HIGH confidence)
     if band_count == 3 and dtype in ['uint8', 'uint16']:
@@ -1065,7 +1219,7 @@ def _detect_raster_type(src, user_type: str) -> dict:
         confidence = "HIGH"
         evidence.append(f"3 bands, {dtype} (standard RGB)")
 
-        # Check color interpretation
+        # Check color interpretation (header only, no pixel read)
         try:
             if src.colorinterp[0] == ColorInterp.red:
                 evidence.append("Color interpretation: Red/Green/Blue")
@@ -1075,91 +1229,67 @@ def _detect_raster_type(src, user_type: str) -> dict:
 
     # RGBA Detection (HIGH confidence) - CRITICAL FOR DRONE IMAGERY
     elif band_count == 4 and dtype in ['uint8', 'uint16']:
-        # Check if 4th band is alpha (low unique values)
-        try:
-            alpha_band = src.read(4, window=Window(0, 0, sample_size[0], sample_size[1]))
-            unique_alpha = np.unique(alpha_band)
-
-            if len(unique_alpha) <= 10:  # Alpha typically has few values
+        # Use band 4 stats to detect alpha (low std = few values = likely alpha)
+        stats_band4 = band_stats.get(4)
+        if stats_band4:
+            # Alpha band typically has very low std (mostly 0 or 255)
+            alpha_range = stats_band4["max"] - stats_band4["min"]
+            if alpha_range <= 255 and stats_band4["std"] < 50:
                 detected_type = RasterType.RGBA.value
                 confidence = "HIGH"
-                evidence.append(f"4 bands, {dtype}, alpha band detected ({len(unique_alpha)} unique values)")
+                evidence.append(f"4 bands, {dtype}, alpha band detected (std: {stats_band4['std']:.1f})")
             else:
-                # Could be NIR or multispectral
                 detected_type = RasterType.NIR.value
                 confidence = "MEDIUM"
                 evidence.append(f"4 bands, {dtype} (likely RGB + NIR)")
-        except Exception as e:
-            logger.debug(f"Could not analyze 4th band for alpha detection: {e}")
+        else:
             detected_type = RasterType.NIR.value
             confidence = "LOW"
             evidence.append(f"4 bands, {dtype} (could be RGBA or NIR)")
 
-    # Single-band continuous detection (12 FEB 2026: replaces DEM catch-all)
+    # Single-band continuous detection using GDAL stats
     # Order: vegetation_index → DEM (smooth) → continuous (catch-all)
-    elif band_count == 1 and dtype in ['float32', 'float64', 'int16', 'int32'] and sample is not None:
-        if sample.size >= 100:
-            try:
-                valid_mask = ~np.isnan(sample) if np.issubdtype(sample.dtype, np.floating) else np.ones_like(sample, dtype=bool)
-                valid_data = sample[valid_mask]
+    elif band_count == 1 and dtype in ['float32', 'float64', 'int16', 'int32'] and stats_band1:
+        data_min = stats_band1["min"]
+        data_max = stats_band1["max"]
+        data_std = stats_band1["std"]
+        value_range = data_max - data_min
 
-                if len(valid_data) > 0:
-                    data_min = float(valid_data.min())
-                    data_max = float(valid_data.max())
-                    value_range = data_max - data_min
+        # Vegetation index: float values bounded in [-1, 1]
+        if dtype in ['float32', 'float64'] and -1.0 <= data_min and data_max <= 1.0 and value_range > 0.1:
+            detected_type = RasterType.VEGETATION_INDEX.value
+            confidence = "HIGH"
+            evidence.append(f"Single-band {dtype}, range [{data_min:.2f}, {data_max:.2f}] (vegetation index)")
 
-                    # Vegetation index: float values bounded in [-1, 1]
-                    if dtype in ['float32', 'float64'] and -1.0 <= data_min and data_max <= 1.0 and value_range > 0.1:
-                        detected_type = RasterType.VEGETATION_INDEX.value
-                        confidence = "HIGH"
-                        evidence.append(f"Single-band {dtype}, range [{data_min:.2f}, {data_max:.2f}] (vegetation index)")
-
-                    # DEM: smooth gradients (spatial autocorrelation)
-                    elif value_range > 0:
-                        horizontal_diff = np.abs(np.diff(sample, axis=1)).mean()
-                        vertical_diff = np.abs(np.diff(sample, axis=0)).mean()
-                        smoothness = (horizontal_diff + vertical_diff) / (2 * value_range)
-
-                        if smoothness < 0.1:
-                            detected_type = RasterType.DEM.value
-                            confidence = "HIGH"
-                            evidence.append(f"Single-band {dtype}, smooth gradients (smoothness: {smoothness:.3f})")
-                        else:
-                            # Not smooth enough for DEM — generic continuous
-                            detected_type = RasterType.CONTINUOUS.value
-                            confidence = "MEDIUM"
-                            evidence.append(f"Single-band {dtype}, non-smooth (smoothness: {smoothness:.3f})")
-                    else:
-                        detected_type = RasterType.CONTINUOUS.value
-                        confidence = "LOW"
-                        evidence.append(f"Single-band {dtype}, zero range")
-                else:
-                    detected_type = RasterType.CONTINUOUS.value
-                    confidence = "LOW"
-                    evidence.append(f"Single-band {dtype}, no valid data in sample")
-            except Exception as e:
-                logger.debug(f"Could not analyze single-band data: {e}")
+        # DEM vs continuous: use std/range ratio as smoothness proxy
+        # Low std/range ratio = smooth gradients (DEM-like)
+        elif value_range > 0:
+            smoothness_proxy = data_std / value_range
+            if smoothness_proxy < 0.3:
+                detected_type = RasterType.DEM.value
+                confidence = "HIGH"
+                evidence.append(f"Single-band {dtype}, smooth data (std/range: {smoothness_proxy:.3f})")
+            else:
                 detected_type = RasterType.CONTINUOUS.value
-                confidence = "LOW"
-                evidence.append(f"Single-band {dtype} (analysis failed)")
+                confidence = "MEDIUM"
+                evidence.append(f"Single-band {dtype}, non-smooth (std/range: {smoothness_proxy:.3f})")
         else:
             detected_type = RasterType.CONTINUOUS.value
             confidence = "LOW"
-            evidence.append(f"Single-band {dtype}, insufficient sample")
+            evidence.append(f"Single-band {dtype}, zero range")
 
-    # Categorical Detection (HIGH confidence)
-    elif band_count == 1 and sample is not None:
-        try:
-            unique_values = np.unique(sample[~np.isnan(sample)])
+    # Categorical Detection using GDAL stats
+    elif band_count == 1 and stats_band1:
+        data_min = stats_band1["min"]
+        data_max = stats_band1["max"]
+        data_std = stats_band1["std"]
+        value_range = data_max - data_min
 
-            if len(unique_values) < 256:
-                # Check if values are integers
-                if np.allclose(sample, np.round(sample), equal_nan=True):
-                    detected_type = RasterType.CATEGORICAL.value
-                    confidence = "HIGH"
-                    evidence.append(f"Single-band, {len(unique_values)} discrete integer values")
-        except Exception as e:
-            logger.debug(f"Could not analyze unique values for categorical detection: {e}")
+        # Small integer range + low relative std suggests categorical
+        if value_range < 256 and data_min == int(data_min) and data_max == int(data_max):
+            detected_type = RasterType.CATEGORICAL.value
+            confidence = "HIGH"
+            evidence.append(f"Single-band, integer range [{int(data_min)}, {int(data_max)}] (categorical)")
 
     # Multispectral Detection (MEDIUM confidence)
     elif band_count >= 5:
@@ -1167,32 +1297,23 @@ def _detect_raster_type(src, user_type: str) -> dict:
         confidence = "MEDIUM"
         evidence.append(f"{band_count} bands (likely multispectral satellite)")
 
-        # Landsat specific
         if band_count in [7, 8, 9, 10, 11]:
             evidence.append("Band count matches Landsat")
-
-        # Sentinel-2 specific
         elif band_count in [12, 13]:
             evidence.append("Band count matches Sentinel-2")
 
-    from util_logger import LoggerFactory, ComponentType
-    logger = LoggerFactory.create_logger(ComponentType.SERVICE, "validate_raster")
     logger.info(f"🔍 VALIDATION TYPE: Detected {detected_type} ({confidence})")
 
     # User type validation (HIERARCHICAL — 12 FEB 2026)
-    # Domain types (flood_depth, hydrology, etc.) can refine compatible physical detections.
     if user_type and user_type != "auto":
         compatible = COMPATIBLE_OVERRIDES.get(user_type, set())
         if user_type == detected_type:
-            # Exact match — always ok
             pass
         elif detected_type in compatible:
-            # Domain type refining a physical detection — accepted
             logger.info(f"✅ VALIDATION TYPE: User override '{user_type}' accepted "
                         f"(compatible with detected '{detected_type}')")
             detected_type = user_type
         else:
-            # Genuine mismatch — fail
             logger.error(f"❌ VALIDATION TYPE: MISMATCH - User: {user_type}, Detected: {detected_type}")
             return {
                 "success": False,
@@ -1484,11 +1605,105 @@ def _estimate_memory_footprint(width: int, height: int, band_count: int, dtype: 
 
 
 # ============================================================================
+# GDAL STATISTICS HELPERS (26 FEB 2026 - Split validation)
+# ============================================================================
+# These use GDAL's built-in statistics computation (streaming, O(1) memory)
+# and block-by-block scanning for accurate nodata percentage across ALL pixels.
+# Replaces corner-sampling approach that caused false RASTER_EMPTY on
+# irregularly shaped rasters (e.g., Luang Prabang DTM).
+# ============================================================================
+
+def _compute_band_statistics(src) -> dict:
+    """
+    Compute per-band statistics using GDAL's streaming computation.
+
+    Uses src.statistics(bidx) which calls GDALComputeRasterStatistics
+    internally — reads all pixels in a streaming fashion with O(1) memory.
+
+    Args:
+        src: Open rasterio dataset
+
+    Returns:
+        dict: {band_index: {"min": float, "max": float, "mean": float, "std": float}}
+              Band indices are 1-based (matching rasterio convention).
+    """
+    from util_logger import LoggerFactory, ComponentType
+    logger = LoggerFactory.create_logger(ComponentType.SERVICE, "validate_raster_data")
+
+    band_stats = {}
+    for bidx in range(1, src.count + 1):
+        try:
+            stats = src.statistics(bidx)
+            band_stats[bidx] = {
+                "min": stats.min,
+                "max": stats.max,
+                "mean": stats.mean,
+                "std": stats.std,
+            }
+            logger.debug(f"   Band {bidx}: min={stats.min:.4f}, max={stats.max:.4f}, "
+                         f"mean={stats.mean:.4f}, std={stats.std:.4f}")
+        except Exception as e:
+            logger.warning(f"   Band {bidx}: statistics failed: {e}")
+            band_stats[bidx] = None
+
+    return band_stats
+
+
+def _compute_nodata_percentage(src, nodata) -> float:
+    """
+    Compute accurate nodata percentage by scanning ALL pixels block-by-block.
+
+    Uses src.block_windows(1) to iterate over internal TIFF tiles, reading
+    one block at a time (O(block_size) memory). This replaces the old approach
+    of sampling a 2000x2000 window from the top-left corner, which gave
+    inaccurate results for irregularly shaped rasters.
+
+    Args:
+        src: Open rasterio dataset
+        nodata: Nodata value from file metadata (can be None or NaN)
+
+    Returns:
+        float: Percentage of nodata pixels (0.0 - 100.0)
+    """
+    import numpy as np
+
+    if nodata is None and not any(
+        np.issubdtype(np.dtype(dt), np.floating) for dt in src.dtypes
+    ):
+        # No nodata defined and not float (no NaN possible) — assume 0% nodata
+        return 0.0
+
+    total_pixels = 0
+    nodata_pixels = 0
+    use_nan = nodata is not None and np.isnan(nodata)
+
+    for _, window in src.block_windows(1):
+        block = src.read(1, window=window)
+        total_pixels += block.size
+
+        if use_nan:
+            nodata_pixels += int(np.isnan(block).sum())
+        elif nodata is not None:
+            nodata_pixels += int((block == nodata).sum())
+        else:
+            # No nodata defined — check for NaN in float data
+            if np.issubdtype(block.dtype, np.floating):
+                nodata_pixels += int(np.isnan(block).sum())
+
+    if total_pixels == 0:
+        return 0.0
+
+    return (nodata_pixels / total_pixels) * 100.0
+
+
+# ============================================================================
 # DATA QUALITY CHECKS (Phase 4 - 06 FEB 2026 - BUG_REFORM)
+# Refactored 26 FEB 2026: Accept pre-computed stats instead of corner sampling
 # ============================================================================
 
 def _check_data_quality(
-    src,
+    band_stats: dict,
+    nodata_percent: float,
     nodata,
     dtype: str,
     blob_name: str,
@@ -1498,13 +1713,19 @@ def _check_data_quality(
     """
     Enhanced data quality checks for raster files (BUG_REFORM Phase 4).
 
+    Refactored 26 FEB 2026: Accepts pre-computed GDAL band statistics and
+    accurate nodata percentage (computed block-by-block across ALL pixels)
+    instead of sampling a 2000x2000 window from the top-left corner.
+
     Performs three critical quality checks:
     1. Mostly-empty detection: Files that are 99%+ nodata waste resources
     2. Nodata conflict detection: Nodata value appearing in real data causes holes
     3. Extreme value detection: DEMs with 1e38 values indicate unset nodata
 
     Args:
-        src: Open rasterio dataset
+        band_stats: Pre-computed stats from _compute_band_statistics().
+                    {bidx: {"min", "max", "mean", "std"}} or {bidx: None}
+        nodata_percent: Accurate nodata percentage from _compute_nodata_percentage()
         nodata: Nodata value from file metadata
         dtype: Data type string
         blob_name: Blob path for error messages
@@ -1527,67 +1748,26 @@ def _check_data_quality(
         RASTER_EXTREME_VALUES: DEM with 1e38 values
     """
     from core.errors import ErrorCode, create_error_response
-
-    np, rasterio, ColorInterp, Window = _lazy_imports()
+    import numpy as np
 
     warnings = []
-    nodata_percent = 0.0
-    value_range = (None, None)
 
-    # Sample a representative portion of the raster
-    try:
-        sample_width = min(2000, src.width)
-        sample_height = min(2000, src.height)
-        sample = src.read(1, window=Window(0, 0, sample_width, sample_height))
-
-        total_pixels = sample.size
-
-        # Create mask for nodata pixels
-        if nodata is not None:
-            if np.isnan(nodata):
-                nodata_mask = np.isnan(sample)
-            else:
-                nodata_mask = (sample == nodata)
-        else:
-            # No nodata defined - check for NaN
-            nodata_mask = np.isnan(sample)
-
-        nodata_count = np.sum(nodata_mask)
-        nodata_percent = (nodata_count / total_pixels) * 100
-
-        # Get valid data mask
-        valid_mask = ~nodata_mask
-        valid_data = sample[valid_mask]
-
-        if len(valid_data) > 0:
-            value_range = (float(np.nanmin(valid_data)), float(np.nanmax(valid_data)))
-        else:
-            value_range = (None, None)
-
-    except Exception as e:
-        from util_logger import LoggerFactory, ComponentType
-        logger = LoggerFactory.create_logger(ComponentType.SERVICE, "validate_raster")
-        logger.warning(f"⚠️ DATA_QUALITY: Could not sample data for quality checks: {e}")
-        return {
-            "success": True,
-            "nodata_percent": 0.0,
-            "value_range": (None, None),
-            "warnings": [{
-                "type": "DATA_QUALITY_SAMPLE_FAILED",
-                "severity": "LOW",
-                "message": f"Could not sample data for quality checks: {e}"
-            }]
-        }
+    # Extract value range from GDAL stats (band 1)
+    stats_band1 = band_stats.get(1)
+    if stats_band1:
+        value_range = (stats_band1["min"], stats_band1["max"])
+    else:
+        value_range = (None, None)
 
     # ========================================================================
     # CHECK 1: MOSTLY-EMPTY DETECTION (RASTER_EMPTY)
     # ========================================================================
-    # Files that are 99%+ nodata waste processing resources and storage
+    # Now uses accurate block-by-block nodata percentage (not corner sample)
     EMPTY_THRESHOLD_PERCENT = 99.0
 
     if nodata_percent >= EMPTY_THRESHOLD_PERCENT:
         from util_logger import LoggerFactory, ComponentType
-        logger = LoggerFactory.create_logger(ComponentType.SERVICE, "validate_raster")
+        logger = LoggerFactory.create_logger(ComponentType.SERVICE, "validate_raster_data")
         logger.error(f"🚨 DATA_QUALITY: File is {nodata_percent:.1f}% nodata (threshold: {EMPTY_THRESHOLD_PERCENT}%)")
 
         error_response = create_error_response(
@@ -1601,8 +1781,7 @@ def _check_data_quality(
             details={
                 "nodata_percent": round(nodata_percent, 1),
                 "threshold_percent": EMPTY_THRESHOLD_PERCENT,
-                "sample_size": f"{sample_width}x{sample_height}",
-                "valid_pixels": total_pixels - nodata_count
+                "scan_method": "full_block_scan",
             }
         )
         return error_response.model_dump()
@@ -1619,70 +1798,57 @@ def _check_data_quality(
     # ========================================================================
     # CHECK 2: NODATA CONFLICT DETECTION (RASTER_NODATA_CONFLICT)
     # ========================================================================
-    # Nodata value appearing in real data creates visual holes
-    # Only check if we have both nodata defined and valid data to compare
-    if nodata is not None and len(valid_data) > 0 and not np.isnan(nodata):
-        # Check if nodata value appears in the valid data range
-        # This indicates the nodata value was poorly chosen and may mask real data
-        if value_range[0] is not None and value_range[1] is not None:
-            # If nodata is within 1% of the valid data range, it's a potential conflict
-            data_range = value_range[1] - value_range[0]
-            if data_range > 0:
-                nodata_in_range = value_range[0] <= nodata <= value_range[1]
+    if nodata is not None and not np.isnan(nodata) and value_range[0] is not None and value_range[1] is not None:
+        data_range = value_range[1] - value_range[0]
+        if data_range > 0:
+            nodata_in_range = value_range[0] <= nodata <= value_range[1]
 
-                if nodata_in_range:
-                    # Check if nodata value actually appears in the sample (edge case check)
-                    # This is a strong indicator of data loss
-                    # Count pixels that equal nodata but might be real data
-                    from util_logger import LoggerFactory, ComponentType
-                    logger = LoggerFactory.create_logger(ComponentType.SERVICE, "validate_raster")
+            if nodata_in_range:
+                from util_logger import LoggerFactory, ComponentType
+                logger = LoggerFactory.create_logger(ComponentType.SERVICE, "validate_raster_data")
 
-                    if strict_mode:
-                        logger.error(f"🚨 DATA_QUALITY: Nodata value {nodata} is within valid data range [{value_range[0]}, {value_range[1]}]")
-                        error_response = create_error_response(
-                            ErrorCode.RASTER_NODATA_CONFLICT,
-                            f"Nodata value ({nodata}) falls within the valid data range of this file",
-                            remediation=(
-                                f"Your file's nodata value ({nodata}) is within the actual data range "
-                                f"[{value_range[0]:.4f} to {value_range[1]:.4f}]. This may cause data loss "
-                                f"as real values matching {nodata} will be treated as empty. "
-                                f"Change the nodata value in your source file to a value outside the data range, "
-                                f"or set nodata to None if your file has no actual nodata pixels."
-                            ),
-                            details={
-                                "nodata_value": nodata,
-                                "value_range_min": value_range[0],
-                                "value_range_max": value_range[1],
-                                "blob_name": blob_name
-                            }
-                        )
-                        return error_response.model_dump()
-                    else:
-                        # Warning only in non-strict mode
-                        warnings.append({
-                            "type": "NODATA_IN_DATA_RANGE",
-                            "severity": "HIGH",
+                if strict_mode:
+                    logger.error(f"🚨 DATA_QUALITY: Nodata value {nodata} is within valid data range [{value_range[0]}, {value_range[1]}]")
+                    error_response = create_error_response(
+                        ErrorCode.RASTER_NODATA_CONFLICT,
+                        f"Nodata value ({nodata}) falls within the valid data range of this file",
+                        remediation=(
+                            f"Your file's nodata value ({nodata}) is within the actual data range "
+                            f"[{value_range[0]:.4f} to {value_range[1]:.4f}]. This may cause data loss "
+                            f"as real values matching {nodata} will be treated as empty. "
+                            f"Change the nodata value in your source file to a value outside the data range, "
+                            f"or set nodata to None if your file has no actual nodata pixels."
+                        ),
+                        details={
                             "nodata_value": nodata,
-                            "value_range": value_range,
-                            "message": (
-                                f"Nodata value ({nodata}) is within valid data range "
-                                f"[{value_range[0]:.4f}, {value_range[1]:.4f}]. "
-                                f"This may cause real data to be treated as nodata."
-                            )
-                        })
+                            "value_range_min": value_range[0],
+                            "value_range_max": value_range[1],
+                            "blob_name": blob_name
+                        }
+                    )
+                    return error_response.model_dump()
+                else:
+                    warnings.append({
+                        "type": "NODATA_IN_DATA_RANGE",
+                        "severity": "HIGH",
+                        "nodata_value": nodata,
+                        "value_range": value_range,
+                        "message": (
+                            f"Nodata value ({nodata}) is within valid data range "
+                            f"[{value_range[0]:.4f}, {value_range[1]:.4f}]. "
+                            f"This may cause real data to be treated as nodata."
+                        )
+                    })
 
     # ========================================================================
     # CHECK 3: EXTREME VALUE DETECTION (RASTER_EXTREME_VALUES)
     # ========================================================================
-    # DEMs with values like 1e38 or 3.4e38 indicate uninitialized nodata
-    # These typically come from files where nodata wasn't properly set
-    EXTREME_THRESHOLD = 1e30  # Any value larger than this is suspicious
+    EXTREME_THRESHOLD = 1e30
 
     if value_range[1] is not None and abs(value_range[1]) >= EXTREME_THRESHOLD:
         from util_logger import LoggerFactory, ComponentType
-        logger = LoggerFactory.create_logger(ComponentType.SERVICE, "validate_raster")
+        logger = LoggerFactory.create_logger(ComponentType.SERVICE, "validate_raster_data")
 
-        # Check if this looks like unset nodata (common pattern: 3.4028235e+38 for float32 max)
         is_float_max = abs(value_range[1]) >= 3.4e38
         dtype_lower = str(dtype).lower()
         is_likely_dem = dtype_lower in ['float32', 'float64', 'int16', 'int32']
@@ -1711,7 +1877,7 @@ def _check_data_quality(
             )
             return error_response.model_dump()
 
-    # Also check for extremely negative values (can indicate unset nodata)
+    # Also check for extremely negative values
     if value_range[0] is not None and value_range[0] <= -EXTREME_THRESHOLD:
         warnings.append({
             "type": "EXTREME_NEGATIVE_VALUE",
@@ -1728,7 +1894,6 @@ def _check_data_quality(
         "success": True,
         "nodata_percent": round(nodata_percent, 1),
         "value_range": value_range,
-        "valid_pixel_count": total_pixels - nodata_count if nodata is not None else total_pixels,
-        "sample_size": f"{sample_width}x{sample_height}",
+        "scan_method": "full_block_scan",
         "warnings": warnings
     }

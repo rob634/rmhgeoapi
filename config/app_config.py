@@ -78,6 +78,7 @@ from pydantic import BaseModel, Field
 
 from .storage_config import StorageConfig
 from .database_config import DatabaseConfig, PublicDatabaseConfig
+from .docker_config import DockerConfig
 from .raster_config import RasterConfig
 from .vector_config import VectorConfig
 from .queue_config import QueueConfig
@@ -345,6 +346,11 @@ class AppConfig(BaseModel):
             PUBLIC_DB_HOST, PUBLIC_DB_NAME, PUBLIC_DB_SCHEMA,
             PUBLIC_DB_MANAGED_IDENTITY_NAME (all optional - uses app db if not set)
         """
+    )
+
+    docker: DockerConfig = Field(
+        default_factory=DockerConfig.from_environment,
+        description="Docker worker mount configuration (shared by raster and vector pipelines)"
     )
 
     raster: RasterConfig = Field(
@@ -1027,6 +1033,7 @@ class AppConfig(BaseModel):
             public_database=PublicDatabaseConfig.from_environment()
                 if (os.environ.get("PUBLIC_DB_HOST") or os.environ.get("PUBLIC_DB_NAME"))
                 else None,
+            docker=DockerConfig.from_environment(),
             raster=RasterConfig.from_environment(),
             vector=VectorConfig.from_environment(),
             queues=QueueConfig.from_environment(),

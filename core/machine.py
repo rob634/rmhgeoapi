@@ -1290,7 +1290,8 @@ class CoreMachine:
                 try:
                     self.state_manager.mark_task_failed(
                         task_message.task_id,
-                        f"Permanent failure ({error_type}): {result.error_details}"
+                        f"Permanent failure ({error_type}): {result.error_details}",
+                        result_data=result.result_data
                     )
                     self._mark_job_failed(
                         task_message.parent_job_id,

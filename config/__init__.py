@@ -12,6 +12,7 @@ Structure:
     ├── app_mode_config.py       # Multi-Function App deployment modes
     ├── storage_config.py        # COG tiers, multi-account storage
     ├── database_config.py       # PostgreSQL/PostGIS
+    ├── docker_config.py         # Docker worker mount settings (shared)
     ├── raster_config.py         # Raster pipeline settings
     ├── vector_config.py         # Vector pipeline settings
     ├── queue_config.py          # Service Bus queues
@@ -59,6 +60,7 @@ from .defaults import (
     AppModeDefaults,
     TaskRoutingDefaults,
     RasterDefaults,
+    DockerDefaults,
     VectorDefaults,
     AnalyticsDefaults,
     PlatformDefaults,
@@ -81,6 +83,7 @@ from .storage_config import (
     determine_applicable_tiers
 )
 from .database_config import DatabaseConfig, PublicDatabaseConfig, get_postgres_connection_string
+from .docker_config import DockerConfig
 from .raster_config import RasterConfig
 from .vector_config import VectorConfig
 from .queue_config import QueueConfig, QueueNames
@@ -157,10 +160,11 @@ def debug_config() -> dict:
             'public_database': config.public_database.debug_dict() if config.public_database else None,
             'public_database_configured': config.is_public_database_configured(),
 
-            # Raster (V0.8 - 24 JAN 2026)
+            # Docker worker (26 FEB 2026 - shared mount config)
+            'docker': config.docker.debug_dict(),
+
+            # Raster
             'raster': {
-                'use_etl_mount': config.raster.use_etl_mount,
-                'etl_mount_path': config.raster.etl_mount_path,
                 'raster_tiling_threshold_mb': config.raster.raster_tiling_threshold_mb,
                 'raster_tile_target_mb': config.raster.raster_tile_target_mb,
                 'raster_collection_max_files': config.raster.raster_collection_max_files,
@@ -221,6 +225,7 @@ __all__ = [
     'AppModeDefaults',
     'TaskRoutingDefaults',
     'RasterDefaults',
+    'DockerDefaults',
     'VectorDefaults',
     'AnalyticsDefaults',
     'PlatformDefaults',
@@ -254,6 +259,9 @@ __all__ = [
     'DatabaseConfig',
     'PublicDatabaseConfig',
     'get_postgres_connection_string',
+
+    # Docker
+    'DockerConfig',
 
     # Raster
     'RasterConfig',

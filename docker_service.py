@@ -957,7 +957,7 @@ def test_storage_connectivity() -> dict:
 
 def validate_etl_mount() -> Dict[str, Any]:
     """
-    Validate ETL mount at startup when RASTER_USE_ETL_MOUNT=true.
+    Validate ETL mount at startup when DOCKER_USE_ETL_MOUNT=true.
 
     Checks:
     1. Mount path exists
@@ -971,37 +971,39 @@ def validate_etl_mount() -> Dict[str, Any]:
         This function NEVER raises exceptions. Mount failures result in
         degraded state, not startup failure. The app continues running
         with reduced capability (smaller file processing only).
+
+    Updated 26 FEB 2026: Reads from config.docker (shared by raster + vector).
     """
     import shutil
 
     from config import get_config
     config = get_config()
-    raster_config = config.raster
+    docker_config = config.docker
 
     result = {
-        "mount_enabled": raster_config.use_etl_mount,
-        "mount_path": raster_config.etl_mount_path,
+        "mount_enabled": docker_config.use_etl_mount,
+        "mount_path": docker_config.etl_mount_path,
         "validated": False,
         "degraded": False,
         "error": None,
-        "original_setting": raster_config.use_etl_mount,  # Track what was requested
+        "original_setting": docker_config.use_etl_mount,  # Track what was requested
     }
 
-    if not raster_config.use_etl_mount:
+    if not docker_config.use_etl_mount:
         # User explicitly disabled mount - this is intentional degraded state
-        result["message"] = "ETL mount explicitly disabled via RASTER_USE_ETL_MOUNT=false"
+        result["message"] = "ETL mount explicitly disabled via DOCKER_USE_ETL_MOUNT=false"
         result["degraded"] = True
         logger.warning("=" * 60)
         logger.warning("⚠️ ETL MOUNT DISABLED (explicit setting)")
         logger.warning("=" * 60)
-        logger.warning("  RASTER_USE_ETL_MOUNT=false")
-        logger.warning("  Large raster processing may fail due to temp space limits")
-        logger.warning("  Set RASTER_USE_ETL_MOUNT=true and configure Azure Files mount")
+        logger.warning("  DOCKER_USE_ETL_MOUNT=false")
+        logger.warning("  Large file processing may fail due to temp space limits")
+        logger.warning("  Set DOCKER_USE_ETL_MOUNT=true and configure Azure Files mount")
         logger.warning("=" * 60)
         return result
 
     # Mount was requested (use_etl_mount=true) - validate it
-    mount_path = raster_config.etl_mount_path
+    mount_path = docker_config.etl_mount_path
     logger.info(f"📁 ETL Mount: Validating {mount_path}...")
 
     # Helper to handle validation failure - sets degraded state instead of raising
@@ -1013,16 +1015,16 @@ def validate_etl_mount() -> Dict[str, Any]:
         logger.error("=" * 60)
         logger.error("⚠️ ETL MOUNT VALIDATION FAILED - DEGRADED MODE")
         logger.error("=" * 60)
-        logger.error(f"  Requested: RASTER_USE_ETL_MOUNT=true")
+        logger.error(f"  Requested: DOCKER_USE_ETL_MOUNT=true")
         logger.error(f"  Mount path: {mount_path}")
         logger.error(f"  Error: {error_msg}")
         logger.error("")
         logger.error("  App will continue with REDUCED CAPABILITY:")
-        logger.error("  - Large raster files may fail processing")
+        logger.error("  - Large raster/vector files may fail processing")
         logger.error("  - GDAL temp files will use container's limited /tmp space")
         logger.error("")
         logger.error("  To fix: Configure Azure Files mount at the expected path")
-        logger.error("  Or set RASTER_USE_ETL_MOUNT=false to suppress this warning")
+        logger.error("  Or set DOCKER_USE_ETL_MOUNT=false to suppress this warning")
         logger.error("=" * 60)
         return result
 
@@ -1080,7 +1082,7 @@ def validate_etl_mount() -> Dict[str, Any]:
     result["message"] = "ETL mount validated successfully"
     logger.info(f"✅ ETL Mount: VALIDATED and ENABLED")
     logger.info(f"   Mount path: {mount_path}")
-    logger.info(f"   All raster temp files will use this mount")
+    logger.info(f"   All raster/vector temp files will use this mount")
     logger.info(f"   in_memory will be forced to False for disk-based processing")
 
     return result

@@ -78,6 +78,7 @@ from ..models.system_snapshot import SystemSnapshotRecord, SnapshotTriggerType  
 from ..models.external_refs import DatasetRefRecord  # External references (09 JAN 2026 - F7.8)
 from ..models.raster_metadata import CogMetadataRecord  # Raster metadata (09 JAN 2026 - F7.9)
 from ..models.asset import Asset, AssetRelease, ApprovalState, ClearanceState, ProcessingStatus  # V0.9 Asset/Release entity split (21 FEB 2026)
+from ..models.release_table import ReleaseTable  # Release→tables junction (26 FEB 2026)
 from ..models.platform_registry import Platform, DDH_PLATFORM  # Platform registry (29 JAN 2026 - V0.8)
 from ..models.artifact import Artifact, ArtifactStatus  # Artifact registry (20 JAN 2026)
 from ..models.external_service import ExternalService, ServiceType, ServiceStatus  # External service registry (22 JAN 2026)
@@ -1644,6 +1645,7 @@ INSERT INTO {schema}.{table} (
         composed.append(self.generate_table_from_model(Platform))  # Platform registry (29 JAN 2026 - V0.8) - before assets (FK)
         composed.append(self.generate_table_from_model(Asset))  # V0.9 Asset (21 FEB 2026)
         composed.append(self.generate_table_from_model(AssetRelease))  # V0.9 AssetRelease (21 FEB 2026)
+        composed.append(self.generate_table_from_model(ReleaseTable))  # Release→tables junction (26 FEB 2026)
 
         # Indexes - now using composed SQL
         composed.extend(self.generate_indexes_composed("jobs", JobRecord))
@@ -1664,6 +1666,7 @@ INSERT INTO {schema}.{table} (
         composed.extend(self.generate_indexes_from_model(Platform))  # Platform registry (29 JAN 2026 - V0.8)
         composed.extend(self.generate_indexes_from_model(Asset))  # V0.9 Asset (21 FEB 2026)
         composed.extend(self.generate_indexes_from_model(AssetRelease))  # V0.9 AssetRelease (21 FEB 2026)
+        composed.extend(self.generate_indexes_from_model(ReleaseTable))  # Release→tables junction (26 FEB 2026)
 
         # Functions - already sql.Composed objects
         composed.extend(self.generate_static_functions())

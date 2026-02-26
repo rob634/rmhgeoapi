@@ -273,7 +273,7 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                     stac_item_id=generate_stac_item_id(platform_req.dataset_id, platform_req.resource_id, platform_req.version_id),
                     stac_collection_id=job_params.get('collection_id', platform_req.dataset_id.lower()),
                     blob_path=None,  # Set by handler after COG is created (silver path, not bronze input)
-                    table_name=job_params.get('table_name') if platform_req.data_type.value == 'vector' else None,
+                    # table_name removed (26 FEB 2026) → written to app.release_tables after ordinal finalization
                     request_id=request_id,
                     suggested_version_id=platform_req.version_id,
                 )
@@ -351,8 +351,19 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                     job_params['table_name'] = final_table
                     job_params['stac_item_id'] = final_stac
 
+                    # Write table name to junction table (single source of truth)
+                    from infrastructure import ReleaseTableRepository
+                    release_table_repo = ReleaseTableRepository()
+                    release_table_repo.create(
+                        release_id=release.release_id,
+                        table_name=final_table,
+                        geometry_type='UNKNOWN',  # Set by ETL handler after processing
+                        table_role='primary',
+                    )
+
+                    # Still update stac_item_id on release (not a table field)
                     asset_service.update_physical_outputs(
-                        release.release_id, table_name=final_table, stac_item_id=final_stac
+                        release.release_id, stac_item_id=final_stac
                     )
                     logger.info(f"  Finalized vector names: table={final_table}, stac={final_stac} (ord={ordinal})")
 

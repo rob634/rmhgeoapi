@@ -592,6 +592,7 @@ class AssetApprovalService:
                     'error': 'ADF not configured (missing ADF_SUBSCRIPTION_ID or ADF_FACTORY_NAME)'
                 }
 
+            from infrastructure import ReleaseTableRepository
             result = adf_repo.trigger_pipeline(
                 pipeline_name='export_to_public',
                 parameters={
@@ -600,7 +601,7 @@ class AssetApprovalService:
                     'stac_item_id': release.stac_item_id,
                     'stac_collection_id': release.stac_collection_id,
                     'data_type': 'raster' if release.blob_path else 'vector',
-                    'table_name': release.table_name,
+                    'table_names': ReleaseTableRepository().get_table_names(release.release_id),
                     'blob_path': release.blob_path
                 }
             )

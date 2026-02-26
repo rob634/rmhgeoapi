@@ -123,7 +123,7 @@ class ReleaseRepository(PostgreSQLRepository):
                             version_id, suggested_version_id, version_ordinal,
                             revision, previous_release_id,
                             is_latest, is_served, request_id,
-                            blob_path, table_name, stac_item_id, stac_collection_id,
+                            blob_path, stac_item_id, stac_collection_id,
                             stac_item_json, content_hash, source_file_hash, output_file_hash,
                             output_mode, tile_count, search_id,
                             job_id, processing_status, processing_started_at,
@@ -138,7 +138,7 @@ class ReleaseRepository(PostgreSQLRepository):
                             %s, %s, %s,
                             %s, %s,
                             %s, %s, %s,
-                            %s, %s, %s, %s,
+                            %s, %s, %s,
                             %s, %s, %s, %s,
                             %s, %s, %s,
                             %s, %s, %s,
@@ -163,8 +163,8 @@ class ReleaseRepository(PostgreSQLRepository):
                         release.revision, release.previous_release_id,
                         # Flags
                         release.is_latest, release.is_served, release.request_id,
-                        # Physical outputs
-                        release.blob_path, release.table_name,
+                        # Physical outputs (table_name removed → app.release_tables)
+                        release.blob_path,
                         release.stac_item_id, release.stac_collection_id,
                         release.stac_item_json, release.content_hash,
                         release.source_file_hash, release.output_file_hash,
@@ -233,7 +233,7 @@ class ReleaseRepository(PostgreSQLRepository):
                             version_id, suggested_version_id, version_ordinal,
                             revision, previous_release_id,
                             is_latest, is_served, request_id,
-                            blob_path, table_name, stac_item_id, stac_collection_id,
+                            blob_path, stac_item_id, stac_collection_id,
                             stac_item_json, content_hash, source_file_hash, output_file_hash,
                             output_mode, tile_count, search_id,
                             job_id, processing_status, processing_started_at,
@@ -248,7 +248,7 @@ class ReleaseRepository(PostgreSQLRepository):
                             %s, %s, %s,
                             %s, %s,
                             %s, %s, %s,
-                            %s, %s, %s, %s,
+                            %s, %s, %s,
                             %s, %s, %s, %s,
                             %s, %s, %s,
                             %s, %s, %s,
@@ -270,7 +270,7 @@ class ReleaseRepository(PostgreSQLRepository):
                         release.version_ordinal,
                         release.revision, release.previous_release_id,
                         release.is_latest, release.is_served, release.request_id,
-                        release.blob_path, release.table_name,
+                        release.blob_path,
                         release.stac_item_id, release.stac_collection_id,
                         release.stac_item_json, release.content_hash,
                         release.source_file_hash, release.output_file_hash,
@@ -985,7 +985,6 @@ class ReleaseRepository(PostgreSQLRepository):
         self,
         release_id: str,
         blob_path: str = None,
-        table_name: str = None,
         stac_item_id: str = None,
         content_hash: str = None,
         source_file_hash: str = None,
@@ -1000,10 +999,11 @@ class ReleaseRepository(PostgreSQLRepository):
         Builds the SET clause dynamically from provided arguments.
         Always includes updated_at = NOW().
 
+        Note: table_name removed (26 FEB 2026) — now in app.release_tables.
+
         Args:
             release_id: Release to update
             blob_path: Azure Blob Storage path for raster outputs
-            table_name: PostGIS table name for vector outputs
             stac_item_id: STAC item identifier
             content_hash: Hash of processed output content
             source_file_hash: Hash of original source file
@@ -1021,7 +1021,6 @@ class ReleaseRepository(PostgreSQLRepository):
 
         field_map = {
             'blob_path': blob_path,
-            'table_name': table_name,
             'stac_item_id': stac_item_id,
             'content_hash': content_hash,
             'source_file_hash': source_file_hash,
@@ -1358,9 +1357,8 @@ class ReleaseRepository(PostgreSQLRepository):
             is_latest=row.get('is_latest', False),
             is_served=row.get('is_served', True),
             request_id=row.get('request_id'),
-            # Physical outputs
+            # Physical outputs (table_name removed → app.release_tables)
             blob_path=row.get('blob_path'),
-            table_name=row.get('table_name'),
             stac_item_id=row.get('stac_item_id', ''),
             stac_collection_id=row.get('stac_collection_id', ''),
             stac_item_json=row.get('stac_item_json'),

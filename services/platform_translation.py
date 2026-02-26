@@ -130,21 +130,24 @@ def get_unpublish_params_from_request(request: ApiRequest, data_type: str) -> di
         Dict with unpublish parameters (table_name or stac_item_id/collection_id)
     """
     if data_type == "vector":
-        # Read stored table_name from Release (authoritative source)
-        table_name = None
+        # Read table names from release_tables junction (authoritative source)
+        table_names = []
         if request.job_id:
-            from infrastructure import ReleaseRepository
+            from infrastructure import ReleaseRepository, ReleaseTableRepository
             release_repo = ReleaseRepository()
             release = release_repo.get_by_job_id(request.job_id)
-            if release and release.table_name:
-                table_name = release.table_name
+            if release:
+                release_table_repo = ReleaseTableRepository()
+                table_names = release_table_repo.get_table_names(release.release_id)
 
-        if not table_name:
+        if not table_names:
             # Fallback: reconstruct (pre-ordinal data only)
             table_name = generate_table_name(request.dataset_id, request.resource_id, request.version_id)
-            logger.warning(f"Reconstructed table_name (no release): {table_name}")
+            logger.warning(f"Reconstructed table_name (no release_tables entry): {table_name}")
+            table_names = [table_name]
 
-        return {'table_name': table_name}
+        # Return all table names — unpublish handler must drop all of them
+        return {'table_names': table_names, 'table_name': table_names[0]}
     elif data_type == "raster":
         stac_item_id = generate_stac_item_id(request.dataset_id, request.resource_id, request.version_id)
         collection_id = request.dataset_id

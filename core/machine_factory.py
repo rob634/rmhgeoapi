@@ -240,10 +240,30 @@ def _default_platform_callback(job_id: str, job_type: str, status: str, result: 
             if status == 'completed':
                 outputs = {}
 
-                # Vector: table_name from result
+                # Vector: table_name from result → write to release_tables
                 table_name = result.get('table_name')
                 if table_name:
-                    outputs['table_name'] = table_name
+                    from infrastructure import ReleaseTableRepository
+                    release_table_repo = ReleaseTableRepository()
+                    # Check if already exists (submit trigger may have created a placeholder)
+                    existing = release_table_repo.get_tables(release.release_id)
+                    if existing:
+                        # Update feature count from result
+                        total_rows = result.get('total_rows', 0)
+                        if total_rows:
+                            release_table_repo.update_feature_count(
+                                release.release_id, existing[0].table_name, total_rows
+                            )
+                    else:
+                        # Create entry (fallback if submit didn't create one)
+                        geom_type = result.get('geometry_type', 'UNKNOWN')
+                        release_table_repo.create(
+                            release_id=release.release_id,
+                            table_name=table_name,
+                            geometry_type=geom_type,
+                            feature_count=result.get('total_rows', 0),
+                            table_role='primary',
+                        )
 
                 # Raster: blob_path from result
                 cog_blob = result.get('cog', {}).get('cog_blob') if isinstance(result.get('cog'), dict) else None

@@ -743,6 +743,13 @@ def _build_single_status_response(
     return result
 
 
+def _get_release_table_names(release_id: str) -> list[str]:
+    """Get table names for a release from the junction table."""
+    from infrastructure import ReleaseTableRepository
+    repo = ReleaseTableRepository()
+    return repo.get_table_names(release_id)
+
+
 def _build_version_summary(releases: list) -> list:
     """
     Build compact version summary from AssetRelease objects.
@@ -770,7 +777,7 @@ def _build_version_summary(releases: list) -> list:
             "revision": release.revision,
             "created_at": release.created_at.isoformat() if release.created_at else None,
             "blob_path": getattr(release, 'blob_path', None),
-            "table_name": getattr(release, 'table_name', None),
+            "table_names": _get_release_table_names(release.release_id),
             "stac_item_id": getattr(release, 'stac_item_id', None),
             "stac_collection_id": getattr(release, 'stac_collection_id', None),
         })
@@ -819,8 +826,10 @@ def _build_outputs_block(release, job_result: Optional[dict] = None) -> Optional
         outputs["container"] = container or "silver-cogs"
 
     # Vector outputs
-    if release.table_name:
-        outputs["table_name"] = release.table_name
+    table_names = _get_release_table_names(release.release_id)
+    if table_names:
+        outputs["table_names"] = table_names
+        outputs["table_name"] = table_names[0]  # Primary for backward-compat in API response
         outputs["schema"] = "geo"
 
     return outputs
@@ -861,11 +870,24 @@ def _build_services_block(release, data_type: str) -> Optional[dict]:
         services["tiles"] = f"{titiler_base}/cog/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}.png?url={cog_url}"
         services["viewer"] = f"{titiler_base}/cog/WebMercatorQuad/map.html?url={cog_url}"
 
-    elif data_type == "vector" and release.table_name:
-        tipg_base = config.tipg_base_url
-        qualified = f"geo.{release.table_name}" if '.' not in release.table_name else release.table_name
-        services["collection"] = f"{tipg_base}/collections/{qualified}"
-        services["items"] = f"{tipg_base}/collections/{qualified}/items"
+    elif data_type == "vector":
+        table_names = _get_release_table_names(release.release_id)
+        if table_names:
+            tipg_base = config.tipg_base_url
+            # Return URLs for ALL tables (multi-table releases)
+            if len(table_names) == 1:
+                qualified = f"geo.{table_names[0]}"
+                services["collection"] = f"{tipg_base}/collections/{qualified}"
+                services["items"] = f"{tipg_base}/collections/{qualified}/items"
+            else:
+                services["collections"] = []
+                for tn in table_names:
+                    qualified = f"geo.{tn}"
+                    services["collections"].append({
+                        "table_name": tn,
+                        "collection": f"{tipg_base}/collections/{qualified}",
+                        "items": f"{tipg_base}/collections/{qualified}/items",
+                    })
 
     # STAC URLs (both raster and vector)
     if release.stac_collection_id:
@@ -920,9 +942,15 @@ def _build_approval_block(release, asset_id: str, data_type: str) -> Optional[di
         approval["viewer_url"] = f"{platform_base}/api/interface/raster-viewer?url={cog_url}&asset_id={asset_id}"
         approval["embed_url"] = f"{platform_base}/api/interface/raster-viewer?url={cog_url}&asset_id={asset_id}&embed=true"
 
-    elif data_type == "vector" and release.table_name:
-        approval["viewer_url"] = f"{platform_base}/api/interface/vector-viewer?collection={release.table_name}&asset_id={asset_id}"
-        approval["embed_url"] = f"{platform_base}/api/interface/vector-viewer?collection={release.table_name}&asset_id={asset_id}&embed=true"
+    elif data_type == "vector":
+        table_names = _get_release_table_names(release.release_id)
+        if table_names:
+            # Use first/primary table for viewer URLs
+            primary_table = table_names[0]
+            approval["viewer_url"] = f"{platform_base}/api/interface/vector-viewer?collection={primary_table}&asset_id={asset_id}"
+            approval["embed_url"] = f"{platform_base}/api/interface/vector-viewer?collection={primary_table}&asset_id={asset_id}&embed=true"
+            if len(table_names) > 1:
+                approval["all_tables"] = table_names
 
     return approval
 

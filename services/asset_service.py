@@ -157,7 +157,6 @@ class AssetService:
         stac_item_id: str,
         stac_collection_id: str,
         blob_path: Optional[str] = None,
-        table_name: Optional[str] = None,
         job_id: Optional[str] = None,
         request_id: Optional[str] = None,
         suggested_version_id: Optional[str] = None,
@@ -174,12 +173,13 @@ class AssetService:
         approval_state=PENDING_REVIEW and processing_status=PENDING.
         version_ordinal is set at creation (reserved slot), not at approval.
 
+        Note: table_name removed (26 FEB 2026) — now in app.release_tables.
+
         Args:
             asset_id: Parent asset identifier
             stac_item_id: STAC item identifier
             stac_collection_id: STAC collection identifier
             blob_path: Azure Blob path for raster outputs
-            table_name: PostGIS table name for vector outputs
             job_id: Processing job identifier
             request_id: API request identifier for audit trail
             suggested_version_id: Submitter's suggested version (metadata only)
@@ -211,9 +211,8 @@ class AssetService:
             is_latest=False,
             is_served=True,
             request_id=request_id,
-            # Physical outputs
+            # Physical outputs (table_name removed → app.release_tables)
             blob_path=blob_path,
-            table_name=table_name,
             stac_item_id=stac_item_id,
             stac_collection_id=stac_collection_id,
             # Processing lifecycle
@@ -239,7 +238,6 @@ class AssetService:
         stac_item_id: str,
         stac_collection_id: str,
         blob_path: Optional[str] = None,
-        table_name: Optional[str] = None,
         job_id: Optional[str] = None,
         request_id: Optional[str] = None,
         suggested_version_id: Optional[str] = None,
@@ -263,13 +261,14 @@ class AssetService:
            - New version workflow (succeeding release)
            - Return (new_release, "new_version")
 
+        Note: table_name removed (26 FEB 2026) — now in app.release_tables.
+
         Args:
             asset_id: Parent asset identifier
             overwrite: If True, allow overwriting existing draft
             stac_item_id: STAC item identifier
             stac_collection_id: STAC collection identifier
             blob_path: Azure Blob path for raster outputs
-            table_name: PostGIS table name for vector outputs
             job_id: Processing job identifier
             request_id: API request identifier
             suggested_version_id: Submitter's suggested version (metadata only)
@@ -332,7 +331,6 @@ class AssetService:
                 stac_item_id=stac_item_id,
                 stac_collection_id=stac_collection_id,
                 blob_path=blob_path,
-                table_name=table_name,
                 job_id=job_id,
                 request_id=request_id,
                 suggested_version_id=suggested_version_id,
@@ -543,7 +541,6 @@ class AssetService:
         self,
         release_id: str,
         blob_path: Optional[str] = None,
-        table_name: Optional[str] = None,
         stac_item_id: Optional[str] = None,
         content_hash: Optional[str] = None,
         source_file_hash: Optional[str] = None,
@@ -553,11 +550,11 @@ class AssetService:
         Update physical output fields on a release.
 
         Only provided fields are updated (dynamic SET clause).
+        Note: table_name removed (26 FEB 2026) — now in app.release_tables.
 
         Args:
             release_id: Release to update
             blob_path: Azure Blob Storage path for raster outputs
-            table_name: PostGIS table name for vector outputs
             stac_item_id: STAC item identifier
             content_hash: Hash of processed output content
             source_file_hash: Hash of original source file
@@ -569,7 +566,6 @@ class AssetService:
         return self.release_repo.update_physical_outputs(
             release_id=release_id,
             blob_path=blob_path,
-            table_name=table_name,
             stac_item_id=stac_item_id,
             content_hash=content_hash,
             source_file_hash=source_file_hash,

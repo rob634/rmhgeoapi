@@ -436,7 +436,14 @@ class WDPAHandler:
             handler = VectorToPostGISHandler()
 
             # Prepare the GeoDataFrame (reproject, clean columns, etc.)
-            gdf = handler.prepare_gdf(gdf)
+            prepared_groups = handler.prepare_gdf(gdf)
+            # WDPA is always single-type (polygons) — take the one entry
+            if len(prepared_groups) != 1:
+                raise ValueError(
+                    f"WDPA data unexpectedly contains {len(prepared_groups)} geometry types: "
+                    f"{list(prepared_groups.keys())}. Expected single type."
+                )
+            gdf = list(prepared_groups.values())[0]
 
             # Full replace: TRUNCATE then INSERT
             # First, truncate the target table

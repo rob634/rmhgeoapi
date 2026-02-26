@@ -40,6 +40,7 @@ Exports:
 """
 
 from typing import Dict, Any, Optional, List
+import os
 import time
 import logging
 import traceback
@@ -157,26 +158,83 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
         })
         logger.info(f"[{job_id[:8]}] Validation: {event_name} - {details}")
 
+    # =========================================================================
+    # MOUNT STREAMING SETUP (26 FEB 2026)
+    # =========================================================================
+    # Stream source blob to mount if available, avoiding full RAM copy.
+    # On failure: fall back to in-memory loading (degraded but functional).
+    mount_source_path = None
+    mount_paths = None
+
+    if config.docker.use_etl_mount:
+        try:
+            import os
+            mount_base = os.path.join(config.docker.etl_mount_path, f"vector_{job_id[:8]}")
+            source_dir = os.path.join(mount_base, "source")
+            extract_dir = os.path.join(mount_base, "extract")
+            os.makedirs(source_dir, exist_ok=True)
+            os.makedirs(extract_dir, exist_ok=True)
+
+            # Verify mount is writable
+            test_file = os.path.join(source_dir, ".write-test")
+            with open(test_file, "w") as f:
+                f.write("ok")
+            os.remove(test_file)
+
+            # Stream blob to mount
+            from infrastructure.blob import BlobRepository
+            blob_repo = BlobRepository.for_zone("bronze")
+            dest_path = os.path.join(source_dir, os.path.basename(blob_name))
+
+            logger.info(f"[{job_id[:8]}] Streaming {blob_name} to mount: {dest_path}")
+            blob_repo.stream_blob_to_mount(
+                container_name, blob_name, dest_path, chunk_size_mb=32
+            )
+
+            mount_source_path = dest_path
+            mount_paths = {"base": mount_base, "source": source_dir, "extract": extract_dir}
+
+            file_size = os.path.getsize(dest_path)
+            logger.info(
+                f"[{job_id[:8]}] Streamed to mount: {file_size / (1024*1024):.1f}MB "
+                f"({dest_path})"
+            )
+        except Exception as mount_err:
+            logger.warning(
+                f"[{job_id[:8]}] Mount streaming failed, falling back to in-memory: {mount_err}"
+            )
+            mount_source_path = None
+            mount_paths = None
+
     try:
         # =====================================================================
         # PHASE 1: Load and Validate Source File
         # =====================================================================
         logger.info(f"[{job_id[:8]}] Phase 1: Loading and validating source file")
 
-        gdf, load_info, validation_info, warnings = _load_and_validate_source(
+        # Build extra converter params for mount-based ZIP extraction
+        mount_converter_extras = {}
+        if mount_paths and file_extension in ('shp', 'zip', 'kmz'):
+            mount_converter_extras['extract_dir'] = mount_paths['extract']
+
+        prepared_groups, load_info, validation_info, warnings = _load_and_validate_source(
             blob_name=blob_name,
             container_name=container_name,
             file_extension=file_extension,
             parameters=parameters,
             job_id=job_id,
-            event_callback=emit_validation_event
+            event_callback=emit_validation_event,
+            mount_source_path=mount_source_path,
+            mount_converter_extras=mount_converter_extras,
         )
         data_warnings.extend(warnings)
 
+        total_features = sum(len(g) for g in prepared_groups.values())
         checkpoint("validated", {
-            "features": len(gdf),
+            "features": total_features,
+            "geometry_groups": len(prepared_groups),
+            "group_counts": {k: len(v) for k, v in prepared_groups.items()},
             "crs": load_info['original_crs'],
-            "geometry_type": validation_info.get('geometry_type'),
             "columns": load_info['columns'],
             "file_size_mb": load_info['file_size_mb']
         })
@@ -185,206 +243,52 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
         _record_validation_events(job_id, validation_events)
 
         # =====================================================================
-        # PHASE 2: Create PostGIS Table and Metadata
+        # PHASES 2-4: Process each geometry type into its own table
         # =====================================================================
-        logger.info(f"[{job_id[:8]}] Phase 2: Creating PostGIS table")
+        is_split = len(prepared_groups) > 1
+        table_results = []
+        grand_total_rows = 0
 
-        table_result = _create_table_and_metadata(
-            gdf=gdf,
-            table_name=table_name,
-            schema=schema,
-            overwrite=overwrite,
-            parameters=parameters,
-            load_info=load_info,
-            job_id=job_id
-        )
+        for suffix, sub_gdf in prepared_groups.items():
+            # Suffix only when multiple geometry types
+            current_table = f"{table_name}_{suffix}" if is_split else table_name
 
-        checkpoint("table_created", {
-            "table": f"{schema}.{table_name}",
-            "geometry_type": table_result['geometry_type'],
-            "srid": table_result['srid']
-        })
-
-        # =====================================================================
-        # PHASE 2.5: Create Default Style
-        # =====================================================================
-        logger.info(f"[{job_id[:8]}] Phase 2.5: Creating default style")
-
-        style_result = _create_default_style(
-            table_name=table_name,
-            geometry_type=table_result['geometry_type'],
-            style_params=parameters.get('style'),
-            job_id=job_id
-        )
-
-        checkpoint("style_created", style_result)
-
-        # =====================================================================
-        # PHASE 3: Upload Chunks (with per-chunk checkpoints)
-        # =====================================================================
-        logger.info(f"[{job_id[:8]}] Phase 3: Uploading data in chunks")
-
-        upload_result = _upload_chunks_with_checkpoints(
-            gdf=gdf,
-            table_name=table_name,
-            schema=schema,
-            chunk_size=chunk_size,
-            job_id=job_id,
-            checkpoint_fn=checkpoint
-        )
-
-        # =====================================================================
-        # PHASE 3.5: Deferred Indexes + ANALYZE
-        # =====================================================================
-        # Build indexes after all data is loaded (faster than pre-insert).
-        # Then run ANALYZE so the query planner has statistics immediately.
-        # =====================================================================
-        logger.info(f"[{job_id[:8]}] Phase 3.5: Creating deferred indexes")
-        from services.vector.postgis_handler import VectorToPostGISHandler
-        _post_handler = VectorToPostGISHandler()
-
-        indexes = parameters.get('indexes', {'spatial': True, 'attributes': [], 'temporal': []})
-        _post_handler.create_deferred_indexes(
-            table_name=table_name,
-            schema=schema,
-            gdf=gdf,
-            indexes=indexes
-        )
-        checkpoint("indexes_created", {"table": f"{schema}.{table_name}"})
-
-        logger.info(f"[{job_id[:8]}] Phase 3.5: Running ANALYZE for query planner")
-        _post_handler.analyze_table(table_name, schema)
-        checkpoint("table_analyzed", {"table": f"{schema}.{table_name}"})
-
-        # =====================================================================
-        # PHASE 4: Refresh TiPG Collection Catalog (05 FEB 2026 - F1.6)
-        # =====================================================================
-        # Notify the Service Layer to re-scan PostGIS so TiPG immediately
-        # discovers the new collection without waiting for cache TTL or restart.
-        # Non-fatal: if the webhook fails, TiPG will eventually pick it up.
-        # =====================================================================
-        tipg_collection_id = f"{schema}.{table_name}"
-        tipg_refresh_data = {
-            "collection_id": tipg_collection_id,
-            "status": "pending"
-        }
-
-        try:
-            from infrastructure.service_layer_client import ServiceLayerClient
-
-            sl_client = ServiceLayerClient()
-            logger.info(f"[{job_id[:8]}] Refreshing TiPG catalog for {tipg_collection_id}")
-
-            refresh_result = sl_client.refresh_tipg_collections()
-
-            if refresh_result.status == "success":
-                tipg_refresh_data = {
-                    "collection_id": tipg_collection_id,
-                    "status": "success",
-                    "collections_before": refresh_result.collections_before,
-                    "collections_after": refresh_result.collections_after,
-                    "new_collections": refresh_result.new_collections,
-                    "collection_discovered": tipg_collection_id in refresh_result.new_collections
-                }
-                logger.info(
-                    f"[{job_id[:8]}] TiPG catalog refreshed for {tipg_collection_id}: "
-                    f"{refresh_result.collections_before} -> {refresh_result.collections_after} "
-                    f"(new: {refresh_result.new_collections})"
-                )
-            else:
-                tipg_refresh_data = {
-                    "collection_id": tipg_collection_id,
-                    "status": "error",
-                    "error": refresh_result.error
-                }
-                logger.warning(
-                    f"[{job_id[:8]}] TiPG refresh for {tipg_collection_id} returned error: {refresh_result.error}"
-                )
-        except Exception as e:
-            tipg_refresh_data = {
-                "collection_id": tipg_collection_id,
-                "status": "failed",
-                "error": str(e)
-            }
-            logger.warning(f"[{job_id[:8]}] TiPG catalog refresh for {tipg_collection_id} failed (non-fatal): {e}")
-
-        # G3: Probe TiPG to verify collection is actually servable (non-fatal)
-        try:
-            probe = sl_client.probe_collection(tipg_collection_id)
-            tipg_refresh_data['probe'] = probe
-
-            if probe['number_matched'] == 0:
-                logger.warning(
-                    f"[{job_id[:8]}] TiPG probe: {tipg_collection_id} has 0 features "
-                    f"(expected {upload_result.get('total_rows', '?')}). Data may not be servable."
-                )
-            else:
-                logger.info(
-                    f"[{job_id[:8]}] TiPG probe: {tipg_collection_id} confirmed "
-                    f"{probe['number_matched']} features servable"
-                )
-        except Exception as probe_err:
-            tipg_refresh_data['probe'] = {'status': 'failed', 'error': str(probe_err)}
-            logger.warning(f"[{job_id[:8]}] TiPG probe failed (non-fatal): {probe_err}")
-
-        checkpoint("tipg_refresh", tipg_refresh_data)
-
-        # =====================================================================
-        # POST-UPLOAD VALIDATION (24 FEB 2026 - False Success Prevention)
-        # =====================================================================
-        total_rows = upload_result.get('total_rows', 0)
-
-        # G2: Hard gate — fail the job if 0 rows inserted
-        if total_rows == 0:
-            raise ValueError(
-                f"Vector ETL completed all phases but inserted 0 rows into "
-                f"{schema}.{table_name}. Table exists but is empty. "
-                f"Source had {len(gdf)} features after validation — "
-                f"data was lost during chunk upload."
+            logger.info(
+                f"[{job_id[:8]}] {'Split' if is_split else 'Single'} table: "
+                f"{schema}.{current_table} ({len(sub_gdf)} features, {suffix})"
             )
 
-        # G1: Cross-check actual table row count against chunk sum
-        try:
-            from psycopg import sql as psql
-            from services.vector.postgis_handler import VectorToPostGISHandler
-            _handler = VectorToPostGISHandler()
-            with _handler._pg_repo._get_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        psql.SQL("SELECT COUNT(*) FROM {schema}.{table}").format(
-                            schema=psql.Identifier(schema),
-                            table=psql.Identifier(table_name)
-                        )
+            table_result = _process_single_table(
+                gdf=sub_gdf,
+                table_name=current_table,
+                schema=schema,
+                overwrite=overwrite,
+                parameters=parameters,
+                load_info=load_info,
+                job_id=job_id,
+                chunk_size=chunk_size,
+                checkpoint_fn=checkpoint,
+                table_group=table_name if is_split else None,
+            )
+
+            table_results.append(table_result)
+            grand_total_rows += table_result['total_rows']
+
+            # Write to release_tables junction (if release exists)
+            if parameters.get('release_id'):
+                try:
+                    from infrastructure import ReleaseTableRepository
+                    release_table_repo = ReleaseTableRepository()
+                    release_table_repo.create(
+                        release_id=parameters['release_id'],
+                        table_name=current_table,
+                        geometry_type=table_result['geometry_type'],
+                        feature_count=table_result['total_rows'],
+                        table_role='geometry_split' if is_split else 'primary',
+                        table_suffix=f"_{suffix}" if is_split else None,
                     )
-                    db_total = cur.fetchone()['count']
-
-            if db_total != total_rows:
-                logger.warning(
-                    f"[{job_id[:8]}] Row count discrepancy: "
-                    f"chunk sum={total_rows}, table COUNT(*)={db_total}"
-                )
-                total_rows = db_total  # Use DB truth
-        except Exception as count_err:
-            logger.warning(f"[{job_id[:8]}] Could not verify table row count: {count_err}")
-
-        # Update metadata feature_count with actual DB count (registered in Phase 2 with len(gdf))
-        if total_rows != len(gdf):
-            try:
-                from services.vector.postgis_handler import VectorToPostGISHandler
-                _meta_handler = VectorToPostGISHandler()
-                with _meta_handler._pg_repo._get_connection() as conn:
-                    with conn.cursor() as cur:
-                        cur.execute(
-                            psql.SQL(
-                                "UPDATE {schema}.table_catalog SET feature_count = %s "
-                                "WHERE table_name = %s AND schema_name = %s"
-                            ).format(schema=psql.Identifier("geo")),
-                            (total_rows, table_name, schema)
-                        )
-                        conn.commit()
-                logger.info(f"[{job_id[:8]}] Updated metadata feature_count: {len(gdf)} -> {total_rows}")
-            except Exception as meta_err:
-                logger.warning(f"[{job_id[:8]}] Could not update metadata feature_count: {meta_err}")
+                except Exception as rt_err:
+                    logger.warning(f"[{job_id[:8]}] Failed to write release_tables (non-fatal): {rt_err}")
 
         # =====================================================================
         # COMPLETE
@@ -392,14 +296,16 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
         elapsed = time.time() - start_time
 
         checkpoint("complete", {
-            "total_rows": total_rows,
+            "tables_created": len(table_results),
+            "total_rows": grand_total_rows,
             "elapsed_seconds": round(elapsed, 2)
         })
 
-        rows_per_sec = total_rows / elapsed if elapsed > 0 else 0
+        rows_per_sec = grand_total_rows / elapsed if elapsed > 0 else 0
         logger.info(
             f"[{job_id[:8]}] Docker Vector ETL complete: "
-            f"{total_rows:,} rows in {elapsed:.1f}s ({rows_per_sec:.0f} rows/sec)"
+            f"{grand_total_rows:,} rows across {len(table_results)} table(s) "
+            f"in {elapsed:.1f}s ({rows_per_sec:.0f} rows/sec)"
         )
 
         # V0.9: Update release processing status to COMPLETED
@@ -409,28 +315,32 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
                 from core.models.asset import ProcessingStatus
                 release_repo = ReleaseRepository()
                 release_repo.update_processing_status(parameters['release_id'], status=ProcessingStatus.COMPLETED)
-                logger.info(f"[{job_id[:8]}] Updated release {parameters['release_id'][:16]}... processing_status=completed")
             except Exception as release_err:
                 logger.warning(f"[{job_id[:8]}] Failed to update release processing status: {release_err}")
 
-        return {
-            "success": True,
-            "result": {
-                "table_name": table_name,
-                "schema": schema,
-                "total_rows": total_rows,
-                "geometry_type": table_result['geometry_type'],
-                "srid": table_result.get('srid', 4326),
-                "style_id": style_result.get('style_id', 'default'),
-                "chunks_uploaded": upload_result.get('chunks_uploaded', 0),
-                "checkpoint_count": len(checkpoints),
-                "elapsed_seconds": round(elapsed, 2),
-                "execution_mode": "docker",
-                "connection_pooling": True,
-                "data_warnings": data_warnings if data_warnings else None,
-                "vector_tile_urls": table_result.get('vector_tile_urls')
-            }
+        # Build result — backward compatible for single table, enhanced for multi
+        primary_result = table_results[0]
+
+        result = {
+            "table_name": table_name if not is_split else None,
+            "table_names": [tr['table_name'] for tr in table_results],
+            "schema": schema,
+            "total_rows": grand_total_rows,
+            "geometry_type": primary_result['geometry_type'] if not is_split else 'mixed',
+            "geometry_split": is_split,
+            "tables": table_results,
+            "srid": primary_result.get('srid', 4326),
+            "style_id": primary_result.get('style_id', 'default'),
+            "chunks_uploaded": sum(tr.get('chunks_uploaded', 0) for tr in table_results),
+            "checkpoint_count": len(checkpoints),
+            "elapsed_seconds": round(elapsed, 2),
+            "execution_mode": "docker",
+            "connection_pooling": True,
+            "data_warnings": data_warnings if data_warnings else None,
+            "vector_tile_urls": primary_result.get('vector_tile_urls'),
         }
+
+        return {"success": True, "result": result}
 
     except Exception as e:
         elapsed = time.time() - start_time
@@ -495,6 +405,37 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
             "_debug": debug.model_dump(),  # Store for job record
         }
 
+    finally:
+        # Mount cleanup (26 FEB 2026) — same pattern as raster handler
+        _cleanup_vector_mount(mount_paths, job_id)
+
+
+def _cleanup_vector_mount(mount_paths: Optional[Dict], job_id: str) -> None:
+    """
+    Clean up vector mount directories after processing.
+
+    Removes the vector_{job_id[:8]} directory tree from the mount.
+    Logs but does not raise on cleanup failure.
+
+    Args:
+        mount_paths: Dict with 'base' key, or None if mount wasn't used
+        job_id: Job ID for logging
+    """
+    if not mount_paths:
+        return
+
+    import shutil
+    base = mount_paths.get("base")
+    if not base:
+        return
+
+    try:
+        if os.path.exists(base):
+            shutil.rmtree(base, ignore_errors=True)
+            logger.info(f"[{job_id[:8]}] Cleaned up mount dir: {base}")
+    except Exception as e:
+        logger.warning(f"[{job_id[:8]}] Mount cleanup failed (non-fatal): {e}")
+
 
 # =============================================================================
 # PHASE IMPLEMENTATIONS
@@ -506,7 +447,9 @@ def _load_and_validate_source(
     file_extension: str,
     parameters: Dict[str, Any],
     job_id: str,
-    event_callback: Optional[callable] = None
+    event_callback: Optional[callable] = None,
+    mount_source_path: Optional[str] = None,
+    mount_converter_extras: Optional[Dict[str, Any]] = None,
 ) -> tuple:
     """
     Load source file and validate geometry using shared core module.
@@ -518,16 +461,20 @@ def _load_and_validate_source(
         parameters: Job parameters
         job_id: Job ID for logging
         event_callback: Optional callback for fine-grained validation events
+        mount_source_path: Optional file path on mount (26 FEB 2026).
+            When provided, skips blob download and reads from mount.
+        mount_converter_extras: Optional extra converter params for mount mode
+            (e.g., extract_dir for ZIP formats).
 
     Returns:
-        Tuple of (GeoDataFrame, load_info, validation_info, warnings)
+        Tuple of (prepared_groups, load_info, validation_info, warnings)
+        prepared_groups: dict mapping geometry suffix to GeoDataFrame
     """
     from services.vector.core import (
         load_vector_source,
         build_csv_converter_params,
         validate_and_prepare,
         apply_column_mapping,
-        extract_geometry_info,
         log_gdf_memory
     )
 
@@ -574,11 +521,16 @@ def _load_and_validate_source(
                 f"Spatial layers in this file: {spatial_names}"
             )
 
+    # Merge mount-specific converter extras (e.g., extract_dir for ZIP formats)
+    if mount_converter_extras:
+        converter_params.update(mount_converter_extras)
+
     # Emit file download start event
     emit("file_download_start", {
         "blob_name": blob_name,
         "container": container_name,
-        "format": file_extension
+        "format": file_extension,
+        "source": "mount" if mount_source_path else "memory",
     })
 
     # Load file using shared core function
@@ -587,7 +539,8 @@ def _load_and_validate_source(
         container_name=container_name,
         file_extension=file_extension,
         converter_params=converter_params,
-        job_id=job_id
+        job_id=job_id,
+        mount_source_path=mount_source_path,
     )
 
     # Emit file loaded event
@@ -644,28 +597,32 @@ def _load_and_validate_source(
     # Validate and prepare using shared core function
     # Pass event_callback for fine-grained validation events
     geometry_params = parameters.get('geometry_params', {})
-    validated_gdf, validation_info, warnings = validate_and_prepare(
+    prepared_groups, validation_info, warnings = validate_and_prepare(
         gdf=gdf,
         geometry_params=geometry_params,
         job_id=job_id,
         event_callback=event_callback
     )
 
-    # Extract geometry info
-    geom_info = extract_geometry_info(validated_gdf)
-    validation_info['geometry_type'] = geom_info['geometry_type']
+    # Extract geometry info from all groups
+    all_geom_types = list(prepared_groups.keys())
+    validation_info['geometry_types'] = all_geom_types
+    validation_info['geometry_type'] = all_geom_types[0] if len(all_geom_types) == 1 else 'mixed'
 
-    log_gdf_memory(validated_gdf, "after_validation", job_id)
+    for suffix, sub_gdf in prepared_groups.items():
+        log_gdf_memory(sub_gdf, f"after_validation_{suffix}", job_id)
 
     # Emit validation complete event
+    total_validated = sum(len(g) for g in prepared_groups.values())
     emit("validation_complete", {
         "original_features": validation_info['original_count'],
-        "validated_features": validation_info['validated_count'],
+        "validated_features": total_validated,
         "filtered_features": validation_info['filtered_count'],
-        "geometry_type": geom_info['geometry_type']
+        "geometry_types": all_geom_types,
+        "geometry_groups": len(prepared_groups),
     })
 
-    return validated_gdf, load_info, validation_info, warnings
+    return prepared_groups, load_info, validation_info, warnings
 
 
 def _create_table_and_metadata(
@@ -899,6 +856,216 @@ def _upload_chunks_with_checkpoints(
         'chunks_uploaded': num_chunks,
         'avg_chunk_time': round(sum(chunk_times) / len(chunk_times), 2) if chunk_times else 0,
         'idempotent_reruns_detected': total_rows_deleted > 0
+    }
+
+
+def _refresh_tipg(tipg_collection_id: str, job_id: str) -> Dict[str, Any]:
+    """Refresh TiPG catalog for a collection. Returns refresh data dict."""
+    tipg_refresh_data = {"collection_id": tipg_collection_id, "status": "pending"}
+
+    try:
+        from infrastructure.service_layer_client import ServiceLayerClient
+        sl_client = ServiceLayerClient()
+        logger.info(f"[{job_id[:8]}] Refreshing TiPG catalog for {tipg_collection_id}")
+
+        refresh_result = sl_client.refresh_tipg_collections()
+
+        if refresh_result.status == "success":
+            tipg_refresh_data = {
+                "collection_id": tipg_collection_id,
+                "status": "success",
+                "collections_before": refresh_result.collections_before,
+                "collections_after": refresh_result.collections_after,
+                "new_collections": refresh_result.new_collections,
+                "collection_discovered": tipg_collection_id in refresh_result.new_collections
+            }
+        else:
+            tipg_refresh_data = {
+                "collection_id": tipg_collection_id,
+                "status": "error",
+                "error": refresh_result.error
+            }
+
+        # Probe collection
+        try:
+            probe = sl_client.probe_collection(tipg_collection_id)
+            tipg_refresh_data['probe'] = probe
+        except Exception as probe_err:
+            tipg_refresh_data['probe'] = {'status': 'failed', 'error': str(probe_err)}
+
+    except Exception as e:
+        tipg_refresh_data = {
+            "collection_id": tipg_collection_id,
+            "status": "failed",
+            "error": str(e)
+        }
+        logger.warning(f"[{job_id[:8]}] TiPG refresh for {tipg_collection_id} failed (non-fatal): {e}")
+
+    return tipg_refresh_data
+
+
+def _process_single_table(
+    gdf,
+    table_name: str,
+    schema: str,
+    overwrite: bool,
+    parameters: Dict[str, Any],
+    load_info: Dict[str, Any],
+    job_id: str,
+    chunk_size: int,
+    checkpoint_fn: callable,
+    table_group: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Process a single GeoDataFrame into a PostGIS table.
+
+    Handles: table creation, metadata, style, chunk upload,
+    deferred indexes, ANALYZE, TiPG refresh, post-upload validation.
+
+    Args:
+        gdf: Single-type GeoDataFrame to upload
+        table_name: Target PostGIS table name (with suffix if split)
+        schema: Target schema (default 'geo')
+        overwrite: Whether to overwrite existing table
+        parameters: Full job parameters
+        load_info: File loading metadata
+        job_id: Job ID for logging
+        chunk_size: Rows per chunk
+        checkpoint_fn: Checkpoint callback
+        table_group: Optional group name for split tables
+
+    Returns:
+        Dict with table_name, geometry_type, total_rows, style_id, vector_tile_urls
+    """
+    from services.vector.postgis_handler import VectorToPostGISHandler
+
+    logger.info(f"[{job_id[:8]}] Processing table: {schema}.{table_name} ({len(gdf)} features)")
+
+    # Phase 2: Create table and metadata
+    table_result = _create_table_and_metadata(
+        gdf=gdf,
+        table_name=table_name,
+        schema=schema,
+        overwrite=overwrite,
+        parameters=parameters,
+        load_info=load_info,
+        job_id=job_id
+    )
+
+    # Set table_group in catalog if this is a geometry split
+    if table_group:
+        try:
+            _handler = VectorToPostGISHandler()
+            with _handler._pg_repo._get_connection() as conn:
+                with conn.cursor() as cur:
+                    from psycopg import sql as psql
+                    cur.execute(
+                        psql.SQL(
+                            "UPDATE {schema}.table_catalog SET table_group = %s "
+                            "WHERE table_name = %s"
+                        ).format(schema=psql.Identifier("geo")),
+                        (table_group, table_name)
+                    )
+                    conn.commit()
+            logger.info(f"[{job_id[:8]}] Set table_group='{table_group}' for {table_name}")
+        except Exception as e:
+            logger.warning(f"[{job_id[:8]}] Failed to set table_group (non-fatal): {e}")
+
+    checkpoint_fn(f"table_created_{table_name}", {
+        "table": f"{schema}.{table_name}",
+        "geometry_type": table_result['geometry_type'],
+        "srid": table_result['srid']
+    })
+
+    # Phase 2.5: Create default style
+    style_result = _create_default_style(
+        table_name=table_name,
+        geometry_type=table_result['geometry_type'],
+        style_params=parameters.get('style'),
+        job_id=job_id
+    )
+
+    # Phase 3: Upload chunks
+    upload_result = _upload_chunks_with_checkpoints(
+        gdf=gdf,
+        table_name=table_name,
+        schema=schema,
+        chunk_size=chunk_size,
+        job_id=job_id,
+        checkpoint_fn=checkpoint_fn
+    )
+
+    # Phase 3.5: Deferred indexes + ANALYZE
+    _post_handler = VectorToPostGISHandler()
+    indexes = parameters.get('indexes', {'spatial': True, 'attributes': [], 'temporal': []})
+    _post_handler.create_deferred_indexes(
+        table_name=table_name,
+        schema=schema,
+        gdf=gdf,
+        indexes=indexes
+    )
+    _post_handler.analyze_table(table_name, schema)
+
+    # Phase 4: TiPG refresh
+    tipg_collection_id = f"{schema}.{table_name}"
+    tipg_refresh_data = _refresh_tipg(tipg_collection_id, job_id)
+    checkpoint_fn(f"tipg_refresh_{table_name}", tipg_refresh_data)
+
+    # Post-upload validation
+    total_rows = upload_result.get('total_rows', 0)
+
+    if total_rows == 0:
+        raise ValueError(
+            f"Vector ETL completed all phases but inserted 0 rows into "
+            f"{schema}.{table_name}. Source had {len(gdf)} features."
+        )
+
+    # Cross-check row count
+    try:
+        from psycopg import sql as psql
+        with _post_handler._pg_repo._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    psql.SQL("SELECT COUNT(*) FROM {schema}.{table}").format(
+                        schema=psql.Identifier(schema),
+                        table=psql.Identifier(table_name)
+                    )
+                )
+                db_total = cur.fetchone()['count']
+        if db_total != total_rows:
+            logger.warning(
+                f"[{job_id[:8]}] Row count discrepancy for {table_name}: "
+                f"chunk sum={total_rows}, COUNT(*)={db_total}"
+            )
+            total_rows = db_total
+    except Exception as count_err:
+        logger.warning(f"[{job_id[:8]}] Could not verify row count for {table_name}: {count_err}")
+
+    # Update metadata feature_count if needed
+    if total_rows != len(gdf):
+        try:
+            from psycopg import sql as psql
+            with _post_handler._pg_repo._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        psql.SQL(
+                            "UPDATE {schema}.table_catalog SET feature_count = %s "
+                            "WHERE table_name = %s AND schema_name = %s"
+                        ).format(schema=psql.Identifier("geo")),
+                        (total_rows, table_name, schema)
+                    )
+                    conn.commit()
+        except Exception as meta_err:
+            logger.warning(f"[{job_id[:8]}] Could not update feature_count for {table_name}: {meta_err}")
+
+    return {
+        "table_name": table_name,
+        "geometry_type": table_result['geometry_type'],
+        "total_rows": total_rows,
+        "srid": table_result.get('srid', 4326),
+        "style_id": style_result.get('style_id', 'default'),
+        "chunks_uploaded": upload_result.get('chunks_uploaded', 0),
+        "vector_tile_urls": table_result.get('vector_tile_urls'),
     }
 
 

@@ -51,7 +51,7 @@ Historical context archived in: docs/archive/INIT_PY_HISTORY.md
 
 from .service_hello_world import handle_greeting, handle_reply
 from .stac_catalog import list_raster_files, extract_stac_metadata
-from .raster_validation import validate_raster
+from .raster_validation import validate_raster, validate_raster_header, validate_raster_data
 from .raster_cog import create_cog
 from .raster_mosaicjson import create_mosaicjson
 from .stac_collection import create_stac_collection
@@ -89,6 +89,11 @@ from .stac_metadata_helper import (
 # PLATFORM VALIDATION (V0.8 Release Control - dry_run support)
 # ============================================================================
 from .platform_validation import validate_version_lineage, VersionValidationResult
+
+# ============================================================================
+# STAC MATERIALIZATION (26 FEB 2026 — B2C materialized view engine)
+# ============================================================================
+from .stac_materialization import STACMaterializer
 
 # ============================================================================
 # EXPLICIT HANDLER REGISTRY
@@ -217,4 +222,6 @@ __all__ = [
     # Platform validation (V0.8 Release Control)
     'validate_version_lineage',
     'VersionValidationResult',
+    # STAC Materialization (26 FEB 2026)
+    'STACMaterializer',
 ]

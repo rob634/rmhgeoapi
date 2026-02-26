@@ -348,3 +348,169 @@ class STACAPIService:
             response['links'] = links
 
         return response
+
+    # =========================================================================
+    # ADMIN — STAC Materialization CRUD (26 FEB 2026)
+    # =========================================================================
+
+    def admin_create_collection(
+        self,
+        collection_id: str,
+        description: str = None,
+        bbox: list = None,
+        license_val: str = "proprietary",
+    ) -> Dict[str, Any]:
+        """
+        Create an empty STAC collection in pgSTAC.
+
+        Args:
+            collection_id: Collection identifier
+            description: Optional description
+            bbox: Spatial extent [minx, miny, maxx, maxy]
+            license_val: STAC license
+
+        Returns:
+            Dict with success and collection_id
+        """
+        from services.stac_collection import build_raster_stac_collection
+        from infrastructure.pgstac_repository import PgStacRepository
+
+        pgstac = PgStacRepository()
+
+        if pgstac.collection_exists(collection_id):
+            return {
+                'success': False,
+                'error': f"Collection '{collection_id}' already exists. Use PUT to update."
+            }
+
+        collection_dict = build_raster_stac_collection(
+            collection_id=collection_id,
+            bbox=bbox or [-180, -90, 180, 90],
+            description=description,
+            license_val=license_val,
+        )
+        pgstac.insert_collection(collection_dict)
+
+        return {'success': True, 'collection_id': collection_id}
+
+    def admin_update_collection(
+        self,
+        collection_id: str,
+        updates: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Update collection metadata in pgSTAC.
+
+        Args:
+            collection_id: Collection to update
+            updates: Dict with fields to update (description, bbox, etc.)
+
+        Returns:
+            Dict with success and collection_id
+        """
+        from infrastructure.pgstac_repository import PgStacRepository
+
+        pgstac = PgStacRepository()
+        collection_dict = pgstac.get_collection(collection_id)
+
+        if not collection_dict:
+            return {
+                'success': False,
+                'error': f"Collection '{collection_id}' not found"
+            }
+
+        # Patch supported fields
+        if 'description' in updates:
+            collection_dict['description'] = updates['description']
+        if 'bbox' in updates:
+            collection_dict.setdefault('extent', {}).setdefault('spatial', {})['bbox'] = [updates['bbox']]
+        if 'license' in updates:
+            collection_dict['license'] = updates['license']
+
+        pgstac.insert_collection(collection_dict)
+
+        return {'success': True, 'collection_id': collection_id}
+
+    def admin_delete_collection(self, collection_id: str) -> Dict[str, Any]:
+        """
+        Delete a collection and all its items from pgSTAC.
+
+        Args:
+            collection_id: Collection to delete
+
+        Returns:
+            Dict with success, items_deleted, collection_id
+        """
+        from infrastructure.pgstac_repository import PgStacRepository
+
+        pgstac = PgStacRepository()
+
+        if not pgstac.collection_exists(collection_id):
+            return {
+                'success': False,
+                'error': f"Collection '{collection_id}' not found"
+            }
+
+        # Delete all items first
+        item_ids = pgstac.get_collection_item_ids(collection_id)
+        for item_id in item_ids:
+            pgstac.delete_item(collection_id, item_id)
+
+        # Delete collection
+        pgstac.delete_collection(collection_id)
+
+        return {
+            'success': True,
+            'collection_id': collection_id,
+            'items_deleted': len(item_ids),
+        }
+
+    def admin_delete_item(
+        self,
+        collection_id: str,
+        item_id: str
+    ) -> Dict[str, Any]:
+        """
+        Remove an item and recalculate collection extent.
+
+        Delegates to STACMaterializer.dematerialize_item() for
+        automatic extent recalculation and empty collection cleanup.
+
+        Args:
+            collection_id: Collection containing the item
+            item_id: Item to remove
+
+        Returns:
+            Dict with success, deleted, collection_action
+        """
+        from services.stac_materialization import STACMaterializer
+
+        materializer = STACMaterializer()
+        return materializer.dematerialize_item(collection_id, item_id)
+
+    def admin_rebuild_all(self) -> Dict[str, Any]:
+        """
+        Rebuild entire STAC catalog from internal DB.
+
+        Returns:
+            Dict with collections_rebuilt, items_rebuilt, errors
+        """
+        from services.stac_materialization import STACMaterializer
+
+        materializer = STACMaterializer()
+        return materializer.rebuild_all_from_db()
+
+    def admin_rebuild_collection(self, collection_id: str) -> Dict[str, Any]:
+        """
+        Rebuild a single collection from internal DB.
+
+        Args:
+            collection_id: Collection to rebuild
+
+        Returns:
+            Dict with items_created, bbox, etc.
+        """
+        from services.stac_materialization import STACMaterializer
+
+        materializer = STACMaterializer()
+        return materializer.rebuild_collection_from_db(collection_id)

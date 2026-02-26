@@ -176,6 +176,32 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                 file_name = file_name[0]
             file_ext = file_name.split('.')[-1].lower()
 
+            if file_ext == 'csv':
+                # CSV geometry parameter preflight (26 FEB 2026)
+                # Reject early if no geometry pathway specified — saves time vs failing deep in ETL
+                proc_opts = platform_req.processing_options
+                has_wkt = getattr(proc_opts, 'wkt_column', None)
+                has_lat = getattr(proc_opts, 'lat_column', None)
+                has_lon = getattr(proc_opts, 'lon_column', None)
+
+                if not has_wkt and not (has_lat and has_lon):
+                    if has_lat and not has_lon:
+                        return validation_error(
+                            "CSV file requires both lat_column and lon_column, but only lat_column was provided. "
+                            "Add lon_column to processing_options."
+                        )
+                    elif has_lon and not has_lat:
+                        return validation_error(
+                            "CSV file requires both lat_column and lon_column, but only lon_column was provided. "
+                            "Add lat_column to processing_options."
+                        )
+                    else:
+                        return validation_error(
+                            "CSV file requires geometry parameters in processing_options. "
+                            "Provide either: (1) wkt_column for WKT geometry, or "
+                            "(2) both lat_column and lon_column for point coordinates."
+                        )
+
             if file_ext == 'gpkg':
                 requested_layer = getattr(platform_req.processing_options, 'layer_name', None)
                 if not requested_layer:
@@ -189,6 +215,19 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                     })
 
         logger.info(f"  Translated to job_type: {job_type}")
+
+        # Pre-flight STAC collection check (26 FEB 2026 — informational only)
+        collection_id = job_params.get('collection_id')
+        if collection_id:
+            try:
+                from infrastructure.pgstac_repository import PgStacRepository
+                pgstac = PgStacRepository()
+                if pgstac.collection_exists(collection_id):
+                    logger.info(f"  Adding to existing STAC collection: {collection_id}")
+                else:
+                    logger.info(f"  Will create new STAC collection: {collection_id}")
+            except Exception:
+                pass  # Non-fatal: informational only
 
         # =====================================================================
         # V0.9 ENTITY ARCHITECTURE: Asset/Release (21 FEB 2026)
@@ -245,9 +284,22 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
 
             # Step 4: Handle idempotent case (existing draft, no overwrite)
             if release_op == "existing":
+                # Detect orphaned release: prior attempt created Release but job creation failed.
+                # Return explicit error instead of "success" with empty job_id. (26 FEB 2026)
+                if not release.job_id:
+                    logger.warning(
+                        f"Orphaned release {release.release_id[:16]} — "
+                        f"no job_id, prior job creation likely failed"
+                    )
+                    return error_response(
+                        "Prior submission created a release but job creation failed. "
+                        "Resubmit with processing_options.overwrite=true to retry.",
+                        "OrphanedReleaseError",
+                        status_code=409
+                    )
                 return idempotent_response(
                     request_id=request_id,
-                    job_id=release.job_id or "",
+                    job_id=release.job_id,
                     hint="Use processing_options.overwrite=true to force reprocessing"
                 )
 

@@ -40,6 +40,14 @@ Routes (19 total):
         GET  /stac/collections/{id}/stats             Collection statistics
         GET  /stac/items/{item_id}                    Item lookup shortcut
         GET  /stac/health                             Health metrics
+
+    Admin - Materialization CRUD (6 routes, 26 FEB 2026):
+        POST   /stac/admin/collections                          Create empty collection
+        PUT    /stac/admin/collections/{collection_id}          Update collection metadata
+        DELETE /stac/admin/collections/{collection_id}          Delete collection + items
+        DELETE /stac/admin/collections/{cid}/items/{item_id}    Remove item
+        POST   /stac/admin/rebuild                              Rebuild all from DB
+        POST   /stac/admin/rebuild/{collection_id}              Rebuild single collection
 """
 
 import azure.functions as func
@@ -489,3 +497,201 @@ def stac_health(req: func.HttpRequest) -> func.HttpResponse:
     except Exception as e:
         logger.error(f"Error in /stac/health: {e}")
         return _json_response({'error': str(e)}, 500)
+
+
+# ============================================================================
+# ADMIN - STAC MATERIALIZATION CRUD (26 FEB 2026)
+# ============================================================================
+# These endpoints provide admin-level STAC management:
+# - Create/update/delete collections
+# - Add/remove items
+# - Rebuild catalog from internal DB
+# ============================================================================
+
+@bp.route(route="stac/admin/collections", methods=["POST"])
+def stac_admin_create_collection(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Create an empty STAC collection.
+
+    POST /api/stac/admin/collections
+
+    Body:
+        {
+            "collection_id": "my-dataset-my-resource",
+            "description": "Optional description",
+            "bbox": [-180, -90, 180, 90],
+            "license": "proprietary"
+        }
+
+    Returns:
+        {"success": true, "collection_id": "my-dataset-my-resource"}
+    """
+    try:
+        body = req.get_json()
+        collection_id = body.get('collection_id')
+        if not collection_id:
+            return _error_response("collection_id is required", 400)
+
+        config = get_stac_config()
+        service = STACAPIService(config)
+        result = service.admin_create_collection(
+            collection_id=collection_id,
+            description=body.get('description'),
+            bbox=body.get('bbox', [-180, -90, 180, 90]),
+            license_val=body.get('license', 'proprietary'),
+        )
+        status = 201 if result.get('success') else 400
+        return _json_response(result, status)
+    except Exception as e:
+        logger.error(f"Error in POST /stac/admin/collections: {e}", exc_info=True)
+        return _error_response(str(e), 500, "InternalServerError")
+
+
+@bp.route(route="stac/admin/collections/{collection_id}", methods=["PUT"])
+def stac_admin_update_collection(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Update collection metadata.
+
+    PUT /api/stac/admin/collections/{collection_id}
+
+    Body:
+        {
+            "description": "Updated description",
+            "bbox": [-70, -56, -69, -55]
+        }
+
+    Returns:
+        {"success": true, "collection_id": "..."}
+    """
+    try:
+        collection_id = req.route_params.get('collection_id')
+        if not collection_id:
+            return _error_response("collection_id is required", 400)
+
+        body = req.get_json()
+        config = get_stac_config()
+        service = STACAPIService(config)
+        result = service.admin_update_collection(collection_id, body)
+        status = 200 if result.get('success') else 404
+        return _json_response(result, status)
+    except Exception as e:
+        logger.error(f"Error in PUT /stac/admin/collections: {e}", exc_info=True)
+        return _error_response(str(e), 500, "InternalServerError")
+
+
+@bp.route(route="stac/admin/collections/{collection_id}", methods=["DELETE"])
+def stac_admin_delete_collection(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Delete a collection and all its items from pgSTAC.
+
+    DELETE /api/stac/admin/collections/{collection_id}?confirm=yes
+
+    Returns:
+        {"success": true, "collection_id": "...", "items_deleted": N}
+    """
+    try:
+        collection_id = req.route_params.get('collection_id')
+        if not collection_id:
+            return _error_response("collection_id is required", 400)
+
+        confirm = req.params.get('confirm', '')
+        if confirm != 'yes':
+            return _error_response(
+                "Add ?confirm=yes to confirm deletion", 400
+            )
+
+        config = get_stac_config()
+        service = STACAPIService(config)
+        result = service.admin_delete_collection(collection_id)
+        status = 200 if result.get('success') else 404
+        return _json_response(result, status)
+    except Exception as e:
+        logger.error(f"Error in DELETE /stac/admin/collections: {e}", exc_info=True)
+        return _error_response(str(e), 500, "InternalServerError")
+
+
+@bp.route(route="stac/admin/collections/{collection_id}/items/{item_id}", methods=["DELETE"])
+def stac_admin_delete_item(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Remove an item from a collection (with extent recalculation).
+
+    DELETE /api/stac/admin/collections/{collection_id}/items/{item_id}?confirm=yes
+
+    Returns:
+        {"success": true, "deleted": true, "collection_action": "extent_recalculated"|"deleted_empty"}
+    """
+    try:
+        collection_id = req.route_params.get('collection_id')
+        item_id = req.route_params.get('item_id')
+        if not collection_id or not item_id:
+            return _error_response("collection_id and item_id are required", 400)
+
+        confirm = req.params.get('confirm', '')
+        if confirm != 'yes':
+            return _error_response(
+                "Add ?confirm=yes to confirm deletion", 400
+            )
+
+        config = get_stac_config()
+        service = STACAPIService(config)
+        result = service.admin_delete_item(collection_id, item_id)
+        return _json_response(result)
+    except Exception as e:
+        logger.error(f"Error in DELETE /stac/admin/items: {e}", exc_info=True)
+        return _error_response(str(e), 500, "InternalServerError")
+
+
+@bp.route(route="stac/admin/rebuild", methods=["POST"])
+def stac_admin_rebuild_all(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Rebuild entire STAC catalog from internal DB.
+
+    POST /api/stac/admin/rebuild?confirm=yes
+
+    Returns:
+        {"success": true, "collections_rebuilt": N, "items_rebuilt": N}
+    """
+    try:
+        confirm = req.params.get('confirm', '')
+        if confirm != 'yes':
+            return _error_response(
+                "Add ?confirm=yes to confirm full catalog rebuild", 400
+            )
+
+        config = get_stac_config()
+        service = STACAPIService(config)
+        result = service.admin_rebuild_all()
+        return _json_response(result)
+    except Exception as e:
+        logger.error(f"Error in POST /stac/admin/rebuild: {e}", exc_info=True)
+        return _error_response(str(e), 500, "InternalServerError")
+
+
+@bp.route(route="stac/admin/rebuild/{collection_id}", methods=["POST"])
+def stac_admin_rebuild_collection(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Rebuild a single STAC collection from internal DB.
+
+    POST /api/stac/admin/rebuild/{collection_id}?confirm=yes
+
+    Returns:
+        {"success": true, "collection_id": "...", "items_created": N}
+    """
+    try:
+        collection_id = req.route_params.get('collection_id')
+        if not collection_id:
+            return _error_response("collection_id is required", 400)
+
+        confirm = req.params.get('confirm', '')
+        if confirm != 'yes':
+            return _error_response(
+                "Add ?confirm=yes to confirm collection rebuild", 400
+            )
+
+        config = get_stac_config()
+        service = STACAPIService(config)
+        result = service.admin_rebuild_collection(collection_id)
+        return _json_response(result)
+    except Exception as e:
+        logger.error(f"Error in POST /stac/admin/rebuild/{collection_id}: {e}", exc_info=True)
+        return _error_response(str(e), 500, "InternalServerError")

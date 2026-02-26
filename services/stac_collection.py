@@ -502,10 +502,11 @@ def _create_stac_collection_impl(
         logger.info(f"✅ Cached {len(created_items)} STAC Items in cog_metadata")
 
         # =========================================================================
-        # 25 FEB 2026: Insert items into pgSTAC + register search at processing time
-        # Enables mosaic preview before approval. Items get geoetl:published=false.
+        # 26 FEB 2026: Insert items into pgSTAC + register search at processing time
+        # Enables mosaic preview before approval. Items get ddh:status=processing
+        # (B2C-legible, no geoetl:* internal properties).
         # All pgSTAC ops are NON-FATAL — job succeeds with degraded output if they fail.
-        # Approval fallback in _materialize_stac handles the case where these fail.
+        # Approval fallback in STACMaterializer handles the case where these fail.
         # =========================================================================
         search_id = None
         viewer_url = None
@@ -522,7 +523,7 @@ def _create_stac_collection_impl(
             pgstac_id = collection_id
             logger.info(f"   pgSTAC collection upserted: {collection_id}")
 
-            # Insert each cached item with geoetl:published=false
+            # Insert each cached item with ddh:status=processing (B2C-legible)
             items_inserted = 0
             for i, tile_blob in enumerate(tile_blobs):
                 tile_name = tile_blob.split('/')[-1].replace('_cog.tif', '').replace('.tif', '')
@@ -536,14 +537,28 @@ def _create_stac_collection_impl(
 
                 item_dict = dict(cog_record['stac_item_json'])
 
-                # Set unpublished flag
+                # Strip geoetl:* properties, set B2C status flag
                 item_props = item_dict.setdefault('properties', {})
-                item_props['geoetl:published'] = False
+                item_props = {
+                    k: v for k, v in item_props.items()
+                    if not k.startswith('geoetl:')
+                }
+                item_props['ddh:status'] = 'processing'
+                item_dict['properties'] = item_props
 
                 pgstac.insert_item(item_dict, collection_id)
                 items_inserted += 1
 
-            logger.info(f"   Inserted {items_inserted} items into pgSTAC (geoetl:published=false)")
+            logger.info(f"   Inserted {items_inserted} items into pgSTAC (ddh:status=processing)")
+
+            # After inserting items, compute union extent from all items
+            extent = pgstac.compute_collection_extent(collection_id)
+            if extent:
+                collection_dict['extent']['spatial']['bbox'] = [extent['bbox']]
+                if extent.get('temporal'):
+                    collection_dict['extent']['temporal']['interval'] = [extent['temporal']]
+                pgstac.insert_collection(collection_dict)
+                logger.info(f"   Collection extent updated from {items_inserted} items")
 
             # Register pgSTAC search for mosaic preview
             registrar = PgSTACSearchRegistration()

@@ -117,6 +117,7 @@ Classes in this file:
     - AppModeDefaults: Multi-Function App deployment modes
     - TaskRoutingDefaults: Task type to queue mapping
     - RasterDefaults: COG processing settings
+    - DockerDefaults: Docker worker mount settings (shared by raster + vector)
     - VectorDefaults: PostGIS ETL settings
     - AnalyticsDefaults: DuckDB settings
     - PlatformDefaults: DDH integration settings
@@ -485,17 +486,7 @@ class RasterDefaults:
         - float64:      5.0x (double precision overhead)
     """
 
-    # ==========================================================================
-    # V0.8 ETL MOUNT SETTINGS (24 JAN 2026)
-    # ==========================================================================
-    # Docker workers use Azure Files mount for GDAL temp files.
-    # This allows processing files larger than container RAM without OOM.
-    #
-    # Mount path: /mounts/etl-temp (configured via Azure Portal)
-    # GDAL uses this via CPL_TMPDIR environment variable.
-
-    USE_ETL_MOUNT = True  # V0.8: Mount is expected (False = degraded state)
-    ETL_MOUNT_PATH = "/mounts/etl-temp"  # Mount path in Docker container
+    # USE_ETL_MOUNT and ETL_MOUNT_PATH moved to DockerDefaults (26 FEB 2026)
 
     # ==========================================================================
     # TILING SETTINGS (V0.8 - 24 JAN 2026)
@@ -540,6 +531,27 @@ class RasterDefaults:
 
     # Intermediate storage
     INTERMEDIATE_PREFIX = "temp/raster_etl"
+
+
+# =============================================================================
+# DOCKER DEFAULTS (Shared mount config for raster + vector pipelines)
+# =============================================================================
+
+class DockerDefaults:
+    """
+    Docker worker config defaults. Shared by raster and vector pipelines.
+
+    V0.8 (24 JAN 2026): ETL mount introduced for raster pipeline.
+    V0.9 (26 FEB 2026): Promoted to shared DockerDefaults for vector mount support.
+
+    Docker workers use Azure Files mount for temp files (GDAL CPL_TMPDIR, vector staging).
+    This allows processing files larger than container RAM without OOM.
+
+    Mount path: /mounts/etl-temp (configured via Azure Portal)
+    """
+
+    USE_ETL_MOUNT = True  # Mount is expected (False = degraded state)
+    ETL_MOUNT_PATH = "/mounts/etl-temp"  # Mount path in Docker container
 
 
 # =============================================================================
@@ -600,7 +612,7 @@ class PlatformDefaults:
     # {version_id} resolves to: explicit version_id, "ord{N}" for drafts, or "draft" (legacy)
     VECTOR_TABLE_PATTERN = "{dataset_id}_{resource_id}_{version_id}"
     RASTER_OUTPUT_FOLDER_PATTERN = "{dataset_id}/{resource_id}/{version_id}"
-    STAC_COLLECTION_PATTERN = "{dataset_id}"
+    STAC_COLLECTION_PATTERN = "{dataset_id}_{resource_id}"
     STAC_ITEM_PATTERN = "{dataset_id}_{resource_id}_{version_id}"
 
     # Request ID generation
@@ -772,6 +784,7 @@ __all__ = [
     "AppModeDefaults",
     "TaskRoutingDefaults",
     "RasterDefaults",
+    "DockerDefaults",
     "VectorDefaults",
     "AnalyticsDefaults",
     "PlatformDefaults",

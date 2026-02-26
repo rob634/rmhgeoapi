@@ -673,6 +673,166 @@ class PgStacRepository:
             logger.error(f"❌ Error getting items for platform dataset: {e}")
             return []
 
+    # =========================================================================
+    # EXTENT + COLLECTION MANAGEMENT (26 FEB 2026 — STAC Materialization)
+    # =========================================================================
+
+    def compute_collection_extent(self, collection_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Compute spatial+temporal extent from all items in a collection.
+
+        Queries pgSTAC items table and computes the union bbox and temporal
+        range across all items.
+
+        Args:
+            collection_id: STAC collection ID
+
+        Returns:
+            Dict with 'bbox' [minx, miny, maxx, maxy] and
+            'temporal' [start_iso, end_iso], or None if no items.
+        """
+        logger.debug(f"Computing extent for collection '{collection_id}'")
+
+        try:
+            with self._pg_repo._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT
+                            MIN((content->'bbox'->>0)::float) AS minx,
+                            MIN((content->'bbox'->>1)::float) AS miny,
+                            MAX((content->'bbox'->>2)::float) AS maxx,
+                            MAX((content->'bbox'->>3)::float) AS maxy,
+                            MIN(content->'properties'->>'datetime') AS temporal_start,
+                            MAX(content->'properties'->>'datetime') AS temporal_end,
+                            COUNT(*) AS item_count
+                        FROM pgstac.items
+                        WHERE collection = %s
+                        """,
+                        (collection_id,)
+                    )
+                    result = cur.fetchone()
+
+                    if not result or result['item_count'] == 0:
+                        logger.debug(f"   No items in collection '{collection_id}'")
+                        return None
+
+                    extent = {
+                        'bbox': [
+                            result['minx'],
+                            result['miny'],
+                            result['maxx'],
+                            result['maxy'],
+                        ],
+                        'temporal': [
+                            result['temporal_start'],
+                            result['temporal_end'],
+                        ],
+                        'item_count': result['item_count'],
+                    }
+                    logger.debug(
+                        f"   Extent for '{collection_id}': bbox={extent['bbox']}, "
+                        f"items={extent['item_count']}"
+                    )
+                    return extent
+
+        except Exception as e:
+            logger.error(f"❌ Error computing extent for '{collection_id}': {e}")
+            return None
+
+    def update_collection_extent(self, collection_id: str, extent: Dict[str, Any]) -> bool:
+        """
+        Update existing collection's extent (bbox + temporal) in pgSTAC.
+
+        Fetches current collection, patches extent, and upserts back.
+
+        Args:
+            collection_id: STAC collection ID
+            extent: Dict with 'bbox' and optional 'temporal' keys
+
+        Returns:
+            True if updated successfully
+        """
+        logger.info(f"🔄 Updating extent for collection '{collection_id}'")
+
+        try:
+            collection_dict = self.get_collection(collection_id)
+            if not collection_dict:
+                logger.warning(f"Collection '{collection_id}' not found for extent update")
+                return False
+
+            # Patch extent
+            bbox = extent.get('bbox')
+            temporal = extent.get('temporal')
+
+            if bbox:
+                collection_dict.setdefault('extent', {}).setdefault('spatial', {})['bbox'] = [bbox]
+
+            if temporal:
+                collection_dict.setdefault('extent', {}).setdefault('temporal', {})['interval'] = [temporal]
+
+            # Upsert back
+            self.insert_collection(collection_dict)
+            logger.info(f"✅ Extent updated for '{collection_id}'")
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ Error updating extent for '{collection_id}': {e}")
+            return False
+
+    def delete_collection(self, collection_id: str) -> bool:
+        """
+        Delete a collection from pgSTAC.
+
+        Items must be deleted first (or use delete_collection_cascade).
+
+        Args:
+            collection_id: STAC collection ID to delete
+
+        Returns:
+            True if deleted, False if not found or error
+        """
+        logger.info(f"🗑️ Deleting collection '{collection_id}'")
+
+        try:
+            with self._pg_repo._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT pgstac.delete_collection(%s)",
+                        (collection_id,)
+                    )
+                    conn.commit()
+                    logger.info(f"   ✅ Deleted collection '{collection_id}'")
+                    return True
+
+        except Exception as e:
+            logger.error(f"❌ Error deleting collection '{collection_id}': {e}")
+            return False
+
+    def get_collection_item_count(self, collection_id: str) -> int:
+        """
+        Count items in a collection.
+
+        Args:
+            collection_id: STAC collection ID
+
+        Returns:
+            Number of items in the collection
+        """
+        try:
+            with self._pg_repo._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT COUNT(*) AS cnt FROM pgstac.items WHERE collection = %s",
+                        (collection_id,)
+                    )
+                    result = cur.fetchone()
+                    return result['cnt'] if result else 0
+
+        except Exception as e:
+            logger.error(f"❌ Error counting items in '{collection_id}': {e}")
+            return 0
+
 
 # Export the repository class
 __all__ = ['PgStacRepository']

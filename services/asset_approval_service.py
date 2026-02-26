@@ -493,15 +493,11 @@ class AssetApprovalService:
         """
         Create pgSTAC item from cached STAC dict at approval time.
 
-        V0.9 Change: Reads STAC from Release.stac_item_json (NOT from
-        cog_metadata table as in V0.8). The STAC item dict was cached
-        on the Release during processing.
-
-        At approval, we:
-        1. Read the cached dict from release.stac_item_json
-        2. Patch it with versioned ID and approval properties
-        3. Build/upsert the STAC collection
-        4. Insert the item into pgSTAC
+        Delegates to STACMaterializer which handles:
+        - B2C sanitization (strips geoetl:* properties)
+        - Union extent computation across all items in collection
+        - TiTiler URL injection
+        - Both single COG and tiled output modes
 
         Args:
             release: The approved AssetRelease
@@ -511,227 +507,19 @@ class AssetApprovalService:
         Returns:
             Dict with success, pgstac_id, and optional error
         """
-        if not release.stac_item_id or not release.stac_collection_id:
-            return {
-                'success': False,
-                'error': 'Release has no STAC item/collection ID'
-            }
-
-        if not release.stac_item_json:
-            logger.warning(
-                f"No cached STAC item JSON on release {release.release_id[:16]}..."
-            )
-            return {
-                'success': False,
-                'error': (
-                    f'STAC metadata not cached on release {release.release_id[:16]}... '
-                    f'-- resubmit data'
-                )
-            }
-
-        try:
-            from infrastructure.pgstac_repository import PgStacRepository
-            from services.stac_collection import build_raster_stac_collection
-
-            now_iso = datetime.now(timezone.utc).isoformat()
-            pgstac = PgStacRepository()
-
-            # =================================================================
-            # TILED OUTPUT: Items already in pgSTAC from processing (Step 4).
-            # Patch each with geoetl:published=true + approval metadata.
-            # =================================================================
-            if release.output_mode == 'tiled':
-                approval_props = {
-                    'geoetl:published': True,
-                    'geoetl:published_at': now_iso,
-                    'geoetl:approved_by': reviewer,
-                    'geoetl:clearance': clearance_state.value,
-                }
-                if release.version_id:
-                    approval_props['ddh:version_id'] = release.version_id
-
-                item_ids = pgstac.get_collection_item_ids(release.stac_collection_id)
-
-                if not item_ids:
-                    # Fallback: items weren't inserted at processing time.
-                    # Insert from cog_metadata now.
-                    logger.warning(
-                        f"No pgSTAC items found for tiled collection "
-                        f"{release.stac_collection_id} — inserting from cog_metadata"
-                    )
-                    from infrastructure.raster_metadata_repository import RasterMetadataRepository
-                    cog_repo = RasterMetadataRepository.instance()
-                    cog_records = cog_repo.list_by_collection(release.stac_collection_id)
-
-                    # Upsert collection first
-                    if cog_records:
-                        first_item = cog_records[0].get('stac_item_json', {})
-                        bbox = first_item.get('bbox', [-180, -90, 180, 90])
-                        collection_dict = build_raster_stac_collection(
-                            collection_id=release.stac_collection_id,
-                            bbox=bbox,
-                        )
-                        pgstac.insert_collection(collection_dict)
-
-                    item_ids = []
-                    for rec in cog_records:
-                        stac_json = rec.get('stac_item_json')
-                        if not stac_json:
-                            continue
-                        item_dict = dict(stac_json)
-                        props = item_dict.setdefault('properties', {})
-                        props.update(approval_props)
-                        pgstac.insert_item(item_dict, release.stac_collection_id)
-                        item_ids.append(item_dict.get('id'))
-
-                    logger.info(
-                        f"Inserted {len(item_ids)} tiled items from cog_metadata "
-                        f"with geoetl:published=true"
-                    )
-                else:
-                    # Patch each existing item with approval properties
-                    for item_id in item_ids:
-                        pgstac.update_item_properties(
-                            item_id, release.stac_collection_id, approval_props
-                        )
-                    logger.info(
-                        f"Patched {len(item_ids)} tiled items with "
-                        f"geoetl:published=true in {release.stac_collection_id}"
-                    )
-
-                # Build mosaic URL from search_id
-                mosaic_viewer_url = None
-                if release.search_id:
-                    from services.pgstac_search_registration import PgSTACSearchRegistration
-                    from config import get_config
-                    config = get_config()
-                    registrar = PgSTACSearchRegistration()
-                    urls = registrar.get_search_urls(
-                        release.search_id, config.titiler_base_url, assets=['data']
-                    )
-                    mosaic_viewer_url = urls.get('viewer')
-
-                return {
-                    'success': True,
-                    'items_updated': len(item_ids),
-                    'mosaic_viewer_url': mosaic_viewer_url,
-                }
-
-            # =================================================================
-            # SINGLE COG OUTPUT: Original behavior (unchanged)
-            # =================================================================
-
-            # Copy to avoid mutating model
-            stac_item_json = dict(release.stac_item_json)
-
-            # Patch with versioned ID and collection
-            versioned_id = release.stac_item_id
-            stac_item_json['id'] = versioned_id
-            stac_item_json['collection'] = release.stac_collection_id
-
-            # Patch title and self-link with versioned item ID
-            # The cached dict was built at processing time with draft/ordinal names.
-            props = stac_item_json.setdefault('properties', {})
-            if versioned_id:
-                props['title'] = versioned_id
-                for link in stac_item_json.get('links', []):
-                    if link.get('rel') == 'self':
-                        href = link.get('href', '')
-                        # Replace /items/{old_id} with /items/{versioned_id}
-                        items_prefix = '/items/'
-                        idx = href.rfind(items_prefix)
-                        if idx >= 0:
-                            link['href'] = href[:idx + len(items_prefix)] + versioned_id
-
-            # Patch with approval properties
-            props['geoetl:published'] = True
-            props['geoetl:published_at'] = now_iso
-            props['geoetl:approved_by'] = reviewer
-            props['geoetl:clearance'] = clearance_state.value
-            if release.version_id:
-                props['ddh:version_id'] = release.version_id
-
-            # Ensure TiTiler visualization URLs are present in STAC item
-            # The cached dict may or may not have them (depends on Docker worker config).
-            # Always inject from the Function App's config to guarantee correctness.
-            if release.blob_path:
-                try:
-                    from config import get_config
-                    import urllib.parse
-                    config = get_config()
-                    titiler_base = config.titiler_base_url.rstrip('/')
-                    vsiaz_url = f"/vsiaz/silver-cogs/{release.blob_path}"
-                    encoded_url = urllib.parse.quote(vsiaz_url, safe='')
-
-                    # Thumbnail asset
-                    assets = stac_item_json.setdefault('assets', {})
-                    thumbnail_params = f"url={encoded_url}&max_size=512"
-                    # Carry over render params from existing thumbnail if present
-                    existing_thumb = assets.get('thumbnail', {}).get('href', '')
-                    for param in ['rescale', 'colormap_name', 'bidx']:
-                        if f'&{param}=' in existing_thumb:
-                            val = existing_thumb.split(f'&{param}=')[1].split('&')[0]
-                            thumbnail_params += f"&{param}={val}"
-
-                    assets['thumbnail'] = {
-                        "href": f"{titiler_base}/cog/preview.png?{thumbnail_params}",
-                        "type": "image/png",
-                        "title": "Thumbnail",
-                        "roles": ["thumbnail"]
-                    }
-
-                    # TiTiler links (viewer, tilejson)
-                    links = stac_item_json.setdefault('links', [])
-                    # Remove stale tiles/viewer links, then re-add
-                    links[:] = [l for l in links if l.get('rel') not in ('tiles', 'viewer')]
-                    links.append({
-                        "rel": "tiles",
-                        "href": f"{titiler_base}/cog/tilejson.json?url={encoded_url}",
-                        "type": "application/json",
-                        "title": "TileJSON"
-                    })
-                    links.append({
-                        "rel": "viewer",
-                        "href": f"{titiler_base}/cog/WebMercatorQuad/map.html?url={encoded_url}",
-                        "type": "text/html",
-                        "title": "Map Viewer"
-                    })
-                except Exception as titiler_err:
-                    logger.warning(f"Failed to inject TiTiler URLs (non-fatal): {titiler_err}")
-
-            # Build and upsert STAC collection
-            item_bbox = stac_item_json.get('bbox', [-180, -90, 180, 90])
-            item_dt = props.get('datetime')
-            collection_dict = build_raster_stac_collection(
-                collection_id=release.stac_collection_id,
-                bbox=item_bbox,
-                temporal_start=item_dt,
-            )
-            pgstac.insert_collection(collection_dict)
-            logger.info(f"Collection upserted: {release.stac_collection_id}")
-
-            # Insert item into pgSTAC
-            pgstac_id = pgstac.insert_item(stac_item_json, release.stac_collection_id)
-            logger.info(
-                f"Materialized STAC item {release.stac_item_id} in collection "
-                f"{release.stac_collection_id} (pgstac_id={pgstac_id})"
-            )
-
-            return {'success': True, 'pgstac_id': pgstac_id}
-
-        except Exception as e:
-            logger.error(f"Error materializing STAC item: {e}")
-            return {
-                'success': False,
-                'error': str(e)
-            }
+        from services.stac_materialization import STACMaterializer
+        materializer = STACMaterializer()
+        return materializer.materialize_release(release, reviewer, clearance_state)
 
     def _delete_stac(self, release: AssetRelease) -> Dict[str, Any]:
         """
         Delete pgSTAC item on revocation.
 
-        Approved = visible in catalog, not approved = invisible.
-        Revocation deletes the item from pgSTAC entirely.
+        Delegates to STACMaterializer.dematerialize_item() which handles:
+        - Item deletion from pgSTAC
+        - Extent recalculation for remaining items
+        - Empty collection cleanup
+
         The cached stac_item_json on the Release is preserved for auditing.
 
         Args:
@@ -748,34 +536,30 @@ class AssetApprovalService:
             }
 
         try:
+            from services.stac_materialization import STACMaterializer
             from infrastructure.pgstac_repository import PgStacRepository
-            pgstac = PgStacRepository()
+            materializer = STACMaterializer()
 
-            # Tiled output: delete all items in the collection
+            # Tiled output: delete all items for this release's tiles
             if release.output_mode == 'tiled':
+                pgstac = PgStacRepository()
                 item_ids = pgstac.get_collection_item_ids(release.stac_collection_id)
-                deleted_count = 0
                 for item_id in item_ids:
-                    if pgstac.delete_item(release.stac_collection_id, item_id):
-                        deleted_count += 1
-                logger.info(
-                    f"Deleted {deleted_count}/{len(item_ids)} tiled items "
-                    f"from {release.stac_collection_id}"
-                )
-                # Leave collection + search (harmless, search returns empty)
-                return {'success': True, 'deleted': deleted_count > 0, 'items_deleted': deleted_count}
+                    materializer.dematerialize_item(release.stac_collection_id, item_id)
+                return {
+                    'success': True,
+                    'deleted': len(item_ids) > 0,
+                    'items_deleted': len(item_ids)
+                }
 
-            # Single COG: delete the single item
-            deleted = pgstac.delete_item(release.stac_collection_id, release.stac_item_id)
-
-            if deleted:
-                logger.info(f"Deleted pgSTAC item {release.stac_item_id}")
-            else:
-                logger.info(
-                    f"pgSTAC item {release.stac_item_id} not found (never materialized)"
-                )
-
-            return {'success': True, 'deleted': deleted}
+            # Single COG: delete just this release's item
+            result = materializer.dematerialize_item(
+                release.stac_collection_id, release.stac_item_id
+            )
+            return {
+                'success': result.get('success', False),
+                'deleted': result.get('deleted', False),
+            }
 
         except Exception as e:
             logger.warning(f"Failed to delete STAC item on revocation: {e}")

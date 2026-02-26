@@ -92,14 +92,14 @@ def load_vector_source(
     file_extension: str,
     converter_params: Optional[Dict[str, Any]] = None,
     job_id: str = "unknown",
-    blob_repo=None
+    blob_repo=None,
+    mount_source_path: Optional[str] = None
 ) -> Tuple[gpd.GeoDataFrame, Dict[str, Any]]:
     """
-    Load vector file from blob storage and convert to GeoDataFrame.
+    Load vector file from blob storage (or mount path) and convert to GeoDataFrame.
 
     Handles:
-        - Blob download
-        - BytesIO wrapping for converters
+        - Blob download (in-memory) OR mount path reading (file-based)
         - Format-specific conversion
         - Memory logging
 
@@ -110,6 +110,8 @@ def load_vector_source(
         converter_params: Format-specific parameters (e.g., lat_name, lon_name for CSV)
         job_id: Job ID for logging
         blob_repo: Optional BlobRepository instance (creates one if not provided)
+        mount_source_path: Optional file path on mount. When provided, skips blob
+            download and passes the path directly to converters (26 FEB 2026).
 
     Returns:
         Tuple of (GeoDataFrame, load_info dict)
@@ -117,6 +119,7 @@ def load_vector_source(
     Raises:
         ValueError: If file format is unsupported or file is empty
     """
+    from pathlib import Path
     from infrastructure.blob import BlobRepository
 
     # Normalize extension
@@ -133,29 +136,47 @@ def load_vector_source(
             f"Supported formats: {supported}"
         )
 
-    # Initialize blob repo if not provided
-    if blob_repo is None:
-        blob_repo = BlobRepository.for_zone("bronze")
-
-    # Download file
-    logger.info(f"[{job_id[:8]}] Downloading {blob_name} from {container_name}")
-    file_bytes = blob_repo.read_blob(container_name, blob_name)
-    file_size_mb = len(file_bytes) / (1024 * 1024)
-
-    log_memory_checkpoint(
-        logger, "After file download",
-        context_id=job_id,
-        file_size_mb=round(file_size_mb, 1),
-        file_extension=file_extension
-    )
-
-    # Wrap in BytesIO for converters (they expect file-like objects)
-    file_buffer = BytesIO(file_bytes)
-
-    # Convert to GeoDataFrame
-    # Converters use **kwargs so we unpack converter_params
     params = converter_params or {}
-    gdf = converter(file_buffer, **params)
+
+    if mount_source_path:
+        # Mount-based path: pass file path string to converter (no RAM copy)
+        mount_file = Path(mount_source_path)
+        file_size_mb = mount_file.stat().st_size / (1024 * 1024)
+
+        logger.info(
+            f"[{job_id[:8]}] Loading from mount: {mount_source_path} "
+            f"({file_size_mb:.1f}MB)"
+        )
+
+        log_memory_checkpoint(
+            logger, "Before mount-based conversion",
+            context_id=job_id,
+            file_size_mb=round(file_size_mb, 1),
+            file_extension=file_extension,
+            source="mount"
+        )
+
+        # Pass file path string to converter (converters accept Union[BytesIO, str, Path])
+        gdf = converter(mount_source_path, **params)
+
+    else:
+        # In-memory path: download blob to BytesIO (existing behavior)
+        if blob_repo is None:
+            blob_repo = BlobRepository.for_zone("bronze")
+
+        logger.info(f"[{job_id[:8]}] Downloading {blob_name} from {container_name}")
+        file_bytes = blob_repo.read_blob(container_name, blob_name)
+        file_size_mb = len(file_bytes) / (1024 * 1024)
+
+        log_memory_checkpoint(
+            logger, "After file download",
+            context_id=job_id,
+            file_size_mb=round(file_size_mb, 1),
+            file_extension=file_extension
+        )
+
+        file_buffer = BytesIO(file_bytes)
+        gdf = converter(file_buffer, **params)
 
     # Capture original CRS before any transformations
     original_crs = str(gdf.crs) if gdf.crs else "unknown"
@@ -183,7 +204,8 @@ def load_vector_source(
         'file_size_mb': round(file_size_mb, 1),
         'original_crs': original_crs,
         'feature_count': len(gdf),
-        'columns': list(gdf.columns)
+        'columns': list(gdf.columns),
+        'source': 'mount' if mount_source_path else 'memory',
     }
 
     return gdf, load_info
@@ -228,7 +250,7 @@ def validate_and_prepare(
     geometry_params: Optional[Dict[str, Any]] = None,
     job_id: str = "unknown",
     event_callback: Optional[EventCallback] = None
-) -> Tuple[gpd.GeoDataFrame, Dict[str, Any], List[str]]:
+) -> Tuple[Dict[str, gpd.GeoDataFrame], Dict[str, Any], List[str]]:
     """
     Validate geometries and prepare GeoDataFrame for PostGIS.
 
@@ -247,7 +269,8 @@ def validate_and_prepare(
             Used by Docker ETL to emit fine-grained validation events.
 
     Returns:
-        Tuple of (validated_gdf, validation_info, warnings_list)
+        Tuple of (prepared_groups, validation_info, warnings_list)
+        prepared_groups: dict mapping geometry suffix to GeoDataFrame
 
     Raises:
         ValueError: If all features are filtered out during validation
@@ -256,9 +279,9 @@ def validate_and_prepare(
 
     original_count = len(gdf)
 
-    # Validate and reproject to EPSG:4326
+    # Validate, reproject to EPSG:4326, and split by geometry type
     handler = VectorToPostGISHandler()
-    validated_gdf = handler.prepare_gdf(
+    prepared_groups = handler.prepare_gdf(
         gdf,
         geometry_params=geometry_params or {},
         event_callback=event_callback
@@ -267,7 +290,8 @@ def validate_and_prepare(
     # Capture any warnings from prepare_gdf
     data_warnings = handler.last_warnings.copy() if hasattr(handler, 'last_warnings') and handler.last_warnings else []
 
-    validated_count = len(validated_gdf)
+    # Total validated count across all groups
+    validated_count = sum(len(g) for g in prepared_groups.values())
 
     log_memory_checkpoint(
         logger, "After validation",
@@ -297,10 +321,12 @@ def validate_and_prepare(
     validation_info = {
         'original_count': original_count,
         'validated_count': validated_count,
-        'filtered_count': original_count - validated_count
+        'filtered_count': original_count - validated_count,
+        'geometry_groups': len(prepared_groups),
+        'group_counts': {k: len(v) for k, v in prepared_groups.items()},
     }
 
-    return validated_gdf, validation_info, data_warnings
+    return prepared_groups, validation_info, data_warnings
 
 
 # =============================================================================

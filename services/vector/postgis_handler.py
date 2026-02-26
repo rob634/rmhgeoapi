@@ -85,17 +85,15 @@ class VectorToPostGISHandler:
         gdf: gpd.GeoDataFrame,
         geometry_params: dict = None,
         event_callback: Optional[EventCallback] = None
-    ) -> gpd.GeoDataFrame:
+    ) -> Dict[str, 'gpd.GeoDataFrame']:
         """
-        Validate, reproject, clean, and optionally process GeoDataFrame geometries.
+        Validate, reproject, clean, and split GeoDataFrame by geometry type.
 
-        Operations:
-        1. Remove null geometries
-        2. Fix invalid geometries (buffer(0) trick)
-        3. Reproject to EPSG:4326 if needed
-        4. Clean column names (lowercase, replace spaces with underscores)
-        5. Remove geometry column from attributes
-        6. Apply geometry processing (simplification, quantization) if requested
+        Runs all validation steps on the full GeoDataFrame (null removal,
+        invalid fix, force 2D, antimeridian, normalize to Multi-types,
+        winding order, PostGIS type validation, datetime validation,
+        null column pruning, CRS reprojection, column sanitization,
+        geometry processing). Then splits by geometry type at the end.
 
         Args:
             gdf: Input GeoDataFrame
@@ -107,10 +105,13 @@ class VectorToPostGISHandler:
                 Used by Docker ETL to emit fine-grained validation events.
 
         Returns:
-            Cleaned and validated GeoDataFrame
+            Dict mapping geometry suffix to GeoDataFrame.
+            Single-type files: {'polygon': gdf}
+            Mixed-type files: {'polygon': gdf1, 'line': gdf2, 'point': gdf3}
 
         Raises:
-            ValueError: If GeoDataFrame has no valid geometries
+            ValueError: If GeoDataFrame has no valid geometries or
+                        contains unsupported geometry types
         """
         # Helper to emit events if callback provided
         def emit(event_name: str, details: Dict[str, Any]):
@@ -454,33 +455,6 @@ class VectorToPostGISHandler:
             })
 
         # ========================================================================
-        # MIXED GEOMETRY TYPE DETECTION (25 FEB 2026)
-        # ========================================================================
-        # After normalization, all geometries should be the same Multi-type.
-        # If multiple Multi-types exist (e.g., MultiPoint + MultiPolygon), the
-        # table can only be typed to one — mismatched rows would fail on INSERT
-        # or produce an unusable mixed-type table.
-        # ========================================================================
-        multi_types = set(gdf.geometry.geom_type.unique())
-        if len(multi_types) > 1:
-            type_counts = gdf.geometry.geom_type.value_counts().to_dict()
-            type_summary = ", ".join(
-                f"{t}: {c} features" for t, c in type_counts.items()
-            )
-            raise ValueError(
-                f"File contains mixed geometry types that cannot be stored in a "
-                f"single PostGIS table: {type_summary}. "
-                f"Each table requires a uniform geometry type. "
-                f"Split the source file by geometry type (e.g., polygons in one "
-                f"file, points in another) and submit separately."
-            )
-
-        emit("geometry_type_uniform", {
-            "geometry_type": list(multi_types)[0],
-            "features": len(gdf)
-        })
-
-        # ========================================================================
         # VALIDATE POSTGIS GEOMETRY TYPE SUPPORT (12 NOV 2025)
         # ========================================================================
         # PostGIS CREATE TABLE only supports specific geometry types.
@@ -716,7 +690,39 @@ class VectorToPostGISHandler:
                 except ImportError:
                     logger.warning("⚠️  Shapely 2.0+ required for quantization - skipping (install: pip install shapely>=2.0)")
 
-        return gdf
+        # ====================================================================
+        # GEOMETRY TYPE SPLIT (26 FEB 2026)
+        # ====================================================================
+        # Split by geometry type. Always returns dict[str, GeoDataFrame].
+        # Single-type files get one entry. Mixed-type files get 2-3 entries.
+        # Suffixes only applied by caller when len(result) > 1.
+        # ====================================================================
+        GEOM_TYPE_SUFFIX = {
+            'MultiPolygon': 'polygon',
+            'MultiLineString': 'line',
+            'MultiPoint': 'point',
+        }
+
+        groups = {}
+        for geom_type, sub_gdf in gdf.groupby(gdf.geometry.geom_type):
+            suffix = GEOM_TYPE_SUFFIX.get(geom_type, geom_type.lower())
+            groups[suffix] = sub_gdf.copy()
+
+        if len(groups) > 1:
+            type_summary = {k: len(v) for k, v in groups.items()}
+            logger.info(f"📊 Split into {len(groups)} geometry types: {type_summary}")
+            emit("geometry_type_split", {
+                "types": type_summary,
+                "total_features": len(gdf)
+            })
+        else:
+            key = list(groups.keys())[0]
+            emit("geometry_type_uniform", {
+                "geometry_type": key,
+                "features": len(gdf)
+            })
+
+        return groups
 
     def calculate_optimal_chunk_size(self, gdf: gpd.GeoDataFrame) -> int:
         """

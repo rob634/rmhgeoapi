@@ -591,7 +591,12 @@ class PlatformCatalogService:
         """
         from datetime import datetime, timezone
 
-        table_name = release.get('table_name')
+        # Get table names from junction table
+        from infrastructure import ReleaseTableRepository
+        release_table_repo = ReleaseTableRepository()
+        release_id = release.get('release_id')
+        table_names = release_table_repo.get_table_names(release_id) if release_id else []
+        table_name = table_names[0] if table_names else None
 
         # Generate TiPG URLs
         tile_urls = self._config.generate_vector_tile_urls(table_name, schema="geo") if table_name else {}
@@ -613,7 +618,8 @@ class PlatformCatalogService:
             },
 
             "vector": {
-                "table_name": table_name,
+                "table_names": table_names,
+                "table_name": table_name,  # Primary for backward compat
                 "schema": "geo",
                 "endpoints": {
                     "features": f"/api/features/collections/{table_name}/items" if table_name else None,

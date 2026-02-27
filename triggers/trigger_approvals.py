@@ -35,7 +35,7 @@ Updated: 21 FEB 2026 - V0.9 Release-based approval
 import json
 import azure.functions as func
 
-from triggers.http_base import parse_request_json
+from triggers.http_base import parse_request_json, safe_error_response
 from util_logger import LoggerFactory, ComponentType
 
 logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "ApprovalTriggers")
@@ -360,16 +360,7 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
             headers={"Content-Type": "application/json"}
         )
     except Exception as e:
-        logger.error(f"Platform approve failed: {e}", exc_info=True)
-        return func.HttpResponse(
-            json.dumps({
-                "success": False,
-                "error": str(e),
-                "error_type": type(e).__name__
-            }),
-            status_code=500,
-            headers={"Content-Type": "application/json"}
-        )
+        return safe_error_response(500, logger, "Platform approve failed", exc=e)
 
 
 def platform_reject(req: func.HttpRequest) -> func.HttpResponse:
@@ -508,16 +499,7 @@ def platform_reject(req: func.HttpRequest) -> func.HttpResponse:
             headers={"Content-Type": "application/json"}
         )
     except Exception as e:
-        logger.error(f"Platform reject failed: {e}", exc_info=True)
-        return func.HttpResponse(
-            json.dumps({
-                "success": False,
-                "error": str(e),
-                "error_type": type(e).__name__
-            }),
-            status_code=500,
-            headers={"Content-Type": "application/json"}
-        )
+        return safe_error_response(500, logger, "Platform reject failed", exc=e)
 
 
 def platform_revoke(req: func.HttpRequest) -> func.HttpResponse:
@@ -661,16 +643,7 @@ def platform_revoke(req: func.HttpRequest) -> func.HttpResponse:
             headers={"Content-Type": "application/json"}
         )
     except Exception as e:
-        logger.error(f"Platform revoke failed: {e}", exc_info=True)
-        return func.HttpResponse(
-            json.dumps({
-                "success": False,
-                "error": str(e),
-                "error_type": type(e).__name__
-            }),
-            status_code=500,
-            headers={"Content-Type": "application/json"}
-        )
+        return safe_error_response(500, logger, "Platform revoke failed", exc=e)
 
 
 def platform_approvals_list(req: func.HttpRequest) -> func.HttpResponse:
@@ -784,16 +757,7 @@ def platform_approvals_list(req: func.HttpRequest) -> func.HttpResponse:
         )
 
     except Exception as e:
-        logger.error(f"Platform approvals list failed: {e}", exc_info=True)
-        return func.HttpResponse(
-            json.dumps({
-                "success": False,
-                "error": str(e),
-                "error_type": type(e).__name__
-            }),
-            status_code=500,
-            headers={"Content-Type": "application/json"}
-        )
+        return safe_error_response(500, logger, "Platform approvals list failed", exc=e)
 
 
 def platform_approval_get(req: func.HttpRequest) -> func.HttpResponse:
@@ -865,16 +829,7 @@ def platform_approval_get(req: func.HttpRequest) -> func.HttpResponse:
         )
 
     except Exception as e:
-        logger.error(f"Platform approval get failed: {e}", exc_info=True)
-        return func.HttpResponse(
-            json.dumps({
-                "success": False,
-                "error": str(e),
-                "error_type": type(e).__name__
-            }),
-            status_code=500,
-            headers={"Content-Type": "application/json"}
-        )
+        return safe_error_response(500, logger, "Platform approval get failed", exc=e)
 
 
 def platform_approvals_status(req: func.HttpRequest) -> func.HttpResponse:
@@ -962,16 +917,7 @@ def platform_approvals_status(req: func.HttpRequest) -> func.HttpResponse:
         )
 
     except Exception as e:
-        logger.error(f"Platform approvals status failed: {e}", exc_info=True)
-        return func.HttpResponse(
-            json.dumps({
-                "success": False,
-                "error": str(e),
-                "error_type": type(e).__name__
-            }),
-            status_code=500,
-            headers={"Content-Type": "application/json"}
-        )
+        return safe_error_response(500, logger, "Platform approvals status failed", exc=e)
 
 
 # =============================================================================

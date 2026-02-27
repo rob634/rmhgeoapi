@@ -83,6 +83,34 @@ def parse_request_json(req: func.HttpRequest, required: bool = True) -> Optional
     return body
 
 
+def safe_error_response(
+    status_code: int,
+    logger_instance,
+    error_msg: str,
+    exc=None,
+    error_type: str = "InternalError"
+):
+    """
+    Create error response that does not leak internal details.
+
+    Logs full exception server-side, returns generic message to caller.
+    """
+    if exc:
+        logger_instance.error(f"{error_msg}: {exc}", exc_info=True)
+    else:
+        logger_instance.error(error_msg)
+
+    return func.HttpResponse(
+        json.dumps({
+            "success": False,
+            "error": "An internal error occurred. Check server logs.",
+            "error_type": error_type
+        }),
+        status_code=status_code,
+        headers={"Content-Type": "application/json"}
+    )
+
+
 class BaseHttpTrigger(ABC):
     """
     Abstract base class for Azure Functions HTTP triggers.

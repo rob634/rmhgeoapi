@@ -176,27 +176,46 @@ class AssetApprovalService:
                 )
             }
 
-        # Update stac_item_id to final versioned form (draft-N -> version_id)
-        from services.platform_translation import generate_stac_item_id
-        from infrastructure import AssetRepository
-        asset_repo = AssetRepository()
-        asset = asset_repo.get_by_id(release.asset_id)
-        if asset:
-            final_stac_item_id = generate_stac_item_id(
-                asset.dataset_id, asset.resource_id, version_id
-            )
-            if final_stac_item_id != release.stac_item_id:
-                self.release_repo.update_physical_outputs(
-                    release_id=release_id,
-                    stac_item_id=final_stac_item_id
+        # Post-atomic operations: stac_item_id update + STAC materialization.
+        # These run AFTER the atomic approval commit. If they fail, the release
+        # is APPROVED in the DB but STAC is stale/missing.
+        stac_result = {'success': False, 'error': 'STAC materialization not attempted'}
+        try:
+            # Update stac_item_id to final versioned form (draft-N -> version_id)
+            from services.platform_translation import generate_stac_item_id
+            from infrastructure import AssetRepository
+            asset_repo = AssetRepository()
+            asset = asset_repo.get_by_id(release.asset_id)
+            if asset:
+                final_stac_item_id = generate_stac_item_id(
+                    asset.dataset_id, asset.resource_id, version_id
                 )
-                logger.info(
-                    f"Updated stac_item_id: {release.stac_item_id} -> {final_stac_item_id}"
-                )
-                release.stac_item_id = final_stac_item_id
+                if final_stac_item_id != release.stac_item_id:
+                    self.release_repo.update_physical_outputs(
+                        release_id=release_id,
+                        stac_item_id=final_stac_item_id
+                    )
+                    logger.info(
+                        f"Updated stac_item_id: {release.stac_item_id} -> {final_stac_item_id}"
+                    )
+                    release.stac_item_id = final_stac_item_id
 
-        # Materialize STAC item to pgSTAC from cached stac_item_json
-        stac_result = self._materialize_stac(release, reviewer, clearance_state)
+            # Materialize STAC item to pgSTAC from cached stac_item_json
+            stac_result = self._materialize_stac(release, reviewer, clearance_state)
+
+        except Exception as e:
+            logger.critical(
+                f"STAC_MATERIALIZATION_FAILED for approved release {release_id[:16]}...: {e}",
+                exc_info=True
+            )
+            stac_result = {'success': False, 'error': f'STAC_MATERIALIZATION_FAILED: {e}'}
+            try:
+                self.release_repo.update_last_error(
+                    release_id=release_id,
+                    last_error=f"STAC_MATERIALIZATION_FAILED: {e}"
+                )
+            except Exception as persist_err:
+                logger.error(f"Failed to persist STAC error to release: {persist_err}")
 
         # Trigger ADF if PUBLIC
         adf_run_id = None
@@ -284,7 +303,7 @@ class AssetApprovalService:
             }
 
         # Validate state
-        if not release.can_approve():
+        if not release.can_reject():
             return {
                 'success': False,
                 'error': (
@@ -540,16 +559,39 @@ class AssetApprovalService:
             from infrastructure.pgstac_repository import PgStacRepository
             materializer = STACMaterializer()
 
-            # Tiled output: delete all items for this release's tiles
+            # Tiled output: delete only THIS release's items (not all in collection)
             if release.output_mode == 'tiled':
                 pgstac = PgStacRepository()
-                item_ids = pgstac.get_collection_item_ids(release.stac_collection_id)
-                for item_id in item_ids:
+                all_item_ids = pgstac.get_collection_item_ids(release.stac_collection_id)
+
+                # Filter to items belonging to this release via ddh:release_id tag
+                release_item_ids = []
+                for item_id in all_item_ids:
+                    item = pgstac.get_item(item_id, release.stac_collection_id)
+                    if item and item.get('properties', {}).get('ddh:release_id') == release.release_id:
+                        release_item_ids.append(item_id)
+
+                if not release_item_ids and all_item_ids:
+                    # Legacy items without ddh:release_id tag — skip to prevent data loss
+                    logger.warning(
+                        f"Tiled revocation: {len(all_item_ids)} items in collection "
+                        f"{release.stac_collection_id} but none tagged with release_id "
+                        f"{release.release_id[:16]}... — skipping deletion to prevent data loss"
+                    )
+                    return {
+                        'success': True,
+                        'deleted': False,
+                        'warning': 'Legacy items without release_id tag — manual cleanup required',
+                        'items_in_collection': len(all_item_ids)
+                    }
+
+                for item_id in release_item_ids:
                     materializer.dematerialize_item(release.stac_collection_id, item_id)
+
                 return {
                     'success': True,
-                    'deleted': len(item_ids) > 0,
-                    'items_deleted': len(item_ids)
+                    'deleted': len(release_item_ids) > 0,
+                    'items_deleted': len(release_item_ids)
                 }
 
             # Single COG: delete just this release's item

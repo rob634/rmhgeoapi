@@ -35,7 +35,7 @@ import json
 import azure.functions as func
 from azure.functions import Blueprint
 
-from triggers.http_base import parse_request_json
+from triggers.http_base import parse_request_json, safe_error_response
 from util_logger import LoggerFactory, ComponentType
 
 logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "ApprovalsAdmin")
@@ -136,12 +136,7 @@ def list_approvals(req: func.HttpRequest) -> func.HttpResponse:
         )
 
     except Exception as e:
-        logger.error(f"Error listing approvals: {e}", exc_info=True)
-        return func.HttpResponse(
-            json.dumps({'error': str(e)}),
-            status_code=500,
-            mimetype='application/json'
-        )
+        return safe_error_response(500, logger, "Error listing approvals", exc=e)
 
 
 @bp.route(route="approvals/{approval_id}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
@@ -195,12 +190,7 @@ def get_approval(req: func.HttpRequest) -> func.HttpResponse:
         )
 
     except Exception as e:
-        logger.error(f"Error getting asset: {e}", exc_info=True)
-        return func.HttpResponse(
-            json.dumps({'error': str(e)}),
-            status_code=500,
-            mimetype='application/json'
-        )
+        return safe_error_response(500, logger, "Error getting asset", exc=e)
 
 
 # ============================================================================
@@ -331,12 +321,7 @@ def approve_dataset(req: func.HttpRequest) -> func.HttpResponse:
             )
 
     except Exception as e:
-        logger.error(f"Error approving asset: {e}", exc_info=True)
-        return func.HttpResponse(
-            json.dumps({'success': False, 'error': str(e)}),
-            status_code=500,
-            mimetype='application/json'
-        )
+        return safe_error_response(500, logger, "Error approving asset", exc=e)
 
 
 @bp.route(route="approvals/{approval_id}/reject", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
@@ -428,12 +413,7 @@ def reject_dataset(req: func.HttpRequest) -> func.HttpResponse:
             )
 
     except Exception as e:
-        logger.error(f"Error rejecting asset: {e}", exc_info=True)
-        return func.HttpResponse(
-            json.dumps({'success': False, 'error': str(e)}),
-            status_code=500,
-            mimetype='application/json'
-        )
+        return safe_error_response(500, logger, "Error rejecting asset", exc=e)
 
 
 @bp.route(route="approvals/{approval_id}/revoke", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
@@ -525,12 +505,7 @@ def revoke_dataset(req: func.HttpRequest) -> func.HttpResponse:
             )
 
     except Exception as e:
-        logger.error(f"Error revoking asset: {e}", exc_info=True)
-        return func.HttpResponse(
-            json.dumps({'success': False, 'error': str(e)}),
-            status_code=500,
-            mimetype='application/json'
-        )
+        return safe_error_response(500, logger, "Error revoking asset", exc=e)
 
 
 # Module exports

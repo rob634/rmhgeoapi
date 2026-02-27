@@ -250,6 +250,8 @@ class STACMaterializer:
         }
         if release.version_id:
             approval_props['ddh:version_id'] = release.version_id
+        if release.release_id:
+            approval_props['ddh:release_id'] = release.release_id
 
         item_ids = self.pgstac.get_collection_item_ids(release.stac_collection_id)
 

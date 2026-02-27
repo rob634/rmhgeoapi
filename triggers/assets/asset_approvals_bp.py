@@ -42,7 +42,7 @@ import json
 import azure.functions as func
 from azure.functions import Blueprint
 
-from triggers.http_base import parse_request_json
+from triggers.http_base import parse_request_json, safe_error_response
 from util_logger import LoggerFactory, ComponentType
 
 logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "AssetApprovals")
@@ -233,16 +233,7 @@ def approve_asset(req: func.HttpRequest) -> func.HttpResponse:
             )
 
     except Exception as e:
-        logger.error(f"Asset approve failed: {e}", exc_info=True)
-        return func.HttpResponse(
-            json.dumps({
-                "success": False,
-                "error": str(e),
-                "error_type": type(e).__name__
-            }),
-            status_code=500,
-            headers={"Content-Type": "application/json"}
-        )
+        return safe_error_response(500, logger, "Asset approve failed", exc=e)
 
 
 @bp.route(route="assets/{asset_id}/reject", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
@@ -380,16 +371,7 @@ def reject_asset(req: func.HttpRequest) -> func.HttpResponse:
             )
 
     except Exception as e:
-        logger.error(f"Asset reject failed: {e}", exc_info=True)
-        return func.HttpResponse(
-            json.dumps({
-                "success": False,
-                "error": str(e),
-                "error_type": type(e).__name__
-            }),
-            status_code=500,
-            headers={"Content-Type": "application/json"}
-        )
+        return safe_error_response(500, logger, "Asset reject failed", exc=e)
 
 
 @bp.route(route="assets/{asset_id}/revoke", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
@@ -530,16 +512,7 @@ def revoke_asset(req: func.HttpRequest) -> func.HttpResponse:
             )
 
     except Exception as e:
-        logger.error(f"Asset revoke failed: {e}", exc_info=True)
-        return func.HttpResponse(
-            json.dumps({
-                "success": False,
-                "error": str(e),
-                "error_type": type(e).__name__
-            }),
-            status_code=500,
-            headers={"Content-Type": "application/json"}
-        )
+        return safe_error_response(500, logger, "Asset revoke failed", exc=e)
 
 
 # ============================================================================
@@ -590,16 +563,7 @@ def list_pending_review(req: func.HttpRequest) -> func.HttpResponse:
         )
 
     except Exception as e:
-        logger.error(f"List pending-review failed: {e}", exc_info=True)
-        return func.HttpResponse(
-            json.dumps({
-                "success": False,
-                "error": str(e),
-                "error_type": type(e).__name__
-            }),
-            status_code=500,
-            headers={"Content-Type": "application/json"}
-        )
+        return safe_error_response(500, logger, "List pending-review failed", exc=e)
 
 
 @bp.route(route="assets/approval-stats", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
@@ -643,16 +607,7 @@ def get_approval_stats(req: func.HttpRequest) -> func.HttpResponse:
         )
 
     except Exception as e:
-        logger.error(f"Get approval-stats failed: {e}", exc_info=True)
-        return func.HttpResponse(
-            json.dumps({
-                "success": False,
-                "error": str(e),
-                "error_type": type(e).__name__
-            }),
-            status_code=500,
-            headers={"Content-Type": "application/json"}
-        )
+        return safe_error_response(500, logger, "Get approval-stats failed", exc=e)
 
 
 @bp.route(route="assets/{asset_id}/approval", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
@@ -730,16 +685,7 @@ def get_asset_approval(req: func.HttpRequest) -> func.HttpResponse:
         )
 
     except Exception as e:
-        logger.error(f"Get asset approval failed: {e}", exc_info=True)
-        return func.HttpResponse(
-            json.dumps({
-                "success": False,
-                "error": str(e),
-                "error_type": type(e).__name__
-            }),
-            status_code=500,
-            headers={"Content-Type": "application/json"}
-        )
+        return safe_error_response(500, logger, "Get asset approval failed", exc=e)
 
 
 # ============================================================================
@@ -822,16 +768,7 @@ def list_by_approval_state(req: func.HttpRequest) -> func.HttpResponse:
         )
 
     except Exception as e:
-        logger.error(f"List by-approval-state failed: {e}", exc_info=True)
-        return func.HttpResponse(
-            json.dumps({
-                "success": False,
-                "error": str(e),
-                "error_type": type(e).__name__
-            }),
-            status_code=500,
-            headers={"Content-Type": "application/json"}
-        )
+        return safe_error_response(500, logger, "List by-approval-state failed", exc=e)
 
 
 # Module exports

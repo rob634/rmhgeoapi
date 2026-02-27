@@ -1069,6 +1069,37 @@ class ReleaseRepository(PostgreSQLRepository):
                     logger.info(f"Updated physical outputs for {release_id[:16]}...")
                 return updated
 
+    def update_last_error(self, release_id: str, last_error: str) -> bool:
+        """
+        Update last_error field on a release.
+
+        Used to persist error context when post-atomic operations fail
+        (e.g., STAC materialization after approval commit).
+
+        Args:
+            release_id: Release to update
+            last_error: Error message to persist
+
+        Returns:
+            True if updated, False if release not found
+        """
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL("""
+                        UPDATE {}.{}
+                        SET last_error = %s,
+                            updated_at = %s
+                        WHERE release_id = %s
+                    """).format(
+                        sql.Identifier(self.schema),
+                        sql.Identifier(self.table)
+                    ),
+                    (last_error, datetime.now(timezone.utc), release_id)
+                )
+                conn.commit()
+                return cur.rowcount > 0
+
     # =========================================================================
     # LIFECYCLE
     # =========================================================================
@@ -1210,6 +1241,7 @@ class ReleaseRepository(PostgreSQLRepository):
                                 reviewer = %s,
                                 reviewed_at = %s,
                                 approval_notes = %s,
+                                rejection_reason = NULL,
                                 clearance_state = %s,
                                 cleared_at = %s,
                                 cleared_by = %s,
@@ -1244,6 +1276,7 @@ class ReleaseRepository(PostgreSQLRepository):
                                 reviewer = %s,
                                 reviewed_at = %s,
                                 approval_notes = %s,
+                                rejection_reason = NULL,
                                 clearance_state = %s,
                                 cleared_at = %s,
                                 cleared_by = %s,

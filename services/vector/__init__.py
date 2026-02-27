@@ -22,6 +22,12 @@ Archived (13 FEB 2026):
     process_vector_tasks → docs/archive/v08_archive_feb2026/services/
 """
 
+from typing import Dict, Any, Callable
+
+# Shared type alias for event callback functions
+# Signature: callback(event_name: str, details: dict) -> None
+EventCallback = Callable[[str, Dict[str, Any]], None]
+
 from .helpers import xy_df_to_gdf, wkt_df_to_gdf, extract_zip_file, DEFAULT_CRS
 from .postgis_handler import VectorToPostGISHandler
 
@@ -39,6 +45,8 @@ from .core import (
 )
 
 __all__ = [
+    # Type aliases
+    'EventCallback',
     # Helpers
     'xy_df_to_gdf',
     'wkt_df_to_gdf',

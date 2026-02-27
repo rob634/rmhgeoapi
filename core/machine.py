@@ -430,7 +430,7 @@ class CoreMachine:
                 available = list(self.jobs_registry.keys())
                 error_msg = f"Unknown job type: '{job_message.job_type}'. Available: {available}"
                 self.logger.error(f"❌ COREMACHINE STEP 2 FAILED: {error_msg}")
-                self._mark_job_failed(job_message.job_id, error_msg)
+                self._mark_job_failed(job_message.job_id, error_msg, job_type=job_message.job_type)
                 raise BusinessLogicError(error_msg)
 
             job_class = self.jobs_registry[job_message.job_type]
@@ -570,7 +570,7 @@ class CoreMachine:
         except Exception as e:
             self.logger.error(f"❌ COREMACHINE STEP 5 FAILED: Task generation error: {e}")
             self.logger.error(f"   Traceback: {traceback.format_exc()}")
-            self._mark_job_failed(job_message.job_id, f"Task generation failed: {e}")
+            self._mark_job_failed(job_message.job_id, f"Task generation failed: {e}", job_type=job_message.job_type)
             raise BusinessLogicError(f"Failed to generate tasks: {e}")
 
         # Step 5: Convert plain dicts to TaskDefinition objects (Pydantic validation)
@@ -598,12 +598,12 @@ class CoreMachine:
         except KeyError as e:
             self.logger.error(f"❌ COREMACHINE STEP 6 FAILED: Task dict missing required field: {e}")
             self.logger.error(f"   Task dict structure: {list(tasks[0].keys()) if tasks else 'N/A'}")
-            self._mark_job_failed(job_message.job_id, f"Task dict missing field: {e}")
+            self._mark_job_failed(job_message.job_id, f"Task dict missing field: {e}", job_type=job_message.job_type)
             raise BusinessLogicError(f"Invalid task dict structure: {e}")
         except Exception as e:
             self.logger.error(f"❌ COREMACHINE STEP 6 FAILED: TaskDefinition conversion error: {e}")
             self.logger.error(f"   Traceback: {traceback.format_exc()}")
-            self._mark_job_failed(job_message.job_id, f"TaskDefinition conversion failed: {e}")
+            self._mark_job_failed(job_message.job_id, f"TaskDefinition conversion failed: {e}", job_type=job_message.job_type)
             raise BusinessLogicError(f"Failed to convert tasks to TaskDefinition: {e}")
 
         # Step 6: Queue tasks (database + Service Bus) using existing helper
@@ -627,6 +627,19 @@ class CoreMachine:
             else:
                 self.logger.info(f"✅ COREMACHINE STEP 7: All {result['tasks_queued']} tasks queued successfully")
 
+            # If NO tasks were queued, fail the job immediately (26 FEB 2026)
+            # All tasks failed to send to Service Bus — orphan PENDING tasks
+            # have been marked FAILED by _individual_queue_tasks, but the job
+            # itself must also be failed to prevent it sitting in PROCESSING forever.
+            if result.get('tasks_queued', 0) == 0 and result.get('tasks_failed', 0) > 0:
+                error_msg = f"All {result['tasks_failed']} tasks failed to queue (Service Bus unavailable)"
+                self._mark_job_failed(job_message.job_id, error_msg, job_type=job_message.job_type)
+                return {
+                    'success': False,
+                    'error': error_msg,
+                    'job_id': job_message.job_id
+                }
+
             return {
                 'success': True,
                 'job_id': job_message.job_id,
@@ -638,7 +651,7 @@ class CoreMachine:
         except Exception as e:
             self.logger.error(f"❌ COREMACHINE STEP 7 FAILED: Task queueing error: {e}")
             self.logger.error(f"   Traceback: {traceback.format_exc()}")
-            self._mark_job_failed(job_message.job_id, f"Task queueing failed: {e}")
+            self._mark_job_failed(job_message.job_id, f"Task queueing failed: {e}", job_type=job_message.job_type)
             raise BusinessLogicError(f"Failed to queue tasks: {e}")
 
     # ========================================================================
@@ -731,7 +744,8 @@ class CoreMachine:
             try:
                 self._mark_job_failed(
                     job_id,
-                    f"Stage complete processing failed: {e}"
+                    f"Stage complete processing failed: {e}",
+                    job_type=job_type
                 )
             except Exception as cleanup_error:
                 self.logger.error(f"❌ Failed to mark job as failed: {cleanup_error}")
@@ -863,7 +877,8 @@ class CoreMachine:
                     self.state_manager.mark_task_failed(task_message.task_id, error_msg)
                     self._mark_job_failed(
                         task_message.parent_job_id,
-                        f"Task {task_message.task_id} failed to enter PROCESSING state: {error_msg}"
+                        f"Task {task_message.task_id} failed to enter PROCESSING state: {error_msg}",
+                        job_type=task_message.job_type
                     )
                     self.logger.error(f"❌ Task and job marked as FAILED - handler will NOT execute")
                 except Exception as cleanup_error:
@@ -898,7 +913,8 @@ class CoreMachine:
                 self.state_manager.mark_task_failed(task_message.task_id, error_msg)
                 self._mark_job_failed(
                     task_message.parent_job_id,
-                    f"Task {task_message.task_id} status update exception: {e}"
+                    f"Task {task_message.task_id} status update exception: {e}",
+                    job_type=task_message.job_type
                 )
             except Exception as cleanup_error:
                 # 28 NOV 2025: Preserve both primary and cleanup error context
@@ -1191,7 +1207,8 @@ class CoreMachine:
                         try:
                             self._mark_job_failed(
                                 task_message.parent_job_id,
-                                error_msg
+                                error_msg,
+                                job_type=task_message.job_type
                             )
                             self.logger.error(
                                 f"❌ Job {task_message.parent_job_id[:16]}... marked as FAILED "
@@ -1251,7 +1268,8 @@ class CoreMachine:
                     self.state_manager.mark_task_failed(task_message.task_id, str(e))
                     self._mark_job_failed(
                         task_message.parent_job_id,
-                        f"Task {task_message.task_id} completion SQL failed: {e}"
+                        f"Task {task_message.task_id} completion SQL failed: {e}",
+                        job_type=task_message.job_type
                     )
                 except Exception as cleanup_error:
                     # 28 NOV 2025: Preserve both primary and cleanup error context
@@ -1296,7 +1314,8 @@ class CoreMachine:
                     self._mark_job_failed(
                         task_message.parent_job_id,
                         f"Task {task_message.task_id[:16]}... failed permanently: {result.error_details}",
-                        result_data=result.result_data
+                        result_data=result.result_data,
+                        job_type=task_message.job_type
                     )
                     self.logger.info(
                         f"✅ Task and job marked as FAILED (permanent error)",
@@ -1382,7 +1401,8 @@ class CoreMachine:
                 try:
                     self._mark_job_failed(
                         task_message.parent_job_id,
-                        f"Task {task_message.task_id[:16]}... not found in database during retry logic"
+                        f"Task {task_message.task_id[:16]}... not found in database during retry logic",
+                        job_type=task_message.job_type
                     )
                     self.logger.info(
                         f"✅ Job marked as FAILED due to missing task",
@@ -1527,7 +1547,8 @@ class CoreMachine:
                     self._mark_job_failed(
                         task_message.parent_job_id,
                         job_error_msg,
-                        result_data=result.result_data
+                        result_data=result.result_data,
+                        job_type=task_message.job_type
                     )
                     self.logger.error(
                         f"❌ Job {task_message.parent_job_id[:16]} marked as FAILED "
@@ -1619,6 +1640,25 @@ class CoreMachine:
             except Exception as e:
                 tasks_failed += 1
                 self.logger.error(f"❌ Failed to queue task {task_def.task_id}: {e}")
+                # Mark orphan task as FAILED to prevent stage deadlock (26 FEB 2026)
+                # Without this, a PENDING task with no Service Bus message blocks
+                # stage completion forever (complete_task_and_check_stage counts
+                # tasks NOT IN ('completed', 'failed')).
+                try:
+                    self.repos['task_repo'].fail_task(
+                        task_def.task_id,
+                        f"Service Bus send failed: {e}"
+                    )
+                    self.logger.warning(
+                        f"Marked orphan task {task_def.task_id} as FAILED",
+                        extra={
+                            'checkpoint': 'ORPHAN_TASK_FAILED',
+                            'task_id': task_def.task_id,
+                            'error': str(e)
+                        }
+                    )
+                except Exception as cleanup_err:
+                    self.logger.error(f"❌ Failed to cleanup orphan task {task_def.task_id}: {cleanup_err}")
 
         elapsed_ms = (time.time() - start_time) * 1000
 

@@ -631,6 +631,37 @@ class StateManager:
             self.logger.debug(f"  - remaining_tasks: {stage_completion.remaining_tasks}")
 
             if not stage_completion.task_updated:
+                # TOCTOU race fix (26 FEB 2026): Between our initial status check
+                # and the SQL call, another worker may have completed/failed this task.
+                # Re-check the task's current status before raising an error.
+                from core.models.results import TaskCompletionResult
+                recheck_task = self.repos['task_repo'].get_task(task_id)
+                recheck_status = recheck_task.status if recheck_task else None
+
+                if recheck_status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
+                    # Duplicate completion — another worker won the race. This is
+                    # expected under Service Bus duplicate delivery. Log and return
+                    # a no-op result so the caller does NOT re-advance the stage.
+                    self.logger.info(
+                        f"TOCTOU race resolved: task {task_id} is now {recheck_status.value} "
+                        f"(completed by another worker). Treating as duplicate.",
+                        extra={
+                            'checkpoint': 'STATE_TOCTOU_DUPLICATE',
+                            'task_id': task_id,
+                            'job_id': job_id,
+                            'stage': stage,
+                            'recheck_status': recheck_status.value,
+                        }
+                    )
+                    return TaskCompletionResult(
+                        task_updated=False,
+                        stage_complete=False,
+                        job_id=job_id,
+                        stage_number=stage,
+                        remaining_tasks=stage_completion.remaining_tasks,
+                    )
+
+                # Not a duplicate — genuine SQL failure
                 raise RuntimeError(f"SQL function failed to update task {task_id}")
 
             # Return completion status (caller handles stage advancement)
@@ -843,9 +874,9 @@ class StateManager:
         """
         Mark all non-terminal tasks for a job as FAILED.
 
-        GAP-004 FIX (15 DEC 2025): When a job is marked failed (e.g., due to stage
-        advancement failure), sibling tasks in PROCESSING or QUEUED state should
-        also be failed to prevent orphan tasks and wasted compute.
+        GAP-004 FIX (15 DEC 2025): When a job is marked failed, sibling tasks
+        in PROCESSING or QUEUED state should also be failed to prevent orphan
+        tasks and wasted compute.
 
         Safe method that won't raise exceptions.
 
@@ -857,37 +888,20 @@ class StateManager:
             Number of tasks marked as failed
         """
         try:
-            from psycopg import sql
+            failed_task_ids = self.repos['task_repo'].fail_tasks_for_job(job_id, error_msg)
+            failed_count = len(failed_task_ids)
 
-            with self.repos['task_repo']._get_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        sql.SQL("""
-                            UPDATE {schema}.tasks
-                            SET status = 'failed',
-                                error_details = %s,
-                                updated_at = NOW()
-                            WHERE parent_job_id = %s
-                              AND status NOT IN ('completed', 'failed')
-                            RETURNING task_id, status
-                        """).format(schema=sql.Identifier("app")),
-                        (error_msg, job_id)
-                    )
-                    failed_tasks = cur.fetchall()
-                    conn.commit()
-
-                    failed_count = len(failed_tasks)
-                    if failed_count > 0:
-                        self.logger.warning(
-                            f"GAP-004: Marked {failed_count} orphan tasks as FAILED for job {job_id[:16]}...",
-                            extra={
-                                'checkpoint': 'STATE_ORPHAN_TASKS_FAILED',
-                                'job_id': job_id,
-                                'failed_count': failed_count,
-                                'task_ids': [t['task_id'] for t in failed_tasks[:10]]  # Log first 10
-                            }
-                        )
-                    return failed_count
+            if failed_count > 0:
+                self.logger.warning(
+                    f"GAP-004: Marked {failed_count} orphan tasks as FAILED for job {job_id[:16]}...",
+                    extra={
+                        'checkpoint': 'STATE_ORPHAN_TASKS_FAILED',
+                        'job_id': job_id,
+                        'failed_count': failed_count,
+                        'task_ids': failed_task_ids[:10],
+                    }
+                )
+            return failed_count
 
         except Exception as e:
             self.logger.error(
@@ -895,9 +909,9 @@ class StateManager:
                 extra={
                     'checkpoint': 'STATE_FAIL_ORPHAN_TASKS_ERROR',
                     'error_source': 'state',
-                    'job_id': job_id,
                     'error_type': type(e).__name__,
-                    'error_message': str(e)
+                    'error_message': str(e),
+                    'job_id': job_id,
                 }
             )
             return 0

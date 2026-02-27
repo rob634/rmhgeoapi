@@ -23,7 +23,7 @@ import hashlib
 import json
 import logging
 import uuid
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 from util_logger import LoggerFactory, ComponentType
 logger = LoggerFactory.create_logger(ComponentType.SERVICE, "platform_job_submit")
@@ -76,7 +76,7 @@ def create_and_submit_job(
     job_type: str,
     parameters: Dict[str, Any],
     platform_request_id: str
-) -> Optional[str]:
+) -> str:
     """
     Create CoreMachine job and submit to Service Bus queue.
 
@@ -96,10 +96,11 @@ def create_and_submit_job(
         platform_request_id: Platform request ID for tracking
 
     Returns:
-        job_id if successful, None if failed
+        job_id (always returns on success, raises on failure)
 
     Raises:
         ValueError: If pre-flight validation fails (e.g., blob doesn't exist)
+        RuntimeError: If job creation or queue submission fails
     """
     from jobs import ALL_JOBS
 
@@ -181,21 +182,29 @@ def create_and_submit_job(
                 logger.warning(f"Failed to record JOB_CREATED event: {event_err}")
 
             # Submit to Service Bus
-            service_bus = ServiceBusRepository()
-            queue_message = JobQueueMessage(
-                job_id=job_id,
-                job_type=current_job_type,
-                parameters=validated_params,
-                stage=1,
-                correlation_id=str(uuid.uuid4())[:8]
-            )
+            try:
+                service_bus = ServiceBusRepository()
+                queue_message = JobQueueMessage(
+                    job_id=job_id,
+                    job_type=current_job_type,
+                    parameters=validated_params,
+                    stage=1,
+                    correlation_id=str(uuid.uuid4())[:8]
+                )
 
-            message_id = service_bus.send_message(
-                config.service_bus_jobs_queue,
-                queue_message
-            )
-
-            logger.info(f"Submitted job {job_id[:16]} to queue (message_id: {message_id})")
+                message_id = service_bus.send_message(
+                    config.service_bus_jobs_queue,
+                    queue_message
+                )
+                logger.info(f"Submitted job {job_id[:16]} to queue (message_id: {message_id})")
+            except Exception as send_err:
+                # Job record exists but message never queued — mark FAILED to prevent orphan
+                logger.error(f"Service Bus send failed for job {job_id[:16]}: {send_err}")
+                try:
+                    job_repo.update_job_status(job_id, JobStatus.FAILED, error=f"Queue send failed: {send_err}")
+                except Exception:
+                    logger.error(f"Failed to mark orphaned job {job_id[:16]} as FAILED")
+                raise RuntimeError(f"Job created but queue send failed: {send_err}") from send_err
             return job_id
 
         except ValueError as e:
@@ -233,4 +242,4 @@ def create_and_submit_job(
 
     except Exception as e:
         logger.error(f"Failed to create/submit job: {e}", exc_info=True)
-        return None
+        raise RuntimeError(f"Job creation failed: {e}") from e

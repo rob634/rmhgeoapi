@@ -26,7 +26,7 @@ Dependencies:
     util_logger: Structured logging
 """
 
-from typing import List, Dict, Any, Literal, Optional, Callable
+from typing import List, Dict, Any, Literal, Optional
 import logging
 import geopandas as gpd
 import pandas as pd
@@ -36,9 +36,7 @@ from config import get_config
 from util_logger import LoggerFactory, ComponentType
 
 
-# Type alias for event callback function
-# Signature: callback(event_name: str, details: dict) -> None
-EventCallback = Callable[[str, Dict[str, Any]], None]
+from services.vector import EventCallback
 
 # Component-specific logger for structured logging (Application Insights)
 logger = LoggerFactory.create_logger(

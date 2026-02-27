@@ -39,8 +39,7 @@ import pandas as pd
 
 from util_logger import LoggerFactory, ComponentType, log_memory_checkpoint
 
-# Type alias for event callback (matches postgis_handler)
-EventCallback = Callable[[str, Dict[str, Any]], None]
+from services.vector import EventCallback
 
 # Component-specific logger
 logger = LoggerFactory.create_logger(

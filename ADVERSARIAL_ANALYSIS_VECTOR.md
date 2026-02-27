@@ -4,12 +4,15 @@
 **Pipeline**: Adversarial Review (Omega → Alpha + Beta → Gamma → Delta)
 **Scope**: Complete vector workflow — ingestion through PostGIS, STAC, approval, unpublish
 **Files Reviewed**: ~20 key files across jobs, services, core, config, triggers, infrastructure
+**Implementation Status**: 10 of 10 actionable findings RESOLVED (26 FEB 2026)
 
 ---
 
 ## EXECUTIVE SUMMARY
 
 The vector data workflow is architecturally sound — the Asset/Release separation, JobBaseMixin pattern, STAC-as-materialized-view, and anti-corruption layer are genuine strengths worth preserving. However, one confirmed **showstopper bug** (C-1) crashes every first-ever dataset submission with a `NameError`, and a **security-grade issue** (H-1) lets approved data be unpublished without authorization when the database is unreachable. Three additional high-priority fixes address orphaned state, non-atomic STAC operations, and a dual-write race. All five fixes are surgical — none require architectural changes. Total effort: ~2 hours.
+
+> **UPDATE 26 FEB 2026**: All Top 5 fixes implemented (commit `8355f7c`). All 5 medium/low actionable findings also resolved. 330 tests passing, zero regressions.
 
 ---
 
@@ -116,14 +119,14 @@ except Exception as e:
 
 ## EFFORT SUMMARY
 
-| Fix | Effort | Impact |
-|-----|--------|--------|
-| Fix 1 (CRITICAL) | 5 min | Unblocks all first-time dataset submissions |
-| Fix 2 (HIGH) | 15 min | Closes authorization bypass on DB failure |
-| Fix 3 (HIGH) | 15 min | Eliminates phantom table references |
-| Fix 4 (HIGH) | 1 hour | Atomic STAC + release state management |
-| Fix 5 (MEDIUM) | 20 min | Single source of truth for completion status |
-| **Total** | **~2 hours** | **Zero architectural refactoring required** |
+| Fix | Effort | Impact | Status |
+|-----|--------|--------|--------|
+| Fix 1 (CRITICAL) | 5 min | Unblocks all first-time dataset submissions | DONE `8355f7c` |
+| Fix 2 (HIGH) | 15 min | Closes authorization bypass on DB failure | DONE `8355f7c` |
+| Fix 3 (HIGH) | 15 min | Eliminates phantom table references | DONE `8355f7c` |
+| Fix 4 (HIGH) | 1 hour | Atomic STAC + release state management | DONE `8355f7c` |
+| Fix 5 (MEDIUM) | 20 min | Single source of truth for completion status | DONE `8355f7c` |
+| **Total** | **~2 hours** | **Zero architectural refactoring required** | **ALL DONE** |
 
 ---
 
@@ -162,34 +165,34 @@ except Exception as e:
 
 ### Unified Severity Rankings
 
-| Sev | ID | Finding | Confidence | Source |
-|-----|----|---------|------------|--------|
-| CRITICAL | C-1 | `table_name` NameError in asset_service.py:348 | CONFIRMED | Alpha + Beta + Gamma |
-| HIGH | H-1 | Approval check swallowed in unpublish | CONFIRMED | Beta |
-| HIGH | H-2 | Non-atomic STAC delete + release revocation | CONFIRMED | Beta + Gamma |
-| HIGH | H-3 | Orphaned release_tables on ETL failure | CONFIRMED | Gamma (blind spot) |
-| HIGH | H-4 | Column name collision after sanitization | PROBABLE | Beta + Gamma |
-| HIGH | H-5 | prepare_gdf() God method (700+ lines) | CONFIRMED | Alpha |
-| HIGH | H-6 | No canonical HandlerResult contract | CONFIRMED | Alpha |
-| HIGH | H-7 | rebuild_collection_from_db non-atomic | CONFIRMED | Beta |
-| MEDIUM | M-1 | Dual processing status update race | CONFIRMED | Alpha + Beta |
-| MEDIUM | M-2 | wkt_df_to_gdf no per-row error handling | PROBABLE | Beta |
-| MEDIUM | M-3 | Temp file leak for non-mount ZIP extraction | CONFIRMED | Beta |
-| MEDIUM | M-4 | VectorConfig.target_schema dead config | CONFIRMED | Gamma (blind spot) |
-| MEDIUM | M-5 | platform_job_submit swallows exception context | CONFIRMED | Gamma (blind spot) |
-| MEDIUM | M-6 | submit.py non-transactional orchestration | CONFIRMED | Alpha |
-| MEDIUM | M-7 | Inconsistent error return conventions | CONFIRMED | Alpha |
-| MEDIUM | M-8 | Raw SQL in unpublish_handlers | CONFIRMED | Alpha |
-| MEDIUM | M-9 | create_tasks_for_stage .get() proliferation | CONFIRMED | Alpha |
-| LOW | L-1 | EventCallback type alias in two places | CONFIRMED | Alpha |
-| LOW | L-2 | slugify divergence (underscore vs hyphen) | CONFIRMED | Alpha + Gamma |
-| LOW | L-3 | delete_blob TOCTOU race | CONFIRMED | Beta |
-| LOW | L-4 | No timeout on GPKG layer validation | PROBABLE | Beta |
-| LOW | L-5 | Antimeridian recursion (bounded to depth 2) | CONFIRMED | Beta + Gamma |
-| LOW | L-6 | has_m check properly guarded | CONFIRMED | Beta |
-| LOW | L-7 | Vector STAC materialization skips (by design) | CONFIRMED | Beta |
-| LOW | L-8 | DDH identifier logging (potential PII) | PROBABLE | Gamma |
-| LOW | L-9 | Handler-repository layering (intentional) | CONFIRMED | Alpha + Gamma |
+| Sev | ID | Finding | Confidence | Source | Status |
+|-----|----|---------|------------|--------|--------|
+| CRITICAL | C-1 | `table_name` NameError in asset_service.py:348 | CONFIRMED | Alpha + Beta + Gamma | **FIXED** |
+| HIGH | H-1 | Approval check swallowed in unpublish | CONFIRMED | Beta | **FIXED** |
+| HIGH | H-2 | Non-atomic STAC delete + release revocation | CONFIRMED | Beta + Gamma | **FIXED** |
+| HIGH | H-3 | Orphaned release_tables on ETL failure | CONFIRMED | Gamma (blind spot) | **FIXED** |
+| HIGH | H-4 | Column name collision after sanitization | PROBABLE | Beta + Gamma | Accepted risk |
+| HIGH | H-5 | prepare_gdf() God method (700+ lines) | CONFIRMED | Alpha | Accepted risk |
+| HIGH | H-6 | No canonical HandlerResult contract | CONFIRMED | Alpha | Accepted risk |
+| HIGH | H-7 | rebuild_collection_from_db non-atomic | CONFIRMED | Beta | Accepted risk |
+| MEDIUM | M-1 | Dual processing status update race | CONFIRMED | Alpha + Beta | **FIXED** |
+| MEDIUM | M-2 | wkt_df_to_gdf no per-row error handling | PROBABLE | Beta | **FIXED** |
+| MEDIUM | M-3 | Temp file leak for non-mount ZIP extraction | CONFIRMED | Beta | Accepted risk |
+| MEDIUM | M-4 | VectorConfig.target_schema dead config | CONFIRMED | Gamma (blind spot) | Accepted risk |
+| MEDIUM | M-5 | platform_job_submit swallows exception context | CONFIRMED | Gamma (blind spot) | **FIXED** |
+| MEDIUM | M-6 | submit.py non-transactional orchestration | CONFIRMED | Alpha | Accepted risk |
+| MEDIUM | M-7 | Inconsistent error return conventions | CONFIRMED | Alpha | Already resolved |
+| MEDIUM | M-8 | Raw SQL in unpublish_handlers | CONFIRMED | Alpha | Accepted risk |
+| MEDIUM | M-9 | create_tasks_for_stage .get() proliferation | CONFIRMED | Alpha | **FIXED** |
+| LOW | L-1 | EventCallback type alias in two places | CONFIRMED | Alpha | **FIXED** |
+| LOW | L-2 | slugify divergence (underscore vs hyphen) | CONFIRMED | Alpha + Gamma | Accepted risk |
+| LOW | L-3 | delete_blob TOCTOU race | CONFIRMED | Beta | Accepted risk |
+| LOW | L-4 | No timeout on GPKG layer validation | PROBABLE | Beta | Accepted risk |
+| LOW | L-5 | Antimeridian recursion (bounded to depth 2) | CONFIRMED | Beta + Gamma | Verified safe |
+| LOW | L-6 | has_m check properly guarded | CONFIRMED | Beta | Verified safe |
+| LOW | L-7 | Vector STAC materialization skips (by design) | CONFIRMED | Beta | By design |
+| LOW | L-8 | DDH identifier logging (potential PII) | PROBABLE | Gamma | Accepted risk |
+| LOW | L-9 | Handler-repository layering (intentional) | CONFIRMED | Alpha + Gamma | By design |
 
 ### Verified Safe Patterns
 
@@ -206,6 +209,36 @@ except Exception as e:
 | VS-9 | BytesIO seek(0) correctly handled | CONFIRMED |
 | VS-10 | PlatformConfig validator ensures pattern placeholders | CONFIRMED |
 | VS-11 | Deterministic request IDs with pipe separator | CONFIRMED |
+
+---
+
+## IMPLEMENTATION LOG (26 FEB 2026)
+
+### Batch 1: Top 5 Fixes — commit `8355f7c`
+
+| Fix | Files Changed | What Was Done |
+|-----|---------------|---------------|
+| C-1 | `services/asset_service.py` | Removed stale `table_name=table_name` kwarg from first-release creation path |
+| H-1 | `services/unpublish_handlers.py` | Changed approval guard from fail-open to fail-closed in both raster and vector inventory paths |
+| H-2 | `services/unpublish_handlers.py` | Moved release revocation into same cursor/connection as STAC delete for atomic commit |
+| H-3 | `triggers/platform/submit.py` | Removed premature `release_tables` placeholder write with `geometry_type='UNKNOWN'` |
+| M-1 | `services/handler_vector_docker_complete.py` | Removed redundant COMPLETED and FAILED status updates — callback is canonical authority |
+
+### Batch 2: Medium/Low Fixes
+
+| Finding | Files Changed | What Was Done |
+|---------|---------------|---------------|
+| M-2 | `services/vector/helpers.py`, `tests/unit/test_wkt_error_handling.py` | Per-row WKT parsing with `_safe_wkt_load()` — drops bad rows instead of crashing. 5 new tests. |
+| M-5 | `services/platform_job_submit.py`, `triggers/platform/submit.py` | Service Bus send failure marks job FAILED (prevents orphans). Outer handler re-raises with context instead of returning None. Removed dead `if not job_id` check in caller. |
+| M-7 | _(no changes needed)_ | Audit found all 14 `"success": False` returns already include `error_type`. Likely resolved during Fix 2. |
+| M-9 | `jobs/vector_docker_etl.py` | Replaced 30+ manual `.get()` calls with declarative `_PASSTHROUGH_PARAMS` list. |
+| L-1 | `services/vector/__init__.py`, `services/vector/core.py`, `services/vector/postgis_handler.py` | Centralized `EventCallback` type alias to `services/vector/__init__.py`. Both consumers now import instead of defining locally. |
+
+### Test Results
+
+- **330 tests passing** after all changes
+- **Zero regressions**
+- **5 new tests** added for WKT error handling
 
 ---
 

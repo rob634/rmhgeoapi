@@ -110,13 +110,36 @@ def wkt_df_to_gdf(
     if wkt_column not in df.columns:
         raise KeyError(f"WKT column '{wkt_column}' not found in DataFrame")
 
-    try:
-        # Parse WKT strings to geometries
-        geometry = df[wkt_column].apply(wkt.loads)
-        gdf = gpd.GeoDataFrame(df, geometry=geometry, crs=crs)
-        return gdf
-    except ShapelyError as e:
-        raise ValueError(f"Invalid WKT in column '{wkt_column}': {e}")
+    # Parse WKT strings to geometries, handling per-row errors
+    def _safe_wkt_load(val):
+        if pd.isna(val) or val == '':
+            return None
+        try:
+            return wkt.loads(val)
+        except (ShapelyError, Exception):
+            return None
+
+    geometry = df[wkt_column].apply(_safe_wkt_load)
+    bad_mask = geometry.isna()
+    bad_count = bad_mask.sum()
+
+    if bad_count == len(df):
+        raise ValueError(
+            f"All {len(df)} rows have invalid or empty WKT in column '{wkt_column}'. "
+            f"No valid geometries to process."
+        )
+
+    if bad_count > 0:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(
+            f"Dropped {bad_count}/{len(df)} rows with invalid WKT in column '{wkt_column}'"
+        )
+        df = df[~bad_mask].copy()
+        geometry = geometry[~bad_mask]
+
+    gdf = gpd.GeoDataFrame(df, geometry=geometry, crs=crs)
+    return gdf
 
 
 def extract_zip_file(

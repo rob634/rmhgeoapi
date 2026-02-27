@@ -347,64 +347,55 @@ class VectorDockerETLJob(JobBaseMixin, JobBase):
 
         task_id = generate_deterministic_task_id(job_id, 1, "vector_docker")
 
+        # Parameters to pass through to handler (explicit include list)
+        _PASSTHROUGH_PARAMS = [
+            # Source
+            'blob_name', 'file_extension',
+            # Target
+            'table_name', 'overwrite',
+            # Geometry
+            'lat_name', 'lon_name', 'wkt_column', 'layer_name',
+            'converter_params', 'geometry_params',
+            # Column mapping
+            'column_mapping', 'temporal_property',
+            # Metadata
+            'title', 'description', 'attribution', 'license', 'keywords',
+            # DDH identifiers
+            'dataset_id', 'resource_id', 'version_id', 'release_id',
+            'stac_item_id', 'tags', 'access_level',
+            # Style
+            'style',
+            # Processing
+            'chunk_size', 'indexes', 'create_tile_view', 'max_tile_vertices',
+            # Platform tracking
+            '_platform_job_id',
+        ]
+
+        task_params = {k: job_params.get(k) for k in _PASSTHROUGH_PARAMS}
+
+        # Override computed values
+        task_params['job_id'] = job_id
+        task_params['container_name'] = container_name
+        task_params['schema'] = job_params.get('schema', 'geo')
+
+        # Apply defaults for dict/int params that need non-None defaults
+        if task_params.get('converter_params') is None:
+            task_params['converter_params'] = {}
+        if task_params.get('geometry_params') is None:
+            task_params['geometry_params'] = {}
+        if task_params.get('chunk_size') is None:
+            task_params['chunk_size'] = 20000
+        if task_params.get('indexes') is None:
+            task_params['indexes'] = {'spatial': True, 'attributes': [], 'temporal': []}
+        if task_params.get('max_tile_vertices') is None:
+            task_params['max_tile_vertices'] = 256
+        if task_params.get('create_tile_view') is None:
+            task_params['create_tile_view'] = False
+
         return [{
             'task_id': task_id,
             'task_type': 'vector_docker_complete',
-            'parameters': {
-                # Job context
-                'job_id': job_id,
-
-                # Source
-                'blob_name': job_params['blob_name'],
-                'container_name': container_name,
-                'file_extension': job_params['file_extension'],
-
-                # Target
-                'table_name': job_params['table_name'],
-                'schema': job_params.get('schema', 'geo'),
-                'overwrite': job_params.get('overwrite', False),
-
-                # Geometry
-                'lat_name': job_params.get('lat_name'),
-                'lon_name': job_params.get('lon_name'),
-                'wkt_column': job_params.get('wkt_column'),
-                'layer_name': job_params.get('layer_name'),
-                'converter_params': job_params.get('converter_params', {}),
-                'geometry_params': job_params.get('geometry_params', {}),
-
-                # Column mapping
-                'column_mapping': job_params.get('column_mapping'),
-                'temporal_property': job_params.get('temporal_property'),
-
-                # Metadata
-                'title': job_params.get('title'),
-                'description': job_params.get('description'),
-                'attribution': job_params.get('attribution'),
-                'license': job_params.get('license'),
-                'keywords': job_params.get('keywords'),
-
-                # DDH identifiers
-                'dataset_id': job_params.get('dataset_id'),
-                'resource_id': job_params.get('resource_id'),
-                'version_id': job_params.get('version_id'),
-                'release_id': job_params.get('release_id'),
-                'stac_item_id': job_params.get('stac_item_id'),
-                # NOTE: 'title' already set in Metadata section above
-                'tags': job_params.get('tags'),
-                'access_level': job_params.get('access_level'),
-
-                # Style
-                'style': job_params.get('style'),
-
-                # Processing
-                'chunk_size': job_params.get('chunk_size', 20000),
-                'indexes': job_params.get('indexes', {'spatial': True, 'attributes': [], 'temporal': []}),
-                'create_tile_view': job_params.get('create_tile_view', False),
-                'max_tile_vertices': job_params.get('max_tile_vertices', 256),
-
-                # Platform tracking
-                '_platform_job_id': job_params.get('_platform_job_id'),
-            }
+            'parameters': task_params,
         }]
 
     @staticmethod

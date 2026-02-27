@@ -381,11 +381,8 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                 status_code=500
             )
 
-        # Create CoreMachine job
+        # Create CoreMachine job (raises on failure — never returns None)
         job_id = create_and_submit_job(job_type, job_params, request_id)
-
-        if not job_id:
-            raise RuntimeError("Failed to create CoreMachine job")
 
         # Link job to release (sets job_id and resets processing_status)
         asset_service.link_job_to_release(release.release_id, job_id)

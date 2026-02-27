@@ -110,7 +110,13 @@ def handle_task_message(
         task_message.parameters['_processing_path'] = queue_name
 
         # PENDING -> QUEUED confirmation (proves message was delivered)
-        _confirm_task_queued(task_message.task_id, correlation_id, queue_name)
+        # Share task_repo from CoreMachine to avoid redundant DB connections
+        _confirm_task_queued(
+            task_message.task_id,
+            correlation_id,
+            queue_name,
+            task_repo=core_machine.repos['task_repo']
+        )
 
         # Process via CoreMachine
         result = core_machine.process_task_message(task_message)
@@ -156,7 +162,8 @@ def _log_message_received(
 def _confirm_task_queued(
     task_id: str,
     correlation_id: str,
-    queue_name: str
+    queue_name: str,
+    task_repo=None
 ) -> None:
     """
     Update task status from PENDING to QUEUED.
@@ -168,10 +175,15 @@ def _confirm_task_queued(
         task_id: Task ID to update
         correlation_id: Correlation ID for logging
         queue_name: Queue name for logging
+        task_repo: Optional TaskRepository instance. If provided, skips
+                   RepositoryFactory.create_repositories() to reduce DB connections.
     """
     try:
-        repos = RepositoryFactory.create_repositories()
-        success = repos['task_repo'].update_task_status_with_validation(
+        if task_repo is None:
+            repos = RepositoryFactory.create_repositories()
+            task_repo = repos['task_repo']
+
+        success = task_repo.update_task_status_with_validation(
             task_id,
             TaskStatus.QUEUED
         )
@@ -187,7 +199,7 @@ def _confirm_task_queued(
             )
         else:
             # Task may be in unexpected state - log but continue (janitor will handle)
-            current = repos['task_repo'].get_task_status(task_id)
+            current = task_repo.get_task_status(task_id)
             logger.warning(
                 f"[{correlation_id}] PENDING -> QUEUED update returned False. "
                 f"Current status: {current}. Continuing (janitor will recover if needed)."

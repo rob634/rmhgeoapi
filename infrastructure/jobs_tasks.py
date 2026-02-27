@@ -885,6 +885,41 @@ class TaskRepository(PostgreSQLTaskRepository):
             TaskStatus.FAILED,
             extra_fields
         )
+
+    def fail_tasks_for_job(self, job_id: str, error_msg: str) -> list:
+        """
+        Mark all non-terminal tasks for a job as FAILED.
+
+        Used when a job is being failed and sibling tasks must be cleaned up
+        to prevent orphans blocking stage completion.
+
+        Args:
+            job_id: Parent job identifier
+            error_msg: Error message to set on failed tasks
+
+        Returns:
+            List of task_id strings that were marked as failed
+        """
+        from psycopg import sql
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL("""
+                        UPDATE {schema}.tasks
+                        SET status = 'failed',
+                            error_details = %s,
+                            updated_at = NOW()
+                        WHERE parent_job_id = %s
+                          AND status NOT IN ('completed', 'failed')
+                        RETURNING task_id
+                    """).format(schema=sql.Identifier(self.schema_name)),
+                    (error_msg, job_id)
+                )
+                failed_tasks = cur.fetchall()
+                conn.commit()
+
+                return [row['task_id'] for row in failed_tasks]
     
     def update_task_with_model(self, task_id: str, update_model: TaskUpdateModel) -> bool:
         """

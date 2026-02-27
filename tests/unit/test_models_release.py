@@ -3,7 +3,6 @@ AssetRelease model tests — defaults, validation, serialization.
 """
 
 import pytest
-from enum import Enum
 
 from core.models.asset import AssetRelease, ApprovalState, ProcessingStatus
 from tests.factories.model_factories import make_asset_release

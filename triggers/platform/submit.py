@@ -376,7 +376,7 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
             # Without release_id, approval/reject/revoke workflows fail with 404
             logger.error(f"Asset/Release creation failed: {asset_err}", exc_info=True)
             return error_response(
-                f"Failed to create asset/release record: {asset_err}",
+                "Failed to create asset/release record. Check server logs for details.",
                 "AssetCreationError",
                 status_code=500
             )
@@ -421,7 +421,10 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
 
     except Exception as e:
         logger.error(f"Platform request failed: {e}", exc_info=True)
-        return error_response(str(e), type(e).__name__)
+        return error_response(
+            "An internal error occurred. Check server logs for details.",
+            "InternalError"
+        )
 
 
 # ============================================================================

@@ -165,7 +165,7 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                 clearance_level = None
 
         # Translate DDH request to CoreMachine job parameters
-        job_type, job_params = translate_to_coremachine(platform_req, config)
+        job_type, job_params = translate_to_coremachine(platform_req)
 
         # GPKG layer preflight warning (24 FEB 2026)
         submit_warnings = []

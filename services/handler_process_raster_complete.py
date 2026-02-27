@@ -622,6 +622,14 @@ def _process_raster_tiled(
             logger.info("⏭️ PHASE 3: Skipping COG creation (checkpoint)")
             _report_progress(docker_context, 90, 3, 4, "Create COGs", "Skipped (resumed)")
             cog_results = checkpoint.get_data('cog_results', [])
+            # Recover raster_type for Phase 4 (same construction as Phase 3 else branch)
+            raster_metadata = extraction_result.get('raster_metadata', {})
+            raster_type = {
+                "detected_type": raster_metadata.get("detected_type", "unknown"),
+                "band_count": raster_metadata.get("band_count", 3),
+                "data_type": raster_metadata.get("data_type", "uint8"),
+                "optimal_cog_settings": {}
+            }
         else:
             tile_blobs = extraction_result.get('tile_blobs', [])
             tile_count = len(tile_blobs)
@@ -1376,9 +1384,11 @@ def _process_raster_tiled_mount(
         tile_size = int(target_tile_pixels ** 0.5)  # Square tiles
         tile_size = max(tile_size, 1024)  # Minimum 1024 pixels
 
-        # Calculate grid
-        cols = (raster_width + tile_size - 1) // tile_size
-        rows = (raster_height + tile_size - 1) // tile_size
+        # Calculate grid with overlap (match VSI workflow default from tiling_scheme.py)
+        overlap = 512  # 1 COG block overlap to prevent seams in TiTiler mosaics
+        effective_tile_size = tile_size - overlap
+        cols = (raster_width + effective_tile_size - 1) // effective_tile_size
+        rows = (raster_height + effective_tile_size - 1) // effective_tile_size
         tile_count = cols * rows
 
         # Build tile specs
@@ -1386,8 +1396,8 @@ def _process_raster_tiled_mount(
         for row in range(rows):
             for col in range(cols):
                 tile_index = row * cols + col
-                x_off = col * tile_size
-                y_off = row * tile_size
+                x_off = col * effective_tile_size
+                y_off = row * effective_tile_size
                 width = min(tile_size, raster_width - x_off)
                 height = min(tile_size, raster_height - y_off)
 

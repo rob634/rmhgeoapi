@@ -752,8 +752,8 @@ def create_cog(params: dict) -> dict:
     # ==========================================================================
     # DISK-BASED PROCESSING PATH (when ETL mount enabled)
     # ==========================================================================
-    if config_obj.raster.use_etl_mount:
-        mount_path = config_obj.raster.etl_mount_path
+    if config_obj.docker.use_etl_mount:
+        mount_path = config_obj.docker.etl_mount_path
         logger.info("=" * 60)
         logger.info("📁 DISK-BASED PROCESSING MODE (ETL Mount Enabled)")
         logger.info(f"   Mount path: {mount_path}")
@@ -1092,8 +1092,8 @@ def create_cog(params: dict) -> dict:
                             context_id=task_id,
                             source_path=f"{container_name}/{blob_name}",
                             dest_path=f"{silver_container}/{output_blob_name}",
-                            use_etl_mount=config_obj.raster.use_etl_mount,
-                            mount_path=config_obj.raster.etl_mount_path if config_obj.raster.use_etl_mount else None,
+                            use_etl_mount=config_obj.docker.use_etl_mount,
+                            mount_path=config_obj.docker.etl_mount_path if config_obj.docker.use_etl_mount else None,
                             compression=compression,
                             compression_ratio=round(input_size_mb / output_size_mb, 2) if output_size_mb > 0 else None
                         )

@@ -929,6 +929,11 @@ class ReleaseRepository(PostgreSQLRepository):
                         UPDATE {}.{}
                         SET revision = %s,
                             processing_status = %s,
+                            approval_state = %s,
+                            rejection_reason = NULL,
+                            reviewer = NULL,
+                            reviewed_at = NULL,
+                            job_id = NULL,
                             processing_started_at = NULL,
                             processing_completed_at = NULL,
                             last_error = NULL,
@@ -938,7 +943,7 @@ class ReleaseRepository(PostgreSQLRepository):
                         sql.Identifier(self.schema),
                         sql.Identifier(self.table)
                     ),
-                    (revision, ProcessingStatus.PENDING, release_id)
+                    (revision, ProcessingStatus.PENDING, ApprovalState.PENDING_REVIEW, release_id)
                 )
                 conn.commit()
 

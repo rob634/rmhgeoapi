@@ -293,7 +293,7 @@ class AssetService:
                     raise ReleaseStateError(
                         existing_draft.release_id,
                         existing_draft.approval_state.value,
-                        "pending_review or rejected",
+                        "pending_review or rejected (and not actively processing)",
                         "overwrite"
                     )
                 self.release_repo.update_overwrite(

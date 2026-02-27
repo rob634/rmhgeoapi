@@ -44,7 +44,6 @@ V0.8 Architecture (24 JAN 2026):
 ETL Mount Settings (26 FEB 2026):
     Moved to DockerConfig (config/docker_config.py).
     Use DOCKER_USE_ETL_MOUNT and DOCKER_ETL_MOUNT_PATH env vars.
-    Legacy RASTER_USE_ETL_MOUNT / RASTER_ETL_MOUNT_PATH still supported as fallback.
 
 Tiling Settings:
     RASTER_TILING_THRESHOLD_MB = 500 # Files above this produce tiled output (lowered from 2000 for testing)

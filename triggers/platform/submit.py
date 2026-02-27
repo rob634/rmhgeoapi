@@ -44,7 +44,6 @@ logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "platform_submit")
 
 # Import config
 from config import get_config, generate_platform_request_id
-config = get_config()
 
 # Import infrastructure
 from infrastructure import PlatformRepository
@@ -312,7 +311,7 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
             # Before this fix, all drafts wrote to …/draft/… which meant v2
             # overwrote v1's COG when both existed as approved+draft.
             if 'output_folder' in job_params and release.version_ordinal:
-                platform_cfg = config.platform
+                platform_cfg = get_config().platform
                 job_params['output_folder'] = platform_cfg.generate_raster_output_folder(
                     platform_req.dataset_id,
                     platform_req.resource_id,

@@ -158,6 +158,21 @@ class STACMaterializer:
             return self._materialize_tiled_items(release, reviewer, clearance_state, now_iso)
 
         # =================================================================
+        # VECTOR RELEASES — not yet supported for STAC materialization
+        # =================================================================
+        if not release.blob_path and not release.stac_item_json:
+            logger.info(
+                f"Skipping STAC materialization for vector release "
+                f"{release.release_id[:16]}... (no blob_path or cached STAC JSON)"
+            )
+            return {
+                'success': True,
+                'skipped': True,
+                'reason': 'vector_release',
+                'message': 'Vector STAC materialization not yet implemented',
+            }
+
+        # =================================================================
         # SINGLE COG OUTPUT
         # =================================================================
         if not release.stac_item_json:
@@ -548,9 +563,8 @@ class STACMaterializer:
         if self.pgstac.collection_exists(collection_id):
             self.pgstac.delete_collection(collection_id)
 
-        # Build and insert fresh items
-        items_created = 0
-        bboxes = []
+        # Single pass: build all items, collect bboxes
+        prepared_items = []
 
         for release in matching_releases:
             if not release.stac_item_json:
@@ -560,7 +574,6 @@ class STACMaterializer:
                 continue
 
             if release.output_mode == 'tiled':
-                # For tiled releases, rebuild from cog_metadata
                 cog_records = self.cog_repo.list_by_collection(collection_id)
                 for rec in cog_records:
                     stac_json = rec.get('stac_item_json')
@@ -569,37 +582,29 @@ class STACMaterializer:
                     item_dict = dict(stac_json)
                     self.sanitize_item_properties(item_dict)
 
-                    # Add B2C props from release
                     props = item_dict.setdefault('properties', {})
                     props['ddh:access_level'] = release.clearance_state.value if release.clearance_state else 'ouo'
                     if release.version_id:
                         props['ddh:version_id'] = release.version_id
 
-                    if item_dict.get('bbox'):
-                        bboxes.append(item_dict['bbox'])
-                    items_created += 1
+                    prepared_items.append(item_dict)
                 continue
 
             # Single COG
             item_dict = dict(release.stac_item_json)
             item_dict['id'] = release.stac_item_id
             item_dict['collection'] = collection_id
-
-            # Sanitize
             self.sanitize_item_properties(item_dict)
 
-            # Add B2C props
             props = item_dict.setdefault('properties', {})
             props['ddh:access_level'] = release.clearance_state.value if release.clearance_state else 'ouo'
             if release.version_id:
                 props['ddh:version_id'] = release.version_id
 
-            if item_dict.get('bbox'):
-                bboxes.append(item_dict['bbox'])
+            prepared_items.append(item_dict)
 
-            items_created += 1
-
-        # Compute union extent
+        # Compute union extent from collected bboxes
+        bboxes = [item['bbox'] for item in prepared_items if item.get('bbox')]
         if bboxes:
             union_bbox = [
                 min(b[0] for b in bboxes),
@@ -610,52 +615,25 @@ class STACMaterializer:
         else:
             union_bbox = [-180, -90, 180, 90]
 
-        # Create collection
+        # Create collection, then insert all items
         collection_dict = build_raster_stac_collection(
             collection_id=collection_id,
             bbox=union_bbox,
         )
         self.pgstac.insert_collection(collection_dict)
 
-        # Insert all items
-        for release in matching_releases:
-            if not release.stac_item_json:
-                continue
-
-            if release.output_mode == 'tiled':
-                cog_records = self.cog_repo.list_by_collection(collection_id)
-                for rec in cog_records:
-                    stac_json = rec.get('stac_item_json')
-                    if not stac_json:
-                        continue
-                    item_dict = dict(stac_json)
-                    self.sanitize_item_properties(item_dict)
-                    props = item_dict.setdefault('properties', {})
-                    props['ddh:access_level'] = release.clearance_state.value if release.clearance_state else 'ouo'
-                    if release.version_id:
-                        props['ddh:version_id'] = release.version_id
-                    self.pgstac.insert_item(item_dict, collection_id)
-                continue
-
-            item_dict = dict(release.stac_item_json)
-            item_dict['id'] = release.stac_item_id
-            item_dict['collection'] = collection_id
-            self.sanitize_item_properties(item_dict)
-            props = item_dict.setdefault('properties', {})
-            props['ddh:access_level'] = release.clearance_state.value if release.clearance_state else 'ouo'
-            if release.version_id:
-                props['ddh:version_id'] = release.version_id
+        for item_dict in prepared_items:
             self.pgstac.insert_item(item_dict, collection_id)
 
         logger.info(
-            f"Rebuilt collection '{collection_id}': {items_created} items, "
+            f"Rebuilt collection '{collection_id}': {len(prepared_items)} items, "
             f"bbox={union_bbox}"
         )
 
         return {
             'success': True,
             'collection_id': collection_id,
-            'items_created': items_created,
+            'items_created': len(prepared_items),
             'bbox': union_bbox,
         }
 

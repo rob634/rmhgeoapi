@@ -241,21 +241,15 @@ def _default_platform_callback(job_id: str, job_type: str, status: str, result: 
                 outputs = {}
 
                 # Vector: table_name from result → write to release_tables
+                # The handler writes accurate per-table entries during processing.
+                # Only create a fallback entry here if none exist yet.
                 table_name = result.get('table_name')
                 if table_name:
                     from infrastructure import ReleaseTableRepository
                     release_table_repo = ReleaseTableRepository()
-                    # Check if already exists (submit trigger may have created a placeholder)
                     existing = release_table_repo.get_tables(release.release_id)
-                    if existing:
-                        # Update feature count from result
-                        total_rows = result.get('total_rows', 0)
-                        if total_rows:
-                            release_table_repo.update_feature_count(
-                                release.release_id, existing[0].table_name, total_rows
-                            )
-                    else:
-                        # Create entry (fallback if submit didn't create one)
+                    if not existing:
+                        # Handler didn't write entries — create fallback
                         geom_type = result.get('geometry_type', 'UNKNOWN')
                         release_table_repo.create(
                             release_id=release.release_id,

@@ -46,6 +46,7 @@ All Claude-optimized documentation is in **`/docs_claude/`**.
 | `docs_claude/JOB_CREATION_QUICKSTART.md` | 5-step guide for new jobs |
 | `docs_claude/APIM_ARCHITECTURE.md` | Future microservices architecture |
 | `docs_claude/APPLICATION_INSIGHTS.md` | Log query patterns |
+| `docs_claude/AGENT_PLAYBOOKS.md` | **Multi-agent review** - adversarial review + kludge hardener pipelines |
 | `docs_claude/HISTORY.md` | Completed work log |
 
 ---

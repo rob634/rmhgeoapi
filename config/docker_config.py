@@ -16,10 +16,6 @@ Environment Variables:
     DOCKER_USE_ETL_MOUNT      = true       (mount enabled, false = degraded)
     DOCKER_ETL_MOUNT_PATH     = /mounts/etl-temp  (Azure Files mount path)
 
-Legacy Fallback (zero-downtime migration):
-    RASTER_USE_ETL_MOUNT      → falls back if DOCKER_USE_ETL_MOUNT not set
-    RASTER_ETL_MOUNT_PATH     → falls back if DOCKER_ETL_MOUNT_PATH not set
-
 Exports:
     DockerConfig: Pydantic configuration model
 """
@@ -69,16 +65,13 @@ class DockerConfig(BaseModel):
 
     @classmethod
     def from_environment(cls) -> "DockerConfig":
-        """Load from environment variables with legacy fallback."""
-        # New DOCKER_* vars with fallback to legacy RASTER_* vars
+        """Load from environment variables."""
         use_mount_raw = (
             os.environ.get("DOCKER_USE_ETL_MOUNT")
-            or os.environ.get("RASTER_USE_ETL_MOUNT")
             or str(DockerDefaults.USE_ETL_MOUNT).lower()
         )
         mount_path = (
             os.environ.get("DOCKER_ETL_MOUNT_PATH")
-            or os.environ.get("RASTER_ETL_MOUNT_PATH")
             or DockerDefaults.ETL_MOUNT_PATH
         )
 

@@ -81,7 +81,13 @@ class ReleaseTableRepository(PostgreSQLRepository):
         table_suffix: Optional[str] = None,
         feature_count: int = 0
     ) -> ReleaseTable:
-        """Insert a single release_tables row."""
+        """Insert or update a single release_tables row.
+
+        Uses upsert — if (release_id, table_name) already exists, updates
+        geometry_type, feature_count, table_role, and table_suffix with the
+        new values. This ensures the handler's accurate data always wins
+        over any placeholder created by the submit trigger.
+        """
         now = datetime.now(timezone.utc)
 
         with self._get_connection() as conn:
@@ -93,6 +99,11 @@ class ReleaseTableRepository(PostgreSQLRepository):
                             feature_count, table_role, table_suffix,
                             created_at
                         ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (release_id, table_name) DO UPDATE SET
+                            geometry_type = EXCLUDED.geometry_type,
+                            feature_count = EXCLUDED.feature_count,
+                            table_role = EXCLUDED.table_role,
+                            table_suffix = EXCLUDED.table_suffix
                         RETURNING *
                     """).format(
                         sql.Identifier(self.schema),
@@ -103,11 +114,11 @@ class ReleaseTableRepository(PostgreSQLRepository):
                 )
                 row = cur.fetchone()
                 conn.commit()
-                logger.info(f"Created release_table: {release_id[:12]}... -> {table_name}")
+                logger.info(f"Upserted release_table: {release_id[:12]}... -> {table_name}")
                 return self._row_to_model(row)
 
     def create_batch(self, entries: List[ReleaseTable]) -> List[ReleaseTable]:
-        """Insert multiple release_tables rows in one transaction."""
+        """Upsert multiple release_tables rows in one transaction."""
         if not entries:
             return []
 
@@ -124,6 +135,11 @@ class ReleaseTableRepository(PostgreSQLRepository):
                                 feature_count, table_role, table_suffix,
                                 created_at
                             ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (release_id, table_name) DO UPDATE SET
+                                geometry_type = EXCLUDED.geometry_type,
+                                feature_count = EXCLUDED.feature_count,
+                                table_role = EXCLUDED.table_role,
+                                table_suffix = EXCLUDED.table_suffix
                             RETURNING *
                         """).format(
                             sql.Identifier(self.schema),
@@ -136,7 +152,7 @@ class ReleaseTableRepository(PostgreSQLRepository):
                     results.append(self._row_to_model(row))
 
                 conn.commit()
-                logger.info(f"Created {len(results)} release_table entries for {entries[0].release_id[:12]}...")
+                logger.info(f"Upserted {len(results)} release_table entries for {entries[0].release_id[:12]}...")
                 return results
 
     # =========================================================================
@@ -245,13 +261,17 @@ class ReleaseTableRepository(PostgreSQLRepository):
     # =========================================================================
 
     def _row_to_model(self, row: dict) -> ReleaseTable:
-        """Convert a database row to a ReleaseTable model."""
+        """Convert a database row to a ReleaseTable model.
+
+        All NOT NULL columns use direct key access — a KeyError here means
+        the schema is out of sync and must be fixed, not masked.
+        """
         return ReleaseTable(
             release_id=row['release_id'],
             table_name=row['table_name'],
-            geometry_type=row.get('geometry_type', 'UNKNOWN'),
-            feature_count=row.get('feature_count', 0),
-            table_role=row.get('table_role', 'primary'),
-            table_suffix=row.get('table_suffix'),
-            created_at=row.get('created_at', datetime.now(timezone.utc)),
+            geometry_type=row['geometry_type'],
+            feature_count=row['feature_count'],
+            table_role=row['table_role'],
+            table_suffix=row.get('table_suffix'),  # nullable
+            created_at=row['created_at'],
         )

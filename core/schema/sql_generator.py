@@ -412,6 +412,63 @@ class PydanticToSQL:
         self.logger.debug(f"✅ Generated {len(result)} indexes for {schema_name}.{table_name}")
         return result
 
+    def generate_add_columns_from_model(self, model: Type[BaseModel]) -> List[sql.Composed]:
+        """
+        Generate ALTER TABLE ... ADD COLUMN IF NOT EXISTS for each column in the model.
+
+        Used for tables in preserved schemas (like geo) that aren't dropped during
+        rebuild. CREATE TABLE IF NOT EXISTS is a no-op for existing tables, so this
+        ensures new columns from the Pydantic model are added before indexes are created.
+
+        Args:
+            model: Pydantic model with __sql_* class attributes
+
+        Returns:
+            List of composed ALTER TABLE ... ADD COLUMN IF NOT EXISTS statements
+        """
+        meta = self.get_model_sql_metadata(model)
+        table_name = meta["table_name"]
+        schema_name = meta["schema"]
+        primary_key = meta["primary_key"]
+
+        self.logger.debug(f"🔧 Generating ADD COLUMN IF NOT EXISTS for {schema_name}.{table_name}")
+        statements = []
+
+        # Detect serial columns
+        mangled_name = f'_{model.__name__}__sql_serial_columns'
+        serial_columns = getattr(model, mangled_name, getattr(model, '__sql_serial_columns', []))
+
+        for field_name, field_info in model.model_fields.items():
+            field_type = field_info.annotation
+            sql_type_str = self.python_type_to_sql(field_type, field_info)
+
+            # Skip SERIAL / auto-increment primary keys — can't ALTER TABLE ADD SERIAL
+            if field_name in serial_columns:
+                continue
+            if field_name == "id" and primary_key == ["id"]:
+                continue
+
+            # Build type fragment
+            if sql_type_str in self.enums:
+                type_fragment = sql.SQL("").join([
+                    sql.Identifier(schema_name),
+                    sql.SQL("."),
+                    sql.Identifier(sql_type_str)
+                ])
+            else:
+                type_fragment = sql.SQL(sql_type_str)
+
+            stmt = sql.SQL("ALTER TABLE {}.{} ADD COLUMN IF NOT EXISTS {} {}").format(
+                sql.Identifier(schema_name),
+                sql.Identifier(table_name),
+                sql.Identifier(field_name),
+                type_fragment
+            )
+            statements.append(stmt)
+
+        self.logger.debug(f"✅ Generated {len(statements)} ADD COLUMN statements for {schema_name}.{table_name}")
+        return statements
+
     def generate_enum_from_model(self, enum_class: Type[Enum], schema_name: str) -> List[sql.Composed]:
         """
         Generate ENUM type DDL for a given schema.
@@ -462,11 +519,17 @@ class PydanticToSQL:
         statements.append(sql.SQL("CREATE SCHEMA IF NOT EXISTS geo"))
 
         # GeoTableCatalog: service layer metadata
+        # SCHEMA EVOLUTION (27 FEB 2026): geo schema is preserved during rebuild
+        # (user data). CREATE TABLE IF NOT EXISTS is a no-op for existing tables,
+        # so ADD COLUMN IF NOT EXISTS ensures new Pydantic fields are added before
+        # indexes are created.
         statements.append(self.generate_table_from_model(GeoTableCatalog))
+        statements.extend(self.generate_add_columns_from_model(GeoTableCatalog))
         statements.extend(self.generate_indexes_from_model(GeoTableCatalog))
 
         # FeatureCollectionStyles: OGC API Styles (22 JAN 2026)
         statements.append(self.generate_table_from_model(FeatureCollectionStyles))
+        statements.extend(self.generate_add_columns_from_model(FeatureCollectionStyles))
         statements.extend(self.generate_indexes_from_model(FeatureCollectionStyles))
 
         self.logger.info(f"✅ Geo schema DDL complete: {len(statements)} statements")

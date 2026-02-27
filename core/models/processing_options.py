@@ -31,7 +31,7 @@ extra='ignore' for forward compatibility (unknown keys logged and dropped).
 import logging
 import re
 from enum import Enum
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -283,4 +283,30 @@ class RasterCollectionProcessingOptions(BaseProcessingOptions):
     @field_validator('use_mount_storage', 'cleanup_temp', 'strict_mode', mode='before')
     @classmethod
     def coerce_bools(cls, v):
+        return _coerce_bool(v)
+
+
+# Greensight Component 2: ZarrProcessingOptions
+class ZarrProcessingOptions(BaseProcessingOptions):
+    """
+    Processing options for VirtualiZarr pipeline.
+
+    Fields:
+        pipeline: Pipeline selector (always "virtualzarr")
+        concat_dim: Dimension to concatenate along (default "time")
+        file_pattern: Glob pattern for source files (default "*.nc")
+        fail_on_chunking_warnings: Fail validation on chunking warnings
+        max_files: Maximum files to process (1-5000)
+    """
+    model_config = ConfigDict(extra='ignore')
+
+    pipeline: Literal["virtualzarr"] = Field(default="virtualzarr", description="Pipeline selector")
+    concat_dim: str = Field(default="time", description="Dimension to concatenate along")
+    file_pattern: str = Field(default="*.nc", description="Glob pattern for source files")
+    fail_on_chunking_warnings: bool = Field(default=False, description="Fail validation on chunking warnings")
+    max_files: int = Field(default=500, ge=1, le=5000, description="Maximum files to process")
+
+    @field_validator('fail_on_chunking_warnings', mode='before')
+    @classmethod
+    def coerce_fail_on_chunking(cls, v):
         return _coerce_bool(v)

@@ -369,6 +369,20 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                     )
                     logger.info(f"  Finalized raster stac_item_id: {final_stac} (ord={ordinal})")
 
+                elif platform_req.data_type == DataType.ZARR:
+                    # Zarr: finalize stac_item_id and ref output prefix with ordinal
+                    final_stac = generate_stac_item_id(
+                        platform_req.dataset_id, platform_req.resource_id,
+                        version_ordinal=ordinal
+                    )
+                    job_params['stac_item_id'] = final_stac
+                    job_params['ref_output_prefix'] = f"refs/{platform_req.dataset_id}/{platform_req.resource_id}/ord{ordinal}"
+
+                    asset_service.update_physical_outputs(
+                        release.release_id, stac_item_id=final_stac
+                    )
+                    logger.info(f"  Finalized zarr stac_item_id: {final_stac} (ord={ordinal})")
+
         except ReleaseStateError:
             raise  # Already handled above, but guard against re-wrapping
         except Exception as asset_err:

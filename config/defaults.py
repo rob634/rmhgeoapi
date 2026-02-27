@@ -448,6 +448,14 @@ class TaskRoutingDefaults:
         "unpublish_delete_stac",
 
         # =====================================================================
+        # VIRTUALZARR PIPELINE (Greensight Component 7)
+        # =====================================================================
+        "virtualzarr_scan",
+        "virtualzarr_validate",
+        "virtualzarr_combine",
+        "virtualzarr_register",
+
+        # =====================================================================
         # TEST HANDLERS (V0.9 - moved from functionapp-tasks)
         # =====================================================================
         "hello_world_greeting",

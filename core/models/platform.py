@@ -54,6 +54,7 @@ from .processing_options import (
     VectorProcessingOptions,
     RasterProcessingOptions,
     RasterCollectionProcessingOptions,
+    ZarrProcessingOptions,  # Greensight Component 2
 )
 
 logger = logging.getLogger(__name__)
@@ -88,6 +89,7 @@ class DataType(str, Enum):
     """
     RASTER = "raster"
     VECTOR = "vector"
+    ZARR = "zarr"  # Greensight Component 1: DataType.ZARR
     POINTCLOUD = "pointcloud"
     MESH_3D = "mesh_3d"
     TABULAR = "tabular"
@@ -199,16 +201,22 @@ class PlatformRequest(BaseModel):
     )
 
     # ========================================================================
-    # DDH File Information (Required)
+    # DDH File Information (Required: file_name or source_url)
     # ========================================================================
     container_name: str = Field(
         ...,
         max_length=100,
         description="Azure storage container name (e.g., bronze-vectors)"
     )
-    file_name: Union[str, List[str]] = Field(
-        ...,
+    file_name: Optional[Union[str, List[str]]] = Field(
+        default=None,
         description="File name(s) - single string or array for raster collections"
+    )
+    # Greensight Component 3: source_url for zarr submissions
+    source_url: Optional[str] = Field(
+        default=None,
+        max_length=500,
+        description="abfs:// URL for source data directory"
     )
 
     # ========================================================================
@@ -314,6 +322,26 @@ class PlatformRequest(BaseModel):
     client_id: str = Field(default="ddh", description="Client application identifier")
 
     # ========================================================================
+    # Model Validator: Ensure file_name or source_url is provided
+    # Greensight Component 3: source_url validation
+    # ========================================================================
+    @model_validator(mode='after')
+    def validate_file_or_source(self):
+        """
+        Ensure either file_name or source_url is provided.
+
+        Zarr submissions use source_url (abfs:// directory).
+        All other data types use file_name (blob path).
+        """
+        if not self.file_name and not self.source_url:
+            raise ValueError(
+                "Either file_name or source_url must be provided. "
+                "Use file_name for raster/vector submissions, "
+                "source_url (abfs://) for zarr submissions."
+            )
+        return self
+
+    # ========================================================================
     # Model Validator: Resolve processing_options to typed model
     # ========================================================================
     @model_validator(mode='after')
@@ -355,6 +383,9 @@ class PlatformRequest(BaseModel):
                 model_cls = RasterCollectionProcessingOptions
             else:
                 model_cls = RasterProcessingOptions
+        # Greensight Component 2: ZarrProcessingOptions dispatch
+        elif data_type == DataType.ZARR:
+            model_cls = ZarrProcessingOptions
         else:
             # POINTCLOUD, MESH_3D, TABULAR — use base model
             model_cls = BaseProcessingOptions
@@ -381,11 +412,18 @@ class PlatformRequest(BaseModel):
     @property
     def data_type(self) -> DataType:
         """
-        Detect data type from file extension.
+        Detect data type from file extension or source_url.
+
+        Greensight Component 3: Returns DataType.ZARR when source_url is
+        present or when file extension is .nc.
 
         Returns:
-            DataType enum (RASTER, VECTOR, POINTCLOUD, MESH_3D, TABULAR)
+            DataType enum (RASTER, VECTOR, ZARR, POINTCLOUD, MESH_3D, TABULAR)
         """
+        # Greensight Component 3: source_url implies ZARR
+        if self.source_url:
+            return DataType.ZARR
+
         # Get first file name if array
         file_name = self.file_name[0] if isinstance(self.file_name, list) else self.file_name
 
@@ -397,11 +435,9 @@ class PlatformRequest(BaseModel):
             return DataType.VECTOR
         elif ext in ['tif', 'tiff', 'geotiff']:
             return DataType.RASTER
+        # Greensight Component 3: .nc extension now routes to ZARR
         elif ext == 'nc':
-            raise ValueError(
-                "NetCDF (.nc) support is under development. "
-                "Currently only GeoTIFF (.tif, .tiff, .geotiff) files are accepted."
-            )
+            return DataType.ZARR
         elif ext in ['img', 'hdf', 'hdf5', 'jp2', 'ecw', 'vrt']:
             raise ValueError(
                 f"Unsupported file format '.{ext}'. "

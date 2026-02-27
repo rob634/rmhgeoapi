@@ -158,6 +158,12 @@ class STACMaterializer:
             return self._materialize_tiled_items(release, reviewer, clearance_state, now_iso)
 
         # =================================================================
+        # ZARR RELEASES — materialize without TiTiler URL injection
+        # =================================================================
+        if release.stac_item_json and self._is_zarr_release(release):
+            return self._materialize_zarr_item(release, reviewer, clearance_state, now_iso)
+
+        # =================================================================
         # VECTOR RELEASES — not yet supported for STAC materialization
         # =================================================================
         if not release.blob_path and not release.stac_item_json:
@@ -701,6 +707,54 @@ class STACMaterializer:
     # =========================================================================
     # HELPERS
     # =========================================================================
+
+    def _is_zarr_release(self, release) -> bool:
+        """Detect zarr release from cached STAC properties."""
+        if not release.stac_item_json:
+            return False
+        props = release.stac_item_json.get('properties', {})
+        return props.get('geoetl:data_type') == 'zarr'
+
+    def _materialize_zarr_item(
+        self,
+        release,
+        reviewer: str,
+        clearance_state,
+        now_iso: str
+    ) -> Dict[str, Any]:
+        """Materialize zarr STAC item to pgSTAC (no TiTiler URL injection)."""
+        stac_item_json = dict(release.stac_item_json)
+
+        # Patch with versioned ID and collection
+        stac_item_json['id'] = release.stac_item_id
+        stac_item_json['collection'] = release.stac_collection_id
+
+        # Add B2C approval properties
+        props = stac_item_json.setdefault('properties', {})
+        if release.stac_item_id:
+            props['title'] = release.stac_item_id
+
+        props['ddh:approved_by'] = reviewer
+        props['ddh:approved_at'] = now_iso
+        props['ddh:access_level'] = clearance_state.value if hasattr(clearance_state, 'value') else str(clearance_state)
+        if release.version_id:
+            props['ddh:version_id'] = release.version_id
+        if release.release_id:
+            props['ddh:release_id'] = release.release_id
+
+        # Sanitize: strip geoetl:* properties (B2C safety)
+        self.sanitize_item_properties(stac_item_json)
+
+        # NO TiTiler URL injection for zarr (V1)
+
+        # Upsert to pgSTAC
+        pgstac_id = self.pgstac.insert_item(stac_item_json, release.stac_collection_id)
+        logger.info(
+            f"Materialized zarr STAC item {release.stac_item_id} in collection "
+            f"{release.stac_collection_id}"
+        )
+
+        return {'success': True, 'pgstac_id': pgstac_id}
 
     def _inject_titiler_urls(self, stac_item_json: dict, blob_path: Optional[str]) -> None:
         """

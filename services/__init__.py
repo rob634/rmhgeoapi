@@ -76,6 +76,14 @@ from .handler_vector_docker_complete import vector_docker_complete
 # Docker Raster Collection handler (V0.8 - sequential checkpoint-based)
 from .handler_raster_collection_complete import raster_collection_complete
 
+# VirtualiZarr handlers (V0.9 - NetCDF virtual reference pipeline)
+from .handler_virtualzarr import (
+    virtualzarr_scan,
+    virtualzarr_validate,
+    virtualzarr_combine,
+    virtualzarr_register,
+)
+
 # ============================================================================
 # STAC METADATA HELPER
 # ============================================================================
@@ -136,6 +144,12 @@ ALL_HANDLERS = {
     "unpublish_delete_blob": delete_blob,
     "unpublish_drop_table": drop_postgis_table,
     "unpublish_delete_stac": delete_stac_and_audit,
+
+    # VirtualiZarr handlers (NetCDF virtual reference pipeline)
+    "virtualzarr_scan": virtualzarr_scan,
+    "virtualzarr_validate": virtualzarr_validate,
+    "virtualzarr_combine": virtualzarr_combine,
+    "virtualzarr_register": virtualzarr_register,
 
 }
 

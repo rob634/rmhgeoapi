@@ -182,7 +182,8 @@ class Asset(BaseModel):
     # =========================================================================
     # DATA TYPE
     # =========================================================================
-    data_type: Literal["vector", "raster"] = Field(
+    # Greensight Component 1: Widened Literal to include "zarr"
+    data_type: Literal["vector", "raster", "zarr"] = Field(
         ...,
         description="Type of geospatial data"
     )

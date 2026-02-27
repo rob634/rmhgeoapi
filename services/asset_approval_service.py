@@ -642,7 +642,10 @@ class AssetApprovalService:
                     'asset_id': release.asset_id,
                     'stac_item_id': release.stac_item_id,
                     'stac_collection_id': release.stac_collection_id,
-                    'data_type': 'raster' if release.blob_path else 'vector',
+                    'data_type': (
+                        'zarr' if (release.stac_item_json and release.stac_item_json.get('properties', {}).get('geoetl:data_type') == 'zarr')
+                        else ('raster' if release.blob_path else 'vector')
+                    ),
                     'table_names': ReleaseTableRepository().get_table_names(release.release_id),
                     'blob_path': release.blob_path
                 }

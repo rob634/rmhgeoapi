@@ -20,7 +20,7 @@ Exports:
     translate_raster_collection: Multiple raster files translation
     generate_table_name: DDH IDs → PostGIS table name
     generate_stac_item_id: DDH IDs → STAC item ID
-    normalize_data_type: Normalize data_type string to 'vector' or 'raster'
+    normalize_data_type: Normalize data_type string to 'vector', 'raster', or 'zarr'
     get_unpublish_params_from_request: Extract unpublish parameters from ApiRequest
 """
 
@@ -59,6 +59,8 @@ def normalize_data_type(data_type: str) -> Optional[str]:
         return 'vector'
     if dt_lower in ('raster', 'unpublish_raster', 'process_raster', 'process_raster_v2', 'process_raster_docker'):
         return 'raster'
+    if dt_lower in ('zarr', 'virtualzarr'):
+        return 'zarr'
     return dt_lower
 
 
@@ -390,6 +392,36 @@ def translate_to_coremachine(
                 'title': request.generated_title,
                 'tags': request.tags,
             }
+
+    # ========================================================================
+    # ZARR CREATE -> virtualzarr (VirtualiZarr reference pipeline)
+    # ========================================================================
+    elif data_type == DataType.ZARR:
+        opts = request.processing_options
+        stac_item_id = platform_cfg.generate_stac_item_id(
+            request.dataset_id,
+            request.resource_id,
+            request.version_id
+        )
+        collection_id = request.dataset_id
+
+        return 'virtualzarr', {
+            'source_url': request.source_url,
+            'file_pattern': getattr(opts, 'file_pattern', '*.nc'),
+            'concat_dim': getattr(opts, 'concat_dim', 'time'),
+            'fail_on_chunking_warnings': getattr(opts, 'fail_on_chunking_warnings', False),
+            'max_files': getattr(opts, 'max_files', 500),
+            'ref_output_prefix': f"refs/{request.dataset_id}/{request.resource_id}",
+            'stac_item_id': stac_item_id,
+            'collection_id': collection_id,
+            'title': request.generated_title,
+            'description': request.description,
+            'tags': request.tags,
+            'access_level': request.access_level.value if request.access_level else 'OUO',
+            'dataset_id': request.dataset_id,
+            'resource_id': request.resource_id,
+            'version_id': request.version_id,
+        }
 
     # ========================================================================
     # POINTCLOUD, MESH_3D, TABULAR - Phase 2

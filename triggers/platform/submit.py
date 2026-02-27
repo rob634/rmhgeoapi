@@ -350,16 +350,6 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                     job_params['table_name'] = final_table
                     job_params['stac_item_id'] = final_stac
 
-                    # Write table name to junction table (single source of truth)
-                    from infrastructure import ReleaseTableRepository
-                    release_table_repo = ReleaseTableRepository()
-                    release_table_repo.create(
-                        release_id=release.release_id,
-                        table_name=final_table,
-                        geometry_type='UNKNOWN',  # Set by ETL handler after processing
-                        table_role='primary',
-                    )
-
                     # Still update stac_item_id on release (not a table field)
                     asset_service.update_physical_outputs(
                         release.release_id, stac_item_id=final_stac

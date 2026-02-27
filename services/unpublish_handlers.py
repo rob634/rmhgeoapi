@@ -120,8 +120,13 @@ def inventory_raster_item(params: Dict[str, Any], context: Optional[Dict[str, An
                     }
                 logger.warning(f"Force-unpublishing approved release {row['release_id'][:16]}...")
         except Exception as e:
-            # Approval check is best-effort - log and continue if service unavailable
-            logger.warning(f"Could not check approval status for {stac_item_id}: {e}")
+            logger.error(f"Cannot verify approval status for {stac_item_id}: {e}")
+            return {
+                "success": False,
+                "error": f"Approval check failed — cannot proceed without verification: {e}",
+                "error_type": "ApprovalCheckFailed",
+                "hint": "Retry when database is available, or use force_approved=true to bypass."
+            }
 
         # Extract blob paths from assets
         blobs_to_delete = []
@@ -354,8 +359,13 @@ def inventory_vector_item(params: Dict[str, Any], context: Optional[Dict[str, An
                         }
                     logger.warning(f"Force-unpublishing approved release {row['release_id'][:16]}...")
             except Exception as e:
-                # Approval check is best-effort - log and continue if service unavailable
-                logger.warning(f"Could not check approval status for linked STAC item {stac_item_id}: {e}")
+                logger.error(f"Cannot verify approval status for {stac_item_id}: {e}")
+                return {
+                    "success": False,
+                    "error": f"Approval check failed — cannot proceed without verification: {e}",
+                    "error_type": "ApprovalCheckFailed",
+                    "hint": "Retry when database is available, or use force_approved=true to bypass."
+                }
 
         return {
             "success": True,
@@ -752,34 +762,22 @@ def delete_stac_and_audit(params: Dict[str, Any], context: Optional[Dict[str, An
                     if stac_deleted:
                         logger.info(f"Deleted STAC item: {collection_id}/{stac_item_id}")
 
-                        # Revoke release if it exists and was APPROVED (V0.9 - 21 FEB 2026)
+                        # Revoke release in SAME transaction as STAC delete
                         try:
-                            from infrastructure import ReleaseRepository
-                            from psycopg import sql as psql
-
-                            release_repo = ReleaseRepository()
-                            with release_repo._get_connection() as rel_conn:
-                                with rel_conn.cursor() as rel_cur:
-                                    rel_cur.execute(
-                                        psql.SQL("SELECT release_id, approval_state FROM {}.{} WHERE stac_item_id = %s LIMIT 1").format(
-                                            psql.Identifier(release_repo.schema),
-                                            psql.Identifier(release_repo.table)
-                                        ),
-                                        (stac_item_id,)
-                                    )
-                                    rel_row = rel_cur.fetchone()
-
-                            if rel_row and rel_row['approval_state'] == 'approved':
-                                from services.asset_approval_service import AssetApprovalService
-                                approval_svc = AssetApprovalService()
-                                approval_svc.revoke_release(
-                                    release_id=rel_row['release_id'],
-                                    revoker=f"unpublish_job:{unpublish_job_id}",
-                                    reason=f"Unpublished via delete_stac_and_audit"
+                            cur.execute(
+                                "SELECT release_id, approval_state FROM app.asset_releases WHERE stac_item_id = %s LIMIT 1",
+                                (stac_item_id,)
+                            )
+                            rel_row = cur.fetchone()
+                            if rel_row and rel_row.get('approval_state') == 'approved':
+                                cur.execute(
+                                    "UPDATE app.asset_releases SET approval_state = 'revoked' WHERE release_id = %s",
+                                    (rel_row['release_id'],)
                                 )
-                                logger.warning(f"AUDIT: Revoked release {rel_row['release_id'][:16]}... during unpublish")
+                                logger.warning(f"AUDIT: Revoked release {rel_row['release_id'][:16]}... during unpublish (atomic with STAC delete)")
                         except Exception as revoke_err:
-                            logger.error(f"Failed to revoke release: {revoke_err}")
+                            logger.error(f"Failed to revoke release during unpublish: {revoke_err}")
+                            raise  # Fail the transaction — don't leave inconsistent state
                     else:
                         logger.warning(f"STAC item not found (already deleted?): {collection_id}/{stac_item_id}")
 

@@ -308,16 +308,6 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
             f"in {elapsed:.1f}s ({rows_per_sec:.0f} rows/sec)"
         )
 
-        # V0.9: Update release processing status to COMPLETED
-        if parameters.get('release_id'):
-            try:
-                from infrastructure import ReleaseRepository
-                from core.models.asset import ProcessingStatus
-                release_repo = ReleaseRepository()
-                release_repo.update_processing_status(parameters['release_id'], status=ProcessingStatus.COMPLETED)
-            except Exception as release_err:
-                logger.warning(f"[{job_id[:8]}] Failed to update release processing status: {release_err}")
-
         # Build result — backward compatible for single table, enhanced for multi
         primary_result = table_results[0]
 
@@ -354,20 +344,6 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
 
         # Map exception type to appropriate ErrorCode
         error_code = _map_exception_to_error_code(e)
-
-        # V0.9: Update Release to FAILED (defense-in-depth alongside callback)
-        if parameters.get('release_id'):
-            try:
-                from infrastructure import ReleaseRepository
-                from core.models.asset import ProcessingStatus
-                release_repo = ReleaseRepository()
-                release_repo.update_processing_status(
-                    parameters['release_id'],
-                    status=ProcessingStatus.FAILED,
-                    error=str(e)[:500]
-                )
-            except Exception:
-                pass  # Callback will handle
 
         # Create enhanced error response
         response, debug = create_error_response_v2(

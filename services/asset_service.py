@@ -345,7 +345,6 @@ class AssetService:
             stac_item_id=stac_item_id,
             stac_collection_id=stac_collection_id,
             blob_path=blob_path,
-            table_name=table_name,
             job_id=job_id,
             request_id=request_id,
             suggested_version_id=suggested_version_id,

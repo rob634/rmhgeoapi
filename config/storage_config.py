@@ -412,6 +412,7 @@ class StorageAccountConfig(BaseModel):
     stac_assets: str = Field(description="STAC asset files (thumbnails, metadata)")
     misc: str = Field(description="Miscellaneous files (logs, reports)")
     temp: str = Field(description="Temporary processing files (auto-cleanup)")
+    netcdf: str = Field(default="notused", description="NetCDF files (VirtualiZarr pipeline)")
 
     def get_container(self, purpose: str) -> str:
         """
@@ -434,7 +435,7 @@ class StorageAccountConfig(BaseModel):
             raise ValueError(
                 f"Unknown container purpose: {purpose}. "
                 f"Valid options: vectors, rasters, cogs, tiles, mosaicjson, "
-                f"stac_assets, misc, temp"
+                f"stac_assets, misc, temp, netcdf"
             )
         return getattr(self, purpose)
 
@@ -517,7 +518,8 @@ class MultiAccountStorageConfig(BaseModel):
             cogs=os.getenv("BRONZE_COGS_CONTAINER", StorageDefaults.NOT_USED),
             tiles=os.getenv("BRONZE_TILES_CONTAINER", StorageDefaults.NOT_USED),
             mosaicjson=os.getenv("BRONZE_MOSAICJSON_CONTAINER", StorageDefaults.NOT_USED),
-            stac_assets=os.getenv("BRONZE_STAC_ASSETS_CONTAINER", StorageDefaults.NOT_USED)
+            stac_assets=os.getenv("BRONZE_STAC_ASSETS_CONTAINER", StorageDefaults.NOT_USED),
+            netcdf=StorageDefaults.NOT_USED,
         )
     )
 
@@ -536,7 +538,8 @@ class MultiAccountStorageConfig(BaseModel):
             mosaicjson=os.getenv("SILVER_MOSAICJSON_CONTAINER", StorageDefaults.SILVER_MOSAICJSON),
             stac_assets=os.getenv("SILVER_STAC_ASSETS_CONTAINER", StorageDefaults.SILVER_STAC_ASSETS),
             misc=os.getenv("SILVER_MISC_CONTAINER", StorageDefaults.SILVER_MISC),
-            temp=os.getenv("SILVER_TEMP_CONTAINER", StorageDefaults.SILVER_TEMP)
+            temp=os.getenv("SILVER_TEMP_CONTAINER", StorageDefaults.SILVER_TEMP),
+            netcdf=os.getenv("SILVER_NETCDF_CONTAINER", StorageDefaults.SILVER_NETCDF),
         )
     )
 
@@ -555,7 +558,8 @@ class MultiAccountStorageConfig(BaseModel):
             mosaicjson=os.getenv("SILVEREXT_MOSAICJSON_CONTAINER", StorageDefaults.SILVEREXT_MOSAICJSON),
             stac_assets=os.getenv("SILVEREXT_STAC_ASSETS_CONTAINER", StorageDefaults.SILVEREXT_STAC_ASSETS),
             misc=os.getenv("SILVEREXT_MISC_CONTAINER", StorageDefaults.SILVEREXT_MISC),
-            temp=os.getenv("SILVEREXT_TEMP_CONTAINER", StorageDefaults.SILVEREXT_TEMP)
+            temp=os.getenv("SILVEREXT_TEMP_CONTAINER", StorageDefaults.SILVEREXT_TEMP),
+            netcdf=StorageDefaults.NOT_USED,
         )
     )
 
@@ -574,7 +578,8 @@ class MultiAccountStorageConfig(BaseModel):
             mosaicjson=os.getenv("GOLD_MOSAICJSON_CONTAINER", StorageDefaults.NOT_USED),
             stac_assets=os.getenv("GOLD_STAC_ASSETS_CONTAINER", StorageDefaults.NOT_USED),
             misc=os.getenv("GOLD_H3_GRIDS_CONTAINER", StorageDefaults.GOLD_H3_GRIDS),
-            temp=os.getenv("GOLD_TEMP_CONTAINER", StorageDefaults.GOLD_TEMP)
+            temp=os.getenv("GOLD_TEMP_CONTAINER", StorageDefaults.GOLD_TEMP),
+            netcdf=StorageDefaults.NOT_USED,
         )
     )
 

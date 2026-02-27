@@ -294,6 +294,7 @@ class StorageDefaults:
     SILVER_STAC_ASSETS = "silver-cogs"  # Consolidated into silver-cogs (15 DEC 2025)
     SILVER_MISC = "silver-cogs"  # Consolidated into silver-cogs (15 DEC 2025)
     SILVER_TEMP = "silver-temp"
+    SILVER_NETCDF = "silver-netcdf"  # NetCDF files for VirtualiZarr pipeline
 
     # SilverExt tier (airgapped external)
     SILVEREXT_VECTORS = "silverext-vectors"
@@ -451,6 +452,7 @@ class TaskRoutingDefaults:
         # VIRTUALZARR PIPELINE (Greensight Component 7)
         # =====================================================================
         "virtualzarr_scan",
+        "virtualzarr_copy",
         "virtualzarr_validate",
         "virtualzarr_combine",
         "virtualzarr_register",

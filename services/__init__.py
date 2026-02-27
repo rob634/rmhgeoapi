@@ -79,6 +79,7 @@ from .handler_raster_collection_complete import raster_collection_complete
 # VirtualiZarr handlers (V0.9 - NetCDF virtual reference pipeline)
 from .handler_virtualzarr import (
     virtualzarr_scan,
+    virtualzarr_copy,
     virtualzarr_validate,
     virtualzarr_combine,
     virtualzarr_register,
@@ -147,6 +148,7 @@ ALL_HANDLERS = {
 
     # VirtualiZarr handlers (NetCDF virtual reference pipeline)
     "virtualzarr_scan": virtualzarr_scan,
+    "virtualzarr_copy": virtualzarr_copy,
     "virtualzarr_validate": virtualzarr_validate,
     "virtualzarr_combine": virtualzarr_combine,
     "virtualzarr_register": virtualzarr_register,

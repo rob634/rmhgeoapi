@@ -5,13 +5,13 @@
 # STATUS: Services - VirtualiZarr pipeline task handlers
 # PURPOSE: Scan, validate, combine, and register virtual Zarr references
 # LAST_REVIEWED: 27 FEB 2026
-# EXPORTS: virtualzarr_scan, virtualzarr_validate, virtualzarr_combine, virtualzarr_register
+# EXPORTS: virtualzarr_scan, virtualzarr_copy, virtualzarr_validate, virtualzarr_combine, virtualzarr_register
 # DEPENDENCIES: fsspec, adlfs, h5py, virtualizarr, xarray (all lazy-imported)
 # ============================================================================
 """
-VirtualZarr Task Handlers - Scan, Validate, Combine, Register.
+VirtualZarr Task Handlers - Scan, Copy, Validate, Combine, Register.
 
-Four handler functions for the virtualzarr job pipeline. All heavy libraries
+Five handler functions for the virtualzarr job pipeline. All heavy libraries
 (h5py, virtualizarr, xarray) are lazy-imported inside function bodies to
 avoid import-time overhead.
 
@@ -22,7 +22,8 @@ Handler Contract:
 Registration: services/__init__.py -> ALL_HANDLERS
 
 Handlers:
-    virtualzarr_scan:     List NetCDF files, write manifest blob
+    virtualzarr_scan:     List NetCDF files, build source→silver manifest
+    virtualzarr_copy:     Copy single file from bronze → silver-netcdf
     virtualzarr_validate: Validate single file's HDF5 structure
     virtualzarr_combine:  Combine virtual datasets into reference JSON
     virtualzarr_register: Build STAC item, update release record
@@ -45,6 +46,12 @@ def _get_storage_account() -> str:
     """Get silver storage account name from config."""
     from config import get_config
     return get_config().storage.silver.account_name
+
+
+def _get_silver_netcdf_container() -> str:
+    """Get the silver-netcdf container name from config."""
+    from config import get_config
+    return get_config().storage.silver.netcdf
 
 
 def _get_blob_fs():
@@ -73,14 +80,18 @@ def virtualzarr_scan(
     context: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
-    Scan source container for NetCDF files and write manifest.
+    Scan source container for NetCDF files and write manifest with source→silver mapping.
 
-    Lists blobs matching file_pattern under source_url, sorts alphabetically,
-    enforces max_files cap, and writes manifest JSON to silver storage.
+    Lists blobs matching file_pattern under source_url, computes relative paths,
+    maps each file to a silver-netcdf destination, and writes manifest JSON.
+    The manifest is the source of truth for the copy stage.
+
+    Supports single-file mode: if source_url ends with a file extension matching
+    file_pattern, treats it as a single file (skips listing).
 
     Args:
         params: Task parameters
-            - source_url (str): abfs:// URL to source container/prefix
+            - source_url (str): abfs:// URL to source container/prefix (or single file)
             - file_pattern (str): Glob pattern for filtering (default "*.nc")
             - max_files (int): Maximum file count cap
             - ref_output_prefix (str): Output prefix in silver container
@@ -104,37 +115,65 @@ def virtualzarr_scan(
     try:
         import fnmatch
         import json
+        from infrastructure import BlobRepository
 
-        fs = _get_blob_fs()
+        silver_container = _get_silver_netcdf_container()
 
         # Parse source_url to get container and prefix
         # Expected format: abfs://container/prefix or abfs://container
         source_path = source_url.replace("abfs://", "")
         parts = source_path.split("/", 1)
-        container = parts[0]
-        prefix = parts[1] if len(parts) > 1 else ""
+        source_container = parts[0]
+        source_prefix = parts[1] if len(parts) > 1 else ""
 
-        # List all blobs under the prefix
-        if prefix:
-            blob_list = fs.ls(f"{container}/{prefix}", detail=True)
+        # Determine zone from container name
+        zone = "bronze" if source_container.startswith("bronze") else "silver"
+        blob_repo = BlobRepository.for_zone(zone)
+
+        # Single-file detection: if source_url ends with a matching extension
+        if source_prefix and fnmatch.fnmatch(source_prefix.rsplit("/", 1)[-1], file_pattern):
+            # Single file mode — no listing needed
+            filename = source_prefix.rsplit("/", 1)[-1]
+            try:
+                props = blob_repo.get_blob_properties(source_container, source_prefix)
+                file_size = props.get("size", 0)
+            except Exception:
+                file_size = 0
+
+            matched_files = [{
+                "source_url": source_url,
+                "blob_name": source_prefix,
+                "relative_path": filename,
+                "size_bytes": file_size,
+            }]
+            total_size_bytes = file_size
+            logger.info(f"virtualzarr_scan: Single file mode — {filename}")
         else:
-            blob_list = fs.ls(container, detail=True)
+            # Multi-file mode — list blobs under the prefix
+            blob_list = blob_repo.list_blobs(source_container, prefix=source_prefix)
 
-        # Filter by file_pattern using fnmatch
-        matched_files = []
-        total_size_bytes = 0
-        for blob_info in blob_list:
-            blob_name = blob_info["name"]
-            filename = blob_name.rsplit("/", 1)[-1]
-            if fnmatch.fnmatch(filename, file_pattern):
-                matched_files.append({
-                    "url": f"abfs://{blob_name}",
-                    "size_bytes": blob_info.get("size", 0),
-                })
-                total_size_bytes += blob_info.get("size", 0)
+            matched_files = []
+            total_size_bytes = 0
+            for blob_info in blob_list:
+                blob_name = blob_info["name"]
+                filename = blob_name.rsplit("/", 1)[-1]
+                if fnmatch.fnmatch(filename, file_pattern):
+                    # Compute relative path by stripping the source prefix
+                    if source_prefix and blob_name.startswith(source_prefix):
+                        relative = blob_name[len(source_prefix):].lstrip("/")
+                    else:
+                        relative = filename
+                    size = blob_info.get("size", 0)
+                    matched_files.append({
+                        "source_url": f"abfs://{source_container}/{blob_name}",
+                        "blob_name": blob_name,
+                        "relative_path": relative,
+                        "size_bytes": size,
+                    })
+                    total_size_bytes += size
 
-        # Sort alphabetically by URL
-        matched_files.sort(key=lambda f: f["url"])
+            # Sort alphabetically by source URL
+            matched_files.sort(key=lambda f: f["source_url"])
 
         # Fail if zero files found
         if not matched_files:
@@ -166,26 +205,52 @@ def virtualzarr_scan(
                 "error_type": "ValueError",
             }
 
-        # Build manifest
-        nc_file_urls = [f["url"] for f in matched_files]
+        # Build files[] array with source→silver mapping
+        files = []
+        for f in matched_files:
+            silver_path = f"{ref_output_prefix}/data/{f['relative_path']}"
+            files.append({
+                "source_url": f["source_url"],
+                "relative_path": f["relative_path"],
+                "silver_path": silver_path,
+                "size_bytes": f["size_bytes"],
+            })
+
+        # Build nc_files[] convenience list (silver URLs for combine stage)
+        nc_files = [
+            f"abfs://{silver_container}/{entry['silver_path']}"
+            for entry in files
+        ]
+
+        # Build manifest (source of truth for copy + downstream stages)
         manifest = {
             "source_url": source_url,
             "file_pattern": file_pattern,
-            "file_count": len(nc_file_urls),
+            "file_count": len(files),
             "total_size_bytes": total_size_bytes,
-            "nc_files": nc_file_urls,
+            "silver_container": silver_container,
+            "ref_output_prefix": ref_output_prefix,
+            "files": files,
+            "nc_files": nc_files,
         }
 
-        # Write manifest to silver storage
-        manifest_path = f"rmhazuregeosilver/{ref_output_prefix}/manifest.json"
-        with fs.open(manifest_path, "w") as f:
-            json.dump(manifest, f, indent=2)
+        # Write manifest to silver-netcdf via BlobRepository
+        manifest_blob_path = f"{ref_output_prefix}/manifest.json"
+        manifest_bytes = json.dumps(manifest, indent=2).encode("utf-8")
 
-        manifest_url = f"abfs://{manifest_path}"
+        silver_repo = BlobRepository.for_zone("silver")
+        silver_repo.write_blob(
+            silver_container,
+            manifest_blob_path,
+            manifest_bytes,
+            content_type="application/json",
+        )
+
+        manifest_url = f"abfs://{silver_container}/{manifest_blob_path}"
 
         elapsed = time.time() - start
         logger.info(
-            f"virtualzarr_scan: Found {len(nc_file_urls)} files, "
+            f"virtualzarr_scan: Found {len(files)} files, "
             f"total_size={total_size_bytes} bytes, "
             f"manifest={manifest_url} ({elapsed:.1f}s)"
         )
@@ -194,7 +259,7 @@ def virtualzarr_scan(
             "success": True,
             "result": {
                 "manifest_url": manifest_url,
-                "file_count": len(nc_file_urls),
+                "file_count": len(files),
                 "total_size_bytes": total_size_bytes,
             },
         }
@@ -210,7 +275,100 @@ def virtualzarr_scan(
 
 
 # =============================================================================
-# HANDLER 2: virtualzarr_validate
+# HANDLER 2: virtualzarr_copy
+# =============================================================================
+
+def virtualzarr_copy(
+    params: Dict[str, Any],
+    context: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    Copy a single NetCDF file from bronze to silver-netcdf.
+
+    Uses BlobRepository read/write (cross-zone safe regardless of account
+    topology). Will be swapped for azcopy later — handler signature stays same.
+
+    Args:
+        params: Task parameters
+            - source_url (str): abfs:// URL to the source file
+            - silver_container (str): Target container (e.g. "silver-netcdf")
+            - silver_path (str): Target blob path within silver container
+            - size_bytes (int): Expected file size for verification
+        context: Optional execution context
+
+    Returns:
+        {"success": True, "result": {"silver_url": ..., "bytes_copied": N}}
+    """
+    start = time.time()
+
+    source_url = params.get("source_url")
+    silver_container = params.get("silver_container")
+    silver_path = params.get("silver_path")
+    expected_size = params.get("size_bytes", 0)
+
+    logger.info(
+        f"virtualzarr_copy: {source_url} → "
+        f"{silver_container}/{silver_path}"
+    )
+
+    try:
+        from infrastructure import BlobRepository
+
+        # Parse source_url → (container, blob_path)
+        source_path = source_url.replace("abfs://", "")
+        parts = source_path.split("/", 1)
+        source_container = parts[0]
+        source_blob = parts[1] if len(parts) > 1 else ""
+
+        # Zone detection: bronze-* → bronze, else silver
+        source_zone = "bronze" if source_container.startswith("bronze") else "silver"
+
+        # Read from source
+        source_repo = BlobRepository.for_zone(source_zone)
+        data = source_repo.read_blob(source_container, source_blob)
+
+        # Verify size if expected_size > 0
+        if expected_size > 0 and len(data) != expected_size:
+            logger.warning(
+                f"virtualzarr_copy: Size mismatch for {source_url}. "
+                f"Expected {expected_size}, got {len(data)}"
+            )
+
+        # Write to silver-netcdf
+        silver_repo = BlobRepository.for_zone("silver")
+        silver_repo.write_blob(silver_container, silver_path, data)
+
+        silver_url = f"abfs://{silver_container}/{silver_path}"
+        bytes_copied = len(data)
+
+        elapsed = time.time() - start
+        logger.info(
+            f"virtualzarr_copy: Copied {bytes_copied} bytes → "
+            f"{silver_url} ({elapsed:.1f}s)"
+        )
+
+        return {
+            "success": True,
+            "result": {
+                "silver_url": silver_url,
+                "bytes_copied": bytes_copied,
+            },
+        }
+
+    except Exception as e:
+        elapsed = time.time() - start
+        logger.error(
+            f"virtualzarr_copy failed for {source_url}: {e} ({elapsed:.1f}s)"
+        )
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": type(e).__name__,
+        }
+
+
+# =============================================================================
+# HANDLER 3: virtualzarr_validate
 # =============================================================================
 
 def virtualzarr_validate(
@@ -366,7 +524,7 @@ def virtualzarr_validate(
 
 
 # =============================================================================
-# HANDLER 3: virtualzarr_combine
+# HANDLER 4: virtualzarr_combine
 # =============================================================================
 
 def virtualzarr_combine(
@@ -595,7 +753,7 @@ def virtualzarr_combine(
 
 
 # =============================================================================
-# HANDLER 4: virtualzarr_register
+# HANDLER 5: virtualzarr_register
 # =============================================================================
 
 def virtualzarr_register(

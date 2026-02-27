@@ -11,17 +11,19 @@
 """
 VirtualZarr Job - NetCDF Virtual Reference Pipeline.
 
-Four-stage workflow that scans NetCDF files, validates HDF5 structure,
-combines virtual Zarr references, and registers STAC metadata.
+Five-stage workflow that scans NetCDF files, copies them to silver-netcdf,
+validates HDF5 structure, combines virtual Zarr references, and registers
+STAC metadata.
 
-Four-Stage Workflow:
-    Stage 1 (scan): List NetCDF files from source container, write manifest
-    Stage 2 (validate): Fan-out - validate each file's HDF5 structure
-    Stage 3 (combine): Combine virtual datasets into single Zarr reference
-    Stage 4 (register): Build STAC item and update release record
+Five-Stage Workflow:
+    Stage 1 (scan): List NetCDF files from source, build source→silver manifest
+    Stage 2 (copy): Fan-out — copy each file from bronze → silver-netcdf
+    Stage 3 (validate): Fan-out — validate each file's HDF5 structure
+    Stage 4 (combine): Combine virtual datasets into single Zarr reference
+    Stage 5 (register): Build STAC item and update release record
 
 Exports:
-    VirtualZarrJob: Four-stage VirtualiZarr pipeline implementation
+    VirtualZarrJob: Five-stage VirtualiZarr pipeline implementation
 """
 
 import json
@@ -31,39 +33,69 @@ from jobs.base import JobBase
 from jobs.mixins import JobBaseMixin
 
 
-def _get_storage_account():
-    """Get the silver storage account name from config."""
+def _get_silver_netcdf_container() -> str:
+    """Get the silver-netcdf container name from config."""
     from config import get_config
-    return get_config().storage.silver.account_name
+    return get_config().storage.silver.netcdf
 
 
 def _read_manifest(manifest_url: str) -> list:
     """
-    Read file list from blob manifest JSON.
+    Read nc_files list from blob manifest JSON via BlobRepository.
 
     Args:
         manifest_url: abfs:// URL to the manifest.json blob
 
     Returns:
-        List of NetCDF file URLs from the manifest
+        List of NetCDF file URLs (silver paths) from the manifest
     """
-    import fsspec
-    fs = fsspec.filesystem("abfs", account_name=_get_storage_account())
+    from infrastructure import BlobRepository
+
     blob_path = manifest_url.replace("abfs://", "")
-    with fs.open(blob_path, 'r') as f:
-        manifest = json.load(f)
+    parts = blob_path.split("/", 1)
+    container = parts[0]
+    blob_name = parts[1] if len(parts) > 1 else ""
+
+    silver_repo = BlobRepository.for_zone("silver")
+    data = silver_repo.read_blob(container, blob_name)
+    manifest = json.loads(data)
     return manifest.get('nc_files', [])
+
+
+def _read_manifest_full(manifest_url: str) -> dict:
+    """
+    Read the full manifest dict from blob JSON via BlobRepository.
+
+    Used by Stage 2 (copy) to access the files[] array with source→silver mapping.
+
+    Args:
+        manifest_url: abfs:// URL to the manifest.json blob
+
+    Returns:
+        Full manifest dict including files[], nc_files[], silver_container, etc.
+    """
+    from infrastructure import BlobRepository
+
+    blob_path = manifest_url.replace("abfs://", "")
+    parts = blob_path.split("/", 1)
+    container = parts[0]
+    blob_name = parts[1] if len(parts) > 1 else ""
+
+    silver_repo = BlobRepository.for_zone("silver")
+    data = silver_repo.read_blob(container, blob_name)
+    return json.loads(data)
 
 
 class VirtualZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
     """
     VirtualZarr job using JobBaseMixin pattern.
 
-    Four-Stage Workflow:
-        1. Stage 1 (scan): List NetCDF files, write manifest to blob
-        2. Stage 2 (validate): Fan-out per file, validate HDF5 headers
-        3. Stage 3 (combine): Combine virtual datasets, export reference JSON
-        4. Stage 4 (register): Build STAC item, update release record
+    Five-Stage Workflow:
+        1. Stage 1 (scan): List NetCDF files, build source→silver manifest
+        2. Stage 2 (copy): Fan-out — copy each file bronze → silver-netcdf
+        3. Stage 3 (validate): Fan-out per file, validate HDF5 headers
+        4. Stage 4 (combine): Combine virtual datasets, export reference JSON
+        5. Stage 5 (register): Build STAC item, update release record
     """
 
     # ========================================================================
@@ -81,24 +113,31 @@ class VirtualZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
         },
         {
             "number": 2,
-            "name": "validate",
-            "task_type": "virtualzarr_validate",
+            "name": "copy",
+            "task_type": "virtualzarr_copy",
             "parallelism": "fan_out",
             "depends_on": 1,
         },
         {
             "number": 3,
-            "name": "combine",
-            "task_type": "virtualzarr_combine",
-            "parallelism": "single",
+            "name": "validate",
+            "task_type": "virtualzarr_validate",
+            "parallelism": "fan_out",
             "depends_on": 2,
         },
         {
             "number": 4,
+            "name": "combine",
+            "task_type": "virtualzarr_combine",
+            "parallelism": "single",
+            "depends_on": 3,
+        },
+        {
+            "number": 5,
             "name": "register",
             "task_type": "virtualzarr_register",
             "parallelism": "single",
-            "depends_on": 3,
+            "depends_on": 4,
         },
     ]
 
@@ -161,7 +200,7 @@ class VirtualZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
         Generate task parameters for each stage.
 
         Args:
-            stage: Stage number (1-4)
+            stage: Stage number (1-5)
             job_params: Validated job parameters
             job_id: Job ID for task ID generation
             previous_results: Results from previous stage
@@ -170,7 +209,7 @@ class VirtualZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
             List of task parameter dicts
         """
         if stage == 1:
-            # Stage 1 (scan): Single task to list NetCDF files
+            # Stage 1 (scan): Single task to list NetCDF files and build manifest
             return [
                 {
                     "task_id": f"{job_id[:8]}-s1-scan",
@@ -185,10 +224,10 @@ class VirtualZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
             ]
 
         elif stage == 2:
-            # Stage 2 (validate): Fan-out - one task per file from manifest
+            # Stage 2 (copy): Fan-out — one copy task per file from manifest
             if not previous_results:
                 raise ValueError(
-                    "Stage 2 (validate) requires previous_results from scan stage"
+                    "Stage 2 (copy) requires previous_results from scan stage"
                 )
 
             # Extract manifest_url from stage 1 result
@@ -200,7 +239,43 @@ class VirtualZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                     "Stage 2 requires manifest_url from scan stage result"
                 )
 
-            # Read manifest to get file list
+            # Read full manifest to get files[] array
+            manifest = _read_manifest_full(manifest_url)
+            files = manifest.get("files", [])
+            if not files:
+                raise ValueError(
+                    f"Manifest at {manifest_url} contains no files"
+                )
+
+            silver_container = manifest.get("silver_container", _get_silver_netcdf_container())
+
+            return [
+                {
+                    "task_id": f"{job_id[:8]}-s2-copy-{i}",
+                    "task_type": "virtualzarr_copy",
+                    "parameters": {
+                        "source_url": f_entry["source_url"],
+                        "silver_container": silver_container,
+                        "silver_path": f_entry["silver_path"],
+                        "size_bytes": f_entry["size_bytes"],
+                    },
+                }
+                for i, f_entry in enumerate(files)
+            ]
+
+        elif stage == 3:
+            # Stage 3 (validate): Fan-out — one task per file (now in silver)
+            if not previous_results:
+                raise ValueError(
+                    "Stage 3 (validate) requires previous_results from copy stage"
+                )
+
+            # Reconstruct manifest path from ref_output_prefix
+            silver_container = _get_silver_netcdf_container()
+            ref_prefix = job_params["ref_output_prefix"]
+            manifest_url = f"abfs://{silver_container}/{ref_prefix}/manifest.json"
+
+            # Read nc_files from manifest — these are silver URLs
             nc_files = _read_manifest(manifest_url)
             if not nc_files:
                 raise ValueError(
@@ -211,7 +286,7 @@ class VirtualZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
 
             return [
                 {
-                    "task_id": f"{job_id[:8]}-s2-val-{i}",
+                    "task_id": f"{job_id[:8]}-s3-val-{i}",
                     "task_type": "virtualzarr_validate",
                     "parameters": {
                         "nc_url": nc_url,
@@ -221,28 +296,21 @@ class VirtualZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                 for i, nc_url in enumerate(nc_files)
             ]
 
-        elif stage == 3:
-            # Stage 3 (combine): Single task to merge virtual datasets
+        elif stage == 4:
+            # Stage 4 (combine): Single task to merge virtual datasets
             if not previous_results:
                 raise ValueError(
-                    "Stage 3 (combine) requires previous_results from validate stage"
+                    "Stage 4 (combine) requires previous_results from validate stage"
                 )
 
-            # Get manifest_url from stage 1 (available via job context)
-            # Stage 3 needs: manifest for file list, concat_dim, output path
-            scan_result = None
-            # previous_results at stage 3 contains stage 2 results
-            # We need the manifest_url which was produced in stage 1.
-            # CoreMachine passes all previous results; the scan result
-            # is typically accessed via job-level context or re-derived.
-            # The ref_output_prefix lets us reconstruct manifest path.
+            silver_container = _get_silver_netcdf_container()
             ref_prefix = job_params["ref_output_prefix"]
-            manifest_url = f"abfs://rmhazuregeosilver/{ref_prefix}/manifest.json"
-            combined_ref_url = f"abfs://rmhazuregeosilver/{ref_prefix}/combined_ref.json"
+            manifest_url = f"abfs://{silver_container}/{ref_prefix}/manifest.json"
+            combined_ref_url = f"abfs://{silver_container}/{ref_prefix}/combined_ref.json"
 
             return [
                 {
-                    "task_id": f"{job_id[:8]}-s3-combine",
+                    "task_id": f"{job_id[:8]}-s4-combine",
                     "task_type": "virtualzarr_combine",
                     "parameters": {
                         "manifest_url": manifest_url,
@@ -253,25 +321,26 @@ class VirtualZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                 }
             ]
 
-        elif stage == 4:
-            # Stage 4 (register): Single task to build STAC + update release
+        elif stage == 5:
+            # Stage 5 (register): Single task to build STAC + update release
             if not previous_results:
                 raise ValueError(
-                    "Stage 4 (register) requires previous_results from combine stage"
+                    "Stage 5 (register) requires previous_results from combine stage"
                 )
 
             combine_result = previous_results[0] if previous_results else {}
             result_data = combine_result.get("result", {})
 
+            silver_container = _get_silver_netcdf_container()
             ref_prefix = job_params["ref_output_prefix"]
             combined_ref_url = result_data.get(
                 "combined_ref_url",
-                f"abfs://rmhazuregeosilver/{ref_prefix}/combined_ref.json"
+                f"abfs://{silver_container}/{ref_prefix}/combined_ref.json"
             )
 
             return [
                 {
-                    "task_id": f"{job_id[:8]}-s4-register",
+                    "task_id": f"{job_id[:8]}-s5-register",
                     "task_type": "virtualzarr_register",
                     "parameters": {
                         "release_id": job_params.get("release_id", job_id),

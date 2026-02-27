@@ -28,7 +28,7 @@ Exports:
     create_stac_collection: Task handler for tiled raster collection creation
 """
 
-import os
+
 import json
 import traceback  # For fail-fast error reporting (11 NOV 2025)
 # asyncio removed (17 NOV 2025) - direct database writes are synchronous
@@ -622,8 +622,9 @@ def _calculate_spatial_extent_from_tiles(
     """
     Calculate spatial extent (bbox) from constituent COG tiles.
 
-    Reads the bounding box from each COG's metadata and computes the
-    union of all bboxes to determine the collection extent.
+    FALLBACK PATH: Callers should pass spatial_extent from tiling_result
+    when available. This function is the slow fallback that opens each tile
+    via HTTP to read bounds.
 
     Args:
         tile_blobs: List of COG blob paths
@@ -638,17 +639,16 @@ def _calculate_spatial_extent_from_tiles(
     import rasterio
     from rasterio.warp import transform_bounds
 
-    logger.info(f"Calculating spatial extent from {len(tile_blobs)} tiles")
+    logger.info(f"Calculating spatial extent from {len(tile_blobs)} tiles (HTTP fallback)")
 
     # Initialize extent with extreme values
     minx, miny = float('inf'), float('inf')
     maxx, maxy = float('-inf'), float('-inf')
 
-    # Get Azure credentials from config (08 DEC 2025)
+    # Get Azure storage account from config — uses Managed Identity (no storage key)
     from config import get_config
     config = get_config()
     storage_account = config.storage.silver.account_name
-    storage_key = os.environ.get("AZURE_STORAGE_KEY")
 
     tiles_read = 0
     for tile_blob in tile_blobs:
@@ -656,10 +656,10 @@ def _calculate_spatial_extent_from_tiles(
             # Construct vsi path for Azure
             vsi_path = f"/vsiaz/{container}/{tile_blob}"
 
-            # Set Azure credentials for GDAL
+            # Use Managed Identity for Azure auth (no storage key on this platform)
             with rasterio.Env(
                 AZURE_STORAGE_ACCOUNT=storage_account,
-                AZURE_STORAGE_ACCESS_KEY=storage_key
+                AZURE_STORAGE_AUTH_TYPE="AZURE_AD",
             ):
                 with rasterio.open(vsi_path) as src:
                     # Get bounds in source CRS

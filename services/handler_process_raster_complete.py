@@ -748,6 +748,18 @@ def _process_raster_tiled(
             collection_id = params.get('collection_id')
             blob_stem = Path(blob_name).stem
 
+            # Extract spatial extent from tiling result (26 FEB 2026)
+            # Avoids opening every COG tile via HTTP to read bounds
+            _spatial_extent = tiling_result.get('target_bounds')  # EPSG:4326 from tiling_scheme.py
+            if not _spatial_extent:
+                _raster_bounds = tiling_result.get('raster_metadata', {}).get('bounds')
+                _source_crs = tiling_result.get('raster_metadata', {}).get('crs') or tiling_result.get('source_crs')
+                if _raster_bounds and _source_crs and _source_crs != 'EPSG:4326':
+                    from rasterio.warp import transform_bounds
+                    _spatial_extent = list(transform_bounds(_source_crs, 'EPSG:4326', *_raster_bounds))
+                elif _raster_bounds:
+                    _spatial_extent = list(_raster_bounds)
+
             stac_params = {
                 'collection_id': collection_id,
                 'item_id': params.get('item_id') or blob_stem,
@@ -755,6 +767,7 @@ def _process_raster_tiled(
                 'cog_container': config.storage.silver.cogs,
                 'title': f"Tiled Raster: {blob_stem}",
                 'description': f"Tiled COG collection from {blob_name}",
+                'spatial_extent': _spatial_extent,
                 # Platform passthrough
                 'dataset_id': params.get('dataset_id'),
                 'resource_id': params.get('resource_id'),
@@ -1638,6 +1651,17 @@ def _process_raster_tiled_mount(
             'data_type': raster_metadata.get('dtype', 'uint8'),
         }
 
+        # Extract spatial extent from tiling result (26 FEB 2026)
+        # Mount workflow: bounds in raster_metadata (source CRS, may need transform)
+        _spatial_extent = None
+        _raster_bounds = tiling_result.get('raster_metadata', {}).get('bounds')
+        _source_crs = tiling_result.get('raster_metadata', {}).get('crs')
+        if _raster_bounds and _source_crs and _source_crs != 'EPSG:4326':
+            from rasterio.warp import transform_bounds
+            _spatial_extent = list(transform_bounds(_source_crs, 'EPSG:4326', *_raster_bounds))
+        elif _raster_bounds:
+            _spatial_extent = list(_raster_bounds)
+
         stac_params = {
             'collection_id': collection_id,
             'item_id': params.get('item_id') or blob_stem,
@@ -1645,6 +1669,7 @@ def _process_raster_tiled_mount(
             'cog_container': cogs_container,
             'title': f"Tiled Raster: {blob_stem}",
             'description': f"Tiled COG collection from {blob_name} (mount-based workflow)",
+            'spatial_extent': _spatial_extent,
             'dataset_id': params.get('dataset_id'),
             'resource_id': params.get('resource_id'),
             'version_id': params.get('version_id'),

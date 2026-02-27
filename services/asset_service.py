@@ -290,9 +290,10 @@ class AssetService:
         if existing_draft:
             if overwrite:
                 if not existing_draft.can_overwrite():
+                    current = f"{existing_draft.approval_state.value}/processing={existing_draft.processing_status.value}"
                     raise ReleaseStateError(
                         existing_draft.release_id,
-                        existing_draft.approval_state.value,
+                        current,
                         "pending_review or rejected (and not actively processing)",
                         "overwrite"
                     )

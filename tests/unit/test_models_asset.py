@@ -137,6 +137,27 @@ class TestReleaseCanOverwrite:
         ))
         assert release.can_overwrite() is False
 
+    def test_rejected_and_processing_blocks_overwrite(self):
+        release = AssetRelease(**make_asset_release(
+            approval_state=ApprovalState.REJECTED,
+            processing_status=ProcessingStatus.PROCESSING
+        ))
+        assert release.can_overwrite() is False
+
+    def test_pending_review_and_completed_allows_overwrite(self):
+        release = AssetRelease(**make_asset_release(
+            approval_state=ApprovalState.PENDING_REVIEW,
+            processing_status=ProcessingStatus.COMPLETED
+        ))
+        assert release.can_overwrite() is True
+
+    def test_pending_review_and_failed_allows_overwrite(self):
+        release = AssetRelease(**make_asset_release(
+            approval_state=ApprovalState.PENDING_REVIEW,
+            processing_status=ProcessingStatus.FAILED
+        ))
+        assert release.can_overwrite() is True
+
     def test_revoked_blocks_overwrite(self):
         release = AssetRelease(**make_asset_release(
             approval_state=ApprovalState.REVOKED,

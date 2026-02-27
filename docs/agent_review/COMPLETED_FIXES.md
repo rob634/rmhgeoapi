@@ -1,8 +1,8 @@
 # Adversarial Review — Completed Fixes
 
-**Date**: 26 FEB 2026
+**Date**: 26-27 FEB 2026
 **Method**: Adversarial multi-agent pipeline (Omega → Alpha + Beta parallel → Gamma → Delta)
-**Result**: 20 of 20 actionable findings RESOLVED across 3 subsystems. Zero regressions.
+**Result**: 25 of 25 actionable findings RESOLVED across 4 subsystems. Zero regressions.
 
 ---
 
@@ -13,6 +13,7 @@
 | CoreMachine Orchestration | 5 (1 CRITICAL, 2 HIGH, 2 MEDIUM) | `fa05cc1` (V0.9.8.1) | 352 passing |
 | Vector Workflow | 10 (1 CRITICAL, 3 HIGH, 4 MEDIUM, 1 LOW, 1 already resolved) | `8355f7c` | 330 passing |
 | Tiled Raster Pipeline | 5 (1 CRITICAL, 2 HIGH, 2 MEDIUM) | `51e8a28` (fixes 1-3), uncommitted (fixes 4-5) | 352 passing |
+| Approval Workflow | 5 (1 CRITICAL, 2 HIGH, 1 MEDIUM, 1 LOW) | `088aca9` | 362 passing |
 
 ---
 
@@ -104,3 +105,21 @@ Key value of the pipeline:
 - **Information asymmetry**: Alpha and Beta see different concerns, preventing confirmation bias.
 - **Gamma's blind spots**: Found the most critical findings across all 3 reviews (orphan PENDING tasks, orphaned release_tables, spatial extent HTTP waste).
 - **Execution**: All agents ran as Claude Code subagents. No external API key required.
+
+---
+
+## Approval Workflow
+
+**Scope**: Approve / Reject / Revoke lifecycle across 3 trigger layers, 1 service, 1 materialization engine, 1 repository.
+**Files reviewed**: 7 files, ~5,500 LOC across `triggers/`, `services/`, `infrastructure/`, `core/models/`.
+**Scope Split**: B — Internal vs External.
+
+### All 5 Fixes — commit `088aca9`
+
+| # | Sev | Finding | Files Changed | Resolution |
+|---|------|---------|---------------|------------|
+| 1 | CRITICAL | `_delete_stac()` deletes ALL items in pgSTAC collection on tiled revocation — nukes other releases' items | `services/asset_approval_service.py`, `services/stac_materialization.py` | Tag tiled items with `ddh:release_id` at materialization. Filter deletion to only matching items. Legacy items without tag get fail-safe skip + warning. |
+| 2 | HIGH | Exception handlers leak `str(e)` and `type(e).__name__` to unauthenticated callers across all 3 trigger layers | `triggers/http_base.py`, `triggers/trigger_approvals.py`, `triggers/assets/asset_approvals_bp.py`, `triggers/admin/admin_approvals.py` | New `safe_error_response()` helper in `http_base.py`. 18 catch blocks sanitized — generic message to caller, full details in server logs only. |
+| 3 | HIGH | Post-atomic STAC materialization failure undetected — release APPROVED in DB but STAC missing, no error record | `services/asset_approval_service.py`, `infrastructure/release_repository.py` | Wrapped post-atomic ops in try/except. CRITICAL log + `last_error` field persistence via new `update_last_error()` method. |
+| 4 | MEDIUM | `approve_release_atomic()` doesn't clear `rejection_reason` — stale reason from prior rejection survives into approved state | `infrastructure/release_repository.py` | Added `rejection_reason = NULL` to both SQL branches (PUBLIC and non-PUBLIC). |
+| 5 | LOW | `reject_release()` calls `can_approve()` instead of `can_reject()` — semantic bug, fragile if rules diverge | `services/asset_approval_service.py` | Changed to `can_reject()`. |

@@ -4,6 +4,7 @@
 **Pipeline**: Omega → Alpha + Beta (parallel) → Gamma → Delta
 **Target**: Approve / Reject / Revoke lifecycle across 3 trigger layers, 1 service, 1 materialization engine, 1 repository, 1 model
 **Files Reviewed**: 7 files, ~5,500 LOC
+**Result**: 5 of 5 TOP FIXES RESOLVED — commit `088aca9`. 362 tests passing. See `COMPLETED_FIXES.md` for details.
 
 ---
 
@@ -31,88 +32,15 @@ The platform approval workflow is architecturally sound — the V0.9 Asset/Relea
 
 ---
 
-### TOP 5 FIXES
+### TOP 5 FIXES — ALL RESOLVED (commit `088aca9`)
 
-#### FIX 1: Tiled revocation deletes ALL collection items, not just revoked release's items (CRITICAL)
-
-**WHAT**: `_delete_stac()` calls `get_collection_item_ids(collection_id)` and deletes every item in the collection, regardless of which release they belong to.
-
-**WHY**: If two approved releases share the same `stac_collection_id` (which is the normal case for versioned assets), revoking one release nukes the STAC items for all releases in that collection. This is a data-loss bug.
-
-**WHERE**: `services/asset_approval_service.py`, function `_delete_stac()`, lines 543-553.
-
-**HOW**: For tiled revocations, filter items to only those belonging to the revoked release. Options: (a) Store the item IDs on the release at materialization time (e.g., in `stac_item_json` or a new `tiled_item_ids` JSONB field), then delete only those. (b) Tag each pgSTAC item with a `geoetl:release_id` property at insertion time and filter on that before deleting. Option (b) is cleaner because it is queryable. As a quick fix, prefix tiled item IDs with `{release_id[:8]}-` at insertion time and filter `get_collection_item_ids` results by that prefix before deletion.
-
-**EFFORT**: Medium (2-3 hours). Requires touching both materialization (to tag items) and dematerialization (to filter).
-
-**RISK OF FIX**: Medium. Changes must be backward-compatible with existing pgSTAC items that lack the tag. Add a fallback path that logs a warning and skips deletion if items cannot be attributed to the release.
-
----
-
-#### FIX 2: Exception handlers leak internal details to unauthenticated callers (HIGH)
-
-**WHAT**: All `except Exception as e` blocks across the three trigger layers return `str(e)` and `type(e).__name__` in the HTTP response body.
-
-**WHY**: Exposes internal class names, database error messages, connection strings, and stack context to any unauthenticated caller. This is an information disclosure vulnerability.
-
-**WHERE**:
-- `triggers/trigger_approvals.py`, lines 362-372 (`platform_approve`), 510-520 (`platform_reject`), 663-673 (`platform_revoke`).
-- `triggers/assets/asset_approvals_bp.py`, lines 235-245, 382-392, 532-542.
-- `triggers/admin/admin_approvals.py`, lines 138-144, 333-339, 430-436, 528-533.
-
-**HOW**: Replace `str(e)` in all 500-level response bodies with a generic message (e.g., `"An internal error occurred. Check server logs."`). Keep the detailed `logger.error(f"...: {e}", exc_info=True)` calls for server-side diagnostics. Create a helper function `_error_500(message, logger, exc)` in `triggers/http_base.py` to standardize this pattern across all trigger files.
-
-**EFFORT**: Small (30-45 minutes). Mechanical replacement across ~15 catch blocks.
-
-**RISK OF FIX**: Low. Only changes the HTTP response body for 500 errors; logging remains identical.
-
----
-
-#### FIX 3: `reject_release()` uses `can_approve()` instead of `can_reject()` (LOW — semantic bug)
-
-**WHAT**: The rejection path calls `release.can_approve()` to validate state, but should call `release.can_reject()`.
-
-**WHY**: Today `can_approve()` and `can_reject()` have identical implementations (both check for `PENDING_REVIEW`), so there is no runtime bug. But if the state machine ever diverges, this will silently break. It also makes the code misleading to read.
-
-**WHERE**: `services/asset_approval_service.py`, function `reject_release()`, line 287.
-
-**HOW**: Change `if not release.can_approve():` to `if not release.can_reject():`. Fix the error message text on line 290 from `"Cannot approve"` to `"Cannot reject"`.
-
-**EFFORT**: Small (5 minutes).
-
-**RISK OF FIX**: Low.
-
----
-
-#### FIX 4: `approve_release_atomic()` does not clear `rejection_reason` on approval (MEDIUM)
-
-**WHAT**: When a previously rejected release is re-submitted and then approved, the atomic approval SQL does not set `rejection_reason = NULL`.
-
-**WHY**: A release that was rejected, re-submitted (overwrite), and then approved will carry a stale `rejection_reason` from the previous review cycle. This corrupts the audit trail.
-
-**WHERE**: `infrastructure/release_repository.py`, function `approve_release_atomic()`, lines 1201-1266 (both the PUBLIC and non-PUBLIC SQL branches).
-
-**HOW**: Add `rejection_reason = NULL` to both UPDATE statements in `approve_release_atomic()`, after the `approval_notes = %s` line. Note: `update_overwrite()` (line 933) already clears `rejection_reason`, so this is belt-and-suspenders.
-
-**EFFORT**: Small (15 minutes).
-
-**RISK OF FIX**: Low. Adding a NULL assignment to an atomic UPDATE cannot break existing behavior.
-
----
-
-#### FIX 5: Non-atomic stac_item_id update + STAC materialization after atomic approval (HIGH)
-
-**WHAT**: After the atomic `approve_release_atomic()` commits, three follow-on operations happen in separate transactions: (a) `update_physical_outputs()` to rewrite `stac_item_id`, (b) `_materialize_stac()` to write to pgSTAC, and (c) optionally `_trigger_adf_pipeline()`. If (a) or (b) fails, the release is APPROVED in the DB but STAC is stale or missing.
-
-**WHY**: A crash or transient pgSTAC failure between the atomic approval commit and STAC materialization leaves the release approved without a corresponding STAC catalog entry. Users see the release as approved but cannot discover it via STAC.
-
-**WHERE**: `services/asset_approval_service.py`, function `approve_release()`, lines 179-199 (stac_item_id update) and line 199 (`_materialize_stac` call).
-
-**HOW**: Simpler approach — wrap lines 179-199 in a try/except that logs a CRITICAL-level error and sets a `last_error` field with `"STAC_MATERIALIZATION_FAILED"` so it can be queried and retried. Fuller approach — add a `stac_materialized` boolean column to `asset_releases` (default FALSE), set TRUE only after successful STAC materialization, add admin endpoint to retry failures.
-
-**EFFORT**: Medium (30 minutes for try/except approach; 2-4 hours for new column approach).
-
-**RISK OF FIX**: Low for try/except; Medium for new column (requires schema migration).
+| # | Sev | Fix | Resolution |
+|---|------|-----|------------|
+| 1 | CRITICAL | Tiled revocation deletes ALL collection items | Items tagged `ddh:release_id` at materialization; deletion filtered to matching items; legacy fail-safe skip |
+| 2 | HIGH | Exception handlers leak `str(e)` to callers | `safe_error_response()` helper in `http_base.py`; 18 catch blocks sanitized across 3 trigger layers |
+| 3 | LOW | `reject_release()` uses `can_approve()` guard | Changed to `can_reject()` |
+| 4 | MEDIUM | `approve_release_atomic()` doesn't clear `rejection_reason` | Added `rejection_reason = NULL` to both SQL branches |
+| 5 | HIGH | Post-atomic STAC failure undetected | try/except wrapper, CRITICAL log, `last_error` field persistence via `update_last_error()` |
 
 ---
 

@@ -45,3 +45,22 @@
 | C-1 | CRITICAL | `config_obj.raster.use_etl_mount` AttributeError — crashes all single-COG Docker processing | `services/raster_cog.py` | Changed 4 references from `config_obj.raster.use_etl_mount`/`etl_mount_path` to `config_obj.docker.*` |
 | C-2 | HIGH | `raster_type` unbound on VSI checkpoint resume — `NameError` when Phase 4 runs after Phase 3 skip | `services/handler_process_raster_complete.py` | Added `raster_type` recovery from `extraction_result.raster_metadata` in Phase 3 checkpoint skip branch |
 | H-1 | HIGH | Zero tile overlap in mount workflow causes visible seams in TiTiler mosaics | `services/handler_process_raster_complete.py` | Added `overlap=512` to mount workflow tile grid, matching VSI workflow default from `tiling_scheme.py` |
+
+---
+
+## Platform Submit Workflow — 26 FEB 2026
+
+**Source**: `docs/agent_review/SUBMISSION.md`
+**Pipeline**: Omega → Alpha + Beta → Gamma → Delta
+**Scope**: 12 files, ~6,700 LOC — submit endpoint, Asset/Release lifecycle, translation layer
+**Result**: 5 of 5 actionable findings RESOLVED. 286 tests passing, zero regressions.
+
+### Fixes Completed
+
+| Fix | Sev | Finding | Files Changed | Resolution |
+|-----|------|---------|---------------|------------|
+| FIX 1 | CRITICAL | `config` NameError at `submit.py:168` — crashes every platform submit | `triggers/platform/submit.py` | Removed bare `config` arg; `translate_to_coremachine()` already has `cfg=None` default |
+| FIX 4 | HIGH | `can_overwrite()` doesn't check `processing_status` — allows overwrite while PROCESSING | `core/models/asset.py`, `services/asset_service.py` | Added `processing_status == PROCESSING` guard; error message now includes both dimensions |
+| FIX 2 | HIGH | `update_overwrite()` doesn't reset `approval_state` from REJECTED | `infrastructure/release_repository.py` | Added `approval_state`, `rejection_reason`, `reviewer`, `reviewed_at` to UPDATE SET clause |
+| FIX 3 | HIGH | `update_overwrite()` doesn't clear stale `job_id` | `infrastructure/release_repository.py` | Added `job_id = NULL` to same UPDATE (combined with FIX 2) |
+| FIX 5 | MEDIUM | Error response leaks internal exception details to HTTP callers | `triggers/platform/submit.py` | Replaced raw `str(e)` with generic messages; details remain in server logs via `exc_info=True` |

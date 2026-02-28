@@ -260,7 +260,7 @@ def _resolve_unpublish_data_type(req_body: dict) -> Tuple[Optional[str], dict, O
     dataset_id = req_body.get('dataset_id')
     resource_id = req_body.get('resource_id')
     version_id = req_body.get('version_id')
-    if dataset_id and resource_id and version_id:
+    if dataset_id and resource_id and version_id is not None:
         original_request = platform_repo.get_request_by_ddh_ids(dataset_id, resource_id, version_id)
         if original_request:
             data_type = normalize_data_type(original_request.data_type)
@@ -521,6 +521,26 @@ def _handle_collection_unpublish(
             status_code=200,
             headers={"Content-Type": "application/json"}
         )
+
+    # Revoke individual releases before submitting cleanup jobs
+    from infrastructure import ReleaseRepository
+    from core.models.asset import ApprovalState
+    release_repo = ReleaseRepository()
+    revoked_count = 0
+
+    for stac_item_id in item_ids:
+        release = release_repo.get_by_stac_item_id(stac_item_id)
+        if release and release.approval_state == ApprovalState.APPROVED:
+            success = release_repo.update_revocation(
+                release_id=release.release_id,
+                revoked_by='system:collection_unpublish',
+                revocation_reason=f'Collection-level unpublish of {collection_id}'
+            )
+            if success:
+                revoked_count += 1
+
+    if revoked_count > 0:
+        logger.info(f"Revoked {revoked_count} releases for collection '{collection_id}'")
 
     # Submit unpublish job for each item
     submitted_jobs = []

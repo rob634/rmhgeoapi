@@ -64,6 +64,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 
 from psycopg import sql
+from psycopg.errors import UniqueViolation
 
 from util_logger import LoggerFactory, ComponentType
 from core.models.asset import AssetRelease, ApprovalState, ClearanceState, ProcessingStatus
@@ -83,11 +84,69 @@ class ReleaseRepository(PostgreSQLRepository):
     Table: app.asset_releases
     """
 
+    # Column list shared by create() and create_and_count_atomic()
+    _INSERT_COLUMNS = (
+        "release_id", "asset_id",
+        "version_id", "suggested_version_id", "version_ordinal",
+        "revision", "previous_release_id",
+        "is_latest", "is_served", "request_id",
+        "blob_path", "stac_item_id", "stac_collection_id",
+        "stac_item_json", "content_hash", "source_file_hash", "output_file_hash",
+        "output_mode", "tile_count", "search_id",
+        "job_id", "processing_status", "processing_started_at",
+        "processing_completed_at", "last_error", "workflow_id", "node_summary",
+        "approval_state", "reviewer", "reviewed_at", "rejection_reason",
+        "approval_notes", "clearance_state", "adf_run_id",
+        "cleared_at", "cleared_by", "made_public_at", "made_public_by",
+        "revoked_at", "revoked_by", "revocation_reason",
+        "created_at", "updated_at", "priority",
+    )
+
     def __init__(self):
         """Initialize with PostgreSQL connection."""
         super().__init__()
         self.table = "asset_releases"
         self.schema = "app"
+
+    def _build_insert_values(self, release: AssetRelease, now: datetime) -> tuple:
+        """Extract ordered values from release model to match _INSERT_COLUMNS."""
+        return (
+            release.release_id, release.asset_id,
+            release.version_id, release.suggested_version_id,
+            release.version_ordinal,
+            release.revision, release.previous_release_id,
+            release.is_latest, release.is_served, release.request_id,
+            release.blob_path,
+            release.stac_item_id, release.stac_collection_id,
+            release.stac_item_json, release.content_hash,
+            release.source_file_hash, release.output_file_hash,
+            release.output_mode, release.tile_count, release.search_id,
+            release.job_id, release.processing_status,
+            release.processing_started_at,
+            release.processing_completed_at, release.last_error,
+            release.workflow_id, release.node_summary,
+            release.approval_state, release.reviewer,
+            release.reviewed_at, release.rejection_reason,
+            release.approval_notes, release.clearance_state,
+            release.adf_run_id,
+            release.cleared_at, release.cleared_by,
+            release.made_public_at, release.made_public_by,
+            release.revoked_at, release.revoked_by,
+            release.revocation_reason,
+            now, now,
+            release.priority,
+        )
+
+    def _build_insert_sql(self) -> sql.Composed:
+        """Build the INSERT ... RETURNING * SQL for asset_releases."""
+        cols = ", ".join(self._INSERT_COLUMNS)
+        placeholders = ", ".join(["%s"] * len(self._INSERT_COLUMNS))
+        return sql.SQL(
+            f"INSERT INTO {{}}.{{}} ({cols}) VALUES ({placeholders}) RETURNING *"
+        ).format(
+            sql.Identifier(self.schema),
+            sql.Identifier(self.table)
+        )
 
     # =========================================================================
     # CREATE
@@ -117,79 +176,8 @@ class ReleaseRepository(PostgreSQLRepository):
         with self._get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    sql.SQL("""
-                        INSERT INTO {}.{} (
-                            release_id, asset_id,
-                            version_id, suggested_version_id, version_ordinal,
-                            revision, previous_release_id,
-                            is_latest, is_served, request_id,
-                            blob_path, stac_item_id, stac_collection_id,
-                            stac_item_json, content_hash, source_file_hash, output_file_hash,
-                            output_mode, tile_count, search_id,
-                            job_id, processing_status, processing_started_at,
-                            processing_completed_at, last_error, workflow_id, node_summary,
-                            approval_state, reviewer, reviewed_at, rejection_reason,
-                            approval_notes, clearance_state, adf_run_id,
-                            cleared_at, cleared_by, made_public_at, made_public_by,
-                            revoked_at, revoked_by, revocation_reason,
-                            created_at, updated_at, priority
-                        ) VALUES (
-                            %s, %s,
-                            %s, %s, %s,
-                            %s, %s,
-                            %s, %s, %s,
-                            %s, %s, %s,
-                            %s, %s, %s, %s,
-                            %s, %s, %s,
-                            %s, %s, %s,
-                            %s, %s, %s, %s,
-                            %s, %s, %s, %s,
-                            %s, %s, %s,
-                            %s, %s, %s, %s,
-                            %s, %s, %s,
-                            %s, %s, %s
-                        )
-                        RETURNING *
-                    """).format(
-                        sql.Identifier(self.schema),
-                        sql.Identifier(self.table)
-                    ),
-                    (
-                        # Identity
-                        release.release_id, release.asset_id,
-                        # Version
-                        release.version_id, release.suggested_version_id,
-                        release.version_ordinal,
-                        release.revision, release.previous_release_id,
-                        # Flags
-                        release.is_latest, release.is_served, release.request_id,
-                        # Physical outputs (table_name removed → app.release_tables)
-                        release.blob_path,
-                        release.stac_item_id, release.stac_collection_id,
-                        release.stac_item_json, release.content_hash,
-                        release.source_file_hash, release.output_file_hash,
-                        # Tiled output metadata
-                        release.output_mode, release.tile_count, release.search_id,
-                        # Processing lifecycle
-                        release.job_id, release.processing_status,
-                        release.processing_started_at,
-                        release.processing_completed_at, release.last_error,
-                        release.workflow_id, release.node_summary,
-                        # Approval lifecycle
-                        release.approval_state, release.reviewer,
-                        release.reviewed_at, release.rejection_reason,
-                        release.approval_notes, release.clearance_state,
-                        release.adf_run_id,
-                        release.cleared_at, release.cleared_by,
-                        release.made_public_at, release.made_public_by,
-                        # Revocation audit
-                        release.revoked_at, release.revoked_by,
-                        release.revocation_reason,
-                        # Timestamps
-                        now, now,
-                        # Priority
-                        release.priority,
-                    )
+                    self._build_insert_sql(),
+                    self._build_insert_values(release, now)
                 )
                 row = cur.fetchone()
                 conn.commit()
@@ -227,69 +215,8 @@ class ReleaseRepository(PostgreSQLRepository):
             with conn.cursor() as cur:
                 # Step 1: INSERT release
                 cur.execute(
-                    sql.SQL("""
-                        INSERT INTO {}.{} (
-                            release_id, asset_id,
-                            version_id, suggested_version_id, version_ordinal,
-                            revision, previous_release_id,
-                            is_latest, is_served, request_id,
-                            blob_path, stac_item_id, stac_collection_id,
-                            stac_item_json, content_hash, source_file_hash, output_file_hash,
-                            output_mode, tile_count, search_id,
-                            job_id, processing_status, processing_started_at,
-                            processing_completed_at, last_error, workflow_id, node_summary,
-                            approval_state, reviewer, reviewed_at, rejection_reason,
-                            approval_notes, clearance_state, adf_run_id,
-                            cleared_at, cleared_by, made_public_at, made_public_by,
-                            revoked_at, revoked_by, revocation_reason,
-                            created_at, updated_at, priority
-                        ) VALUES (
-                            %s, %s,
-                            %s, %s, %s,
-                            %s, %s,
-                            %s, %s, %s,
-                            %s, %s, %s,
-                            %s, %s, %s, %s,
-                            %s, %s, %s,
-                            %s, %s, %s,
-                            %s, %s, %s, %s,
-                            %s, %s, %s, %s,
-                            %s, %s, %s,
-                            %s, %s, %s, %s,
-                            %s, %s, %s,
-                            %s, %s, %s
-                        )
-                        RETURNING *
-                    """).format(
-                        sql.Identifier(self.schema),
-                        sql.Identifier(self.table)
-                    ),
-                    (
-                        release.release_id, release.asset_id,
-                        release.version_id, release.suggested_version_id,
-                        release.version_ordinal,
-                        release.revision, release.previous_release_id,
-                        release.is_latest, release.is_served, release.request_id,
-                        release.blob_path,
-                        release.stac_item_id, release.stac_collection_id,
-                        release.stac_item_json, release.content_hash,
-                        release.source_file_hash, release.output_file_hash,
-                        release.output_mode, release.tile_count, release.search_id,
-                        release.job_id, release.processing_status,
-                        release.processing_started_at,
-                        release.processing_completed_at, release.last_error,
-                        release.workflow_id, release.node_summary,
-                        release.approval_state, release.reviewer,
-                        release.reviewed_at, release.rejection_reason,
-                        release.approval_notes, release.clearance_state,
-                        release.adf_run_id,
-                        release.cleared_at, release.cleared_by,
-                        release.made_public_at, release.made_public_by,
-                        release.revoked_at, release.revoked_by,
-                        release.revocation_reason,
-                        now, now,
-                        release.priority,
-                    )
+                    self._build_insert_sql(),
+                    self._build_insert_values(release, now)
                 )
                 row = cur.fetchone()
 
@@ -406,6 +333,36 @@ class ReleaseRepository(PostgreSQLRepository):
                 row = cur.fetchone()
                 return self._row_to_model(row) if row else None
 
+    def get_by_suggested_version(self, asset_id: str, suggested_version_id: str) -> Optional[AssetRelease]:
+        """
+        Get a release by its DDH-provided suggested version ID.
+
+        Used when the external caller's version_id may differ from the
+        internal version_id assigned at approval time.
+
+        Args:
+            asset_id: Parent asset identifier
+            suggested_version_id: DDH-provided version (e.g., "v1.0")
+
+        Returns:
+            AssetRelease if found, None otherwise
+        """
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL("""
+                        SELECT * FROM {}.{}
+                        WHERE asset_id = %s AND suggested_version_id = %s
+                        ORDER BY created_at DESC LIMIT 1
+                    """).format(
+                        sql.Identifier(self.schema),
+                        sql.Identifier(self.table)
+                    ),
+                    (asset_id, suggested_version_id)
+                )
+                row = cur.fetchone()
+                return self._row_to_model(row) if row else None
+
     def get_latest(self, asset_id: str) -> Optional[AssetRelease]:
         """
         Get the latest approved release for an asset.
@@ -479,6 +436,28 @@ class ReleaseRepository(PostgreSQLRepository):
                 row = cur.fetchone()
                 return self._row_to_model(row) if row else None
 
+    def get_by_stac_item_id(self, stac_item_id: str) -> Optional[AssetRelease]:
+        """
+        Get a release by its STAC item ID.
+
+        Args:
+            stac_item_id: STAC item identifier
+
+        Returns:
+            AssetRelease if found, None otherwise
+        """
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL("SELECT * FROM {}.{} WHERE stac_item_id = %s").format(
+                        sql.Identifier(self.schema),
+                        sql.Identifier(self.table)
+                    ),
+                    (stac_item_id,)
+                )
+                row = cur.fetchone()
+                return self._row_to_model(row) if row else None
+
     def list_by_asset(self, asset_id: str) -> List[AssetRelease]:
         """
         List all releases for an asset, ordered by version.
@@ -511,8 +490,8 @@ class ReleaseRepository(PostgreSQLRepository):
         """
         Get the next version ordinal for a new release under this asset.
 
-        Returns MAX(version_ordinal) + 1 from approved releases (version_id IS NOT NULL).
-        Returns 1 if no approved releases exist (first release).
+        Returns MAX(version_ordinal) + 1 from ALL releases with assigned ordinals.
+        Returns 1 if no releases with ordinals exist (first release).
 
         Args:
             asset_id: Parent asset identifier
@@ -527,7 +506,7 @@ class ReleaseRepository(PostgreSQLRepository):
                         SELECT COALESCE(MAX(version_ordinal), 0) + 1 AS next_ordinal
                         FROM {}.{}
                         WHERE asset_id = %s
-                          AND version_id IS NOT NULL
+                          AND version_ordinal IS NOT NULL
                     """).format(
                         sql.Identifier(self.schema),
                         sql.Identifier(self.table)
@@ -623,7 +602,7 @@ class ReleaseRepository(PostgreSQLRepository):
             approval_notes: Optional reviewer notes
 
         Returns:
-            True if updated, False if release not found
+            True if updated, False if release not found or already transitioned
         """
         logger.info(f"Updating approval state for {release_id[:16]}... to {approval_state.value}")
 
@@ -639,6 +618,7 @@ class ReleaseRepository(PostgreSQLRepository):
                             approval_notes = %s,
                             updated_at = NOW()
                         WHERE release_id = %s
+                          AND approval_state = %s
                     """).format(
                         sql.Identifier(self.schema),
                         sql.Identifier(self.table)
@@ -646,7 +626,8 @@ class ReleaseRepository(PostgreSQLRepository):
                     (
                         approval_state, reviewer, reviewed_at,
                         rejection_reason, approval_notes,
-                        release_id
+                        release_id,
+                        ApprovalState.PENDING_REVIEW.value
                     )
                 )
                 conn.commit()
@@ -654,6 +635,8 @@ class ReleaseRepository(PostgreSQLRepository):
                 updated = cur.rowcount > 0
                 if updated:
                     logger.info(f"Updated approval state for {release_id[:16]}... to {approval_state.value}")
+                else:
+                    logger.warning(f"No rows updated for {release_id[:16]}... — release not found or not in pending_review state")
                 return updated
 
     def update_clearance(
@@ -1184,12 +1167,18 @@ class ReleaseRepository(PostgreSQLRepository):
         Atomically approve a release: flip is_latest + assign version +
         set approval state + set clearance in a single transaction.
 
+        Spec: version-conflict-guard -- adds NOT EXISTS subquery to prevent
+        two releases for the same (asset_id, version_id) from both being
+        approved. UniqueViolation from idx_releases_version_conflict is
+        caught as a concurrent-race fallback (R2).
+
         Combines flip_is_latest(), update_version_assignment(),
         update_approval_state(), and update_clearance() into one
         connection/commit to prevent partial state on failure.
 
         The WHERE guard 'approval_state = pending_review' ensures
-        idempotent safety — concurrent approvals fail cleanly (0 rows).
+        idempotent safety -- concurrent approvals fail cleanly (0 rows).
+        The NOT EXISTS guard prevents version_id collisions across releases.
 
         Args:
             release_id: Release to approve
@@ -1203,8 +1192,8 @@ class ReleaseRepository(PostgreSQLRepository):
             approval_notes: Optional reviewer notes
 
         Returns:
-            True if approved, False if release not found or not in
-            pending_review state (concurrent approval or stale request)
+            True if approved, False if release not found, not in
+            pending_review state, or version conflict (concurrent approval)
         """
         logger.info(
             f"Atomic approve: release {release_id[:16]}... "
@@ -1216,104 +1205,277 @@ class ReleaseRepository(PostgreSQLRepository):
 
         with self._get_connection() as conn:
             with conn.cursor() as cur:
-                # Step 1: Clear is_latest for all releases of this asset
+                try:
+                    # Step 1: Clear is_latest for all releases of this asset
+                    cur.execute(
+                        sql.SQL("""
+                            UPDATE {}.{}
+                            SET is_latest = false, updated_at = %s
+                            WHERE asset_id = %s AND is_latest = true
+                        """).format(
+                            sql.Identifier(self.schema),
+                            sql.Identifier(self.table)
+                        ),
+                        (reviewed_at, asset_id)
+                    )
+
+                    # Step 2: Approve + version + is_latest + clearance in one UPDATE
+                    # NOT EXISTS prevents approving when another release already
+                    # holds the same (asset_id, version_id) in approved state.
+                    if is_public:
+                        cur.execute(
+                            sql.SQL("""
+                                UPDATE {}.{}
+                                SET version_id = %s,
+                                    version_ordinal = %s,
+                                    is_latest = true,
+                                    approval_state = %s,
+                                    reviewer = %s,
+                                    reviewed_at = %s,
+                                    approval_notes = %s,
+                                    rejection_reason = NULL,
+                                    clearance_state = %s,
+                                    cleared_at = %s,
+                                    cleared_by = %s,
+                                    made_public_at = %s,
+                                    made_public_by = %s,
+                                    updated_at = %s
+                                WHERE release_id = %s
+                                  AND approval_state = %s
+                                  AND NOT EXISTS (
+                                      SELECT 1 FROM {}.{}
+                                      WHERE asset_id = %s
+                                        AND version_id = %s
+                                        AND approval_state = %s
+                                        AND release_id != %s
+                                  )
+                            """).format(
+                                sql.Identifier(self.schema),
+                                sql.Identifier(self.table),
+                                sql.Identifier(self.schema),
+                                sql.Identifier(self.table)
+                            ),
+                            (
+                                version_id, version_ordinal,
+                                approval_state, reviewer, reviewed_at,
+                                approval_notes,
+                                clearance_state, reviewed_at, reviewer,
+                                reviewed_at, reviewer,
+                                reviewed_at,
+                                release_id,
+                                ApprovalState.PENDING_REVIEW,
+                                asset_id, version_id,
+                                ApprovalState.APPROVED, release_id
+                            )
+                        )
+                    else:
+                        cur.execute(
+                            sql.SQL("""
+                                UPDATE {}.{}
+                                SET version_id = %s,
+                                    version_ordinal = %s,
+                                    is_latest = true,
+                                    approval_state = %s,
+                                    reviewer = %s,
+                                    reviewed_at = %s,
+                                    approval_notes = %s,
+                                    rejection_reason = NULL,
+                                    clearance_state = %s,
+                                    cleared_at = %s,
+                                    cleared_by = %s,
+                                    updated_at = %s
+                                WHERE release_id = %s
+                                  AND approval_state = %s
+                                  AND NOT EXISTS (
+                                      SELECT 1 FROM {}.{}
+                                      WHERE asset_id = %s
+                                        AND version_id = %s
+                                        AND approval_state = %s
+                                        AND release_id != %s
+                                  )
+                            """).format(
+                                sql.Identifier(self.schema),
+                                sql.Identifier(self.table),
+                                sql.Identifier(self.schema),
+                                sql.Identifier(self.table)
+                            ),
+                            (
+                                version_id, version_ordinal,
+                                approval_state, reviewer, reviewed_at,
+                                approval_notes,
+                                clearance_state, reviewed_at, reviewer,
+                                reviewed_at,
+                                release_id,
+                                ApprovalState.PENDING_REVIEW,
+                                asset_id, version_id,
+                                ApprovalState.APPROVED, release_id
+                            )
+                        )
+
+                    approved = cur.rowcount > 0
+
+                    if approved:
+                        conn.commit()
+                        logger.info(
+                            f"Atomic approve committed: {release_id[:16]}... "
+                            f"-> {version_id} (ordinal={version_ordinal})"
+                        )
+                    else:
+                        conn.rollback()
+                        logger.warning(
+                            f"Atomic approve failed: {release_id[:16]}... "
+                            f"not found, not in pending_review state, or version conflict"
+                        )
+
+                    return approved
+
+                except UniqueViolation:
+                    # R2: READ COMMITTED race -- another transaction committed the
+                    # same (asset_id, version_id) between our NOT EXISTS check and
+                    # our UPDATE. The partial unique index catches this at commit.
+                    # Explicit rollback undoes Step 1's is_latest clear.
+                    conn.rollback()
+                    logger.warning(
+                        f"UniqueViolation on approve: {release_id[:16]}... "
+                        f"version_id={version_id} already approved for asset "
+                        f"(concurrent race)"
+                    )
+                    return False
+
+    def rollback_approval_atomic(
+        self,
+        release_id: str,
+        asset_id: str,
+        reason: str = "STAC materialization failed"
+    ) -> bool:
+        """
+        Roll back a committed approval when post-atomic operations fail.
+
+        Spec: version-conflict-guard -- reverts approval_state to PENDING_REVIEW,
+        clears version_id/is_latest/clearance_state, and promotes the next
+        most recent approved sibling to is_latest if one exists.
+
+        Preserves: reviewer, reviewed_at, approval_notes, stac_item_id,
+        stac_collection_id, blob_path (for audit trail and retry).
+        Clears: version_id, is_latest, clearance_state.
+
+        Args:
+            release_id: The release whose approval is being rolled back
+            asset_id: Parent asset (for sibling is_latest promotion)
+            reason: Why the rollback occurred (stored in last_error)
+
+        Returns:
+            True if rollback succeeded, False if release was not in
+            approved state (already rolled back or concurrently modified)
+        """
+        logger.warning(
+            f"Rolling back approval: {release_id[:16]}... reason={reason}"
+        )
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                # Step 1: Revert the target release
                 cur.execute(
                     sql.SQL("""
                         UPDATE {}.{}
-                        SET is_latest = false, updated_at = %s
-                        WHERE asset_id = %s AND is_latest = true
+                        SET approval_state = %s,
+                            version_id = NULL,
+                            is_latest = false,
+                            clearance_state = %s,
+                            last_error = %s,
+                            updated_at = %s
+                        WHERE release_id = %s
+                          AND approval_state = %s
                     """).format(
                         sql.Identifier(self.schema),
                         sql.Identifier(self.table)
                     ),
-                    (reviewed_at, asset_id)
+                    (
+                        ApprovalState.PENDING_REVIEW,
+                        ClearanceState.UNCLEARED,
+                        f"ROLLBACK: {reason}",
+                        datetime.now(timezone.utc),
+                        release_id,
+                        ApprovalState.APPROVED
+                    )
                 )
 
-                # Step 2: Approve + version + is_latest + clearance in one UPDATE
-                if is_public:
+                reverted = cur.rowcount > 0
+
+                if reverted:
+                    # Step 2: Promote next most recent approved sibling to is_latest
                     cur.execute(
                         sql.SQL("""
                             UPDATE {}.{}
-                            SET version_id = %s,
-                                version_ordinal = %s,
-                                is_latest = true,
-                                approval_state = %s,
-                                reviewer = %s,
-                                reviewed_at = %s,
-                                approval_notes = %s,
-                                rejection_reason = NULL,
-                                clearance_state = %s,
-                                cleared_at = %s,
-                                cleared_by = %s,
-                                made_public_at = %s,
-                                made_public_by = %s,
+                            SET is_latest = true,
                                 updated_at = %s
-                            WHERE release_id = %s
-                              AND approval_state = %s
+                            WHERE release_id = (
+                                SELECT release_id FROM {}.{}
+                                WHERE asset_id = %s
+                                  AND approval_state = %s
+                                  AND release_id != %s
+                                ORDER BY version_ordinal DESC, reviewed_at DESC
+                                LIMIT 1
+                            )
                         """).format(
+                            sql.Identifier(self.schema),
+                            sql.Identifier(self.table),
                             sql.Identifier(self.schema),
                             sql.Identifier(self.table)
                         ),
                         (
-                            version_id, version_ordinal,
-                            approval_state, reviewer, reviewed_at,
-                            approval_notes,
-                            clearance_state, reviewed_at, reviewer,
-                            reviewed_at, reviewer,
-                            reviewed_at,
-                            release_id,
-                            ApprovalState.PENDING_REVIEW
+                            datetime.now(timezone.utc),
+                            asset_id,
+                            ApprovalState.APPROVED,
+                            release_id
                         )
                     )
-                else:
-                    cur.execute(
-                        sql.SQL("""
-                            UPDATE {}.{}
-                            SET version_id = %s,
-                                version_ordinal = %s,
-                                is_latest = true,
-                                approval_state = %s,
-                                reviewer = %s,
-                                reviewed_at = %s,
-                                approval_notes = %s,
-                                rejection_reason = NULL,
-                                clearance_state = %s,
-                                cleared_at = %s,
-                                cleared_by = %s,
-                                updated_at = %s
-                            WHERE release_id = %s
-                              AND approval_state = %s
-                        """).format(
-                            sql.Identifier(self.schema),
-                            sql.Identifier(self.table)
-                        ),
-                        (
-                            version_id, version_ordinal,
-                            approval_state, reviewer, reviewed_at,
-                            approval_notes,
-                            clearance_state, reviewed_at, reviewer,
-                            reviewed_at,
-                            release_id,
-                            ApprovalState.PENDING_REVIEW
-                        )
-                    )
-
-                approved = cur.rowcount > 0
-
-                if approved:
                     conn.commit()
-                    logger.info(
-                        f"Atomic approve committed: {release_id[:16]}... "
-                        f"-> {version_id} (ordinal={version_ordinal})"
+                    logger.warning(
+                        f"Approval rollback committed: {release_id[:16]}... "
+                        f"reason={reason}"
                     )
                 else:
                     conn.rollback()
                     logger.warning(
-                        f"Atomic approve failed: {release_id[:16]}... "
-                        f"not found or not in pending_review state"
+                        f"Approval rollback no-op: {release_id[:16]}... "
+                        f"not in approved state (concurrent modification?)"
                     )
 
-                return approved
+                return reverted
+
+    def get_approved_by_version(self, asset_id: str, version_id: str) -> Optional[AssetRelease]:
+        """
+        Get an approved release for a specific (asset_id, version_id) pair.
+
+        Spec: version-conflict-guard -- used to probe for the conflicting
+        release when approve_release_atomic() returns False, so the service
+        layer can distinguish VersionConflict from generic ApprovalFailed.
+
+        Args:
+            asset_id: Parent asset identifier
+            version_id: Version identifier (e.g., "v1", "v2")
+
+        Returns:
+            AssetRelease if an approved release with that version exists,
+            None otherwise
+        """
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL("""
+                        SELECT * FROM {}.{}
+                        WHERE asset_id = %s
+                          AND version_id = %s
+                          AND approval_state = %s
+                    """).format(
+                        sql.Identifier(self.schema),
+                        sql.Identifier(self.table)
+                    ),
+                    (asset_id, version_id, ApprovalState.APPROVED)
+                )
+                row = cur.fetchone()
+                return self._row_to_model(row) if row else None
 
     def count_by_approval_state(self) -> Dict[str, int]:
         """

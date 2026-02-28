@@ -307,7 +307,7 @@ class PlatformResubmitHandler:
         resource_id = body.get('resource_id')
         version_id = body.get('version_id')
 
-        if dataset_id and resource_id and version_id:
+        if dataset_id and resource_id and version_id is not None:
             try:
                 request = self.platform_repo.get_request_by_ddh_ids(
                     dataset_id=dataset_id,

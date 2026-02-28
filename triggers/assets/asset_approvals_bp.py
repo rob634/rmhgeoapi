@@ -436,14 +436,15 @@ def revoke_asset(req: func.HttpRequest) -> func.HttpResponse:
         )
 
     # Extract and validate parameters
-    revoker = req_body.get('revoker')
+    # Standardized: accept 'reviewer' as the actor field (also accept 'revoker' for backward compat)
+    reviewer = req_body.get('reviewer') or req_body.get('revoker')
     reason = req_body.get('reason')
 
-    if not revoker:
+    if not reviewer:
         return func.HttpResponse(
             json.dumps({
                 "success": False,
-                "error": "revoker is required in request body",
+                "error": "reviewer is required in request body",
                 "error_type": "ValidationError"
             }),
             status_code=400,
@@ -481,11 +482,11 @@ def revoke_asset(req: func.HttpRequest) -> func.HttpResponse:
 
         service = AssetApprovalService()
 
-        logger.warning(f"AUDIT: Revoking release {release.release_id[:16]}... (asset {asset_id[:16]}...) by {revoker}. Reason: {reason}")
+        logger.warning(f"AUDIT: Revoking release {release.release_id[:16]}... (asset {asset_id[:16]}...) by {reviewer}. Reason: {reason}")
 
         result = service.revoke_release(
             release_id=release.release_id,
-            revoker=revoker,
+            revoker=reviewer,
             reason=reason
         )
 

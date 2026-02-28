@@ -43,6 +43,14 @@ logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "ApprovalTriggers")
 # V0.9 Entity Architecture imports
 from core.models.asset import ClearanceState, ApprovalState
 
+# Spec: version-conflict-guard -- maps error_type to HTTP status code
+ERROR_STATUS_MAP = {
+    'VersionConflict': 409,
+    'ApprovalFailed': 400,
+    'StacMaterializationError': 500,
+    'StacRollbackFailed': 500,
+}
+
 
 def _resolve_release(
     release_id: str = None,
@@ -268,18 +276,6 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
                 headers={"Content-Type": "application/json"}
             )
 
-        # Validate version_id is provided
-        if not version_id:
-            return func.HttpResponse(
-                json.dumps({
-                    "success": False,
-                    "error": "version_id is required (e.g., 'v1', 'v2')",
-                    "error_type": "ValidationError"
-                }),
-                status_code=400,
-                headers={"Content-Type": "application/json"}
-            )
-
         # Resolve release from various identifiers
         release, error = _resolve_release(
             release_id=release_id_param,
@@ -297,6 +293,12 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
                 status_code=status_code,
                 headers={"Content-Type": "application/json"}
             )
+
+        # Auto-generate version_id from ordinal if not provided (matches asset/admin layer behavior)
+        if not version_id and release.version_ordinal:
+            version_id = f"v{release.version_ordinal}"
+        elif not version_id:
+            version_id = "v1"
 
         # V0.9: Approve release (version assignment handled internally)
         from services.asset_approval_service import AssetApprovalService
@@ -316,13 +318,20 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
         )
 
         if not result.get('success'):
+            error_type = result.get('error_type', 'ApprovalFailed')
+            status_code = ERROR_STATUS_MAP.get(error_type, 400)
+            response_body = {
+                "success": False,
+                "error": result.get('error'),
+                "error_type": error_type,
+            }
+            if result.get('remediation'):
+                response_body['remediation'] = result['remediation']
+            if result.get('conflicting_release_id'):
+                response_body['conflicting_release_id'] = result['conflicting_release_id']
             return func.HttpResponse(
-                json.dumps({
-                    "success": False,
-                    "error": result.get('error'),
-                    "error_type": "ApprovalFailed"
-                }),
-                status_code=400,
+                json.dumps(response_body),
+                status_code=status_code,
                 headers={"Content-Type": "application/json"}
             )
 
@@ -551,15 +560,16 @@ def platform_revoke(req: func.HttpRequest) -> func.HttpResponse:
         if not asset_id_param:
             asset_id_param = req_body.get('approval_id')
 
-        revoker = req_body.get('revoker')
+        # Standardized: accept 'reviewer' as the actor field (also accept 'revoker' for backward compat)
+        reviewer = req_body.get('reviewer') or req_body.get('revoker')
         reason = req_body.get('reason')
 
         # Validate required fields
-        if not revoker:
+        if not reviewer:
             return func.HttpResponse(
                 json.dumps({
                     "success": False,
-                    "error": "revoker is required",
+                    "error": "reviewer is required",
                     "error_type": "ValidationError"
                 }),
                 status_code=400,
@@ -599,11 +609,11 @@ def platform_revoke(req: func.HttpRequest) -> func.HttpResponse:
         from services.asset_approval_service import AssetApprovalService
         approval_service = AssetApprovalService()
 
-        logger.warning(f"AUDIT: Revoking release {release.release_id[:16]}... by {revoker}. Reason: {reason}")
+        logger.warning(f"AUDIT: Revoking release {release.release_id[:16]}... by {reviewer}. Reason: {reason}")
 
         result = approval_service.revoke_release(
             release_id=release.release_id,
-            revoker=revoker,
+            revoker=reviewer,
             reason=reason
         )
 

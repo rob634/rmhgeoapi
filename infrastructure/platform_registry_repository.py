@@ -69,8 +69,9 @@ class PlatformRegistryRepository(PostgreSQLRepository):
         """
         query = sql.SQL("""
             SELECT platform_id, display_name, description,
-                   required_refs, optional_refs, is_active,
-                   created_at, updated_at
+                   required_refs, optional_refs,
+                   nominal_refs, version_ref, uses_versioning,
+                   is_active, created_at, updated_at
             FROM {schema}.{table}
             WHERE platform_id = %s
         """).format(
@@ -95,8 +96,9 @@ class PlatformRegistryRepository(PostgreSQLRepository):
         """
         query = sql.SQL("""
             SELECT platform_id, display_name, description,
-                   required_refs, optional_refs, is_active,
-                   created_at, updated_at
+                   required_refs, optional_refs,
+                   nominal_refs, version_ref, uses_versioning,
+                   is_active, created_at, updated_at
             FROM {schema}.{table}
             WHERE platform_id = %s AND is_active = true
         """).format(
@@ -168,9 +170,10 @@ class PlatformRegistryRepository(PostgreSQLRepository):
         query = sql.SQL("""
             INSERT INTO {schema}.{table} (
                 platform_id, display_name, description,
-                required_refs, optional_refs, is_active,
-                created_at, updated_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                required_refs, optional_refs,
+                nominal_refs, version_ref, uses_versioning,
+                is_active, created_at, updated_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING platform_id
         """).format(
             schema=sql.Identifier(self.schema_name),
@@ -184,6 +187,9 @@ class PlatformRegistryRepository(PostgreSQLRepository):
             platform.description,
             json.dumps(platform.required_refs),
             json.dumps(platform.optional_refs),
+            json.dumps(platform.nominal_refs),
+            platform.version_ref,
+            platform.uses_versioning,
             platform.is_active,
             now,
             now
@@ -310,6 +316,9 @@ class PlatformRegistryRepository(PostgreSQLRepository):
             description=row.get('description'),
             required_refs=row.get('required_refs', []) if isinstance(row.get('required_refs'), list) else [],
             optional_refs=row.get('optional_refs', []) if isinstance(row.get('optional_refs'), list) else [],
+            nominal_refs=row.get('nominal_refs', []) if isinstance(row.get('nominal_refs'), list) else [],
+            version_ref=row.get('version_ref'),
+            uses_versioning=row.get('uses_versioning', False),
             is_active=row.get('is_active', True),
             created_at=row.get('created_at'),
             updated_at=row.get('updated_at')

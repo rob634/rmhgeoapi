@@ -93,14 +93,17 @@ class AssetApprovalService:
         """
         Approve a release for publication.
 
+        Spec: version-conflict-guard -- enhanced approval with version
+        conflict detection and STAC rollback on post-atomic failure.
+
         Steps:
         1. Validate release exists and is PENDING_REVIEW
         2. Warn (don't block) if processing_status != COMPLETED
-        3. Assign version (version_id, ordinal, is_latest) via asset_service
-        4. Update approval_state to APPROVED
-        5. Update clearance (with made_public tracking if PUBLIC)
-        6. Materialize STAC from cached stac_item_json
-        7. Trigger ADF if PUBLIC
+        3. Atomic approval (version + is_latest + clearance + NOT EXISTS guard)
+        4. On False: probe get_approved_by_version to distinguish VersionConflict
+        5. On True: post-atomic stac_item_id update + STAC materialization
+        6. On STAC failure: rollback_approval_atomic, return typed error
+        7. On success: trigger ADF if PUBLIC, build success response
 
         Args:
             release_id: Release to approve
@@ -112,33 +115,40 @@ class AssetApprovalService:
         Returns:
             Dict with:
                 success: bool
-                release: Updated AssetRelease dict
+                release: Updated AssetRelease dict (on success)
                 action: 'approved_ouo' or 'approved_public_adf_triggered'
                 stac_updated: bool
                 adf_run_id: str (if PUBLIC)
                 error: str (if failed)
+                error_type: str (if failed) -- VersionConflict, ApprovalFailed,
+                    StacMaterializationError, or StacRollbackFailed
+                remediation: str (if failed)
+                conflicting_release_id: str (if VersionConflict)
         """
         logger.info(
             f"Approving release {release_id[:16]}... by {reviewer} "
             f"(clearance: {clearance_state.value}, version: {version_id})"
         )
 
-        # Get release
+        # Step 1: Validate release exists and can be approved
         release = self.release_repo.get_by_id(release_id)
         if not release:
             return {
                 'success': False,
-                'error': f"Release not found: {release_id}"
+                'error': f"Release not found: {release_id}",
+                'error_type': 'ApprovalFailed',
+                'remediation': 'Verify the release_id is correct'
             }
 
-        # Validate state
         if not release.can_approve():
             return {
                 'success': False,
                 'error': (
                     f"Cannot approve: approval_state is '{release.approval_state.value}', "
                     f"expected 'pending_review'"
-                )
+                ),
+                'error_type': 'ApprovalFailed',
+                'remediation': 'Release must be in pending_review state to approve'
             }
 
         # Warn if processing is not complete (don't block)
@@ -153,8 +163,7 @@ class AssetApprovalService:
         # Use pre-set ordinal from draft creation (reserved slot)
         version_ordinal = release.version_ordinal
 
-        # Atomic approval: flip_is_latest + version assignment + approval
-        # state + clearance in a single transaction. All-or-nothing.
+        # Step 2: Atomic approval with NOT EXISTS version conflict guard
         success = self.release_repo.approve_release_atomic(
             release_id=release_id,
             asset_id=release.asset_id,
@@ -167,19 +176,46 @@ class AssetApprovalService:
             approval_notes=notes
         )
 
+        # Step 3: On False, probe to distinguish VersionConflict from generic failure
         if not success:
+            conflicting = self.release_repo.get_approved_by_version(
+                release.asset_id, version_id
+            )
+            if conflicting:
+                logger.warning(
+                    f"Version conflict: {release_id[:16]}... tried version_id={version_id} "
+                    f"but {conflicting.release_id[:16]}... already holds it"
+                )
+                return {
+                    'success': False,
+                    'error': (
+                        f"Version '{version_id}' is already approved for this asset "
+                        f"(held by release {conflicting.release_id[:16]}...)"
+                    ),
+                    'error_type': 'VersionConflict',
+                    'conflicting_release_id': conflicting.release_id,
+                    'remediation': (
+                        'Choose a different version_id, or revoke the conflicting '
+                        'release before retrying'
+                    )
+                }
             return {
                 'success': False,
                 'error': (
                     "Atomic approval failed: release not found or not in "
                     "pending_review state (concurrent approval?)"
-                )
+                ),
+                'error_type': 'ApprovalFailed',
+                'remediation': 'Reload the release and verify its current state'
             }
 
-        # Post-atomic operations: stac_item_id update + STAC materialization.
-        # These run AFTER the atomic approval commit. If they fail, the release
-        # is APPROVED in the DB but STAC is stale/missing.
+        # Step 4: Re-read the approved release for post-atomic operations
+        release = self.release_repo.get_by_id(release_id)
+
+        # Step 5: Post-atomic operations -- stac_item_id update + STAC materialization
         stac_result = {'success': False, 'error': 'STAC materialization not attempted'}
+        stac_failed = False
+        stac_error_msg = None
         try:
             # Update stac_item_id to final versioned form (draft-N -> version_id)
             from services.platform_translation import generate_stac_item_id
@@ -203,21 +239,95 @@ class AssetApprovalService:
             # Materialize STAC item to pgSTAC from cached stac_item_json
             stac_result = self._materialize_stac(release, reviewer, clearance_state)
 
+            # Check if materializer returned a failure dict
+            if not stac_result.get('success'):
+                stac_failed = True
+                stac_error_msg = stac_result.get('error', 'STAC materialization returned failure')
+
         except Exception as e:
+            stac_failed = True
+            stac_error_msg = f"STAC_MATERIALIZATION_FAILED: {e}"
             logger.critical(
                 f"STAC_MATERIALIZATION_FAILED for approved release {release_id[:16]}...: {e}",
                 exc_info=True
             )
-            stac_result = {'success': False, 'error': f'STAC_MATERIALIZATION_FAILED: {e}'}
-            try:
-                self.release_repo.update_last_error(
-                    release_id=release_id,
-                    last_error=f"STAC_MATERIALIZATION_FAILED: {e}"
-                )
-            except Exception as persist_err:
-                logger.error(f"Failed to persist STAC error to release: {persist_err}")
+            stac_result = {'success': False, 'error': stac_error_msg}
 
-        # Trigger ADF if PUBLIC
+        # Step 6: On STAC failure, rollback the approval
+        if stac_failed:
+            logger.warning(
+                f"STAC failed for {release_id[:16]}..., initiating approval rollback"
+            )
+            try:
+                rollback_ok = self.release_repo.rollback_approval_atomic(
+                    release_id=release_id,
+                    asset_id=release.asset_id,
+                    reason=stac_error_msg
+                )
+                if rollback_ok:
+                    return {
+                        'success': False,
+                        'error': stac_error_msg,
+                        'error_type': 'StacMaterializationError',
+                        'remediation': (
+                            'Approval was rolled back. Investigate STAC materialization '
+                            'failure, then retry approval.'
+                        )
+                    }
+                else:
+                    logger.critical(
+                        f"MANUAL_INTERVENTION_REQUIRED: rollback returned False for "
+                        f"{release_id[:16]}... -- release may be in inconsistent state"
+                    )
+                    return {
+                        'success': False,
+                        'error': (
+                            f"STAC failed AND rollback failed. {stac_error_msg}. "
+                            f"MANUAL_INTERVENTION_REQUIRED"
+                        ),
+                        'error_type': 'StacRollbackFailed',
+                        'remediation': (
+                            'MANUAL_INTERVENTION_REQUIRED: Release is approved in DB but '
+                            'STAC is missing/stale and rollback failed. Manually inspect '
+                            'release state and correct.'
+                        )
+                    }
+            except Exception as rollback_err:
+                # R1: Double failure -- STAC + rollback both threw exceptions
+                logger.critical(
+                    f"MANUAL_INTERVENTION_REQUIRED: rollback exception for "
+                    f"{release_id[:16]}...: {rollback_err}",
+                    exc_info=True
+                )
+                # Best effort: persist the error to last_error
+                try:
+                    self.release_repo.update_last_error(
+                        release_id=release_id,
+                        last_error=(
+                            f"DOUBLE_FAILURE: STAC={stac_error_msg}; "
+                            f"ROLLBACK={rollback_err}"
+                        )
+                    )
+                except Exception as persist_err:
+                    logger.error(
+                        f"Failed to persist double-failure error: {persist_err}"
+                    )
+                return {
+                    'success': False,
+                    'error': (
+                        f"STAC failed AND rollback threw exception. "
+                        f"STAC: {stac_error_msg}. Rollback: {rollback_err}. "
+                        f"MANUAL_INTERVENTION_REQUIRED"
+                    ),
+                    'error_type': 'StacRollbackFailed',
+                    'remediation': (
+                        'MANUAL_INTERVENTION_REQUIRED: Release is approved in DB but '
+                        'STAC is missing/stale and rollback threw an exception. '
+                        'Manually inspect release state and correct.'
+                    )
+                }
+
+        # Step 7: Trigger ADF if PUBLIC
         adf_run_id = None
         action = 'approved_ouo'
 

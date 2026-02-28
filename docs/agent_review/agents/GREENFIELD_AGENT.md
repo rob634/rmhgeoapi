@@ -1,4 +1,4 @@
-# Pipeline 3: Greensight
+# Pipeline 3: Greenfield
 
 **Purpose**: Design and build new code from intent, using adversarial agents to stress-test the design before any code is written. The pipeline ensures that architecture, edge cases, and operational reality are all resolved before the first line of code exists.
 
@@ -47,21 +47,54 @@ Developer intent
 
 ---
 
-## Step 1: Gather Intent
+## Step 1: Gather Intent (Two-Tier Briefing)
 
-Before playing S, collect from the developer (or from yourself):
+Most greenfield work is building a new component inside an existing system. The briefing must separate two kinds of information, because they go to different agents at different stages.
 
-- **What this thing does**: One to three sentences describing the purpose.
-- **What it connects to**: Upstream systems that send data or requests. Downstream systems that receive data or requests.
+### Tier 1: System Context
+
+This describes **what exists around the thing we are building**. Facts about the environment. Not design decisions.
+
+Collect:
+- **What this component does**: One to three sentences describing the purpose.
+- **What it connects to**: Upstream systems that send data or requests. Downstream systems that receive data or requests. Name the specific services.
+- **What already exists**: Other components, shared libraries, repository layers, message buses, databases that this component will interact with. Describe what they do, not how to use them.
 - **What it must guarantee**: Hard requirements that cannot be compromised.
-- **What it should avoid**: Known anti-patterns, organizational constraints, things that have failed before.
 - **Infrastructure profile**: Runtime environment, resource limits, scaling model, known constraints.
 
-If any of these are missing, ask the developer before proceeding. Incomplete intent leads to a spec full of assumptions, which leads to agents arguing about things that could have been settled upfront.
+Tier 1 goes into the spec that A, C, and O all see. It is like giving an architect the building code and the lot survey — it constrains the solution space without dictating the design.
+
+### Tier 2: Design Constraints
+
+This describes **how we do things here**. Architectural decisions that are already settled. Patterns that the new component must follow to fit into the existing system.
+
+Collect:
+- **Settled architectural patterns**: How authentication works, how data access works, how configuration is loaded, how errors are reported.
+- **Integration rules**: Which existing modules or layers must be used for specific operations (example: "all database access goes through the db repository, never direct connections").
+- **Anti-patterns**: Things that have been tried and failed, or things that are explicitly forbidden in this codebase.
+- **Conventions**: Data contract formats (Pydantic, dataclasses, etc.), naming conventions, logging standards.
+
+Tier 2 is held back from A, C, and O. It goes ONLY to M (Step 4) and B (Step 5).
+
+### Why the Tiers Are Separated
+
+If A sees "authentication is handled by the repository layers," A will design around that constraint without questioning whether it is the right approach. If C sees it, C will not challenge it. The whole point of the parallel agents is that A designs freely and C critiques freely.
+
+M then applies the Design Constraints during conflict resolution. If A's ideal design suggests a different pattern from your existing one, that is valuable signal — it tells you whether your existing pattern is serving you well or creating friction. M notes this tension even when enforcing the existing constraint.
+
+### Completeness Check
+
+If any of the following are missing, ask the developer before proceeding:
+- Tier 1: What the component does, what it connects to, infrastructure profile.
+- Tier 2: At least the settled auth pattern, data access pattern, and configuration pattern.
+
+Incomplete intent leads to a spec full of assumptions, which leads to agents arguing about things that could have been settled upfront.
 
 ## Step 2: Play S (Spec Writer — No Subagent)
 
-Claude plays S directly. Transform the developer's intent into a formal spec.
+Claude plays S directly. Transform the developer's Tier 1 System Context into a formal spec.
+
+**Important**: S uses ONLY Tier 1 information. Tier 2 Design Constraints are held back for M and B. Do not include settled architectural patterns, integration rules, or internal conventions in the spec. The spec describes *what* the component must do, not *how* the existing system expects it to be done.
 
 The spec must include ALL of the following sections:
 
@@ -92,7 +125,12 @@ The spec must include ALL of the following sections:
 
 **INFRASTRUCTURE CONTEXT**
 - Runtime environment and its constraints.
-- Paste or summarize the infrastructure profile from Step 1.
+- Paste or summarize the infrastructure profile from Tier 1.
+
+**EXISTING SYSTEM CONTEXT**
+- What other components exist that this subsystem will interact with.
+- Describe their interfaces at the level A, C, and O need to reason about them.
+- Do NOT include Tier 2 Design Constraints (how to use those components).
 
 **OPEN QUESTIONS**
 - Anything S is unsure about. These become priority targets for Agent C.
@@ -327,6 +365,13 @@ These three agents worked independently. They did not see each other's output.
 Their analyses will conflict. Your job is to resolve those conflicts and produce
 a final spec that the Builder agent can code against.
 
+You also have DESIGN CONSTRAINTS — settled architectural decisions from the existing
+system that the new component must follow. A, C, and O did not see these constraints.
+Where their proposals conflict with these constraints, enforce the constraints but
+NOTE THE TENSION. If an agent's unconstrained analysis suggests a better pattern
+than the existing constraint, record that observation in DESIGN TENSIONS — it is
+valuable feedback even when the constraint is enforced.
+
 ## Your Task
 
 Produce these sections:
@@ -340,14 +385,22 @@ CONFLICTS FOUND
   For each: what O requires, what it costs, and whether it is justified.
 - Where C's concerns are already addressed by O's infrastructure, or made worse by it.
 
+DESIGN TENSIONS
+- Where an agent's unconstrained proposal conflicts with a Tier 2 Design Constraint.
+  For each: what the agent proposed, what the existing constraint requires,
+  which one you enforced, and whether the tension suggests the existing
+  constraint should be revisited in the future.
+- This section may be empty if no tensions exist. That is fine.
+
 RESOLVED SPEC
 - The final, unified spec that incorporates A's design, addresses C's concerns,
-  and satisfies O's operational requirements.
+  satisfies O's operational requirements, AND conforms to the Design Constraints.
 - Organize by component. For each component:
   - Responsibility (one sentence)
   - Interface (function signatures with types)
   - Error handling strategy (what exceptions, what recovery)
   - Operational requirements (logging, monitoring, configuration)
+  - Integration notes (which existing modules or layers to use, from Design Constraints)
 - This section must be detailed enough that a developer can code from it
   without asking follow-up questions.
 
@@ -367,12 +420,17 @@ RISK REGISTER
 - Every resolution must explain the tradeoff. Do not silently drop a concern.
 - If A's design and O's constraints are incompatible, prefer O's constraints.
   Infrastructure limits are not negotiable; designs can be changed.
+- If A's design and a Tier 2 Design Constraint are incompatible, enforce the
+  Design Constraint but record the tension in DESIGN TENSIONS.
 - If C raised a concern that neither A nor O addressed, you must address it.
 - The RESOLVED SPEC must be self-contained. The Builder should not need to read
   A, C, or O's outputs.
 
 ## Original Spec
 [Paste the spec from Step 2]
+
+## Tier 2 Design Constraints
+[Paste the Design Constraints collected in Step 1]
 
 ## Agent A's Design (Advocate)
 [Paste A output]
@@ -388,9 +446,11 @@ RISK REGISTER
 
 Before dispatching B, verify:
 - CONFLICTS FOUND explicitly addresses disagreements between agents, not just summaries.
-- RESOLVED SPEC includes function signatures and error handling, not just descriptions.
+- DESIGN TENSIONS is present (even if empty — M must acknowledge the section).
+- RESOLVED SPEC includes function signatures, error handling, and integration notes.
 - DEFERRED DECISIONS has a "trigger for revisiting" for each item.
 - No concern from C was silently dropped.
+- All Tier 2 Design Constraints are reflected in the RESOLVED SPEC.
 
 ## Step 5: Dispatch B (Builder)
 
@@ -402,6 +462,9 @@ You are Agent B — the Builder.
 You receive a resolved spec for a subsystem that does not exist yet. The spec has
 already been through adversarial review: an architect designed it, a critic stress-tested
 it, an operator assessed it, and a mediator resolved all conflicts.
+
+You also receive Design Constraints — settled patterns from the existing system.
+The resolved spec already accounts for these, but you have them for reference.
 
 Your job is to write the code.
 
@@ -426,6 +489,12 @@ CODE ORGANIZATION
 - One file per component unless the component is trivially small (under 50 lines).
 - Clear module boundaries that match the component boundaries in the spec.
 - Imports grouped: standard library, third-party, internal.
+
+INTEGRATION
+- Follow the integration notes in the resolved spec for each component.
+- Use the existing modules and layers specified in the Design Constraints.
+- Do not create new patterns for operations that have existing patterns
+  (authentication, data access, configuration, etc.).
 
 ERROR HANDLING
 - Follow the error handling strategy specified in the resolved spec for each component.
@@ -452,8 +521,16 @@ CONFIGURATION
 ## Resolved Spec
 [Paste M's RESOLVED SPEC section]
 
+## Tier 2 Design Constraints
+[Paste the Design Constraints collected in Step 1]
+
 ## Risk Register
 [Paste M's RISK REGISTER section — B should be aware of known risks]
+
+## Design Tensions (for awareness only)
+[Paste M's DESIGN TENSIONS section — B should know where existing patterns
+were enforced over potentially better alternatives, in case it affects
+implementation choices]
 ```
 
 ## Step 6: Dispatch V (Validator)
@@ -541,7 +618,7 @@ Write the full report to a markdown file in the project root. Include:
 - V's analysis
 - The spec diff
 
-Suggested filename: `GREENSIGHT_[subsystem_name].md`
+Suggested filename: `Greenfield_[subsystem_name].md`
 
 Save the code files separately in the appropriate project directory.
 
@@ -549,14 +626,14 @@ Save the code files separately in the appropriate project directory.
 
 ## Chaining to Other Pipelines
 
-### Greensight → Adversarial Review
+### Greenfield → Adversarial Review
 
 After the code is written and passes the V-check, run an Adversarial Review on the new code. This catches implementation-level issues that the design-level agents did not anticipate. Use the resolved spec as developer context for Omega's scope selection.
 
-### Greensight → Reflexion Agent
+### Greenfield → Reflexion Agent
 
 Run the Reflexion Agent on the generated code to find fault-level vulnerabilities. Agent R's analysis should closely match Agent V's — if it does not, the code is harder to understand than expected. Use M's Risk Register as developer context for Agent F.
 
-### Adversarial Review → Greensight
+### Adversarial Review → Greenfield
 
-If the Adversarial Review finds that an existing subsystem needs to be replaced rather than patched, use Greensight to design the replacement. Feed the Adversarial Review's findings into S as constraints and anti-patterns to avoid.
+If the Adversarial Review finds that an existing subsystem needs to be replaced rather than patched, use Greenfield to design the replacement. Feed the Adversarial Review's findings into S as constraints and anti-patterns to avoid.

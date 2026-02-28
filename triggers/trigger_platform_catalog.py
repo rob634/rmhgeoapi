@@ -47,6 +47,15 @@ from util_logger import LoggerFactory, ComponentType
 logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "trigger_platform_catalog")
 
 
+def _catalog_error_response(status_code: int, error: str, error_type: str = "server_error") -> func.HttpResponse:
+    """Standard error response for catalog endpoints."""
+    return func.HttpResponse(
+        json.dumps({"success": False, "error": error, "error_type": error_type}, indent=2),
+        status_code=status_code,
+        headers={"Content-Type": "application/json"}
+    )
+
+
 # ============================================================================
 # CATALOG LOOKUP (UNIFIED - 10 FEB 2026)
 # ============================================================================
@@ -122,15 +131,10 @@ async def platform_catalog_lookup(req: func.HttpRequest) -> func.HttpResponse:
             missing.append('version_id')
 
         if missing:
-            return func.HttpResponse(
-                json.dumps({
-                    "error": "missing_parameters",
-                    "message": f"Missing required query parameters: {', '.join(missing)}",
-                    "required": ["dataset_id", "resource_id", "version_id"],
-                    "example": "/api/platform/catalog/lookup?dataset_id=flood-data&resource_id=res-001&version_id=v1.0"
-                }, indent=2),
-                status_code=400,
-                headers={"Content-Type": "application/json"}
+            return _catalog_error_response(
+                400,
+                f"Missing required query parameters: {', '.join(missing)}",
+                "ValidationError"
             )
 
         # Perform unified lookup (works for both raster and vector)
@@ -139,6 +143,16 @@ async def platform_catalog_lookup(req: func.HttpRequest) -> func.HttpResponse:
 
         result = service.lookup_unified(dataset_id, resource_id, version_id)
 
+        # Return 404 for not-found results
+        if not result.get("found", True):
+            result["success"] = False
+            return func.HttpResponse(
+                json.dumps(result, indent=2, default=str),
+                status_code=404,
+                headers={"Content-Type": "application/json"}
+            )
+
+        result["success"] = True
         return func.HttpResponse(
             json.dumps(result, indent=2, default=str),
             status_code=200,
@@ -147,16 +161,7 @@ async def platform_catalog_lookup(req: func.HttpRequest) -> func.HttpResponse:
 
     except Exception as e:
         logger.error(f"Platform catalog lookup failed: {e}", exc_info=True)
-        return func.HttpResponse(
-            json.dumps({
-                "error": "lookup_failed",
-                "message": str(e),
-                "error_type": type(e).__name__,
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }, indent=2),
-            status_code=500,
-            headers={"Content-Type": "application/json"}
-        )
+        return _catalog_error_response(500, "Internal server error")
 
 
 # ============================================================================
@@ -234,16 +239,7 @@ async def platform_catalog_asset_by_id(req: func.HttpRequest) -> func.HttpRespon
 
     except Exception as e:
         logger.error(f"Platform catalog asset by ID failed: {e}", exc_info=True)
-        return func.HttpResponse(
-            json.dumps({
-                "error": "get_asset_failed",
-                "message": str(e),
-                "error_type": type(e).__name__,
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }, indent=2),
-            status_code=500,
-            headers={"Content-Type": "application/json"}
-        )
+        return _catalog_error_response(500, "Internal server error")
 
 
 # ============================================================================
@@ -310,16 +306,10 @@ async def platform_catalog_item(req: func.HttpRequest) -> func.HttpResponse:
         item = repo.get_item(item_id, collection_id)
 
         if not item:
-            return func.HttpResponse(
-                json.dumps({
-                    "error": "item_not_found",
-                    "message": f"STAC item '{item_id}' not found in collection '{collection_id}'",
-                    "collection_id": collection_id,
-                    "item_id": item_id,
-                    "suggestion": "Use /api/platform/catalog/lookup to verify item exists"
-                }, indent=2),
-                status_code=404,
-                headers={"Content-Type": "application/json"}
+            return _catalog_error_response(
+                404,
+                f"STAC item '{item_id}' not found in collection '{collection_id}'",
+                "NotFound"
             )
 
         # Return the full STAC item
@@ -331,16 +321,7 @@ async def platform_catalog_item(req: func.HttpRequest) -> func.HttpResponse:
 
     except Exception as e:
         logger.error(f"Platform catalog item failed: {e}", exc_info=True)
-        return func.HttpResponse(
-            json.dumps({
-                "error": "get_item_failed",
-                "message": str(e),
-                "error_type": type(e).__name__,
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }, indent=2),
-            status_code=500,
-            headers={"Content-Type": "application/json"}
-        )
+        return _catalog_error_response(500, "Internal server error")
 
 
 # ============================================================================
@@ -441,16 +422,7 @@ async def platform_catalog_assets(req: func.HttpRequest) -> func.HttpResponse:
 
     except Exception as e:
         logger.error(f"Platform catalog assets failed: {e}", exc_info=True)
-        return func.HttpResponse(
-            json.dumps({
-                "error": "get_assets_failed",
-                "message": str(e),
-                "error_type": type(e).__name__,
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }, indent=2),
-            status_code=500,
-            headers={"Content-Type": "application/json"}
-        )
+        return _catalog_error_response(500, "Internal server error")
 
 
 # ============================================================================
@@ -548,16 +520,7 @@ async def platform_catalog_dataset(req: func.HttpRequest) -> func.HttpResponse:
 
     except Exception as e:
         logger.error(f"Platform catalog dataset failed: {e}", exc_info=True)
-        return func.HttpResponse(
-            json.dumps({
-                "error": "list_dataset_failed",
-                "message": str(e),
-                "error_type": type(e).__name__,
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }, indent=2),
-            status_code=500,
-            headers={"Content-Type": "application/json"}
-        )
+        return _catalog_error_response(500, "Internal server error")
 
 
 # ============================================================================

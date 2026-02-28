@@ -335,7 +335,7 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                 ordinal = release.version_ordinal
 
                 if (
-                    platform_req.data_type.value == 'vector'
+                    platform_req.data_type == DataType.VECTOR
                     and not getattr(platform_req.processing_options, 'table_name', None)
                 ):
                     # Vector: finalize table_name AND stac_item_id
@@ -356,7 +356,7 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                     )
                     logger.info(f"  Finalized vector names: table={final_table}, stac={final_stac} (ord={ordinal})")
 
-                elif platform_req.data_type.value == 'raster':
+                elif platform_req.data_type == DataType.RASTER:
                     # Raster: finalize stac_item_id (output_folder already handled in Step 6)
                     final_stac = generate_stac_item_id(
                         platform_req.dataset_id, platform_req.resource_id,

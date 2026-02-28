@@ -219,6 +219,16 @@ class PlatformRequest(BaseModel):
         description="abfs:// URL for source data directory"
     )
 
+    @field_validator('source_url', mode='after')
+    @classmethod
+    def validate_source_url_scheme(cls, v: Optional[str]) -> Optional[str]:
+        """Enforce abfs:// scheme on source_url when provided."""
+        if v is not None and not v.startswith("abfs://"):
+            raise ValueError(
+                f"source_url must use the abfs:// scheme. Got: '{v}'"
+            )
+        return v
+
     # ========================================================================
     # DDH Service Metadata
     # ========================================================================

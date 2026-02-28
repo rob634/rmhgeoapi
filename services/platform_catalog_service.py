@@ -539,8 +539,11 @@ class PlatformCatalogService:
             }
 
         # Step 2: Get Release - specific version or latest
+        # DDH version_id may differ from internal version_id, so try suggested_version_id first
         if version_id:
-            release = self._release_repo.get_by_version(asset.asset_id, version_id)
+            release = self._release_repo.get_by_suggested_version(asset.asset_id, version_id)
+            if not release:
+                release = self._release_repo.get_by_version(asset.asset_id, version_id)
         else:
             release = self._release_repo.get_latest(asset.asset_id)
 

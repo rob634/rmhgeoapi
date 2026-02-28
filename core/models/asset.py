@@ -352,7 +352,13 @@ class AssetRelease(BaseModel):
         "asset_id": "app.assets(asset_id)",
         "job_id": "app.jobs(job_id)"
     }
-    __sql_unique_constraints: ClassVar[List[Dict[str, Any]]] = []
+    __sql_unique_constraints: ClassVar[List[Dict[str, Any]]] = [
+        {
+            "columns": ["asset_id", "version_ordinal"],
+            "name": "uq_release_asset_ordinal",
+            "partial_where": "version_ordinal IS NOT NULL"
+        }
+    ]
     __sql_indexes: ClassVar[List[Dict[str, Any]]] = [
         {"columns": ["asset_id"], "name": "idx_releases_asset"},
         {"columns": ["version_id"], "name": "idx_releases_version"},
@@ -380,6 +386,12 @@ class AssetRelease(BaseModel):
             "columns": ["request_id"],
             "name": "idx_releases_request",
             "partial_where": "request_id IS NOT NULL"
+        },
+        {
+            "columns": ["asset_id", "version_id"],
+            "name": "idx_releases_version_conflict",
+            "unique": True,
+            "partial_where": "approval_state = 'approved' AND version_id IS NOT NULL"
         },
     ]
 

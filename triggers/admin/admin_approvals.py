@@ -158,7 +158,7 @@ def get_approval(req: func.HttpRequest) -> func.HttpResponse:
         asset_id = req.route_params.get('approval_id')
         if not asset_id:
             return func.HttpResponse(
-                json.dumps({'error': 'asset_id is required'}),
+                json.dumps({'success': False, 'error': 'asset_id is required', 'error_type': 'ValidationError'}),
                 status_code=400,
                 mimetype='application/json'
             )
@@ -169,7 +169,7 @@ def get_approval(req: func.HttpRequest) -> func.HttpResponse:
 
         if not asset:
             return func.HttpResponse(
-                json.dumps({'error': f"Asset not found: {asset_id}"}),
+                json.dumps({'success': False, 'error': f"Asset not found: {asset_id}", 'error_type': 'NotFound'}),
                 status_code=404,
                 mimetype='application/json'
             )
@@ -231,7 +231,7 @@ def approve_dataset(req: func.HttpRequest) -> func.HttpResponse:
         asset_id = req.route_params.get('approval_id')
         if not asset_id:
             return func.HttpResponse(
-                json.dumps({'error': 'asset_id is required'}),
+                json.dumps({'success': False, 'error': 'asset_id is required', 'error_type': 'ValidationError'}),
                 status_code=400,
                 mimetype='application/json'
             )
@@ -240,12 +240,16 @@ def approve_dataset(req: func.HttpRequest) -> func.HttpResponse:
         try:
             body = parse_request_json(req)
         except ValueError:
-            body = {}
+            return func.HttpResponse(
+                json.dumps({'success': False, 'error': 'Invalid JSON body', 'error_type': 'ValidationError'}),
+                status_code=400,
+                mimetype='application/json'
+            )
 
         reviewer = body.get('reviewer')
         if not reviewer:
             return func.HttpResponse(
-                json.dumps({'error': 'reviewer is required in request body'}),
+                json.dumps({'success': False, 'error': 'reviewer is required in request body', 'error_type': 'ValidationError'}),
                 status_code=400,
                 mimetype='application/json'
             )
@@ -253,7 +257,7 @@ def approve_dataset(req: func.HttpRequest) -> func.HttpResponse:
         clearance_level_str = body.get('clearance_state') or body.get('clearance_level')
         if not clearance_level_str:
             return func.HttpResponse(
-                json.dumps({'error': "clearance_state is required. Must be 'ouo' or 'public'"}),
+                json.dumps({'success': False, 'error': "clearance_state is required. Must be 'ouo' or 'public'", 'error_type': 'ValidationError'}),
                 status_code=400,
                 mimetype='application/json'
             )
@@ -263,13 +267,13 @@ def approve_dataset(req: func.HttpRequest) -> func.HttpResponse:
             clearance_state = ClearanceState(clearance_level_str.lower())
             if clearance_state == ClearanceState.UNCLEARED:
                 return func.HttpResponse(
-                    json.dumps({'error': "clearance_state must be 'ouo' or 'public', not 'uncleared'"}),
+                    json.dumps({'success': False, 'error': "clearance_state must be 'ouo' or 'public', not 'uncleared'", 'error_type': 'ValidationError'}),
                     status_code=400,
                     mimetype='application/json'
                 )
         except ValueError:
             return func.HttpResponse(
-                json.dumps({'error': f"Invalid clearance_state: '{clearance_level_str}'. Must be 'ouo' or 'public'"}),
+                json.dumps({'success': False, 'error': f"Invalid clearance_state: '{clearance_level_str}'. Must be 'ouo' or 'public'", 'error_type': 'ValidationError'}),
                 status_code=400,
                 mimetype='application/json'
             )
@@ -284,7 +288,7 @@ def approve_dataset(req: func.HttpRequest) -> func.HttpResponse:
             release = release_repo.get_latest(asset_id)
         if not release:
             return func.HttpResponse(
-                json.dumps({'error': f'No release found for asset {asset_id}'}),
+                json.dumps({'success': False, 'error': f'No release found for asset {asset_id}', 'error_type': 'NotFound'}),
                 status_code=404,
                 mimetype='application/json'
             )
@@ -350,7 +354,7 @@ def reject_dataset(req: func.HttpRequest) -> func.HttpResponse:
         asset_id = req.route_params.get('approval_id')
         if not asset_id:
             return func.HttpResponse(
-                json.dumps({'error': 'asset_id is required'}),
+                json.dumps({'success': False, 'error': 'asset_id is required', 'error_type': 'ValidationError'}),
                 status_code=400,
                 mimetype='application/json'
             )
@@ -359,12 +363,16 @@ def reject_dataset(req: func.HttpRequest) -> func.HttpResponse:
         try:
             body = parse_request_json(req)
         except ValueError:
-            body = {}
+            return func.HttpResponse(
+                json.dumps({'success': False, 'error': 'Invalid JSON body', 'error_type': 'ValidationError'}),
+                status_code=400,
+                mimetype='application/json'
+            )
 
         reviewer = body.get('reviewer')
         if not reviewer:
             return func.HttpResponse(
-                json.dumps({'error': 'reviewer is required in request body'}),
+                json.dumps({'success': False, 'error': 'reviewer is required in request body', 'error_type': 'ValidationError'}),
                 status_code=400,
                 mimetype='application/json'
             )
@@ -372,7 +380,7 @@ def reject_dataset(req: func.HttpRequest) -> func.HttpResponse:
         reason = body.get('reason')
         if not reason:
             return func.HttpResponse(
-                json.dumps({'error': 'reason is required in request body'}),
+                json.dumps({'success': False, 'error': 'reason is required in request body', 'error_type': 'ValidationError'}),
                 status_code=400,
                 mimetype='application/json'
             )
@@ -384,7 +392,7 @@ def reject_dataset(req: func.HttpRequest) -> func.HttpResponse:
             release = release_repo.get_latest(asset_id)
         if not release:
             return func.HttpResponse(
-                json.dumps({'error': f'No release found for asset {asset_id}'}),
+                json.dumps({'success': False, 'error': f'No release found for asset {asset_id}', 'error_type': 'NotFound'}),
                 status_code=404,
                 mimetype='application/json'
             )
@@ -444,7 +452,7 @@ def revoke_dataset(req: func.HttpRequest) -> func.HttpResponse:
         asset_id = req.route_params.get('approval_id')
         if not asset_id:
             return func.HttpResponse(
-                json.dumps({'error': 'asset_id is required'}),
+                json.dumps({'success': False, 'error': 'asset_id is required', 'error_type': 'ValidationError'}),
                 status_code=400,
                 mimetype='application/json'
             )
@@ -453,12 +461,17 @@ def revoke_dataset(req: func.HttpRequest) -> func.HttpResponse:
         try:
             body = parse_request_json(req)
         except ValueError:
-            body = {}
-
-        revoker = body.get('revoker')
-        if not revoker:
             return func.HttpResponse(
-                json.dumps({'error': 'revoker is required in request body'}),
+                json.dumps({'success': False, 'error': 'Invalid JSON body', 'error_type': 'ValidationError'}),
+                status_code=400,
+                mimetype='application/json'
+            )
+
+        # Standardized: accept 'reviewer' as the actor field for all operations
+        reviewer = body.get('reviewer') or body.get('revoker')
+        if not reviewer:
+            return func.HttpResponse(
+                json.dumps({'success': False, 'error': 'reviewer is required in request body', 'error_type': 'ValidationError'}),
                 status_code=400,
                 mimetype='application/json'
             )
@@ -466,7 +479,7 @@ def revoke_dataset(req: func.HttpRequest) -> func.HttpResponse:
         reason = body.get('reason')
         if not reason:
             return func.HttpResponse(
-                json.dumps({'error': 'reason is required in request body'}),
+                json.dumps({'success': False, 'error': 'reason is required in request body', 'error_type': 'ValidationError'}),
                 status_code=400,
                 mimetype='application/json'
             )
@@ -476,17 +489,17 @@ def revoke_dataset(req: func.HttpRequest) -> func.HttpResponse:
         release = release_repo.get_latest(asset_id)  # get_latest returns approved release
         if not release:
             return func.HttpResponse(
-                json.dumps({'error': f'No approved release found for asset {asset_id}'}),
+                json.dumps({'success': False, 'error': f'No approved release found for asset {asset_id}', 'error_type': 'NotFound'}),
                 status_code=404,
                 mimetype='application/json'
             )
 
-        logger.warning(f"AUDIT: Revoke request: release {release.release_id[:16]}... (asset {asset_id[:16]}...) by {revoker}")
+        logger.warning(f"AUDIT: Revoke request: release {release.release_id[:16]}... (asset {asset_id[:16]}...) by {reviewer}")
 
         service = AssetApprovalService()
         result = service.revoke_release(
             release_id=release.release_id,
-            revoker=revoker,
+            revoker=reviewer,
             reason=reason
         )
 

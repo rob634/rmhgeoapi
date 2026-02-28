@@ -44,13 +44,13 @@ from core.models import (
 
 def normalize_data_type(data_type: str) -> Optional[str]:
     """
-    Normalize data_type to 'vector' or 'raster'.
+    Normalize data_type to 'vector', 'raster', or 'zarr'.
 
     Args:
         data_type: Raw data type string from various sources
 
     Returns:
-        'vector', 'raster', or the lowercase original if not recognized
+        'vector', 'raster', 'zarr', or the lowercase original if not recognized
     """
     if not data_type:
         return None
@@ -151,8 +151,20 @@ def get_unpublish_params_from_request(request: ApiRequest, data_type: str) -> di
         # Return all table names — unpublish handler must drop all of them
         return {'table_names': table_names, 'table_name': table_names[0]}
     elif data_type == "raster":
+        # Read stac_item_id from Release record (authoritative, handles ordinal naming)
+        if request.job_id:
+            from infrastructure import ReleaseRepository
+            release_repo = ReleaseRepository()
+            release = release_repo.get_by_job_id(request.job_id)
+            if release and release.stac_item_id:
+                return {
+                    'stac_item_id': release.stac_item_id,
+                    'collection_id': release.stac_collection_id or request.dataset_id
+                }
+        # Fallback: reconstruct from DDH identifiers (pre-V0.9 releases)
         stac_item_id = generate_stac_item_id(request.dataset_id, request.resource_id, request.version_id)
         collection_id = request.dataset_id
+        logger.warning(f"Reconstructed raster stac_item_id (no release found): {stac_item_id}")
         return {'stac_item_id': stac_item_id, 'collection_id': collection_id}
     return {}
 

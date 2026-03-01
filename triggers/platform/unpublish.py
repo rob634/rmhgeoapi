@@ -75,6 +75,10 @@ def platform_unpublish(req: func.HttpRequest) -> func.HttpResponse:
     Auto-detects data type (vector or raster) from platform request record or
     direct parameters. Consolidates /unpublish/vector and /unpublish/raster.
 
+    Parameters:
+        dry_run (bool): Preview mode. Defaults to true if omitted — no data
+            is deleted. Set dry_run=false explicitly to perform actual deletion.
+
     Request Body Options:
 
     Option 1 - By DDH Identifiers (Preferred):
@@ -127,7 +131,7 @@ def platform_unpublish(req: func.HttpRequest) -> func.HttpResponse:
 
     try:
         req_body = parse_request_json(req)
-        dry_run = req_body.get('dry_run', True)  # Safety default
+        dry_run = req_body.get('dry_run', True)  # Defaults to preview mode — caller must set false to delete
 
         # Resolve data type and parameters
         data_type, resolved_params, original_request = _resolve_unpublish_data_type(req_body)

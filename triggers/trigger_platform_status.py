@@ -780,6 +780,7 @@ def _build_version_summary(releases: list) -> list:
             "table_names": _get_release_table_names(release.release_id),
             "stac_item_id": getattr(release, 'stac_item_id', None),
             "stac_collection_id": getattr(release, 'stac_collection_id', None),
+            "is_served": release.is_served,
         })
     # Sort by created_at descending (most recent first)
     summaries.sort(key=lambda x: x["created_at"] or "", reverse=True)

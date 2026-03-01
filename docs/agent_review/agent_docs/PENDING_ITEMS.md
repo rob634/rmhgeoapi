@@ -173,12 +173,12 @@ Root cause: pgSTAC `content` JSONB missing `id`, `collection`, `geometry` stored
 | ID | Severity | Description | Status |
 |----|----------|-------------|--------|
 | SG3-1 | ~~HIGH~~ | Vector STAC materialization creates pgSTAC collection but writes 0 items | **RESOLVED BY DESIGN** — vector does not go in STAC (01 MAR 2026 decision) |
-| SG3-2 | MEDIUM | Approve targets wrong release when request_id shared across versions | NEW — OPEN |
-| SG3-3 | LOW | is_served not exposed in platform status versions array | NEW — OPEN |
+| SG3-2 | MEDIUM | Approve targets wrong release when request_id shared across versions | ~~FIXED~~ — `NULLS FIRST` in `get_by_request_id()` (01 MAR 2026) |
+| SG3-3 | LOW | is_served not exposed in platform status versions array | ~~FIXED~~ — added to `_build_version_summary()` (01 MAR 2026) |
 | SG3-4 | ~~LOW~~ | Vector STAC collection description says "Raster collection" | **NOT APPLICABLE** — no vector STAC collections |
-| SG3-5 | INFO | Unpublish defaults to dry_run=true (undocumented) | NEW — OPEN |
+| SG3-5 | INFO | Unpublish defaults to dry_run=true (undocumented) | ~~FIXED~~ — docstring updated (01 MAR 2026) |
 
-### Score: 10/22 fixed, 1 improved, 3 resolved by design, 2 inconclusive, 6 open (0 CRITICAL, 0 HIGH remaining)
+### Score: 13/22 fixed, 1 improved, 3 resolved by design, 2 inconclusive, 3 open (0 CRITICAL, 0 HIGH remaining)
 
 ---
 
@@ -204,13 +204,11 @@ These are not blocking any run but were identified across the COMPETE reviews as
 Vector discovery is via PostGIS/OGC Features API. STAC is for raster and zarr only.
 This resolves SG3-1 (HIGH), SG3-4 (LOW), and the vector portion of SG-6 (MEDIUM).
 
-**Immediate (before SIEGE Run 4):**
-1. **Implement vector STAC exclusion** — skip STAC materialization for vector, clean up orphaned vector collections
-2. **SG3-2 (MEDIUM)**: Fix approve endpoint request_id disambiguation
-
-**Quick fixes (inline, no pipeline needed):**
-3. SG3-3: Add `is_served` to versions array serialization (~15 min)
-4. SG3-5: Document `dry_run=true` default (~10 min)
+**Completed (01 MAR 2026):**
+1. ~~**Implement vector STAC exclusion**~~ — DONE. Dual guards in `asset_approval_service.py:216-231` and `stac_materialization.py:155-168`. Orphaned `sg-vector-test` collection will be cleaned during SIEGE Run 4 prep (STAC nuke).
+2. ~~**SG3-2 (MEDIUM)**~~ — FIXED. `release_repository.py:get_by_request_id()` changed `NULLS LAST` → `NULLS FIRST` to prioritize drafts over approved versions.
+3. ~~**SG3-3**~~ — FIXED. Added `is_served` to `_build_version_summary()` in `trigger_platform_status.py:783`.
+4. ~~**SG3-5**~~ — FIXED. Added docstring documenting `dry_run=true` default in `triggers/platform/unpublish.py`.
 
 **Medium priority (COMPETE):**
 5. SG-6 (raster only): Cached vs live STAC naming strategy
@@ -220,4 +218,4 @@ This resolves SG3-1 (HIGH), SG3-4 (LOW), and the vector portion of SG-6 (MEDIUM)
 7. V-T1 — Docker dependency verification
 8. V-T2 — Handler tests
 
-**Gate for WARGAME**: Vector STAC exclusion implemented and verified in SIEGE Run 4
+**Gate for WARGAME**: Vector STAC exclusion implemented — verify in SIEGE Run 4

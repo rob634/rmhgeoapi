@@ -416,11 +416,15 @@ class ReleaseRepository(PostgreSQLRepository):
 
     def get_by_request_id(self, request_id: str) -> Optional[AssetRelease]:
         """
-        Get the latest release by its API request ID.
+        Get the most actionable release by its API request ID.
 
         When multiple releases share a request_id (e.g., across version
-        resubmissions), returns the one with the highest version_ordinal,
-        breaking ties by most recent created_at.
+        resubmissions), prioritizes pending drafts (version_ordinal=NULL)
+        over already-approved versions. This matches approval intent:
+        "approve the resubmitted draft, not the old version."
+
+        SG3-2 fix (01 MAR 2026): Changed NULLS LAST → NULLS FIRST so
+        drafts are returned before approved versions.
 
         Args:
             request_id: API request identifier
@@ -430,9 +434,8 @@ class ReleaseRepository(PostgreSQLRepository):
         """
         with self._get_connection() as conn:
             with conn.cursor() as cur:
-                # SG3-2 fix: return latest version when multiple releases share request_id
                 cur.execute(
-                    sql.SQL("SELECT * FROM {}.{} WHERE request_id = %s ORDER BY version_ordinal DESC NULLS LAST, created_at DESC LIMIT 1").format(
+                    sql.SQL("SELECT * FROM {}.{} WHERE request_id = %s ORDER BY version_ordinal DESC NULLS FIRST, created_at DESC LIMIT 1").format(
                         sql.Identifier(self.schema),
                         sql.Identifier(self.table)
                     ),

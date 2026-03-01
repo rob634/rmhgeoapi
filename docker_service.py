@@ -109,9 +109,8 @@ def configure_azure_monitor_telemetry():
 
         if use_aad_auth:
             # Use Managed Identity for Entra ID authentication
-            from azure.identity import DefaultAzureCredential
-            credential = DefaultAzureCredential()
-            configure_kwargs["credential"] = credential
+            from infrastructure.auth.credential import get_azure_credential
+            configure_kwargs["credential"] = get_azure_credential()
             print(f"🔐 Using Entra ID (AAD) authentication for Application Insights")
 
         configure_azure_monitor(**configure_kwargs)
@@ -195,8 +194,6 @@ from azure.servicebus.exceptions import (
     ServiceBusConnectionError,
     OperationTimeoutError,
 )
-from azure.identity import DefaultAzureCredential
-
 logger = logging.getLogger(__name__)
 
 
@@ -474,27 +471,9 @@ class BackgroundQueueWorker:
         if self._sb_client is None:
             self._ensure_initialized()
 
-            # PREFER Managed Identity (namespace) over connection string
-            namespace = self._config.queues.namespace
-
-            if namespace:
-                # Production: Use Managed Identity (system-assigned)
-                logger.info(f"[Queue Worker] Using Managed Identity for: {namespace}")
-                credential = DefaultAzureCredential()
-                self._sb_client = ServiceBusClient(
-                    fully_qualified_namespace=namespace,
-                    credential=credential
-                )
-            else:
-                # Fallback: Connection string (local dev only)
-                connection_string = self._config.queues.connection_string
-                if not connection_string:
-                    raise ValueError(
-                        "No Service Bus connection configured. "
-                        "Set SERVICE_BUS_FQDN (recommended) or ServiceBusConnection"
-                    )
-                logger.warning("[Queue Worker] Using connection string auth (use SERVICE_BUS_FQDN for production)")
-                self._sb_client = ServiceBusClient.from_connection_string(connection_string)
+            from infrastructure.service_bus import ServiceBusRepository
+            sb_repo = ServiceBusRepository.instance()
+            self._sb_client = sb_repo.client
 
         return self._sb_client
 
@@ -912,24 +891,10 @@ def test_storage_connectivity() -> dict:
         dict with success status and details
     """
     try:
-        from config import get_config
-        from azure.storage.blob import BlobServiceClient
-        from azure.identity import DefaultAzureCredential
+        from infrastructure.blob import BlobRepository
 
-        config = get_config()
-        # Use silver zone account (primary storage for Docker worker)
-        account_name = config.storage.silver.account_name
-
-        if not account_name:
-            return {
-                "connected": False,
-                "error": "AZURE_STORAGE_ACCOUNT_NAME not configured",
-            }
-
-        account_url = f"https://{account_name}.blob.core.windows.net"
-        credential = DefaultAzureCredential()
-
-        client = BlobServiceClient(account_url=account_url, credential=credential)
+        blob_repo = BlobRepository.instance()
+        client = blob_repo.blob_service
 
         # List containers (limited to 1) to verify connectivity
         container_pages = client.list_containers(results_per_page=1)
@@ -938,7 +903,7 @@ def test_storage_connectivity() -> dict:
 
         return {
             "connected": True,
-            "account": account_name,
+            "account": client.account_name,
             "containers_accessible": len(containers) > 0,
         }
 

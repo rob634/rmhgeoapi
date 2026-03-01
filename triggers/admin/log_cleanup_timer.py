@@ -44,9 +44,10 @@ Exports:
 
 import os
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 
 from triggers.timer_base import TimerHandlerBase
+from infrastructure.blob import BlobRepository
 
 
 class LogCleanupTimerHandler(TimerHandlerBase):
@@ -57,11 +58,6 @@ class LogCleanupTimerHandler(TimerHandlerBase):
     """
 
     name = "LogCleanup"
-
-    def __init__(self):
-        """Initialize handler with retention settings."""
-        super().__init__()
-        self._blob_service_client = None
 
     def _get_retention_settings(self) -> Dict[str, int]:
         """
@@ -85,45 +81,6 @@ class LogCleanupTimerHandler(TimerHandlerBase):
                 "default": int(os.environ.get("JSONL_WARNING_RETENTION_DAYS", "30")),
                 "metrics": int(os.environ.get("JSONL_METRICS_RETENTION_DAYS", "14")),
             }
-
-    def _get_blob_client(self):
-        """Get or create blob service client."""
-        if self._blob_service_client is None:
-            try:
-                from azure.storage.blob import BlobServiceClient
-                from azure.identity import DefaultAzureCredential
-
-                storage_account = os.environ.get("SILVER_STORAGE_ACCOUNT")
-                if not storage_account:
-                    return None
-
-                account_url = f"https://{storage_account}.blob.core.windows.net"
-
-                try:
-                    credential = DefaultAzureCredential()
-                    self._blob_service_client = BlobServiceClient(
-                        account_url=account_url,
-                        credential=credential
-                    )
-                except Exception:
-                    storage_key = os.environ.get("AZURE_STORAGE_KEY")
-                    if storage_key:
-                        conn_str = (
-                            f"DefaultEndpointsProtocol=https;"
-                            f"AccountName={storage_account};"
-                            f"AccountKey={storage_key};"
-                            f"EndpointSuffix=core.windows.net"
-                        )
-                        self._blob_service_client = BlobServiceClient.from_connection_string(conn_str)
-                    else:
-                        return None
-
-            except ImportError:
-                return None
-            except Exception:
-                return None
-
-        return self._blob_service_client
 
     def _get_expired_date_prefixes(self, retention_days: int) -> List[str]:
         """
@@ -170,16 +127,15 @@ class LogCleanupTimerHandler(TimerHandlerBase):
         """
         result = {"deleted": 0, "errors": 0, "checked": 0}
 
-        client = self._get_blob_client()
-        if not client:
-            self.logger.warning(f"LogCleanup: No blob client available for {log_type}")
+        try:
+            blob_repo = BlobRepository.instance()
+        except Exception:
+            self.logger.warning(f"LogCleanup: No blob repository available for {log_type}")
             return result
 
         try:
-            container_client = client.get_container_client(container_name)
-
             # Check if container exists
-            if not container_client.exists():
+            if not blob_repo.container_exists(container_name):
                 self.logger.info(f"LogCleanup: Container {container_name} does not exist")
                 return result
 
@@ -192,7 +148,7 @@ class LogCleanupTimerHandler(TimerHandlerBase):
 
                 try:
                     # List blobs with this prefix
-                    blobs = list(container_client.list_blobs(name_starts_with=date_prefix))
+                    blobs = blob_repo.list_blobs(container_name, prefix=date_prefix)
                     result["checked"] += len(blobs)
 
                     if blobs:
@@ -203,11 +159,11 @@ class LogCleanupTimerHandler(TimerHandlerBase):
                         # Delete each blob
                         for blob in blobs:
                             try:
-                                container_client.delete_blob(blob.name)
+                                blob_repo.delete_blob(container_name, blob['name'])
                                 result["deleted"] += 1
                             except Exception as e:
                                 self.logger.warning(
-                                    f"LogCleanup: Failed to delete {blob.name}: {e}"
+                                    f"LogCleanup: Failed to delete {blob['name']}: {e}"
                                 )
                                 result["errors"] += 1
 

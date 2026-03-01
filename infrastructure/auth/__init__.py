@@ -56,6 +56,7 @@ DB_ADMIN_MANAGED_IDENTITY_NAME=<identity-name>
 AZURE_STORAGE_ACCOUNT_NAME=<storage-account>
 """
 
+from .credential import get_azure_credential
 from .token_cache import TokenCache, ErrorCache
 from .postgres_auth import (
     get_postgres_token,
@@ -190,6 +191,8 @@ def get_token_status() -> dict:
 
 
 __all__ = [
+    # Shared credential
+    "get_azure_credential",
     # Cache classes
     "TokenCache",
     "ErrorCache",

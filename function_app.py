@@ -839,6 +839,45 @@ def storage_upload(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # ============================================================================
+# PLATFORM DASHBOARD (01 MAR 2026)
+# ============================================================================
+
+try:
+    from web_dashboard import dashboard_handler as _dashboard_handler
+    _dashboard_available = True
+except Exception as _dashboard_import_err:
+    import logging as _logging
+    _logging.getLogger(__name__).warning(
+        f"web_dashboard import failed: {_dashboard_import_err}. "
+        f"/api/dashboard will return 503."
+    )
+    _dashboard_available = False
+
+
+@app.route(route="dashboard", methods=["GET", "POST"])
+def platform_dashboard(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Platform Dashboard - unified operations dashboard with HTMX.
+
+    GET  /api/dashboard              - Full page (Platform tab, Requests section)
+    GET  /api/dashboard?tab=jobs     - Full page with Jobs tab active
+    POST /api/dashboard?action=...   - Action proxy (approve, reject, etc.)
+
+    The dashboard uses HTMX for partial page updates. When HX-Request header
+    is present, returns HTML fragments instead of full pages.
+
+    If the web_dashboard module failed to import, returns HTTP 503.
+    """
+    if not _dashboard_available:
+        return func.HttpResponse(
+            "Dashboard unavailable. Check application logs for import errors.",
+            status_code=503,
+            mimetype="text/plain",
+        )
+    return _dashboard_handler(req)
+
+
+# ============================================================================
 # UNIFIED WEB INTERFACES (14 NOV 2025)
 # ============================================================================
 

@@ -464,15 +464,15 @@ class AssetRelease(BaseModel):
         description="Azure Blob Storage path for raster outputs (COG)"
     )
     # table_name: REMOVED (26 FEB 2026) — moved to app.release_tables junction table
-    stac_item_id: str = Field(
-        ...,
+    stac_item_id: Optional[str] = Field(
+        default=None,
         max_length=200,
-        description="STAC item identifier (required for STAC materialization)"
+        description="STAC item identifier — None for vector (vector does not go in STAC)"
     )
-    stac_collection_id: str = Field(
-        ...,
+    stac_collection_id: Optional[str] = Field(
+        default=None,
         max_length=200,
-        description="STAC collection identifier (required for STAC materialization)"
+        description="STAC collection identifier — None for vector (vector does not go in STAC)"
     )
     stac_item_json: Optional[Dict[str, Any]] = Field(
         default=None,

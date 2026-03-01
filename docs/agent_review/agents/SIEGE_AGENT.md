@@ -108,6 +108,7 @@ Claude plays Sentinel directly. Sentinel's job:
 3. Define test data using `sg-` prefix:
    - Raster: `dataset_id=sg-raster-test`, `resource_id=dctest`, `file_name=dctest.tif`
    - Vector: `dataset_id=sg-vector-test`, `resource_id=cutlines`, `file_name=cutlines.gpkg`
+   - NetCDF: `dataset_id=sg-netcdf-test`, `resource_id=spei-ssp370`, `file_name=good-data/climatology-spei12-annual-mean_cmip6-x0.25_ensemble-all-ssp370_climatology_median_2040-2059.nc`, `container_name=wargames`, `data_type=zarr`
 3. Identify the bronze container name from environment context.
 4. Output the Campaign Brief:
    - BASE_URL
@@ -195,6 +196,17 @@ Lancer executes canonical lifecycle sequences and records state checkpoints.
 **Sequence 4: Unpublish**
 1. POST `/api/platform/unpublish` (v2) → poll until complete
 2. **CHECKPOINT U1**: v2 removed, v1 preserved
+
+**Sequence 5: NetCDF / VirtualiZarr Lifecycle**
+1. POST `/api/platform/submit` with `data_type=zarr`, NetCDF file from wargames container → capture request_id, job_id
+2. Poll until completed (VirtualiZarr pipeline: scan → copy → validate → combine → register)
+3. POST `/api/platform/approve` (version_id="v1") → verify STAC materialized (zarr items go in STAC)
+4. GET `/api/platform/catalog/dataset/{dataset_id}` → verify catalog entry exists
+5. **CHECKPOINT Z1**: Record all IDs, verify job_type=virtualzarr, STAC item present
+
+Note: NetCDF (.nc) routes to the VirtualiZarr pipeline, NOT the raster pipeline.
+Use `data_type_override: "zarr"` from siege_config.json. Submit body must include
+`"data_type": "zarr"`. Processing may take longer than raster (5-stage pipeline).
 
 ### Lancer Checkpoint Format
 
@@ -306,6 +318,7 @@ Assessment: {HEALTHY | DEGRADED | DOWN}
 | Vector Lifecycle | {n} | {n} | {n} | {n} |
 | Multi-Version | {n} | {n} | {n} | {n} |
 | Unpublish | {n} | {n} | {n} | {n} |
+| NetCDF/VirtualiZarr | {n} | {n} | {n} | {n} |
 
 ## State Divergences
 {from Auditor — expected vs actual for each failing checkpoint}

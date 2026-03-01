@@ -557,14 +557,54 @@ All pipeline executions in chronological order.
 
 ---
 
+## Run 20: Platform API Regression + Vector STAC Exclusion (SIEGE)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 01 MAR 2026 |
+| **Pipeline** | SIEGE |
+| **Scope** | Full Platform API surface — regression verification + vector STAC exclusion validation + expanded test fixtures |
+| **Target** | `https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net` (v0.9.11.2) |
+| **Agents** | Sentinel → Cartographer → Lancer → Auditor → Scribe |
+| **Verdict** | **CONDITIONAL PASS** — 3/4 Lancer sequences pass, vector blocked by CRITICAL |
+| **Regressions Verified** | SG-5, SG2-2, SG3-3 confirmed fixed. 0 regressions introduced. |
+| **New Findings** | 6 total: 1 CRITICAL, 1 MEDIUM, 2 LOW, 2 INFO |
+| **Key Discovery** | LNC-1: Vector submit completely broken — AssetRelease model requires stac_item_id/stac_collection_id as non-Optional, but vector exclusion passes None |
+| **Output** | `agent_docs/SIEGE_RUN_4.md` |
+
+**Regression Summary**:
+
+| Prior ID | Severity | Run 4 Status |
+|----------|----------|-------------|
+| SG-1 | CRITICAL | Still fixed |
+| SG-2 | HIGH | Still fixed |
+| SG-3 | HIGH | Still fixed |
+| SG-5 | HIGH | **Confirmed fixed** (blobs_deleted=1) |
+| SG-7 | MEDIUM | Still fixed |
+| SG2-2 | MEDIUM | **Confirmed fixed** (is_served=false) |
+| SG3-3 | LOW | **Confirmed fixed** (is_served in versions) |
+
+**New Finding Summary**:
+
+| ID | Severity | Description |
+|----|----------|-------------|
+| LNC-1 | CRITICAL | Vector submit broken — stac_item_id/stac_collection_id non-Optional in AssetRelease model |
+| AUD-R1-1 | MEDIUM | /api/platform/approvals/status returns lookup_error for valid STAC item IDs |
+| F-CART-1 | LOW | POST-only endpoints return 404 instead of 405 |
+| F-CART-2 | LOW | /api/dbadmin/stats returns 404 (SG-9 reconfirmed) |
+| F-CART-3 | INFO | /api/health JSON contains control character |
+| F-CART-4 | INFO | /api/health latency 3.7s |
+
+---
+
 ## Cumulative Token Usage
 
 | Pipeline | Runs | Total Tokens |
 |----------|------|-------------|
 | COMPETE | Runs 1-6, 9, 12, 19 | 1,071,939 (Run 9: 346,656 + Run 12: 337,561 + Run 19: 387,722; Runs 1-6 predated instrumentation) |
 | GREENFIELD | Runs 7, 8, 10 | 631,196 (Run 10 only; Runs 7-8 predated instrumentation) |
-| SIEGE | Runs 11, 13, 18 | 659,351 (Run 11: 178,793 + Run 13: 251,338 + Run 18: ~229,220) |
+| SIEGE | Runs 11, 13, 18, 20 | ~915,618 (Run 11: 178,793 + Run 13: 251,338 + Run 18: ~229,220 + Run 20: ~256,267) |
 | REFLEXION | Runs 14, 15, 16, 17 | 631,966 (Run 14: 232,684 + Run 15: 278,900 + Run 16: 50,775 + Run 17: 69,607) |
-| **Instrumented Total** | Runs 9-19 | **~2,994,452** |
+| **Instrumented Total** | Runs 9-20 | **~3,250,719** |
 
-**Note**: Runs 1-8 predated the token instrumentation described in `agents/AGENT_METRICS.md`. Per-agent token breakdowns are available for Runs 9-19.
+**Note**: Runs 1-8 predated the token instrumentation described in `agents/AGENT_METRICS.md`. Per-agent token breakdowns are available for Runs 9-20.

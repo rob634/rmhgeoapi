@@ -198,12 +198,46 @@ All pipeline executions in chronological order.
 
 ---
 
+## Run 11: Platform API Smoke Test (SIEGE)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 01 MAR 2026 |
+| **Pipeline** | SIEGE |
+| **Scope** | Full Platform API surface — endpoint health, raster/vector lifecycles, multi-version, unpublish |
+| **Target** | `https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net` (v0.9.9.0) |
+| **Agents** | Sentinel → Cartographer → Lancer → Auditor → Scribe |
+| **Verdict** | **FAIL** — 6/11 workflow steps passed (54.5%) |
+| **Findings** | 11 total: 1 CRITICAL, 2 HIGH, 4 MEDIUM, 4 LOW |
+| **Key Bugs** | STAC materialization ordering (blocks raster approval), SQL error leak on approvals/status, catalog/dataset returns 500 |
+| **Fixes Applied** | None (report only) |
+| **Output** | `agent_docs/SIEGE_RUN_1.md` |
+
+**Finding Summary**:
+
+| ID | Severity | Description |
+|----|----------|-------------|
+| SG-1 | CRITICAL | STAC materialization calls item insert before collection create |
+| SG-2 | HIGH | SQL error message leaked to B2B callers on approvals/status |
+| SG-3 | HIGH | /api/platform/catalog/dataset/{id} returns 500 instead of 404 |
+| SG-4 | MEDIUM | Approval rollbacks not surfaced on /api/platform/failures |
+| SG-5 | MEDIUM | Orphaned 127 MB COG blob with no catalog reference |
+| SG-6 | MEDIUM | stac_item_id mismatch: release says -v1, cached JSON says -ord1 |
+| SG-7 | MEDIUM | is_latest not restored after approval rollback |
+| SG-8 | LOW | Inconsistent 404 response shape on lineage endpoint |
+| SG-9 | LOW | /api/dbadmin/stats and diagnostics/all return 404 |
+| SG-10 | LOW | /api/health takes 3.9s (too slow for health probes) |
+| SG-11 | LOW | Resubmit bumps revision, not version — may surprise callers |
+
+---
+
 ## Cumulative Token Usage
 
 | Pipeline | Runs | Total Tokens |
 |----------|------|-------------|
 | COMPETE | Runs 1-6, 9 | 346,656 (Run 9 only; Runs 1-6 predated instrumentation) |
 | GREENFIELD | Runs 7, 8, 10 | 631,196 (Run 10 only; Runs 7-8 predated instrumentation) |
+| SIEGE | Run 11 | Not instrumented (first SIEGE run) |
 | **Instrumented Total** | Runs 9-10 | **977,852** |
 
-**Note**: Runs 1-8 predated the token instrumentation described in `agents/AGENT_METRICS.md`. Per-agent token breakdowns are only available for Runs 9-10.
+**Note**: Runs 1-8 predated the token instrumentation described in `agents/AGENT_METRICS.md`. Per-agent token breakdowns are only available for Runs 9-10. Run 11 is the first SIEGE pipeline execution.

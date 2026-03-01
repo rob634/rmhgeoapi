@@ -242,13 +242,55 @@ All pipeline executions in chronological order.
 
 ---
 
+## Run 12: SG-6 STAC Item ID Naming Convention
+
+| Field | Value |
+|-------|-------|
+| **Date** | 01 MAR 2026 |
+| **Pipeline** | COMPETE |
+| **Scope** | STAC item ID naming lifecycle — `-ord{N}` vs `-v{version_id}` mismatch |
+| **Files** | 8 primary + 6 supporting |
+| **Scope Split** | B (Internal vs External) |
+| **Findings** | 10 total (2 HIGH, 4 MEDIUM, 4 LOW) |
+| **Fixes Proposed** | 5 (2 HIGH, 1 LOW, 1 LOW, 1 MEDIUM) |
+| **Accepted Risks** | 4 (identity change on approval, 5 mutation points, orphaned pgSTAC, race condition) |
+| **Key Insight** | Naming convention is sound; lifecycle hygiene is incomplete — stale `stac_item_json` blob and `geoetl:*` property leak |
+| **Output** | `agent_docs/COMPETE_SG6_STAC_NAMING.md` |
+
+**Token Usage**:
+
+| Agent | Role | Tokens | Duration |
+|-------|------|--------|----------|
+| Omega | Scope split | — | inline |
+| Alpha | Internal Logic | 69,784 | 5m 51s |
+| Beta | External Interfaces | 91,176 | 4m 31s |
+| Alpha+Beta | (parallel wall clock) | 160,960 | 6m 17s |
+| Gamma | Contradictions | 112,503 | 5m 08s |
+| Delta | Final Report | 64,098 | 3m 13s |
+| **Total** | | **337,561** | **~16m 40s** |
+
+**Finding Summary**:
+
+| Rank | Finding | Severity | Confidence |
+|------|---------|----------|------------|
+| 1 | Raw `stac_item_json` with `geoetl:*` exposed via `to_dict()` | HIGH | CONFIRMED |
+| 2 | Stale `stac_item_json['id']` in DB after approval | HIGH | CONFIRMED |
+| 3 | `stac_item_id` identity change breaks approvals/status lookup | MEDIUM | CONFIRMED |
+| 4 | Five mutation points for `stac_item_id` | MEDIUM | CONFIRMED |
+| 5 | `cog_metadata.stac_item_id` stale after approval | MEDIUM | PROBABLE |
+| 6 | `version_ordinal=0` accepted silently | LOW | CONFIRMED |
+| 7 | No catch-all in submit ordinal finalization | LOW | CONFIRMED |
+| 8 | Orphaned pgSTAC items after failed revocation | MEDIUM | PROBABLE |
+
+---
+
 ## Cumulative Token Usage
 
 | Pipeline | Runs | Total Tokens |
 |----------|------|-------------|
-| COMPETE | Runs 1-6, 9 | 346,656 (Run 9 only; Runs 1-6 predated instrumentation) |
+| COMPETE | Runs 1-6, 9, 12 | 684,217 (Run 9: 346,656 + Run 12: 337,561; Runs 1-6 predated instrumentation) |
 | GREENFIELD | Runs 7, 8, 10 | 631,196 (Run 10 only; Runs 7-8 predated instrumentation) |
 | SIEGE | Run 11 | 178,793 |
-| **Instrumented Total** | Runs 9-11 | **1,156,645** |
+| **Instrumented Total** | Runs 9-12 | **1,494,206** |
 
-**Note**: Runs 1-8 predated the token instrumentation described in `agents/AGENT_METRICS.md`. Per-agent token breakdowns are available for Runs 9-11.
+**Note**: Runs 1-8 predated the token instrumentation described in `agents/AGENT_METRICS.md`. Per-agent token breakdowns are available for Runs 9-12.

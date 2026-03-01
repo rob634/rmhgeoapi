@@ -523,7 +523,7 @@ All pipeline executions in chronological order.
 | **Scope Split** | B: Internal vs External |
 | **Findings** | 43 valid (6 CRITICAL, 8 HIGH, 18 MEDIUM, 11 LOW) + 1 invalidated |
 | **Fixes Proposed** | 5 (Top 5 from Delta) |
-| **Fixes Applied** | Pending |
+| **Fixes Applied** | **YES** — all 5 Top Fixes implemented (v0.9.11.0) |
 | **Key Discovery** | BLIND-1: Reflected XSS via URL params in JS string literals (tasks/interface.py) — trivially exploitable, no auth required |
 | **Systemic Pattern** | Zero HTML escaping in 5 of 6 files; platform/interface.py is the only safe reference |
 | **Output** | `agent_docs/COMPETE_RUN18_WEB_INTERFACE.md` |

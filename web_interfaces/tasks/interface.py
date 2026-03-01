@@ -71,10 +71,11 @@ class TasksInterface(BaseInterface):
         # Custom JavaScript for Status Monitor
         custom_js = self._generate_custom_js(lookup_id, dataset_id, resource_id, release_id)
 
-        display_id = lookup_id[:8] if lookup_id else (dataset_id or 'Loading...')
+        import html as html_mod
+        safe_display = html_mod.escape(lookup_id[:8] if lookup_id else (dataset_id or 'Loading...'))
 
         return self.wrap_html(
-            title=f"Status - {display_id}",
+            title=f"Status - {safe_display}",
             content=content,
             custom_css=custom_css,
             custom_js=custom_js,
@@ -3070,12 +3071,17 @@ class TasksInterface(BaseInterface):
 
     def _generate_custom_js(self, lookup_id: str, dataset_id: str = '', resource_id: str = '', release_id: str = '') -> str:
         """Generate custom JavaScript for Status Monitor with platform status + workflow visualization."""
+        # XSS Fix (COMPETE Run 19): escape URL params before JS string interpolation
+        safe_lookup = self._js_escape(lookup_id)
+        safe_dataset = self._js_escape(dataset_id)
+        safe_resource = self._js_escape(resource_id)
+        safe_release = self._js_escape(release_id)
         return f"""
-        const LOOKUP_ID = '{lookup_id}';
-        const DATASET_ID = '{dataset_id}';
-        const RESOURCE_ID = '{resource_id}';
-        const RELEASE_ID = '{release_id}';
-        let JOB_ID = '{lookup_id}';  // Will be resolved from platform/status
+        const LOOKUP_ID = '{safe_lookup}';
+        const DATASET_ID = '{safe_dataset}';
+        const RESOURCE_ID = '{safe_resource}';
+        const RELEASE_ID = '{safe_release}';
+        let JOB_ID = '{safe_lookup}';  // Will be resolved from platform/status
         let platformData = null;
 
         // Auto-refresh state
@@ -3167,11 +3173,13 @@ class TasksInterface(BaseInterface):
         }}
 
         // Format JSON with syntax highlighting (19 JAN 2026)
+        // XSS Fix (COMPETE Run 19): escape HTML entities before regex highlighting
         function formatJsonWithHighlighting(obj, indent = 2) {{
             const json = JSON.stringify(obj, null, indent);
-            return json
-                .replace(/"([^"]+)":/g, '<span class="json-key">"$1"</span>:')
-                .replace(/: "([^"]*)"/g, ': <span class="json-string">"$1"</span>')
+            const safe = escapeHtml(json);
+            return safe
+                .replace(/&quot;([^&]*?)&quot;:/g, '<span class="json-key">&quot;$1&quot;</span>:')
+                .replace(/: &quot;([^&]*?)&quot;/g, ': <span class="json-string">&quot;$1&quot;</span>')
                 .replace(/: (\\d+\\.?\\d*)/g, ': <span class="json-number">$1</span>')
                 .replace(/: (true|false)/g, ': <span class="json-boolean">$1</span>')
                 .replace(/: (null)/g, ': <span class="json-null">$1</span>');
@@ -3325,10 +3333,11 @@ class TasksInterface(BaseInterface):
                         }}
 
                         // Update header subtitle with platform context
+                        // XSS Fix (COMPETE Run 19): escape API response fields
                         const subtitle = document.getElementById('header-subtitle');
                         if (statusResponse.asset) {{
                             const a = statusResponse.asset;
-                            subtitle.innerHTML = `<span style="font-family: 'Courier New', monospace; font-size: 13px; color: #0071BC;">${{a.dataset_id}} / ${{a.resource_id}}</span> <span style="color: #666; font-size: 12px;">(${{a.data_type}})</span>`;
+                            subtitle.innerHTML = `<span style="font-family: 'Courier New', monospace; font-size: 13px; color: #0071BC;">${{escapeHtml(a.dataset_id)}} / ${{escapeHtml(a.resource_id)}}</span> <span style="color: #666; font-size: 12px;">(${{escapeHtml(a.data_type)}})</span>`;
                         }}
 
                         // Render platform summary
@@ -3410,58 +3419,62 @@ class TasksInterface(BaseInterface):
                                   approvalState === 'rejected' ? 'status-failed' :
                                   approvalState === 'revoked' ? 'status-failed' : '';
 
-            // Build output items
+            // Build output items — XSS Fix (COMPETE Run 19): escape all API fields
             let outputsHtml = '';
             if (outputs.stac_item_id) {{
-                outputsHtml += `<div class="ps-output-item"><span class="ps-label">STAC Item</span><span class="ps-value mono">${{outputs.stac_item_id}}</span></div>`;
+                outputsHtml += `<div class="ps-output-item"><span class="ps-label">STAC Item</span><span class="ps-value mono">${{escapeHtml(outputs.stac_item_id)}}</span></div>`;
             }}
             if (outputs.stac_collection_id) {{
-                outputsHtml += `<div class="ps-output-item"><span class="ps-label">STAC Collection</span><span class="ps-value mono">${{outputs.stac_collection_id}}</span></div>`;
+                outputsHtml += `<div class="ps-output-item"><span class="ps-label">STAC Collection</span><span class="ps-value mono">${{escapeHtml(outputs.stac_collection_id)}}</span></div>`;
             }}
             if (outputs.blob_path) {{
-                outputsHtml += `<div class="ps-output-item"><span class="ps-label">Blob</span><span class="ps-value mono">${{outputs.container}}/${{outputs.blob_path}}</span></div>`;
+                outputsHtml += `<div class="ps-output-item"><span class="ps-label">Blob</span><span class="ps-value mono">${{escapeHtml(outputs.container)}}/${{escapeHtml(outputs.blob_path)}}</span></div>`;
             }}
             if (outputs.table_name) {{
-                outputsHtml += `<div class="ps-output-item"><span class="ps-label">Table</span><span class="ps-value mono">${{outputs.schema}}.${{outputs.table_name}}</span></div>`;
+                outputsHtml += `<div class="ps-output-item"><span class="ps-label">Table</span><span class="ps-value mono">${{escapeHtml(outputs.schema)}}.${{escapeHtml(outputs.table_name)}}</span></div>`;
             }}
 
-            // Build service links
+            // Build service links — XSS Fix: validate URL protocol and escape labels
             let servicesHtml = '';
             const serviceEntries = Object.entries(services);
             if (serviceEntries.length > 0) {{
                 servicesHtml = '<div class="ps-services">';
                 for (const [key, url] of serviceEntries) {{
-                    const label = key.replace(/_/g, ' ');
-                    servicesHtml += `<a href="${{url}}" target="_blank" class="ps-service-link">${{label}}</a>`;
+                    const label = escapeHtml(key.replace(/_/g, ' '));
+                    if (/^https?:\\/\\//i.test(url)) {{
+                        servicesHtml += `<a href="${{escapeHtml(url)}}" target="_blank" class="ps-service-link">${{label}}</a>`;
+                    }} else {{
+                        servicesHtml += `<span class="ps-service-link">${{label}} (invalid URL)</span>`;
+                    }}
                 }}
                 servicesHtml += '</div>';
             }}
 
-            // Build approval action
+            // Build approval action — XSS Fix: validate URLs
             let approvalHtml = '';
-            if (approval.viewer_url) {{
+            if (approval.viewer_url && /^https?:\\/\\//i.test(approval.viewer_url)) {{
                 approvalHtml = `<div class="ps-approval">
-                    <a href="${{approval.viewer_url}}" class="ps-viewer-prominent" target="_blank">Open Viewer for Review</a>
-                    ${{approval.approve_url ? `<div class="ps-approve-context">Approve endpoint: <span class="mono" style="font-size:10px;">${{approval.approve_url}}</span></div>` : ''}}
+                    <a href="${{escapeHtml(approval.viewer_url)}}" class="ps-viewer-prominent" target="_blank">Open Viewer for Review</a>
+                    ${{approval.approve_url ? `<div class="ps-approve-context">Approve endpoint: <span class="mono" style="font-size:10px;">${{escapeHtml(approval.approve_url)}}</span></div>` : ''}}
                 </div>`;
             }}
 
-            // Version history table (collapsible, full list)
+            // Version history table — XSS Fix: escape all version fields
             let versionsHtml = '';
             if (versions.length > 1) {{
                 let vRows = '';
                 for (const v of versions) {{
-                    const vLabel = v.version_id || `ord${{v.version_ordinal}}`;
-                    const vProc = v.processing_status || '';
-                    const vAppr = v.approval_state || '';
-                    const vClear = v.clearance_state || '';
+                    const vLabel = escapeHtml(v.version_id || `ord${{v.version_ordinal}}`);
+                    const vProc = escapeHtml(v.processing_status || '');
+                    const vAppr = escapeHtml((v.approval_state || '').replace('_', ' '));
+                    const vClear = escapeHtml(v.clearance_state || '');
                     const vDate = v.created_at ? new Date(v.created_at).toLocaleDateString() : '';
                     const vLatest = v.is_latest ? '<span class="ps-is-latest">Latest</span>' : '';
                     vRows += `<tr>
                         <td class="mono">${{vLabel}}</td>
                         <td>${{v.version_ordinal || ''}}</td>
                         <td><span class="status-badge status-${{vProc}}">${{vProc}}</span></td>
-                        <td>${{vAppr.replace('_', ' ')}}</td>
+                        <td>${{vAppr}}</td>
                         <td>${{vClear}}</td>
                         <td>${{vDate}} ${{vLatest}}</td>
                     </tr>`;
@@ -3481,20 +3494,20 @@ class TasksInterface(BaseInterface):
                 `;
             }}
 
-            // Build structured error card
+            // Build structured error card — XSS Fix: escape all error fields
             let errorHtml = '';
             if (data.error && typeof data.error === 'object') {{
                 const err = data.error;
                 errorHtml = `
                     <div class="ps-error-card">
                         <div class="ps-error-header">
-                            <span class="ps-error-code">${{err.code || 'ERROR'}}</span>
-                            ${{err.category ? `<span class="ps-error-category">${{err.category}}</span>` : ''}}
+                            <span class="ps-error-code">${{escapeHtml(err.code || 'ERROR')}}</span>
+                            ${{err.category ? `<span class="ps-error-category">${{escapeHtml(err.category)}}</span>` : ''}}
                             ${{err.user_fixable ? '<span class="ps-error-user-fixable">User Fixable</span>' : ''}}
                         </div>
-                        <div class="ps-error-message">${{err.message || 'An error occurred'}}</div>
-                        ${{err.remediation ? `<div class="ps-error-remediation"><strong>Remediation:</strong> ${{err.remediation}}</div>` : ''}}
-                        ${{err.detail ? `<div class="ps-error-detail">${{err.detail}}</div>` : ''}}
+                        <div class="ps-error-message">${{escapeHtml(err.message || 'An error occurred')}}</div>
+                        ${{err.remediation ? `<div class="ps-error-remediation"><strong>Remediation:</strong> ${{escapeHtml(err.remediation)}}</div>` : ''}}
+                        ${{err.detail ? `<div class="ps-error-detail">${{escapeHtml(err.detail)}}</div>` : ''}}
                     </div>
                 `;
             }}
@@ -3509,20 +3522,20 @@ class TasksInterface(BaseInterface):
                 <div class="ps-grid">
                     <div class="ps-section">
                         <div class="ps-section-header">Asset</div>
-                        <div class="ps-row"><span class="ps-label">Dataset</span><span class="ps-value mono">${{asset.dataset_id}}</span></div>
-                        <div class="ps-row"><span class="ps-label">Resource</span><span class="ps-value mono">${{asset.resource_id}}</span></div>
-                        <div class="ps-row"><span class="ps-label">Type</span><span class="ps-value">${{asset.data_type}}</span></div>
+                        <div class="ps-row"><span class="ps-label">Dataset</span><span class="ps-value mono">${{escapeHtml(asset.dataset_id || '')}}</span></div>
+                        <div class="ps-row"><span class="ps-label">Resource</span><span class="ps-value mono">${{escapeHtml(asset.resource_id || '')}}</span></div>
+                        <div class="ps-row"><span class="ps-label">Type</span><span class="ps-value">${{escapeHtml(asset.data_type || '')}}</span></div>
                         <div class="ps-row"><span class="ps-label">Releases</span><span class="ps-value">${{asset.release_count || versions.length}}</span></div>
                     </div>
                     <div class="ps-section">
                         <div class="ps-section-header">Release</div>
-                        <div class="ps-row"><span class="ps-label">Version</span><span class="ps-value">${{release.version_id || 'draft'}} <span style="color:#999;">(ord ${{release.version_ordinal || '?'}})</span></span></div>
-                        <div class="ps-row"><span class="ps-label">Revision</span><span class="ps-value">${{release.revision || '\u2014'}}</span></div>
-                        <div class="ps-row"><span class="ps-label">Processing</span><span class="status-badge ${{procClass}}">${{procStatus}}</span></div>
-                        ${{approvalState ? `<div class="ps-row"><span class="ps-label">Approval</span><span class="status-badge ${{approvalClass}}">${{approvalState.replace('_', ' ')}}</span></div>` : ''}}
-                        <div class="ps-row"><span class="ps-label">Clearance</span><span class="ps-clearance-badge ${{clearanceClass}}">${{clearanceState}}</span></div>
+                        <div class="ps-row"><span class="ps-label">Version</span><span class="ps-value">${{escapeHtml(release.version_id || 'draft')}} <span style="color:#999;">(ord ${{escapeHtml(String(release.version_ordinal || '?'))}})</span></span></div>
+                        <div class="ps-row"><span class="ps-label">Revision</span><span class="ps-value">${{escapeHtml(String(release.revision || '\u2014'))}}</span></div>
+                        <div class="ps-row"><span class="ps-label">Processing</span><span class="status-badge ${{procClass}}">${{escapeHtml(procStatus)}}</span></div>
+                        ${{approvalState ? `<div class="ps-row"><span class="ps-label">Approval</span><span class="status-badge ${{approvalClass}}">${{escapeHtml(approvalState.replace('_', ' '))}}</span></div>` : ''}}
+                        <div class="ps-row"><span class="ps-label">Clearance</span><span class="ps-clearance-badge ${{clearanceClass}}">${{escapeHtml(clearanceState)}}</span></div>
                         ${{release.is_latest ? '<div class="ps-row"><span class="ps-label">Latest</span><span class="ps-is-latest">Latest Release</span></div>' : ''}}
-                        ${{release.release_id ? `<div class="ps-row"><span class="ps-label">Release ID</span><span class="ps-value mono" title="${{release.release_id}}">${{release.release_id.substring(0, 16)}}...</span></div>` : ''}}
+                        ${{release.release_id ? `<div class="ps-row"><span class="ps-label">Release ID</span><span class="ps-value mono" title="${{escapeHtml(release.release_id)}}">${{escapeHtml(release.release_id.substring(0, 16))}}...</span></div>` : ''}}
                     </div>
                     <div class="ps-section">
                         <div class="ps-section-header">Outputs</div>
@@ -3585,22 +3598,22 @@ class TasksInterface(BaseInterface):
             let statusClass = 'status-' + (job.status || 'queued');
             let html = '';
 
-            // Error banner if failed
+            // Error banner if failed — XSS Fix: escape error fields
             if (job.status === 'failed') {{
                 const platformError = window._platformData?.error;
                 if (platformError && typeof platformError === 'object') {{
                     html += `
                         <div class="error-banner">
-                            <strong>Job Failed — ${{platformError.code || ''}}</strong>
-                            <p>${{platformError.message || job.error_details || 'No error details available'}}</p>
-                            ${{platformError.remediation ? `<p style="margin-top:6px;font-size:12px;color:#374151;"><strong>Remediation:</strong> ${{platformError.remediation}}</p>` : ''}}
+                            <strong>Job Failed — ${{escapeHtml(platformError.code || '')}}</strong>
+                            <p>${{escapeHtml(platformError.message || job.error_details || 'No error details available')}}</p>
+                            ${{platformError.remediation ? `<p style="margin-top:6px;font-size:12px;color:#374151;"><strong>Remediation:</strong> ${{escapeHtml(platformError.remediation)}}</p>` : ''}}
                         </div>
                     `;
                 }} else {{
                     html += `
                         <div class="error-banner">
                             <strong>Job Failed</strong>
-                            <p>${{job.error_details || 'No error details available'}}</p>
+                            <p>${{escapeHtml(job.error_details || 'No error details available')}}</p>
                         </div>
                     `;
                 }}
@@ -3647,11 +3660,11 @@ class TasksInterface(BaseInterface):
                 <div class="job-summary-grid">
                     <div class="summary-item">
                         <span class="summary-label">Job Type</span>
-                        <span class="summary-value" style="font-size: 14px;">${{job.job_type}}</span>
+                        <span class="summary-value" style="font-size: 14px;">${{escapeHtml(job.job_type)}}</span>
                     </div>
                     <div class="summary-item">
                         <span class="summary-label">Status</span>
-                        <span class="status-badge ${{statusClass}}">${{job.status}}</span>
+                        <span class="status-badge ${{statusClass}}">${{escapeHtml(job.status)}}</span>
                     </div>
                     <div class="summary-item">
                         <span class="summary-label">Stage</span>
@@ -3697,7 +3710,7 @@ class TasksInterface(BaseInterface):
                         html += `
                             <div class="result-item">
                                 <span class="result-label">Table</span>
-                                <span class="result-value"><code>${{schema || 'geo'}}.${{tableName}}</code></span>
+                                <span class="result-value"><code>${{escapeHtml(schema || 'geo')}}.${{escapeHtml(tableName)}}</code></span>
                             </div>
                         `;
                     }}
@@ -3706,24 +3719,24 @@ class TasksInterface(BaseInterface):
                         html += `
                             <div class="result-item">
                                 <span class="result-label">Source</span>
-                                <span class="result-value">${{blobName}}</span>
+                                <span class="result-value">${{escapeHtml(blobName)}}</span>
                             </div>
                         `;
                     }}
 
                     html += `</div><div class="results-links">`;
 
-                    if (viewerUrl) {{
+                    if (viewerUrl && /^https?:\/\//i.test(viewerUrl)) {{
                         html += `
-                            <a href="${{viewerUrl}}" target="_blank" class="result-link result-link-primary">
+                            <a href="${{encodeURI(viewerUrl)}}" target="_blank" class="result-link result-link-primary">
                                 🗺️ Open Map Viewer
                             </a>
                         `;
                     }}
 
-                    if (ogcFeaturesUrl) {{
+                    if (ogcFeaturesUrl && /^https?:\/\//i.test(ogcFeaturesUrl)) {{
                         html += `
-                            <a href="${{ogcFeaturesUrl}}" target="_blank" class="result-link">
+                            <a href="${{encodeURI(ogcFeaturesUrl)}}" target="_blank" class="result-link">
                                 📡 OGC Features API
                             </a>
                         `;
@@ -3760,14 +3773,14 @@ class TasksInterface(BaseInterface):
                         <span class="job-detail-label">Job ID</span>
                         <span class="job-detail-value">
                             <span class="job-id-full">
-                                ${{job.job_id}}
-                                <button class="copy-btn" onclick="event.stopPropagation(); copyToClipboard('${{job.job_id}}', this)">📋 Copy</button>
+                                ${{escapeHtml(job.job_id || '')}}
+                                <button class="copy-btn" onclick="event.stopPropagation(); copyToClipboard('${{escapeHtml(job.job_id || '')}}', this)">📋 Copy</button>
                             </span>
                         </span>
                     </div>
                     <div class="job-detail-row">
                         <span class="job-detail-label">Job Type</span>
-                        <span class="job-detail-value">${{job.job_type}}</span>
+                        <span class="job-detail-value">${{escapeHtml(job.job_type || '')}}</span>
                     </div>
                     <div class="job-detail-row">
                         <span class="job-detail-label">Timestamps</span>
@@ -4076,7 +4089,7 @@ class TasksInterface(BaseInterface):
             const stages = Object.keys(tasksByStage).sort((a, b) => parseInt(a) - parseInt(b));
 
             let html = `
-                <div class="workflow-title">${{job.job_type}} Workflow</div>
+                <div class="workflow-title">${{escapeHtml(job.job_type)}} Workflow</div>
                 <div class="workflow-stages">
             `;
 
@@ -4099,7 +4112,7 @@ class TasksInterface(BaseInterface):
                     <div class="stage-box ${{stageStatus}}" onclick="scrollToStage(${{stageNum}})">
                         <div class="stage-number">${{stageNum}}</div>
                         <div class="stage-name">Stage ${{stageNum}}</div>
-                        <div class="stage-task-type">${{stageCounts.taskType || 'unknown'}}</div>
+                        <div class="stage-task-type">${{escapeHtml(stageCounts.taskType || 'unknown')}}</div>
                         <div class="stage-counts">
                 `;
 
@@ -4291,7 +4304,7 @@ class TasksInterface(BaseInterface):
                         <div class="docker-progress-bar-fill ${{barClass}}" style="width: ${{progressPercent}}%"></div>
                     </div>
                     <div class="docker-progress-status">
-                        <span class="docker-progress-message">${{progressMessage || (isComplete ? 'Complete' : 'Waiting for progress update...')}}</span>
+                        <span class="docker-progress-message">${{escapeHtml(progressMessage || (isComplete ? 'Complete' : 'Waiting for progress update...'))}}</span>
                         <span class="docker-progress-percent ${{percentClass}}">${{progressPercent.toFixed(0)}}%</span>
                     </div>
                     ${{updatedText ? `<div class="docker-progress-updated">${{updatedText}}</div>` : ''}}
@@ -4364,7 +4377,7 @@ class TasksInterface(BaseInterface):
                                 <span class="stage-number-badge">${{stage}}</span>
                                 <div>
                                     <h4>Stage ${{stage}}</h4>
-                                    <span class="task-type-label">${{taskType}}</span>
+                                    <span class="task-type-label">${{escapeHtml(taskType)}}</span>
                                 </div>
                                 ${{durationBadge}}
                             </div>
@@ -4447,8 +4460,8 @@ class TasksInterface(BaseInterface):
                                     <div class="errors-list">
                                         ${{failedTasks.slice(0, 3).map(t => `
                                             <div class="error-item">
-                                                <span class="error-task-id">${{t.task_id.substring(0, 8)}}...</span>
-                                                <span class="error-message">${{(t.error_details || 'Unknown error').substring(0, 100)}}${{(t.error_details || '').length > 100 ? '...' : ''}}</span>
+                                                <span class="error-task-id">${{escapeHtml(t.task_id.substring(0, 8))}}...</span>
+                                                <span class="error-message">${{escapeHtml((t.error_details || 'Unknown error').substring(0, 100))}}${{(t.error_details || '').length > 100 ? '...' : ''}}</span>
                                             </div>
                                         `).join('')}}
                                         ${{failedTasks.length > 3 ? `<div class="error-more">+ ${{failedTasks.length - 3}} more errors</div>` : ''}}
@@ -4964,7 +4977,7 @@ class TasksInterface(BaseInterface):
                             <div class="swimlane-stage-num ${{statusClass}}">
                                 ${{statusClass === 'completed' ? '✓' : stageNum}}
                             </div>
-                            <span class="swimlane-stage-name">${{formatStageName(stageName)}}</span>
+                            <span class="swimlane-stage-name">${{escapeHtml(formatStageName(stageName))}}</span>
                             ${{duration ? `<span class="swimlane-stage-time">${{duration}}</span>` : ''}}
                         </div>
                         <div class="swimlane-events">
@@ -5003,9 +5016,9 @@ class TasksInterface(BaseInterface):
                 const duration = event.duration_ms ? ` (${{event.duration_ms}}ms)` : '';
 
                 return `
-                    <span class="event-chip ${{event.event_type}}" title="${{label}}${{duration}}">
+                    <span class="event-chip ${{event.event_type}}" title="${{escapeHtml(label + duration)}}">
                         <span class="event-chip-icon">${{icon}}</span>
-                        ${{shortLabel}}
+                        ${{escapeHtml(shortLabel)}}
                     </span>
                     ${{arrow}}
                 `;
@@ -5143,9 +5156,9 @@ class TasksInterface(BaseInterface):
                 const componentDisplay = log.component || log.component_type || '-';
 
                 row.innerHTML = `
-                    <td><span class="log-timestamp">${{timeStr}}</span></td>
-                    <td><span class="log-level ${{levelClass}}">${{log.level}}</span></td>
-                    <td><span class="log-component">${{componentDisplay}}</span></td>
+                    <td><span class="log-timestamp">${{escapeHtml(timeStr)}}</span></td>
+                    <td><span class="log-level ${{levelClass}}">${{escapeHtml(log.level)}}</span></td>
+                    <td><span class="log-component">${{escapeHtml(componentDisplay)}}</span></td>
                     <td>${{stageHtml}}</td>
                     <td><span class="log-message">${{escapeHtml(log.message)}}</span></td>
                 `;
@@ -5421,7 +5434,7 @@ class TasksInterface(BaseInterface):
                 container.innerHTML = `
                     <div class="approval-panel">
                         <h4>Approval</h4>
-                        <div class="approval-result error">Failed to load approval state: ${{err.message}}</div>
+                        <div class="approval-result error">Failed to load approval state: ${{escapeHtml(err.message)}}</div>
                     </div>
                 `;
             }}
@@ -5442,15 +5455,15 @@ class TasksInterface(BaseInterface):
                 <div class="approval-status-row">
                     <div class="approval-status-item">
                         <span class="approval-status-label">Approval Status</span>
-                        <span class="approval-badge ${{approvalState}}">${{approvalState.replace(/_/g, ' ')}}</span>
+                        <span class="approval-badge ${{approvalState}}">${{escapeHtml(approvalState.replace(/_/g, ' '))}}</span>
                     </div>
                     <div class="approval-status-item">
                         <span class="approval-status-label">Processing</span>
-                        <span class="approval-status-value">${{processingStatus}}</span>
+                        <span class="approval-status-value">${{escapeHtml(processingStatus)}}</span>
                     </div>
                     <div class="approval-status-item">
                         <span class="approval-status-label">Asset</span>
-                        <span class="approval-status-value" style="font-family: monospace; font-size: 12px;">${{job.asset_id.substring(0, 12)}}...</span>
+                        <span class="approval-status-value" style="font-family: monospace; font-size: 12px;">${{escapeHtml(job.asset_id.substring(0, 12))}}...</span>
                     </div>
                     ${{isDraft ? `
                     <div class="approval-status-item">
@@ -5469,15 +5482,15 @@ class TasksInterface(BaseInterface):
                 html += `
                     <div class="approval-readonly">
                         <strong>Approved</strong>
-                        ${{reviewer ? ` by ${{reviewer}}` : ''}}
+                        ${{reviewer ? ` by ${{escapeHtml(reviewer)}}` : ''}}
                         ${{approvedAt ? ` on ${{new Date(approvedAt).toLocaleString()}}` : ''}}
-                        ${{clearance ? ` — Clearance: ${{clearance}}` : ''}}
+                        ${{clearance ? ` — Clearance: ${{escapeHtml(clearance)}}` : ''}}
                     </div>
                 `;
                 if (state.can_revoke) {{
                     html += `
                         <div class="approval-actions">
-                            <button class="approval-btn approval-btn-revoke" onclick="executeRevoke('${{job.asset_id}}')">
+                            <button class="approval-btn approval-btn-revoke" onclick="executeRevoke('${{escapeHtml(job.asset_id)}}')">
                                 Revoke Approval
                             </button>
                         </div>
@@ -5496,9 +5509,9 @@ class TasksInterface(BaseInterface):
                 html += `
                     <div class="approval-readonly">
                         <strong>Rejected</strong>
-                        ${{rejReviewer ? ` by ${{rejReviewer}}` : ''}}
+                        ${{rejReviewer ? ` by ${{escapeHtml(rejReviewer)}}` : ''}}
                         ${{rejAt ? ` on ${{new Date(rejAt).toLocaleString()}}` : ''}}
-                        ${{rejReason ? `<br>Reason: ${{rejReason}}` : ''}}
+                        ${{rejReason ? `<br>Reason: ${{escapeHtml(rejReason)}}` : ''}}
                     </div>
                 `;
                 html += `</div>`;
@@ -5512,7 +5525,7 @@ class TasksInterface(BaseInterface):
                 html += `
                     <div class="approval-readonly">
                         <strong>Revoked</strong>
-                        ${{revReviewer ? ` by ${{revReviewer}}` : ''}}
+                        ${{revReviewer ? ` by ${{escapeHtml(revReviewer)}}` : ''}}
                     </div>
                 `;
                 html += `</div>`;
@@ -5659,7 +5672,7 @@ class TasksInterface(BaseInterface):
                 setTimeout(() => loadData(), 1500);
 
             }} catch (err) {{
-                resultArea.innerHTML = `<div class="approval-result error">Approval failed: ${{err.message}}</div>`;
+                resultArea.innerHTML = `<div class="approval-result error">Approval failed: ${{escapeHtml(err.message)}}</div>`;
                 btn.disabled = false;
                 btn.textContent = 'Approve';
             }}
@@ -5702,7 +5715,7 @@ class TasksInterface(BaseInterface):
                 setTimeout(() => loadData(), 1500);
 
             }} catch (err) {{
-                resultArea.innerHTML = `<div class="approval-result error">Rejection failed: ${{err.message}}</div>`;
+                resultArea.innerHTML = `<div class="approval-result error">Rejection failed: ${{escapeHtml(err.message)}}</div>`;
                 btn.disabled = false;
                 btn.textContent = 'Reject';
             }}

@@ -203,10 +203,10 @@ def unified_interface_handler(req: func.HttpRequest) -> func.HttpResponse:
             # HTMX partial update - return HTML fragment
             source = "HTMX" if is_htmx else "fragment param"
             logger.info(f"🔄 {source} partial: {interface_name}/{fragment}")
-            html = interface.htmx_partial(req, fragment)
+            html_content = interface.htmx_partial(req, fragment)
 
             return func.HttpResponse(
-                html,
+                html_content,
                 mimetype="text/html",
                 status_code=200,
                 headers={"Content-Security-Policy": "frame-ancestors *"}
@@ -214,7 +214,7 @@ def unified_interface_handler(req: func.HttpRequest) -> func.HttpResponse:
 
         # Full page render
         logger.info(f"🌐 Rendering interface: {interface_name}")
-        html = interface.render(req)
+        html_content = interface.render(req)
 
         logger.info(f"✅ Successfully rendered interface: {interface_name}")
 
@@ -226,7 +226,7 @@ def unified_interface_handler(req: func.HttpRequest) -> func.HttpResponse:
         }
 
         return func.HttpResponse(
-            html,
+            html_content,
             mimetype="text/html",
             status_code=200,
             headers=response_headers

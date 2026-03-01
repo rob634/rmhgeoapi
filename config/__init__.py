@@ -46,7 +46,7 @@ Usage:
 # ============================================================================
 # Semantic versioning follows MAJOR.MINOR.PATCH.BUILD
 # V0.9 - Asset and Release data models and semantic versioning workflows
-__version__ = "0.9.10.1"
+__version__ = "0.9.11.1"
 
 import threading
 from typing import Optional

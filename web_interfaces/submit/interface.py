@@ -107,7 +107,8 @@ class UnifiedSubmitInterface(BaseInterface):
             return '<option value="">Select zone first</option>'
 
         if zone not in VALID_ZONES:
-            return f'<option value="">Invalid zone: {zone}</option>'
+            import html as html_mod
+            return f'<option value="">Invalid zone: {html_mod.escape(zone)}</option>'
 
         try:
             from infrastructure.blob import BlobRepository
@@ -118,7 +119,8 @@ class UnifiedSubmitInterface(BaseInterface):
             if not containers:
                 return '<option value="">No containers in zone</option>'
 
-            options = [f'<option value="{c["name"]}">{c["name"]}</option>' for c in containers]
+            import html as html_mod
+            options = [f'<option value="{html_mod.escape(c["name"])}">{html_mod.escape(c["name"])}</option>' for c in containers]
             return '\n'.join(options)
 
         except Exception as e:
@@ -192,6 +194,15 @@ class UnifiedSubmitInterface(BaseInterface):
                 short_name = name.split('/')[-1] if '/' in name else name
                 ext = short_name.split('.')[-1].upper() if '.' in short_name else 'File'
 
+                # XSS Fix (COMPETE Run 19): escape blob names for HTML and JS contexts
+                import html as html_mod
+                safe_name = html_mod.escape(name, quote=True)
+                safe_short = html_mod.escape(short_name, quote=True)
+                # For onclick JS context: JS-escape first, then HTML-escape the result
+                js_safe_name = html_mod.escape(self._js_escape(name), quote=True)
+                js_safe_container = html_mod.escape(self._js_escape(container), quote=True)
+                js_safe_zone = html_mod.escape(self._js_escape(zone), quote=True)
+
                 # Size styling
                 size_class = 'file-size'
                 if size_mb > 1024:
@@ -200,15 +211,15 @@ class UnifiedSubmitInterface(BaseInterface):
                 if is_collection:
                     # Multi-select with checkboxes
                     row = f'''
-                    <tr class="file-row" data-blob="{name}" data-size="{size_mb:.2f}">
+                    <tr class="file-row" data-blob="{safe_name}" data-size="{size_mb:.2f}">
                         <td class="checkbox-cell">
                             <input type="checkbox" class="file-checkbox"
-                                   data-blob="{name}"
+                                   data-blob="{safe_name}"
                                    data-size="{size_mb:.2f}"
                                    onchange="updateCollectionSelection()">
                         </td>
                         <td>
-                            <div class="file-name" title="{name}">{short_name}</div>
+                            <div class="file-name" title="{safe_name}">{safe_short}</div>
                         </td>
                         <td>
                             <span class="{size_class}">{size_mb:.2f} MB</span>
@@ -224,11 +235,11 @@ class UnifiedSubmitInterface(BaseInterface):
                     # Single-select (click row)
                     row = f'''
                     <tr class="file-row"
-                        onclick="selectFile('{name}', '{container}', '{zone}', {size_mb:.2f})"
-                        data-blob="{name}"
+                        onclick="selectFile('{js_safe_name}', '{js_safe_container}', '{js_safe_zone}', {size_mb:.2f})"
+                        data-blob="{safe_name}"
                         data-size="{size_mb:.2f}">
                         <td>
-                            <div class="file-name" title="{name}">{short_name}</div>
+                            <div class="file-name" title="{safe_name}">{safe_short}</div>
                         </td>
                         <td>
                             <span class="{size_class}">{size_mb:.2f} MB</span>
@@ -264,13 +275,15 @@ class UnifiedSubmitInterface(BaseInterface):
 
     def _render_files_error(self, message: str) -> str:
         """Render error state for files table."""
+        import html as html_mod
+        safe_msg = html_mod.escape(str(message))
         return f'''
         <tr>
             <td colspan="5">
                 <div class="error-state" style="margin: 0; box-shadow: none;">
                     <div class="icon" style="font-size: 48px;">⚠️</div>
                     <h3>Error Loading Files</h3>
-                    <p>{message}</p>
+                    <p>{safe_msg}</p>
                 </div>
             </td>
         </tr>
@@ -564,9 +577,10 @@ class UnifiedSubmitInterface(BaseInterface):
 
             warnings_html = ""
             if warnings:
+                import html as html_mod
                 warnings_html = '<div class="validation-warnings">'
                 for w in warnings:
-                    warnings_html += f'<div class="warning-item">⚠️ {w}</div>'
+                    warnings_html += f'<div class="warning-item">⚠️ {html_mod.escape(str(w))}</div>'
                 warnings_html += '</div>'
 
             return f'''
@@ -585,9 +599,10 @@ class UnifiedSubmitInterface(BaseInterface):
             title = "Validation Failed"
             status_class = "error"
 
+            import html as html_mod
             warnings_html = '<div class="validation-errors">'
             for w in warnings:
-                warnings_html += f'<div class="error-item">{w}</div>'
+                warnings_html += f'<div class="error-item">{html_mod.escape(str(w))}</div>'
             warnings_html += '</div>'
 
             return f'''
@@ -793,9 +808,10 @@ class UnifiedSubmitInterface(BaseInterface):
 
     def _render_submit_success(self, result: dict, payload: dict, data_type: str) -> str:
         """Render successful submission result."""
-        request_id = result.get('request_id', 'N/A')
-        job_id = result.get('job_id', 'N/A')
-        job_type = result.get('job_type', 'unknown')
+        import html as html_mod
+        request_id = html_mod.escape(str(result.get('request_id', 'N/A')))
+        job_id = html_mod.escape(str(result.get('job_id', 'N/A')))
+        job_type = html_mod.escape(str(result.get('job_type', 'unknown')))
         status = result.get('status', 'accepted')
 
         if status == 'exists':
@@ -806,7 +822,14 @@ class UnifiedSubmitInterface(BaseInterface):
         file_name = payload.get('file_name', 'N/A')
         file_count = len(file_name) if isinstance(file_name, list) else 1
 
-        data_type_display = data_type.replace('_', ' ').title()
+        data_type_display = html_mod.escape(data_type.replace('_', ' ').title())
+        safe_dataset = html_mod.escape(str(payload.get('dataset_id', '')))
+        safe_resource = html_mod.escape(str(payload.get('resource_id', '')))
+        safe_version = html_mod.escape(str(payload.get('version_id', '(draft)')))
+        # For href: job_id already escaped for HTML, use url-safe version
+        job_id_raw = str(result.get('job_id', ''))
+        import urllib.parse
+        url_safe_job_id = urllib.parse.quote(job_id_raw, safe='')
 
         return f'''
         <div class="submit-result success">
@@ -831,7 +854,7 @@ class UnifiedSubmitInterface(BaseInterface):
                 </div>
                 <div class="detail-row">
                     <span class="detail-label">DDH Identifier</span>
-                    <span class="detail-value">{payload.get('dataset_id')}/{payload.get('resource_id')}/{payload.get('version_id', '(draft)')}</span>
+                    <span class="detail-value">{safe_dataset}/{safe_resource}/{safe_version}</span>
                 </div>
                 <div class="detail-row">
                     <span class="detail-label">File(s)</span>
@@ -839,7 +862,7 @@ class UnifiedSubmitInterface(BaseInterface):
                 </div>
             </div>
             <div class="result-actions">
-                <a href="/api/interface/status?job_id={job_id}" class="btn btn-primary">Workflow Monitor</a>
+                <a href="/api/interface/status?job_id={url_safe_job_id}" class="btn btn-primary">Workflow Monitor</a>
                 <button onclick="resetForm()" class="btn btn-secondary">Submit Another</button>
             </div>
         </div>
@@ -847,11 +870,13 @@ class UnifiedSubmitInterface(BaseInterface):
 
     def _render_submit_error(self, message: str) -> str:
         """Render submission error."""
+        import html as html_mod
+        safe_msg = html_mod.escape(str(message))
         return f'''
         <div class="submit-result error">
             <div class="result-icon">❌</div>
             <h3>Submission Failed</h3>
-            <p class="error-message">{message}</p>
+            <p class="error-message">{safe_msg}</p>
             <button onclick="dismissError()" class="btn btn-secondary">
                 Dismiss
             </button>

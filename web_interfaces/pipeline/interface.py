@@ -699,7 +699,7 @@ class PipelineInterface(BaseInterface):
 
             if (jobs.length === 0) {
                 const hoursText = queryInfo?.hours_back === 'all' ? 'any time' : `last ${queryInfo?.hours_back || 168} hours`;
-                const schemaText = queryInfo?.schema ? ` in schema '${queryInfo.schema}'` : '';
+                const schemaText = queryInfo?.schema ? ` in schema '${escapeHtml(queryInfo.schema)}'` : '';
                 tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 2rem;">
                     No jobs found${schemaText} (${hoursText}).<br>
                     <span style="font-size: 12px; color: #666;">Try selecting "All time" or submit a test job.</span>
@@ -715,13 +715,19 @@ class PipelineInterface(BaseInterface):
                 const jobIdShort = jobId ? jobId.substring(0, 8) : '--';
                 const createdAt = formatDateTime(job.created_at);
 
-                // Task counts
+                // Task counts (numeric, safe for innerHTML)
                 const taskCounts = job.task_counts || { queued: 0, processing: 0, completed: 0, failed: 0 };
 
+                // XSS Fix (COMPETE Run 19): escape API response fields before innerHTML
+                const safeJobId = escapeHtml(jobId || '');
+                const safeJobIdShort = escapeHtml(jobIdShort);
+                const safeJobType = escapeHtml(job.job_type || '--');
+                const safeStatus = escapeHtml(job.status || 'unknown');
+
                 row.innerHTML = `
-                    <td><span class="job-id-short" title="${jobId}">${jobIdShort}</span></td>
-                    <td>${job.job_type || '--'}</td>
-                    <td><span class="status-badge status-${job.status || 'unknown'}">${job.status || 'unknown'}</span></td>
+                    <td><span class="job-id-short" title="${safeJobId}">${safeJobIdShort}</span></td>
+                    <td>${safeJobType}</td>
+                    <td><span class="status-badge status-${safeStatus}">${safeStatus}</span></td>
                     <td><span class="stage-badge">Stage ${job.stage || 0}/${job.total_stages || '?'}</span></td>
                     <td>
                         <div class="task-summary">
@@ -733,7 +739,7 @@ class PipelineInterface(BaseInterface):
                     </td>
                     <td>${createdAt}</td>
                     <td>
-                        <a href="/api/interface/status?job_id=${jobId}" class="btn btn-sm btn-primary">View Status</a>
+                        <a href="/api/interface/status?job_id=${encodeURIComponent(jobId)}" class="btn btn-sm btn-primary">View Status</a>
                     </td>
                 `;
 

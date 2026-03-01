@@ -2203,6 +2203,30 @@ class BaseInterface(ABC):
         """
 
     # ========================================================================
+    # OUTPUT ENCODING HELPERS - XSS prevention (COMPETE Run 19, 01 MAR 2026)
+    # ========================================================================
+
+    @staticmethod
+    def _js_escape(value: str) -> str:
+        """
+        Escape a string for safe embedding in a JavaScript single-quoted literal.
+
+        Handles: backslash, quotes, angle brackets (to prevent </script> breakout),
+        newlines, carriage returns.
+        """
+        if not value:
+            return ''
+        return (value
+                .replace('\\', '\\\\')
+                .replace("'", "\\'")
+                .replace('"', '\\"')
+                .replace('<', '\\x3c')
+                .replace('>', '\\x3e')
+                .replace('\n', '\\n')
+                .replace('\r', '\\r')
+                .replace('\0', ''))
+
+    # ========================================================================
     # COMPONENT HELPERS - Reusable HTML components (S12.1.3)
     # ========================================================================
 

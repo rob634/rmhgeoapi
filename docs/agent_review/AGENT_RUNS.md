@@ -346,6 +346,7 @@ All pipeline executions in chronological order.
 | **Agents** | R → F → P → J (sequential) |
 | **Root Cause** | SQL references `r.table_name` — column removed from `asset_releases` on 26 FEB 2026, moved to `release_tables` |
 | **Patches** | 2 (1 CRITICAL approved, 1 HIGH approved with modifications) |
+| **Patches Applied** | **YES** — both patches verified in codebase (v0.9.10.1) |
 | **Residual Faults** | 8 (F-3 through F-10, MEDIUM/LOW, deferred) |
 | **Output** | `agent_docs/REFLEXION_SG3.md` |
 
@@ -379,6 +380,7 @@ All pipeline executions in chronological order.
 | **Agents** | R → F → P → J (sequential) |
 | **Root Cause** | Three-bug cascade: `/vsiaz/` href misparse + missing return field + silent idempotent success |
 | **Patches** | 3 (1 CRITICAL, 1 HIGH, 1 MEDIUM — all approved) |
+| **Patches Applied** | **YES** — all 3 patches verified in codebase (v0.9.10.1) |
 | **Residual Risks** | 4 (zarr finalize gap, Bug C unpatched, no integration test, dry-run inconsistency) |
 | **Output** | `agent_docs/REFLEXION_SG5.md` |
 
@@ -413,6 +415,7 @@ All pipeline executions in chronological order.
 | **Agents** | R → F → P → J (combined run) |
 | **Root Cause** | 2 independent revocation SQL paths both missing `is_served = false` |
 | **Patches** | 2 (both ACCEPTED) |
+| **Patches Applied** | **YES** — both patches verified in codebase (v0.9.10.1) |
 | **Output** | `agent_docs/REFLEXION_SG22.md` |
 
 **Token Usage**:
@@ -442,6 +445,7 @@ All pipeline executions in chronological order.
 | **Agents** | R → F → P → J (combined run) |
 | **Root Cause** | pgSTAC stores `id`, `collection`, `geometry` in separate columns; `content` JSONB alone is not a valid STAC item. Correct reconstitution pattern existed in `pgstac_bootstrap.py` since 13 NOV 2025 but was not propagated to `PgStacRepository`. |
 | **Patches** | 3 (all ACCEPTED) |
+| **Patches Applied** | **YES** — all 3 patches verified in codebase (v0.9.10.1) |
 | **Output** | `agent_docs/REFLEXION_SG23.md` |
 
 **Token Usage**:

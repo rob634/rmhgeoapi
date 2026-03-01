@@ -123,7 +123,7 @@ deploy_docker() {
     az webapp config container set \
         --name $DOCKER_APP \
         --resource-group $RESOURCE_GROUP \
-        --docker-custom-image-name "$ACR_REGISTRY.azurecr.io/$ACR_REPO:$VERSION"
+        --container-image-name "$ACR_REGISTRY.azurecr.io/$ACR_REPO:$VERSION"
 
     # Restart
     echo ""

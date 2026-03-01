@@ -229,7 +229,8 @@ class UnpublishRasterJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                     "original_job_id": original_job_id,
                     "original_job_type": original_job_type,
                     "original_parameters": None,  # Not stored in STAC item
-                    "blobs_deleted": blobs_deleted
+                    "blobs_deleted": blobs_deleted,
+                    "stac_item_snapshot": stac_item,
                 }
             }]
 

@@ -139,7 +139,9 @@ def platform_unpublish(req: func.HttpRequest) -> func.HttpResponse:
 
         logger.info(f"Unpublish: data_type={data_type}, dry_run={dry_run}, params={resolved_params}")
 
-        # Delegate to appropriate handler based on data type
+        # Delegate to appropriate handler based on data type.
+        # data_type is a normalized string from normalize_data_type(), not a
+        # DataType enum — string comparison is intentional here (V-11).
         if data_type == "vector":
             response = _execute_vector_unpublish(
                 table_name=resolved_params.get('table_name'),
@@ -370,14 +372,24 @@ def _execute_vector_unpublish(
     platform_repo = PlatformRepository()
     unpublish_request_id = generate_unpublish_request_id("vector", table_name)
 
-    # Check for existing (idempotent)
+    # Check for existing with retry support (matches raster pattern)
     existing = platform_repo.get_request(unpublish_request_id)
+    is_retry = False
     if existing:
-        return idempotent_response(
-            request_id=unpublish_request_id,
-            job_id=existing.job_id,
-            data_type="vector"
-        )
+        job_repo = JobRepository()
+        existing_job = job_repo.get_job(existing.job_id)
+
+        if existing_job and existing_job.status == JobStatus.FAILED:
+            is_retry = True
+            logger.info(f"Previous vector unpublish failed, allowing retry: {unpublish_request_id[:16]}")
+        else:
+            job_status = existing_job.status.value if existing_job else "unknown"
+            return idempotent_response(
+                request_id=unpublish_request_id,
+                job_id=existing.job_id,
+                job_status=job_status,
+                data_type="vector"
+            )
 
     # Submit job
     job_params = {
@@ -400,15 +412,18 @@ def _execute_vector_unpublish(
         job_id=job_id,
         data_type="unpublish_vector"
     )
-    platform_repo.create_request(api_request)
+    created_request = platform_repo.create_request(api_request, is_retry=is_retry)
 
-    logger.info(f"Vector unpublish submitted: {unpublish_request_id[:16]} → job {job_id[:16]}")
+    retry_msg = f" (retry #{created_request.retry_count})" if is_retry else ""
+    logger.info(f"Vector unpublish submitted{retry_msg}: {unpublish_request_id[:16]} → job {job_id[:16]}")
 
     return unpublish_accepted(
         request_id=unpublish_request_id,
         job_id=job_id,
         data_type="vector",
         dry_run=dry_run,
+        message=f"Vector unpublish job submitted{retry_msg} (dry_run={dry_run})",
+        is_retry=is_retry,
         table_name=table_name
     )
 

@@ -42,16 +42,14 @@ logger = LoggerFactory.create_logger(ComponentType.SERVICE, "handler_virtualzarr
 # HELPERS
 # =============================================================================
 
+# Consolidate: _get_silver_netcdf_container lives in jobs/virtualzarr.py (V-8)
+from jobs.virtualzarr import _get_silver_netcdf_container
+
+
 def _get_storage_account() -> str:
     """Get silver storage account name from config."""
     from config import get_config
     return get_config().storage.silver.account_name
-
-
-def _get_silver_netcdf_container() -> str:
-    """Get the silver-netcdf container name from config."""
-    from config import get_config
-    return get_config().storage.silver.netcdf
 
 
 def _get_blob_fs():
@@ -152,7 +150,8 @@ def virtualzarr_scan(
             total_size_bytes = file_size
             logger.info(f"virtualzarr_scan: Single file mode — {filename}")
         else:
-            # Multi-file mode — list blobs under the prefix
+            # Multi-file mode — list blobs under the prefix.
+            # Azure SDK list_blobs() recurses into subdirectories by default (V-6).
             blob_list = blob_repo.list_blobs(source_container, prefix=source_prefix)
 
             matched_files = []
@@ -571,6 +570,10 @@ def virtualzarr_combine(
         from virtualizarr import open_virtual_dataset
 
         from infrastructure import BlobRepository
+
+        # Two auth patterns, one credential source (BlobRepository singleton):
+        # - Raw account_name/credential for open_virtual_dataset storage_options
+        # - fsspec filesystem (_get_blob_fs) for direct file reads (manifest)
         repo = BlobRepository.for_zone("silver")
         account_name = repo.account_name
         credential = repo.credential
@@ -671,7 +674,6 @@ def virtualzarr_combine(
             combined.virtualize.to_kerchunk(tmp_path, format="json")
             with open(tmp_path, 'rb') as f:
                 ref_data = f.read()
-            from infrastructure import BlobRepository
             silver_repo = BlobRepository.for_zone("silver")
             parts = combined_path.split("/", 1)
             container = parts[0]

@@ -208,6 +208,20 @@ class VirtualZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
     }
 
     # ========================================================================
+    # JOB-SPECIFIC LOGIC: Parameter Validation (V-7)
+    # ========================================================================
+    @classmethod
+    def validate_job_parameters(cls, params: dict) -> dict:
+        """Validate job parameters with source_url prefix check."""
+        validated = super().validate_job_parameters(params)
+        source_url = validated.get("source_url", "")
+        if not source_url.startswith("abfs://"):
+            raise ValueError(
+                f"source_url must start with 'abfs://', got: '{source_url}'"
+            )
+        return validated
+
+    # ========================================================================
     # JOB-SPECIFIC LOGIC: Task Creation
     # ========================================================================
     @staticmethod

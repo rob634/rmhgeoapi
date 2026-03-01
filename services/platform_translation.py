@@ -46,6 +46,12 @@ def normalize_data_type(data_type: str) -> Optional[str]:
     """
     Normalize data_type to 'vector', 'raster', or 'zarr'.
 
+    Recognizes variant forms:
+        - Vector: 'vector', 'unpublish_vector', 'process_vector'
+        - Raster: 'raster', 'unpublish_raster', 'process_raster',
+                  'process_raster_v2', 'process_raster_docker'
+        - Zarr: 'zarr', 'virtualzarr', 'unpublish_zarr'
+
     Args:
         data_type: Raw data type string from various sources
 

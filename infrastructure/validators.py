@@ -1180,8 +1180,13 @@ def validate_stac_item_exists(params: Dict[str, Any], config: Dict[str, Any]) ->
                     params['_stac_item_assets'] = content.get('assets', {})
 
                     # Extract original job ID if available (for idempotency fix)
+                    # Forward ETL writes geoetl:job_id (APP_PREFIX="geoetl"), legacy items may use older keys
                     properties = content.get('properties', {})
-                    original_job_id = properties.get('processing:job_id') or properties.get('etl_job_id')
+                    original_job_id = (
+                        properties.get('geoetl:job_id')
+                        or properties.get('processing:job_id')
+                        or properties.get('etl_job_id')
+                    )
                     if original_job_id:
                         params['_stac_original_job_id'] = original_job_id
 

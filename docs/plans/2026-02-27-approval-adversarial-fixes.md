@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Fix the 5 bugs identified by the adversarial review of the approval workflow (see `docs/agent_review/APPROVAL_WORKFLOW.md`).
+**Goal:** Fix the 5 bugs identified by the adversarial review of the approval workflow (see `docs/agent_review/REVIEW_SUMMARY.md`, formerly `APPROVAL_WORKFLOW.md`).
 
 **Architecture:** All fixes are surgical patches. Tasks 2-4 are mechanical edits. Task 1 is the only one that touches two modules (materialization + dematerialization). Task 5 adds a try/except wrapper. No new modules, no new tables, no schema migrations.
 
@@ -448,4 +448,4 @@ conda run -n azgeo pytest tests/ -v --tb=short
 conda run -n azgeo pytest tests/ -v --tb=short 2>&1 | grep -E "FAILED|ERROR|passed"
 ```
 
-Update `docs/agent_review/APPROVAL_WORKFLOW.md` to mark fixes as RESOLVED with commit hashes.
+Update `docs/agent_review/REVIEW_SUMMARY.md` (formerly `APPROVAL_WORKFLOW.md`) — fixes already marked RESOLVED.

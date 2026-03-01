@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Fix the 5 bugs identified by the adversarial review of `/api/platform/submit` (see `docs/agent_review/SUBMISSION.md`).
+**Goal:** Fix the 5 bugs identified by the adversarial review of `/api/platform/submit` (see `docs/agent_review/REVIEW_SUMMARY.md`, formerly `SUBMISSION.md`).
 
 **Architecture:** All fixes are surgical — model guard, repository UPDATE, trigger one-liner, and error message sanitization. No new modules, no new patterns. TDD: write the failing test first, then fix.
 
@@ -429,7 +429,7 @@ Add entry to `ADVERSARIAL_ANALYSIS_HISTORY.md`:
 ### 4. Platform Submit Workflow (26 FEB 2026)
 - **Scope**: 12 files, ~6,700 LOC — submit endpoint, Asset/Release lifecycle, translation layer
 - **Pipeline**: Omega → Alpha + Beta (parallel) → Gamma → Delta
-- **Report**: `docs/agent_review/SUBMISSION.md`
+- **Report**: `docs/agent_review/REVIEW_SUMMARY.md` (formerly `SUBMISSION.md`)
 - **Fixes found**: 5 (1 critical, 3 high, 1 medium)
 - **Fixes applied**: 5/5
 ```

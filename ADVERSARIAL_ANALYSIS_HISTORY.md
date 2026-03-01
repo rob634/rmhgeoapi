@@ -50,7 +50,7 @@
 
 ## Platform Submit Workflow — 26 FEB 2026
 
-**Source**: `docs/agent_review/SUBMISSION.md`
+**Source**: `docs/agent_review/REVIEW_SUMMARY.md` (formerly `SUBMISSION.md`)
 **Pipeline**: Omega → Alpha + Beta → Gamma → Delta
 **Scope**: 12 files, ~6,700 LOC — submit endpoint, Asset/Release lifecycle, translation layer
 **Result**: 5 of 5 actionable findings RESOLVED. 286 tests passing, zero regressions.

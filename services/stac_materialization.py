@@ -152,6 +152,22 @@ class STACMaterializer:
         now_iso = datetime.now(timezone.utc).isoformat()
 
         # =================================================================
+        # VECTOR RELEASES — Vector data does not go in STAC (01 MAR 2026 design decision)
+        # Vector discovery is via PostGIS/OGC Features API, not STAC.
+        # =================================================================
+        if self._is_vector_release(release):
+            logger.info(
+                f"Skipping STAC materialization for vector release "
+                f"{release.release_id[:16]}... — vector data does not go in STAC"
+            )
+            return {
+                'success': True,
+                'skipped': True,
+                'reason': 'vector_release',
+                'message': 'Vector data uses PostGIS/OGC Features API, not STAC',
+            }
+
+        # =================================================================
         # TILED OUTPUT
         # =================================================================
         if release.output_mode == 'tiled':
@@ -162,21 +178,6 @@ class STACMaterializer:
         # =================================================================
         if release.stac_item_json and self._is_zarr_release(release):
             return self._materialize_zarr_item(release, reviewer, clearance_state, now_iso)
-
-        # =================================================================
-        # VECTOR RELEASES — not yet supported for STAC materialization
-        # =================================================================
-        if not release.blob_path and not release.stac_item_json:
-            logger.info(
-                f"Skipping STAC materialization for vector release "
-                f"{release.release_id[:16]}... (no blob_path or cached STAC JSON)"
-            )
-            return {
-                'success': True,
-                'skipped': True,
-                'reason': 'vector_release',
-                'message': 'Vector STAC materialization not yet implemented',
-            }
 
         # =================================================================
         # SINGLE COG OUTPUT
@@ -719,6 +720,30 @@ class STACMaterializer:
     # =========================================================================
     # HELPERS
     # =========================================================================
+
+    def _is_vector_release(self, release) -> bool:
+        """
+        Detect vector release from asset data_type.
+
+        Vector data does not go in STAC (01 MAR 2026 design decision).
+        Checks asset.data_type via DB lookup (cached per release).
+        """
+        try:
+            from infrastructure.asset_repository import AssetRepository
+            asset_repo = AssetRepository()
+            asset = asset_repo.get_by_id(release.asset_id)
+            if asset and asset.data_type == 'vector':
+                return True
+        except Exception as e:
+            logger.warning(f"Failed to check asset data_type for vector guard: {e}")
+        # Fallback heuristic: no blob_path AND no stac_item_json = likely vector
+        if not release.blob_path and not release.stac_item_json:
+            logger.warning(
+                f"DB lookup failed for release {release.release_id[:16]}... "
+                f"— falling back to heuristic (no blob_path, no stac_item_json)"
+            )
+            return True
+        return False
 
     def _is_zarr_release(self, release) -> bool:
         """Detect zarr release from cached STAC properties."""

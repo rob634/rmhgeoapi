@@ -265,10 +265,14 @@ def _default_platform_callback(job_id: str, job_type: str, status: str, result: 
                 if cog_url:
                     outputs['blob_path'] = cog_url
 
-                # STAC IDs if available
-                stac_item_id = extract_stac_item_id(result)
-                if stac_item_id:
-                    outputs['stac_item_id'] = stac_item_id
+                # Vector data does not go in STAC (01 MAR 2026 design decision)
+                # Vector discovery is via PostGIS/OGC Features API.
+                VECTOR_JOB_TYPES = {'process_vector', 'vector_docker_etl'}
+                if job_type not in VECTOR_JOB_TYPES:
+                    # STAC IDs if available (raster and zarr only)
+                    stac_item_id = extract_stac_item_id(result)
+                    if stac_item_id:
+                        outputs['stac_item_id'] = stac_item_id
 
                 # Note: stac_collection_id is set at release creation, not updated here
 

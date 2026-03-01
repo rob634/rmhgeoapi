@@ -338,23 +338,14 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                     platform_req.data_type == DataType.VECTOR
                     and not getattr(platform_req.processing_options, 'table_name', None)
                 ):
-                    # Vector: finalize table_name AND stac_item_id
+                    # Vector: finalize table_name only
+                    # Vector data does not go in STAC (01 MAR 2026 design decision)
                     final_table = generate_table_name(
                         platform_req.dataset_id, platform_req.resource_id,
                         version_ordinal=ordinal
                     )
-                    final_stac = generate_stac_item_id(
-                        platform_req.dataset_id, platform_req.resource_id,
-                        version_ordinal=ordinal
-                    )
                     job_params['table_name'] = final_table
-                    job_params['stac_item_id'] = final_stac
-
-                    # Still update stac_item_id on release (not a table field)
-                    asset_service.update_physical_outputs(
-                        release.release_id, stac_item_id=final_stac
-                    )
-                    logger.info(f"  Finalized vector names: table={final_table}, stac={final_stac} (ord={ordinal})")
+                    logger.info(f"  Finalized vector table_name: {final_table} (ord={ordinal})")
 
                 elif platform_req.data_type == DataType.RASTER:
                     # Raster: finalize stac_item_id (output_folder already handled in Step 6)

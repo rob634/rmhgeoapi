@@ -465,14 +465,106 @@ All pipeline executions in chronological order.
 
 ---
 
+## Run 18: Platform API Regression Verification (SIEGE)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 01 MAR 2026 |
+| **Pipeline** | SIEGE |
+| **Scope** | Full Platform API surface -- regression verification after REFLEXION Runs 14-17 (SG-3, SG-5, SG2-2, SG2-3 fixes) |
+| **Target** | `https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net` (v0.9.10.1) |
+| **Agents** | Sentinel -> Cartographer -> Lancer -> Auditor -> Scribe |
+| **Verdict** | **CONDITIONAL PASS** -- Lancer 100% pass rate (first clean sweep), 3 of 4 targeted regressions FIXED |
+| **Regressions Verified** | SG-3 FIXED, SG-5 FIXED, SG2-3 FIXED, SG2-2 INCONCLUSIVE (not exposed in API) |
+| **New Findings** | 5 (1 HIGH, 1 MEDIUM, 2 LOW, 1 INFO) |
+| **Key Discovery** | SG3-1: Vector STAC materialization writes 0 items -- vector equivalent of SG-1 |
+| **Output** | `agent_docs/SIEGE_RUN_3.md` |
+
+**Token Usage**:
+
+| Agent | Role | Tokens | Duration |
+|-------|------|--------|----------|
+| Sentinel | Campaign brief | -- | inline |
+| Cartographer | Endpoint probing | 33,062 | 1m 31s |
+| Lancer | Lifecycle execution | 71,479 | 19m 37s |
+| Auditor | State verification | 59,679 | 3m 04s |
+| Scribe | Report synthesis | ~65,000 | ~3m 00s |
+| **Total** | | **~229,220** | **~27m 12s** |
+
+**Regression Summary**:
+
+| Run 2 ID | Severity | Fixed in Run 3? | Notes |
+|----------|----------|-----------------|-------|
+| SG-3 | HIGH | **YES** | Returns 404 instead of 500 (REFLEXION Run 14) |
+| SG-5 | HIGH | **YES** | blobs_deleted=1, COG absent from storage (REFLEXION Run 15) |
+| SG2-2 | MEDIUM | **INCONCLUSIVE** | Code fix applied but is_served not exposed in API |
+| SG2-3 | MEDIUM | **YES** | All 5 STAC 1.0.0 fields present (REFLEXION Run 17) |
+
+**New Finding Summary**:
+
+| ID | Severity | Description |
+|----|----------|-------------|
+| SG3-1 | HIGH | Vector STAC materialization creates pgSTAC collection but writes 0 items -- vector datasets invisible in catalog |
+| SG3-2 | MEDIUM | Approve endpoint targets wrong release when request_id shared across versions (hash collision) |
+| SG3-3 | LOW | is_served not exposed in platform status versions array |
+| SG3-4 | LOW | Vector STAC collection description says "Raster collection" |
+| SG3-5 | INFO | Unpublish defaults to dry_run=true (safe but undocumented) |
+
+---
+
+## Run 19: Web Interface Core Workflow (COMPETE)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 01 MAR 2026 |
+| **Pipeline** | COMPETE |
+| **Scope** | Web interface core workflow — pipeline → submit → status → platform (+ base infrastructure) |
+| **Files** | 6 (~13,700 lines) |
+| **Scope Split** | B: Internal vs External |
+| **Findings** | 43 valid (6 CRITICAL, 8 HIGH, 18 MEDIUM, 11 LOW) + 1 invalidated |
+| **Fixes Proposed** | 5 (Top 5 from Delta) |
+| **Fixes Applied** | Pending |
+| **Key Discovery** | BLIND-1: Reflected XSS via URL params in JS string literals (tasks/interface.py) — trivially exploitable, no auth required |
+| **Systemic Pattern** | Zero HTML escaping in 5 of 6 files; platform/interface.py is the only safe reference |
+| **Output** | `agent_docs/COMPETE_RUN18_WEB_INTERFACE.md` |
+
+**Token Usage**:
+
+| Agent | Role | Tokens | Duration |
+|-------|------|--------|----------|
+| Alpha | Internal logic & invariants | 100,244 | 4m 48s |
+| Beta | External interfaces & security | 78,856 | 5m 02s |
+| Gamma | Contradictions & blind spots | 161,814 | 3m 35s |
+| Delta | Final report | 46,808 | 2m 28s |
+| **Total** | | **387,722** | **~15m 53s** |
+
+**Gamma Corrections**:
+
+| Original | Correction |
+|----------|-----------|
+| Alpha C2 HIGH ("dead execution link") | **INVALIDATED** — execution interface IS registered |
+| Alpha C9 MEDIUM (html shadowing) | **UPGRADED to HIGH** — causes UnboundLocalError crash in error handler |
+
+**Top 5 Fixes**:
+
+| Fix | Target | Severity | Effort |
+|-----|--------|----------|--------|
+| 1 | JS string injection in tasks `_generate_custom_js` | CRITICAL | Small |
+| 2 | Blob/container/zone escaping in submit | CRITICAL | Small |
+| 3 | `html` variable shadowing in `__init__.py` | HIGH | Small |
+| 4 | innerHTML sanitization across pipeline + tasks JS | HIGH | Medium |
+| 5 | Error message + warning escaping in submit | HIGH | Small |
+
+---
+
 ## Cumulative Token Usage
 
 | Pipeline | Runs | Total Tokens |
 |----------|------|-------------|
-| COMPETE | Runs 1-6, 9, 12 | 684,217 (Run 9: 346,656 + Run 12: 337,561; Runs 1-6 predated instrumentation) |
+| COMPETE | Runs 1-6, 9, 12, 19 | 1,071,939 (Run 9: 346,656 + Run 12: 337,561 + Run 19: 387,722; Runs 1-6 predated instrumentation) |
 | GREENFIELD | Runs 7, 8, 10 | 631,196 (Run 10 only; Runs 7-8 predated instrumentation) |
-| SIEGE | Runs 11, 13 | 430,131 (Run 11: 178,793 + Run 13: 251,338) |
+| SIEGE | Runs 11, 13, 18 | 659,351 (Run 11: 178,793 + Run 13: 251,338 + Run 18: ~229,220) |
 | REFLEXION | Runs 14, 15, 16, 17 | 631,966 (Run 14: 232,684 + Run 15: 278,900 + Run 16: 50,775 + Run 17: 69,607) |
-| **Instrumented Total** | Runs 9-17 | **2,377,510** |
+| **Instrumented Total** | Runs 9-19 | **~2,994,452** |
 
-**Note**: Runs 1-8 predated the token instrumentation described in `agents/AGENT_METRICS.md`. Per-agent token breakdowns are available for Runs 9-17.
+**Note**: Runs 1-8 predated the token instrumentation described in `agents/AGENT_METRICS.md`. Per-agent token breakdowns are available for Runs 9-19.

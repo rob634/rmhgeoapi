@@ -139,36 +139,46 @@ Root cause: pgSTAC `content` JSONB missing `id`, `collection`, `geometry` stored
 
 ---
 
-## SIEGE Bug Tracker — Cumulative Status (01 MAR 2026)
+## SIEGE Bug Tracker — Cumulative Status (01 MAR 2026, post-Run 3)
 
 ### From SIEGE Run 1 (Run 11)
 
-| ID | Severity | Description | Fixed By | Status |
-|----|----------|-------------|----------|--------|
-| SG-1 | CRITICAL | STAC materialization ordering | v0.9.10.0 | ~~FIXED~~ |
-| SG-2 | HIGH | SQL error leak on approvals/status | v0.9.10.0 | ~~FIXED~~ |
-| SG-3 | HIGH | catalog/dataset returns 500 | Run 14 (REFLEXION) | ~~FIXED~~ |
-| SG-4 | MEDIUM | Approval rollbacks not surfaced on /failures | — | INCONCLUSIVE |
-| SG-5 | HIGH | Unpublish blob deletion no-op | Run 15 (REFLEXION) | ~~FIXED~~ |
-| SG-6 | MEDIUM | Cached STAC JSON uses stale `-ord` naming | Run 12 (COMPETE analysis) | OPEN — naming sound, hygiene incomplete |
-| SG-7 | MEDIUM | is_latest not restored after rollback | v0.9.10.0 | ~~FIXED~~ |
-| SG-8 | LOW | Inconsistent lineage 404 shape | v0.9.10.0 | ~~FIXED~~ |
-| SG-9 | LOW | dbadmin/stats and diagnostics/all return 404 | — | OPEN |
-| SG-10 | LOW | /api/health takes 3.9s | — | OPEN |
-| SG-11 | LOW | Resubmit bumps revision not version | — | OPEN (by design) |
+| ID | Severity | Description | Fixed By | Verified | Status |
+|----|----------|-------------|----------|----------|--------|
+| SG-1 | CRITICAL | STAC materialization ordering (raster) | v0.9.10.0 | Run 2, Run 3 | ~~FIXED~~ |
+| SG-2 | HIGH | SQL error leak on approvals/status | v0.9.10.0 | Run 2, Run 3 | ~~FIXED~~ |
+| SG-3 | HIGH | catalog/dataset returns 500 | Run 14 (REFLEXION) | **Run 3** | ~~FIXED~~ |
+| SG-4 | MEDIUM | Approval rollbacks not surfaced on /failures | — | — | INCONCLUSIVE |
+| SG-5 | HIGH | Unpublish blob deletion no-op | Run 15 (REFLEXION) | **Run 3** | ~~FIXED~~ |
+| SG-6 | MEDIUM | Cached STAC JSON uses stale `-ord` naming | Run 12 (COMPETE analysis) | Run 3 | OPEN |
+| SG-7 | MEDIUM | is_latest not restored after rollback | v0.9.10.0 | Run 2, Run 3 | ~~FIXED~~ |
+| SG-8 | LOW | Inconsistent lineage 404 shape | v0.9.10.0 | Run 2, Run 3 | ~~FIXED~~ |
+| SG-9 | LOW | dbadmin/stats returns 404 | — | Run 3 | OPEN |
+| SG-10 | LOW | /api/health latency | — | Run 3 | IMPROVED (3.8s → 1.3s) |
+| SG-11 | LOW | Resubmit bumps revision not version | — | — | RESOLVED BY DESIGN |
 
 ### From SIEGE Run 2 (Run 13)
 
-| ID | Severity | Description | Fixed By | Status |
-|----|----------|-------------|----------|--------|
-| SG2-1 | MEDIUM | Unpublish doesn't accept release_id/version_ordinal | — | OPEN |
-| SG2-2 | MEDIUM | Revoked release retains is_served=true | Run 16 (REFLEXION) | ~~FIXED~~ |
-| SG2-3 | MEDIUM | Catalog API strips STAC 1.0.0 fields | Run 17 (REFLEXION) | ~~FIXED~~ |
-| SG2-4 | LOW | Status endpoint shows revoked release as primary | — | OPEN |
-| SG2-5 | LOW | outputs.stac_item_id shows processing-time name | — | OPEN |
-| SG2-6 | INFO | /resubmit semantics documentation gap | — | OPEN |
+| ID | Severity | Description | Fixed By | Verified | Status |
+|----|----------|-------------|----------|----------|--------|
+| SG2-1 | MEDIUM | Unpublish doesn't accept release_id/version_ordinal | — | — | OPEN |
+| SG2-2 | MEDIUM | Revoked release retains is_served=true | Run 16 (REFLEXION) | Run 3 (indirect) | ~~FIXED~~ (INCONCLUSIVE via API) |
+| SG2-3 | MEDIUM | Catalog API strips STAC 1.0.0 fields | Run 17 (REFLEXION) | **Run 3** | ~~FIXED~~ |
+| SG2-4 | LOW | Status endpoint shows revoked release as primary | — | — | OPEN |
+| SG2-5 | LOW | outputs.stac_item_id shows processing-time name | — | — | OPEN |
+| SG2-6 | INFO | /resubmit semantics documentation gap | — | — | OPEN |
 
-### Score: 10/17 fixed, 7 open (0 CRITICAL, 0 HIGH remaining)
+### From SIEGE Run 3 (Run 18)
+
+| ID | Severity | Description | Status |
+|----|----------|-------------|--------|
+| SG3-1 | ~~HIGH~~ | Vector STAC materialization creates pgSTAC collection but writes 0 items | **RESOLVED BY DESIGN** — vector does not go in STAC (01 MAR 2026 decision) |
+| SG3-2 | MEDIUM | Approve targets wrong release when request_id shared across versions | NEW — OPEN |
+| SG3-3 | LOW | is_served not exposed in platform status versions array | NEW — OPEN |
+| SG3-4 | ~~LOW~~ | Vector STAC collection description says "Raster collection" | **NOT APPLICABLE** — no vector STAC collections |
+| SG3-5 | INFO | Unpublish defaults to dry_run=true (undocumented) | NEW — OPEN |
+
+### Score: 10/22 fixed, 1 improved, 3 resolved by design, 2 inconclusive, 6 open (0 CRITICAL, 0 HIGH remaining)
 
 ---
 
@@ -188,13 +198,26 @@ These are not blocking any run but were identified across the COMPETE reviews as
 
 ## Priority Order
 
-**All REFLEXION patches (Runs 14-17) — APPLIED to codebase (v0.9.10.1)**
+**SIEGE Run 3 complete (01 MAR 2026) — CONDITIONAL PASS, 100% Lancer pass rate**
 
-**Next steps:**
-1. Deploy v0.9.10.1 and run SIEGE 3 to verify SG-3, SG-5, SG2-2, SG2-3 fixes
-2. Address remaining open items (SG-6, SG2-1, SG-9, SG-10 — all MEDIUM/LOW)
-3. Consider WARGAME or TOURNAMENT for pre-release adversarial testing
+**Design decision (01 MAR 2026): Vector data does NOT go in STAC.**
+Vector discovery is via PostGIS/OGC Features API. STAC is for raster and zarr only.
+This resolves SG3-1 (HIGH), SG3-4 (LOW), and the vector portion of SG-6 (MEDIUM).
+
+**Immediate (before SIEGE Run 4):**
+1. **Implement vector STAC exclusion** — skip STAC materialization for vector, clean up orphaned vector collections
+2. **SG3-2 (MEDIUM)**: Fix approve endpoint request_id disambiguation
+
+**Quick fixes (inline, no pipeline needed):**
+3. SG3-3: Add `is_served` to versions array serialization (~15 min)
+4. SG3-5: Document `dry_run=true` default (~10 min)
+
+**Medium priority (COMPETE):**
+5. SG-6 (raster only): Cached vs live STAC naming strategy
+6. SG2-1: Add release_id as unpublish lookup parameter
 
 **Before VirtualiZarr ship:**
-4. V-T1 — Docker dependency verification
-5. V-T2 — Handler tests
+7. V-T1 — Docker dependency verification
+8. V-T2 — Handler tests
+
+**Gate for WARGAME**: Vector STAC exclusion implemented and verified in SIEGE Run 4

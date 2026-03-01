@@ -213,69 +213,80 @@ class AssetApprovalService:
         release = self.release_repo.get_by_id(release_id)
 
         # Step 5: Post-atomic operations -- stac_item_id update + STAC materialization
-        stac_result = {'success': False, 'error': 'STAC materialization not attempted'}
+        # Vector data does not go in STAC (01 MAR 2026 design decision)
+        # Vector discovery is via PostGIS/OGC Features API.
+        from infrastructure import AssetRepository
+        asset_repo = AssetRepository()
+        asset = asset_repo.get_by_id(release.asset_id)
+        is_vector = asset and asset.data_type == 'vector'
+
+        stac_result = {'success': True, 'skipped': True, 'reason': 'vector_release'} if is_vector else {'success': False, 'error': 'STAC materialization not attempted'}
         stac_failed = False
         stac_error_msg = None
-        try:
-            # Update stac_item_id to final versioned form (draft-N -> version_id)
-            from services.platform_translation import generate_stac_item_id
-            from infrastructure import AssetRepository
-            asset_repo = AssetRepository()
-            asset = asset_repo.get_by_id(release.asset_id)
-            if asset:
-                final_stac_item_id = generate_stac_item_id(
-                    asset.dataset_id, asset.resource_id, version_id
-                )
-                if final_stac_item_id != release.stac_item_id:
-                    old_stac_item_id = release.stac_item_id
-                    self.release_repo.update_physical_outputs(
-                        release_id=release_id,
-                        stac_item_id=final_stac_item_id
-                    )
-                    logger.info(
-                        f"Updated stac_item_id: {old_stac_item_id} -> {final_stac_item_id}"
-                    )
-                    release.stac_item_id = final_stac_item_id
 
-                    # Sync cached stac_item_json['id'] to match new stac_item_id
-                    if release.stac_item_json and release.stac_item_json.get('id') != final_stac_item_id:
-                        patched_json = dict(release.stac_item_json)
-                        patched_json['id'] = final_stac_item_id
-                        props = patched_json.get('properties', {})
-                        if 'title' in props:
-                            props['title'] = final_stac_item_id
-                        self.release_repo.update_stac_item_json(release_id, patched_json)
-                        release.stac_item_json = patched_json
-                        logger.info(f"Synced stac_item_json['id'] to {final_stac_item_id}")
-
-                    # Sync cog_metadata.stac_item_id to versioned form
-                    try:
-                        from infrastructure.raster_metadata_repository import RasterMetadataRepository
-                        cog_repo = RasterMetadataRepository.instance()
-                        cog_repo.update_stac_linkage(
-                            cog_id=old_stac_item_id,
-                            stac_item_id=final_stac_item_id,
-                            stac_collection_id=release.stac_collection_id
-                        )
-                    except Exception as cog_err:
-                        logger.warning(f"Failed to sync cog_metadata stac_item_id: {cog_err}")
-
-            # Materialize STAC item to pgSTAC from cached stac_item_json
-            stac_result = self._materialize_stac(release, reviewer, clearance_state)
-
-            # Check if materializer returned a failure dict
-            if not stac_result.get('success'):
-                stac_failed = True
-                stac_error_msg = stac_result.get('error', 'STAC materialization returned failure')
-
-        except Exception as e:
-            stac_failed = True
-            stac_error_msg = f"STAC_MATERIALIZATION_FAILED: {e}"
-            logger.critical(
-                f"STAC_MATERIALIZATION_FAILED for approved release {release_id[:16]}...: {e}",
-                exc_info=True
+        if is_vector:
+            logger.info(
+                f"Skipping STAC workflow for vector release {release_id[:16]}... "
+                f"— vector data does not go in STAC"
             )
-            stac_result = {'success': False, 'error': stac_error_msg}
+        else:
+            try:
+                # Update stac_item_id to final versioned form (draft-N -> version_id)
+                from services.platform_translation import generate_stac_item_id
+                if asset:
+                    final_stac_item_id = generate_stac_item_id(
+                        asset.dataset_id, asset.resource_id, version_id
+                    )
+                    if final_stac_item_id != release.stac_item_id:
+                        old_stac_item_id = release.stac_item_id
+                        self.release_repo.update_physical_outputs(
+                            release_id=release_id,
+                            stac_item_id=final_stac_item_id
+                        )
+                        logger.info(
+                            f"Updated stac_item_id: {old_stac_item_id} -> {final_stac_item_id}"
+                        )
+                        release.stac_item_id = final_stac_item_id
+
+                        # Sync cached stac_item_json['id'] to match new stac_item_id
+                        if release.stac_item_json and release.stac_item_json.get('id') != final_stac_item_id:
+                            patched_json = dict(release.stac_item_json)
+                            patched_json['id'] = final_stac_item_id
+                            props = patched_json.get('properties', {})
+                            if 'title' in props:
+                                props['title'] = final_stac_item_id
+                            self.release_repo.update_stac_item_json(release_id, patched_json)
+                            release.stac_item_json = patched_json
+                            logger.info(f"Synced stac_item_json['id'] to {final_stac_item_id}")
+
+                        # Sync cog_metadata.stac_item_id to versioned form
+                        try:
+                            from infrastructure.raster_metadata_repository import RasterMetadataRepository
+                            cog_repo = RasterMetadataRepository.instance()
+                            cog_repo.update_stac_linkage(
+                                cog_id=old_stac_item_id,
+                                stac_item_id=final_stac_item_id,
+                                stac_collection_id=release.stac_collection_id
+                            )
+                        except Exception as cog_err:
+                            logger.warning(f"Failed to sync cog_metadata stac_item_id: {cog_err}")
+
+                # Materialize STAC item to pgSTAC from cached stac_item_json
+                stac_result = self._materialize_stac(release, reviewer, clearance_state)
+
+                # Check if materializer returned a failure dict
+                if not stac_result.get('success'):
+                    stac_failed = True
+                    stac_error_msg = stac_result.get('error', 'STAC materialization returned failure')
+
+            except Exception as e:
+                stac_failed = True
+                stac_error_msg = f"STAC_MATERIALIZATION_FAILED: {e}"
+                logger.critical(
+                    f"STAC_MATERIALIZATION_FAILED for approved release {release_id[:16]}...: {e}",
+                    exc_info=True
+                )
+                stac_result = {'success': False, 'error': stac_error_msg}
 
         # Step 6: On STAC failure, rollback the approval
         if stac_failed:

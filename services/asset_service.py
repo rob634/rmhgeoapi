@@ -199,6 +199,12 @@ class AssetService:
             f"{asset_id}|{uniquifier}|{release_count}".encode()
         ).hexdigest()[:32]
 
+        # Vector data does not go in STAC (01 MAR 2026 design decision)
+        # Vector discovery is via PostGIS/OGC Features API.
+        if data_type == 'vector' or (asset and asset.data_type == 'vector'):
+            stac_item_id = None
+            stac_collection_id = None
+
         release = AssetRelease(
             release_id=release_id,
             asset_id=asset_id,
@@ -335,6 +341,7 @@ class AssetService:
                 job_id=job_id,
                 request_id=request_id,
                 suggested_version_id=suggested_version_id,
+                data_type=data_type,
                 version_ordinal=next_ordinal,
             )
             return release, "new_version"
@@ -349,6 +356,7 @@ class AssetService:
             job_id=job_id,
             request_id=request_id,
             suggested_version_id=suggested_version_id,
+            data_type=data_type,
             version_ordinal=1,
         )
         return release, "created"

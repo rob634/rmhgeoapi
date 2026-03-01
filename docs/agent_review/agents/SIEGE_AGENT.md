@@ -66,12 +66,31 @@ curl -sf "${BASE_URL}/api/health"
 
 ---
 
+## Campaign Config
+
+All pipelines share a config file: `docs/agent_review/siege_config.json`
+
+The config contains:
+- **`valid_files`**: Files that MUST exist in bronze storage — used by Pathfinder/Blue/Lancer
+- **`invalid_files`**: Deliberately bad inputs — used by Saboteur/Red/Provocateur
+- **`approval_fixtures`**: Pre-built payloads for approve/reject testing
+- **`discovery`**: Endpoint templates for verifying files exist before testing
+- **`prerequisites`**: Setup commands (rebuild, nuke, health check)
+
+Sentinel MUST verify valid files exist before launching by calling the discovery endpoint:
+```bash
+curl "${BASE_URL}/api/storage/rmhazuregeobronze/blobs?zone=bronze&limit=50"
+```
+
+---
+
 ## Step 1: Play Sentinel (No Subagent)
 
 Claude plays Sentinel directly. Sentinel's job:
 
-1. Read `V0.9_TEST.md` sections A–I for canonical test sequences.
-2. Define test data using `sg-` prefix:
+1. Read `siege_config.json` for test data and `V0.9_TEST.md` sections A–I for canonical test sequences.
+2. Verify valid files exist via discovery endpoint.
+3. Define test data using `sg-` prefix:
    - Raster: `dataset_id=sg-raster-test`, `resource_id=dctest`, `file_name=dctest.tif`
    - Vector: `dataset_id=sg-vector-test`, `resource_id=cutlines`, `file_name=cutlines.gpkg`
 3. Identify the bronze container name from environment context.

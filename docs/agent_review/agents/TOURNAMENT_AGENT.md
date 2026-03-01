@@ -63,6 +63,17 @@ Target: BASE_URL (Azure endpoint)
 
 ---
 
+## Campaign Config
+
+Shared config file: `docs/agent_review/siege_config.json`
+
+- **`valid_files`**: Used by Pathfinder for golden-path sequences
+- **`invalid_files`**: Used by Saboteur for adversarial attacks and Provocateur for input validation
+- **`approval_fixtures`**: Pre-built payloads for approve/reject/conflict attacks
+- **`discovery`**: Endpoints for General to verify files exist before launching
+
+---
+
 ## Prerequisites
 
 ```bash

@@ -54,6 +54,17 @@ Target: BASE_URL (Azure endpoint)
 
 ---
 
+## Campaign Config
+
+Shared config file: `docs/agent_review/siege_config.json`
+
+- **`valid_files`**: Used by Blue for golden-path sequences
+- **`invalid_files`**: Used by Red for adversarial attacks
+- **`approval_fixtures`**: Pre-built payloads for approve/reject attacks
+- **`discovery`**: Endpoints for Strategist to verify files exist before launching
+
+---
+
 ## Prerequisites
 
 ```bash

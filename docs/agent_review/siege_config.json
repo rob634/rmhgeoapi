@@ -1,0 +1,177 @@
+{
+  "target": {
+    "base_url": "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net",
+    "bronze_container": "rmhazuregeobronze"
+  },
+
+  "discovery": {
+    "list_containers": "/api/storage/containers?zone=bronze",
+    "list_blobs": "/api/storage/{container}/blobs?zone=bronze&suffix={suffix}&limit=50",
+    "get_metadata": "/api/storage/{container}/blob?path={path}&zone=bronze"
+  },
+
+  "namespaces": {
+    "siege": "sg-",
+    "wargame": "wg-",
+    "tournament": "tn-"
+  },
+
+  "valid_files": {
+    "_comment": "Files that MUST exist in bronze storage. Sentinel should verify via discovery endpoints before launching.",
+    "raster": {
+      "dataset_id_suffix": "raster-test",
+      "resource_id": "dctest",
+      "file_name": "dctest.tif",
+      "container_name": "rmhazuregeobronze",
+      "description": "Small GeoTIFF for raster lifecycle testing"
+    },
+    "vector": {
+      "dataset_id_suffix": "vector-test",
+      "resource_id": "cutlines",
+      "file_name": "0403c87a-0c6c-4767-a6ad-78a8026258db/Vivid_Standard_30_CO02_24Q2/cutlines.gpkg",
+      "container_name": "rmhazuregeobronze",
+      "description": "GeoPackage with nested folder path for vector lifecycle testing"
+    },
+    "raster_collection": {
+      "dataset_id_suffix": "collection-test",
+      "resource_id": "namangan",
+      "file_names": [
+        "namangan/namangan14aug2019_R1C1cog.tif",
+        "namangan/namangan14aug2019_R1C2cog.tif",
+        "namangan/namangan14aug2019_R2C1cog.tif",
+        "namangan/namangan14aug2019_R2C2cog.tif"
+      ],
+      "container_name": "rmhazuregeobronze",
+      "description": "Multi-file raster collection for tiled ingestion testing"
+    },
+    "geojson": {
+      "dataset_id_suffix": "geojson-test",
+      "resource_id": "testgeo",
+      "file_name": "8.geojson",
+      "container_name": "rmhazuregeobronze",
+      "description": "Simple GeoJSON for vector format variant testing"
+    }
+  },
+
+  "invalid_files": {
+    "_comment": "Deliberately bad inputs for Saboteur, Red, and Provocateur attacks. These SHOULD fail.",
+
+    "nonexistent_file": {
+      "dataset_id_suffix": "ghost-test",
+      "resource_id": "ghost",
+      "file_name": "this_file_does_not_exist.tif",
+      "container_name": "rmhazuregeobronze",
+      "expected_error": "File not found in bronze storage",
+      "attack_use": "IDENTITY — submit with valid params but missing source file"
+    },
+    "nonexistent_container": {
+      "dataset_id_suffix": "nocontainer-test",
+      "resource_id": "nocontainer",
+      "file_name": "dctest.tif",
+      "container_name": "container-that-does-not-exist",
+      "expected_error": "Container not found",
+      "attack_use": "IDENTITY — valid file but wrong container"
+    },
+    "wrong_extension": {
+      "dataset_id_suffix": "badext-test",
+      "resource_id": "badext",
+      "file_name": "malware.exe",
+      "container_name": "rmhazuregeobronze",
+      "expected_error": "Unsupported file type",
+      "attack_use": "PAYLOAD — unsupported extension"
+    },
+    "path_traversal": {
+      "dataset_id_suffix": "traversal-test",
+      "resource_id": "traversal",
+      "file_name": "../../etc/passwd",
+      "container_name": "rmhazuregeobronze",
+      "expected_error": "400 or sanitized path",
+      "attack_use": "PAYLOAD P10 — directory traversal attempt"
+    },
+    "empty_filename": {
+      "dataset_id_suffix": "empty-test",
+      "resource_id": "empty",
+      "file_name": "",
+      "container_name": "rmhazuregeobronze",
+      "expected_error": "400 — file_name required",
+      "attack_use": "PAYLOAD — empty required field"
+    },
+    "sql_injection_dataset": {
+      "dataset_id_suffix": "'; DROP TABLE app.jobs;--",
+      "resource_id": "injection",
+      "file_name": "dctest.tif",
+      "container_name": "rmhazuregeobronze",
+      "expected_error": "400 or safe processing",
+      "attack_use": "PAYLOAD P3 — SQL injection in identifiers"
+    },
+    "unicode_resource": {
+      "dataset_id_suffix": "unicode-test",
+      "resource_id": "\u00e9m\u00f6ji\ud83d\ude80",
+      "file_name": "dctest.tif",
+      "container_name": "rmhazuregeobronze",
+      "expected_error": "400 or sanitized",
+      "attack_use": "PAYLOAD P4 — unicode in identifiers"
+    },
+    "extremely_long_dataset": {
+      "dataset_id_suffix": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "resource_id": "long",
+      "file_name": "dctest.tif",
+      "container_name": "rmhazuregeobronze",
+      "expected_error": "400 — identifier too long",
+      "attack_use": "PAYLOAD P5 — boundary value (length)"
+    },
+    "special_chars_dataset": {
+      "dataset_id_suffix": "test/with/slashes",
+      "resource_id": "slash",
+      "file_name": "dctest.tif",
+      "container_name": "rmhazuregeobronze",
+      "expected_error": "400 or sanitized",
+      "attack_use": "PAYLOAD — path separator in identifier"
+    },
+    "null_values": {
+      "dataset_id_suffix": null,
+      "resource_id": null,
+      "file_name": null,
+      "container_name": null,
+      "expected_error": "400 — required fields",
+      "attack_use": "PAYLOAD P9 — null values in all fields"
+    }
+  },
+
+  "approval_fixtures": {
+    "_comment": "Pre-built approval payloads for testing approve/reject/revoke workflows.",
+
+    "valid_approval": {
+      "reviewer": "siege-qa@example.com",
+      "clearance_level": "ouo",
+      "version_id": "v1"
+    },
+    "missing_version_id": {
+      "reviewer": "siege-qa@example.com",
+      "clearance_level": "ouo",
+      "_comment": "No version_id — should fail validation",
+      "attack_use": "LIFECYCLE L3"
+    },
+    "nonexistent_release": {
+      "release_id": "00000000-0000-0000-0000-000000000000",
+      "reviewer": "siege-qa@example.com",
+      "clearance_level": "ouo",
+      "version_id": "v1",
+      "attack_use": "IDENTITY I1"
+    },
+    "duplicate_version_id": {
+      "reviewer": "siege-qa@example.com",
+      "clearance_level": "ouo",
+      "version_id": "v1",
+      "_comment": "Use this AFTER v1 is already approved — tests conflict guard",
+      "attack_use": "DUPLICATION D5, LIFECYCLE L4"
+    }
+  },
+
+  "prerequisites": {
+    "rebuild_schema": "POST /api/dbadmin/maintenance?action=rebuild&confirm=yes",
+    "nuke_stac": "POST /api/stac/nuke?confirm=yes&mode=all",
+    "health_check": "GET /api/health",
+    "verify_bronze_files": "GET /api/storage/rmhazuregeobronze/blobs?zone=bronze&limit=50"
+  }
+}

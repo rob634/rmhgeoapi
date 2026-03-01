@@ -40,6 +40,7 @@ from .process_raster_docker import ProcessRasterDockerJob
 from .process_raster_collection_docker import ProcessRasterCollectionDockerJob
 from .vector_docker_etl import VectorDockerETLJob
 from .virtualzarr import VirtualZarrJob
+from .unpublish_zarr import UnpublishZarrJob
 
 # Job Registry - add new jobs here
 # ARCHIVED (13 FEB 2026): H3 (7), Fathom (4), legacy Function App ETL (4) → docs/archive/v08_archive_feb2026/
@@ -65,6 +66,7 @@ ALL_JOBS = {
     # Unpublish
     "unpublish_raster": UnpublishRasterJob,
     "unpublish_vector": UnpublishVectorJob,
+    "unpublish_zarr": UnpublishZarrJob,
 
     # VirtualiZarr (NetCDF virtual reference pipeline)
     "virtualzarr": VirtualZarrJob,

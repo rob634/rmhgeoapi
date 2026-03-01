@@ -39,6 +39,27 @@ def _get_silver_netcdf_container() -> str:
     return get_config().storage.silver.netcdf
 
 
+# Manifest filename — single source of truth shared with handler_virtualzarr.py
+MANIFEST_FILENAME = "manifest.json"
+
+
+def _manifest_blob_path(ref_output_prefix: str) -> str:
+    """
+    Build the blob path for the pipeline manifest.
+
+    Shared with handler_virtualzarr.py to prevent path drift between
+    the scan handler (which writes the manifest) and later stages
+    (which reconstruct the URL to read it).
+
+    Args:
+        ref_output_prefix: Reference output prefix (e.g. "datasets/foo/v1")
+
+    Returns:
+        Blob path like "datasets/foo/v1/manifest.json"
+    """
+    return f"{ref_output_prefix}/{MANIFEST_FILENAME}"
+
+
 def _read_manifest(manifest_url: str) -> list:
     """
     Read nc_files list from blob manifest JSON via BlobRepository.
@@ -161,7 +182,7 @@ class VirtualZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
         "max_files": {
             "type": "int",
             "min": 1,
-            "max": 10000,
+            "max": 5000,
             "default": 500,
         },
         "ref_output_prefix": {
@@ -270,10 +291,13 @@ class VirtualZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                     "Stage 3 (validate) requires previous_results from copy stage"
                 )
 
-            # Reconstruct manifest path from ref_output_prefix
+            # Reconstruct manifest URL from ref_output_prefix.
+            # CoreMachine only passes the previous stage's results, so Stage 3
+            # (which follows copy) cannot read manifest_url from Stage 1 (scan).
+            # _manifest_blob_path is shared with the scan handler to prevent drift.
             silver_container = _get_silver_netcdf_container()
             ref_prefix = job_params["ref_output_prefix"]
-            manifest_url = f"abfs://{silver_container}/{ref_prefix}/manifest.json"
+            manifest_url = f"abfs://{silver_container}/{_manifest_blob_path(ref_prefix)}"
 
             # Read nc_files from manifest — these are silver URLs
             nc_files = _read_manifest(manifest_url)
@@ -303,9 +327,11 @@ class VirtualZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                     "Stage 4 (combine) requires previous_results from validate stage"
                 )
 
+            # Reconstruct manifest URL — same pattern as Stage 3.
+            # _manifest_blob_path shared with scan handler to prevent drift.
             silver_container = _get_silver_netcdf_container()
             ref_prefix = job_params["ref_output_prefix"]
-            manifest_url = f"abfs://{silver_container}/{ref_prefix}/manifest.json"
+            manifest_url = f"abfs://{silver_container}/{_manifest_blob_path(ref_prefix)}"
             combined_ref_url = f"abfs://{silver_container}/{ref_prefix}/combined_ref.json"
 
             return [

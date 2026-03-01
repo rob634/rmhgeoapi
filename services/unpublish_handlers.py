@@ -5,7 +5,7 @@
 # PURPOSE: Provide surgical data removal for raster and vector assets
 # LAST_REVIEWED: 04 JAN 2026
 # REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
-# EXPORTS: inventory_raster_item, inventory_vector_item, delete_blob, drop_postgis_table, delete_stac_and_audit
+# EXPORTS: inventory_raster_item, inventory_vector_item, inventory_zarr_item, delete_blob, drop_postgis_table, delete_stac_and_audit
 # DEPENDENCIES: psycopg, azure-storage-blob
 # ============================================================================
 """
@@ -384,6 +384,316 @@ def inventory_vector_item(params: Dict[str, Any], context: Optional[Dict[str, An
 
     except Exception as e:
         logger.error(f"Failed to inventory vector item {params.get('table_name')}: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": type(e).__name__
+        }
+
+
+def inventory_zarr_item(params: Dict[str, Any], context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Discover all zarr artifacts, classify them, check approval state, return blob list.
+
+    Stage 1 handler for unpublish_zarr job.
+    Implements spec Component 3: inventory_zarr_item.
+
+    Discovery chain (spec Component 3):
+    1. Query pgstac.items for STAC item (fall back to Release record if not materialized)
+    2. Extract combined_ref.json href from STAC assets["reference"]["href"]
+    3. Derive ref_output_prefix from href (strip "/combined_ref.json")
+    4. Read manifest.json at {ref_output_prefix}/manifest.json
+    5. Extract data file paths from manifest["files"][]["silver_path"]
+    6. If manifest read fails, fall back to BlobRepository.list_blobs(prefix=ref_output_prefix + "/data/")
+
+    Error handling addresses Critic concern C's E-4 (data type guard)
+    and Operator concern (approval check).
+
+    Args:
+        params: {
+            'stac_item_id': str,
+            'collection_id': str,
+            'dry_run': bool,
+            'delete_data_files': bool,
+            'force_approved': bool,
+        }
+        context: Optional job context
+
+    Returns:
+        {
+            'success': True,
+            'stac_item_id': str,
+            'collection_id': str,
+            'blobs_to_delete': [{"container": str, "blob_path": str, "category": str}],
+            'ref_blob_count': int,
+            'data_file_count': int,
+            'stac_item_snapshot': dict,
+            'stac_materialized': bool,
+            'original_job_id': str or None,
+            'dry_run': bool,
+            'delete_data_files': bool,
+        }
+    """
+    try:
+        stac_item_id = params.get('stac_item_id')
+        collection_id = params.get('collection_id')
+        dry_run = params.get('dry_run', True)
+        delete_data_files = params.get('delete_data_files', True)
+        force_approved = params.get('force_approved', False)
+
+        if not stac_item_id or not collection_id:
+            return {
+                "success": False,
+                "error": "stac_item_id and collection_id are required",
+                "error_type": "ValidationError"
+            }
+
+        # =====================================================================
+        # Step 1: Locate STAC item (pgstac first, Release fallback)
+        # Spec Component 3: Discovery chain step 1
+        # =====================================================================
+        stac_item = None
+        stac_materialized = False
+        original_job_id = None
+
+        # Try pgstac first
+        try:
+            from infrastructure.pgstac_repository import PgStacRepository
+            pgstac_repo = PgStacRepository()
+            stac_item = pgstac_repo.get_item(stac_item_id, collection_id)
+            if stac_item:
+                stac_materialized = True
+                properties = stac_item.get('properties', {})
+                original_job_id = properties.get('geoetl:job_id')
+                logger.info(
+                    f"{'[DRY-RUN] ' if dry_run else ''}Found zarr item in pgstac: "
+                    f"{collection_id}/{stac_item_id}"
+                )
+        except Exception as pgstac_err:
+            logger.warning(f"pgstac lookup failed for {stac_item_id}: {pgstac_err}")
+
+        # Fall back to Release record if not in pgstac
+        if not stac_item:
+            try:
+                from infrastructure import ReleaseRepository
+                release_repo = ReleaseRepository()
+                release = release_repo.get_by_stac_item_id(stac_item_id)
+                if release and release.stac_item_json:
+                    stac_item = release.stac_item_json
+                    original_job_id = release.job_id
+                    logger.info(
+                        f"{'[DRY-RUN] ' if dry_run else ''}Found zarr item in Release record: "
+                        f"{stac_item_id} (not materialized to pgstac)"
+                    )
+            except Exception as release_err:
+                logger.warning(f"Release lookup failed for {stac_item_id}: {release_err}")
+
+        if not stac_item:
+            # Spec Component 3: STAC item not found error
+            return {
+                "success": False,
+                "error": f"STAC item '{stac_item_id}' not found in pgstac or Release records for collection '{collection_id}'",
+                "error_type": "NotFoundError"
+            }
+
+        # =====================================================================
+        # Step 2: Data type guard (Critic concern C's E-4)
+        # Spec Component 3: Check geoetl:data_type
+        # =====================================================================
+        properties = stac_item.get('properties', {})
+        data_type = properties.get('geoetl:data_type')
+        if data_type and data_type != 'zarr':
+            return {
+                "success": False,
+                "error": (
+                    f"STAC item '{stac_item_id}' has data_type='{data_type}', expected 'zarr'. "
+                    f"Use the appropriate unpublish job for {data_type} data."
+                ),
+                "error_type": "DataTypeMismatch"
+            }
+
+        # =====================================================================
+        # Step 3: Approval check (Operator concern)
+        # Spec Component 3: Copy pattern from inventory_raster_item
+        # =====================================================================
+        try:
+            from infrastructure import ReleaseRepository as _ReleaseRepo
+            from psycopg import sql as _psql
+
+            _release_repo = _ReleaseRepo()
+            with _release_repo._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        _psql.SQL(
+                            "SELECT release_id, approval_state FROM {}.{} "
+                            "WHERE stac_item_id = %s ORDER BY created_at DESC LIMIT 1"
+                        ).format(
+                            _psql.Identifier(_release_repo.schema),
+                            _psql.Identifier(_release_repo.table)
+                        ),
+                        (stac_item_id,)
+                    )
+                    row = cur.fetchone()
+
+            if row and row['approval_state'] == 'approved':
+                if not force_approved:
+                    return {
+                        "success": False,
+                        "error": "Cannot unpublish approved release. Use force_approved=true.",
+                        "error_type": "ApprovalBlocksUnpublish",
+                        "release_id": row['release_id'],
+                        "approval_state": row['approval_state'],
+                        "hint": "Use force_approved=true to revoke approval and unpublish"
+                    }
+                logger.warning(f"Force-unpublishing approved zarr release {row['release_id'][:16]}...")
+        except Exception as e:
+            # Addresses Operator concern: approval check failure is non-recoverable
+            logger.error(f"Cannot verify approval status for {stac_item_id}: {e}")
+            return {
+                "success": False,
+                "error": f"Approval check failed -- cannot proceed without verification: {e}",
+                "error_type": "ApprovalCheckFailed",
+                "hint": "Retry when database is available, or use force_approved=true to bypass."
+            }
+
+        # =====================================================================
+        # Step 4: Extract reference href and derive ref_output_prefix
+        # Spec Component 3: Discovery chain steps 2-3
+        # =====================================================================
+        assets = stac_item.get('assets', {})
+        ref_asset = assets.get('reference', {})
+        ref_href = ref_asset.get('href', '')
+
+        if not ref_href:
+            return {
+                "success": False,
+                "error": f"STAC item '{stac_item_id}' has no 'reference' asset href",
+                "error_type": "ValidationError"
+            }
+
+        # Derive container and ref_output_prefix from href
+        # href format: abfs://silver-netcdf/datasets/foo/v1/combined_ref.json
+        # OR: silver-netcdf/datasets/foo/v1/combined_ref.json
+        clean_href = ref_href.replace("abfs://", "")
+        href_parts = clean_href.split("/", 1)
+        container = href_parts[0]
+        blob_path = href_parts[1] if len(href_parts) > 1 else ""
+
+        # Strip /combined_ref.json to get ref_output_prefix
+        combined_ref_suffix = "/combined_ref.json"
+        if blob_path.endswith("combined_ref.json"):
+            ref_output_prefix = blob_path[:blob_path.rfind("/combined_ref.json")]
+        else:
+            # Ambiguity note: href doesn't end with combined_ref.json.
+            # Use the directory of the href as the prefix.
+            ref_output_prefix = blob_path.rsplit("/", 1)[0] if "/" in blob_path else blob_path
+
+        # =====================================================================
+        # Step 5: Build blob list - always include reference files
+        # Spec Component 3: Blob classification
+        # =====================================================================
+        blobs_to_delete = []
+
+        # Always delete: combined_ref.json (category="reference")
+        blobs_to_delete.append({
+            "container": container,
+            "blob_path": blob_path,
+            "category": "reference"
+        })
+
+        # Always delete: manifest.json (category="reference")
+        manifest_blob_path = f"{ref_output_prefix}/manifest.json"
+        blobs_to_delete.append({
+            "container": container,
+            "blob_path": manifest_blob_path,
+            "category": "reference"
+        })
+
+        # =====================================================================
+        # Step 6: Discover data files from manifest (with list_blobs fallback)
+        # Spec Component 3: Discovery chain steps 4-6
+        # =====================================================================
+        data_file_paths = []
+        if delete_data_files:
+            # Try reading manifest first
+            manifest_read_success = False
+            try:
+                from infrastructure import BlobRepository
+                silver_repo = BlobRepository.for_zone("silver")
+                manifest_data = silver_repo.read_blob(container, manifest_blob_path)
+                import json
+                manifest = json.loads(manifest_data)
+                files_list = manifest.get("files", [])
+                for file_entry in files_list:
+                    silver_path = file_entry.get("silver_path")
+                    if silver_path:
+                        data_file_paths.append(silver_path)
+                manifest_read_success = True
+                logger.info(
+                    f"{'[DRY-RUN] ' if dry_run else ''}Read manifest: "
+                    f"{len(data_file_paths)} data files found"
+                )
+            except Exception as manifest_err:
+                # Spec Component 3: Manifest read fails - WARNING log, fall back to list_blobs
+                logger.warning(
+                    f"Manifest read failed for {container}/{manifest_blob_path}: {manifest_err}. "
+                    f"Falling back to list_blobs."
+                )
+
+            # Fall back to list_blobs if manifest read failed
+            if not manifest_read_success:
+                try:
+                    from infrastructure import BlobRepository
+                    silver_repo = BlobRepository.for_zone("silver")
+                    data_prefix = f"{ref_output_prefix}/data/"
+                    blob_list = silver_repo.list_blobs(container, prefix=data_prefix)
+                    for blob_info in blob_list:
+                        data_file_paths.append(blob_info["name"])
+                    logger.info(
+                        f"{'[DRY-RUN] ' if dry_run else ''}list_blobs fallback: "
+                        f"{len(data_file_paths)} data files found under {data_prefix}"
+                    )
+                except Exception as list_err:
+                    # Spec Component 3: Both manifest and list_blobs fail -
+                    # continue with ref-only deletion
+                    logger.warning(
+                        f"list_blobs fallback also failed for {container}/{ref_output_prefix}/data/: "
+                        f"{list_err}. Continuing with reference-only deletion."
+                    )
+
+            # Add data files to blob list
+            for data_path in data_file_paths:
+                blobs_to_delete.append({
+                    "container": container,
+                    "blob_path": data_path,
+                    "category": "data_file"
+                })
+
+        # Count by category
+        ref_blob_count = sum(1 for b in blobs_to_delete if b["category"] == "reference")
+        data_file_count = sum(1 for b in blobs_to_delete if b["category"] == "data_file")
+
+        logger.info(
+            f"{'[DRY-RUN] ' if dry_run else ''}Inventoried zarr item {collection_id}/{stac_item_id}: "
+            f"{ref_blob_count} reference blobs, {data_file_count} data files to delete"
+        )
+
+        return {
+            "success": True,
+            "stac_item_id": stac_item_id,
+            "collection_id": collection_id,
+            "blobs_to_delete": blobs_to_delete,
+            "ref_blob_count": ref_blob_count,
+            "data_file_count": data_file_count,
+            "stac_item_snapshot": stac_item,
+            "stac_materialized": stac_materialized,
+            "original_job_id": original_job_id,
+            "dry_run": dry_run,
+            "delete_data_files": delete_data_files,
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to inventory zarr item {params.get('stac_item_id')}: {e}")
         return {
             "success": False,
             "error": str(e),
@@ -878,6 +1188,7 @@ def delete_stac_and_audit(params: Dict[str, Any], context: Optional[Dict[str, An
 __all__ = [
     'inventory_raster_item',
     'inventory_vector_item',
+    'inventory_zarr_item',
     'delete_blob',
     'drop_postgis_table',
     'delete_stac_and_audit',

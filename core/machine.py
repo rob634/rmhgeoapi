@@ -567,6 +567,29 @@ class CoreMachine:
                 self.logger.info(f"✅ COREMACHINE STEP 5: Generated {len(tasks)} task definitions (in-memory)")
                 self.logger.debug(f"   Task IDs: {[t['task_id'] for t in tasks]}")
 
+                # Zero-task guard (28 FEB 2026 — COMPETE Fix 1)
+                # If create_tasks_for_stage returned an empty list, the stage has
+                # no work to do. Skip conversion/queueing and advance immediately.
+                # Without this, jobs hang in PROCESSING forever because no task
+                # exists to trigger the "last task turns out the lights" pattern.
+                # Example: unpublish_raster Stage 2 returns [] for STAC-only items
+                # that have no blobs to delete.
+                if len(tasks) == 0:
+                    self.logger.info(
+                        f"⏭️ COREMACHINE: Stage {job_message.stage} generated 0 tasks — "
+                        f"advancing to next stage (zero-task guard)"
+                    )
+                    self._handle_stage_completion(
+                        job_message.job_id, job_message.job_type, job_message.stage
+                    )
+                    return {
+                        'success': True,
+                        'job_id': job_message.job_id,
+                        'stage': job_message.stage,
+                        'tasks_created': 0,
+                        'stage_skipped': True
+                    }
+
         except Exception as e:
             self.logger.error(f"❌ COREMACHINE STEP 5 FAILED: Task generation error: {e}")
             self.logger.error(f"   Traceback: {traceback.format_exc()}")

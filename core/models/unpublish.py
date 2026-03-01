@@ -34,6 +34,7 @@ class UnpublishType(str, Enum):
     """Types of unpublish operations."""
     RASTER = "raster"        # Unpublish raster STAC item + COG blobs
     VECTOR = "vector"        # Unpublish vector STAC item + PostGIS table
+    ZARR = "zarr"            # Unpublish zarr STAC item + kerchunk refs + NetCDF data files
     STAC_ONLY = "stac_only"  # Unpublish STAC item only (no artifact deletion)
 
 

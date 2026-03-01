@@ -444,6 +444,7 @@ class TaskRoutingDefaults:
         # =====================================================================
         "unpublish_inventory_raster",
         "unpublish_inventory_vector",
+        "unpublish_inventory_zarr",
         "unpublish_delete_blob",
         "unpublish_drop_table",
         "unpublish_delete_stac",

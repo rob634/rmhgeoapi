@@ -59,7 +59,7 @@ def normalize_data_type(data_type: str) -> Optional[str]:
         return 'vector'
     if dt_lower in ('raster', 'unpublish_raster', 'process_raster', 'process_raster_v2', 'process_raster_docker'):
         return 'raster'
-    if dt_lower in ('zarr', 'virtualzarr'):
+    if dt_lower in ('zarr', 'virtualzarr', 'unpublish_zarr'):
         return 'zarr'
     return dt_lower
 
@@ -165,6 +165,21 @@ def get_unpublish_params_from_request(request: ApiRequest, data_type: str) -> di
         stac_item_id = generate_stac_item_id(request.dataset_id, request.resource_id, request.version_id)
         collection_id = request.dataset_id
         logger.warning(f"Reconstructed raster stac_item_id (no release found): {stac_item_id}")
+        return {'stac_item_id': stac_item_id, 'collection_id': collection_id}
+    elif data_type == "zarr":
+        # Same pattern as raster — stac_item_id + collection_id from Release
+        if request.job_id:
+            from infrastructure import ReleaseRepository
+            release_repo = ReleaseRepository()
+            release = release_repo.get_by_job_id(request.job_id)
+            if release and release.stac_item_id:
+                return {
+                    'stac_item_id': release.stac_item_id,
+                    'collection_id': release.stac_collection_id or request.dataset_id
+                }
+        stac_item_id = generate_stac_item_id(request.dataset_id, request.resource_id, request.version_id)
+        collection_id = request.dataset_id
+        logger.warning(f"Reconstructed zarr stac_item_id (no release found): {stac_item_id}")
         return {'stac_item_id': stac_item_id, 'collection_id': collection_id}
     return {}
 

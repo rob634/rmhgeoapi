@@ -56,18 +56,21 @@ def _get_silver_netcdf_container() -> str:
 
 def _get_blob_fs():
     """
-    Create an Azure Blob filesystem using DefaultAzureCredential.
+    Create an Azure Blob filesystem using BlobRepository's credential.
+
+    Auth is owned by BlobRepository — this helper reuses the singleton's
+    credential so all handlers authenticate through the same path.
 
     Returns:
         adlfs.AzureBlobFileSystem instance
     """
     from adlfs import AzureBlobFileSystem
-    from azure.identity import DefaultAzureCredential
+    from infrastructure import BlobRepository
 
-    credential = DefaultAzureCredential()
+    repo = BlobRepository.for_zone("silver")
     return AzureBlobFileSystem(
-        account_name=_get_storage_account(),
-        credential=credential,
+        account_name=repo.account_name,
+        credential=repo.credential,
     )
 
 
@@ -234,8 +237,10 @@ def virtualzarr_scan(
             "nc_files": nc_files,
         }
 
-        # Write manifest to silver-netcdf via BlobRepository
-        manifest_blob_path = f"{ref_output_prefix}/manifest.json"
+        # Write manifest to silver-netcdf via BlobRepository.
+        # Import shared helper so the blob path pattern is defined in one place.
+        from jobs.virtualzarr import _manifest_blob_path
+        manifest_blob_path = _manifest_blob_path(ref_output_prefix)
         manifest_bytes = json.dumps(manifest, indent=2).encode("utf-8")
 
         silver_repo = BlobRepository.for_zone("silver")
@@ -400,15 +405,13 @@ def virtualzarr_validate(
 
     try:
         import h5py
-        import fsspec
 
         LARGE_VAR_THRESHOLD = 100 * 1024 * 1024  # 100 MB
         LARGE_CHUNK_THRESHOLD = 100 * 1024 * 1024  # 100 MB
         LARGE_COORD_THRESHOLD = 50 * 1024 * 1024  # 50 MB
 
         # Open HDF5 file via fsspec (header-only read)
-        account_name = _get_storage_account()
-        fs = fsspec.filesystem("abfs", account_name=account_name)
+        fs = _get_blob_fs()
         blob_path = nc_url.replace("abfs://", "")
 
         variables = {}
@@ -565,11 +568,13 @@ def virtualzarr_combine(
         import json
         import numpy as np
         import xarray as xr
-        import fsspec
         from virtualizarr import open_virtual_dataset
 
-        account_name = _get_storage_account()
-        fs = fsspec.filesystem("abfs", account_name=account_name)
+        from infrastructure import BlobRepository
+        repo = BlobRepository.for_zone("silver")
+        account_name = repo.account_name
+        credential = repo.credential
+        fs = _get_blob_fs()
 
         # Read manifest for file list
         manifest_path = manifest_url.replace("abfs://", "")
@@ -591,7 +596,7 @@ def virtualzarr_combine(
         # Pre-check: open first file to get reference variable/dimension info
         first_url = nc_files[0]
         first_path = first_url.replace("abfs://", "")
-        storage_options = {"account_name": account_name}
+        storage_options = {"account_name": account_name, "credential": credential}
 
         first_vds = open_virtual_dataset(
             first_path,
@@ -656,9 +661,24 @@ def virtualzarr_combine(
         # Concatenate along concat_dim
         combined = xr.concat(virtual_datasets, dim=concat_dim)
 
-        # Export to kerchunk reference JSON
+        # Export to kerchunk reference JSON via temp file + BlobRepository upload
+        import tempfile
+        import os
         combined_path = combined_ref_url.replace("abfs://", "")
-        combined.virtualize.to_kerchunk(combined_path, format="json")
+        with tempfile.NamedTemporaryFile(suffix='.json', delete=False, mode='w') as tmp:
+            tmp_path = tmp.name
+        try:
+            combined.virtualize.to_kerchunk(tmp_path, format="json")
+            with open(tmp_path, 'rb') as f:
+                ref_data = f.read()
+            from infrastructure import BlobRepository
+            silver_repo = BlobRepository.for_zone("silver")
+            parts = combined_path.split("/", 1)
+            container = parts[0]
+            blob_name = parts[1] if len(parts) > 1 else ""
+            silver_repo.write_blob(container, blob_name, ref_data, content_type="application/json")
+        finally:
+            os.unlink(tmp_path)
 
         # Extract metadata from the combined dataset
         all_dims = dict(combined.dims)
@@ -705,16 +725,21 @@ def virtualzarr_combine(
                 break
 
         # Validation read: try opening combined reference to verify
+        # Use in-memory ref_dict to avoid re-reading from blob storage
         try:
+            ref_dict = json.loads(ref_data)
             validation_ds = xr.open_dataset(
                 "reference://",
                 engine="zarr",
                 backend_kwargs={
                     "consolidated": False,
                     "storage_options": {
-                        "fo": combined_path,
+                        "fo": ref_dict,
                         "remote_protocol": "abfs",
-                        "remote_options": {"account_name": account_name},
+                        "remote_options": {
+                            "account_name": account_name,
+                            "credential": credential,
+                        },
                     },
                 },
             )

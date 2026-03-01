@@ -62,6 +62,7 @@ from .tiling_extraction import extract_tiles
 from .unpublish_handlers import (
     inventory_raster_item,
     inventory_vector_item,
+    inventory_zarr_item,
     delete_blob,
     drop_postgis_table,
     delete_stac_and_audit,
@@ -142,6 +143,7 @@ ALL_HANDLERS = {
     # Unpublish handlers
     "unpublish_inventory_raster": inventory_raster_item,
     "unpublish_inventory_vector": inventory_vector_item,
+    "unpublish_inventory_zarr": inventory_zarr_item,
     "unpublish_delete_blob": delete_blob,
     "unpublish_drop_table": drop_postgis_table,
     "unpublish_delete_stac": delete_stac_and_audit,

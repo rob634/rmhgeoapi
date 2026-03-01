@@ -718,7 +718,9 @@ class ReleaseRepository(PostgreSQLRepository):
         """
         Revoke a release with audit trail.
 
-        Sets approval_state to REVOKED and is_latest to false.
+        Sets approval_state to REVOKED, is_latest to false, and
+        is_served to false (SG2-2 fix: revoked releases must not
+        remain served).
 
         Args:
             release_id: Release to revoke
@@ -740,6 +742,7 @@ class ReleaseRepository(PostgreSQLRepository):
                             revoked_by = %s,
                             revocation_reason = %s,
                             is_latest = false,
+                            is_served = false,
                             updated_at = NOW()
                         WHERE release_id = %s
                           AND approval_state = %s

@@ -149,6 +149,17 @@ def inventory_raster_item(params: Dict[str, Any], context: Optional[Dict[str, An
                             'asset_key': asset_key,
                             'href': href
                         })
+            elif href.startswith('/vsiaz/'):
+                # GDAL /vsiaz/ virtual path: /vsiaz/{container}/{blob_path}
+                vsiaz_path = href[len('/vsiaz/'):]  # strip '/vsiaz/'
+                if '/' in vsiaz_path:
+                    container, blob_path = vsiaz_path.split('/', 1)
+                    blobs_to_delete.append({
+                        'container': container,
+                        'blob_path': blob_path,
+                        'asset_key': asset_key,
+                        'href': href
+                    })
             elif href.startswith('/') or not href.startswith('http'):
                 # Relative path - assume silver-cogs container
                 blobs_to_delete.append({
@@ -1081,7 +1092,7 @@ def delete_stac_and_audit(params: Dict[str, Any], context: Optional[Dict[str, An
                             rel_row = cur.fetchone()
                             if rel_row and rel_row.get('approval_state') == 'approved':
                                 cur.execute(
-                                    "UPDATE app.asset_releases SET approval_state = 'revoked' WHERE release_id = %s",
+                                    "UPDATE app.asset_releases SET approval_state = 'revoked', is_served = false, is_latest = false, revoked_at = NOW() WHERE release_id = %s",
                                     (rel_row['release_id'],)
                                 )
                                 logger.warning(f"AUDIT: Revoked release {rel_row['release_id'][:16]}... during unpublish (atomic with STAC delete)")
@@ -1169,6 +1180,7 @@ def delete_stac_and_audit(params: Dict[str, Any], context: Optional[Dict[str, An
             "collection_remaining_items": item_count if not collection_deleted else 0,
             "postgis_table": postgis_table,
             "audit_record_id": audit_record.unpublish_id,
+            "blobs_deleted": params.get('blobs_deleted', []),
             "dry_run": False
         }
 

@@ -287,7 +287,10 @@ class UnpublishRasterJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                     "dry_run": dry_run,
                     "stac_item_id": cleanup.get("stac_item_id"),
                     "collection_id": cleanup.get("collection_id"),
-                    "blobs_deleted": len(cleanup.get("blobs_deleted", [])),
+                    "blobs_deleted": sum(
+                        1 for b in cleanup.get("blobs_deleted", [])
+                        if isinstance(b, dict) and b.get("deleted") is True
+                    ),
                     "collection_deleted": cleanup.get("collection_deleted", False)
                 }
 

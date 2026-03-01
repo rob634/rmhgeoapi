@@ -522,8 +522,14 @@ async def platform_catalog_dataset(req: func.HttpRequest) -> func.HttpResponse:
         )
 
     except Exception as e:
+        error_type = type(e).__name__
+        ds_id = locals().get('dataset_id', 'unknown')
         logger.error(f"Platform catalog dataset failed: {e}", exc_info=True)
-        return _catalog_error_response(500, "Internal server error")
+        return _catalog_error_response(
+            500,
+            f"Internal server error retrieving dataset '{ds_id}'. "
+            f"Error type: {error_type}. Contact support with this dataset_id for investigation."
+        )
 
 
 # ============================================================================

@@ -284,13 +284,191 @@ All pipeline executions in chronological order.
 
 ---
 
+## Run 13: Platform API Smoke Test — Post-Fix Re-Run (SIEGE)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 01 MAR 2026 |
+| **Pipeline** | SIEGE |
+| **Scope** | Full Platform API surface — regression verification after SG-1 through SG-11 fixes deployed |
+| **Target** | `https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net` (v0.9.10.0) |
+| **Agents** | Sentinel → Cartographer → Lancer → Auditor → Scribe |
+| **Verdict** | **CONDITIONAL PASS** — 80% pass rate (up from 54.5% in Run 11) |
+| **Run 1 Regressions** | 4 fixed (SG-1, SG-2, SG-7, SG-8), 3 not fixed (SG-3, SG-5, SG-6), 1 inconclusive (SG-4) |
+| **New Findings** | 6 (3 MEDIUM, 2 LOW, 1 INFO) |
+| **Key Milestone** | SG-1 FIXED — raster approval, multi-version, and selective unpublish work end-to-end |
+| **Output** | `agent_docs/SIEGE_RUN_2.md` |
+
+**Token Usage**:
+
+| Agent | Role | Tokens | Duration |
+|-------|------|--------|----------|
+| Sentinel | Campaign brief | — | inline |
+| Cartographer | Endpoint probing | 35,060 | 1m 44s |
+| Lancer | Lifecycle execution | 95,188 | 18m 23s |
+| Auditor | State verification | 56,490 | 3m 19s |
+| Scribe | Report synthesis | 64,600 | 3m 03s |
+| **Total** | | **251,338** | **~26m 29s** |
+
+**Regression Summary**:
+
+| Run 1 ID | Severity | Fixed? | Notes |
+|----------|----------|--------|-------|
+| SG-1 | CRITICAL | **YES** | Raster approval + STAC materialization works |
+| SG-2 | HIGH | **YES** | Clean error messages, no SQL leak |
+| SG-3 | HIGH | NO | catalog/dataset still returns 500 |
+| SG-5 | MEDIUM→HIGH | NO | Unpublish reports blobs_deleted=0 |
+| SG-6 | MEDIUM | NO | Cached STAC JSON still uses -ord naming |
+| SG-7 | MEDIUM | **YES** | is_latest correctly restored after unpublish |
+| SG-8 | LOW | **YES** | Lineage 404 response shape consistent |
+
+**New Finding Summary**:
+
+| ID | Severity | Description |
+|----|----------|-------------|
+| SG2-1 | MEDIUM | Unpublish doesn't accept release_id or version_ordinal |
+| SG2-2 | MEDIUM | Revoked release retains is_served=true |
+| SG2-3 | MEDIUM | Catalog API strips required STAC 1.0.0 fields |
+| SG2-4 | LOW | Status endpoint shows revoked release as primary |
+| SG2-5 | LOW | outputs.stac_item_id shows processing-time name |
+| SG2-6 | INFO | /resubmit semantics documentation gap |
+
+---
+
+## Run 14: SG-3 Root Cause Analysis and Fix (REFLEXION)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 01 MAR 2026 |
+| **Pipeline** | REFLEXION |
+| **Scope** | `GET /api/platform/catalog/dataset/{dataset_id}` — HTTP 500 on all requests |
+| **Files** | 7 analyzed, 2 patched |
+| **Agents** | R → F → P → J (sequential) |
+| **Root Cause** | SQL references `r.table_name` — column removed from `asset_releases` on 26 FEB 2026, moved to `release_tables` |
+| **Patches** | 2 (1 CRITICAL approved, 1 HIGH approved with modifications) |
+| **Residual Faults** | 8 (F-3 through F-10, MEDIUM/LOW, deferred) |
+| **Output** | `agent_docs/REFLEXION_SG3.md` |
+
+**Token Usage**:
+
+| Agent | Role | Tokens | Duration |
+|-------|------|--------|----------|
+| R | Reverse Engineer | 41,068 | 1m 56s |
+| F | Fault Injector | 91,885 | 3m 00s |
+| P | Patch Author | 42,850 | 1m 52s |
+| J | Judge | 56,881 | 2m 45s |
+| **Total** | | **232,684** | **~9m 33s** |
+
+**Patch Verdicts**:
+
+| Patch | Fault | Severity | Verdict |
+|-------|-------|----------|---------|
+| 1 | F-1 (broken SQL) | CRITICAL | **APPROVE** |
+| 2 | F-2 (opaque 500) | HIGH | **APPROVE WITH MODIFICATIONS** |
+
+---
+
+## Run 15: SG-5 Blob Deletion Failure (REFLEXION)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 01 MAR 2026 |
+| **Pipeline** | REFLEXION |
+| **Scope** | Unpublish raster pipeline — blobs not deleted, `blobs_deleted: 0` |
+| **Files** | 10+ analyzed, 2 patched |
+| **Agents** | R → F → P → J (sequential) |
+| **Root Cause** | Three-bug cascade: `/vsiaz/` href misparse + missing return field + silent idempotent success |
+| **Patches** | 3 (1 CRITICAL, 1 HIGH, 1 MEDIUM — all approved) |
+| **Residual Risks** | 4 (zarr finalize gap, Bug C unpatched, no integration test, dry-run inconsistency) |
+| **Output** | `agent_docs/REFLEXION_SG5.md` |
+
+**Token Usage**:
+
+| Agent | Role | Tokens | Duration |
+|-------|------|--------|----------|
+| R | Reverse Engineer | 90,426 | 3m 08s |
+| F | Fault Injector | 100,721 | 6m 27s |
+| P | Patch Author | 37,444 | 2m 38s |
+| J | Judge | 50,309 | 2m 46s |
+| **Total** | | **278,900** | **~15m 00s** |
+
+**Patch Verdicts**:
+
+| Patch | Fault | Severity | Verdict |
+|-------|-------|----------|---------|
+| 1 | Bug A (/vsiaz/ href misparse) | CRITICAL | **APPROVE** |
+| 2 | Bug B (missing blobs_deleted return) | HIGH | **APPROVE** |
+| 3 | Bug B+C (accurate blob count) | MEDIUM | **APPROVE** |
+
+---
+
+## Run 16: SG2-2 Revoked Release Retains is_served=true (REFLEXION)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 01 MAR 2026 |
+| **Pipeline** | REFLEXION |
+| **Scope** | Release revocation — `is_served` not set to `false` on revoke |
+| **Files** | 5 analyzed, 2 patched |
+| **Agents** | R → F → P → J (combined run) |
+| **Root Cause** | 2 independent revocation SQL paths both missing `is_served = false` |
+| **Patches** | 2 (both ACCEPTED) |
+| **Output** | `agent_docs/REFLEXION_SG22.md` |
+
+**Token Usage**:
+
+| Agent | Role | Tokens | Duration |
+|-------|------|--------|----------|
+| R+F+P+J | Combined | 50,775 | 3m 49s |
+| **Total** | | **50,775** | **~3m 49s** |
+
+**Patch Verdicts**:
+
+| Patch | Location | Change | Verdict |
+|-------|----------|--------|---------|
+| 1 | `release_repository.py:745` | Added `is_served = false` to `update_revocation()` SQL | **ACCEPT** |
+| 2 | `unpublish_handlers.py:1095` | Extended inline SQL: `+is_served=false, is_latest=false, revoked_at=NOW()` | **ACCEPT** |
+
+---
+
+## Run 17: SG2-3 Catalog API Strips STAC 1.0.0 Fields (REFLEXION)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 01 MAR 2026 |
+| **Pipeline** | REFLEXION |
+| **Scope** | pgSTAC item denormalization — `get_item()` returns incomplete STAC items |
+| **Files** | 1 analyzed, 1 patched (3 methods) |
+| **Agents** | R → F → P → J (combined run) |
+| **Root Cause** | pgSTAC stores `id`, `collection`, `geometry` in separate columns; `content` JSONB alone is not a valid STAC item. Correct reconstitution pattern existed in `pgstac_bootstrap.py` since 13 NOV 2025 but was not propagated to `PgStacRepository`. |
+| **Patches** | 3 (all ACCEPTED) |
+| **Output** | `agent_docs/REFLEXION_SG23.md` |
+
+**Token Usage**:
+
+| Agent | Role | Tokens | Duration |
+|-------|------|--------|----------|
+| R+F+P+J | Combined | 69,607 | 2m 47s |
+| **Total** | | **69,607** | **~2m 47s** |
+
+**Patch Verdicts**:
+
+| Patch | Location | Change | Verdict |
+|-------|----------|--------|---------|
+| 1 | `pgstac_repository.py:374-393` | `get_item()`: `SELECT content` → `content \|\| jsonb_build_object(...)` | **ACCEPT** |
+| 2 | `pgstac_repository.py:612-640` | `search_by_platform_ids()`: Same reconstitution pattern | **ACCEPT** |
+| 3 | `pgstac_repository.py:672-692` | `get_items_by_platform_dataset()`: SQL reconstitution replaces Python merge | **ACCEPT** |
+
+---
+
 ## Cumulative Token Usage
 
 | Pipeline | Runs | Total Tokens |
 |----------|------|-------------|
 | COMPETE | Runs 1-6, 9, 12 | 684,217 (Run 9: 346,656 + Run 12: 337,561; Runs 1-6 predated instrumentation) |
 | GREENFIELD | Runs 7, 8, 10 | 631,196 (Run 10 only; Runs 7-8 predated instrumentation) |
-| SIEGE | Run 11 | 178,793 |
-| **Instrumented Total** | Runs 9-12 | **1,494,206** |
+| SIEGE | Runs 11, 13 | 430,131 (Run 11: 178,793 + Run 13: 251,338) |
+| REFLEXION | Runs 14, 15, 16, 17 | 631,966 (Run 14: 232,684 + Run 15: 278,900 + Run 16: 50,775 + Run 17: 69,607) |
+| **Instrumented Total** | Runs 9-17 | **2,377,510** |
 
-**Note**: Runs 1-8 predated the token instrumentation described in `agents/AGENT_METRICS.md`. Per-agent token breakdowns are available for Runs 9-12.
+**Note**: Runs 1-8 predated the token instrumentation described in `agents/AGENT_METRICS.md`. Per-agent token breakdowns are available for Runs 9-17.

@@ -864,7 +864,11 @@ class PlatformCatalogService:
                    a.data_type, a.created_at as asset_created_at,
                    r.release_id, r.version_id, r.version_ordinal,
                    r.is_latest, r.is_served,
-                   r.blob_path, r.table_name,
+                   r.blob_path,
+                   (SELECT rt.table_name FROM {schema}.{release_tables} rt
+                    WHERE rt.release_id = r.release_id
+                    ORDER BY rt.table_role, rt.table_name
+                    LIMIT 1) as table_name,
                    r.stac_item_id, r.stac_collection_id,
                    r.processing_status, r.approval_state, r.clearance_state,
                    r.created_at as release_created_at
@@ -879,7 +883,8 @@ class PlatformCatalogService:
         """).format(
             schema=sql.Identifier("app"),
             assets=sql.Identifier("assets"),
-            releases=sql.Identifier("asset_releases")
+            releases=sql.Identifier("asset_releases"),
+            release_tables=sql.Identifier("release_tables")
         )
 
         with self._asset_repo._get_connection() as conn:

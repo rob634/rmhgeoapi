@@ -352,21 +352,35 @@ class PgStacRepository:
         """
         Get item by ID and collection.
 
+        Returns a fully-reconstituted STAC item with all required top-level
+        fields (id, type, geometry, collection, stac_version) merged from
+        pgSTAC's decomposed columns back into the content JSONB.
+
         Args:
             item_id: Item ID to retrieve
             collection_id: Collection ID the item belongs to
 
         Returns:
-            Item dict or None if not found
+            Complete STAC item dict or None if not found
         """
         logger.debug(f"🔍 Fetching item: {item_id} (collection: {collection_id})")
 
         try:
             with self._pg_repo._get_connection() as conn:
                 with conn.cursor() as cur:
+                    # FIX SG2-3: Reconstitute full STAC item from decomposed columns
+                    # pgSTAC stores id, collection, geometry separately from content JSONB
+                    # Pattern from pgstac_bootstrap.py lines 2093-2100
                     cur.execute(
                         """
-                        SELECT content
+                        SELECT content ||
+                            jsonb_build_object(
+                                'id', id,
+                                'collection', collection,
+                                'geometry', ST_AsGeoJSON(geometry)::jsonb,
+                                'type', 'Feature',
+                                'stac_version', COALESCE(content->>'stac_version', '1.0.0')
+                            ) AS stac_item
                         FROM pgstac.items
                         WHERE id = %s AND collection = %s
                         """,
@@ -376,7 +390,7 @@ class PgStacRepository:
 
                     if result:
                         logger.debug(f"   ✅ Item found: {item_id}")
-                        return result['content']  # content is JSONB, returns dict
+                        return result['stac_item']
                     else:
                         logger.debug(f"   ❌ Item not found: {item_id}")
                         return None
@@ -594,9 +608,17 @@ class PgStacRepository:
         try:
             with self._pg_repo._get_connection() as conn:
                 with conn.cursor() as cur:
+                    # FIX SG2-3: Reconstitute full STAC item from decomposed columns
                     cur.execute(
                         """
-                        SELECT content, collection, id
+                        SELECT content ||
+                            jsonb_build_object(
+                                'id', id,
+                                'collection', collection,
+                                'geometry', ST_AsGeoJSON(geometry)::jsonb,
+                                'type', 'Feature',
+                                'stac_version', COALESCE(content->>'stac_version', '1.0.0')
+                            ) AS stac_item
                         FROM pgstac.items
                         WHERE content->'properties' @> %s::jsonb
                         LIMIT 1
@@ -610,11 +632,12 @@ class PgStacRepository:
                     result = cur.fetchone()
 
                     if result:
+                        stac_item = result['stac_item']
                         logger.debug(
-                            f"   ✅ Found item: {result['id']} "
-                            f"(collection: {result['collection']})"
+                            f"   ✅ Found item: {stac_item.get('id')} "
+                            f"(collection: {stac_item.get('collection')})"
                         )
-                        return result['content']
+                        return stac_item
                     else:
                         logger.debug("   ❌ No item found for platform IDs")
                         return None
@@ -639,16 +662,24 @@ class PgStacRepository:
             limit: Maximum items to return (default 100)
 
         Returns:
-            List of STAC item dicts (with id and collection added)
+            List of complete STAC item dicts (with all required top-level fields)
         """
         logger.debug(f"🔍 Getting items for DDH dataset: {dataset_id}")
 
         try:
             with self._pg_repo._get_connection() as conn:
                 with conn.cursor() as cur:
+                    # FIX SG2-3: Reconstitute full STAC items from decomposed columns
                     cur.execute(
                         """
-                        SELECT id, collection, content
+                        SELECT content ||
+                            jsonb_build_object(
+                                'id', id,
+                                'collection', collection,
+                                'geometry', ST_AsGeoJSON(geometry)::jsonb,
+                                'type', 'Feature',
+                                'stac_version', COALESCE(content->>'stac_version', '1.0.0')
+                            ) AS stac_item
                         FROM pgstac.items
                         WHERE content->'properties'->>'ddh:dataset_id' = %s
                         ORDER BY content->'properties'->>'datetime' DESC
@@ -658,13 +689,7 @@ class PgStacRepository:
                     )
                     results = cur.fetchall()
 
-                    # Merge id and collection into content dict
-                    items = []
-                    for row in results:
-                        item = row['content']
-                        item['id'] = row['id']
-                        item['collection'] = row['collection']
-                        items.append(item)
+                    items = [row['stac_item'] for row in results]
 
                     logger.debug(f"   ✅ Found {len(items)} items for dataset {dataset_id}")
                     return items

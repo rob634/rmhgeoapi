@@ -383,6 +383,12 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                     )
                     logger.info(f"  Finalized zarr stac_item_id: {final_stac} (ord={ordinal})")
 
+                else:
+                    logger.warning(
+                        f"  Ordinal finalization not implemented for data_type={platform_req.data_type.value} "
+                        f"-- stac_item_id may retain 'draft' placeholder"
+                    )
+
         except ReleaseStateError:
             raise  # Already handled above, but guard against re-wrapping
         except Exception as asset_err:

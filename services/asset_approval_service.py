@@ -227,14 +227,38 @@ class AssetApprovalService:
                     asset.dataset_id, asset.resource_id, version_id
                 )
                 if final_stac_item_id != release.stac_item_id:
+                    old_stac_item_id = release.stac_item_id
                     self.release_repo.update_physical_outputs(
                         release_id=release_id,
                         stac_item_id=final_stac_item_id
                     )
                     logger.info(
-                        f"Updated stac_item_id: {release.stac_item_id} -> {final_stac_item_id}"
+                        f"Updated stac_item_id: {old_stac_item_id} -> {final_stac_item_id}"
                     )
                     release.stac_item_id = final_stac_item_id
+
+                    # Sync cached stac_item_json['id'] to match new stac_item_id
+                    if release.stac_item_json and release.stac_item_json.get('id') != final_stac_item_id:
+                        patched_json = dict(release.stac_item_json)
+                        patched_json['id'] = final_stac_item_id
+                        props = patched_json.get('properties', {})
+                        if 'title' in props:
+                            props['title'] = final_stac_item_id
+                        self.release_repo.update_stac_item_json(release_id, patched_json)
+                        release.stac_item_json = patched_json
+                        logger.info(f"Synced stac_item_json['id'] to {final_stac_item_id}")
+
+                    # Sync cog_metadata.stac_item_id to versioned form
+                    try:
+                        from infrastructure.raster_metadata_repository import RasterMetadataRepository
+                        cog_repo = RasterMetadataRepository.instance()
+                        cog_repo.update_stac_linkage(
+                            cog_id=old_stac_item_id,
+                            stac_item_id=final_stac_item_id,
+                            stac_collection_id=release.stac_collection_id
+                        )
+                    except Exception as cog_err:
+                        logger.warning(f"Failed to sync cog_metadata stac_item_id: {cog_err}")
 
             # Materialize STAC item to pgSTAC from cached stac_item_json
             stac_result = self._materialize_stac(release, reviewer, clearance_state)

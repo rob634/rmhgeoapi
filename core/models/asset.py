@@ -665,6 +665,20 @@ class AssetRelease(BaseModel):
         """Check if this release is a draft (no version_id assigned)."""
         return self.version_id is None
 
+    @staticmethod
+    def _sanitize_stac_json(stac_json: Optional[Dict]) -> Optional[Dict]:
+        """Strip internal geoetl:* properties from STAC JSON for API responses."""
+        if not stac_json:
+            return stac_json
+        sanitized = dict(stac_json)
+        props = sanitized.get('properties', {})
+        if props:
+            sanitized['properties'] = {
+                k: v for k, v in props.items()
+                if not k.startswith('geoetl:')
+            }
+        return sanitized
+
     def to_dict(self) -> Dict[str, Any]:
         """
         Convert to dictionary for database storage.
@@ -693,7 +707,7 @@ class AssetRelease(BaseModel):
             # table_name: REMOVED — read from app.release_tables
             'stac_item_id': self.stac_item_id,
             'stac_collection_id': self.stac_collection_id,
-            'stac_item_json': self.stac_item_json,
+            'stac_item_json': self._sanitize_stac_json(self.stac_item_json),
             'content_hash': self.content_hash,
             'source_file_hash': self.source_file_hash,
             'output_file_hash': self.output_file_hash,

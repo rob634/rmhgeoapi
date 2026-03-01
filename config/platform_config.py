@@ -286,6 +286,8 @@ class PlatformConfig(BaseModel):
         if version_id:
             segment = version_id
         elif version_ordinal is not None:
+            if version_ordinal < 1:
+                raise ValueError(f"version_ordinal must be >= 1, got {version_ordinal}")
             segment = f"ord{version_ordinal}"
         else:
             segment = "draft"
@@ -377,6 +379,8 @@ class PlatformConfig(BaseModel):
         if version_id:
             segment = version_id
         elif version_ordinal is not None:
+            if version_ordinal < 1:
+                raise ValueError(f"version_ordinal must be >= 1, got {version_ordinal}")
             segment = f"ord{version_ordinal}"
         else:
             segment = "draft"

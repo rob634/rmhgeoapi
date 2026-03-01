@@ -6,6 +6,20 @@
 
 ---
 
+## Endpoint Access Rules
+
+Agents test through the **same API surface** that B2B consumers use (`/api/platform/*`).
+
+| Tier | Endpoints | Who Uses | Purpose |
+|------|-----------|----------|---------|
+| **Action** | `/api/platform/*` | Blue, Red | Submit, approve, reject, unpublish, status, catalog. The B2B surface. |
+| **Verification** | `/api/dbadmin/*`, `/api/storage/*`, `/api/health` | Oracle, Coroner | Read-only state auditing after the battle phase. |
+| **Setup** | `/api/dbadmin/maintenance`, `/api/stac/nuke` | Strategist (prerequisites only) | Before agents run. Never during tests. |
+
+**Hard rule**: Blue and Red MUST only use `/api/platform/*` endpoints. If a workflow requires an admin endpoint, that's a finding (missing B2B capability).
+
+---
+
 ## Agent Roles
 
 | Agent | Role | Runs As | Input |
@@ -261,19 +275,18 @@ Oracle receives Blue's State Checkpoint Map and Red's Attack Log. Oracle does NO
 
 **Step 1: Verify Blue's Checkpoints**
 
-For each checkpoint in Blue's map, query the system:
+For each checkpoint in Blue's map, query using Platform API first, then admin for deep verification:
 
 ```bash
-# Job state
-curl "${BASE_URL}/api/dbadmin/jobs/{job_id}"
-
-# Release state
+# Platform API (primary — same surface as B2B consumers)
 curl "${BASE_URL}/api/platform/status/{request_id}"
-
-# STAC item
 curl "${BASE_URL}/api/platform/catalog/item/{collection}/{item_id}"
+curl "${BASE_URL}/api/platform/catalog/dataset/{dataset_id}"
+curl "${BASE_URL}/api/platform/approvals/status?stac_item_ids={ids}"
+curl "${BASE_URL}/api/platform/failures"
 
-# Overall stats
+# Admin (verification only — deeper state inspection)
+curl "${BASE_URL}/api/dbadmin/jobs/{job_id}"
 curl "${BASE_URL}/api/dbadmin/stats"
 ```
 

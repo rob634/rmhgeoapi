@@ -6,6 +6,20 @@
 
 ---
 
+## Endpoint Access Rules
+
+Agents test through the **same API surface** that B2B consumers use (`/api/platform/*`).
+
+| Tier | Endpoints | Who Uses | Purpose |
+|------|-----------|----------|---------|
+| **Action** | `/api/platform/*` | Pathfinder, Saboteur, Provocateur | Submit, approve, reject, unpublish, status, catalog. The B2B surface. |
+| **Verification** | `/api/dbadmin/*`, `/api/storage/*`, `/api/health` | Inspector, Tribunal | Read-only state auditing in Phase 2 and Phase 3. |
+| **Setup** | `/api/dbadmin/maintenance`, `/api/stac/nuke` | General (prerequisites only) | Before agents run. Never during tests. |
+
+**Hard rule**: Pathfinder, Saboteur, and Provocateur MUST only use `/api/platform/*` endpoints. Inspector and Tribunal may use verification endpoints for auditing. If a test workflow needs an admin endpoint to function, flag it as a finding — a missing B2B capability.
+
+---
+
 ## Agent Roles
 
 | Agent | Role | Runs As | Input |
@@ -266,33 +280,49 @@ After both Phase 1 agents complete, dispatch Phase 2 agents simultaneously.
 
 Receives Pathfinder's State Checkpoint Map and captured IDs. Does NOT know about Saboteur.
 
-**For each checkpoint**:
+**For each checkpoint — Platform API first (B2B surface)**:
 
 ```bash
-# Job state
-curl -s "${BASE_URL}/api/dbadmin/jobs/{job_id}"
-
-# Release state via platform status
+# Release/job state (primary check)
 curl -s "${BASE_URL}/api/platform/status/{request_id}"
 
 # STAC item existence
 curl -s "${BASE_URL}/api/platform/catalog/item/{collection}/{item_id}"
+
+# Dataset-level view
+curl -s "${BASE_URL}/api/platform/catalog/dataset/{dataset_id}"
+
+# Approval status
+curl -s "${BASE_URL}/api/platform/approvals/status?stac_item_ids={ids}"
+
+# Recent failures
+curl -s "${BASE_URL}/api/platform/failures"
 ```
 
-**Additional system-wide checks**:
+**System-wide checks — Platform API**:
 
 ```bash
-# All jobs for the tn- namespace
-curl -s "${BASE_URL}/api/dbadmin/jobs?limit=100"
+# All platform requests
+curl -s "${BASE_URL}/api/platform/status?limit=100"
 
-# Failed jobs (should be none or explainable)
+# All approvals
+curl -s "${BASE_URL}/api/platform/approvals"
+
+# Platform health
+curl -s "${BASE_URL}/api/platform/health"
+```
+
+**Deep verification — admin endpoints (verification only)**:
+
+```bash
+# Job detail (when platform/status is insufficient)
+curl -s "${BASE_URL}/api/dbadmin/jobs/{job_id}"
+
+# Failed jobs
 curl -s "${BASE_URL}/api/dbadmin/jobs?status=failed"
 
 # System diagnostics
 curl -s "${BASE_URL}/api/dbadmin/diagnostics/all"
-
-# STAC collections
-curl -s "${BASE_URL}/api/platform/catalog/collections"
 
 # Database stats
 curl -s "${BASE_URL}/api/dbadmin/stats"

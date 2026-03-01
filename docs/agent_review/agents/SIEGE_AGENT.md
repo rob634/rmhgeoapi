@@ -6,6 +6,20 @@
 
 ---
 
+## Endpoint Access Rules
+
+Agents test through the **same API surface** that B2B consumers use (`/api/platform/*`). This ensures tests reflect real-world access patterns.
+
+| Tier | Endpoints | Who Uses | Purpose |
+|------|-----------|----------|---------|
+| **Action** | `/api/platform/*` | All agents | Submit, approve, reject, unpublish, query status, browse catalog. The B2B surface. |
+| **Verification** | `/api/dbadmin/*`, `/api/storage/*`, `/api/health` | Auditor, Inspector, Oracle | Read-only state auditing. Confirm DB/STAC/blob state matches expectations. |
+| **Setup** | `/api/dbadmin/maintenance`, `/api/stac/nuke` | Sentinel (prerequisites only) | Schema rebuild and STAC nuke BEFORE agents run. Never during tests. |
+
+**Hard rule**: No agent may use a verification or setup endpoint to perform a test action. If the Platform API can't do it, the test should flag that as a finding, not work around it.
+
+---
+
 ## Agent Roles
 
 | Agent | Role | Runs As | Input |
@@ -109,16 +123,32 @@ Cartographer probes every known endpoint with a minimal request to verify livene
 
 ### Cartographer Probe Table
 
+**Platform API surface (B2B — primary focus)**:
+
+| Endpoint | Method | Probe | Expected |
+|----------|--------|-------|----------|
+| `/api/platform/health` | GET | No params | 200 |
+| `/api/platform/submit` | OPTIONS or GET | Check if live | 405 or method listing |
+| `/api/platform/status` | GET | No params, list mode | 200 |
+| `/api/platform/status/{random-uuid}` | GET | Random UUID | 404 or empty |
+| `/api/platform/approve` | OPTIONS or GET | Check if live | 405 or method listing |
+| `/api/platform/reject` | OPTIONS or GET | Check if live | 405 or method listing |
+| `/api/platform/unpublish` | OPTIONS or GET | Check if live | 405 or method listing |
+| `/api/platform/resubmit` | OPTIONS or GET | Check if live | 405 or method listing |
+| `/api/platform/validate` | OPTIONS or GET | Check if live | 405 or method listing |
+| `/api/platform/approvals` | GET | No params | 200 |
+| `/api/platform/catalog/lookup` | GET | Missing params | 400 or empty |
+| `/api/platform/failures` | GET | No params | 200 |
+| `/api/platform/lineage/{random-uuid}` | GET | Random UUID | 404 or empty |
+| `/api/platforms` | GET | No params | 200 |
+
+**Verification endpoints (admin — health check only)**:
+
 | Endpoint | Method | Probe | Expected |
 |----------|--------|-------|----------|
 | `/api/health` | GET | No params | 200 |
-| `/api/platform/submit` | OPTIONS or GET | Check if live | 405 or method listing |
-| `/api/platform/status/{random-uuid}` | GET | Random UUID | 404 or empty |
-| `/api/platform/approve` | OPTIONS or GET | Check if live | 405 or method listing |
-| `/api/platform/catalog/collections` | GET | No params | 200 |
 | `/api/dbadmin/stats` | GET | No params | 200 |
 | `/api/dbadmin/jobs` | GET | `?limit=1` | 200 |
-| `/api/dbadmin/diagnostics/all` | GET | No params | 200 |
 
 ### Cartographer Output Format
 
@@ -206,15 +236,25 @@ Auditor receives Lancer's State Checkpoint Map and verifies actual system state.
 
 ### Audit Queries
 
-For each checkpoint:
+For each checkpoint, prefer Platform API endpoints. Use admin endpoints only for deeper verification.
+
+**Primary checks (Platform API)**:
 
 | Check | Query | Compare Against |
 |-------|-------|-----------------|
-| Job exists and correct status | `/api/dbadmin/jobs/{job_id}` | Expected status from checkpoint |
-| Release exists and correct state | `/api/platform/status/{request_id}` | Expected approval_state |
+| Job/release state | `/api/platform/status/{request_id}` | Expected job_status, approval_state |
 | STAC item existence | `/api/platform/catalog/item/{collection}/{item_id}` | Expected 200 or 404 |
-| Overall health | `/api/dbadmin/stats` | No unexpected counts |
-| No orphaned tasks | `/api/dbadmin/diagnostics/all` | Clean diagnostics |
+| Dataset items | `/api/platform/catalog/dataset/{dataset_id}` | Expected item count |
+| Approval state | `/api/platform/approvals/status?stac_item_ids={ids}` | Expected approval records |
+| Recent failures | `/api/platform/failures` | No unexpected failures |
+
+**Deep verification (admin — verification only)**:
+
+| Check | Query | Compare Against |
+|-------|-------|-----------------|
+| Job detail | `/api/dbadmin/jobs/{job_id}` | Expected status, result_data |
+| Overall stats | `/api/dbadmin/stats` | No unexpected counts |
+| Orphaned tasks | `/api/dbadmin/diagnostics/all` | Clean diagnostics |
 
 ### Auditor Output Format
 

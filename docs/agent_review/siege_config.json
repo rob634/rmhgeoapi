@@ -4,6 +4,55 @@
     "bronze_container": "rmhazuregeobronze"
   },
 
+  "endpoint_access_rules": {
+    "_comment": "Agents test through the SAME API surface that B2B consumers use. Admin endpoints are verification-only.",
+
+    "action_endpoints": {
+      "_comment": "Agents MUST use these for all test actions (submit, approve, status, etc.). This is the B2B API surface.",
+      "submit":              "POST /api/platform/submit",
+      "validate":            "POST /api/platform/validate",
+      "status_by_id":        "GET  /api/platform/status/{request_id}",
+      "status_list":         "GET  /api/platform/status",
+      "approve":             "POST /api/platform/approve",
+      "reject":              "POST /api/platform/reject",
+      "revoke":              "POST /api/platform/revoke",
+      "unpublish":           "POST /api/platform/unpublish",
+      "resubmit":            "POST /api/platform/resubmit",
+      "approvals_list":      "GET  /api/platform/approvals",
+      "approvals_by_id":     "GET  /api/platform/approvals/{approval_id}",
+      "approvals_status":    "GET  /api/platform/approvals/status",
+      "catalog_lookup":      "GET  /api/platform/catalog/lookup",
+      "catalog_asset":       "GET  /api/platform/catalog/asset/{asset_id}",
+      "catalog_item":        "GET  /api/platform/catalog/item/{collection_id}/{item_id}",
+      "catalog_assets":      "GET  /api/platform/catalog/assets/{collection_id}/{item_id}",
+      "catalog_dataset":     "GET  /api/platform/catalog/dataset/{dataset_id}",
+      "platform_health":     "GET  /api/platform/health",
+      "platform_failures":   "GET  /api/platform/failures",
+      "platform_lineage":    "GET  /api/platform/lineage/{request_id}",
+      "platforms_list":      "GET  /api/platforms",
+      "platforms_by_id":     "GET  /api/platforms/{platform_id}"
+    },
+
+    "verification_endpoints": {
+      "_comment": "Agents may use these ONLY for auditing and state verification — never for test actions.",
+      "dbadmin_jobs":        "GET  /api/dbadmin/jobs",
+      "dbadmin_job_by_id":   "GET  /api/dbadmin/jobs/{job_id}",
+      "dbadmin_tasks":       "GET  /api/dbadmin/tasks/{job_id}",
+      "dbadmin_stats":       "GET  /api/dbadmin/stats",
+      "dbadmin_diagnostics": "GET  /api/dbadmin/diagnostics/all",
+      "storage_blobs":       "GET  /api/storage/{container}/blobs",
+      "storage_blob":        "GET  /api/storage/{container}/blob",
+      "storage_containers":  "GET  /api/storage/containers",
+      "health":              "GET  /api/health"
+    },
+
+    "setup_only_endpoints": {
+      "_comment": "Used ONLY in prerequisites (before agents run). Never during tests.",
+      "rebuild_schema":      "POST /api/dbadmin/maintenance?action=rebuild&confirm=yes",
+      "nuke_stac":           "POST /api/stac/nuke?confirm=yes&mode=all"
+    }
+  },
+
   "discovery": {
     "list_containers": "/api/storage/containers?zone=bronze",
     "list_blobs": "/api/storage/{container}/blobs?zone=bronze&suffix={suffix}&limit=50",

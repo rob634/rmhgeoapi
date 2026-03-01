@@ -12,11 +12,12 @@ Agents test through the **same API surface** that B2B consumers use (`/api/platf
 
 | Tier | Endpoints | Who Uses | Purpose |
 |------|-----------|----------|---------|
-| **Action** | `/api/platform/*` | All agents | Submit, approve, reject, unpublish, query status, browse catalog. The B2B surface. |
-| **Verification** | `/api/dbadmin/*`, `/api/storage/*`, `/api/health` | Auditor, Inspector, Oracle | Read-only state auditing. Confirm DB/STAC/blob state matches expectations. |
+| **Action** | `/api/platform/*` | Cartographer (probes), Lancer | Submit, approve, reject, unpublish, query status, browse catalog. The B2B surface. |
+| **Verification** | `/api/dbadmin/*`, `/api/storage/*`, `/api/health` | Cartographer (health only), Auditor | Read-only state auditing. Confirm DB/STAC/blob state matches expectations. |
 | **Setup** | `/api/dbadmin/maintenance`, `/api/stac/nuke` | Sentinel (prerequisites only) | Schema rebuild and STAC nuke BEFORE agents run. Never during tests. |
+| **Synthesis** | None (reads other agents' outputs) | Scribe | Produces final report from other agents' data. No HTTP calls. |
 
-**Hard rule**: No agent may use a verification or setup endpoint to perform a test action. If the Platform API can't do it, the test should flag that as a finding, not work around it.
+**Hard rule**: Lancer MUST only use `/api/platform/*` endpoints. Auditor may use admin endpoints for deep verification. If a workflow needs an admin endpoint to function, flag it as a finding — a missing B2B capability.
 
 ---
 

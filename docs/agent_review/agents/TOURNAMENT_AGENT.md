@@ -13,10 +13,11 @@ Agents test through the **same API surface** that B2B consumers use (`/api/platf
 | Tier | Endpoints | Who Uses | Purpose |
 |------|-----------|----------|---------|
 | **Action** | `/api/platform/*` | Pathfinder, Saboteur, Provocateur | Submit, approve, reject, unpublish, status, catalog. The B2B surface. |
-| **Verification** | `/api/dbadmin/*`, `/api/storage/*`, `/api/health` | Inspector, Tribunal | Read-only state auditing in Phase 2 and Phase 3. |
+| **Verification** | `/api/dbadmin/*`, `/api/storage/*`, `/api/health` | Inspector | Read-only state auditing in Phase 2. Deep verification where Platform API is insufficient. |
 | **Setup** | `/api/dbadmin/maintenance`, `/api/stac/nuke` | General (prerequisites only) | Before agents run. Never during tests. |
+| **Synthesis** | None (reads other agents' outputs) | Tribunal | Correlates findings, scores, and produces final report. No HTTP calls. |
 
-**Hard rule**: Pathfinder, Saboteur, and Provocateur MUST only use `/api/platform/*` endpoints. Inspector and Tribunal may use verification endpoints for auditing. If a test workflow needs an admin endpoint to function, flag it as a finding — a missing B2B capability.
+**Hard rule**: Pathfinder, Saboteur, and Provocateur MUST only use `/api/platform/*` endpoints. Inspector may use admin endpoints for deep verification. Tribunal does not make HTTP calls — it synthesizes. If a test workflow needs an admin endpoint to function, flag it as a finding — a missing B2B capability.
 
 ---
 

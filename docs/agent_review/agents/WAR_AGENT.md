@@ -13,10 +13,11 @@ Agents test through the **same API surface** that B2B consumers use (`/api/platf
 | Tier | Endpoints | Who Uses | Purpose |
 |------|-----------|----------|---------|
 | **Action** | `/api/platform/*` | Blue, Red | Submit, approve, reject, unpublish, status, catalog. The B2B surface. |
-| **Verification** | `/api/dbadmin/*`, `/api/storage/*`, `/api/health` | Oracle, Coroner | Read-only state auditing after the battle phase. |
+| **Verification** | `/api/dbadmin/*`, `/api/storage/*`, `/api/health` | Oracle | Read-only state auditing after the battle phase. |
 | **Setup** | `/api/dbadmin/maintenance`, `/api/stac/nuke` | Strategist (prerequisites only) | Before agents run. Never during tests. |
+| **Synthesis** | None (reads other agents' outputs) | Coroner | Root-cause analysis and report. Documents reproduction curls but does not execute them. |
 
-**Hard rule**: Blue and Red MUST only use `/api/platform/*` endpoints. If a workflow requires an admin endpoint, that's a finding (missing B2B capability).
+**Hard rule**: Blue and Red MUST only use `/api/platform/*` endpoints. Oracle may use admin endpoints for deep verification. If a workflow requires an admin endpoint to function, that's a finding (missing B2B capability).
 
 ---
 

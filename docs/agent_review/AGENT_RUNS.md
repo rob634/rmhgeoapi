@@ -213,6 +213,17 @@ All pipeline executions in chronological order.
 | **Fixes Applied** | None (report only) |
 | **Output** | `agent_docs/SIEGE_RUN_1.md` |
 
+**Token Usage**:
+
+| Agent | Role | Tokens | Duration |
+|-------|------|--------|----------|
+| Sentinel | Campaign brief | — | inline |
+| Cartographer | Endpoint probing | 34,172 | 1m 48s |
+| Lancer | Lifecycle execution | 69,735 | 7m 34s |
+| Auditor | State verification | 45,628 | 2m 42s |
+| Scribe | Report synthesis | 29,258 | 1m 20s |
+| **Total** | | **178,793** | **~13m 24s** |
+
 **Finding Summary**:
 
 | ID | Severity | Description |
@@ -237,7 +248,7 @@ All pipeline executions in chronological order.
 |----------|------|-------------|
 | COMPETE | Runs 1-6, 9 | 346,656 (Run 9 only; Runs 1-6 predated instrumentation) |
 | GREENFIELD | Runs 7, 8, 10 | 631,196 (Run 10 only; Runs 7-8 predated instrumentation) |
-| SIEGE | Run 11 | Not instrumented (first SIEGE run) |
-| **Instrumented Total** | Runs 9-10 | **977,852** |
+| SIEGE | Run 11 | 178,793 |
+| **Instrumented Total** | Runs 9-11 | **1,156,645** |
 
-**Note**: Runs 1-8 predated the token instrumentation described in `agents/AGENT_METRICS.md`. Per-agent token breakdowns are only available for Runs 9-10. Run 11 is the first SIEGE pipeline execution.
+**Note**: Runs 1-8 predated the token instrumentation described in `agents/AGENT_METRICS.md`. Per-agent token breakdowns are available for Runs 9-11.

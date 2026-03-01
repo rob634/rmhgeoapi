@@ -1396,8 +1396,44 @@ async def platform_failures(req: func.HttpRequest) -> func.HttpResponse:
                         "error_category": error_category,
                         "error_summary": error_summary,
                         "request_id": row['request_id'],
-                        "source": f"{row['container']}/{row['blob']}" if row['container'] and row['blob'] else None
+                        "source": f"{row['container']}/{row['blob']}" if row['container'] and row['blob'] else None,
+                        "failure_type": "job_failure"
                     })
+
+                # Query approval rollbacks from asset_releases
+                cur.execute(f"""
+                    SELECT
+                        r.release_id,
+                        r.asset_id,
+                        r.stac_item_id,
+                        r.last_error,
+                        r.updated_at as failed_at
+                    FROM {config.app_schema}.asset_releases r
+                    WHERE r.last_error LIKE 'ROLLBACK:%%'
+                      AND r.updated_at >= NOW() - INTERVAL '%s hours'
+                    ORDER BY r.updated_at DESC
+                    LIMIT %s
+                """, (hours, limit))
+                rollbacks = cur.fetchall()
+
+                for row in rollbacks:
+                    raw_error = row['last_error'] or "Unknown rollback error"
+                    error_summary, error_category = _sanitize_error(raw_error)
+
+                    result["recent_failures"].append({
+                        "release_id": row['release_id'],
+                        "asset_id": row['asset_id'],
+                        "stac_item_id": row['stac_item_id'],
+                        "failed_at": row['failed_at'].isoformat() if row['failed_at'] else None,
+                        "error_category": error_category,
+                        "error_summary": error_summary,
+                        "failure_type": "approval_rollback"
+                    })
+
+                # Sort merged list by failed_at descending
+                result["recent_failures"].sort(
+                    key=lambda x: x.get("failed_at") or "", reverse=True
+                )
 
         return func.HttpResponse(
             json.dumps(result, indent=2),
@@ -1499,7 +1535,9 @@ async def platform_lineage(req: func.HttpRequest) -> func.HttpResponse:
         if not request_id:
             return func.HttpResponse(
                 json.dumps({
+                    "success": False,
                     "error": "request_id is required",
+                    "error_type": "ValidationError",
                     "usage": "GET /api/platform/lineage/{request_id}"
                 }),
                 status_code=400,
@@ -1515,7 +1553,9 @@ async def platform_lineage(req: func.HttpRequest) -> func.HttpResponse:
         if not platform_request:
             return func.HttpResponse(
                 json.dumps({
+                    "success": False,
                     "error": f"Platform request {request_id} not found",
+                    "error_type": "NotFound",
                     "timestamp": datetime.now(timezone.utc).isoformat()
                 }),
                 status_code=404,
@@ -1528,9 +1568,11 @@ async def platform_lineage(req: func.HttpRequest) -> func.HttpResponse:
         if not job:
             return func.HttpResponse(
                 json.dumps({
+                    "success": False,
+                    "error": "Associated job not found",
+                    "error_type": "NotFound",
                     "request_id": request_id,
                     "job_id": platform_request.job_id,
-                    "error": "Associated job not found",
                     "timestamp": datetime.now(timezone.utc).isoformat()
                 }),
                 status_code=404,

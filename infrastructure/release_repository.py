@@ -1430,10 +1430,11 @@ class ReleaseRepository(PostgreSQLRepository):
                             release_id
                         )
                     )
+                    sibling_promoted = cur.rowcount > 0
                     conn.commit()
                     logger.warning(
                         f"Approval rollback committed: {release_id[:16]}... "
-                        f"reason={reason}"
+                        f"reason={reason}, sibling_promoted={sibling_promoted}"
                     )
                 else:
                     conn.rollback()

@@ -991,7 +991,7 @@ def _lookup_releases_by_stac_item_ids(release_repo, stac_item_ids, statuses):
         logger.warning(f"Error looking up releases by stac_item_ids: {e}")
         for item_id in stac_item_ids:
             if item_id not in statuses:
-                statuses[item_id] = {"has_release": False, "error": str(e)}
+                statuses[item_id] = {"has_release": False, "lookup_error": True}
 
 
 def _lookup_releases_by_stac_collection_ids(release_repo, stac_collection_ids, statuses):
@@ -1042,7 +1042,7 @@ def _lookup_releases_by_stac_collection_ids(release_repo, stac_collection_ids, s
         logger.warning(f"Error looking up releases by stac_collection_ids: {e}")
         for collection_id in stac_collection_ids:
             if collection_id not in statuses:
-                statuses[collection_id] = {"has_release": False, "error": str(e)}
+                statuses[collection_id] = {"has_release": False, "lookup_error": True}
 
 
 def _lookup_releases_by_table_names(release_repo, table_names, statuses):
@@ -1113,7 +1113,7 @@ def _lookup_releases_by_table_names(release_repo, table_names, statuses):
         logger.warning(f"Error looking up table approvals: {e}")
         for table_name in table_names:
             if table_name not in statuses:
-                statuses[table_name] = {"has_release": False, "error": str(e)}
+                statuses[table_name] = {"has_release": False, "lookup_error": True}
 
 
 # Module exports

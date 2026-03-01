@@ -437,6 +437,18 @@ class STACMaterializer:
             }
 
         try:
+            # Step 0: Ensure collection exists (required for item insert)
+            # pgSTAC requires collections BEFORE items — items partition by collection.
+            # materialize_collection() can't go first because it needs items to compute extent.
+            if not self.pgstac.collection_exists(release.stac_collection_id):
+                from services.stac_collection import build_raster_stac_collection
+                collection_dict = build_raster_stac_collection(
+                    collection_id=release.stac_collection_id,
+                    bbox=[-180, -90, 180, 90],  # Placeholder, updated by Step 2
+                )
+                self.pgstac.insert_collection(collection_dict)
+                logger.info(f"Created collection '{release.stac_collection_id}' for first item")
+
             # Step 1: Materialize item
             item_result = self.materialize_item(release, reviewer, clearance_state)
 

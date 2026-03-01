@@ -512,6 +512,9 @@ async def platform_catalog_dataset(req: func.HttpRequest) -> func.HttpResponse:
 
         result = service.list_dataset_unified(dataset_id, limit, offset)
 
+        if result["count"] == 0 and offset == 0:
+            return _catalog_error_response(404, f"Dataset '{dataset_id}' not found", "NotFound")
+
         return func.HttpResponse(
             json.dumps(result, indent=2, default=str),
             status_code=200,

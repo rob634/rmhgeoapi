@@ -86,6 +86,13 @@ from .handler_virtualzarr import (
     virtualzarr_register,
 )
 
+# IngestZarr handlers (native Zarr store pipeline)
+from .handler_ingest_zarr import (
+    ingest_zarr_validate,
+    ingest_zarr_copy,
+    ingest_zarr_register,
+)
+
 # ============================================================================
 # STAC METADATA HELPER
 # ============================================================================
@@ -154,6 +161,11 @@ ALL_HANDLERS = {
     "virtualzarr_validate": virtualzarr_validate,
     "virtualzarr_combine": virtualzarr_combine,
     "virtualzarr_register": virtualzarr_register,
+
+    # IngestZarr handlers (native Zarr store pipeline)
+    "ingest_zarr_validate": ingest_zarr_validate,
+    "ingest_zarr_copy": ingest_zarr_copy,
+    "ingest_zarr_register": ingest_zarr_register,
 
 }
 

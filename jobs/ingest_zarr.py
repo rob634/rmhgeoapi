@@ -237,6 +237,7 @@ class IngestZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                     "task_id": f"{job_id[:8]}-s3-register",
                     "task_type": "ingest_zarr_register",
                     "parameters": {
+                        "release_id": job_params.get("release_id", job_id),
                         "zarr_store_url": zarr_store_url,
                         "stac_item_id": job_params["stac_item_id"],
                         "collection_id": job_params["collection_id"],

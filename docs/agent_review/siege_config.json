@@ -3,7 +3,26 @@
     "base_url": "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net",
     "storage_account": "rmhazuregeo",
     "bronze_container": "rmhazuregeobronze",
-    "wargames_container": "wargames"
+    "wargames_container": "wargames",
+    "service_urls": {
+      "titiler_base": "https://rmhtitiler-ghcyd7g0bxdvc2hc.eastus-01.azurewebsites.net",
+      "titiler_liveness": "/livez",
+      "catalog_lookup_unified": "GET /api/platform/catalog/lookup-unified?dataset_id={dataset_id}&resource_id={resource_id}",
+      "raster_probes": {
+        "info": "/cog/info?url={encoded_url}",
+        "preview": "/cog/preview.png?url={encoded_url}&max_size=256",
+        "tilejson": "/cog/WebMercatorQuad/tilejson.json?url={encoded_url}"
+      },
+      "vector_probes": {
+        "collection": "/vector/collections/{schema}.{table_name}",
+        "items": "/vector/collections/{schema}.{table_name}/items?limit=1",
+        "tilejson": "/vector/collections/{schema}.{table_name}/tiles/WebMercatorQuad/tilejson.json"
+      },
+      "zarr_probes": {
+        "variables": "/xarray/variables?url={encoded_url}",
+        "info": "/xarray/info?url={encoded_url}&variable={variable}&decode_times=false"
+      }
+    }
   },
   "endpoint_access_rules": {
     "_comment": "Agents test through the SAME API surface that B2B consumers use. Admin endpoints are verification-only.",
@@ -26,6 +45,7 @@
       "catalog_item": "GET  /api/platform/catalog/item/{collection_id}/{item_id}",
       "catalog_assets": "GET  /api/platform/catalog/assets/{collection_id}/{item_id}",
       "catalog_dataset": "GET  /api/platform/catalog/dataset/{dataset_id}",
+      "catalog_lookup_unified": "GET  /api/platform/catalog/lookup-unified",
       "platform_health": "GET  /api/platform/health",
       "platform_failures": "GET  /api/platform/failures",
       "platform_lineage": "GET  /api/platform/lineage/{request_id}",
@@ -192,6 +212,38 @@
       "container_name": "wargames",
       "data_type_override": "zarr",
       "description": "Second NetCDF4 (SSP5-8.5 scenario) — routes to VirtualiZarr pipeline"
+    },
+    "netcdf_climate_p10_370": {
+      "dataset_id_suffix": "netcdf-p10-370-test",
+      "resource_id": "spei-ssp370-p10",
+      "file_name": "good-data/climatology-spei12-annual-mean_cmip6-x0.25_ensemble-all-ssp370_climatology_p10_2040-2059.nc",
+      "container_name": "wargames",
+      "data_type_override": "zarr",
+      "description": "NetCDF4 SPEI p10 variant (SSP3-7.0, 4MB) — routes to VirtualiZarr pipeline"
+    },
+    "netcdf_climate_p10_585": {
+      "dataset_id_suffix": "netcdf-p10-585-test",
+      "resource_id": "spei-ssp585-p10",
+      "file_name": "good-data/climatology-spei12-annual-mean_cmip6-x0.25_ensemble-all-ssp585_climatology_p10_2040-2059.nc",
+      "container_name": "wargames",
+      "data_type_override": "zarr",
+      "description": "NetCDF4 SPEI p10 variant (SSP5-8.5, 4MB) — routes to VirtualiZarr pipeline"
+    },
+    "zarr_cmip6_tasmax": {
+      "dataset_id_suffix": "zarr-tasmax-test",
+      "resource_id": "cmip6-tasmax",
+      "file_name": "good-data/cmip6-tasmax-sample.zarr",
+      "container_name": "wargames",
+      "data_type_override": "zarr",
+      "description": "Native Zarr store (CMIP6 tasmax) — tests direct zarr submission path, NOT VirtualiZarr"
+    },
+    "zarr_era5_global": {
+      "dataset_id_suffix": "zarr-era5-test",
+      "resource_id": "era5-global",
+      "file_name": "good-data/era5-global-sample.zarr",
+      "container_name": "wargames",
+      "data_type_override": "zarr",
+      "description": "Native Zarr store (ERA5 global sample) — tests direct zarr submission path, NOT VirtualiZarr"
     }
   },
   "invalid_files": {
@@ -486,6 +538,56 @@
       "version_id": "v1",
       "_comment": "Use this AFTER v1 is already approved — tests conflict guard",
       "attack_use": "DUPLICATION D5, LIFECYCLE L4"
+    },
+    "_comment_rejection": "--- Rejection workflow fixtures ---",
+    "valid_rejection": {
+      "reviewer": "siege-qa@example.com",
+      "reason": "SIEGE test rejection — does not meet quality standards",
+      "_comment": "Standard rejection payload with required reason field",
+      "attack_use": "Sequence 7 — Rejection Path"
+    },
+    "rejection_missing_reason": {
+      "reviewer": "siege-qa@example.com",
+      "_comment": "No reason field — should fail validation (reason required for audit trail)",
+      "attack_use": "Sequence 12f — Missing Required Fields"
+    },
+    "rejection_empty_reason": {
+      "reviewer": "siege-qa@example.com",
+      "reason": "",
+      "_comment": "Empty string reason — should fail validation",
+      "attack_use": "Sequence 12g — Missing Required Fields"
+    },
+    "_comment_revocation": "--- Revocation workflow fixtures ---",
+    "valid_revocation": {
+      "reviewer": "siege-qa@example.com",
+      "reason": "SIEGE test revocation — removing published data",
+      "_comment": "Standard revocation payload with required reason field",
+      "attack_use": "Sequence 9 — Revocation Path"
+    },
+    "revocation_missing_reason": {
+      "reviewer": "siege-qa@example.com",
+      "_comment": "No reason field — should fail validation (reason required for audit trail)",
+      "attack_use": "Sequence 12h — Missing Required Fields"
+    },
+    "_comment_invalid_approvals": "--- Invalid approval fixtures for state transition tests ---",
+    "approve_missing_reviewer": {
+      "clearance_level": "ouo",
+      "version_id": "v1",
+      "_comment": "No reviewer — should fail validation",
+      "attack_use": "Sequence 12d — Missing Required Fields"
+    },
+    "approve_missing_clearance": {
+      "reviewer": "siege-qa@example.com",
+      "version_id": "v1",
+      "_comment": "No clearance_level — should fail validation",
+      "attack_use": "Sequence 12e — Missing Required Fields"
+    },
+    "approve_no_release_identifier": {
+      "reviewer": "siege-qa@example.com",
+      "clearance_level": "ouo",
+      "version_id": "v1",
+      "_comment": "No release_id, asset_id, job_id, request_id, or dataset_id — should fail 400",
+      "attack_use": "Sequence 12f — Missing Required Fields"
     }
   },
   "prerequisites": {
@@ -495,7 +597,7 @@
     "verify_bronze_files": "GET /api/storage/rmhazuregeobronze/blobs?zone=bronze&limit=50"
   },
   "_file_manifest": {
-    "_comment": "Summary of test data locations — 01 MAR 2026",
+    "_comment": "Summary of test data locations — 02 MAR 2026",
     "good_data": {
       "location": "rmhazuregeo/wargames/good-data/",
       "total_files": "~20 (excluding GB+ heavy files)",
@@ -506,7 +608,8 @@
         "KML",
         "Shapefile (zip)",
         "CSV",
-        "NetCDF4"
+        "NetCDF4",
+        "Zarr (native)"
       ],
       "crs_variety": [
         "EPSG:4326 (WGS84)",

@@ -179,13 +179,15 @@ Lancer executes canonical lifecycle sequences and records state checkpoints.
 2. GET `/api/platform/status/{request_id}` (poll until completed) → capture release_id, asset_id
 3. POST `/api/platform/approve` (version_id="v1") → verify STAC materialized
 4. GET `/api/platform/catalog/item/{collection}/{item_id}` → verify exists
-5. **CHECKPOINT R1**: Record all IDs and expected DB/STAC state
+5. GET `/api/platform/catalog/lookup-unified?dataset_id={ds}&resource_id={rs}` → verify `titiler_urls` present with keys [xyz, tilejson, preview, info, statistics]. Verify URLs contain TiTiler base hostname. → **CHECKPOINT R1-URLS**
+6. **CHECKPOINT R1**: Record all IDs and expected DB/STAC state
 
 **Sequence 2: Vector Lifecycle**
 1. POST `/api/platform/submit` (vector) → capture IDs
 2. Poll until completed → capture release_id
 3. POST `/api/platform/approve` → verify OGC Features
-4. **CHECKPOINT V1**: Record all IDs
+4. GET `/api/platform/catalog/lookup-unified?dataset_id={ds}&resource_id={rs}` → verify `endpoints.features` present, `tiles.tilejson` present. Verify URLs contain TiPG base path. → **CHECKPOINT V1-URLS**
+5. **CHECKPOINT V1**: Record all IDs
 
 **Sequence 3: Multi-Version**
 1. POST `/api/platform/submit` (resubmit raster, same dataset_id) → capture v2 IDs
@@ -202,11 +204,94 @@ Lancer executes canonical lifecycle sequences and records state checkpoints.
 2. Poll until completed (VirtualiZarr pipeline: scan → copy → validate → combine → register)
 3. POST `/api/platform/approve` (version_id="v1") → verify STAC materialized (zarr items go in STAC)
 4. GET `/api/platform/catalog/dataset/{dataset_id}` → verify catalog entry exists
-5. **CHECKPOINT Z1**: Record all IDs, verify job_type=virtualzarr, STAC item present
+5. GET `/api/platform/catalog/lookup-unified?dataset_id={ds}&resource_id={rs}` → verify `xarray_urls` present with keys [variables, tiles, tilejson, preview, info, point]. Verify URLs contain TiTiler base hostname and `/xarray/` path. → **CHECKPOINT Z1-URLS**
+6. **CHECKPOINT Z1**: Record all IDs, verify job_type=virtualzarr, STAC item present
 
 Note: NetCDF (.nc) routes to the VirtualiZarr pipeline, NOT the raster pipeline.
 Use `data_type_override: "zarr"` from siege_config.json. Submit body must include
 `"data_type": "zarr"`. Processing may take longer than raster (5-stage pipeline).
+
+**Sequence 6: Native Zarr Lifecycle**
+1. POST `/api/platform/submit` with `data_type=zarr`, native `.zarr` store (`zarr_cmip6_tasmax` from config) → capture request_id, job_id
+2. Poll until completed → verify job completes (different code path from VirtualiZarr .nc)
+3. POST `/api/platform/approve` (version_id="v1") → verify STAC materialized
+4. GET `/api/platform/catalog/lookup-unified?dataset_id={ds}&resource_id={rs}` → verify `xarray_urls` present → **CHECKPOINT NZ1-URLS**
+5. **CHECKPOINT NZ1**: Record all IDs, verify direct zarr path (NOT virtualzarr pipeline)
+
+**Sequence 7: Rejection Path**
+1. POST `/api/platform/submit` (raster, new dataset_id `sg-reject-test`) → capture request_id
+2. Poll until completed → capture release_id
+3. POST `/api/platform/reject` with `reviewer`, `reason` → expect 200, approval_state=rejected
+4. GET `/api/platform/status/{request_id}` → verify approval_state=rejected, reason preserved
+5. **CHECKPOINT REJ1**: Release rejected, reason in audit trail
+
+**Sequence 8: Reject → Resubmit → Approve**
+1. POST `/api/platform/resubmit` (same request_id from Seq 7) → expect new job_id created
+2. Poll until completed → capture new release_id (revision counter incremented)
+3. POST `/api/platform/approve` (version_id="v1") → expect success
+4. GET `/api/platform/catalog/lookup-unified?dataset_id={ds}&resource_id={rs}` → verify catalog entry
+5. **CHECKPOINT REJ2**: Recovered from rejection, release approved after resubmit
+
+**Sequence 9: Revocation + is_latest Cascade**
+1. Use raster from Seq 1 (has v1 approved + v1 preserved after Seq 4 unpublished v2)
+2. POST `/api/platform/submit` (same dataset_id as Seq 1, new file) → poll → capture v3 IDs
+3. POST `/api/platform/approve` (version_id="v3") → v3 is now is_latest=true
+4. POST `/api/platform/revoke` with `reviewer`, `reason` (revoke v3) → expect 200, approval_state=revoked
+5. GET `/api/platform/status/{request_id}` → verify v3 revoked, v1 promoted back to is_latest=true
+6. **CHECKPOINT REV1**: v3 revoked, v1 is_latest restored, STAC item for v3 deleted
+
+**Sequence 10: Overwrite Draft**
+1. POST `/api/platform/submit` (new dataset_id `sg-overwrite-test`) → capture request_id_1
+2. POST `/api/platform/submit` (same dataset_id + resource_id, NO overwrite) → expect idempotent response (same request_id returned) or 409 if job exists
+3. POST `/api/platform/submit` (same dataset_id + resource_id, `overwrite=true`) → expect NEW request_id, revision counter incremented
+4. Poll new request until completed
+5. **CHECKPOINT OW1**: Old draft replaced, new release active
+
+### Invalid Transition Sequences
+
+These sequences verify that the state machine rejects illegal transitions with correct error codes. Each step expects a specific HTTP error — a 200 or 500 is a **FAIL**.
+
+**Sequence 11: Invalid State Transitions**
+
+Uses releases created in previous sequences. Each step is independent.
+
+| # | Action | Target State | Expected | Checkpoint |
+|---|--------|-------------|----------|------------|
+| 11a | POST `/api/platform/approve` (release from Seq 1, already approved) | approved→approved | HTTP 400 `"expected 'pending_review'"` | IST-1 |
+| 11b | POST `/api/platform/reject` (release from Seq 1, already approved) | approved→rejected | HTTP 400 `"expected 'pending_review'"` | IST-2 |
+| 11c | POST `/api/platform/approve` (release from Seq 7, rejected, before resubmit) | rejected→approved | HTTP 400 `"expected 'pending_review'"` | IST-3 |
+| 11d | POST `/api/platform/reject` (release from Seq 7, already rejected) | rejected→rejected | HTTP 400 `"expected 'pending_review'"` | IST-4 |
+| 11e | POST `/api/platform/approve` (v3 from Seq 9, revoked) | revoked→approved | HTTP 400 `"expected 'pending_review'"` | IST-5 |
+| 11f | POST `/api/platform/revoke` (v3 from Seq 9, already revoked) | revoked→revoked | HTTP 400 `"expected 'approved'"` | IST-6 |
+| 11g | POST `/api/platform/revoke` (pending_review release) | pending→revoked | HTTP 400 `"expected 'approved'"` | IST-7 |
+
+**CHECKPOINT IST**: All 7 transitions returned 400 (not 200 or 500). Record each HTTP code and error message.
+
+**Sequence 12: Missing Required Fields**
+
+Fresh requests — no prior state needed. Each step expects HTTP 400.
+
+| # | Action | Missing Field | Expected |
+|---|--------|---------------|----------|
+| 12a | POST `/api/platform/submit` with empty body `{}` | all fields | HTTP 400 |
+| 12b | POST `/api/platform/submit` without `dataset_id` | dataset_id | HTTP 400 |
+| 12c | POST `/api/platform/submit` without `file_name` and without `source_url` | file_name | HTTP 400 |
+| 12d | POST `/api/platform/approve` without `reviewer` | reviewer | HTTP 400 |
+| 12e | POST `/api/platform/approve` without `clearance_level` | clearance_level | HTTP 400 |
+| 12f | POST `/api/platform/approve` without any release identifier | release lookup | HTTP 400 |
+| 12g | POST `/api/platform/reject` without `reason` | reason | HTTP 400 |
+| 12h | POST `/api/platform/reject` with `reason=""` (empty string) | reason (blank) | HTTP 400 |
+| 12i | POST `/api/platform/revoke` without `reason` | reason | HTTP 400 |
+| 12j | POST `/api/platform/approve` for nonexistent release_id (UUID zeros) | valid structure, no target | HTTP 404 |
+
+**CHECKPOINT MRF**: All 10 requests returned 400/404 (not 200 or 500). Record each HTTP code and error body.
+
+**Sequence 13: Version Conflict**
+1. POST `/api/platform/submit` (new dataset_id `sg-conflict-test`) → poll until completed
+2. POST `/api/platform/approve` (version_id="v1") → expect 200 (first approval)
+3. POST `/api/platform/submit` (same dataset_id, new resource or overwrite) → poll until completed
+4. POST `/api/platform/approve` (version_id="v1" AGAIN, same version_id) → expect HTTP 409 `VersionConflict`
+5. **CHECKPOINT VC1**: Second approval rejected with 409, first v1 unaffected
 
 ### Lancer Checkpoint Format
 
@@ -220,6 +305,10 @@ EXPECTED STATE:
     - {release_id} → approval_state={state}, version_ordinal={n}
   STAC Items:
     - {item_id} → {exists | not exists}
+  Service URLs:
+    - raster: titiler_urls keys={list} | MISSING
+    - vector: endpoints.features={url}, tiles.tilejson={url} | MISSING
+    - zarr: xarray_urls keys={list} | MISSING
   Captured IDs:
     - request_id={value}
     - job_id={value}
@@ -288,7 +377,29 @@ For each checkpoint, prefer Platform API endpoints. Use admin endpoints only for
 ### Divergences
 | Checkpoint | Expected | Actual | Severity |
 ...
+
+### Service URL Integrity
+| Data Type | Probe | URL | HTTP | Content-Type | Verdict |
+|-----------|-------|-----|------|-------------|---------|
+...
 ```
+
+### Service URL Integrity
+
+For each approved release in the checkpoint map:
+
+1. **TiTiler Liveness**: GET `{titiler_base}/livez` → expect HTTP 200 with `{"status":"alive"}`
+2. **Per data type probes** (using URLs from Lancer's catalog response):
+
+| Data Type | Probe | Expected |
+|-----------|-------|----------|
+| Raster | GET `{titiler_urls.info}` | HTTP 200, JSON with `band_metadata` |
+| Raster | GET `{titiler_urls.preview}` | HTTP 200, Content-Type: image/png |
+| Raster | GET `{titiler_urls.tilejson}` | HTTP 200, JSON with `tiles` array |
+| Vector | GET `{tipg_base}/collections/{table}` | HTTP 200, collection metadata |
+| Vector | GET `{tipg_base}/collections/{table}/items?limit=1` | HTTP 200, GeoJSON FeatureCollection |
+| Zarr | GET `{xarray_urls.variables}` | HTTP 200, JSON array of variable names |
+| Zarr | GET `{xarray_urls.info}&variable={first_var}` | HTTP 200, JSON metadata |
 
 ---
 
@@ -314,11 +425,32 @@ Assessment: {HEALTHY | DEGRADED | DOWN}
 ## Workflow Results
 | Sequence | Steps | Pass | Fail | Unexpected |
 |----------|-------|------|------|------------|
-| Raster Lifecycle | {n} | {n} | {n} | {n} |
-| Vector Lifecycle | {n} | {n} | {n} | {n} |
-| Multi-Version | {n} | {n} | {n} | {n} |
-| Unpublish | {n} | {n} | {n} | {n} |
-| NetCDF/VirtualiZarr | {n} | {n} | {n} | {n} |
+| 1. Raster Lifecycle | {n} | {n} | {n} | {n} |
+| 2. Vector Lifecycle | {n} | {n} | {n} | {n} |
+| 3. Multi-Version | {n} | {n} | {n} | {n} |
+| 4. Unpublish | {n} | {n} | {n} | {n} |
+| 5. NetCDF/VirtualiZarr | {n} | {n} | {n} | {n} |
+| 6. Native Zarr | {n} | {n} | {n} | {n} |
+| 7. Rejection | {n} | {n} | {n} | {n} |
+| 8. Reject→Resubmit→Approve | {n} | {n} | {n} | {n} |
+| 9. Revoke + is_latest Cascade | {n} | {n} | {n} | {n} |
+| 10. Overwrite Draft | {n} | {n} | {n} | {n} |
+| 11. Invalid State Transitions (7) | {n} | {n} | {n} | {n} |
+| 12. Missing Required Fields (10) | {n} | {n} | {n} | {n} |
+| 13. Version Conflict | {n} | {n} | {n} | {n} |
+
+## Service URL Verification
+| Data Type | Probe | HTTP | Verdict |
+|-----------|-------|------|---------|
+| TiTiler liveness | /livez | {code} | PASS/FAIL |
+| Raster info | /cog/info | {code} | PASS/FAIL |
+| Raster preview | /cog/preview | {code} | PASS/FAIL |
+| Vector collection | /vector/collections/{table} | {code} | PASS/FAIL |
+| Vector items | /vector/collections/{table}/items | {code} | PASS/FAIL |
+| Zarr variables | /xarray/variables | {code} | PASS/FAIL |
+| Zarr info | /xarray/info | {code} | PASS/FAIL |
+
+Assessment: {ALL PASS | DEGRADED | UNAVAILABLE}
 
 ## State Divergences
 {from Auditor — expected vs actual for each failing checkpoint}
@@ -345,7 +477,7 @@ Log the run in `docs/agent_review/AGENT_RUNS.md`.
 | Sentinel | V0.9_TEST.md, API docs | Nothing (defines everything) |
 | Cartographer | Campaign Brief, endpoint list | Test data, lifecycle sequences |
 | Lancer | Campaign Brief, test data, sequences | Cartographer's findings |
-| Auditor | Lancer's State Checkpoint Map, captured IDs | Lancer's raw HTTP responses |
+| Auditor | Lancer's State Checkpoint Map, captured IDs, service URLs from checkpoints. Also probes external TiTiler/TiPG endpoints. | Lancer's raw HTTP responses |
 | Scribe | All outputs from all agents | Nothing hidden |
 
 **Note**: SIEGE has minimal information asymmetry by design. Its value is speed and completeness, not adversarial competition. For adversarial testing, use WARGAME or TOURNAMENT.

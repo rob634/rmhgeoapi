@@ -446,7 +446,7 @@ class AssetRelease(BaseModel):
         description="True if this is the latest approved release for the asset"
     )
     is_served: bool = Field(
-        default=True,
+        default=False,
         description="True if this release should be served via STAC/OGC APIs"
     )
     request_id: Optional[str] = Field(

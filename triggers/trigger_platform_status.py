@@ -781,6 +781,10 @@ def _build_version_summary(releases: list) -> list:
             "stac_item_id": getattr(release, 'stac_item_id', None),
             "stac_collection_id": getattr(release, 'stac_collection_id', None),
             "is_served": release.is_served,
+            "reviewer": getattr(release, 'reviewer', None),
+            "reviewed_at": release.reviewed_at.isoformat() if getattr(release, 'reviewed_at', None) else None,
+            "rejection_reason": getattr(release, 'rejection_reason', None),
+            "approval_notes": getattr(release, 'approval_notes', None),
         })
     # Sort by created_at descending (most recent first)
     summaries.sort(key=lambda x: x["created_at"] or "", reverse=True)
@@ -890,12 +894,14 @@ def _build_services_block(release, data_type: str) -> Optional[dict]:
                         "items": f"{tipg_base}/collections/{qualified}/items",
                     })
 
-    # STAC URLs (both raster and vector)
+    # STAC URLs via Service Layer (titiler-pgstac STAC API)
+    # The Service Layer Docker app hosts STAC at /stac/ — this is the B2C endpoint.
+    # The Orchestrator's /api/stac/ is legacy and being phased out.
     if release.stac_collection_id:
-        etl_base = config.etl_app_base_url
-        services["stac_collection"] = f"{etl_base}/api/collections/{release.stac_collection_id}"
+        stac_base = f"{config.titiler_base_url.rstrip('/')}/stac"
+        services["stac_collection"] = f"{stac_base}/collections/{release.stac_collection_id}"
         if release.stac_item_id:
-            services["stac_item"] = f"{etl_base}/api/collections/{release.stac_collection_id}/items/{release.stac_item_id}"
+            services["stac_item"] = f"{stac_base}/collections/{release.stac_collection_id}/items/{release.stac_item_id}"
 
     return services if services else None
 

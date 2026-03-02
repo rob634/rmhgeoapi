@@ -215,7 +215,7 @@ class AssetService:
             revision=1,
             # Flags
             is_latest=False,
-            is_served=True,
+            is_served=False,
             request_id=request_id,
             # Physical outputs (table_name removed → app.release_tables)
             blob_path=blob_path,

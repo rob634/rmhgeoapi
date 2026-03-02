@@ -786,14 +786,62 @@ All pipeline executions in chronological order.
 
 ---
 
+## Run 25: SIEGE Run 8 — Full State Machine + Service URL Testing
+
+| Field | Value |
+|-------|-------|
+| **Pipeline** | SIEGE |
+| **Date** | 02 MAR 2026 |
+| **Version** | 0.9.11.9 |
+| **Focus** | Full lifecycle state machine (13 sequences), invalid transition guards, service URL probes |
+| **Output** | `agent_docs/SIEGE_RUN_8.md` |
+
+**Sequences Tested**: 13 (up from 5 in prior SIEGE runs)
+
+| Category | Sequences | Steps | Pass | Fail |
+|----------|-----------|-------|------|------|
+| Happy-path lifecycles (1-6) | Raster, Vector, Multi-Version, Unpublish, NetCDF/Zarr, Native Zarr | 23 | 22 | 1 |
+| Extended lifecycle (7-10) | Rejection, Reject→Resubmit→Approve, Revoke+Cascade, Overwrite | 16 | 14 | 2 |
+| Invalid transitions (11-13) | 7 state guards + 10 field validations + version conflict | 22 | 22 | 0 |
+| **Total** | | **61** | **58** | **3** |
+
+**Score**: 87.4% — NEEDS INVESTIGATION
+
+**New Findings**:
+
+| ID | Severity | Description |
+|----|----------|-------------|
+| REJ2-F1 | **CRITICAL** | Resubmit after rejection broken — release deleted but not recreated, approve returns 404 |
+| SVC-F1 | HIGH | STAC URLs in /status use wrong prefix (`/api/collections/` → 404, should be `/api/stac/collections/`) |
+| NZ1-F1 | MEDIUM | No native .zarr ingest path — VirtualiZarr only scans for *.nc |
+| OW1-F1 | MEDIUM | `is_served=true` set on pending_review releases (before approval) |
+| SVC-F2 | MEDIUM | TiTiler xarray endpoints return 500 — zarr package not installed |
+| SVC-F3 | MEDIUM | Double path in zarr xarray URLs (container name duplicated) |
+| REJ1-F1 | LOW | Rejection reason not surfaced in /status response |
+
+**Reconfirmed**: SG-9 (stats 404), SG5-1 (approve allows failed releases), SG6-L3 (orphaned release from file_name zarr submit)
+
+**Token Usage**:
+
+| Agent | Tokens |
+|-------|--------|
+| Cartographer | ~29,000 |
+| Lancer Seq 1-5 | ~55,000 |
+| Lancer Seq 6-10 | ~57,000 |
+| Lancer Seq 11-13 | ~45,000 |
+| Auditor | ~57,000 |
+| **Total** | **~243,000** |
+
+---
+
 ## Cumulative Token Usage
 
 | Pipeline | Runs | Total Tokens |
 |----------|------|-------------|
 | COMPETE | Runs 1-6, 9, 12, 19 | 1,071,939 (Run 9: 346,656 + Run 12: 337,561 + Run 19: 387,722; Runs 1-6 predated instrumentation) |
 | GREENFIELD | Runs 7, 8, 10, 24 | ~944,196 (Run 10: 631,196 + Run 24: ~313,000; Runs 7-8 predated instrumentation) |
-| SIEGE | Runs 11, 13, 18, 20, 21, 22, 23 | ~1,361,587 |
+| SIEGE | Runs 11, 13, 18, 20, 21, 22, 23, 25 | ~1,604,587 |
 | REFLEXION | Runs 14, 15, 16, 17 | 631,966 (Run 14: 232,684 + Run 15: 278,900 + Run 16: 50,775 + Run 17: 69,607) |
-| **Instrumented Total** | Runs 9-24 | **~4,009,688** |
+| **Instrumented Total** | Runs 9-25 | **~4,252,688** |
 
 **Note**: Runs 1-8 predated the token instrumentation described in `agents/AGENT_METRICS.md`. Per-agent token breakdowns are available for Runs 9-24.

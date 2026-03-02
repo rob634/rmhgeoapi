@@ -1240,6 +1240,7 @@ class ReleaseRepository(PostgreSQLRepository):
                                 SET version_id = %s,
                                     version_ordinal = %s,
                                     is_latest = true,
+                                    is_served = true,
                                     approval_state = %s,
                                     reviewer = %s,
                                     reviewed_at = %s,
@@ -1286,6 +1287,7 @@ class ReleaseRepository(PostgreSQLRepository):
                                 SET version_id = %s,
                                     version_ordinal = %s,
                                     is_latest = true,
+                                    is_served = true,
                                     approval_state = %s,
                                     reviewer = %s,
                                     reviewed_at = %s,
@@ -1567,7 +1569,7 @@ class ReleaseRepository(PostgreSQLRepository):
             previous_release_id=row.get('previous_release_id'),
             # Flags
             is_latest=row.get('is_latest', False),
-            is_served=row.get('is_served', True),
+            is_served=row.get('is_served', False),
             request_id=row.get('request_id'),
             # Physical outputs (table_name removed → app.release_tables)
             blob_path=row.get('blob_path'),

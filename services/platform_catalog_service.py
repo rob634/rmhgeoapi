@@ -821,6 +821,11 @@ class PlatformCatalogService:
                 # VirtualiZarr output — kerchunk reference in silver-netcdf
                 container = self._config.storage.silver.netcdf
 
+            # Strip container prefix from blob_path if present
+            # (VirtualiZarr stores full abfs path: "silver-netcdf/refs/...")
+            if blob_path.startswith(f"{container}/"):
+                blob_path = blob_path[len(container) + 1:]
+
             zarr_url = f"https://{storage_account}.blob.core.windows.net/{container}/{blob_path}"
             xarray_urls = self._config.generate_xarray_tile_urls(zarr_url)
 

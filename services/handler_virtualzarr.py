@@ -417,21 +417,32 @@ def virtualzarr_validate(
         LARGE_CHUNK_THRESHOLD = 100 * 1024 * 1024  # 100 MB
         LARGE_COORD_THRESHOLD = 50 * 1024 * 1024  # 50 MB
 
-        # Open via fsspec → xarray for metadata validation.
-        # We open the remote file ourselves via _get_blob_fs() and pass
-        # the file object to xarray, because xarray's netcdf4/scipy backends
-        # don't accept storage_options directly.
-        # netCDF4 engine reads the file into memory then accesses headers.
-        # For validation (metadata only), this is acceptable.
+        # Download file to temp path, then open with netCDF4 engine.
+        # The netCDF4 C library requires a real file path (no file objects
+        # or storage_options). Download via fsspec, then open locally.
+        # netCDF4 reads headers lazily (~KB) even from large files.
+        import tempfile
+        import os
+
         blob_path = nc_url.replace("abfs://", "")
         fs = _get_blob_fs()
+
+        # Use ETL mount for temp storage if available, else system temp
+        etl_mount = "/mounts/etl-temp"
+        temp_dir = etl_mount if os.path.isdir(etl_mount) else None
 
         variables = {}
         dimensions = {}
         warnings_list = []
 
-        with fs.open(blob_path, "rb") as remote_file:
-            with xr.open_dataset(remote_file, engine="netcdf4") as ds:
+        with tempfile.NamedTemporaryFile(
+            suffix=".nc", dir=temp_dir, delete=True
+        ) as tmp:
+            # Download remote file to temp path
+            fs.get(blob_path, tmp.name)
+            logger.info(f"virtualzarr_validate: downloaded {blob_path} to {tmp.name} ({os.path.getsize(tmp.name)} bytes)")
+
+            with xr.open_dataset(tmp.name, engine="netcdf4") as ds:
                 # Record dimensions
                 for dim_name, dim_size in ds.dims.items():
                     dimensions[dim_name] = dim_size

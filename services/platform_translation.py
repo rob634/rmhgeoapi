@@ -427,7 +427,7 @@ def translate_to_coremachine(
             }
 
     # ========================================================================
-    # ZARR CREATE -> virtualzarr (VirtualiZarr reference pipeline)
+    # ZARR CREATE -> virtualzarr or ingest_zarr
     # ========================================================================
     elif data_type == DataType.ZARR:
         opts = request.processing_options
@@ -442,24 +442,52 @@ def translate_to_coremachine(
         # The handler needs an explicit account — not prefix-guessing.
         source_account = get_config().storage.bronze.account_name
 
-        return 'virtualzarr', {
-            'source_url': request.source_url,
-            'source_account': source_account,
-            'file_pattern': getattr(opts, 'file_pattern', '*.nc'),
-            'concat_dim': getattr(opts, 'concat_dim', 'time'),
-            'fail_on_chunking_warnings': getattr(opts, 'fail_on_chunking_warnings', False),
-            'max_files': getattr(opts, 'max_files', 500),
-            'ref_output_prefix': f"refs/{request.dataset_id}/{request.resource_id}",
-            'stac_item_id': stac_item_id,
-            'collection_id': collection_id,
-            'title': request.generated_title,
-            'description': request.description,
-            'tags': request.tags,
-            'access_level': request.access_level.value if request.access_level else 'OUO',
-            'dataset_id': request.dataset_id,
-            'resource_id': request.resource_id,
-            'version_id': request.version_id,
-        }
+        pipeline = getattr(opts, 'pipeline', 'virtualzarr')
+
+        if pipeline == 'ingest_zarr':
+            # Native Zarr store — normalize source_url from container+file if needed
+            source_url = request.source_url
+            if not source_url and request.container_name and request.file_name:
+                file_name = request.file_name[0] if isinstance(request.file_name, list) else request.file_name
+                source_url = f"abfs://{request.container_name}/{file_name}"
+
+            if not source_url:
+                raise ValueError("ingest_zarr requires source_url or container_name+file_name")
+
+            return 'ingest_zarr', {
+                'source_url': source_url,
+                'source_account': source_account,
+                'stac_item_id': stac_item_id,
+                'collection_id': collection_id,
+                'title': request.generated_title,
+                'description': request.description,
+                'tags': request.tags,
+                'access_level': request.access_level.value if request.access_level else 'OUO',
+                'dataset_id': request.dataset_id,
+                'resource_id': request.resource_id,
+                'version_id': request.version_id,
+            }
+
+        else:
+            # VirtualiZarr (NetCDF → kerchunk reference pipeline) — existing path unchanged
+            return 'virtualzarr', {
+                'source_url': request.source_url,
+                'source_account': source_account,
+                'file_pattern': getattr(opts, 'file_pattern', '*.nc'),
+                'concat_dim': getattr(opts, 'concat_dim', 'time'),
+                'fail_on_chunking_warnings': getattr(opts, 'fail_on_chunking_warnings', False),
+                'max_files': getattr(opts, 'max_files', 500),
+                'ref_output_prefix': f"refs/{request.dataset_id}/{request.resource_id}",
+                'stac_item_id': stac_item_id,
+                'collection_id': collection_id,
+                'title': request.generated_title,
+                'description': request.description,
+                'tags': request.tags,
+                'access_level': request.access_level.value if request.access_level else 'OUO',
+                'dataset_id': request.dataset_id,
+                'resource_id': request.resource_id,
+                'version_id': request.version_id,
+            }
 
     # ========================================================================
     # POINTCLOUD, MESH_3D, TABULAR - Phase 2

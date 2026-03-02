@@ -413,6 +413,7 @@ class StorageAccountConfig(BaseModel):
     misc: str = Field(description="Miscellaneous files (logs, reports)")
     temp: str = Field(description="Temporary processing files (auto-cleanup)")
     netcdf: str = Field(default="notused", description="NetCDF files (VirtualiZarr pipeline)")
+    zarr: str = Field(default="notused", description="Zarr stores (IngestZarr pipeline)")
 
     def get_container(self, purpose: str) -> str:
         """
@@ -435,7 +436,7 @@ class StorageAccountConfig(BaseModel):
             raise ValueError(
                 f"Unknown container purpose: {purpose}. "
                 f"Valid options: vectors, rasters, cogs, tiles, mosaicjson, "
-                f"stac_assets, misc, temp, netcdf"
+                f"stac_assets, misc, temp, netcdf, zarr"
             )
         return getattr(self, purpose)
 
@@ -520,6 +521,7 @@ class MultiAccountStorageConfig(BaseModel):
             mosaicjson=os.getenv("BRONZE_MOSAICJSON_CONTAINER", StorageDefaults.NOT_USED),
             stac_assets=os.getenv("BRONZE_STAC_ASSETS_CONTAINER", StorageDefaults.NOT_USED),
             netcdf=StorageDefaults.NOT_USED,
+            zarr=StorageDefaults.NOT_USED,
         )
     )
 
@@ -540,6 +542,7 @@ class MultiAccountStorageConfig(BaseModel):
             misc=os.getenv("SILVER_MISC_CONTAINER", StorageDefaults.SILVER_MISC),
             temp=os.getenv("SILVER_TEMP_CONTAINER", StorageDefaults.SILVER_TEMP),
             netcdf=os.getenv("SILVER_NETCDF_CONTAINER", StorageDefaults.SILVER_NETCDF),
+            zarr=os.getenv("SILVER_ZARR_CONTAINER", StorageDefaults.SILVER_ZARR),
         )
     )
 
@@ -560,6 +563,7 @@ class MultiAccountStorageConfig(BaseModel):
             misc=os.getenv("SILVEREXT_MISC_CONTAINER", StorageDefaults.SILVEREXT_MISC),
             temp=os.getenv("SILVEREXT_TEMP_CONTAINER", StorageDefaults.SILVEREXT_TEMP),
             netcdf=StorageDefaults.NOT_USED,
+            zarr=StorageDefaults.NOT_USED,
         )
     )
 
@@ -580,6 +584,7 @@ class MultiAccountStorageConfig(BaseModel):
             misc=os.getenv("GOLD_H3_GRIDS_CONTAINER", StorageDefaults.GOLD_H3_GRIDS),
             temp=os.getenv("GOLD_TEMP_CONTAINER", StorageDefaults.GOLD_TEMP),
             netcdf=StorageDefaults.NOT_USED,
+            zarr=StorageDefaults.NOT_USED,
         )
     )
 

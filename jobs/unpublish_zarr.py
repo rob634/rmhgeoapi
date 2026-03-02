@@ -64,7 +64,7 @@ class UnpublishZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
     description = "Remove zarr STAC item, kerchunk references, manifest, and optionally copied NetCDF files"
 
     # Declarative ETL linkage - which forward workflows this job reverses
-    reverses = ["virtualzarr"]
+    reverses = ["virtualzarr", "ingest_zarr"]
 
     # Stage definitions
     stages = [

@@ -191,9 +191,9 @@ class JobsPanel(BasePanel):
                 self.format_age(created),
             ])
             row_attrs.append({
-                "id": f"job-{html_module.escape(str(job_id)[:8])}",
+                "id": f"job-{str(job_id)[:8]}",
                 "class": "clickable",
-                "hx-get": f"/api/dashboard?tab=jobs&section=tasks&job_id={html_module.escape(str(job_id))}",
+                "hx-get": f"/api/dashboard?tab=jobs&section=tasks&job_id={str(job_id)}",
                 "hx-target": "#panel-content",
                 "hx-push-url": "true",
                 "hx-swap": "innerHTML",

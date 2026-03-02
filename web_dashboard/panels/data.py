@@ -15,7 +15,7 @@ Provides sub-tabs for:
     - assets: Registered assets and approval stats
     - stac: STAC collection and item browsing
     - vector: Vector/OGC Features collection browsing
-    - storage: Blob storage browser (placeholder -- deferred D-5)
+    - storage: Blob storage browser (zone-grouped containers + blob listing)
 
 Exports:
     DataPanel: Registered panel class
@@ -72,6 +72,7 @@ class DataPanel(BasePanel):
             "collections-list": self._fragment_collections_list,
             "items-list": self._fragment_items_list,
             "vector-collections-list": self._fragment_vector_collections_list,
+            "storage-blobs": self._fragment_storage_blobs,
         }
         handler = dispatch.get(fragment_name)
         if not handler:
@@ -329,16 +330,148 @@ class DataPanel(BasePanel):
         return self._render_vector(request)
 
     # -----------------------------------------------------------------------
-    # STORAGE section (deferred -- D-5)
+    # STORAGE section (D-5)
     # -----------------------------------------------------------------------
 
     def _render_storage(self, request: func.HttpRequest) -> str:
-        """Render storage browser placeholder."""
-        return f"""<div class="empty-state">
-<div class="empty-icon">--</div>
-<p>Storage browser is not yet available.</p>
-<p style="font-size:var(--ds-font-size-sm); color:var(--ds-gray); margin-top:8px;">
-Blob storage browsing requires additional API capabilities.
-This feature is planned for a future iteration (D-5).
-</p>
-</div>"""
+        """Render storage browser: container list or blob listing."""
+        container = request.params.get("container", "")
+
+        if container:
+            return self._render_storage_blobs(request, container)
+
+        return self._render_storage_containers(request)
+
+    def _render_storage_containers(self, request: func.HttpRequest) -> str:
+        """Render zone-grouped container list."""
+        ok, data = self.call_api(request, "/api/storage/containers")
+
+        if not ok:
+            return self.error_block(
+                f"Failed to load containers: {data}",
+                retry_url="/api/dashboard?tab=data&section=storage",
+            )
+
+        if not isinstance(data, dict) or "zones" not in data:
+            return self.empty_block("No storage containers found.")
+
+        zones = data.get("zones", {})
+        total = data.get("total_containers", 0)
+
+        # Stats per zone
+        zone_counts = {}
+        for zone_name, zone_info in zones.items():
+            zone_counts[zone_name.title()] = zone_info.get("container_count", 0)
+        zone_counts["Total"] = total
+        stats = self.stat_strip(zone_counts)
+
+        # Build table with all containers grouped by zone
+        headers = ["Container", "Zone", "Account"]
+        rows = []
+        row_attrs = []
+        for zone_name, zone_info in zones.items():
+            account = zone_info.get("account", "--")
+            containers = zone_info.get("containers", [])
+            for cname in containers:
+                safe_cname = str(cname)
+                rows.append([
+                    html_module.escape(safe_cname),
+                    html_module.escape(zone_name),
+                    html_module.escape(str(account)),
+                ])
+                row_attrs.append({
+                    "class": "clickable",
+                    "hx-get": f"/api/dashboard?tab=data&section=storage&container={safe_cname}&zone={zone_name}",
+                    "hx-target": "#panel-content",
+                    "hx-push-url": "true",
+                    "hx-swap": "innerHTML",
+                })
+
+        if not rows:
+            return stats + self.empty_block("No containers found.")
+
+        table = self.data_table(headers, rows, table_id="storage-containers-table", row_attrs=row_attrs)
+        return stats + table
+
+    def _render_storage_blobs(self, request: func.HttpRequest, container: str) -> str:
+        """Render blob listing for a specific container."""
+        safe_container = html_module.escape(container)
+        zone = request.params.get("zone", "")
+
+        # Infer zone from container prefix if not provided
+        if not zone:
+            for prefix in ("bronze", "silver", "silverext"):
+                if container.lower().startswith(prefix):
+                    zone = prefix
+                    break
+
+        header = (
+            f'<div style="margin-bottom:16px; display:flex; align-items:center; gap:12px;">'
+            f'<h3 class="section-heading" style="margin:0; border:none; padding:0;">'
+            f'Container: {safe_container}</h3>'
+            f'<a hx-get="/api/dashboard?tab=data&section=storage" '
+            f'hx-target="#panel-content" hx-push-url="true" hx-swap="innerHTML" '
+            f'class="btn btn-sm btn-secondary">Back to Containers</a>'
+            f'</div>'
+        )
+
+        params = {"limit": "100"}
+        if zone:
+            params["zone"] = zone
+
+        ok, data = self.call_api(
+            request,
+            f"/api/storage/{container}/blobs",
+            params=params,
+        )
+
+        if not ok:
+            return header + self.error_block(
+                f"Failed to load blobs: {data}",
+                retry_url=f"/api/dashboard?tab=data&section=storage&container={safe_container}",
+            )
+
+        blobs = []
+        if isinstance(data, dict):
+            blobs = data.get("blobs", [])
+
+        if not blobs:
+            return header + self.empty_block(
+                f"No blobs in container '{safe_container}'."
+            )
+
+        count = data.get("count", len(blobs)) if isinstance(data, dict) else len(blobs)
+        stats = self.stat_strip({"Blobs": count, "Zone": zone or "--"})
+
+        headers_list = ["Name", "Size (MB)", "Type", "Last Modified"]
+        rows = []
+        for blob in blobs:
+            name = str(blob.get("name", "--"))
+            size_mb = blob.get("size_mb", "--")
+            content_type = blob.get("content_type", "--")
+            last_modified = blob.get("last_modified", "")
+
+            # Truncate long blob paths with title hover
+            if len(name) > 60:
+                safe_full = html_module.escape(name)
+                safe_short = html_module.escape(name[-55:])
+                display_name = f'<span class="truncated-id" title="{safe_full}">...{safe_short}</span>'
+            else:
+                display_name = html_module.escape(name)
+
+            rows.append([
+                display_name,
+                html_module.escape(str(size_mb)),
+                html_module.escape(str(content_type)),
+                self.format_date(last_modified),
+            ])
+
+        table = self.data_table(headers_list, rows, table_id="storage-blobs-table")
+        return header + stats + table
+
+    def _fragment_storage_blobs(self, request: func.HttpRequest) -> str:
+        """Fragment: blob listing for a container."""
+        container = request.params.get("container", "")
+        if not container:
+            return self.empty_block("No container specified.")
+        return self._render_storage_blobs(request, container)

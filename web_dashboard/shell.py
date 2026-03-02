@@ -61,6 +61,11 @@ HTMX_SCRIPT = """
     s.src = 'https://unpkg.com/htmx.org@1.9.12/dist/htmx.min.js';
     s.integrity = 'sha384-ujb1lZYygJmzgSwoxRggbCHcjc0rB2XoQrxeTUQyRjrOnlCoYta87iKBWq3EsdM2';
     s.crossOrigin = 'anonymous';
+    s.onload = function(){
+        if(typeof htmx !== 'undefined' && htmx.process){
+            htmx.process(document.body);
+        }
+    };
     s.onerror = function(){
         console.error('HTMX failed to load. Dashboard interactivity disabled.');
         document.getElementById('htmx-load-error').style.display = 'block';

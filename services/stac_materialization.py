@@ -782,7 +782,8 @@ class STACMaterializer:
         # Sanitize: strip geoetl:* properties (B2C safety)
         self.sanitize_item_properties(stac_item_json)
 
-        # NO TiTiler URL injection for zarr (V1)
+        # Inject TiTiler xarray URLs
+        self._inject_xarray_urls(stac_item_json)
 
         # Upsert to pgSTAC
         pgstac_id = self.pgstac.insert_item(stac_item_json, release.stac_collection_id)
@@ -849,6 +850,47 @@ class STACMaterializer:
             })
         except Exception as titiler_err:
             logger.warning(f"Failed to inject TiTiler URLs (non-fatal): {titiler_err}")
+
+    def _inject_xarray_urls(self, stac_item_json: dict) -> None:
+        """Inject TiTiler xarray URLs into zarr STAC item."""
+        try:
+            from config import get_config
+            config = get_config()
+
+            # Get zarr store URL from assets
+            assets = stac_item_json.get('assets', {})
+            zarr_asset = assets.get('zarr-store') or assets.get('zarr') or assets.get('reference')
+            if not zarr_asset:
+                logger.warning("[STAC] No zarr/reference asset found for xarray URL injection")
+                return
+
+            zarr_url = zarr_asset.get('href', '')
+            if not zarr_url:
+                return
+
+            xarray_urls = config.generate_xarray_tile_urls(zarr_url)
+
+            # Add variables discovery link
+            links = stac_item_json.setdefault('links', [])
+            links.append({
+                "rel": "variables",
+                "href": xarray_urls["variables"],
+                "type": "application/json",
+                "title": "Available Variables (TiTiler xarray)",
+            })
+
+            # Add tilejson link (with {variable} template)
+            links.append({
+                "rel": "tilejson",
+                "href": xarray_urls["tilejson"],
+                "type": "application/json",
+                "title": "TileJSON (substitute {variable})",
+            })
+
+            logger.info("[STAC] Injected xarray URLs for zarr item")
+
+        except Exception as e:
+            logger.warning(f"[STAC] Failed to inject xarray URLs: {e}")
 
 
 # Module exports

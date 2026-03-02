@@ -448,6 +448,18 @@ def validate_raster_header(params: dict) -> dict:
                     "traceback": traceback.format_exc()
                 }
 
+            # STEP 6: Geotransform validation (SG6-P2)
+            try:
+                logger.info("🔄 [HEADER] STEP 6: Validating geotransform...")
+                geotransform_result = _validate_geotransform(src)
+                if not geotransform_result["success"]:
+                    logger.error(f"❌ [HEADER] STEP 6 FAILED: {geotransform_result.get('error')}")
+                    return geotransform_result
+                logger.info("✅ [HEADER] STEP 6: Geotransform valid")
+            except Exception as e:
+                logger.error(f"❌ [HEADER] STEP 6 FAILED: {e}")
+                return {"success": False, "error": "GEOTRANSFORM_CHECK_FAILED", "message": str(e)}
+
             # Build header-only result (no raster_type, cog_tiers, bit_depth_check)
             try:
                 memory_estimation_model = None
@@ -993,6 +1005,31 @@ def _validate_crs(src, input_crs: Optional[str], bounds, skip_validation: bool =
                     "shape": src.shape
                 }
             }
+
+
+def _validate_geotransform(src) -> dict:
+    """Reject rasters with identity/zero geotransform (no georeference)."""
+    transform = src.transform
+    # Identity = Affine(1.0, 0.0, 0.0, 0.0, 1.0, 0.0) — GDAL default when no GeoTransform tag
+    is_identity = (transform.a == 1.0 and transform.b == 0.0 and transform.c == 0.0
+                   and transform.d == 0.0 and transform.e == 1.0 and transform.f == 0.0)
+    # Zero scale = degenerate transform
+    is_zero_scale = (transform.a == 0.0 and transform.e == 0.0)
+
+    if is_identity or is_zero_scale:
+        return {
+            "success": False,
+            "error": "GEOTRANSFORM_MISSING",
+            "message": "Raster file has no valid geotransform (spatial reference). "
+                       "Pixel coordinates cannot be mapped to geographic coordinates. "
+                       "Re-export from the source application with georeferencing, or assign with: "
+                       "gdal_edit.py -a_ullr <ulx> <uly> <lrx> <lry> your_file.tif",
+            "remediation": "Fix the source file to include a valid geotransform.",
+            "user_fixable": True,
+            "retryable": False,
+            "file_info": {"transform": list(transform)[:6], "shape": src.shape}
+        }
+    return {"success": True}
 
 
 def _check_bounds_sanity(crs, bounds) -> Optional[dict]:

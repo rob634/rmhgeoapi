@@ -692,14 +692,62 @@ All pipeline executions in chronological order.
 
 ---
 
+## Run 23: Full SIEGE with NetCDF Fix Verification
+
+| Field | Value |
+|-------|-------|
+| **Date** | 02 MAR 2026 |
+| **Pipeline** | SIEGE (full lifecycle + Provocateur) |
+| **Scope** | 6 lifecycle sequences (incl. CSV/SHP/KML) + 32 invalid data scenarios |
+| **Target** | Docker Worker v0.9.11.7 (netCDF4 + scipy + fsspec temp file + abfs:// fix) |
+| **Agents** | Cartographer -> Lancer -> Provocateur |
+| **Verdict** | **PASS** — All 6 sequences pass (28/28 steps), 0 new bugs, 0 server 500s |
+| **Key Milestone** | SG6-L1 FIXED — first clean NetCDF/VirtualiZarr end-to-end run |
+| **New Findings** | 0 |
+| **Output** | `agent_docs/SIEGE_RUN_7.md` |
+
+**Sequence Results**:
+
+| Sequence | Steps | Result |
+|----------|-------|--------|
+| 1. Raster Lifecycle | 4/4 | PASS |
+| 2. Vector Lifecycle | 4/4 | PASS |
+| 3. Multi-Version | 7/7 | PASS |
+| 4. Unpublish | 6/6 | PASS |
+| 5. NetCDF/VirtualiZarr | 4/4 | **PASS** (previously FAIL) |
+| 6. Additional Formats (CSV/SHP/KML) | 3/3 | PASS |
+
+**Invalid Data Sweep (32 tests)**:
+
+| Category | Count |
+|----------|-------|
+| Rejected at submit (4xx) | 11 |
+| Accepted then failed in pipeline | 17 |
+| 500 errors | **0** |
+| Unexpected successes | 2 (SG6-P1/P2 — known) |
+| Inconclusive | 1 |
+
+**Score**: 84/88 (95.5%) — up from 88.75% in Run 22
+
+**Token Usage**:
+
+| Agent | Role | Tokens | Duration |
+|-------|------|--------|----------|
+| Cartographer | Endpoint probing | ~30,000 | ~57s |
+| Lancer | Lifecycle execution | ~64,000 | ~8m |
+| Provocateur | Invalid data sweep | ~59,000 | ~9.5m |
+| **Total** | | **~153,000** | **~18m** |
+
+---
+
 ## Cumulative Token Usage
 
 | Pipeline | Runs | Total Tokens |
 |----------|------|-------------|
 | COMPETE | Runs 1-6, 9, 12, 19 | 1,071,939 (Run 9: 346,656 + Run 12: 337,561 + Run 19: 387,722; Runs 1-6 predated instrumentation) |
 | GREENFIELD | Runs 7, 8, 10 | 631,196 (Run 10 only; Runs 7-8 predated instrumentation) |
-| SIEGE | Runs 11, 13, 18, 20, 21, 22 | ~1,208,587 |
+| SIEGE | Runs 11, 13, 18, 20, 21, 22, 23 | ~1,361,587 |
 | REFLEXION | Runs 14, 15, 16, 17 | 631,966 (Run 14: 232,684 + Run 15: 278,900 + Run 16: 50,775 + Run 17: 69,607) |
-| **Instrumented Total** | Runs 9-22 | **~3,543,688** |
+| **Instrumented Total** | Runs 9-23 | **~3,696,688** |
 
 **Note**: Runs 1-8 predated the token instrumentation described in `agents/AGENT_METRICS.md`. Per-agent token breakdowns are available for Runs 9-22.

@@ -417,80 +417,76 @@ def virtualzarr_validate(
         LARGE_CHUNK_THRESHOLD = 100 * 1024 * 1024  # 100 MB
         LARGE_COORD_THRESHOLD = 50 * 1024 * 1024  # 50 MB
 
-        # Open via xarray with fsspec storage_options (lazy metadata read).
-        # Uses netCDF4 engine: reads headers only (~KB), supports NetCDF3 + NetCDF4,
-        # and integrates with fsspec for remote Azure blob access.
-        repo = BlobRepository.for_zone("silver")
-        storage_options = {
-            "account_name": repo.account_name,
-            "credential": repo.credential,
-        }
+        # Open via fsspec → xarray for metadata validation.
+        # We open the remote file ourselves via _get_blob_fs() and pass
+        # the file object to xarray, because xarray's netcdf4/scipy backends
+        # don't accept storage_options directly.
+        # netCDF4 engine reads the file into memory then accesses headers.
+        # For validation (metadata only), this is acceptable.
         blob_path = nc_url.replace("abfs://", "")
+        fs = _get_blob_fs()
 
         variables = {}
         dimensions = {}
         warnings_list = []
 
-        with xr.open_dataset(
-            f"az://{blob_path}",
-            engine="netcdf4",
-            storage_options=storage_options,
-        ) as ds:
-            # Record dimensions
-            for dim_name, dim_size in ds.dims.items():
-                dimensions[dim_name] = dim_size
+        with fs.open(blob_path, "rb") as remote_file:
+            with xr.open_dataset(remote_file, engine="netcdf4") as ds:
+                # Record dimensions
+                for dim_name, dim_size in ds.dims.items():
+                    dimensions[dim_name] = dim_size
 
-            # Extract variable metadata
-            for name, var in ds.data_vars.items():
-                shape = list(var.shape)
-                dtype = str(var.dtype)
-                encoding = var.encoding
+                # Extract variable metadata
+                for name, var in ds.data_vars.items():
+                    shape = list(var.shape)
+                    dtype = str(var.dtype)
+                    encoding = var.encoding
 
-                # Chunksizes from encoding (NetCDF4 HDF5 chunking)
-                chunks = encoding.get("chunksizes")
-                if chunks:
-                    chunks = list(chunks)
-                compression = encoding.get("zlib") or encoding.get("complevel")
+                    # Chunksizes from encoding (NetCDF4 HDF5 chunking)
+                    chunks = encoding.get("chunksizes")
+                    if chunks:
+                        chunks = list(chunks)
+                    compression = encoding.get("zlib") or encoding.get("complevel")
 
-                var_size_bytes = var.dtype.itemsize
-                for dim_len in shape:
-                    var_size_bytes *= dim_len
+                    var_size_bytes = var.dtype.itemsize
+                    for dim_len in shape:
+                        var_size_bytes *= dim_len
 
-                variables[name] = {
-                    "shape": shape,
-                    "dtype": dtype,
-                    "chunks": chunks,
-                    "compression": compression,
-                    "size_bytes": var_size_bytes,
-                }
+                    variables[name] = {
+                        "shape": shape,
+                        "dtype": dtype,
+                        "chunks": chunks,
+                        "compression": compression,
+                        "size_bytes": var_size_bytes,
+                    }
 
-                # Warning: No chunking on large variables
-                if chunks is None and var_size_bytes > LARGE_VAR_THRESHOLD:
-                    warnings_list.append(
-                        f"Variable '{name}' is contiguous (no chunking) "
-                        f"and {var_size_bytes / (1024*1024):.0f} MB - "
-                        f"will require full read for any access"
-                    )
-
-                # Warning: Individual chunk size too large
-                if chunks is not None:
-                    chunk_size_bytes = var.dtype.itemsize
-                    for c in chunks:
-                        chunk_size_bytes *= c
-                    if chunk_size_bytes > LARGE_CHUNK_THRESHOLD:
+                    # Warning: No chunking on large variables
+                    if chunks is None and var_size_bytes > LARGE_VAR_THRESHOLD:
                         warnings_list.append(
-                            f"Variable '{name}' has chunk size "
-                            f"{chunk_size_bytes / (1024*1024):.0f} MB - "
-                            f"exceeds 100 MB threshold"
+                            f"Variable '{name}' is contiguous (no chunking) "
+                            f"and {var_size_bytes / (1024*1024):.0f} MB - "
+                            f"will require full read for any access"
                         )
 
-                # Warning: 2D coordinate variable too large
-                if len(shape) == 2 and var_size_bytes > LARGE_COORD_THRESHOLD:
-                    warnings_list.append(
-                        f"Variable '{name}' is a 2D coordinate "
-                        f"({var_size_bytes / (1024*1024):.0f} MB) - "
-                        f"exceeds 50 MB threshold for coordinate variables"
-                    )
+                    # Warning: Individual chunk size too large
+                    if chunks is not None:
+                        chunk_size_bytes = var.dtype.itemsize
+                        for c in chunks:
+                            chunk_size_bytes *= c
+                        if chunk_size_bytes > LARGE_CHUNK_THRESHOLD:
+                            warnings_list.append(
+                                f"Variable '{name}' has chunk size "
+                                f"{chunk_size_bytes / (1024*1024):.0f} MB - "
+                                f"exceeds 100 MB threshold"
+                            )
+
+                    # Warning: 2D coordinate variable too large
+                    if len(shape) == 2 and var_size_bytes > LARGE_COORD_THRESHOLD:
+                        warnings_list.append(
+                            f"Variable '{name}' is a 2D coordinate "
+                            f"({var_size_bytes / (1024*1024):.0f} MB) - "
+                            f"exceeds 50 MB threshold for coordinate variables"
+                        )
 
         status = "warning" if warnings_list else "success"
 

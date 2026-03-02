@@ -569,12 +569,12 @@ class PlatformPanel(BasePanel):
             '<div class="form-group" style="flex:1; min-width:180px;">'
             '<label class="filter-label">Dataset ID:'
             '<input type="text" name="dataset_id" class="filter-input"'
-            ' placeholder="my_dataset"></label>'
+            ' placeholder="my_dataset" required></label>'
             '</div>'
             '<div class="form-group" style="flex:1; min-width:180px;">'
             '<label class="filter-label">Resource ID:'
             '<input type="text" name="resource_id" class="filter-input"'
-            ' placeholder="my_resource"></label>'
+            ' placeholder="my_resource" required></label>'
             '</div>'
             '</div>'
             '<div class="form-row" style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:12px;">'
@@ -772,7 +772,7 @@ class PlatformPanel(BasePanel):
                     f"Failed to list blobs: {data}",
                     retry_url=(
                         f"/api/dashboard?tab=platform&fragment=submit-files"
-                        f"&container_name={html_module.escape(str(container))}"
+                        f"&container_name={urllib.parse.quote(str(container))}"
                     ),
                 )
                 + oob_clear
@@ -875,6 +875,8 @@ class PlatformPanel(BasePanel):
             )
 
         if data_type == "zarr":
+            # source_url is a top-level PlatformRequest field, not a processing_option,
+            # so it intentionally does NOT use the po_ prefix convention.
             return (
                 '<div class="form-group">'
                 '<label class="filter-label">Source URL:'

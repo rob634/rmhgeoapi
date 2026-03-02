@@ -31,7 +31,8 @@ Exports:
 import html as html_module
 import json
 import logging
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlencode as urllib_urlencode
+import urllib.parse
 
 import azure.functions as func
 
@@ -355,9 +356,7 @@ def _handle_action(req: func.HttpRequest, action: str) -> func.HttpResponse:
         if target:
             query_params["target"] = target
         # Maintenance endpoint uses query params, not body
-        api_path_with_params = api_path + "?" + "&".join(
-            f"{k}={v}" for k, v in query_params.items()
-        )
+        api_path_with_params = api_path + "?" + urllib.parse.urlencode(query_params)
         result = _call_api_direct(req, api_path_with_params, "POST")
     else:
         result = _call_api_direct(req, api_path, "POST", body=body)

@@ -383,7 +383,7 @@ class BasePanel(ABC):
         for label, value in counts.items():
             safe_label = html_module.escape(str(label))
             safe_value = html_module.escape(str(value))
-            css_class = f"stat-{label.lower().replace(' ', '-')}"
+            css_class = f"stat-{html_module.escape(label.lower().replace(' ', '-'))}"
             cards.append(
                 f'<div class="stat-card {css_class}">'
                 f'<div class="stat-value">{safe_value}</div>'
@@ -564,19 +564,24 @@ class BasePanel(ABC):
             filters: List of filter HTML strings (selects, inputs, buttons).
 
         Returns:
-            HTML for the filter bar.
+            HTML for the filter bar with a form wrapper so hx-include captures all values.
         """
         filter_html = "".join(filters)
+        safe_tab = html_module.escape(tab)
+        safe_section = html_module.escape(section)
         refresh_url = html_module.escape(
             f"/api/dashboard?tab={tab}&section={section}"
         )
         return (
-            f'<div class="filter-bar">'
-            f'{filter_html}'
-            f'<button hx-get="{refresh_url}" '
+            f'<form id="filter-form-{safe_tab}-{safe_section}" class="filter-bar" '
+            f'hx-get="{refresh_url}" '
             f'hx-target="#panel-content" hx-swap="innerHTML" '
+            f'hx-trigger="change from:find select">'
+            f'{filter_html}'
+            f'<button type="submit" '
+            f'hx-include="closest form" '
             f'class="btn btn-sm btn-secondary">Refresh</button>'
-            f'</div>'
+            f'</form>'
         )
 
     def select_filter(

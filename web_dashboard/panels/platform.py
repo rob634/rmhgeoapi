@@ -75,6 +75,7 @@ class PlatformPanel(BasePanel):
     def render_fragment(self, request: func.HttpRequest, fragment_name: str) -> str:
         dispatch = {
             "requests-table": self._fragment_requests_table,
+            "request-detail": self._fragment_request_detail,
             "approval-detail": self._fragment_approval_detail,
             "catalog-results": self._fragment_catalog_results,
             "lineage-graph": self._fragment_lineage_graph,
@@ -166,7 +167,7 @@ class PlatformPanel(BasePanel):
                 "id": f"row-{html_module.escape(str(req_id)[:8])}",
                 "class": "clickable",
                 "hx-get": f"/api/dashboard?tab=platform&section=requests&fragment=request-detail&request_id={html_module.escape(str(req_id))}",
-                "hx-target": "next .detail-panel",
+                "hx-target": "#request-detail-panel",
                 "hx-swap": "innerHTML",
             })
 
@@ -180,11 +181,83 @@ class PlatformPanel(BasePanel):
         if total > limit:
             pagination = self.pagination_controls("platform", "requests", page, limit, total)
 
-        return filters + table + pagination
+        detail_panel = '<div class="detail-panel" id="request-detail-panel"></div>'
+        return filters + table + pagination + detail_panel
 
     def _fragment_requests_table(self, request: func.HttpRequest) -> str:
         """Fragment: refresh requests table body only."""
         return self._render_requests(request)
+
+    def _fragment_request_detail(self, request: func.HttpRequest) -> str:
+        """Fragment: load request detail for row click expansion."""
+        request_id = request.params.get("request_id", "")
+        if not request_id:
+            return self.empty_block("No request ID specified.")
+
+        ok, data = self.call_api(
+            request, f"/api/platform/status/{request_id}"
+        )
+        if not ok:
+            return self.error_block(
+                f"Failed to load request detail: {data}",
+                retry_url=f"/api/dashboard?tab=platform&fragment=request-detail&request_id={html_module.escape(request_id)}",
+            )
+
+        if not data:
+            return self.empty_block(f"Request '{html_module.escape(request_id)}' not found.")
+
+        req_data = data if isinstance(data, dict) else {}
+
+        # Build detail fields
+        fields = [
+            ("Request ID", req_data.get("request_id", req_data.get("id", "--"))),
+            ("Job ID", req_data.get("job_id", "--")),
+            ("Job Type", req_data.get("job_type", req_data.get("type", "--"))),
+            ("Data Type", req_data.get("data_type", "--")),
+            ("Dataset ID", req_data.get("dataset_id", "--")),
+            ("Resource ID", req_data.get("resource_id", "--")),
+            ("Version ID", req_data.get("version_id", "--")),
+            ("Status", req_data.get("status", "--")),
+            ("Approval State", req_data.get("approval_state", "--")),
+            ("Created", req_data.get("created_at", req_data.get("submitted_at", "--"))),
+            ("Updated", req_data.get("updated_at", "--")),
+        ]
+
+        detail_items = []
+        for label, value in fields:
+            safe_label = html_module.escape(label)
+            if label == "Status":
+                display_val = self.status_badge(str(value))
+            elif label == "Approval State" and value != "--":
+                display_val = self.approval_badge(str(value))
+            elif label in ("Created", "Updated") and value != "--":
+                display_val = self.format_date(value)
+            else:
+                display_val = html_module.escape(str(value))
+            detail_items.append(
+                f'<div class="detail-item">'
+                f'<span class="detail-label">{safe_label}</span>'
+                f'<span class="detail-value">{display_val}</span>'
+                f'</div>'
+            )
+
+        # Error message if failed
+        error_html = ""
+        error_msg = req_data.get("error", req_data.get("error_message", ""))
+        if error_msg:
+            error_html = (
+                f'<div class="error-block" style="margin-top:12px;">'
+                f'<span class="error-icon">!</span>'
+                f'<span class="error-message">{html_module.escape(str(error_msg)[:500])}</span>'
+                f'</div>'
+            )
+
+        safe_rid = html_module.escape(str(request_id)[:16])
+        return (
+            f'<h3>Request: {safe_rid}...</h3>'
+            f'<div class="detail-grid">{"".join(detail_items)}</div>'
+            f'{error_html}'
+        )
 
     # -----------------------------------------------------------------------
     # APPROVALS section

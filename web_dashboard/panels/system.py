@@ -98,8 +98,8 @@ class SystemPanel(BasePanel):
         """Build health cards HTML (used by both section and fragment)."""
         # Define health endpoints to check
         endpoints = [
-            ("/health", "Liveness"),
-            ("/system-health", "System Health"),
+            ("/api/health", "Liveness"),
+            ("/api/system-health", "System Health"),
             ("/api/platform/health", "Platform"),
             ("/api/dbadmin/health", "Database"),
             ("/api/stac/health", "STAC"),

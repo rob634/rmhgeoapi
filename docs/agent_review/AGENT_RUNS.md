@@ -597,14 +597,49 @@ All pipeline executions in chronological order.
 
 ---
 
+## Run 21: LNC-1 Fix Verification + NetCDF Lifecycle (SIEGE)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 01 MAR 2026 |
+| **Pipeline** | SIEGE |
+| **Scope** | 5 lifecycle sequences (raster, vector, multi-version, unpublish, NetCDF/VirtualiZarr) — LNC-1 fix verification + first NetCDF test |
+| **Target** | `https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net` (v0.9.11.3) |
+| **Agents** | Sentinel → Cartographer → Lancer → Auditor → Scribe |
+| **Verdict** | **CONDITIONAL PASS** — 4/5 sequences pass (first-ever vector pass), NetCDF blocked by infra gap |
+| **Key Milestone** | LNC-1 FIXED — vector lifecycle passes for the first time |
+| **Regressions Verified** | All prior fixes hold (SG-1, SG-5, SG2-2, SG3-3) |
+| **New Findings** | 3 total: 1 CRITICAL, 1 MEDIUM, 1 LOW |
+| **Output** | `agent_docs/SIEGE_RUN_5.md` |
+
+**Sequence Results**:
+
+| Sequence | Steps | Result |
+|----------|-------|--------|
+| 1. Raster Lifecycle | 4/4 | PASS |
+| 2. Vector Lifecycle | 4/4 | **PASS (LNC-1 FIXED)** |
+| 3. Multi-Version | 4/4 | PASS |
+| 4. Unpublish | 3/3 | PASS |
+| 5. NetCDF/VirtualiZarr | 1/4 | FAIL (SG5-1, SG5-3) |
+
+**New Finding Summary**:
+
+| ID | Severity | Description |
+|----|----------|-------------|
+| SG5-1 | CRITICAL | Approval endpoint approved release with processing_status=failed — no guard. Phantom STAC entry with is_served=true. |
+| SG5-2 | MEDIUM | Orphaned release on validation failure — requires overwrite=true on retry |
+| SG5-3 | LOW | silver-netcdf container not provisioned — VirtualiZarr fails at Stage 1 |
+
+---
+
 ## Cumulative Token Usage
 
 | Pipeline | Runs | Total Tokens |
 |----------|------|-------------|
 | COMPETE | Runs 1-6, 9, 12, 19 | 1,071,939 (Run 9: 346,656 + Run 12: 337,561 + Run 19: 387,722; Runs 1-6 predated instrumentation) |
 | GREENFIELD | Runs 7, 8, 10 | 631,196 (Run 10 only; Runs 7-8 predated instrumentation) |
-| SIEGE | Runs 11, 13, 18, 20 | ~915,618 (Run 11: 178,793 + Run 13: 251,338 + Run 18: ~229,220 + Run 20: ~256,267) |
+| SIEGE | Runs 11, 13, 18, 20, 21 | ~1,060,000 |
 | REFLEXION | Runs 14, 15, 16, 17 | 631,966 (Run 14: 232,684 + Run 15: 278,900 + Run 16: 50,775 + Run 17: 69,607) |
-| **Instrumented Total** | Runs 9-20 | **~3,250,719** |
+| **Instrumented Total** | Runs 9-21 | **~3,395,101** |
 
-**Note**: Runs 1-8 predated the token instrumentation described in `agents/AGENT_METRICS.md`. Per-agent token breakdowns are available for Runs 9-20.
+**Note**: Runs 1-8 predated the token instrumentation described in `agents/AGENT_METRICS.md`. Per-agent token breakdowns are available for Runs 9-21.

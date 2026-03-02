@@ -139,7 +139,7 @@ Root cause: pgSTAC `content` JSONB missing `id`, `collection`, `geometry` stored
 
 ---
 
-## SIEGE Bug Tracker — Cumulative Status (01 MAR 2026, post-Run 3)
+## SIEGE Bug Tracker — Cumulative Status (01 MAR 2026, post-Run 5)
 
 ### From SIEGE Run 1 (Run 11)
 
@@ -178,7 +178,22 @@ Root cause: pgSTAC `content` JSONB missing `id`, `collection`, `geometry` stored
 | SG3-4 | ~~LOW~~ | Vector STAC collection description says "Raster collection" | **NOT APPLICABLE** — no vector STAC collections |
 | SG3-5 | INFO | Unpublish defaults to dry_run=true (undocumented) | ~~FIXED~~ — docstring updated (01 MAR 2026) |
 
-### Score: 13/22 fixed, 1 improved, 3 resolved by design, 2 inconclusive, 3 open (0 CRITICAL, 0 HIGH remaining)
+### From SIEGE Run 4 (Run 20)
+
+| ID | Severity | Description | Status |
+|----|----------|-------------|--------|
+| LNC-1 | CRITICAL | Vector submit broken — stac_item_id/stac_collection_id non-Optional in model | ~~FIXED~~ — v0.9.11.3 (verified Run 5) |
+| AUD-R1-1 | MEDIUM | /api/platform/approvals/status returns lookup_error for valid STAC IDs | OPEN |
+
+### From SIEGE Run 5 (Run 21)
+
+| ID | Severity | Description | Status |
+|----|----------|-------------|--------|
+| SG5-1 | **CRITICAL** | Approval endpoint approved release with processing_status=failed — no guard | **NEW — OPEN** |
+| SG5-2 | MEDIUM | Orphaned release on validation failure — requires overwrite on retry | NEW — OPEN |
+| SG5-3 | LOW | silver-netcdf container not provisioned — VirtualiZarr fails at Stage 1 | NEW — OPEN (infra) |
+
+### Score: 14/27 fixed, 1 improved, 3 resolved by design, 2 inconclusive, 7 open (1 CRITICAL, 0 HIGH remaining)
 
 ---
 
@@ -198,19 +213,17 @@ These are not blocking any run but were identified across the COMPETE reviews as
 
 ## Priority Order
 
-**SIEGE Run 3 complete (01 MAR 2026) — CONDITIONAL PASS, 100% Lancer pass rate**
+**SIEGE Run 5 complete (01 MAR 2026) — CONDITIONAL PASS, 4/5 sequences pass**
 
-**Design decision (01 MAR 2026): Vector data does NOT go in STAC.**
-Vector discovery is via PostGIS/OGC Features API. STAC is for raster and zarr only.
-This resolves SG3-1 (HIGH), SG3-4 (LOW), and the vector portion of SG-6 (MEDIUM).
+**Milestone**: First-ever vector lifecycle pass (LNC-1 fixed). All 4 original sequences pass.
 
-**Completed (01 MAR 2026):**
-1. ~~**Implement vector STAC exclusion**~~ — DONE. Dual guards in `asset_approval_service.py:216-231` and `stac_materialization.py:155-168`. Orphaned `sg-vector-test` collection will be cleaned during SIEGE Run 4 prep (STAC nuke).
-2. ~~**SG3-2 (MEDIUM)**~~ — FIXED. `release_repository.py:get_by_request_id()` changed `NULLS LAST` → `NULLS FIRST` to prioritize drafts over approved versions.
-3. ~~**SG3-3**~~ — FIXED. Added `is_served` to `_build_version_summary()` in `trigger_platform_status.py:783`.
-4. ~~**SG3-5**~~ — FIXED. Added docstring documenting `dry_run=true` default in `triggers/platform/unpublish.py`.
+**Immediate (before SIEGE Run 6):**
+1. **SG5-1 (CRITICAL)**: Add processing_status guard to approval service — reject releases with status != completed
+2. **SG5-3 (LOW/INFRA)**: Provision `silver-netcdf` container for VirtualiZarr pipeline
 
-**Medium priority (COMPETE):**
+**Medium priority:**
+3. SG5-2: Auto-cleanup orphaned releases on resubmit (remove overwrite requirement)
+4. AUD-R1-1: Fix `/api/platform/approvals/status` lookup for STAC item IDs
 5. SG-6 (raster only): Cached vs live STAC naming strategy
 6. SG2-1: Add release_id as unpublish lookup parameter
 
@@ -218,4 +231,4 @@ This resolves SG3-1 (HIGH), SG3-4 (LOW), and the vector portion of SG-6 (MEDIUM)
 7. V-T1 — Docker dependency verification
 8. V-T2 — Handler tests
 
-**Gate for WARGAME**: Vector STAC exclusion implemented — verify in SIEGE Run 4
+**Gate for WARGAME**: SG5-1 fixed + NetCDF lifecycle passes in SIEGE Run 6

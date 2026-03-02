@@ -438,8 +438,13 @@ def translate_to_coremachine(
         )
         collection_id = request.dataset_id
 
+        # Resolve source storage account at submit time.
+        # The handler needs an explicit account — not prefix-guessing.
+        source_account = get_config().storage.bronze.account_name
+
         return 'virtualzarr', {
             'source_url': request.source_url,
+            'source_account': source_account,
             'file_pattern': getattr(opts, 'file_pattern', '*.nc'),
             'concat_dim': getattr(opts, 'concat_dim', 'time'),
             'fail_on_chunking_warnings': getattr(opts, 'fail_on_chunking_warnings', False),

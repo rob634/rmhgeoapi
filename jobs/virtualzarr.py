@@ -251,6 +251,7 @@ class VirtualZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                     "task_type": "virtualzarr_scan",
                     "parameters": {
                         "source_url": job_params["source_url"],
+                        "source_account": job_params.get("source_account"),
                         "file_pattern": job_params.get("file_pattern", "*.nc"),
                         "max_files": job_params.get("max_files", 500),
                         "ref_output_prefix": job_params["ref_output_prefix"],
@@ -290,6 +291,7 @@ class VirtualZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                     "task_type": "virtualzarr_copy",
                     "parameters": {
                         "source_url": f_entry["source_url"],
+                        "source_account": job_params.get("source_account"),
                         "silver_container": silver_container,
                         "silver_path": f_entry["silver_path"],
                         "size_bytes": f_entry["size_bytes"],

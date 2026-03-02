@@ -104,12 +104,14 @@ def virtualzarr_scan(
     start = time.time()
 
     source_url = params.get("source_url")
+    source_account = params.get("source_account")
     file_pattern = params.get("file_pattern", "*.nc")
     max_files = params.get("max_files", 500)
     ref_output_prefix = params.get("ref_output_prefix")
 
     logger.info(
         f"virtualzarr_scan: source_url={source_url}, "
+        f"source_account={source_account}, "
         f"pattern={file_pattern}, max_files={max_files}"
     )
 
@@ -127,9 +129,12 @@ def virtualzarr_scan(
         source_container = parts[0]
         source_prefix = parts[1] if len(parts) > 1 else ""
 
-        # Determine zone from container name
-        zone = "bronze" if source_container.startswith("bronze") else "silver"
-        blob_repo = BlobRepository.for_zone(zone)
+        # Use explicit source_account from job params (set by submit trigger).
+        # Falls back to bronze zone if source_account not provided (legacy jobs).
+        if source_account:
+            blob_repo = BlobRepository(account_name=source_account)
+        else:
+            blob_repo = BlobRepository.for_zone("bronze")
 
         # Single-file detection: if source_url ends with a matching extension
         if source_prefix and fnmatch.fnmatch(source_prefix.rsplit("/", 1)[-1], file_pattern):
@@ -306,6 +311,7 @@ def virtualzarr_copy(
     start = time.time()
 
     source_url = params.get("source_url")
+    source_account = params.get("source_account")
     silver_container = params.get("silver_container")
     silver_path = params.get("silver_path")
     expected_size = params.get("size_bytes", 0)
@@ -324,11 +330,12 @@ def virtualzarr_copy(
         source_container = parts[0]
         source_blob = parts[1] if len(parts) > 1 else ""
 
-        # Zone detection: bronze-* → bronze, else silver
-        source_zone = "bronze" if source_container.startswith("bronze") else "silver"
-
-        # Read from source
-        source_repo = BlobRepository.for_zone(source_zone)
+        # Use explicit source_account from job params (set by submit trigger).
+        # Falls back to bronze zone if source_account not provided (legacy jobs).
+        if source_account:
+            source_repo = BlobRepository(account_name=source_account)
+        else:
+            source_repo = BlobRepository.for_zone("bronze")
         data = source_repo.read_blob(source_container, source_blob)
 
         # Verify size if expected_size > 0

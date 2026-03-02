@@ -624,19 +624,18 @@ def virtualzarr_combine(
 
         # Pre-check: open first file to get reference variable/dimension info
         first_url = nc_files[0]
-        first_path = first_url.replace("abfs://", "")
         storage_options = {"account_name": account_name, "credential": credential}
 
         try:
             first_vds = open_virtual_dataset(
-                first_path,
+                first_url,
                 indexes={},
                 reader_options={"storage_options": storage_options},
             )
         except Exception as e:
-            logger.info(f"virtualzarr_combine: Auto-detect failed for {first_path}, retrying as netcdf3: {e}")
+            logger.info(f"virtualzarr_combine: Auto-detect failed for {first_url}, retrying as netcdf3: {e}")
             first_vds = open_virtual_dataset(
-                first_path,
+                first_url,
                 indexes={},
                 filetype="netcdf3",
                 reader_options={"storage_options": storage_options},
@@ -650,17 +649,16 @@ def virtualzarr_combine(
         # Open all virtual datasets
         virtual_datasets = [first_vds]
         for nc_url in nc_files[1:]:
-            nc_path = nc_url.replace("abfs://", "")
             try:
                 vds = open_virtual_dataset(
-                    nc_path,
+                    nc_url,
                     indexes={},
                     reader_options={"storage_options": storage_options},
                 )
             except Exception as e:
-                logger.info(f"virtualzarr_combine: Auto-detect failed for {nc_path}, retrying as netcdf3: {e}")
+                logger.info(f"virtualzarr_combine: Auto-detect failed for {nc_url}, retrying as netcdf3: {e}")
                 vds = open_virtual_dataset(
-                    nc_path,
+                    nc_url,
                     indexes={},
                     filetype="netcdf3",
                     reader_options={"storage_options": storage_options},

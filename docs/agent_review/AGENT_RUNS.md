@@ -632,14 +632,74 @@ All pipeline executions in chronological order.
 
 ---
 
+## Run 22: NetCDF Pipeline Gaps + Full Invalid Data Sweep (SIEGE)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 02 MAR 2026 |
+| **Pipeline** | SIEGE (expanded with Provocateur) |
+| **Scope** | 5 lifecycle sequences + 32 invalid/bad data scenarios (all valid_files + all invalid_files from siege_config.json) |
+| **Target** | Orchestrator v0.9.11.5 / Docker Worker v0.9.11.6 |
+| **Agents** | Sentinel -> Cartographer -> Lancer -> Provocateur -> Scribe |
+| **Verdict** | **CONDITIONAL PASS** -- Seq 1-4 pass (100%), Seq 5 blocked by scipy backend, invalid data 26/32 graceful |
+| **Key Milestone** | SG5-3 FIXED (silver-netcdf container now exists), GAP-1/2/7 code deployed |
+| **New Findings** | 9 total: 2 HIGH, 3 MEDIUM, 2 LOW, 2 INFO |
+| **Output** | `agent_docs/SIEGE_RUN_6.md` |
+
+**Sequence Results**:
+
+| Sequence | Steps | Result |
+|----------|-------|--------|
+| 1. Raster Lifecycle | 4/4 | PASS |
+| 2. Vector Lifecycle | 4/4 | PASS |
+| 3. Multi-Version | 4/4 | PASS |
+| 4. Unpublish | 3/3 | PASS |
+| 5. NetCDF/VirtualiZarr | 1/4 | FAIL (SG6-L1: scipy backend incompatible) |
+
+**Invalid Data Sweep (32 tests)**:
+
+| Category | Count |
+|----------|-------|
+| Rejected at submit (4xx) | 12 |
+| Accepted then failed in pipeline | 15 |
+| 500 errors | **0** |
+| Unexpected successes | 3 |
+| Inconclusive | 1 |
+
+**New Finding Summary**:
+
+| ID | Severity | Description |
+|----|----------|-------------|
+| SG6-L1 | HIGH | scipy engine does not support storage_options -- validate handler fails on all NetCDF files |
+| SG6-L2 | HIGH | Approval allows failed releases (reconfirms SG5-1) |
+| SG6-L3 | MEDIUM | Zarr submit with file_name creates orphaned release |
+| SG6-P1 | MEDIUM | Raster without CRS silently processed into COG |
+| SG6-P2 | MEDIUM | Raster without geotransform silently processed |
+| SG6-P3 | LOW | Empty/garbage rasters produce misleading "transient network" error |
+| SG6-P4 | LOW | Vector null geometries silently accepted |
+| SG6-P5 | INFO | No timeout guard on huge polygon processing |
+| SG6-P6 | INFO | File/container not found returns 409 instead of 404 |
+
+**Token Usage**:
+
+| Agent | Role | Tokens | Duration |
+|-------|------|--------|----------|
+| Sentinel | Campaign brief | -- | inline |
+| Cartographer | Endpoint probing | 26,352 | 58s |
+| Lancer | Lifecycle execution | 67,021 | 11m 22s |
+| Provocateur | Invalid data sweep | 55,214 | 10m 45s |
+| **Total** | | **~148,587** | **~23m 05s** |
+
+---
+
 ## Cumulative Token Usage
 
 | Pipeline | Runs | Total Tokens |
 |----------|------|-------------|
 | COMPETE | Runs 1-6, 9, 12, 19 | 1,071,939 (Run 9: 346,656 + Run 12: 337,561 + Run 19: 387,722; Runs 1-6 predated instrumentation) |
 | GREENFIELD | Runs 7, 8, 10 | 631,196 (Run 10 only; Runs 7-8 predated instrumentation) |
-| SIEGE | Runs 11, 13, 18, 20, 21 | ~1,060,000 |
+| SIEGE | Runs 11, 13, 18, 20, 21, 22 | ~1,208,587 |
 | REFLEXION | Runs 14, 15, 16, 17 | 631,966 (Run 14: 232,684 + Run 15: 278,900 + Run 16: 50,775 + Run 17: 69,607) |
-| **Instrumented Total** | Runs 9-21 | **~3,395,101** |
+| **Instrumented Total** | Runs 9-22 | **~3,543,688** |
 
-**Note**: Runs 1-8 predated the token instrumentation described in `agents/AGENT_METRICS.md`. Per-agent token breakdowns are available for Runs 9-21.
+**Note**: Runs 1-8 predated the token instrumentation described in `agents/AGENT_METRICS.md`. Per-agent token breakdowns are available for Runs 9-22.

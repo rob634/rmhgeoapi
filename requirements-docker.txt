@@ -64,7 +64,7 @@ asyncpg>=0.29.0
 # === xarray ecosystem (Zarr direct access) ===
 xarray>=2024.10.0
 zarr>=3.1.0                           # zarr 3.x (reads v2 format data; >=3.1 avoids yanked releases)
-scipy>=1.12.0                         # NetCDF3 engine for xarray (validate handler)
+netCDF4>=1.6.0                        # NetCDF3/4 engine for xarray (lazy metadata read, validate handler)
 fsspec>=2024.2.0
 adlfs>=2024.2.0
 aiohttp>=3.13.3                       # CVE-2025-69223 + 5 others fixed in 3.13.3

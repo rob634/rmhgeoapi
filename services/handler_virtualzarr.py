@@ -6,7 +6,7 @@
 # PURPOSE: Scan, validate, combine, and register virtual Zarr references
 # LAST_REVIEWED: 27 FEB 2026
 # EXPORTS: virtualzarr_scan, virtualzarr_copy, virtualzarr_validate, virtualzarr_combine, virtualzarr_register
-# DEPENDENCIES: fsspec, adlfs, scipy, virtualizarr, xarray (all lazy-imported)
+# DEPENDENCIES: fsspec, adlfs, netCDF4, virtualizarr, xarray (all lazy-imported)
 # ============================================================================
 """
 VirtualZarr Task Handlers - Scan, Copy, Validate, Combine, Register.
@@ -417,7 +417,9 @@ def virtualzarr_validate(
         LARGE_CHUNK_THRESHOLD = 100 * 1024 * 1024  # 100 MB
         LARGE_COORD_THRESHOLD = 50 * 1024 * 1024  # 50 MB
 
-        # Open via xarray with fsspec storage_options (handles NetCDF3 + NetCDF4)
+        # Open via xarray with fsspec storage_options (lazy metadata read).
+        # Uses netCDF4 engine: reads headers only (~KB), supports NetCDF3 + NetCDF4,
+        # and integrates with fsspec for remote Azure blob access.
         repo = BlobRepository.for_zone("silver")
         storage_options = {
             "account_name": repo.account_name,
@@ -431,7 +433,7 @@ def virtualzarr_validate(
 
         with xr.open_dataset(
             f"az://{blob_path}",
-            engine="scipy",
+            engine="netcdf4",
             storage_options=storage_options,
         ) as ds:
             # Record dimensions

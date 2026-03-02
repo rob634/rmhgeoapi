@@ -27,7 +27,6 @@ Handlers:
     ingest_zarr_register:  Build STAC item, update release record
 """
 
-import logging
 import time
 from typing import Dict, Any, Optional
 
@@ -49,28 +48,6 @@ def _get_storage_account() -> str:
     from config import get_config
     return get_config().storage.silver.account_name
 
-
-def _get_blob_fs(zone: str = "silver"):
-    """
-    Create an Azure Blob filesystem using BlobRepository's credential.
-
-    Auth is owned by BlobRepository -- this helper reuses the singleton's
-    credential so all handlers authenticate through the same path.
-
-    Args:
-        zone: Trust zone to connect to (default "silver")
-
-    Returns:
-        adlfs.AzureBlobFileSystem instance
-    """
-    from adlfs import AzureBlobFileSystem
-    from infrastructure import BlobRepository
-
-    repo = BlobRepository.for_zone(zone)
-    return AzureBlobFileSystem(
-        account_name=repo.account_name,
-        credential=repo.credential,
-    )
 
 
 # =============================================================================

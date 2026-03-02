@@ -407,6 +407,13 @@ class PlatformRequest(BaseModel):
             logger.debug(f"Processing options: ignoring unknown keys {unknown_keys} for {model_cls.__name__}")
 
         self.processing_options = model_cls(**raw_dict)
+
+        # Auto-detect ingest_zarr pipeline from .zarr file extension
+        if data_type == DataType.ZARR and model_cls is ZarrProcessingOptions:
+            file_name = self.file_name[0] if isinstance(self.file_name, list) else self.file_name
+            if file_name and file_name.lower().endswith('.zarr') and 'pipeline' not in raw_dict:
+                self.processing_options.pipeline = "ingest_zarr"
+
         return self
 
     # ========================================================================

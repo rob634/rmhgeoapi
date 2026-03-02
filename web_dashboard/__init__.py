@@ -346,6 +346,21 @@ def _handle_action(req: func.HttpRequest, action: str) -> func.HttpResponse:
         logger.warning(f"Failed to parse form data for action '{action}': {e}")
         body = {}
 
+    # Restructure po_* fields into processing_options for submit/validate
+    if action in ("submit", "validate"):
+        processing_options = {}
+        po_keys = [k for k in body if k.startswith("po_")]
+        for k in po_keys:
+            val = body.pop(k)
+            if val:  # Only include non-empty values
+                processing_options[k[3:]] = val
+        if processing_options:
+            body["processing_options"] = processing_options
+        # Remove dashboard-only fields that the API does not expect
+        body.pop("detected_data_type", None)
+        body.pop("prefix_filter", None)
+        body.pop("suffix_filter", None)
+
     # Special handling for maintenance actions
     if action in ("ensure", "rebuild"):
         query_params = {"action": action, "confirm": "yes"}

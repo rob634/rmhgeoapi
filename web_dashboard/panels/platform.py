@@ -25,6 +25,7 @@ Exports:
 
 import html as html_module
 import logging
+import urllib.parse
 import azure.functions as func
 
 from web_dashboard.base_panel import BasePanel
@@ -79,6 +80,9 @@ class PlatformPanel(BasePanel):
             "approval-detail": self._fragment_approval_detail,
             "catalog-results": self._fragment_catalog_results,
             "lineage-graph": self._fragment_lineage_graph,
+            "submit-containers": self._fragment_submit_containers,
+            "submit-files": self._fragment_submit_files,
+            "submit-options": self._fragment_submit_options,
         }
         handler = dispatch.get(fragment_name)
         if not handler:
@@ -253,10 +257,29 @@ class PlatformPanel(BasePanel):
             )
 
         safe_rid = html_module.escape(str(request_id)[:16])
+
+        # Navigation links
+        job_id = req_data.get("job_id", "")
+        nav_links = []
+        if job_id:
+            safe_jid = html_module.escape(str(job_id))
+            nav_links.append(
+                f'<a hx-get="/api/dashboard?tab=jobs&section=tasks&job_id={safe_jid}" '
+                f'hx-target="#main-content" hx-push-url="true" '
+                f'class="btn btn-sm btn-primary">View Job</a>'
+            )
+        nav_links.append(
+            f'<a hx-get="/api/dashboard?tab=platform&section=lineage&request_id={html_module.escape(str(request_id))}" '
+            f'hx-target="#main-content" hx-push-url="true" '
+            f'class="btn btn-sm btn-secondary">View Lineage</a>'
+        )
+        nav_html = f'<div style="display:flex; gap:8px; margin-top:12px;">{"".join(nav_links)}</div>'
+
         return (
             f'<h3>Request: {safe_rid}...</h3>'
             f'<div class="detail-grid">{"".join(detail_items)}</div>'
             f'{error_html}'
+            f'{nav_html}'
         )
 
     # -----------------------------------------------------------------------
@@ -264,7 +287,7 @@ class PlatformPanel(BasePanel):
     # -----------------------------------------------------------------------
 
     def _render_approvals(self, request: func.HttpRequest) -> str:
-        """Render the approval queue."""
+        """Render the approval queue with row-click detail expansion."""
         ok, data = self.call_api(request, "/api/platform/approvals")
 
         if not ok:
@@ -291,8 +314,8 @@ class PlatformPanel(BasePanel):
             state_counts[state] = state_counts.get(state, 0) + 1
         stats = self.stat_strip(state_counts)
 
-        # Build table
-        headers = ["Release", "Asset", "Version", "State", "Clearance", "Updated", "Actions"]
+        # Build table — row click expands detail panel below
+        headers = ["Release", "Asset", "Version", "State", "Clearance", "Updated"]
         rows = []
         row_attrs = []
         for item in approvals_list:
@@ -303,40 +326,6 @@ class PlatformPanel(BasePanel):
             clearance = item.get("clearance_state", item.get("clearance", "--"))
             updated = item.get("updated_at", item.get("reviewed_at", ""))
 
-            # Action buttons for pending_review items
-            actions = ""
-            if str(state).lower() == "pending_review":
-                safe_rid = html_module.escape(str(release_id))
-                actions = (
-                    f'<button hx-post="/api/dashboard?action=approve" '
-                    f'hx-vals=\'{{"release_id": "{safe_rid}", "reviewer": "", "clearance": "OUO"}}\' '
-                    f'hx-target="#row-{html_module.escape(str(release_id)[:12])}" '
-                    f'hx-swap="outerHTML" '
-                    f'hx-confirm="Approve release {safe_rid}? This publishes the dataset." '
-                    f'hx-disabled-elt="this" '
-                    f'class="btn btn-sm btn-approve">Approve</button> '
-                    f'<button hx-post="/api/dashboard?action=reject" '
-                    f'hx-vals=\'{{"release_id": "{safe_rid}", "reviewer": "", "reason": ""}}\' '
-                    f'hx-target="#row-{html_module.escape(str(release_id)[:12])}" '
-                    f'hx-swap="outerHTML" '
-                    f'hx-confirm="Reject release {safe_rid}?" '
-                    f'hx-disabled-elt="this" '
-                    f'class="btn btn-sm btn-reject">Reject</button>'
-                    f'<span class="btn-indicator htmx-indicator">...</span>'
-                )
-            elif str(state).lower() == "approved":
-                safe_rid = html_module.escape(str(release_id))
-                actions = (
-                    f'<button hx-post="/api/dashboard?action=revoke" '
-                    f'hx-vals=\'{{"release_id": "{safe_rid}", "reviewer": "", "reason": ""}}\' '
-                    f'hx-target="#row-{html_module.escape(str(release_id)[:12])}" '
-                    f'hx-swap="outerHTML" '
-                    f'hx-confirm="Revoke approval for release {safe_rid}? This unpublishes the dataset." '
-                    f'hx-disabled-elt="this" '
-                    f'class="btn btn-sm btn-danger">Revoke</button>'
-                    f'<span class="btn-indicator htmx-indicator">...</span>'
-                )
-
             rows.append([
                 self.truncate_id(release_id, 12),
                 html_module.escape(str(asset_id)),
@@ -344,19 +333,23 @@ class PlatformPanel(BasePanel):
                 self.approval_badge(state),
                 self.clearance_badge(clearance),
                 self.format_date(updated),
-                actions,
             ])
             row_attrs.append({
                 "id": f"row-{str(release_id)[:12]}",
+                "class": "clickable",
+                "hx-get": f"/api/dashboard?tab=platform&fragment=approval-detail&release_id={str(release_id)}",
+                "hx-target": "#approval-detail-panel",
+                "hx-swap": "innerHTML",
             })
 
         table = self.data_table(
             headers, rows, table_id="approvals-table", row_attrs=row_attrs,
         )
-        return stats + table
+        detail_panel = '<div class="detail-panel" id="approval-detail-panel"></div>'
+        return stats + table + detail_panel
 
     def _fragment_approval_detail(self, request: func.HttpRequest) -> str:
-        """Fragment: load approval detail panel."""
+        """Fragment: load approval detail with action form."""
         release_id = request.params.get("release_id", "")
         if not release_id:
             return self.empty_block("No release ID specified.")
@@ -373,12 +366,13 @@ class PlatformPanel(BasePanel):
         if not data:
             return self.empty_block(f"Release {html_module.escape(release_id)} not found.")
 
-        # Render detail panel
         release = data if isinstance(data, dict) else {}
         safe_rid = html_module.escape(str(release.get("release_id", release_id)))
-        return f"""<div class="detail-panel">
-<h3>Release: {safe_rid}</h3>
-<div class="detail-grid">
+        state = str(release.get("approval_state", release.get("state", ""))).lower()
+        current_clearance = str(release.get("clearance_state", release.get("clearance", "OUO")))
+
+        # Info grid
+        info_html = f"""<div class="detail-grid">
     <div class="detail-item">
         <span class="detail-label">Asset</span>
         <span class="detail-value">{html_module.escape(str(release.get("asset_identifier", "--")))}</span>
@@ -392,8 +386,8 @@ class PlatformPanel(BasePanel):
         <span class="detail-value">{self.approval_badge(release.get("approval_state", "--"))}</span>
     </div>
     <div class="detail-item">
-        <span class="detail-label">Clearance</span>
-        <span class="detail-value">{self.clearance_badge(release.get("clearance_state", "--"))}</span>
+        <span class="detail-label">Current Clearance</span>
+        <span class="detail-value">{self.clearance_badge(current_clearance)}</span>
     </div>
     <div class="detail-item">
         <span class="detail-label">Job ID</span>
@@ -419,85 +413,480 @@ class PlatformPanel(BasePanel):
         <span class="detail-label">Updated</span>
         <span class="detail-value">{self.format_date(release.get("updated_at"))}</span>
     </div>
-</div>
 </div>"""
+
+        # Build action form based on current state
+        action_html = ""
+        form_id = f"approval-form-{safe_rid[:12]}"
+
+        if state == "pending_review":
+            # Clearance selector options
+            clearance_options = []
+            for val, label in [("UNCLEARED", "Uncleared"), ("OUO", "OUO"), ("PUBLIC", "Public")]:
+                sel = " selected" if val == current_clearance.upper() else ""
+                clearance_options.append(f'<option value="{val}"{sel}>{label}</option>')
+
+            action_html = f"""
+<div style="margin-top:16px; padding-top:16px; border-top:1px solid var(--ds-border);">
+    <h4 style="margin-bottom:12px; color:var(--ds-navy);">Review Actions</h4>
+    <form id="{form_id}">
+        <input type="hidden" name="release_id" value="{safe_rid}">
+        <div class="form-row" style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
+            <div class="form-group" style="flex:1; min-width:150px;">
+                <label class="filter-label">Clearance:
+                <select name="clearance" class="filter-select">
+                    {"".join(clearance_options)}
+                </select></label>
+            </div>
+            <div class="form-group" style="flex:1; min-width:200px;">
+                <label class="filter-label">Reviewer:
+                <input type="text" name="reviewer" class="filter-input"
+                       placeholder="Your name" style="width:100%;"></label>
+            </div>
+        </div>
+        <div class="form-group" style="margin-bottom:12px;">
+            <label class="filter-label">Notes (for reject/revoke):
+            <input type="text" name="reason" class="filter-input"
+                   placeholder="Optional reason..." style="width:100%;"></label>
+        </div>
+        <div style="display:flex; gap:8px;">
+            <button type="button"
+                    hx-post="/api/dashboard?action=approve"
+                    hx-include="#{form_id}"
+                    hx-target="#approval-detail-panel"
+                    hx-swap="innerHTML"
+                    hx-confirm="Approve release {safe_rid}? This publishes the dataset."
+                    hx-disabled-elt="this"
+                    class="btn btn-sm btn-approve">
+                Approve
+                <span class="btn-indicator htmx-indicator">...</span>
+            </button>
+            <button type="button"
+                    hx-post="/api/dashboard?action=reject"
+                    hx-include="#{form_id}"
+                    hx-target="#approval-detail-panel"
+                    hx-swap="innerHTML"
+                    hx-confirm="Reject release {safe_rid}?"
+                    hx-disabled-elt="this"
+                    class="btn btn-sm btn-reject">
+                Reject
+                <span class="btn-indicator htmx-indicator">...</span>
+            </button>
+        </div>
+    </form>
+</div>"""
+
+        elif state == "approved":
+            action_html = f"""
+<div style="margin-top:16px; padding-top:16px; border-top:1px solid var(--ds-border);">
+    <h4 style="margin-bottom:12px; color:var(--ds-navy);">Revoke Approval</h4>
+    <form id="{form_id}">
+        <input type="hidden" name="release_id" value="{safe_rid}">
+        <div class="form-group" style="margin-bottom:12px;">
+            <label class="filter-label">Reviewer:
+            <input type="text" name="reviewer" class="filter-input"
+                   placeholder="Your name" style="width:100%;"></label>
+        </div>
+        <div class="form-group" style="margin-bottom:12px;">
+            <label class="filter-label">Reason:
+            <input type="text" name="reason" class="filter-input"
+                   placeholder="Reason for revoking..." style="width:100%;"></label>
+        </div>
+        <button type="button"
+                hx-post="/api/dashboard?action=revoke"
+                hx-include="#{form_id}"
+                hx-target="#approval-detail-panel"
+                hx-swap="innerHTML"
+                hx-confirm="Revoke approval for {safe_rid}? This unpublishes the dataset."
+                hx-disabled-elt="this"
+                class="btn btn-sm btn-danger">
+            Revoke Approval
+            <span class="btn-indicator htmx-indicator">...</span>
+        </button>
+    </form>
+</div>"""
+
+        return f'<h3>Release: {safe_rid}</h3>{info_html}{action_html}'
 
     # -----------------------------------------------------------------------
     # SUBMIT section
     # -----------------------------------------------------------------------
 
+    # Extension-to-data-type mapping for file selection
+    EXTENSION_TO_TYPE = {
+        '.tif': 'raster', '.tiff': 'raster', '.geotiff': 'raster',
+        '.nc': 'raster', '.hdf': 'raster', '.hdf5': 'raster', '.h5': 'raster',
+        '.geojson': 'vector', '.json': 'vector', '.gpkg': 'vector',
+        '.csv': 'vector', '.shp': 'vector', '.kml': 'vector', '.kmz': 'vector',
+        '.zarr': 'zarr',
+    }
+
     def _render_submit(self, request: func.HttpRequest) -> str:
-        """Render the submission form."""
-        return """<h3 class="section-heading">Submit Platform Request</h3>
-<form id="submit-form" class="detail-panel">
-    <div class="form-row">
-        <div class="form-group">
-            <label for="submit-job-type">Job Type</label>
-            <select id="submit-job-type" name="job_type" class="form-control" required>
-                <option value="">Select job type...</option>
-                <option value="ingest_raster">Ingest Raster</option>
-                <option value="ingest_vector">Ingest Vector</option>
-                <option value="ingest_zarr">Ingest Zarr</option>
-                <option value="virtualzarr">VirtualiZarr Pipeline</option>
-            </select>
-        </div>
-        <div class="form-group">
-            <label for="submit-source">Source URL</label>
-            <input type="text" id="submit-source" name="source_url"
-                   class="form-control" placeholder="https://... or /vsiaz/..."
-                   required>
-        </div>
-    </div>
-    <div class="form-row">
-        <div class="form-group">
-            <label for="submit-dataset">Dataset ID</label>
-            <input type="text" id="submit-dataset" name="dataset_id"
-                   class="form-control" placeholder="my_dataset_name">
-        </div>
-        <div class="form-group">
-            <label for="submit-clearance">Clearance</label>
-            <select id="submit-clearance" name="clearance" class="form-control">
-                <option value="UNCLEARED">Uncleared</option>
-                <option value="OUO" selected>OUO</option>
-                <option value="PUBLIC">Public</option>
-            </select>
-        </div>
-    </div>
-    <div class="form-group">
-        <label for="submit-params">Additional Parameters (JSON)</label>
-        <textarea id="submit-params" name="parameters"
-                  class="form-control" placeholder='{"key": "value"}'></textarea>
-    </div>
-    <div class="form-group">
-        <label for="submit-notes">Notes</label>
-        <textarea id="submit-notes" name="notes"
-                  class="form-control" placeholder="Optional notes..."></textarea>
-    </div>
-    <div style="display:flex; gap:12px; margin-top:8px;">
-        <button type="button"
-                hx-post="/api/dashboard?action=validate"
-                hx-include="#submit-form"
-                hx-target="#submit-result"
-                hx-swap="innerHTML"
-                hx-disabled-elt="this"
-                class="btn btn-secondary">
-            Validate (Dry Run)
-            <span class="btn-indicator htmx-indicator">...</span>
-        </button>
-        <button type="button"
-                hx-post="/api/dashboard?action=submit"
-                hx-include="#submit-form"
-                hx-target="#submit-result"
-                hx-swap="innerHTML"
-                hx-confirm="Submit this request? This will start processing."
-                hx-disabled-elt="this"
-                class="btn btn-primary">
-            Submit Request
-            <span class="btn-indicator htmx-indicator">...</span>
-        </button>
-    </div>
-</form>
-<div id="submit-result"></div>"""
+        """Render the submission form with file browser and processing options."""
+        containers_url = html_module.escape(
+            "/api/dashboard?tab=platform&fragment=submit-containers"
+        )
+        return (
+            '<h3 class="section-heading">Submit Platform Request</h3>'
+            '<form id="submit-form" class="detail-panel">'
+            # -- Hidden inputs (set by file selection via OOB swap) --
+            '<input type="hidden" id="hidden-file-name" name="file_name" value="">'
+            '<input type="hidden" id="hidden-detected-type" name="detected_data_type" value="">'
+            # -- File Browser section --
+            '<h4 style="margin-bottom:8px; color:var(--ds-navy);">File Browser</h4>'
+            '<div class="form-row" style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:12px;">'
+            '<div class="form-group" style="flex:1; min-width:200px;">'
+            '<label class="filter-label">Container:'
+            f'<select name="container_name" class="filter-select"'
+            f' hx-get="/api/dashboard?tab=platform&amp;fragment=submit-files"'
+            ' hx-target="#file-selection-area"'
+            ' hx-swap="innerHTML"'
+            ' hx-include="[name=prefix_filter],[name=suffix_filter]">'
+            '<option value="">Loading...</option>'
+            '</select>'
+            '</label>'
+            f'<div hx-get="{containers_url}" hx-trigger="load"'
+            ' hx-target="previous select" hx-swap="innerHTML"></div>'
+            '</div>'
+            '<div class="form-group" style="flex:1; min-width:150px;">'
+            '<label class="filter-label">Prefix filter:'
+            '<input type="text" name="prefix_filter" class="filter-input"'
+            ' placeholder="e.g., flood/"></label>'
+            '</div>'
+            '<div class="form-group" style="flex:1; min-width:150px;">'
+            '<label class="filter-label">Suffix filter:'
+            '<input type="text" name="suffix_filter" class="filter-input"'
+            ' placeholder="e.g., .tif"></label>'
+            '</div>'
+            '</div>'
+            '<div id="file-selection-area">'
+            '<div class="empty-state"><div class="empty-icon">--</div>'
+            '<p>Select a container to browse files.</p></div>'
+            '</div>'
+            # -- DDH Identifiers --
+            '<h4 style="margin-top:16px; margin-bottom:8px; color:var(--ds-navy);">Identifiers</h4>'
+            '<div class="form-row" style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:12px;">'
+            '<div class="form-group" style="flex:1; min-width:180px;">'
+            '<label class="filter-label">Dataset ID:'
+            '<input type="text" name="dataset_id" class="filter-input"'
+            ' placeholder="my_dataset"></label>'
+            '</div>'
+            '<div class="form-group" style="flex:1; min-width:180px;">'
+            '<label class="filter-label">Resource ID:'
+            '<input type="text" name="resource_id" class="filter-input"'
+            ' placeholder="my_resource"></label>'
+            '</div>'
+            '</div>'
+            '<div class="form-row" style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:12px;">'
+            '<div class="form-group" style="flex:1; min-width:180px;">'
+            '<label class="filter-label">Version ID:'
+            '<input type="text" name="version_id" class="filter-input"'
+            ' placeholder="v1"></label>'
+            '</div>'
+            '<div class="form-group" style="flex:1; min-width:180px;">'
+            '<label class="filter-label">Previous Version ID:'
+            '<input type="text" name="previous_version_id" class="filter-input"'
+            ' placeholder="(optional)"></label>'
+            '</div>'
+            '</div>'
+            # -- Metadata --
+            '<h4 style="margin-top:16px; margin-bottom:8px; color:var(--ds-navy);">Metadata</h4>'
+            '<div class="form-row" style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:12px;">'
+            '<div class="form-group" style="flex:2; min-width:200px;">'
+            '<label class="filter-label">Title:'
+            '<input type="text" name="title" class="filter-input"'
+            ' placeholder="Human-readable title"></label>'
+            '</div>'
+            '<div class="form-group" style="flex:1; min-width:150px;">'
+            '<label class="filter-label">Access Level:'
+            '<select name="access_level" class="filter-select">'
+            '<option value="OUO" selected>OUO</option>'
+            '<option value="PUBLIC">PUBLIC</option>'
+            '<option value="RESTRICTED">RESTRICTED</option>'
+            '</select></label>'
+            '</div>'
+            '</div>'
+            '<div class="form-group" style="margin-bottom:12px;">'
+            '<label class="filter-label">Description:'
+            '<input type="text" name="description" class="filter-input"'
+            ' placeholder="Brief description of this dataset"></label>'
+            '</div>'
+            # -- Processing Options placeholder --
+            '<h4 style="margin-top:16px; margin-bottom:8px; color:var(--ds-navy);">Processing Options</h4>'
+            '<div id="submit-options">'
+            '<div class="empty-state"><div class="empty-icon">--</div>'
+            '<p>Select a file to see processing options.</p></div>'
+            '</div>'
+            # -- Action buttons --
+            '<div style="display:flex; gap:12px; margin-top:16px;">'
+            '<button type="button"'
+            ' hx-post="/api/dashboard?action=validate"'
+            ' hx-include="#submit-form"'
+            ' hx-target="#submit-result"'
+            ' hx-swap="innerHTML"'
+            ' hx-disabled-elt="this"'
+            ' class="btn btn-secondary">'
+            'Validate (Dry Run)'
+            '<span class="btn-indicator htmx-indicator">...</span>'
+            '</button>'
+            '<button type="button"'
+            ' hx-post="/api/dashboard?action=submit"'
+            ' hx-include="#submit-form"'
+            ' hx-target="#submit-result"'
+            ' hx-swap="innerHTML"'
+            ' hx-confirm="Submit this request? This will start processing."'
+            ' hx-disabled-elt="this"'
+            ' class="btn btn-primary">'
+            'Submit Request'
+            '<span class="btn-indicator htmx-indicator">...</span>'
+            '</button>'
+            '</div>'
+            '</form>'
+            '<div id="submit-result"></div>'
+        )
+
+    def _fragment_submit_containers(self, request: func.HttpRequest) -> str:
+        """Fragment: load bronze container names into the container select."""
+        ok, data = self.call_api(
+            request, "/api/storage/containers", params={"zone": "bronze"}
+        )
+        if not ok:
+            return '<option value="" disabled>Error loading containers</option>'
+
+        containers = []
+        if isinstance(data, dict):
+            zones = data.get("zones", {})
+            bronze = zones.get("bronze", {})
+            containers = bronze.get("containers", [])
+
+        if not containers:
+            return '<option value="" disabled>No bronze containers found</option>'
+
+        options = ['<option value="">Select container...</option>']
+        for name in containers:
+            safe_name = html_module.escape(str(name))
+            options.append(f'<option value="{safe_name}">{safe_name}</option>')
+        return "".join(options)
+
+    def _fragment_submit_files(self, request: func.HttpRequest) -> str:
+        """Fragment: list blobs in a container or handle file selection."""
+        select = request.params.get("select", "")
+        container = request.params.get("container_name", "")
+
+        # --- Mode B: file selection ---
+        if select:
+            safe_file = html_module.escape(str(select))
+            safe_container = html_module.escape(str(container))
+
+            # Detect data type from extension
+            ext = ""
+            dot_pos = select.rfind(".")
+            if dot_pos >= 0:
+                ext = select[dot_pos:].lower()
+            data_type = self.EXTENSION_TO_TYPE.get(ext, "")
+            safe_type = html_module.escape(data_type)
+            type_badge = self.data_type_badge(data_type) if data_type else ""
+
+            # Build OOB swaps for hidden inputs
+            oob_file = (
+                f'<input type="hidden" id="hidden-file-name" name="file_name"'
+                f' value="{safe_file}" hx-swap-oob="true">'
+            )
+            oob_type = (
+                f'<input type="hidden" id="hidden-detected-type" name="detected_data_type"'
+                f' value="{safe_type}" hx-swap-oob="true">'
+            )
+
+            # Build options-loading div URL
+            options_url = html_module.escape(
+                f"/api/dashboard?tab=platform&fragment=submit-options"
+                f"&data_type={urllib.parse.quote(data_type)}"
+            )
+
+            # Auto-load processing options div (OOB into #submit-options)
+            options_loader = (
+                f'<div id="submit-options" hx-swap-oob="true"'
+                f' hx-get="{options_url}" hx-trigger="load" hx-swap="innerHTML">'
+                '<div class="loading-state">'
+                '<div class="spinner"></div>'
+                '<p class="spinner-text">Loading options...</p>'
+                '</div>'
+                '</div>'
+            )
+
+            # Back-to-browser button URL
+            back_url = html_module.escape(
+                f"/api/dashboard?tab=platform&fragment=submit-files"
+                f"&container_name={urllib.parse.quote(str(container))}"
+            )
+
+            return (
+                f'<div class="detail-panel" style="padding:12px;">'
+                f'<strong>Selected:</strong> {safe_file} {type_badge}'
+                f'<div style="margin-top:4px; font-size:var(--ds-font-size-sm); '
+                f'color:var(--ds-gray);">Container: {safe_container}</div>'
+                f'<a hx-get="{back_url}" hx-target="#file-selection-area"'
+                f' hx-swap="innerHTML" class="btn btn-sm btn-secondary"'
+                f' style="margin-top:8px;">Back to browser</a>'
+                f'</div>'
+                f'{oob_file}{oob_type}{options_loader}'
+            )
+
+        # --- Mode A: list blobs ---
+        if not container:
+            return (
+                '<div class="empty-state"><div class="empty-icon">--</div>'
+                '<p>Select a container to browse files.</p></div>'
+                # OOB-clear hidden inputs
+                '<input type="hidden" id="hidden-file-name" name="file_name"'
+                ' value="" hx-swap-oob="true">'
+                '<input type="hidden" id="hidden-detected-type" name="detected_data_type"'
+                ' value="" hx-swap-oob="true">'
+            )
+
+        prefix = request.params.get("prefix_filter", "")
+        suffix = request.params.get("suffix_filter", "")
+
+        api_params = {"zone": "bronze", "limit": "500"}
+        if prefix:
+            api_params["prefix"] = prefix
+        if suffix:
+            api_params["suffix"] = suffix
+
+        safe_container_path = urllib.parse.quote(str(container), safe="")
+        ok, data = self.call_api(
+            request, f"/api/storage/{safe_container_path}/blobs", params=api_params
+        )
+
+        # OOB-clear hidden inputs when browsing
+        oob_clear = (
+            '<input type="hidden" id="hidden-file-name" name="file_name"'
+            ' value="" hx-swap-oob="true">'
+            '<input type="hidden" id="hidden-detected-type" name="detected_data_type"'
+            ' value="" hx-swap-oob="true">'
+        )
+
+        if not ok:
+            return (
+                self.error_block(
+                    f"Failed to list blobs: {data}",
+                    retry_url=(
+                        f"/api/dashboard?tab=platform&fragment=submit-files"
+                        f"&container_name={html_module.escape(str(container))}"
+                    ),
+                )
+                + oob_clear
+            )
+
+        blobs = []
+        if isinstance(data, dict):
+            blobs = data.get("blobs", [])
+
+        if not blobs:
+            return (
+                self.empty_block("No files found in this container with the current filters.")
+                + oob_clear
+            )
+
+        headers = ["Name", "Size (MB)", "Modified"]
+        rows = []
+        row_attrs = []
+        for blob in blobs:
+            name = blob.get("name", "")
+            size_mb = blob.get("size_mb", "")
+            modified = blob.get("modified", "")
+
+            rows.append([
+                html_module.escape(str(name)),
+                html_module.escape(str(size_mb)),
+                self.format_date(modified),
+            ])
+            select_url = (
+                f"/api/dashboard?tab=platform&fragment=submit-files"
+                f"&select={urllib.parse.quote(str(name))}"
+                f"&container_name={urllib.parse.quote(str(container))}"
+            )
+            row_attrs.append({
+                "class": "clickable",
+                "hx-get": select_url,
+                "hx-target": "#file-selection-area",
+                "hx-swap": "innerHTML",
+            })
+
+        table = self.data_table(headers, rows, table_id="file-browser-table", row_attrs=row_attrs)
+        return table + oob_clear
+
+    def _fragment_submit_options(self, request: func.HttpRequest) -> str:
+        """Fragment: return type-specific processing option fields."""
+        data_type = request.params.get("data_type", "").lower()
+
+        if data_type == "raster":
+            return (
+                '<div class="form-row" style="display:flex; gap:12px; flex-wrap:wrap;">'
+                '<div class="form-group" style="flex:1; min-width:180px;">'
+                '<label class="filter-label">CRS:'
+                '<input type="text" name="po_crs" class="filter-input"'
+                ' placeholder="e.g., EPSG:32618"></label>'
+                '</div>'
+                '<div class="form-group" style="flex:1; min-width:150px;">'
+                '<label class="filter-label">NoData Value:'
+                '<input type="text" name="po_nodata_value" class="filter-input"'
+                ' placeholder="e.g., -9999"></label>'
+                '</div>'
+                '<div class="form-group" style="flex:1; min-width:180px;">'
+                '<label class="filter-label">Band Names:'
+                '<input type="text" name="po_band_names" class="filter-input"'
+                ' placeholder="e.g., red,green,blue"></label>'
+                '</div>'
+                '</div>'
+            )
+
+        if data_type == "vector":
+            return (
+                '<div class="form-row" style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:8px;">'
+                '<div class="form-group" style="flex:1; min-width:180px;">'
+                '<label class="filter-label">Table Name:'
+                '<input type="text" name="po_table_name" class="filter-input"'
+                ' placeholder="Auto-generated if blank"></label>'
+                '</div>'
+                '<div class="form-group" style="flex:1; min-width:180px;">'
+                '<label class="filter-label">Layer Name:'
+                '<input type="text" name="po_layer_name" class="filter-input"'
+                ' placeholder="For .gpkg with multiple layers"></label>'
+                '</div>'
+                '</div>'
+                '<div class="form-row" style="display:flex; gap:12px; flex-wrap:wrap;">'
+                '<div class="form-group" style="flex:1; min-width:150px;">'
+                '<label class="filter-label">Lat Column:'
+                '<input type="text" name="po_lat_column" class="filter-input"'
+                ' placeholder="e.g., lat, latitude, y"></label>'
+                '</div>'
+                '<div class="form-group" style="flex:1; min-width:150px;">'
+                '<label class="filter-label">Lon Column:'
+                '<input type="text" name="po_lon_column" class="filter-input"'
+                ' placeholder="e.g., lon, longitude, x"></label>'
+                '</div>'
+                '<div class="form-group" style="flex:1; min-width:150px;">'
+                '<label class="filter-label">WKT Column:'
+                '<input type="text" name="po_wkt_column" class="filter-input"'
+                ' placeholder="e.g., geometry, geom"></label>'
+                '</div>'
+                '</div>'
+            )
+
+        if data_type == "zarr":
+            return (
+                '<div class="form-group">'
+                '<label class="filter-label">Source URL:'
+                '<input type="text" name="source_url" class="filter-input"'
+                ' placeholder="https://... or abfs://..."></label>'
+                '</div>'
+            )
+
+        return (
+            '<div class="empty-state"><div class="empty-icon">--</div>'
+            '<p>Select a file to see processing options.</p></div>'
+        )
 
     # -----------------------------------------------------------------------
     # CATALOG section

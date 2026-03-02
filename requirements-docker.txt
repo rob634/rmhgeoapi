@@ -72,6 +72,7 @@ aiohttp>=3.13.3                       # CVE-2025-69223 + 5 others fixed in 3.13.
 # === VirtualiZarr pipeline (NetCDF → virtual Zarr references) ===
 virtualizarr>=1.1.0,<2.0.0           # 2.0+ requires xarray>=2025.3; stay on 1.x for now
 kerchunk>=0.2.8                       # Requires zarr 3.x
+scipy>=1.12.0                        # Required by kerchunk for NetCDF3 chunking
 
 # === HTTP / Image ===
 httpx>=0.27.0

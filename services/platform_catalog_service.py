@@ -571,6 +571,8 @@ class PlatformCatalogService:
             response = self._build_vector_response(asset_dict, release_dict)
         elif data_type == 'raster':
             response = self._build_raster_response(asset_dict, release_dict)
+        elif data_type == 'zarr':
+            response = self._build_zarr_response(asset_dict, release_dict)
         else:
             logger.warning(f"   Unknown data_type: {data_type}")
             response = self._build_generic_response(asset_dict, release_dict)
@@ -784,6 +786,97 @@ class PlatformCatalogService:
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
+    def _build_zarr_response(self, asset: Dict[str, Any], release: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Build catalog response for zarr data type with xarray TiTiler URLs.
+
+        Serves both native Zarr (ingest_zarr pipeline, output_mode='zarr_store')
+        and VirtualiZarr output (virtualzarr pipeline, kerchunk reference in
+        silver-netcdf container).
+
+        Args:
+            asset: Asset dict from Asset.to_dict()
+            release: Release dict from AssetRelease.to_dict()
+
+        Returns:
+            Unified response format with zarr-specific fields including
+            xarray TiTiler URLs with {variable} template params.
+        """
+        from datetime import datetime, timezone
+
+        blob_path = release.get('blob_path')
+        output_mode = release.get('output_mode', '')
+        stac_collection_id = release.get('stac_collection_id')
+        stac_item_id = release.get('stac_item_id')
+
+        # Build xarray TiTiler URLs
+        xarray_urls = {}
+        if blob_path:
+            storage_account = self._config.storage.silver.account_name
+
+            # Determine container from output_mode
+            if output_mode == 'zarr_store':
+                container = self._config.storage.silver.zarr
+            else:
+                # VirtualiZarr output — kerchunk reference in silver-netcdf
+                container = self._config.storage.silver.netcdf
+
+            zarr_url = f"https://{storage_account}.blob.core.windows.net/{container}/{blob_path}"
+            xarray_urls = self._config.generate_xarray_tile_urls(zarr_url)
+
+        # Extract zarr metadata from cached STAC item if available
+        zarr_metadata = {}
+        stac_json = release.get('stac_item_json')
+        if stac_json and isinstance(stac_json, dict):
+            props = stac_json.get('properties', {})
+            zarr_metadata = {
+                "variables": props.get('zarr:variables', []),
+                "dimensions": props.get('zarr:dimensions', {}),
+                "open_kwargs": props.get('xarray:open_kwargs', {}),
+            }
+
+        return {
+            "found": True,
+            "asset_id": asset.get('asset_id'),
+            "data_type": "zarr",
+
+            "status": {
+                "processing": release.get('processing_status', 'pending'),
+                "approval": release.get('approval_state', 'pending_review'),
+                "clearance": release.get('clearance_state', 'uncleared'),
+            },
+
+            "xarray_urls": xarray_urls,
+
+            "stac": {
+                "collection_id": stac_collection_id,
+                "item_id": stac_item_id,
+            },
+
+            "zarr_metadata": zarr_metadata,
+
+            "metadata": {
+                "bbox": release.get('bbox'),
+                "created_at": asset.get('created_at'),
+            },
+
+            "ddh_refs": {
+                "dataset_id": asset.get('dataset_id'),
+                "resource_id": asset.get('resource_id'),
+                "version_id": release.get('version_id'),
+            },
+
+            "lineage": {
+                "asset_id": asset.get('asset_id'),
+                "version_id": release.get('version_id'),
+                "version_ordinal": release.get('version_ordinal'),
+                "is_latest": release.get('is_latest'),
+                "is_served": release.get('is_served'),
+            },
+
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
     def get_unified_urls(self, asset_id: str) -> Dict[str, Any]:
         """
         Get service URLs by asset_id.
@@ -830,6 +923,8 @@ class PlatformCatalogService:
             return self._build_vector_response(asset_dict, release_dict)
         elif asset.data_type == 'raster':
             return self._build_raster_response(asset_dict, release_dict)
+        elif asset.data_type == 'zarr':
+            return self._build_zarr_response(asset_dict, release_dict)
         else:
             return self._build_generic_response(asset_dict, release_dict)
 

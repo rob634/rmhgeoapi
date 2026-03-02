@@ -637,3 +637,91 @@ Run the Reflexion Agent on the generated code to find fault-level vulnerabilitie
 ### Adversarial Review → Greenfield
 
 If the Adversarial Review finds that an existing subsystem needs to be replaced rather than patched, use Greenfield to design the replacement. Feed the Adversarial Review's findings into S as constraints and anti-patterns to avoid.
+
+---
+
+## Known Limitations & Lessons Learned
+
+**Added**: 02 MAR 2026 — Based on analysis of GREENFIELD Run 19 (Platform Dashboard)
+
+### 1. Builder Agent Output Budget Collapse
+
+**Problem**: Agent B receives the entire resolved spec (~1100 lines from M) and must produce all code in a single session. For large subsystems, B runs out of output capacity before completing all components. The result is a **quality gradient** — early components are well-implemented while later components degrade to stubs.
+
+**Evidence (Run 19)**: The Platform panel has 6 sub-tabs. The Builder produced:
+- Requests (1st built): Good — filters, table, detail fragment (~150 lines)
+- Approvals (2nd): Good — stat strip, action buttons, detail (~120 lines)
+- Submit (3rd): **Stub** — generic form, missing all type-specific fields (~70 lines)
+- Catalog (4th): Decent — search input, results table (~80 lines)
+- Lineage (5th): Decent — search input, chain cards (~60 lines)
+- Failures (6th): Basic — time filter + table (~40 lines)
+
+The Submit form — the most complex "write" interface in the dashboard — was spec'd at ~200+ lines of detailed form design but received only ~70 lines of generic dropdown + text inputs. The Builder allocated its budget to "read" interfaces and short-changed the "write" interface.
+
+**Total output**: 4,499 lines across 9 files in one pass (~114K tokens, ~11 min). This is near the practical ceiling for a single agent session.
+
+### 2. Validator Blind Spot on Feature Completeness
+
+**Problem**: Agent V reverse-engineers from code only (by design — no spec). This means V treats whatever B built as the intended scope. If B produced a stub, V validates the stub as correct. V catches **bugs in what exists** (wrong endpoint paths, missing fragment handlers, XSS vectors) but cannot catch **features that were never built**.
+
+**Evidence (Run 19)**: V found 2 CRITICAL bugs (health paths, request-detail wiring) and 3 HIGH issues (URL injection, CSS XSS, broken filters) — all real bugs in existing code. But V did not flag the Submit form as incomplete because V had no spec to compare against.
+
+The Step 7 Spec Diff (Claude comparing V's output against S's spec) should catch this, but in Run 19 the diff focused on architectural compliance (31/31 requirements met) rather than feature-level completeness of individual forms.
+
+### 3. Scope Ceiling
+
+**Observed safe zone**: ~2,000-3,000 lines of output code across 4-6 files.
+
+**Run 19 exceeded this**: 4,499 lines across 9 files — and quality degraded on the most complex component.
+
+**Guideline**: If M's resolved spec implies >3,000 lines of implementation code, the Builder will likely produce stubs for later components.
+
+### Recommended Mitigations
+
+#### Option A: Narrower Scope Per Run
+
+Split large subsystems into multiple GREENFIELD runs, each producing one panel/module:
+- Run A: Shell + BasePanel + Registry + `__init__.py` (infrastructure)
+- Run B: Platform panel (6 sub-tabs — still large, could split further)
+- Run C: Jobs panel
+- Run D: Data panel
+- Run E: System panel
+
+**Pro**: Each B agent has a focused, completable scope.
+**Con**: More runs = more tokens total, and cross-panel consistency must be enforced via shared Design Constraints.
+
+#### Option B: Multi-Pass Builder
+
+Replace single Agent B with a B₁ → B₂ → ... sequence:
+- **B₁**: Write infrastructure (shell, base, registry, handler)
+- **B₂**: Write Panel 1 (receives B₁'s code as context + relevant spec section)
+- **B₃**: Write Panel 2 (receives B₁ + B₂ code as context)
+- etc.
+
+Each B agent receives only its section of the resolved spec plus the shared infrastructure code. This keeps each agent's scope within the safe zone.
+
+**Pro**: Natural dependency ordering, each agent sees prior code for consistency.
+**Con**: Sequential execution (no parallelism), later agents have growing context.
+
+#### Option C: Builder + Completeness Auditor
+
+Keep single Agent B but add a **B-Audit** agent after B:
+- B-Audit receives B's code AND M's resolved spec
+- B-Audit produces a checklist: for each spec requirement, is it fully implemented, partially implemented, or missing?
+- Any partially/missing items get dispatched to a B-Fix agent with targeted scope
+
+**Pro**: Minimal pipeline change, catches exactly this class of problem.
+**Con**: Adds 1-2 agents and their token cost.
+
+#### Option D: Spec Decomposition in M
+
+Have M produce not just a resolved spec but a **build plan** that explicitly sequences the work:
+- "Build Phase 1: Shell infrastructure (files: shell.py, base_panel.py, registry.py, __init__.py)"
+- "Build Phase 2: Platform panel — Submit and Requests sections (file: platform.py, focus on write interfaces first)"
+- "Build Phase 3: Platform panel — Approvals, Catalog, Lineage, Failures"
+- etc.
+
+B then follows the build plan, prioritizing complex "write" interfaces before simpler "read" interfaces.
+
+**Pro**: Addresses the root cause (complex components built last get short-changed).
+**Con**: Requires M to estimate implementation complexity, which design agents aren't calibrated for.

@@ -25,6 +25,7 @@ import azure.functions as func
 import html as html_module
 import json
 import logging
+import re
 import urllib.request
 import urllib.parse
 import urllib.error
@@ -404,7 +405,9 @@ class BasePanel(ABC):
         for label, value in counts.items():
             safe_label = html_module.escape(str(label))
             safe_value = html_module.escape(str(value))
-            css_class = f"stat-{html_module.escape(label.lower().replace(' ', '-'))}"
+            # Sanitize for CSS class name: strip anything not alphanumeric or hyphen
+            safe_class_suffix = re.sub(r'[^a-z0-9-]', '', label.lower().replace(' ', '-'))
+            css_class = f"stat-{safe_class_suffix}"
             cards.append(
                 f'<div class="stat-card {css_class}">'
                 f'<div class="stat-value">{safe_value}</div>'

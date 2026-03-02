@@ -31,11 +31,11 @@ Exports:
 import html as html_module
 import json
 import logging
-from urllib.parse import parse_qs, urlencode as urllib_urlencode
-import urllib.parse
+from urllib.parse import parse_qs
 
 import azure.functions as func
 
+from web_dashboard.base_panel import BasePanel
 from web_dashboard.registry import PanelRegistry
 from web_dashboard.shell import DashboardShell
 
@@ -120,15 +120,12 @@ def _get_panels() -> list:
 
 
 def _get_panel(tab: str):
-    """Get a panel instance by tab name, falling back to default."""
-    panel_class = PanelRegistry.get(tab)
-    if panel_class:
-        return panel_class()
+    """Get a cached panel instance by tab name, falling back to default."""
+    panel = PanelRegistry.get_instance(tab)
+    if panel:
+        return panel
     # Fall back to default tab
-    panel_class = PanelRegistry.get(DEFAULT_TAB)
-    if panel_class:
-        return panel_class()
-    return None
+    return PanelRegistry.get_instance(DEFAULT_TAB)
 
 
 # ---------------------------------------------------------------------------
@@ -356,10 +353,9 @@ def _handle_action(req: func.HttpRequest, action: str) -> func.HttpResponse:
         if target:
             query_params["target"] = target
         # Maintenance endpoint uses query params, not body
-        api_path_with_params = api_path + "?" + urllib.parse.urlencode(query_params)
-        result = _call_api_direct(req, api_path_with_params, "POST")
+        result = BasePanel.call_api_static(req, api_path, params=query_params, method="POST")
     else:
-        result = _call_api_direct(req, api_path, "POST", body=body)
+        result = BasePanel.call_api_static(req, api_path, method="POST", body=body)
 
     ok, data = result
 
@@ -397,73 +393,6 @@ def _handle_action(req: func.HttpRequest, action: str) -> func.HttpResponse:
             mimetype="text/html",
             status_code=200,
         )
-
-
-def _call_api_direct(
-    req: func.HttpRequest,
-    path: str,
-    method: str = "GET",
-    body: dict = None,
-    timeout: int = 15,
-) -> tuple:
-    """
-    Direct API call helper for the action proxy.
-
-    Uses urllib.request (same as BasePanel.call_api but standalone).
-    """
-    import urllib.request
-    import urllib.error
-    import urllib.parse
-
-    host = req.headers.get("Host", "localhost:7071")
-    if "azurewebsites.net" in host:
-        scheme = "https"
-    elif host.startswith("localhost") or host.startswith("127.0.0.1"):
-        scheme = "http"
-    else:
-        forwarded = req.headers.get("X-Forwarded-Proto", "").lower()
-        scheme = "https" if forwarded == "https" else "http"
-    base_url = f"{scheme}://{host}"
-    url = f"{base_url}{path}"
-
-    try:
-        if method.upper() == "POST" and body:
-            data = json.dumps(body).encode("utf-8")
-            api_req = urllib.request.Request(
-                url,
-                data=data,
-                method="POST",
-                headers={"Content-Type": "application/json"},
-            )
-        elif method.upper() == "POST":
-            api_req = urllib.request.Request(url, data=b"", method="POST")
-        else:
-            api_req = urllib.request.Request(url, method="GET")
-
-        with urllib.request.urlopen(api_req, timeout=timeout) as resp:
-            resp_body = resp.read().decode("utf-8")
-            try:
-                return (True, json.loads(resp_body))
-            except json.JSONDecodeError:
-                return (True, resp_body)
-
-    except urllib.error.HTTPError as e:
-        error_body = ""
-        try:
-            error_body = e.read().decode("utf-8")
-        except Exception:
-            pass
-        msg = f"HTTP {e.code}: {error_body[:200]}" if error_body else f"HTTP {e.code}"
-        logger.warning(f"Action API call failed: {method} {path} -> {msg}")
-        return (False, msg)
-    except urllib.error.URLError as e:
-        msg = f"Connection error: {e.reason}"
-        logger.warning(f"Action API call failed: {method} {path} -> {msg}")
-        return (False, msg)
-    except Exception as e:
-        msg = f"Unexpected error: {e}"
-        logger.exception(f"Action API call failed: {method} {path}")
-        return (False, msg)
 
 
 # Public API

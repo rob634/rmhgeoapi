@@ -183,7 +183,7 @@ class BasePanel(ABC):
         """
         Format an ISO datetime string to military format.
 
-        Returns: 'DD MMM YYYY HH:MM ET' for datetime, 'DD MMM YYYY' for date-only.
+        Returns: 'DD MMM YYYY HH:MM UTC' for datetime, 'DD MMM YYYY' for date-only.
         """
         if not iso_str:
             return fallback
@@ -193,7 +193,7 @@ class BasePanel(ABC):
             if "T" in raw:
                 # Has time component
                 dt = datetime.fromisoformat(raw)
-                return dt.strftime("%d %b %Y %H:%M ET").upper()
+                return dt.strftime("%d %b %Y %H:%M UTC").upper()
             else:
                 # Date only
                 dt = datetime.fromisoformat(raw)
@@ -263,9 +263,7 @@ class BasePanel(ABC):
         """
         Call an internal API endpoint and return (success, data_or_error).
 
-        Uses urllib.request (stdlib) with configurable timeout.
-        Returns (True, parsed_json) on success, (False, error_message) on failure.
-        Never raises -- all exceptions are caught and returned as error messages.
+        Thin wrapper around call_api_static for use from panel instances.
 
         Args:
             request: The incoming HTTP request (used to derive base URL).
@@ -278,7 +276,31 @@ class BasePanel(ABC):
         Returns:
             Tuple of (bool, Any): (True, response_data) or (False, error_string).
         """
-        base_url = self._get_base_url(request)
+        return BasePanel.call_api_static(request, path, params, method, body, timeout)
+
+    @staticmethod
+    def call_api_static(
+        request: func.HttpRequest,
+        path: str,
+        params: Optional[dict] = None,
+        method: str = "GET",
+        body: Optional[dict] = None,
+        timeout: int = 10,
+    ) -> tuple:
+        """
+        Static version of call_api for use outside panel instances.
+
+        Same semantics as call_api() but callable without a panel instance.
+        """
+        host = request.headers.get("Host", "localhost:7071")
+        if "azurewebsites.net" in host:
+            scheme = "https"
+        elif host.startswith("localhost") or host.startswith("127.0.0.1"):
+            scheme = "http"
+        else:
+            forwarded = request.headers.get("X-Forwarded-Proto", "").lower()
+            scheme = "https" if forwarded == "https" else "http"
+        base_url = f"{scheme}://{host}"
         url = f"{base_url}{path}"
 
         if params:
@@ -304,7 +326,6 @@ class BasePanel(ABC):
                 try:
                     return (True, json.loads(resp_body))
                 except json.JSONDecodeError:
-                    # Non-JSON response (e.g., plain text health check)
                     return (True, resp_body)
 
         except urllib.error.HTTPError as e:
@@ -314,15 +335,15 @@ class BasePanel(ABC):
             except Exception:
                 pass
             msg = f"HTTP {e.code}: {error_body[:200]}" if error_body else f"HTTP {e.code}"
-            logger.warning(f"call_api failed: {method} {path} -> {msg}")
+            logger.warning(f"call_api_static failed: {method} {path} -> {msg}")
             return (False, msg)
         except urllib.error.URLError as e:
             msg = f"Connection error: {e.reason}"
-            logger.warning(f"call_api failed: {method} {path} -> {msg}")
+            logger.warning(f"call_api_static failed: {method} {path} -> {msg}")
             return (False, msg)
         except Exception as e:
             msg = f"Unexpected error: {e}"
-            logger.exception(f"call_api failed: {method} {path}")
+            logger.exception(f"call_api_static failed: {method} {path}")
             return (False, msg)
 
     def data_table(

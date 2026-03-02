@@ -164,9 +164,9 @@ class PlatformPanel(BasePanel):
                 self.format_age(created),
             ])
             row_attrs.append({
-                "id": f"row-{html_module.escape(str(req_id)[:8])}",
+                "id": f"row-{str(req_id)[:8]}",
                 "class": "clickable",
-                "hx-get": f"/api/dashboard?tab=platform&section=requests&fragment=request-detail&request_id={html_module.escape(str(req_id))}",
+                "hx-get": f"/api/dashboard?tab=platform&section=requests&fragment=request-detail&request_id={str(req_id)}",
                 "hx-target": "#request-detail-panel",
                 "hx-swap": "innerHTML",
             })
@@ -347,7 +347,7 @@ class PlatformPanel(BasePanel):
                 actions,
             ])
             row_attrs.append({
-                "id": f"row-{html_module.escape(str(release_id)[:12])}",
+                "id": f"row-{str(release_id)[:12]}",
             })
 
         table = self.data_table(

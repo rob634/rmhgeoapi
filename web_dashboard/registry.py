@@ -45,6 +45,7 @@ class PanelRegistry:
     """
 
     _panels: Dict[str, Type] = {}
+    _instances: Dict[str, object] = {}
 
     @classmethod
     def register(cls, panel_class: Type) -> Type:
@@ -93,6 +94,26 @@ class PanelRegistry:
         return cls._panels.get(name)
 
     @classmethod
+    def get_instance(cls, name: str) -> Optional[object]:
+        """
+        Get a cached panel instance by tab name, creating on first access.
+
+        Args:
+            name: Tab name (e.g., 'platform', 'jobs')
+
+        Returns:
+            Panel instance or None if not registered
+        """
+        if name in cls._instances:
+            return cls._instances[name]
+        panel_class = cls._panels.get(name)
+        if panel_class is None:
+            return None
+        instance = panel_class()
+        cls._instances[name] = instance
+        return instance
+
+    @classmethod
     def list_panels(cls) -> List[str]:
         """
         List all registered panel tab names in registration order.
@@ -121,8 +142,8 @@ class PanelRegistry:
             List of (tab_name, panel_instance) tuples sorted by tab_order
         """
         panels = []
-        for name, panel_class in cls._panels.items():
-            instance = panel_class()
+        for name in cls._panels:
+            instance = cls.get_instance(name)
             order = getattr(instance, 'tab_order', 99)
             panels.append((order, name, instance))
         panels.sort(key=lambda x: x[0])

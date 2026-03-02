@@ -798,6 +798,40 @@ class AppConfig(BaseModel):
         """
         return f"{self.etl_app_base_url.rstrip('/')}/api/interface/vector-tiles?collection={table_name}"
 
+    # ========================================================================
+    # Xarray / Zarr Tile URL Generation (02 MAR 2026)
+    # ========================================================================
+    # TiTiler-xarray serves raster tiles from Zarr stores and kerchunk refs.
+    # URLs use {variable} as a template parameter — consumers call /variables
+    # first to discover available variables, then substitute into other URLs.
+    # ========================================================================
+
+    def generate_xarray_tile_urls(self, zarr_url: str) -> dict:
+        """
+        Generate TiTiler xarray endpoint URLs for a Zarr store.
+
+        URLs use {variable} as a template parameter — consumers call /variables
+        first to discover available variables, then substitute into other URLs.
+
+        Args:
+            zarr_url: HTTPS URL to the Zarr store (or kerchunk reference JSON)
+
+        Returns:
+            Dict of endpoint URLs with {variable} placeholders
+        """
+        from urllib.parse import quote_plus
+        encoded = quote_plus(zarr_url)
+        base = self.titiler_base_url.rstrip('/')
+
+        return {
+            "variables":  f"{base}/xarray/variables?url={encoded}",
+            "tiles":      f"{base}/xarray/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}@1x.png?url={encoded}&variable={{variable}}&decode_times=false",
+            "tilejson":   f"{base}/xarray/tilejson.json?url={encoded}&variable={{variable}}&decode_times=false",
+            "preview":    f"{base}/xarray/preview.png?url={encoded}&variable={{variable}}&decode_times=false",
+            "info":       f"{base}/xarray/info?url={encoded}&variable={{variable}}&decode_times=false",
+            "point":      f"{base}/xarray/point/{{lon}},{{lat}}?url={encoded}&variable={{variable}}&decode_times=false",
+        }
+
     def generate_titiler_urls(self, collection_id: str, item_id: str) -> dict:
         """
         Generate TiTiler-PgSTAC URLs for raster visualization.

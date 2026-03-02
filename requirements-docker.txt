@@ -63,15 +63,15 @@ asyncpg>=0.29.0
 
 # === xarray ecosystem (Zarr direct access) ===
 xarray>=2024.10.0
-zarr>=2.18.0,<3                       # Stay on zarr 2.x for stability
+zarr>=3.1.0                           # zarr 3.x (reads v2 format data; >=3.1 avoids yanked releases)
+scipy>=1.12.0                         # NetCDF3 engine for xarray (validate handler)
 fsspec>=2024.2.0
 adlfs>=2024.2.0
 aiohttp>=3.13.3                       # CVE-2025-69223 + 5 others fixed in 3.13.3
 
 # === VirtualiZarr pipeline (NetCDF → virtual Zarr references) ===
-h5py>=3.12.0                          # numpy 2.x compatible
-virtualizarr>=1.1.0,<2.0.0           # zarr 2.x compatible range
-kerchunk==0.2.8                       # Last version supporting zarr 2.x
+virtualizarr>=1.1.0,<2.0.0           # 2.0+ requires xarray>=2025.3; stay on 1.x for now
+kerchunk>=0.2.8                       # Requires zarr 3.x
 
 # === HTTP / Image ===
 httpx>=0.27.0

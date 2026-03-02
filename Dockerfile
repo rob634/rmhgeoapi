@@ -54,8 +54,12 @@ RUN python3 -m pip install --no-cache-dir --break-system-packages --ignore-insta
 # The base image ships GDAL compiled against numpy 1.x ABI. After pip
 # installs numpy 2.x above, we must recompile the GDAL Python bindings
 # to match the new ABI. Uses the same GDAL C library already in the image.
-RUN python3 -m pip install --no-cache-dir --break-system-packages \
-    --force-reinstall --no-deps GDAL==$(gdal-config --version)
+# Requires g++ (not in runtime image), installed and removed in same layer.
+RUN apt-get update && apt-get install -y --no-install-recommends g++ python3-dev \
+    && python3 -m pip install --no-cache-dir --break-system-packages \
+       --force-reinstall --no-deps GDAL==$(gdal-config --version) \
+    && apt-get purge -y g++ python3-dev && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy application code
 COPY --chown=worker:worker . .

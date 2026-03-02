@@ -6,7 +6,7 @@
 # PURPOSE: Scan, validate, combine, and register virtual Zarr references
 # LAST_REVIEWED: 27 FEB 2026
 # EXPORTS: virtualzarr_scan, virtualzarr_copy, virtualzarr_validate, virtualzarr_combine, virtualzarr_register
-# DEPENDENCIES: fsspec, adlfs, h5py, virtualizarr, xarray (all lazy-imported)
+# DEPENDENCIES: fsspec, adlfs, scipy, virtualizarr, xarray (all lazy-imported)
 # ============================================================================
 """
 VirtualZarr Task Handlers - Scan, Copy, Validate, Combine, Register.
@@ -387,11 +387,11 @@ def virtualzarr_validate(
     context: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
-    Validate a single NetCDF file's HDF5 structure.
+    Validate a single NetCDF file's structure.
 
-    Opens the file with h5py via fsspec (header-only), extracts variable
-    metadata (shape, dtype, chunks, compression), and generates warnings
-    for problematic chunking configurations.
+    Opens the file with xarray via fsspec, extracts variable metadata
+    (shape, dtype, chunks, encoding), and generates warnings for
+    problematic chunking configurations. Supports both NetCDF3 and NetCDF4.
 
     Args:
         params: Task parameters
@@ -410,75 +410,85 @@ def virtualzarr_validate(
     logger.info(f"virtualzarr_validate: nc_url={nc_url}, fail_on_warnings={fail_on_warnings}")
 
     try:
-        import h5py
+        import xarray as xr
+        from infrastructure import BlobRepository
 
         LARGE_VAR_THRESHOLD = 100 * 1024 * 1024  # 100 MB
         LARGE_CHUNK_THRESHOLD = 100 * 1024 * 1024  # 100 MB
         LARGE_COORD_THRESHOLD = 50 * 1024 * 1024  # 50 MB
 
-        # Open HDF5 file via fsspec (header-only read)
-        fs = _get_blob_fs()
+        # Open via xarray with fsspec storage_options (handles NetCDF3 + NetCDF4)
+        repo = BlobRepository.for_zone("silver")
+        storage_options = {
+            "account_name": repo.account_name,
+            "credential": repo.credential,
+        }
         blob_path = nc_url.replace("abfs://", "")
 
         variables = {}
         dimensions = {}
         warnings_list = []
 
-        with fs.open(blob_path, "rb") as f:
-            with h5py.File(f, "r") as h5f:
-                # Extract dimensions from root attributes or dimension scales
-                for name, dataset in h5f.items():
-                    if not isinstance(dataset, h5py.Dataset):
-                        continue
+        with xr.open_dataset(
+            f"az://{blob_path}",
+            engine="scipy",
+            storage_options=storage_options,
+        ) as ds:
+            # Record dimensions
+            for dim_name, dim_size in ds.dims.items():
+                dimensions[dim_name] = dim_size
 
-                    shape = dataset.shape
-                    dtype = str(dataset.dtype)
-                    chunks = dataset.chunks  # None if contiguous
-                    compression = dataset.compression
+            # Extract variable metadata
+            for name, var in ds.data_vars.items():
+                shape = list(var.shape)
+                dtype = str(var.dtype)
+                encoding = var.encoding
 
-                    var_size_bytes = dataset.dtype.itemsize
-                    for dim_len in shape:
-                        var_size_bytes *= dim_len
+                # Chunksizes from encoding (NetCDF4 HDF5 chunking)
+                chunks = encoding.get("chunksizes")
+                if chunks:
+                    chunks = list(chunks)
+                compression = encoding.get("zlib") or encoding.get("complevel")
 
-                    variables[name] = {
-                        "shape": list(shape),
-                        "dtype": dtype,
-                        "chunks": list(chunks) if chunks else None,
-                        "compression": compression,
-                        "size_bytes": var_size_bytes,
-                    }
+                var_size_bytes = var.dtype.itemsize
+                for dim_len in shape:
+                    var_size_bytes *= dim_len
 
-                    # Record dimensions (1D variables are often dimension coords)
-                    if len(shape) == 1:
-                        dimensions[name] = shape[0]
+                variables[name] = {
+                    "shape": shape,
+                    "dtype": dtype,
+                    "chunks": chunks,
+                    "compression": compression,
+                    "size_bytes": var_size_bytes,
+                }
 
-                    # Warning: No HDF5 chunking on large variables
-                    if chunks is None and var_size_bytes > LARGE_VAR_THRESHOLD:
+                # Warning: No chunking on large variables
+                if chunks is None and var_size_bytes > LARGE_VAR_THRESHOLD:
+                    warnings_list.append(
+                        f"Variable '{name}' is contiguous (no chunking) "
+                        f"and {var_size_bytes / (1024*1024):.0f} MB - "
+                        f"will require full read for any access"
+                    )
+
+                # Warning: Individual chunk size too large
+                if chunks is not None:
+                    chunk_size_bytes = var.dtype.itemsize
+                    for c in chunks:
+                        chunk_size_bytes *= c
+                    if chunk_size_bytes > LARGE_CHUNK_THRESHOLD:
                         warnings_list.append(
-                            f"Variable '{name}' is contiguous (no HDF5 chunking) "
-                            f"and {var_size_bytes / (1024*1024):.0f} MB - "
-                            f"will require full read for any access"
+                            f"Variable '{name}' has chunk size "
+                            f"{chunk_size_bytes / (1024*1024):.0f} MB - "
+                            f"exceeds 100 MB threshold"
                         )
 
-                    # Warning: Individual chunk size too large
-                    if chunks is not None:
-                        chunk_size_bytes = dataset.dtype.itemsize
-                        for c in chunks:
-                            chunk_size_bytes *= c
-                        if chunk_size_bytes > LARGE_CHUNK_THRESHOLD:
-                            warnings_list.append(
-                                f"Variable '{name}' has chunk size "
-                                f"{chunk_size_bytes / (1024*1024):.0f} MB - "
-                                f"exceeds 100 MB threshold"
-                            )
-
-                    # Warning: 2D coordinate variable too large
-                    if len(shape) == 2 and var_size_bytes > LARGE_COORD_THRESHOLD:
-                        warnings_list.append(
-                            f"Variable '{name}' is a 2D coordinate "
-                            f"({var_size_bytes / (1024*1024):.0f} MB) - "
-                            f"exceeds 50 MB threshold for coordinate variables"
-                        )
+                # Warning: 2D coordinate variable too large
+                if len(shape) == 2 and var_size_bytes > LARGE_COORD_THRESHOLD:
+                    warnings_list.append(
+                        f"Variable '{name}' is a 2D coordinate "
+                        f"({var_size_bytes / (1024*1024):.0f} MB) - "
+                        f"exceeds 50 MB threshold for coordinate variables"
+                    )
 
         status = "warning" if warnings_list else "success"
 
@@ -608,11 +618,20 @@ def virtualzarr_combine(
         first_path = first_url.replace("abfs://", "")
         storage_options = {"account_name": account_name, "credential": credential}
 
-        first_vds = open_virtual_dataset(
-            first_path,
-            indexes={},
-            reader_options={"storage_options": storage_options},
-        )
+        try:
+            first_vds = open_virtual_dataset(
+                first_path,
+                indexes={},
+                reader_options={"storage_options": storage_options},
+            )
+        except Exception as e:
+            logger.info(f"virtualzarr_combine: Auto-detect failed for {first_path}, retrying as netcdf3: {e}")
+            first_vds = open_virtual_dataset(
+                first_path,
+                indexes={},
+                filetype="netcdf3",
+                reader_options={"storage_options": storage_options},
+            )
         reference_vars = set(first_vds.data_vars)
         reference_dims = {}
         for dim_name, dim_size in first_vds.dims.items():
@@ -623,11 +642,20 @@ def virtualzarr_combine(
         virtual_datasets = [first_vds]
         for nc_url in nc_files[1:]:
             nc_path = nc_url.replace("abfs://", "")
-            vds = open_virtual_dataset(
-                nc_path,
-                indexes={},
-                reader_options={"storage_options": storage_options},
-            )
+            try:
+                vds = open_virtual_dataset(
+                    nc_path,
+                    indexes={},
+                    reader_options={"storage_options": storage_options},
+                )
+            except Exception as e:
+                logger.info(f"virtualzarr_combine: Auto-detect failed for {nc_path}, retrying as netcdf3: {e}")
+                vds = open_virtual_dataset(
+                    nc_path,
+                    indexes={},
+                    filetype="netcdf3",
+                    reader_options={"storage_options": storage_options},
+                )
 
             # Verify variables match
             current_vars = set(vds.data_vars)
@@ -668,8 +696,26 @@ def virtualzarr_combine(
 
             virtual_datasets.append(vds)
 
-        # Concatenate along concat_dim
-        combined = xr.concat(virtual_datasets, dim=concat_dim)
+        # Concatenate along concat_dim (or skip for single file)
+        if len(virtual_datasets) == 1:
+            logger.info("virtualzarr_combine: Single file — skipping concat")
+            combined = virtual_datasets[0]
+        elif concat_dim not in virtual_datasets[0].dims:
+            elapsed = time.time() - start
+            logger.error(
+                f"virtualzarr_combine: concat_dim '{concat_dim}' not found in dataset. "
+                f"Available dims: {list(virtual_datasets[0].dims)} ({elapsed:.1f}s)"
+            )
+            return {
+                "success": False,
+                "error": (
+                    f"Concat dimension '{concat_dim}' not found in dataset. "
+                    f"Available: {list(virtual_datasets[0].dims)}"
+                ),
+                "error_type": "ValueError",
+            }
+        else:
+            combined = xr.concat(virtual_datasets, dim=concat_dim)
 
         # Export to kerchunk reference JSON via temp file + BlobRepository upload
         import tempfile

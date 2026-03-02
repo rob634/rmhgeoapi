@@ -448,6 +448,8 @@ class PlatformRequest(BaseModel):
         # Greensight Component 3: .nc extension now routes to ZARR
         elif ext == 'nc':
             return DataType.ZARR
+        elif ext == 'zarr':
+            return DataType.ZARR
         elif ext in ['img', 'hdf', 'hdf5', 'jp2', 'ecw', 'vrt']:
             raise ValueError(
                 f"Unsupported file format '.{ext}'. "

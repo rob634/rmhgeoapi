@@ -289,10 +289,14 @@ class RasterCollectionProcessingOptions(BaseProcessingOptions):
 # Greensight Component 2: ZarrProcessingOptions
 class ZarrProcessingOptions(BaseProcessingOptions):
     """
-    Processing options for VirtualiZarr pipeline.
+    Processing options for Zarr pipelines.
+
+    Supports two pipelines:
+        - "virtualzarr": For NetCDF files — creates virtual Zarr references via VirtualiZarr
+        - "ingest_zarr": For native Zarr stores — copies Zarr directory tree to silver tier
 
     Fields:
-        pipeline: Pipeline selector (always "virtualzarr")
+        pipeline: Pipeline selector ("virtualzarr" or "ingest_zarr")
         concat_dim: Dimension to concatenate along (default "time")
         file_pattern: Glob pattern for source files (default "*.nc")
         fail_on_chunking_warnings: Fail validation on chunking warnings
@@ -300,7 +304,10 @@ class ZarrProcessingOptions(BaseProcessingOptions):
     """
     model_config = ConfigDict(extra='ignore')
 
-    pipeline: Literal["virtualzarr"] = Field(default="virtualzarr", description="Pipeline selector")
+    pipeline: Literal["virtualzarr", "ingest_zarr"] = Field(
+        default="virtualzarr",
+        description="Pipeline selector: 'virtualzarr' for NetCDF, 'ingest_zarr' for native Zarr stores"
+    )
     concat_dim: str = Field(default="time", description="Dimension to concatenate along")
     file_pattern: str = Field(default="*.nc", description="Glob pattern for source files")
     fail_on_chunking_warnings: bool = Field(default=False, description="Fail validation on chunking warnings")

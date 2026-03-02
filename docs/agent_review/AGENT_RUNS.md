@@ -740,14 +740,60 @@ All pipeline executions in chronological order.
 
 ---
 
+## Run 24: Dashboard Submit Form (GREENFIELD — Narrow Scope)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 02 MAR 2026 |
+| **Pipeline** | GREENFIELD (S→A→C→O→M→B→V) |
+| **Scope** | Narrow — replace `_render_submit()` stub with complete file browser form |
+| **Execution** | Subagent-driven development (fresh subagent per stage) |
+| **Files Modified** | 2 (`platform.py`, `__init__.py`) |
+| **Lines Added** | ~300 |
+| **V Rating** | **GOOD** (0 CRITICAL, 2 MEDIUM, 4 LOW, 4 VERY LOW) |
+| **Spec Diff** | 100% contract alignment, 100% invariant alignment, 6/8 success criteria fully met |
+| **Gaps Found by V** | 2 real (required attrs, error URL escaping) — both spec-aligned, B missed them |
+| **Gaps Fixed** | 3 of 4 (V1 required attrs, V2 URL escaping, V4 code comment; V3 result formatting deferred) |
+| **Builder Budget Collapse** | **NO** — narrow scope (~370 line spec → ~300 line output) worked |
+| **Key Learning** | Narrow scope prevents Builder budget collapse (confirmed). V catches spec-to-code drift, not new design issues. |
+| **Commits** | `63182c6`, `bcc9b0e`, `fcefefb`, `54b9308`, `c0fd2f3` |
+| **Output** | `agent_docs/GREENFIELD_SUBMIT_RUN_REPORT.md` |
+
+**Agent Outputs**:
+
+| Agent | Output File |
+|-------|-------------|
+| A (Advocate) | `agent_docs/GREENFIELD_SUBMIT_ADVOCATE.md` |
+| C (Critic) | `agent_docs/GREENFIELD_SUBMIT_CRITIC.md` |
+| O (Operator) | `agent_docs/GREENFIELD_SUBMIT_OPERATOR.md` |
+| M (Mediator) | `agent_docs/GREENFIELD_SUBMIT_MEDIATOR.md` |
+| B (Builder) | Direct code changes (committed) |
+| V (Validator) | `agent_docs/GREENFIELD_SUBMIT_VALIDATOR.md` |
+| Spec Diff | `agent_docs/GREENFIELD_SUBMIT_SPEC_DIFF.md` |
+
+**Token Usage**:
+
+| Agent | Role | Tokens |
+|-------|------|--------|
+| A | Optimistic design | ~40,000 |
+| C | Gap analysis | ~35,000 |
+| O | Infrastructure assessment | ~35,000 |
+| M | Conflict resolution | ~50,000 |
+| B | Code generation | ~55,000 |
+| V | Blind code review | ~58,000 |
+| Controller | Orchestration + fixes | ~40,000 |
+| **Total** | | **~313,000** |
+
+---
+
 ## Cumulative Token Usage
 
 | Pipeline | Runs | Total Tokens |
 |----------|------|-------------|
 | COMPETE | Runs 1-6, 9, 12, 19 | 1,071,939 (Run 9: 346,656 + Run 12: 337,561 + Run 19: 387,722; Runs 1-6 predated instrumentation) |
-| GREENFIELD | Runs 7, 8, 10 | 631,196 (Run 10 only; Runs 7-8 predated instrumentation) |
+| GREENFIELD | Runs 7, 8, 10, 24 | ~944,196 (Run 10: 631,196 + Run 24: ~313,000; Runs 7-8 predated instrumentation) |
 | SIEGE | Runs 11, 13, 18, 20, 21, 22, 23 | ~1,361,587 |
 | REFLEXION | Runs 14, 15, 16, 17 | 631,966 (Run 14: 232,684 + Run 15: 278,900 + Run 16: 50,775 + Run 17: 69,607) |
-| **Instrumented Total** | Runs 9-23 | **~3,696,688** |
+| **Instrumented Total** | Runs 9-24 | **~4,009,688** |
 
-**Note**: Runs 1-8 predated the token instrumentation described in `agents/AGENT_METRICS.md`. Per-agent token breakdowns are available for Runs 9-22.
+**Note**: Runs 1-8 predated the token instrumentation described in `agents/AGENT_METRICS.md`. Per-agent token breakdowns are available for Runs 9-24.

@@ -283,24 +283,39 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
 
             # Step 4: Handle idempotent case (existing draft, no overwrite)
             if release_op == "existing":
-                # Detect orphaned release: prior attempt created Release but job creation failed.
-                # Return explicit error instead of "success" with empty job_id. (26 FEB 2026)
                 if not release.job_id:
+                    # Orphaned release: prior attempt created Release but job creation failed.
+                    # Auto-clean and create fresh release instead of returning 409. (03 MAR 2026)
                     logger.warning(
-                        f"Orphaned release {release.release_id[:16]} — "
-                        f"no job_id, prior job creation likely failed"
+                        f"Orphaned release {release.release_id[:16]}... — "
+                        f"no job_id, auto-cleaning and re-creating"
                     )
-                    return error_response(
-                        "Prior submission created a release but job creation failed. "
-                        "Resubmit with processing_options.overwrite=true to retry.",
-                        "OrphanedReleaseError",
-                        status_code=409
+                    try:
+                        asset_service.cleanup_orphaned_release(release.release_id, asset.asset_id)
+                        release, release_op = asset_service.get_or_overwrite_release(
+                            asset_id=asset.asset_id,
+                            overwrite=False,
+                            stac_item_id=generate_stac_item_id(platform_req.dataset_id, platform_req.resource_id, platform_req.version_id),
+                            stac_collection_id=job_params.get('collection_id', platform_req.dataset_id.lower()),
+                            blob_path=None,
+                            request_id=request_id,
+                            suggested_version_id=platform_req.version_id,
+                        )
+                        logger.info(f"  Orphan cleaned, fresh release {release_op}: {release.release_id[:16]}...")
+                    except Exception as cleanup_err:
+                        logger.error(f"Orphan auto-cleanup failed: {cleanup_err}", exc_info=True)
+                        return error_response(
+                            "Prior submission left an orphaned release and cleanup failed. "
+                            "Resubmit with processing_options.overwrite=true to force cleanup.",
+                            "OrphanedReleaseError",
+                            status_code=409
+                        )
+                else:
+                    return idempotent_response(
+                        request_id=request_id,
+                        job_id=release.job_id,
+                        hint="Use processing_options.overwrite=true to force reprocessing"
                     )
-                return idempotent_response(
-                    request_id=request_id,
-                    job_id=release.job_id,
-                    hint="Use processing_options.overwrite=true to force reprocessing"
-                )
 
             # Step 5: Add release_id and asset_id to job params
             job_params['release_id'] = release.release_id
@@ -361,13 +376,17 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                     logger.info(f"  Finalized raster stac_item_id: {final_stac} (ord={ordinal})")
 
                 elif platform_req.data_type == DataType.ZARR:
-                    # Zarr: finalize stac_item_id and ref output prefix with ordinal
+                    # Zarr: finalize stac_item_id and output paths with ordinal
                     final_stac = generate_stac_item_id(
                         platform_req.dataset_id, platform_req.resource_id,
                         version_ordinal=ordinal
                     )
                     job_params['stac_item_id'] = final_stac
-                    job_params['ref_output_prefix'] = f"refs/{platform_req.dataset_id}/{platform_req.resource_id}/ord{ordinal}"
+                    # virtualzarr uses ref_output_prefix, netcdf_to_zarr uses output_folder
+                    if 'ref_output_prefix' in job_params:
+                        job_params['ref_output_prefix'] = f"refs/{platform_req.dataset_id}/{platform_req.resource_id}/ord{ordinal}"
+                    if 'output_folder' in job_params:
+                        job_params['output_folder'] = f"zarr/{platform_req.dataset_id}/{platform_req.resource_id}/ord{ordinal}"
 
                     asset_service.update_physical_outputs(
                         release.release_id, stac_item_id=final_stac
@@ -393,10 +412,30 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
             )
 
         # Create CoreMachine job (raises on failure — never returns None)
-        job_id = create_and_submit_job(job_type, job_params, request_id)
+        try:
+            job_id = create_and_submit_job(job_type, job_params, request_id)
+        except (ValueError, RuntimeError) as job_err:
+            # Compensating action: delete the orphaned release
+            try:
+                asset_service.cleanup_orphaned_release(release.release_id, asset.asset_id)
+            except Exception as cleanup_err:
+                logger.critical(
+                    f"ORPHAN_CLEANUP_FAILED: release {release.release_id[:16]}...: {cleanup_err}"
+                )
+            raise  # Re-raise to outer ValueError/Exception handlers
 
         # Link job to release (sets job_id and resets processing_status)
-        asset_service.link_job_to_release(release.release_id, job_id)
+        try:
+            asset_service.link_job_to_release(release.release_id, job_id)
+        except Exception as link_err:
+            # Job is running — do NOT delete release. Log SQL fix for manual intervention.
+            logger.critical(
+                f"LINK_JOB_FAILED: job {job_id[:16]}... created but link to "
+                f"release {release.release_id[:16]}... failed: {link_err}. "
+                f"MANUAL: UPDATE app.asset_releases SET job_id='{job_id}' "
+                f"WHERE release_id='{release.release_id}'"
+            )
+            # Fall through — return success since job IS running
 
         # Store thin tracking record (request_id -> job_id)
         platform_repo = PlatformRepository()

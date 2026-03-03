@@ -480,6 +480,22 @@ class AssetService:
     # UPDATE -- PROCESSING
     # =========================================================================
 
+    def cleanup_orphaned_release(self, release_id: str, asset_id: str) -> bool:
+        """
+        Delete an orphaned release and decrement asset release_count.
+
+        Used as a compensating action when job creation fails after release
+        creation, or to auto-clean orphans detected on re-submission.
+
+        Args:
+            release_id: Orphaned release to delete
+            asset_id: Parent asset whose release_count to decrement
+
+        Returns:
+            True if release was deleted, False if not found
+        """
+        return self.release_repo.delete_and_uncount_atomic(release_id, asset_id)
+
     def link_job_to_release(self, release_id: str, job_id: str) -> bool:
         """
         Link a processing job to a release.

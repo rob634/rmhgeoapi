@@ -249,6 +249,73 @@ class ReleaseRepository(PostgreSQLRepository):
                 )
                 return self._row_to_model(row)
 
+    def delete_and_uncount_atomic(self, release_id: str, asset_id: str) -> bool:
+        """
+        Delete a release and decrement the parent asset's release_count atomically.
+
+        Exact inverse of create_and_count_atomic(). Both DELETE + UPDATE
+        happen in a single transaction — both succeed or both roll back.
+
+        Uses GREATEST(release_count - 1, 0) to prevent negative counts.
+
+        Args:
+            release_id: Release to delete
+            asset_id: Parent asset whose release_count to decrement
+
+        Returns:
+            True if release was deleted, False if release_id not found (rolls back)
+        """
+        logger.info(
+            f"Atomic delete+uncount: release={release_id[:16]}... "
+            f"asset={asset_id[:16]}..."
+        )
+
+        now = datetime.now(timezone.utc)
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                # Step 1: DELETE release
+                cur.execute(
+                    sql.SQL("""
+                        DELETE FROM {}.{}
+                        WHERE release_id = %s
+                    """).format(
+                        sql.Identifier(self.schema),
+                        sql.Identifier("asset_releases")
+                    ),
+                    (release_id,)
+                )
+
+                if cur.rowcount == 0:
+                    conn.rollback()
+                    logger.warning(
+                        f"delete_and_uncount_atomic: release {release_id[:16]}... "
+                        f"not found, rolling back"
+                    )
+                    return False
+
+                # Step 2: Decrement asset.release_count
+                cur.execute(
+                    sql.SQL("""
+                        UPDATE {}.{}
+                        SET release_count = GREATEST(release_count - 1, 0),
+                            updated_at = %s
+                        WHERE asset_id = %s
+                    """).format(
+                        sql.Identifier(self.schema),
+                        sql.Identifier("assets")
+                    ),
+                    (now, asset_id)
+                )
+
+                conn.commit()
+
+                logger.info(
+                    f"Atomic delete+uncount complete: release={release_id[:16]}..., "
+                    f"asset={asset_id[:16]}..."
+                )
+                return True
+
     # =========================================================================
     # READ
     # =========================================================================
@@ -1254,6 +1321,7 @@ class ReleaseRepository(PostgreSQLRepository):
                                     updated_at = %s
                                 WHERE release_id = %s
                                   AND approval_state = %s
+                                  AND processing_status = 'completed'
                                   AND NOT EXISTS (
                                       SELECT 1 FROM {}.{}
                                       WHERE asset_id = %s
@@ -1299,6 +1367,7 @@ class ReleaseRepository(PostgreSQLRepository):
                                     updated_at = %s
                                 WHERE release_id = %s
                                   AND approval_state = %s
+                                  AND processing_status = 'completed'
                                   AND NOT EXISTS (
                                       SELECT 1 FROM {}.{}
                                       WHERE asset_id = %s

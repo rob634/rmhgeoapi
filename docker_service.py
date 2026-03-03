@@ -346,6 +346,18 @@ class TokenRefreshWorker:
 
         logger.info(f"[Token Refresh] Starting (interval: {self._interval}s)")
 
+        # IMMEDIATE refresh on startup (03 MAR 2026)
+        # Critical: Tokens may be stale from container restart, must refresh
+        # BEFORE any task processing begins
+        try:
+            logger.info("[Token Refresh] STARTUP: Immediate token refresh...")
+            status = refresh_all_tokens()
+            self._last_refresh = datetime.now(timezone.utc)
+            self._refresh_count += 1
+            logger.info(f"[Token Refresh] Startup refresh complete: {status}")
+        except Exception as e:
+            logger.error(f"[Token Refresh] Startup refresh FAILED: {e}")
+
         while not self._stop_event.is_set():
             # Wait for interval (interruptible)
             if self._stop_event.wait(timeout=self._interval):
@@ -477,6 +489,34 @@ class BackgroundQueueWorker:
 
         return self._sb_client
 
+    def _ensure_fresh_tokens(self):
+        """
+        Ensure tokens are fresh before processing a task (03 MAR 2026).
+
+        Checks token cache TTL and triggers full refresh + pool recreation
+        if the token is within 10 minutes of expiry. This runs at the start
+        of every message so we never begin work with a stale token.
+
+        If the token has >10 min remaining, this is a no-op (cheap cache check).
+        """
+        from infrastructure.auth.token_cache import postgres_token_cache
+        from infrastructure.auth import refresh_all_tokens
+
+        # 10 min buffer — refresh before token gets close to expiry
+        cached = postgres_token_cache.get_if_valid(min_ttl_seconds=600)
+        if cached:
+            ttl = postgres_token_cache.ttl_seconds()
+            logger.debug(f"[Token] Token valid, TTL: {ttl:.0f}s — skipping refresh")
+            return
+
+        ttl = postgres_token_cache.ttl_seconds()
+        logger.info(f"[Token] Token stale or missing (TTL: {ttl}s) — refreshing before task processing")
+        try:
+            status = refresh_all_tokens()
+            logger.info(f"[Token] Pre-task refresh complete: {status}")
+        except Exception as e:
+            logger.error(f"[Token] Pre-task refresh FAILED: {e}")
+
     def _process_message(
         self,
         message: ServiceBusReceivedMessage,
@@ -491,6 +531,9 @@ class BackgroundQueueWorker:
         task_id = "unknown"
 
         try:
+            # Ensure tokens are fresh before any DB work (03 MAR 2026)
+            self._ensure_fresh_tokens()
+
             message_body = str(message)
             task_data = json.loads(message_body)
             task_message = TaskQueueMessage(**task_data)
@@ -1331,6 +1374,65 @@ def force_token_refresh():
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "results": status,
     }
+
+
+@app.post("/test/token-refresh")
+def test_token_refresh():
+    """
+    Test the per-message token refresh path (03 MAR 2026).
+
+    Simulates a stale token by artificially expiring the cache, then
+    exercises the same _ensure_fresh_tokens() logic that runs at the
+    start of every queue message. Verifies DB connectivity after refresh.
+
+    Steps:
+        1. Snapshot current token state (TTL, expiry)
+        2. Artificially expire the postgres token cache
+        3. Run _ensure_fresh_tokens() (same as per-message path)
+        4. Snapshot new token state
+        5. Test DB connectivity through the pool
+
+    Returns:
+        dict with before/after token state and DB connectivity result
+    """
+    from infrastructure.auth.token_cache import postgres_token_cache
+    from infrastructure.connection_pool import ConnectionPoolManager
+
+    result = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "test": "token-refresh",
+    }
+
+    # Step 1: Before state
+    result["before"] = {
+        "token": postgres_token_cache.get_status(),
+        "pool": ConnectionPoolManager.get_pool_stats(),
+    }
+
+    # Step 2: Artificially expire the token cache
+    logger.info("[Test] Artificially expiring postgres token cache...")
+    postgres_token_cache.invalidate()
+    result["after_invalidation"] = postgres_token_cache.get_status()
+
+    # Step 3: Run the per-message refresh logic
+    logger.info("[Test] Running _ensure_fresh_tokens()...")
+    try:
+        queue_worker._ensure_fresh_tokens()
+        result["refresh"] = {"success": True}
+    except Exception as e:
+        result["refresh"] = {"success": False, "error": str(e)}
+        return result
+
+    # Step 4: After state
+    result["after"] = {
+        "token": postgres_token_cache.get_status(),
+        "pool": ConnectionPoolManager.get_pool_stats(),
+    }
+
+    # Step 5: DB connectivity through pool
+    result["database"] = test_database_connectivity()
+
+    return result
 
 
 @app.get("/test/database")

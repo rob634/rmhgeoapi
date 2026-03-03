@@ -187,7 +187,9 @@ from .job_event import (
 # Geo schema models - Service Layer (21 JAN 2026 - F7.IaC)
 from .geo import (
     GeoTableCatalog,
-    FeatureCollectionStyles  # OGC API Styles (22 JAN 2026)
+    FeatureCollectionStyles,  # OGC API Styles (22 JAN 2026)
+    B2CRoute,                 # Public API route resolution (02 MAR 2026)
+    B2BRoute,                 # Internal API route resolution (02 MAR 2026)
 )
 
 # Release → table junction (26 FEB 2026 - Multi-table Release)
@@ -339,6 +341,8 @@ __all__ = [
     # Geo schema models - Service Layer (21 JAN 2026 - F7.IaC)
     'GeoTableCatalog',
     'FeatureCollectionStyles',  # OGC API Styles (22 JAN 2026)
+    'B2CRoute',                 # Public API route resolution (02 MAR 2026)
+    'B2BRoute',                 # Internal API route resolution (02 MAR 2026)
 
     # Release → table junction (26 FEB 2026 - Multi-table Release)
     'ReleaseTable',

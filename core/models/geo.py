@@ -718,17 +718,15 @@ class FeatureCollectionStyles(BaseModel):
 
 
 # ============================================================================
-# B2C ROUTE MODEL (Public API Routing)
+# ROUTE MODELS (Service Layer URL Resolution - 02 MAR 2026)
 # ============================================================================
 
-class B2CRoute(BaseModel):
+class _RouteBase(BaseModel):
     """
-    Public API route resolution model.
+    Shared field definitions for B2C and B2B route models.
 
     Maps friendly slug URLs (e.g., /assets/fathom-pluvial-100yr/latest) to
     concrete data resources (PostGIS tables, STAC items, blob paths).
-
-    Maps to: geo.b2c_routes
 
     Primary Key: (slug, version_id) composite key
 
@@ -749,357 +747,167 @@ class B2CRoute(BaseModel):
         str_strip_whitespace=True
     )
 
-    # DDL generation hints (ClassVar = not a model field)
+    # ==========================================================================
+    # IDENTITY (Composite Primary Key)
+    # ==========================================================================
+    slug: str = Field(
+        ...,
+        max_length=200,
+        description="Flattened slug from dataset_id-resource_id"
+    )
+
+    version_id: str = Field(
+        ...,
+        max_length=50,
+        description="Version identifier"
+    )
+
+    # ==========================================================================
+    # CLASSIFICATION
+    # ==========================================================================
+    data_type: str = Field(
+        ...,
+        max_length=20,
+        description="Data type: raster, vector, or zarr"
+    )
+
+    is_latest: bool = Field(
+        default=False,
+        description="Whether this is the latest version for the slug (only one TRUE per slug)"
+    )
+
+    version_ordinal: int = Field(
+        ...,
+        description="Ordering within slug (1-based)"
+    )
+
+    # ==========================================================================
+    # RESOLUTION FIELDS (data_type determines which apply)
+    # ==========================================================================
+    table_name: Optional[str] = Field(
+        default=None,
+        max_length=63,
+        description="Vector: PostGIS table name (geo.{table_name})"
+    )
+
+    stac_item_id: Optional[str] = Field(
+        default=None,
+        max_length=200,
+        description="Raster/Zarr: pgSTAC item identifier"
+    )
+
+    stac_collection_id: Optional[str] = Field(
+        default=None,
+        max_length=200,
+        description="STAC collection identifier"
+    )
+
+    blob_path: Optional[str] = Field(
+        default=None,
+        max_length=500,
+        description="Direct download blob path"
+    )
+
+    # ==========================================================================
+    # DISPLAY METADATA
+    # ==========================================================================
+    title: str = Field(
+        ...,
+        max_length=300,
+        description="Display name"
+    )
+
+    description: Optional[str] = Field(
+        default=None,
+        description="Short description"
+    )
+
+    # ==========================================================================
+    # PROVENANCE (Denormalized)
+    # ==========================================================================
+    asset_id: Optional[str] = Field(
+        default=None,
+        max_length=64,
+        description="Provenance: asset identifier"
+    )
+
+    release_id: Optional[str] = Field(
+        default=None,
+        max_length=64,
+        description="Provenance: release identifier"
+    )
+
+    cleared_by: Optional[str] = Field(
+        default=None,
+        max_length=200,
+        description="Who approved this route"
+    )
+
+    cleared_at: Optional[datetime] = Field(
+        default=None,
+        description="When this route was approved"
+    )
+
+    # ==========================================================================
+    # TIMESTAMPS
+    # ==========================================================================
+    created_at: Optional[datetime] = Field(
+        default=None,
+        description="When the route was created"
+    )
+
+    # ==========================================================================
+    # FACTORY METHODS
+    # ==========================================================================
+
+    @classmethod
+    def from_db_row(cls, row: Dict[str, Any]) -> "_RouteBase":
+        """Create instance from database row (psycopg dict_row)."""
+        return cls(
+            slug=row.get('slug'),
+            version_id=row.get('version_id'),
+            data_type=row.get('data_type'),
+            is_latest=row.get('is_latest', False),
+            version_ordinal=row.get('version_ordinal'),
+            table_name=row.get('table_name'),
+            stac_item_id=row.get('stac_item_id'),
+            stac_collection_id=row.get('stac_collection_id'),
+            blob_path=row.get('blob_path'),
+            title=row.get('title'),
+            description=row.get('description'),
+            asset_id=row.get('asset_id'),
+            release_id=row.get('release_id'),
+            cleared_by=row.get('cleared_by'),
+            cleared_at=row.get('cleared_at'),
+            created_at=row.get('created_at'),
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dict for database insertion."""
+        return self.model_dump(exclude_none=False, by_alias=True)
+
+
+class B2CRoute(_RouteBase):
+    """Public API route resolution. Maps to: geo.b2c_routes"""
+
     __sql_table_name: ClassVar[str] = "b2c_routes"
     __sql_schema: ClassVar[str] = "geo"
     __sql_primary_key: ClassVar[List[str]] = ["slug", "version_id"]
     __sql_indexes: ClassVar[List[Dict[str, Any]]] = [
-        # Partial unique index: only one is_latest=true per slug
         {"columns": ["slug"], "name": "idx_b2c_routes_latest", "partial_where": "is_latest = true", "unique": True},
-        # Composite index for ordering within slug
         {"columns": ["slug", "version_ordinal"], "name": "idx_b2c_routes_slug_ordinal"},
-        # Data type filter
         {"columns": ["data_type"], "name": "idx_b2c_routes_data_type"},
     ]
 
-    # ==========================================================================
-    # IDENTITY (Composite Primary Key)
-    # ==========================================================================
-    slug: str = Field(
-        ...,
-        max_length=200,
-        description="Flattened slug from dataset_id-resource_id"
-    )
 
-    version_id: str = Field(
-        ...,
-        max_length=50,
-        description="Version identifier"
-    )
+class B2BRoute(_RouteBase):
+    """Internal API route resolution. Maps to: geo.b2b_routes"""
 
-    # ==========================================================================
-    # CLASSIFICATION
-    # ==========================================================================
-    data_type: str = Field(
-        ...,
-        max_length=20,
-        description="Data type: raster, vector, or zarr"
-    )
-
-    is_latest: bool = Field(
-        default=False,
-        description="Whether this is the latest version for the slug (only one TRUE per slug)"
-    )
-
-    version_ordinal: int = Field(
-        ...,
-        description="Ordering within slug (1-based)"
-    )
-
-    # ==========================================================================
-    # RESOLUTION FIELDS (data_type determines which apply)
-    # ==========================================================================
-    table_name: Optional[str] = Field(
-        default=None,
-        max_length=63,
-        description="Vector: PostGIS table name (geo.{table_name})"
-    )
-
-    stac_item_id: Optional[str] = Field(
-        default=None,
-        max_length=200,
-        description="Raster/Zarr: pgSTAC item identifier"
-    )
-
-    stac_collection_id: Optional[str] = Field(
-        default=None,
-        max_length=200,
-        description="STAC collection identifier"
-    )
-
-    blob_path: Optional[str] = Field(
-        default=None,
-        max_length=500,
-        description="Direct download blob path"
-    )
-
-    # ==========================================================================
-    # DISPLAY METADATA
-    # ==========================================================================
-    title: str = Field(
-        ...,
-        max_length=300,
-        description="Display name"
-    )
-
-    description: Optional[str] = Field(
-        default=None,
-        description="Short description"
-    )
-
-    # ==========================================================================
-    # PROVENANCE (Denormalized)
-    # ==========================================================================
-    asset_id: Optional[str] = Field(
-        default=None,
-        max_length=64,
-        description="Provenance: asset identifier"
-    )
-
-    release_id: Optional[str] = Field(
-        default=None,
-        max_length=64,
-        description="Provenance: release identifier"
-    )
-
-    cleared_by: Optional[str] = Field(
-        default=None,
-        max_length=200,
-        description="Who approved this route"
-    )
-
-    cleared_at: Optional[datetime] = Field(
-        default=None,
-        description="When this route was approved"
-    )
-
-    # ==========================================================================
-    # TIMESTAMPS
-    # ==========================================================================
-    created_at: Optional[datetime] = Field(
-        default=None,
-        description="When the route was created"
-    )
-
-    # ==========================================================================
-    # FACTORY METHODS
-    # ==========================================================================
-
-    @classmethod
-    def from_db_row(cls, row: Dict[str, Any]) -> "B2CRoute":
-        """
-        Create B2CRoute from database row.
-
-        Args:
-            row: Database row as dict (from psycopg dict_row)
-
-        Returns:
-            B2CRoute instance
-        """
-        return cls(
-            slug=row.get('slug'),
-            version_id=row.get('version_id'),
-            data_type=row.get('data_type'),
-            is_latest=row.get('is_latest', False),
-            version_ordinal=row.get('version_ordinal'),
-            table_name=row.get('table_name'),
-            stac_item_id=row.get('stac_item_id'),
-            stac_collection_id=row.get('stac_collection_id'),
-            blob_path=row.get('blob_path'),
-            title=row.get('title'),
-            description=row.get('description'),
-            asset_id=row.get('asset_id'),
-            release_id=row.get('release_id'),
-            cleared_by=row.get('cleared_by'),
-            cleared_at=row.get('cleared_at'),
-            created_at=row.get('created_at'),
-        )
-
-    def to_dict(self) -> Dict[str, Any]:
-        """
-        Convert to dictionary for database insertion.
-
-        Returns:
-            Dict suitable for INSERT/UPDATE operations
-        """
-        return self.model_dump(exclude_none=False, by_alias=True)
-
-
-# ============================================================================
-# B2B ROUTE MODEL (Internal API Routing)
-# ============================================================================
-
-class B2BRoute(BaseModel):
-    """
-    Internal API route resolution model.
-
-    Identical schema to B2CRoute but for internal/B2B API consumers.
-    Separate table allows independent access control and lifecycle management.
-
-    Maps to: geo.b2b_routes
-
-    Primary Key: (slug, version_id) composite key
-
-    Created: 02 MAR 2026
-    Epic: E-Routes - Service Layer URL Resolution
-    """
-    model_config = ConfigDict(
-        use_enum_values=True,
-        extra='ignore',
-        str_strip_whitespace=True
-    )
-
-    # DDL generation hints (ClassVar = not a model field)
     __sql_table_name: ClassVar[str] = "b2b_routes"
     __sql_schema: ClassVar[str] = "geo"
     __sql_primary_key: ClassVar[List[str]] = ["slug", "version_id"]
     __sql_indexes: ClassVar[List[Dict[str, Any]]] = [
-        # Partial unique index: only one is_latest=true per slug
         {"columns": ["slug"], "name": "idx_b2b_routes_latest", "partial_where": "is_latest = true", "unique": True},
-        # Composite index for ordering within slug
         {"columns": ["slug", "version_ordinal"], "name": "idx_b2b_routes_slug_ordinal"},
-        # Data type filter
         {"columns": ["data_type"], "name": "idx_b2b_routes_data_type"},
     ]
-
-    # ==========================================================================
-    # IDENTITY (Composite Primary Key)
-    # ==========================================================================
-    slug: str = Field(
-        ...,
-        max_length=200,
-        description="Flattened slug from dataset_id-resource_id"
-    )
-
-    version_id: str = Field(
-        ...,
-        max_length=50,
-        description="Version identifier"
-    )
-
-    # ==========================================================================
-    # CLASSIFICATION
-    # ==========================================================================
-    data_type: str = Field(
-        ...,
-        max_length=20,
-        description="Data type: raster, vector, or zarr"
-    )
-
-    is_latest: bool = Field(
-        default=False,
-        description="Whether this is the latest version for the slug (only one TRUE per slug)"
-    )
-
-    version_ordinal: int = Field(
-        ...,
-        description="Ordering within slug (1-based)"
-    )
-
-    # ==========================================================================
-    # RESOLUTION FIELDS (data_type determines which apply)
-    # ==========================================================================
-    table_name: Optional[str] = Field(
-        default=None,
-        max_length=63,
-        description="Vector: PostGIS table name (geo.{table_name})"
-    )
-
-    stac_item_id: Optional[str] = Field(
-        default=None,
-        max_length=200,
-        description="Raster/Zarr: pgSTAC item identifier"
-    )
-
-    stac_collection_id: Optional[str] = Field(
-        default=None,
-        max_length=200,
-        description="STAC collection identifier"
-    )
-
-    blob_path: Optional[str] = Field(
-        default=None,
-        max_length=500,
-        description="Direct download blob path"
-    )
-
-    # ==========================================================================
-    # DISPLAY METADATA
-    # ==========================================================================
-    title: str = Field(
-        ...,
-        max_length=300,
-        description="Display name"
-    )
-
-    description: Optional[str] = Field(
-        default=None,
-        description="Short description"
-    )
-
-    # ==========================================================================
-    # PROVENANCE (Denormalized)
-    # ==========================================================================
-    asset_id: Optional[str] = Field(
-        default=None,
-        max_length=64,
-        description="Provenance: asset identifier"
-    )
-
-    release_id: Optional[str] = Field(
-        default=None,
-        max_length=64,
-        description="Provenance: release identifier"
-    )
-
-    cleared_by: Optional[str] = Field(
-        default=None,
-        max_length=200,
-        description="Who approved this route"
-    )
-
-    cleared_at: Optional[datetime] = Field(
-        default=None,
-        description="When this route was approved"
-    )
-
-    # ==========================================================================
-    # TIMESTAMPS
-    # ==========================================================================
-    created_at: Optional[datetime] = Field(
-        default=None,
-        description="When the route was created"
-    )
-
-    # ==========================================================================
-    # FACTORY METHODS
-    # ==========================================================================
-
-    @classmethod
-    def from_db_row(cls, row: Dict[str, Any]) -> "B2BRoute":
-        """
-        Create B2BRoute from database row.
-
-        Args:
-            row: Database row as dict (from psycopg dict_row)
-
-        Returns:
-            B2BRoute instance
-        """
-        return cls(
-            slug=row.get('slug'),
-            version_id=row.get('version_id'),
-            data_type=row.get('data_type'),
-            is_latest=row.get('is_latest', False),
-            version_ordinal=row.get('version_ordinal'),
-            table_name=row.get('table_name'),
-            stac_item_id=row.get('stac_item_id'),
-            stac_collection_id=row.get('stac_collection_id'),
-            blob_path=row.get('blob_path'),
-            title=row.get('title'),
-            description=row.get('description'),
-            asset_id=row.get('asset_id'),
-            release_id=row.get('release_id'),
-            cleared_by=row.get('cleared_by'),
-            cleared_at=row.get('cleared_at'),
-            created_at=row.get('created_at'),
-        )
-
-    def to_dict(self) -> Dict[str, Any]:
-        """
-        Convert to dictionary for database insertion.
-
-        Returns:
-            Dict suitable for INSERT/UPDATE operations
-        """
-        return self.model_dump(exclude_none=False, by_alias=True)

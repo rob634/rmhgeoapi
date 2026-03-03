@@ -604,6 +604,15 @@ class AssetApprovalService:
                         f"Flipped is_latest to {next_latest.release_id[:16]}... "
                         f"({next_latest.version_id})"
                     )
+                    # Create routes for the promoted release (syncs route table with release table)
+                    if asset_for_routes and next_latest.version_id:
+                        promoted_route_result = self._create_routes(
+                            next_latest, asset_for_routes, next_latest.version_id,
+                            next_latest.clearance_state or ClearanceState.OUO,
+                            revoker
+                        )
+                        if promoted_route_result.get('success'):
+                            logger.info(f"Routes created for promoted release {next_latest.release_id[:16]}...")
             else:
                 logger.info(f"No other approved releases for asset {release.asset_id[:16]}...")
 
@@ -858,15 +867,13 @@ class AssetApprovalService:
 
             tables_written = []
 
-            # Always write to b2b_routes
-            route_repo.clear_latest(slug, table='b2b_routes')
-            route_repo.upsert_route(route, table='b2b_routes')
+            # Always write to b2b_routes (atomic clear + upsert in one txn)
+            route_repo.upsert_as_latest(route, table='b2b_routes')
             tables_written.append('b2b_routes')
 
             # Write to b2c_routes only for PUBLIC clearance
             if clearance_state == ClearanceState.PUBLIC:
-                route_repo.clear_latest(slug, table='b2c_routes')
-                route_repo.upsert_route(route, table='b2c_routes')
+                route_repo.upsert_as_latest(route, table='b2c_routes')
                 tables_written.append('b2c_routes')
 
             return {
@@ -915,18 +922,12 @@ class AssetApprovalService:
             for table in ('b2c_routes', 'b2b_routes'):
                 route_repo.delete_route(slug, release.version_id, table=table)
 
-            # If this was the latest, promote next version
-            promoted = None
-            if release.is_latest:
-                for table in ('b2c_routes', 'b2b_routes'):
-                    result = route_repo.promote_next_latest(slug, table=table)
-                    if result:
-                        promoted = result
+            # NOTE: Route promotion is NOT done here. The revoke_release caller
+            # handles is_latest promotion at the release level, then calls
+            # _create_routes for the newly-promoted release. This ensures
+            # route and release state stay synchronized.
 
-            return {
-                'success': True,
-                'promoted_version': promoted,
-            }
+            return {'success': True}
 
         except Exception as e:
             logger.warning(f"Route deletion failed (non-fatal): {e}", exc_info=True)

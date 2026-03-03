@@ -22,6 +22,7 @@ Unique Constraint: One is_latest=true per slug
 Methods:
     UPSERT:
         upsert_route(route, table) - INSERT ON CONFLICT DO UPDATE
+        upsert_as_latest(route, table) - Atomic clear_latest + upsert in one txn
 
     READ:
         get_by_slug(slug, version, table) - Lookup by slug + version or latest
@@ -153,6 +154,75 @@ class RouteRepository(PostgreSQLRepository):
                 conn.commit()
                 logger.info(
                     f"Upserted route: {route.get('slug')} / "
+                    f"{route.get('version_id')} -> {table}"
+                )
+                return True
+
+    def upsert_as_latest(self, route: Dict[str, Any], table: str = "b2c_routes") -> bool:
+        """Atomically clear_latest + upsert in a single transaction.
+
+        Prevents the window where no row has is_latest=true for a slug.
+
+        Args:
+            route: Dict with column values (must include 'slug').
+            table: Route table name ('b2c_routes' or 'b2b_routes').
+
+        Returns:
+            True on success.
+        """
+        self._validate_table(table)
+
+        route = dict(route)  # Don't mutate caller's dict
+        if route.get("created_at") is None:
+            route["created_at"] = datetime.now(timezone.utc)
+
+        slug = route.get("slug")
+        values = tuple(route.get(col) for col in self.UPSERT_COLUMNS)
+
+        update_cols = [c for c in self.UPSERT_COLUMNS if c not in ("slug", "version_id")]
+        update_clause = sql.SQL(", ").join(
+            sql.SQL("{col} = EXCLUDED.{col}").format(col=sql.Identifier(c))
+            for c in update_cols
+        )
+        placeholders = sql.SQL(", ").join(sql.SQL("%s") for _ in self.UPSERT_COLUMNS)
+        col_names = sql.SQL(", ").join(sql.Identifier(c) for c in self.UPSERT_COLUMNS)
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                # Step 1: Clear is_latest for this slug
+                cur.execute(
+                    sql.SQL("""
+                        UPDATE {schema}.{table}
+                        SET is_latest = false
+                        WHERE slug = %s AND is_latest = true
+                    """).format(
+                        schema=sql.Identifier(self.SCHEMA),
+                        table=sql.Identifier(table),
+                    ),
+                    (slug,)
+                )
+
+                # Step 2: Upsert the new route as latest
+                cur.execute(
+                    sql.SQL("""
+                        INSERT INTO {schema}.{table} ({columns})
+                        VALUES ({placeholders})
+                        ON CONFLICT (slug, version_id) DO UPDATE SET
+                            {updates}
+                    """).format(
+                        schema=sql.Identifier(self.SCHEMA),
+                        table=sql.Identifier(table),
+                        columns=col_names,
+                        placeholders=placeholders,
+                        updates=update_clause,
+                    ),
+                    values
+                )
+
+                # Single commit — both operations atomic
+                conn.commit()
+                logger.info(
+                    f"Upserted route as latest: {slug} / "
                     f"{route.get('version_id')} -> {table}"
                 )
                 return True

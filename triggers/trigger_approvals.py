@@ -358,7 +358,7 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
             headers={"Content-Type": "application/json"}
         )
 
-    except json.JSONDecodeError:
+    except (ValueError, json.JSONDecodeError):
         return func.HttpResponse(
             json.dumps({
                 "success": False,
@@ -497,7 +497,7 @@ def platform_reject(req: func.HttpRequest) -> func.HttpResponse:
             headers={"Content-Type": "application/json"}
         )
 
-    except json.JSONDecodeError:
+    except (ValueError, json.JSONDecodeError):
         return func.HttpResponse(
             json.dumps({
                 "success": False,
@@ -642,7 +642,7 @@ def platform_revoke(req: func.HttpRequest) -> func.HttpResponse:
             headers={"Content-Type": "application/json"}
         )
 
-    except json.JSONDecodeError:
+    except (ValueError, json.JSONDecodeError):
         return func.HttpResponse(
             json.dumps({
                 "success": False,

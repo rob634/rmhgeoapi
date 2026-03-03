@@ -575,110 +575,147 @@ def inventory_zarr_item(params: Dict[str, Any], context: Optional[Dict[str, Any]
         ref_asset = assets.get('reference', {})
         ref_href = ref_asset.get('href', '')
 
-        if not ref_href:
+        # Fallback: native Zarr pipelines (netcdf_to_zarr, ingest_zarr) use "zarr-store" asset key
+        zarr_store_asset = assets.get('zarr-store', {})
+        zarr_store_href = zarr_store_asset.get('href', '')
+        is_native_zarr = bool(not ref_href and zarr_store_href)
+
+        if not ref_href and not zarr_store_href:
             return {
                 "success": False,
-                "error": f"STAC item '{stac_item_id}' has no 'reference' asset href",
+                "error": f"STAC item '{stac_item_id}' has no 'reference' or 'zarr-store' asset href",
                 "error_type": "ValidationError"
             }
 
-        # Derive container and ref_output_prefix from href
-        # href format: abfs://silver-netcdf/datasets/foo/v1/combined_ref.json
-        # OR: silver-netcdf/datasets/foo/v1/combined_ref.json
-        clean_href = ref_href.replace("abfs://", "")
-        href_parts = clean_href.split("/", 1)
-        container = href_parts[0]
-        blob_path = href_parts[1] if len(href_parts) > 1 else ""
-
-        # Strip /combined_ref.json to get ref_output_prefix
-        combined_ref_suffix = "/combined_ref.json"
-        if blob_path.endswith("combined_ref.json"):
-            ref_output_prefix = blob_path[:blob_path.rfind("/combined_ref.json")]
-        else:
-            # Ambiguity note: href doesn't end with combined_ref.json.
-            # Use the directory of the href as the prefix.
-            ref_output_prefix = blob_path.rsplit("/", 1)[0] if "/" in blob_path else blob_path
-
         # =====================================================================
-        # Step 5: Build blob list - always include reference files
-        # Spec Component 3: Blob classification
+        # Step 5+6: Build blob list — branch by asset type
         # =====================================================================
         blobs_to_delete = []
 
-        # Always delete: combined_ref.json (category="reference")
-        blobs_to_delete.append({
-            "container": container,
-            "blob_path": blob_path,
-            "category": "reference"
-        })
+        if is_native_zarr:
+            # ---------------------------------------------------------------
+            # Native Zarr path (netcdf_to_zarr / ingest_zarr)
+            # zarr_store_href is HTTPS: https://account.blob.core.windows.net/container/prefix
+            # ---------------------------------------------------------------
+            from urllib.parse import urlparse
+            parsed = urlparse(zarr_store_href)
+            # path is "/container/prefix..." — strip leading slash, split once
+            path_no_slash = parsed.path.lstrip("/")
+            path_parts = path_no_slash.split("/", 1)
+            container = path_parts[0]
+            store_prefix = path_parts[1] if len(path_parts) > 1 else ""
 
-        # Always delete: manifest.json (category="reference")
-        manifest_blob_path = f"{ref_output_prefix}/manifest.json"
-        blobs_to_delete.append({
-            "container": container,
-            "blob_path": manifest_blob_path,
-            "category": "reference"
-        })
+            # Enumerate all blobs under the Zarr store prefix
+            from infrastructure import BlobRepository
+            silver_repo = BlobRepository.for_zone("silver")
 
-        # =====================================================================
-        # Step 6: Discover data files from manifest (with list_blobs fallback)
-        # Spec Component 3: Discovery chain steps 4-6
-        # =====================================================================
-        data_file_paths = []
-        if delete_data_files:
-            # Try reading manifest first
-            manifest_read_success = False
             try:
-                from infrastructure import BlobRepository
-                silver_repo = BlobRepository.for_zone("silver")
-                manifest_data = silver_repo.read_blob(container, manifest_blob_path)
-                import json
-                manifest = json.loads(manifest_data)
-                files_list = manifest.get("files", [])
-                for file_entry in files_list:
-                    silver_path = file_entry.get("silver_path")
-                    if silver_path:
-                        data_file_paths.append(silver_path)
-                manifest_read_success = True
+                blob_list = silver_repo.list_blobs(container, prefix=store_prefix)
+                for blob_info in blob_list:
+                    blob_name = blob_info["name"]
+                    category = "reference" if blob_name.endswith("manifest.json") else "zarr-chunk"
+                    blobs_to_delete.append({
+                        "container": container,
+                        "blob_path": blob_name,
+                        "category": category,
+                    })
                 logger.info(
-                    f"{'[DRY-RUN] ' if dry_run else ''}Read manifest: "
-                    f"{len(data_file_paths)} data files found"
+                    f"{'[DRY-RUN] ' if dry_run else ''}Native Zarr: "
+                    f"enumerated {len(blobs_to_delete)} blobs under {container}/{store_prefix}"
                 )
-            except Exception as manifest_err:
-                # Spec Component 3: Manifest read fails - WARNING log, fall back to list_blobs
+            except Exception as list_err:
                 logger.warning(
-                    f"Manifest read failed for {container}/{manifest_blob_path}: {manifest_err}. "
-                    f"Falling back to list_blobs."
+                    f"list_blobs failed for native Zarr store {container}/{store_prefix}: "
+                    f"{list_err}. Continuing with empty blob list."
                 )
 
-            # Fall back to list_blobs if manifest read failed
-            if not manifest_read_success:
+        else:
+            # ---------------------------------------------------------------
+            # VirtualiZarr / reference path (existing logic)
+            # ---------------------------------------------------------------
+            # Derive container and ref_output_prefix from href
+            # href format: abfs://silver-netcdf/datasets/foo/v1/combined_ref.json
+            # OR: silver-netcdf/datasets/foo/v1/combined_ref.json
+            clean_href = ref_href.replace("abfs://", "")
+            href_parts = clean_href.split("/", 1)
+            container = href_parts[0]
+            blob_path = href_parts[1] if len(href_parts) > 1 else ""
+
+            # Strip /combined_ref.json to get ref_output_prefix
+            if blob_path.endswith("combined_ref.json"):
+                ref_output_prefix = blob_path[:blob_path.rfind("/combined_ref.json")]
+            else:
+                # Ambiguity note: href doesn't end with combined_ref.json.
+                # Use the directory of the href as the prefix.
+                ref_output_prefix = blob_path.rsplit("/", 1)[0] if "/" in blob_path else blob_path
+
+            # Always delete: combined_ref.json (category="reference")
+            blobs_to_delete.append({
+                "container": container,
+                "blob_path": blob_path,
+                "category": "reference"
+            })
+
+            # Always delete: manifest.json (category="reference")
+            manifest_blob_path = f"{ref_output_prefix}/manifest.json"
+            blobs_to_delete.append({
+                "container": container,
+                "blob_path": manifest_blob_path,
+                "category": "reference"
+            })
+
+            # Discover data files from manifest (with list_blobs fallback)
+            data_file_paths = []
+            if delete_data_files:
+                manifest_read_success = False
                 try:
                     from infrastructure import BlobRepository
                     silver_repo = BlobRepository.for_zone("silver")
-                    data_prefix = f"{ref_output_prefix}/data/"
-                    blob_list = silver_repo.list_blobs(container, prefix=data_prefix)
-                    for blob_info in blob_list:
-                        data_file_paths.append(blob_info["name"])
+                    manifest_data = silver_repo.read_blob(container, manifest_blob_path)
+                    import json
+                    manifest = json.loads(manifest_data)
+                    files_list = manifest.get("files", [])
+                    for file_entry in files_list:
+                        silver_path = file_entry.get("silver_path")
+                        if silver_path:
+                            data_file_paths.append(silver_path)
+                    manifest_read_success = True
                     logger.info(
-                        f"{'[DRY-RUN] ' if dry_run else ''}list_blobs fallback: "
-                        f"{len(data_file_paths)} data files found under {data_prefix}"
+                        f"{'[DRY-RUN] ' if dry_run else ''}Read manifest: "
+                        f"{len(data_file_paths)} data files found"
                     )
-                except Exception as list_err:
-                    # Spec Component 3: Both manifest and list_blobs fail -
-                    # continue with ref-only deletion
+                except Exception as manifest_err:
                     logger.warning(
-                        f"list_blobs fallback also failed for {container}/{ref_output_prefix}/data/: "
-                        f"{list_err}. Continuing with reference-only deletion."
+                        f"Manifest read failed for {container}/{manifest_blob_path}: {manifest_err}. "
+                        f"Falling back to list_blobs."
                     )
 
-            # Add data files to blob list
-            for data_path in data_file_paths:
-                blobs_to_delete.append({
-                    "container": container,
-                    "blob_path": data_path,
-                    "category": "data_file"
-                })
+                # Fall back to list_blobs if manifest read failed
+                if not manifest_read_success:
+                    try:
+                        from infrastructure import BlobRepository
+                        silver_repo = BlobRepository.for_zone("silver")
+                        data_prefix = f"{ref_output_prefix}/data/"
+                        blob_list = silver_repo.list_blobs(container, prefix=data_prefix)
+                        for blob_info in blob_list:
+                            data_file_paths.append(blob_info["name"])
+                        logger.info(
+                            f"{'[DRY-RUN] ' if dry_run else ''}list_blobs fallback: "
+                            f"{len(data_file_paths)} data files found under {data_prefix}"
+                        )
+                    except Exception as list_err:
+                        logger.warning(
+                            f"list_blobs fallback also failed for {container}/{ref_output_prefix}/data/: "
+                            f"{list_err}. Continuing with reference-only deletion."
+                        )
+
+                # Add data files to blob list
+                for data_path in data_file_paths:
+                    blobs_to_delete.append({
+                        "container": container,
+                        "blob_path": data_path,
+                        "category": "data_file"
+                    })
 
         # Count by category
         ref_blob_count = sum(1 for b in blobs_to_delete if b["category"] == "reference")

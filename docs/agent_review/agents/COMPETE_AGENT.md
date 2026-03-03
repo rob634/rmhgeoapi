@@ -207,6 +207,12 @@ Show the user the chosen split, the reasoning, and the file assignments before d
 
 Send both Task calls in a single message so they run in parallel.
 
+**IMPORTANT**: Both agents receive their relevant sections of the Project Constitution (`docs/agent_review/CONSTITUTION.md`). Violations of constitution rules are findings — same severity scale as architectural or correctness issues.
+
+- **Alpha** (architecture scope): Gets Constitution Sections 1, 4, 5, 8, 9
+- **Beta** (correctness scope): Gets Constitution Sections 1, 2, 3, 6, 7
+- For non-default splits, Omega assigns constitution sections based on relevance to each scope.
+
 ### Alpha Prompt
 
 ```
@@ -223,6 +229,10 @@ handling a different, non-overlapping scope. You do not know what they are looki
 ## What Is NOT Your Scope
 [Paste the "Does NOT see" list chosen by Omega]
 If you notice something outside your scope, ignore it. The other reviewer will handle it.
+
+## Project Constitution (Your Sections)
+[Paste relevant constitution sections — these are project-specific rules.
+Violations are findings at the severity listed in the constitution.]
 
 ## Files to Read
 [List exact file paths]
@@ -263,6 +273,10 @@ handling a different, non-overlapping scope. You do not know what they are looki
 ## What Is NOT Your Scope
 [Paste the "Does NOT see" list chosen by Omega]
 If you notice something outside your scope, ignore it. The other reviewer will handle it.
+
+## Project Constitution (Your Sections)
+[Paste relevant constitution sections — these are project-specific rules.
+Violations are findings at the severity listed in the constitution.]
 
 ## Files to Read
 [List exact file paths]
@@ -348,9 +362,14 @@ Tag each finding with one of:
 A finding is only CONFIRMED if you cite the specific line numbers and walk through
 the execution path. If you did not do that, use PROBABLE or SPECULATIVE.
 
+## Project Constitution (All Sections)
+[Paste the FULL constitution — Gamma checks what Alpha and Beta missed,
+including constitution violations neither caught.]
+
 ## Additional Focus Areas
 Look specifically for: security issues, concurrency gaps, silent data loss,
-configuration-dependent failures, and logging that exposes sensitive data.
+configuration-dependent failures, logging that exposes sensitive data, and
+PROJECT CONSTITUTION VIOLATIONS that neither Alpha nor Beta flagged.
 ```
 
 ### Gamma Quality Check

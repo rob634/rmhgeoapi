@@ -834,14 +834,266 @@ All pipeline executions in chronological order.
 
 ---
 
+## Run 26: SIEGE Run 9 — Fix Verification (OW1-F1, SVC-F3, REJ1-F1)
+
+| Field | Value |
+|-------|-------|
+| **Pipeline** | SIEGE |
+| **Date** | 02 MAR 2026 |
+| **Version** | 0.9.11.10 |
+| **Focus** | Verify 3 ad hoc fixes from Run 8 + regression test |
+| **Output** | `agent_docs/SIEGE_RUN_9.md` |
+
+**Sequences Tested**: 13
+
+| Category | Steps | Pass | Fail |
+|----------|-------|------|------|
+| Happy-path (1-6) | 19 | 19 | 0 |
+| Extended lifecycle (7-10) | 13 | 11 | 2 |
+| Invalid transitions (11-13) | 22 | 22 | 0 |
+| **Total** | **54** | **52** | **2** |
+
+**Score**: 90.8% — up from 87.4% in Run 8 (+3.4%)
+
+**Fixes Verified**:
+
+| Fix | Status | Evidence |
+|-----|--------|----------|
+| OW1-F1 (is_served premature) | **FIXED** | OW1+VC1: `is_served=false` on pending_review |
+| SVC-F3 (double container) | **FIXED** | No `silver-netcdf/silver-netcdf` in xarray URLs |
+| REJ1-F1 (rejection reason) | **FIXED** | `rejection_reason` visible in `/status` |
+| SVC-F1 (STAC wrong app) | **Confirmed** | STAC URLs → Service Layer, HTTP 200 |
+
+**State Audit**: 17/17 — **ZERO DIVERGENCES** (was 55/57 in Run 8)
+
+**Still Open**: REJ2-F1 (CRITICAL: resubmit broken), SVC-F2 (zarr viz), NZ1-F1 (native zarr), SG-9 (stats 404)
+
+**Token Usage**:
+
+| Agent | Tokens |
+|-------|--------|
+| Cartographer | ~25,000 |
+| Lancer Seq 1-5 | ~48,000 |
+| Lancer Seq 6-13 | ~65,000 |
+| Auditor | ~40,000 |
+| Scribe | ~35,000 |
+| **Total** | **~213,000** |
+
+---
+
 ## Cumulative Token Usage
 
 | Pipeline | Runs | Total Tokens |
 |----------|------|-------------|
 | COMPETE | Runs 1-6, 9, 12, 19 | 1,071,939 (Run 9: 346,656 + Run 12: 337,561 + Run 19: 387,722; Runs 1-6 predated instrumentation) |
 | GREENFIELD | Runs 7, 8, 10, 24 | ~944,196 (Run 10: 631,196 + Run 24: ~313,000; Runs 7-8 predated instrumentation) |
-| SIEGE | Runs 11, 13, 18, 20, 21, 22, 23, 25 | ~1,604,587 |
+| SIEGE | Runs 11, 13, 18, 20, 21, 22, 23, 25, 26 | ~1,817,587 |
 | REFLEXION | Runs 14, 15, 16, 17 | 631,966 (Run 14: 232,684 + Run 15: 278,900 + Run 16: 50,775 + Run 17: 69,607) |
-| **Instrumented Total** | Runs 9-25 | **~4,252,688** |
+| **Instrumented Total** | Runs 9-26 | **~4,465,688** |
 
-**Note**: Runs 1-8 predated the token instrumentation described in `agents/AGENT_METRICS.md`. Per-agent token breakdowns are available for Runs 9-24.
+---
+
+## Run 27: TOURNAMENT Run 1 — Full-Spectrum Adversarial (First TOURNAMENT)
+
+| Field | Value |
+|-------|-------|
+| **Pipeline** | TOURNAMENT |
+| **Date** | 02 MAR 2026 |
+| **Version** | 0.9.11.10 |
+| **Focus** | Full-spectrum adversarial testing: golden-path + attacks + blind audit + boundary-value |
+| **Output** | `agent_docs/TOURNAMENT_RUN_27.md` |
+
+**Phase 1: MUTATION (Parallel)**
+
+| Agent | Scope | Result |
+|-------|-------|--------|
+| Pathfinder | 6 sequences (raster, vector, multi-version, unpublish, NetCDF/VirtualiZarr, rejection recovery) | 6/6 PASS, 25/25 steps |
+| Saboteur | 18 adversarial attacks (TEMPORAL, DUPLICATION, IDENTITY, RACE, LIFECYCLE) | 16 EXPECTED, 2 INTERESTING, 0 UNEXPECTED |
+
+**Phase 2: AUDIT (Parallel)**
+
+| Agent | Scope | Result |
+|-------|-------|--------|
+| Inspector | 6 checkpoints, system-wide anomaly scan | 6/6 PASS, 7 anomalies (all correlated to Saboteur) |
+| Provocateur | 68 boundary-value attacks across 4 endpoints | 8 crashes (500s), 1 CRITICAL exception bug, 1 HIGH SSRF |
+
+**Phase 3: JUDGMENT**
+
+| Agent | Scope | Result |
+|-------|-------|--------|
+| Tribunal | Correlation of all 4 outputs | 0 state divergences, 11 findings classified |
+
+**Score**: **87.2%** (91.2% raw, -4 for 2 CRITICALs)
+
+**Findings**:
+
+| ID | Severity | Source | Description |
+|----|----------|--------|-------------|
+| PRV-1 | CRITICAL | Provocateur | `/approve`, `/reject`, `/revoke` return 500 on malformed JSON — `ValueError` vs `JSONDecodeError` mismatch |
+| LA-1/SG5-1 | CRITICAL | Saboteur | Stale release approved during active processing (reconfirmed from SIEGE Run 25) |
+| PRV-2 | HIGH | Provocateur | SSRF info leak — URL in container_name leaks Azure Storage internal errors |
+| LA-2 | MEDIUM | Saboteur | Unpublish dry_run accepts non-approved releases |
+| ID-1 | MEDIUM | Inspector+Saboteur | No authorization model on approvals — any caller can approve |
+| PRV-3 | MEDIUM | Provocateur | No length limits on approve/reject free-text fields |
+| PRV-7 | MEDIUM | Provocateur | Unpublish broken for DDH identifier-based lookups |
+| PRV-10 | MEDIUM | Provocateur | Inconsistent error format between /submit and /approve |
+| ID-2 | LOW | Inspector+Saboteur | Race condition resolved correctly (approve wins) |
+| PRV-8 | LOW | Provocateur | XSS payloads accepted in stored fields |
+| PRV-9 | LOW | Provocateur | 404 vs 405 for wrong HTTP methods |
+
+**Token Usage**:
+
+| Agent | Tokens | Duration |
+|-------|--------|----------|
+| Pathfinder | ~58,000 | 19 min |
+| Saboteur | ~42,000 | 7.5 min |
+| Inspector | ~63,000 | 5.5 min |
+| Provocateur | ~76,000 | 7.8 min |
+| Tribunal | ~39,000 | 2.6 min |
+| **Total** | **~278,000** | **~42 min** |
+
+---
+
+## Cumulative Token Usage
+
+| Pipeline | Runs | Total Tokens |
+|----------|------|-------------|
+| COMPETE | Runs 1-6, 9, 12, 19 | 1,071,939 (Run 9: 346,656 + Run 12: 337,561 + Run 19: 387,722; Runs 1-6 predated instrumentation) |
+| GREENFIELD | Runs 7, 8, 10, 24 | ~944,196 (Run 10: 631,196 + Run 24: ~313,000; Runs 7-8 predated instrumentation) |
+| SIEGE | Runs 11, 13, 18, 20, 21, 22, 23, 25, 26 | ~1,817,587 |
+| REFLEXION | Runs 14, 15, 16, 17 | 631,966 (Run 14: 232,684 + Run 15: 278,900 + Run 16: 50,775 + Run 17: 69,607) |
+| TOURNAMENT | Run 27 | ~278,000 |
+| **Instrumented Total** | Runs 9-27 | **~4,743,688** |
+
+**Note**: Runs 1-8 predated the token instrumentation described in `agents/AGENT_METRICS.md`. Per-agent token breakdowns are available for Runs 9-27.
+
+---
+
+## Run 28: COMPETE — Approval Workflow (Constitution Rerun)
+
+**Date**: 02 MAR 2026
+**Pipeline**: COMPETE (Adversarial Review) with Constitution Enforcement
+**Scope**: Approval Workflow — approve/reject/revoke lifecycle (7 files, ~7,000 lines)
+**Split**: B (Internal vs External)
+**Pattern**: A (Recurring Review)
+**Output**: `agent_docs/COMPETE_CONSTITUTION_RERUNS.md`
+
+| Agent | Scope | Tokens | Tool Uses | Duration |
+|-------|-------|--------|-----------|----------|
+| Alpha | Internal Logic (asset_approval_service.py, release_repository.py, asset.py, stac_materialization.py) | 91,682 | 20 | 163s |
+| Beta | External Interfaces (trigger_approvals.py, platform.py, pgstac_repository.py, release_repository.py) | 108,344 | 26 | 159s |
+| Gamma | Contradiction + Blind Spot Finder | 96,506 | 20 | 169s |
+| Delta | Final Report | 52,640 | 30 | 177s |
+| **Total** | | **349,172** | **96** | **668s** |
+
+**Key Findings**: 1 CRITICAL, 2 HIGH, 16 MEDIUM, 3 LOW. 5 Constitution violations (Sections 1.1, 1.2, 3.3).
+**Top Fix**: Block approval of non-COMPLETED releases (SG5-1/LA-1 reconfirmed — CRITICAL).
+**Gamma Discovery**: pgSTAC repository systematic error swallowing (11 methods, Section 3.3) — cascading silent failures.
+
+---
+
+## Run 29: COMPETE — CoreMachine Orchestration (Constitution Rerun)
+
+**Date**: 02 MAR 2026
+**Pipeline**: COMPETE (Adversarial Review) with Constitution Enforcement
+**Scope**: CoreMachine Orchestration — Job→Stage→Task pattern (8 files, ~5,600 lines)
+**Split**: A (Design vs Runtime)
+**Pattern**: B (Recurring Review)
+**Output**: `agent_docs/COMPETE_CONSTITUTION_RERUNS.md`
+
+| Agent | Scope | Tokens | Tool Uses | Duration |
+|-------|-------|--------|-----------|----------|
+| Alpha | Architecture/Design (machine.py, state_manager.py, base.py, mixins.py, services/__init__.py) | 104,474 | 36 | 191s |
+| Beta | Correctness/Runtime (machine.py, state_manager.py, transitions.py, task_handler.py, job_handler.py) | 106,028 | 37 | 446s |
+| Gamma | Contradiction + Blind Spot Finder | 114,550 | 32 | 231s |
+| Delta | Final Report | 57,341 | 29 | 148s |
+| **Total** | | **382,393** | **134** | **1,016s** |
+
+**Key Findings**: 2 CRITICAL, 5 HIGH, 12 MEDIUM, 7 LOW. 5 Constitution violations (Sections 1.1, 3.3).
+**Top Fix**: Re-raise transient exceptions in job/task handlers (Section 3.3 — CRITICAL). Service Bus messages silently consumed on failure.
+**Gamma Discovery**: Job/task handlers swallow ALL exceptions, preventing Service Bus retry delivery. If DB is also down, messages are permanently lost.
+
+---
+
+## Run 30: COMPETE — NetCDF-to-Zarr Pipeline
+
+**Date**: 03 MAR 2026
+**Pipeline**: COMPETE (Adversarial Review)
+**Scope**: `netcdf_to_zarr` 5-stage pipeline + platform routing + unpublish integration (8 files, ~2,800 lines)
+**Split**: C (Data vs Control Flow)
+**Pattern**: New Implementation Review
+**Output**: `agent_docs/COMPETE_NETCDF_TO_ZARR.md`
+
+| Agent | Scope | Tokens | Tool Uses | Duration |
+|-------|-------|--------|-----------|----------|
+| Alpha | Data integrity (handler_netcdf_to_zarr.py, netcdf_to_zarr.py, handler_ingest_zarr.py) | ~95,000 | ~30 | ~180s |
+| Beta | Control flow (submit.py, platform_translation.py, unpublish_zarr.py, unpublish_handlers.py) | ~98,000 | ~32 | ~200s |
+| Gamma | Contradiction + Blind Spot Finder | ~105,000 | ~28 | ~210s |
+| Delta | Final Report | ~52,000 | ~24 | ~140s |
+| **Total** | | **~350,000** | **~114** | **~730s** |
+
+**Key Findings**: 2 CRITICAL, 4 HIGH, 10 MEDIUM, 7 LOW. 6 Accepted Risks documented.
+**Top Fix**: Unpublish `inventory_zarr_item` broken for native Zarr pipelines — looks for `"reference"` asset key, but `netcdf_to_zarr` and `ingest_zarr` produce `"zarr-store"` (BS-1 — CRITICAL).
+**Gamma Discovery**: Versioned zarr submissions lose `zarr/` prefix — Step 6 in submit.py uses raster path generator for all data types (C-1 — CRITICAL).
+
+---
+
+## Cumulative Token Usage
+
+| Pipeline | Runs | Total Tokens |
+|----------|------|-------------|
+| COMPETE | Runs 1-6, 9, 12, 19, 28, 29, 30 | ~2,153,504 (prior 1,803,504 + Run 30: ~350,000) |
+| GREENFIELD | Runs 7, 8, 10, 24 | ~944,196 (Run 10: 631,196 + Run 24: ~313,000; Runs 7-8 predated instrumentation) |
+| SIEGE | Runs 11, 13, 18, 20, 21, 22, 23, 25, 26 | ~1,817,587 |
+| REFLEXION | Runs 14, 15, 16, 17 | 631,966 (Run 14: 232,684 + Run 15: 278,900 + Run 16: 50,775 + Run 17: 69,607) |
+| TOURNAMENT | Run 27 | ~278,000 |
+| **Instrumented Total** | Runs 9-30 | **~5,825,253** |
+
+**Note**: Runs 1-8 predated the token instrumentation described in `agents/AGENT_METRICS.md`. Per-agent token breakdowns are available for Runs 9-30.
+
+---
+
+## Recurring Review Patterns
+
+Two subsystems are designated for **regular re-review** using the COMPETE pipeline with full constitution enforcement. These are the highest-churn, highest-risk areas of the codebase — each has been the source of multiple SIEGE/TOURNAMENT findings across runs.
+
+### Pattern A: Approval Workflow Review
+
+**Original**: Run 4 (27 FEB 2026) — pre-constitution, 21 findings, 5 fixes
+**Why recurring**: The approval lifecycle is the most-patched subsystem. Runs 4, 5, 6, 12, 14, 16, 25, 26, 27 all found or fixed approval-related issues. Every fix is a potential constitution violation introduction point.
+
+**Scope** (7 files, ~7,000 lines):
+- `triggers/trigger_approvals.py` — approve/reject/revoke endpoints
+- `services/asset_approval_service.py` — approval business logic
+- `infrastructure/release_repository.py` — release persistence + atomic state transitions
+- `core/models/asset.py` — AssetRelease model + state machine
+- `core/models/platform.py` — PlatformRequest validation
+- `services/stac_materialization.py` — STAC writes at approval time
+- `infrastructure/pgstac_repository.py` — pgSTAC operations
+
+**Constitution focus**: Sections 1 (zero-tolerance), 2 (config access), 3 (error handling), 5 (platform boundaries), 6 (database patterns)
+
+**Recommended split**: B (Internal vs External) — Internal logic/invariants vs boundary contracts/error surfaces
+
+**Cadence**: After every deployment that touches approval files, or monthly.
+
+### Pattern B: CoreMachine Orchestration Review
+
+**Original**: Run 1 (26 FEB 2026) — pre-constitution, 18 findings, 5 fixes
+**Why recurring**: CoreMachine is the heart of all job processing. The zero-task stage guard (added post-Run 9) and various error handling changes make this a constitution compliance hotspot. Exception swallowing patterns (accepted risk BLIND-2) should be re-evaluated against Section 3.3.
+
+**Scope** (8 files, ~5,600 lines):
+- `core/machine.py` — orchestration engine
+- `core/state_manager.py` — job/task state persistence
+- `core/logic/transitions.py` — state machine rules
+- `jobs/base.py` — abstract job interface
+- `jobs/mixins.py` — JobBaseMixin (77% boilerplate reduction)
+- `services/__init__.py` — handler registry
+- `triggers/service_bus/task_handler.py` — task message processing
+- `triggers/service_bus/job_handler.py` — job message processing
+
+**Constitution focus**: Sections 1 (zero-tolerance, especially 1.3 ContractViolationError, 1.4 repository pattern), 3 (error handling categories), 4 (import hierarchy), 9 (job/task patterns)
+
+**Recommended split**: A (Design vs Runtime) — Architecture/contracts vs correctness/reliability
+
+**Cadence**: After major CoreMachine changes, or bi-monthly.

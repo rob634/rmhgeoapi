@@ -256,7 +256,14 @@ def _handle_exception(
         logger.error(f"[{correlation_id}] No task_id/job_id available - cannot mark as FAILED")
         logger.error(f"[{correlation_id}] Exception occurred before message parsing")
 
-    logger.warning(f"[{correlation_id}] Function completing (failure logged and marked in DB)")
+    # Classify: transient errors get re-raised so Service Bus retries the message.
+    # Permanent errors (bad input, programming bugs) are swallowed after marking failed.
+    from core.machine import RETRYABLE_EXCEPTIONS
+    if isinstance(e, RETRYABLE_EXCEPTIONS):
+        logger.warning(f"[{correlation_id}] Transient error ({type(e).__name__}) - re-raising for Service Bus retry")
+        raise
+
+    logger.warning(f"[{correlation_id}] Permanent error ({type(e).__name__}) - not re-raising")
 
     return {
         "success": False,

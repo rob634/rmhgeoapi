@@ -205,8 +205,10 @@ class PlatformRequest(BaseModel):
     # ========================================================================
     container_name: str = Field(
         ...,
-        max_length=100,
-        description="Azure storage container name (e.g., bronze-vectors)"
+        max_length=63,
+        min_length=3,
+        pattern=r'^[a-z0-9]([a-z0-9-]{1,61}[a-z0-9])?$',
+        description="Azure storage container name (e.g., bronze-vectors). Must be 3-63 lowercase alphanumeric or hyphens per Azure naming rules."
     )
     file_name: Optional[Union[str, List[str]]] = Field(
         default=None,

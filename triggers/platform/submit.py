@@ -325,7 +325,7 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
             # Each ordinal gets its own folder — no collision between versions.
             # Before this fix, all drafts wrote to …/draft/… which meant v2
             # overwrote v1's COG when both existed as approved+draft.
-            if 'output_folder' in job_params and release.version_ordinal:
+            if 'output_folder' in job_params and release.version_ordinal and platform_req.data_type == DataType.RASTER:
                 platform_cfg = get_config().platform
                 job_params['output_folder'] = platform_cfg.generate_raster_output_folder(
                     platform_req.dataset_id,

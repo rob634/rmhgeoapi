@@ -467,6 +467,15 @@ class TaskRoutingDefaults:
         "ingest_zarr_register",
 
         # =====================================================================
+        # NETCDF-TO-ZARR PIPELINE (replaces VirtualiZarr)
+        # =====================================================================
+        "netcdf_scan",
+        "netcdf_copy",
+        "netcdf_validate",
+        "netcdf_convert",
+        "netcdf_register",
+
+        # =====================================================================
         # TEST HANDLERS (V0.9 - moved from functionapp-tasks)
         # =====================================================================
         "hello_world_greeting",

@@ -65,7 +65,7 @@ def normalize_data_type(data_type: str) -> Optional[str]:
         return 'vector'
     if dt_lower in ('raster', 'unpublish_raster', 'process_raster', 'process_raster_v2', 'process_raster_docker'):
         return 'raster'
-    if dt_lower in ('zarr', 'virtualzarr', 'unpublish_zarr'):
+    if dt_lower in ('zarr', 'virtualzarr', 'unpublish_zarr', 'netcdf_to_zarr', 'ingest_zarr'):
         return 'zarr'
     return dt_lower
 
@@ -427,7 +427,7 @@ def translate_to_coremachine(
             }
 
     # ========================================================================
-    # ZARR CREATE -> virtualzarr or ingest_zarr
+    # ZARR CREATE -> netcdf_to_zarr (default), ingest_zarr, or virtualzarr (legacy)
     # ========================================================================
     elif data_type == DataType.ZARR:
         opts = request.processing_options
@@ -442,7 +442,7 @@ def translate_to_coremachine(
         # The handler needs an explicit account — not prefix-guessing.
         source_account = get_config().storage.bronze.account_name
 
-        pipeline = getattr(opts, 'pipeline', 'virtualzarr')
+        pipeline = getattr(opts, 'pipeline', 'netcdf_to_zarr')
 
         if pipeline == 'ingest_zarr':
             # Native Zarr store — normalize source_url from container+file if needed
@@ -468,8 +468,8 @@ def translate_to_coremachine(
                 'version_id': request.version_id,
             }
 
-        else:
-            # VirtualiZarr (NetCDF → kerchunk reference pipeline) — existing path unchanged
+        elif pipeline == 'virtualzarr':
+            # Legacy VirtualiZarr — kept for explicit opt-in only
             return 'virtualzarr', {
                 'source_url': request.source_url,
                 'source_account': source_account,
@@ -478,6 +478,26 @@ def translate_to_coremachine(
                 'fail_on_chunking_warnings': getattr(opts, 'fail_on_chunking_warnings', False),
                 'max_files': getattr(opts, 'max_files', 500),
                 'ref_output_prefix': f"refs/{request.dataset_id}/{request.resource_id}",
+                'stac_item_id': stac_item_id,
+                'collection_id': collection_id,
+                'title': request.generated_title,
+                'description': request.description,
+                'tags': request.tags,
+                'access_level': request.access_level.value if request.access_level else 'OUO',
+                'dataset_id': request.dataset_id,
+                'resource_id': request.resource_id,
+                'version_id': request.version_id,
+            }
+
+        else:
+            # NetCDF-to-Zarr (default) — real conversion, native Zarr output
+            return 'netcdf_to_zarr', {
+                'source_url': request.source_url,
+                'source_account': source_account,
+                'file_pattern': getattr(opts, 'file_pattern', '*.nc'),
+                'concat_dim': getattr(opts, 'concat_dim', 'time'),
+                'max_files': getattr(opts, 'max_files', 500),
+                'output_folder': f"zarr/{request.dataset_id}/{request.resource_id}",
                 'stac_item_id': stac_item_id,
                 'collection_id': collection_id,
                 'title': request.generated_title,

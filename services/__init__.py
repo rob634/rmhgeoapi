@@ -93,6 +93,15 @@ from .handler_ingest_zarr import (
     ingest_zarr_register,
 )
 
+# NetCDF-to-Zarr handlers (real conversion pipeline, replaces virtualzarr)
+from .handler_netcdf_to_zarr import (
+    netcdf_scan,
+    netcdf_copy,
+    netcdf_validate,
+    netcdf_convert,
+    netcdf_register,
+)
+
 # ============================================================================
 # STAC METADATA HELPER
 # ============================================================================
@@ -166,6 +175,13 @@ ALL_HANDLERS = {
     "ingest_zarr_validate": ingest_zarr_validate,
     "ingest_zarr_copy": ingest_zarr_copy,
     "ingest_zarr_register": ingest_zarr_register,
+
+    # NetCDF-to-Zarr handlers (real conversion pipeline)
+    "netcdf_scan": netcdf_scan,
+    "netcdf_copy": netcdf_copy,
+    "netcdf_validate": netcdf_validate,
+    "netcdf_convert": netcdf_convert,
+    "netcdf_register": netcdf_register,
 
 }
 

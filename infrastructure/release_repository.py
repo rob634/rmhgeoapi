@@ -1560,6 +1560,41 @@ class ReleaseRepository(PostgreSQLRepository):
                 row = cur.fetchone()
                 return self._row_to_model(row) if row else None
 
+    def has_newer_active_ordinal(self, asset_id: str, version_ordinal: int) -> Optional[dict]:
+        """
+        Check if a newer ordinal exists for this asset that is still active
+        (not rejected/revoked). Used to block approval of stale ordinals.
+
+        Returns:
+            Dict with newer release info if found, None otherwise.
+        """
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL("""
+                        SELECT release_id, version_ordinal, processing_status, approval_state
+                        FROM {}.{}
+                        WHERE asset_id = %s
+                          AND version_ordinal > %s
+                          AND approval_state NOT IN (%s, %s)
+                        ORDER BY version_ordinal DESC
+                        LIMIT 1
+                    """).format(
+                        sql.Identifier(self.schema),
+                        sql.Identifier(self.table)
+                    ),
+                    (asset_id, version_ordinal, ApprovalState.REJECTED, ApprovalState.REVOKED)
+                )
+                row = cur.fetchone()
+                if not row:
+                    return None
+                return {
+                    "release_id": row[0],
+                    "version_ordinal": row[1],
+                    "processing_status": row[2],
+                    "approval_state": row[3],
+                }
+
     def count_by_approval_state(self) -> Dict[str, int]:
         """
         Get counts of releases grouped by approval_state.

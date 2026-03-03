@@ -226,8 +226,9 @@ Use `data_type_override: "zarr"` from siege_config.json. Submit body must includ
 5. **CHECKPOINT REJ1**: Release rejected, reason in audit trail
 
 **Sequence 8: Reject → Resubmit → Approve**
-1. POST `/api/platform/resubmit` (same request_id from Seq 7) → expect new job_id created
-2. Poll until completed → capture new release_id (revision counter incremented)
+1. POST `/api/platform/submit` (same dataset_id + resource_id as Seq 7, `"processing_options": {"overwrite": true}`) → expect new job_id created
+   **CRITICAL**: `overwrite` MUST be inside `processing_options`, NOT at the top level. Top-level `overwrite` is silently ignored by Pydantic.
+2. Poll until completed → verify revision counter incremented (revision=2), approval_state=pending_review
 3. POST `/api/platform/approve` (version_id="v1") → expect success
 4. GET `/api/platform/catalog/lookup-unified?dataset_id={ds}&resource_id={rs}` → verify catalog entry
 5. **CHECKPOINT REJ2**: Recovered from rejection, release approved after resubmit
@@ -243,7 +244,8 @@ Use `data_type_override: "zarr"` from siege_config.json. Submit body must includ
 **Sequence 10: Overwrite Draft**
 1. POST `/api/platform/submit` (new dataset_id `sg-overwrite-test`) → capture request_id_1
 2. POST `/api/platform/submit` (same dataset_id + resource_id, NO overwrite) → expect idempotent response (same request_id returned) or 409 if job exists
-3. POST `/api/platform/submit` (same dataset_id + resource_id, `overwrite=true`) → expect NEW request_id, revision counter incremented
+3. POST `/api/platform/submit` (same dataset_id + resource_id, `"processing_options": {"overwrite": true}`) → expect same request_id, revision counter incremented
+   **CRITICAL**: `overwrite` MUST be inside `processing_options`, NOT at the top level.
 4. Poll new request until completed
 5. **CHECKPOINT OW1**: Old draft replaced, new release active
 

@@ -113,8 +113,9 @@ Claude plays General directly. General's job:
 1. Read V0.9_TEST.md (sections A–I) and the Saboteur Attack Catalog.
 2. Read any prior COMPETE, WARGAME, or SIEGE findings for context.
 3. Define the `tn-` namespace for all test data:
-   - Raster: `dataset_id=tn-raster-test`, `resource_id=dctest`, `file_name=dctest.tif`
-   - Vector: `dataset_id=tn-vector-test`, `resource_id=cutlines`, `file_name=cutlines.gpkg`
+   - Raster: `dataset_id=tn-raster-test`, `resource_id=dctest`, `file_name=dctest.tif`, `container_name=rmhazuregeobronze`
+   - Vector: `dataset_id=tn-vector-test`, `resource_id=cutlines`, `file_name=0403c87a-0c6c-4767-a6ad-78a8026258db/Vivid_Standard_30_CO02_24Q2/cutlines.gpkg`, `container_name=rmhazuregeobronze`
+   - NetCDF: `dataset_id=tn-netcdf-test`, `resource_id=spei-ssp370`, `file_name=good-data/climatology-spei12-annual-mean_cmip6-x0.25_ensemble-all-ssp370_climatology_median_2040-2059.nc`, `container_name=wargames`, `data_type=zarr`
 4. Write 4 specialist briefs:
 
 ### Pathfinder Brief
@@ -181,13 +182,28 @@ Execute these lifecycle sequences using `tn-` prefix test data. Record state che
 1. Unpublish v2 → poll until complete
 2. **CHECKPOINT P-U1**: v2 removed, v1 preserved
 
-**Sequence 5: Rejection Recovery**
+**Sequence 5: NetCDF / VirtualiZarr Lifecycle**
+1. Submit NetCDF: `dataset_id=tn-netcdf-test`, `resource_id=spei-ssp370`, `file_name=good-data/climatology-spei12-annual-mean_cmip6-x0.25_ensemble-all-ssp370_climatology_median_2040-2059.nc`, `container_name=wargames`, `data_type=zarr` → capture request_id, job_id
+2. Poll until completed (VirtualiZarr pipeline: scan → copy → validate → combine → register — may take longer than raster)
+3. Approve with version_id="v1" → verify STAC materialized (zarr items go in STAC)
+4. GET `/api/platform/catalog/dataset/{dataset_id}` → verify catalog entry exists
+5. GET `/api/platform/catalog/lookup-unified?dataset_id=tn-netcdf-test&resource_id=spei-ssp370` → verify `xarray_urls` present with keys [variables, tiles, tilejson, preview, info, point]. Verify URLs contain TiTiler base hostname and `/xarray/` path. No double container prefix in URLs. → **CHECKPOINT P-Z1-URLS**
+6. **CHECKPOINT P-Z1**: Record all IDs, verify job_type=virtualzarr, STAC item present
+
+Note: NetCDF (.nc) routes to the VirtualiZarr pipeline, NOT the raster pipeline.
+Submit body must include `"data_type": "zarr"`. Processing may take longer (5-stage pipeline).
+
+**Sequence 6: Rejection Recovery**
 1. Submit new raster (different resource_id: `tn-reject-test`)
 2. Poll until completed
 3. Reject the release
-4. Resubmit same resource → should create new release
-5. Approve
-6. **CHECKPOINT P-RJ1**: Rejected release still exists, new release approved
+4. Resubmit same resource with `"processing_options": {"overwrite": true}` → should overwrite rejected release (revision increments)
+5. Poll until completed
+6. Approve
+7. **CHECKPOINT P-RJ1**: Rejected release overwritten, new revision approved
+
+CRITICAL: The `overwrite` flag MUST be inside `processing_options`, NOT at the JSON top level.
+Pydantic silently ignores extra top-level fields.
 
 **Polling**: Every 10 seconds, max 30 attempts per job.
 
@@ -203,6 +219,10 @@ EXPECTED STATE:
     - {release_id} → approval_state={state}, ordinal={n}
   STAC Items:
     - {item_id} → {exists | not exists}
+  Service URLs:
+    - raster: titiler_urls keys={list} | MISSING
+    - vector: endpoints.features={url}, tiles.tilejson={url} | MISSING
+    - zarr: xarray_urls keys={list} | MISSING
   Blob Paths:
     - {path} → {should exist | should not exist}
   Captured IDs:
@@ -249,7 +269,8 @@ Execute attacks from ALL 5 categories using the **SAME `tn-` namespace**. This c
 - **Late attacks** (after Pathfinder approves): T3, D5, L4, L5
 
 **Key rules**:
-- MUST use `tn-raster-test` and `tn-vector-test` as dataset_ids
+- MUST use `tn-raster-test`, `tn-vector-test`, and `tn-netcdf-test` as dataset_ids
+- For zarr/NetCDF attacks: use `container_name=wargames`, `data_type=zarr`
 - MUST record expected outcome (succeed/fail) for every attack
 - MUST note any behavior that is surprising or undocumented
 
@@ -293,12 +314,21 @@ curl -s "${BASE_URL}/api/platform/catalog/item/{collection}/{item_id}"
 # Dataset-level view
 curl -s "${BASE_URL}/api/platform/catalog/dataset/{dataset_id}"
 
+# Unified catalog lookup (includes service URLs: titiler_urls, xarray_urls, endpoints)
+curl -s "${BASE_URL}/api/platform/catalog/lookup-unified?dataset_id={dataset_id}&resource_id={resource_id}"
+
 # Approval status
 curl -s "${BASE_URL}/api/platform/approvals/status?stac_item_ids={ids}"
 
 # Recent failures
 curl -s "${BASE_URL}/api/platform/failures"
 ```
+
+**For zarr checkpoints (P-Z1) — additional verification**:
+- Verify `xarray_urls` keys exist: [variables, tiles, tilejson, preview, info, point]
+- Verify URLs contain TiTiler base hostname and `/xarray/` path
+- Verify no double container prefix in URLs (e.g., no `silver-netcdf/silver-netcdf/`)
+- Verify STAC collection exists for zarr dataset
 
 **System-wide checks — Platform API**:
 

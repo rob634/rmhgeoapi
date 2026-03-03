@@ -41,6 +41,7 @@ from .process_raster_collection_docker import ProcessRasterCollectionDockerJob
 from .vector_docker_etl import VectorDockerETLJob
 from .virtualzarr import VirtualZarrJob
 from .ingest_zarr import IngestZarrJob
+from .netcdf_to_zarr import NetCDFToZarrJob
 from .unpublish_zarr import UnpublishZarrJob
 
 # Job Registry - add new jobs here
@@ -74,6 +75,9 @@ ALL_JOBS = {
 
     # IngestZarr (native Zarr store ingest pipeline)
     "ingest_zarr": IngestZarrJob,
+
+    # NetCDF-to-Zarr (real conversion pipeline, replaces virtualzarr)
+    "netcdf_to_zarr": NetCDFToZarrJob,
 }
 
 def validate_job_registry():

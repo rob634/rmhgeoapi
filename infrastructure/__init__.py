@@ -93,6 +93,8 @@ if TYPE_CHECKING:
     from .release_repository import ReleaseRepository as _ReleaseRepository
     # Release→tables junction (26 FEB 2026 - Multi-table Release)
     from .release_table_repository import ReleaseTableRepository as _ReleaseTableRepository
+    # Route tables (02 MAR 2026 - Service Layer Routing)
+    from .route_repository import RouteRepository as _RouteRepository
     from .connection_pool import ConnectionPoolManager as _ConnectionPoolManager
     from .schema_analyzer import (
         SchemaAnalyzer as _SchemaAnalyzer,
@@ -275,6 +277,11 @@ def __getattr__(name: str):
         from .service_layer_client import ServiceLayerClient
         return ServiceLayerClient
 
+    # Route Repository (02 MAR 2026 - Service Layer Routing)
+    elif name == "RouteRepository":
+        from .route_repository import RouteRepository
+        return RouteRepository
+
     else:
         raise AttributeError(f"module 'infrastructure' has no attribute '{name}'")
 
@@ -327,4 +334,6 @@ __all__ = [
     "DriftType",
     # Service Layer Client (05 FEB 2026 - F1.6 TiPG Refresh)
     "ServiceLayerClient",
+    # Route Repository (02 MAR 2026 - Service Layer Routing)
+    "RouteRepository",
 ]

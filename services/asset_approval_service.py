@@ -151,12 +151,39 @@ class AssetApprovalService:
                 'remediation': 'Release must be in pending_review state to approve'
             }
 
-        # Warn if processing is not complete (don't block)
+        # Block approval of releases that haven't finished processing
         if release.processing_status != ProcessingStatus.COMPLETED:
-            logger.warning(
-                f"Approving release with processing_status={release.processing_status.value} "
-                f"(expected COMPLETED) - proceeding anyway"
+            return {
+                'success': False,
+                'error': (
+                    f"Cannot approve: processing_status is '{release.processing_status.value}', "
+                    f"expected 'completed'"
+                ),
+                'error_type': 'ApprovalFailed',
+                'remediation': 'Wait for processing to complete before approving'
+            }
+
+        # Block approval of stale ordinals when a newer ordinal exists (SG5-1/LA-1)
+        if release.version_ordinal:
+            newer = self.release_repo.has_newer_active_ordinal(
+                release.asset_id, release.version_ordinal
             )
+            if newer:
+                return {
+                    'success': False,
+                    'error': (
+                        f"Cannot approve ordinal {release.version_ordinal}: "
+                        f"newer ordinal {newer['version_ordinal']} exists "
+                        f"(status: {newer['processing_status']}, "
+                        f"approval: {newer['approval_state']})"
+                    ),
+                    'error_type': 'StaleOrdinal',
+                    'newer_release_id': newer['release_id'],
+                    'remediation': (
+                        f"Approve ordinal {newer['version_ordinal']} instead, "
+                        f"or reject/revoke it before approving this one"
+                    )
+                }
 
         now = datetime.now(timezone.utc)
 

@@ -192,6 +192,11 @@ Sort by SEVERITY multiplied by LIKELIHOOD. Most dangerous faults first.
 ## Agent R's Analysis
 [Paste R output]
 
+## Project Constitution (Fault-Relevant Sections)
+[Paste Constitution Sections 1, 2, 3, 6 from docs/agent_review/CONSTITUTION.md.
+These are project-specific rules. Code that violates these rules is a fault —
+classify it alongside your other fault scenarios.]
+
 ## Developer Context
 [Paste any context about the system, known issues, or areas of concern.
 Include the Infrastructure Profile if available.
@@ -214,6 +219,15 @@ Your prime directive: Minimal targeted patches. Do NOT rewrite.
 3. NO "while we are here" improvements. Each patch targets exactly one fault.
 4. Patches MUST NOT change the behavior of the code when everything is working normally.
 5. Every patch must be small enough to review in under 5 minutes.
+6. Patches MUST NOT introduce Project Constitution violations (see below).
+
+## Project Constitution (Patch Constraints)
+[Paste Constitution Sections 1, 3 from docs/agent_review/CONSTITUTION.md.
+Your patches must not introduce new violations of these rules. For example:
+- Don't add `or 'default'` fallbacks (Rule 1.1)
+- Don't add f-string SQL (Rule 1.2)
+- Don't catch ContractViolationError (Rule 1.3)
+- Don't swallow exceptions (Rule 3.3)]
 
 ## Preferred Patch Strategies (in priority order)
 

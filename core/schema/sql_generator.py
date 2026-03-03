@@ -85,7 +85,7 @@ from ..models.external_service import ExternalService, ServiceType, ServiceStatu
 from ..models.job_event import JobEvent, JobEventType, JobEventStatus  # Job event tracking (23 JAN 2026)
 
 # Geo and ETL schema models (21 JAN 2026 - F7.IaC)
-from ..models.geo import GeoTableCatalog, FeatureCollectionStyles  # OGC Styles (22 JAN 2026)
+from ..models.geo import GeoTableCatalog, FeatureCollectionStyles, B2CRoute, B2BRoute  # OGC Styles (22 JAN 2026), Routes (02 MAR 2026)
 from ..models.etl_tracking import VectorEtlTracking, RasterEtlTracking, EtlStatus
 from ..models.raster_render_config import RasterRenderConfig  # Render configs (22 JAN 2026 - F2.11)
 from ..models.map_state import MapState, MapStateSnapshot, MapType  # Map states (23 JAN 2026)
@@ -508,6 +508,8 @@ class PydanticToSQL:
         Returns CREATE statements for:
         - geo.table_catalog (service layer metadata)
         - geo.feature_collection_styles (OGC API Styles - 22 JAN 2026)
+        - geo.b2c_routes (Public API routing - 02 MAR 2026)
+        - geo.b2b_routes (Internal API routing - 02 MAR 2026)
 
         Returns:
             List of composed SQL statements
@@ -531,6 +533,16 @@ class PydanticToSQL:
         statements.append(self.generate_table_from_model(FeatureCollectionStyles))
         statements.extend(self.generate_add_columns_from_model(FeatureCollectionStyles))
         statements.extend(self.generate_indexes_from_model(FeatureCollectionStyles))
+
+        # B2CRoute: Public API routing (02 MAR 2026)
+        statements.append(self.generate_table_from_model(B2CRoute))
+        statements.extend(self.generate_add_columns_from_model(B2CRoute))
+        statements.extend(self.generate_indexes_from_model(B2CRoute))
+
+        # B2BRoute: Internal API routing (02 MAR 2026)
+        statements.append(self.generate_table_from_model(B2BRoute))
+        statements.extend(self.generate_add_columns_from_model(B2BRoute))
+        statements.extend(self.generate_indexes_from_model(B2BRoute))
 
         self.logger.info(f"✅ Geo schema DDL complete: {len(statements)} statements")
         return statements

@@ -125,6 +125,13 @@ def db_health_performance(req: func.HttpRequest) -> func.HttpResponse:
     return admin_db_health_trigger.handle_request(req)
 
 
+@bp.route(route="dbadmin/health/utilization", methods=["GET"])
+def db_health_utilization(req: func.HttpRequest) -> func.HttpResponse:
+    """Utilization snapshot: GET /api/dbadmin/health/utilization"""
+    from triggers.admin.db_health import admin_db_health_trigger
+    return admin_db_health_trigger.handle_request(req)
+
+
 # ============================================================================
 # MAINTENANCE (1 consolidated route)
 # ============================================================================

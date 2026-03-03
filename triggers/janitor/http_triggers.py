@@ -56,14 +56,14 @@ def janitor_run_handler(req: func.HttpRequest) -> func.HttpResponse:
                 "success": False,
                 "error": "Missing required parameter: type",
                 "error_type": "ValidationError",
-                "valid_types": ["task_watchdog", "job_health", "orphan_detector", "metadata_consistency", "log_cleanup", "all"],
+                "valid_types": ["task_watchdog", "job_health", "orphan_detector", "metadata_consistency", "log_cleanup", "queue_depth_snapshot", "all"],
                 "usage": "POST /api/admin/janitor/run?type=task_watchdog"
             }),
             status_code=400,
             mimetype="application/json"
         )
 
-    valid_types = ["task_watchdog", "job_health", "orphan_detector", "metadata_consistency", "log_cleanup", "all"]
+    valid_types = ["task_watchdog", "job_health", "orphan_detector", "metadata_consistency", "log_cleanup", "queue_depth_snapshot", "all"]
     if run_type not in valid_types:
         return func.HttpResponse(
             json.dumps({
@@ -105,6 +105,13 @@ def janitor_run_handler(req: func.HttpRequest) -> func.HttpResponse:
             # Log cleanup (11 JAN 2026 - F7.12.F)
             from triggers.admin.log_cleanup_timer import log_cleanup_timer_handler
             result = log_cleanup_timer_handler.execute()
+            results.append(result)
+
+        if run_type == "queue_depth_snapshot" or run_type == "all":
+            # Queue depth snapshot (03 MAR 2026 - OBSERVATORY)
+            from infrastructure.janitor_repository import JanitorRepository
+            janitor_repo = JanitorRepository()
+            result = janitor_repo.record_queue_depth_snapshot()
             results.append(result)
 
         # Summary

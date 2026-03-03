@@ -124,11 +124,26 @@ class InfrastructureHealthChecks(HealthCheckPlugin):
                         try:
                             exists = repo.container_exists(container_name)
                             if exists:
-                                zone_result["containers"][container_name] = {
+                                container_info = {
                                     "status": "exists",
                                     "purpose": purpose,
                                     "criticality": criticality
                                 }
+
+                                # Latency probe: measure get_container_properties() time
+                                try:
+                                    import time
+                                    container_client = repo.blob_service.get_container_client(container_name)
+                                    probe_start = time.time()
+                                    container_client.get_container_properties()
+                                    latency_ms = round((time.time() - probe_start) * 1000, 1)
+                                    container_info["latency_ms"] = latency_ms
+                                    if latency_ms > 2000:
+                                        container_info["latency_warning"] = f"High latency: {latency_ms}ms (>2000ms)"
+                                except Exception:
+                                    pass  # Latency probe is best-effort
+
+                                zone_result["containers"][container_name] = container_info
                                 result["summary"]["containers_exist"] += 1
                             else:
                                 zone_result["containers"][container_name] = {

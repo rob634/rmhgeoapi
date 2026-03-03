@@ -196,7 +196,7 @@ class JanitorRepository(PostgreSQLRepository):
         # Build exclusion clause if task types provided
         if exclude_task_types:
             # Use ANY array comparison for efficient exclusion
-            exclusion_clause = sql.SQL(" AND t.task_type != ALL(%s)")
+            exclusion_clause = sql.SQL(" AND NOT (t.task_type = ANY(%s))")
             query = sql.SQL("""
                 SELECT
                     t.task_id,
@@ -842,6 +842,104 @@ class JanitorRepository(PostgreSQLRepository):
             # Table might not exist yet
             logger.warning(f"Could not get janitor runs: {e}")
             return []
+
+
+    # ========================================================================
+    # QUEUE DEPTH SNAPSHOTS (Service Bus Trending)
+    # ========================================================================
+
+    def record_queue_depth_snapshot(self) -> Dict[str, Any]:
+        """
+        Capture queue depth snapshot using existing janitor_runs infrastructure.
+
+        Records Service Bus queue depths as a janitor run of type
+        'queue_depth_snapshot'. The actions_taken field stores per-queue
+        message counts for time-series trending.
+
+        Returns:
+            Dict with snapshot results (success, queue_depths, etc.)
+        """
+        started_at = datetime.now(timezone.utc)
+        actions = []
+        total_messages = 0
+
+        try:
+            from infrastructure.service_bus import ServiceBusRepository
+            from config import get_config
+
+            config = get_config()
+            sb_repo = ServiceBusRepository()
+
+            queue_names = [
+                config.queues.jobs_queue,
+                config.queues.container_tasks_queue,
+            ]
+
+            for queue_name in queue_names:
+                if not queue_name:
+                    continue
+                try:
+                    count = sb_repo.get_queue_length(queue_name)
+                    actions.append({
+                        "queue": queue_name,
+                        "active_messages": count,
+                        "status": "ok",
+                    })
+                    total_messages += count
+                except Exception as e:
+                    actions.append({
+                        "queue": queue_name,
+                        "active_messages": -1,
+                        "status": "error",
+                        "error": str(e)[:200],
+                    })
+
+            completed_at = datetime.now(timezone.utc)
+
+            # Log as a janitor run for time-series storage
+            run_id = self.log_janitor_run(
+                run_type="queue_depth_snapshot",
+                started_at=started_at,
+                completed_at=completed_at,
+                items_scanned=len(queue_names),
+                items_fixed=0,
+                actions_taken=actions,
+                status="completed",
+            )
+
+            return {
+                "success": True,
+                "run_type": "queue_depth_snapshot",
+                "run_id": run_id,
+                "items_scanned": len(queue_names),
+                "items_fixed": 0,
+                "total_messages": total_messages,
+                "queue_depths": actions,
+                "duration_ms": int((completed_at - started_at).total_seconds() * 1000),
+            }
+
+        except Exception as e:
+            completed_at = datetime.now(timezone.utc)
+            logger.warning(f"[JANITOR] Queue depth snapshot failed: {e}")
+
+            self.log_janitor_run(
+                run_type="queue_depth_snapshot",
+                started_at=started_at,
+                completed_at=completed_at,
+                items_scanned=0,
+                items_fixed=0,
+                actions_taken=actions,
+                status="failed",
+                error_details=str(e)[:500],
+            )
+
+            return {
+                "success": False,
+                "run_type": "queue_depth_snapshot",
+                "error": str(e)[:500],
+                "items_scanned": 0,
+                "items_fixed": 0,
+            }
 
 
 # ============================================================================

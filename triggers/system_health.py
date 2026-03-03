@@ -193,12 +193,30 @@ class SystemHealthProbe:
                     response = requests.get(readyz_url, timeout=5)
 
                     if response.status_code == 200:
-                        apps[app_name] = {
+                        worker_info = {
                             "status": "healthy",
                             "url": url,
                             "source": "http",
                             "check": "readyz"
                         }
+                        # Parse response body for version and check details
+                        try:
+                            body = response.json()
+                            if isinstance(body, dict):
+                                if "version" in body:
+                                    worker_info["version"] = body["version"]
+                                if "checks_passed" in body:
+                                    worker_info["checks_passed"] = body["checks_passed"]
+                                if "checks_failed" in body:
+                                    worker_info["checks_failed"] = body["checks_failed"]
+                                if "warnings_count" in body:
+                                    worker_info["warnings_count"] = body["warnings_count"]
+                                # Degrade status if worker reports failures
+                                if body.get("checks_failed", 0) > 0:
+                                    worker_info["status"] = "degraded"
+                        except (ValueError, KeyError):
+                            pass  # Body parse is best-effort
+                        apps[app_name] = worker_info
                     else:
                         apps[app_name] = {
                             "status": "unhealthy",
@@ -253,7 +271,7 @@ class SystemHealthProbe:
             from config import get_config
 
             config = get_config()
-            fqdn = config.queues.service_bus_fqdn
+            fqdn = config.queues.namespace
 
             if not fqdn:
                 return {"error": "Service Bus not configured"}
@@ -265,7 +283,7 @@ class SystemHealthProbe:
             )
 
             queue_names = [
-                config.queues.job_queue_name,
+                config.queues.jobs_queue,
                 config.queues.container_tasks_queue
             ]
 
@@ -290,11 +308,10 @@ class SystemHealthProbe:
     def _check_database(self) -> Dict[str, Any]:
         """Check database health and connection stats."""
         try:
-            from infrastructure import get_connection_pool
+            from infrastructure.connection_pool import ConnectionPoolManager
             from config import get_config
 
             config = get_config()
-            pool = get_connection_pool()
 
             # Get pool stats
             pool_stats = {
@@ -303,14 +320,17 @@ class SystemHealthProbe:
                 "status": "healthy"
             }
 
+            # Add pool stats from ConnectionPoolManager
+            pool_stats["pool"] = ConnectionPoolManager.get_pool_stats()
+
             # Test connection
-            with pool.connection() as conn:
+            with ConnectionPoolManager.get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute("SELECT 1")
 
             # Get connection count if possible
             try:
-                with pool.connection() as conn:
+                with ConnectionPoolManager.get_connection() as conn:
                     with conn.cursor() as cur:
                         cur.execute("""
                             SELECT count(*) FROM pg_stat_activity

@@ -36,6 +36,7 @@ from .application import ApplicationHealthChecks
 from .infrastructure import InfrastructureHealthChecks
 from .database import DatabaseHealthChecks
 from .external_services import ExternalServicesHealthChecks
+from .observability import ObservabilityHealthChecks
 
 
 # ============================================================================
@@ -48,6 +49,7 @@ HEALTH_CHECK_PLUGINS: List[Type[HealthCheckPlugin]] = [
     StartupHealthChecks,           # Priority 10 - Run first
     ApplicationHealthChecks,       # Priority 20
     InfrastructureHealthChecks,    # Priority 30
+    ObservabilityHealthChecks,     # Priority 35 - Metrics and App Insights
     DatabaseHealthChecks,          # Priority 40
     ExternalServicesHealthChecks,  # Priority 50 - Run last (parallel HTTP)
 ]
@@ -100,6 +102,7 @@ __all__ = [
     'StartupHealthChecks',
     'ApplicationHealthChecks',
     'InfrastructureHealthChecks',
+    'ObservabilityHealthChecks',
     'DatabaseHealthChecks',
     'ExternalServicesHealthChecks',
 ]

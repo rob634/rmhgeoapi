@@ -281,6 +281,53 @@ def health(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # ============================================================================
+# AUTH TOKEN STATUS ENDPOINT
+# ============================================================================
+
+
+@bp.route(
+    route="auth/status",
+    methods=["GET"],
+    auth_level=func.AuthLevel.ANONYMOUS
+)
+def auth_status(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Auth token status — TTL and freshness for all cached tokens.
+
+    Returns:
+        200: {"postgres": {"has_token": true, "ttl_seconds": 1800, ...}, "storage": {...}}
+        500: Error details
+
+    Example:
+        GET /api/auth/status
+    """
+    try:
+        from infrastructure.auth import get_token_status
+
+        status = get_token_status()
+
+        return func.HttpResponse(
+            json.dumps({
+                "status": "ok",
+                "tokens": status,
+            }, indent=2),
+            status_code=200,
+            mimetype="application/json"
+        )
+
+    except Exception as e:
+        return func.HttpResponse(
+            json.dumps({
+                "status": "error",
+                "error": str(e),
+                "error_type": type(e).__name__,
+            }, indent=2),
+            status_code=500,
+            mimetype="application/json"
+        )
+
+
+# ============================================================================
 # DIAGNOSTICS ENDPOINT
 # ============================================================================
 

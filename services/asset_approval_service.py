@@ -362,6 +362,13 @@ class AssetApprovalService:
                     )
                 }
 
+        # Step 6b: Create route records (NON-FATAL)
+        route_result = self._create_routes(release, asset, version_id, clearance_state, reviewer)
+        if route_result.get('success'):
+            logger.info(f"Routes created: {route_result.get('slug')}")
+        else:
+            logger.warning(f"Route creation failed (non-fatal): {route_result.get('error')}")
+
         # Step 7: Trigger ADF if PUBLIC
         adf_run_id = None
         action = 'approved_ouo'
@@ -561,6 +568,19 @@ class AssetApprovalService:
         # Delete STAC item (after DB state is authoritative)
         stac_result = self._delete_stac(release)
 
+        # Delete route records (NON-FATAL)
+        from infrastructure import AssetRepository
+        asset_repo = AssetRepository()
+        asset_for_routes = asset_repo.get_by_id(release.asset_id)
+        if asset_for_routes:
+            route_result = self._delete_routes(release, asset_for_routes)
+            if route_result.get('success'):
+                logger.info(f"Routes deleted for revoked release {release_id[:16]}...")
+            else:
+                logger.warning(f"Route deletion failed (non-fatal): {route_result.get('error')}")
+        else:
+            logger.warning(f"Could not load asset {release.asset_id[:16]}... for route deletion")
+
         # If revoked release was is_latest, flip to next most recent approved release
         if release.is_latest:
             versions = self.release_repo.list_by_asset(release.asset_id)
@@ -754,6 +774,163 @@ class AssetApprovalService:
                 'success': False,
                 'error': str(e)
             }
+
+    # =========================================================================
+    # ROUTE INTEGRATION
+    # =========================================================================
+
+    def _create_routes(
+        self,
+        release: AssetRelease,
+        asset,  # Asset model (may be None)
+        version_id: str,
+        clearance_state: ClearanceState,
+        reviewer: str
+    ) -> Dict[str, Any]:
+        """
+        Create route records for an approved release (NON-FATAL).
+
+        PUBLIC clearance: writes both b2b_routes AND b2c_routes.
+        OUO clearance: writes b2b_routes only.
+
+        Args:
+            release: The approved AssetRelease
+            asset: The parent Asset (for dataset_id, resource_id, data_type)
+            version_id: Version assigned at approval (e.g., "v1")
+            clearance_state: OUO or PUBLIC
+            reviewer: Who approved
+
+        Returns:
+            Dict with success, slug, tables_written (on success)
+            or success=False, error (on failure)
+        """
+        try:
+            from infrastructure import RouteRepository, ReleaseTableRepository
+            from config.platform_config import _slugify_for_stac
+
+            if not asset:
+                return {'success': False, 'error': 'Asset not found for route creation'}
+
+            route_repo = RouteRepository()
+            now = datetime.now(timezone.utc)
+
+            slug = _slugify_for_stac(f"{asset.dataset_id}-{asset.resource_id}")
+
+            # Determine data_type
+            data_type = getattr(asset, 'data_type', None) or 'raster'
+            # Detect zarr from stac_item_json properties
+            if (release.stac_item_json
+                    and release.stac_item_json.get('properties', {}).get('geoetl:data_type') == 'zarr'):
+                data_type = 'zarr'
+
+            # Get table_name for vector releases
+            table_name = None
+            if data_type == 'vector':
+                try:
+                    release_table_repo = ReleaseTableRepository()
+                    table_names = release_table_repo.get_table_names(release.release_id)
+                    if table_names:
+                        table_name = table_names[0]
+                except Exception as tbl_err:
+                    logger.warning(f"Could not get table_name for route: {tbl_err}")
+
+            route = {
+                'slug': slug,
+                'version_id': version_id,
+                'data_type': data_type,
+                'is_latest': True,
+                'version_ordinal': release.version_ordinal,
+                'table_name': table_name,
+                'stac_item_id': release.stac_item_id,
+                'stac_collection_id': release.stac_collection_id,
+                'blob_path': release.blob_path,
+                'title': (
+                    (release.stac_item_json or {}).get('properties', {}).get('title')
+                    or f"{asset.dataset_id} / {asset.resource_id}"
+                ),
+                'description': (release.stac_item_json or {}).get('properties', {}).get('description'),
+                'asset_id': asset.asset_id,
+                'release_id': release.release_id,
+                'cleared_by': reviewer,
+                'cleared_at': now,
+                'created_at': now,
+            }
+
+            tables_written = []
+
+            # Always write to b2b_routes
+            route_repo.clear_latest(slug, table='b2b_routes')
+            route_repo.upsert_route(route, table='b2b_routes')
+            tables_written.append('b2b_routes')
+
+            # Write to b2c_routes only for PUBLIC clearance
+            if clearance_state == ClearanceState.PUBLIC:
+                route_repo.clear_latest(slug, table='b2c_routes')
+                route_repo.upsert_route(route, table='b2c_routes')
+                tables_written.append('b2c_routes')
+
+            return {
+                'success': True,
+                'slug': slug,
+                'tables_written': tables_written,
+            }
+
+        except Exception as e:
+            logger.warning(f"Route creation failed (non-fatal): {e}", exc_info=True)
+            return {'success': False, 'error': str(e)}
+
+    def _delete_routes(
+        self,
+        release: AssetRelease,
+        asset  # Asset model
+    ) -> Dict[str, Any]:
+        """
+        Delete route records on revocation and promote next latest (NON-FATAL).
+
+        Deletes from both b2c_routes and b2b_routes. If the revoked release
+        was is_latest, promotes the next highest ordinal.
+
+        Args:
+            release: The release being revoked
+            asset: The parent Asset (for dataset_id, resource_id)
+
+        Returns:
+            Dict with success and promoted_version (on success)
+            or success=False, error (on failure)
+        """
+        try:
+            from infrastructure import RouteRepository
+            from config.platform_config import _slugify_for_stac
+
+            if not asset:
+                return {'success': False, 'error': 'Asset not found for route deletion'}
+
+            route_repo = RouteRepository()
+            slug = _slugify_for_stac(f"{asset.dataset_id}-{asset.resource_id}")
+
+            if not release.version_id:
+                return {'success': False, 'error': 'Release has no version_id -- cannot delete routes'}
+
+            # Delete from both tables
+            for table in ('b2c_routes', 'b2b_routes'):
+                route_repo.delete_route(slug, release.version_id, table=table)
+
+            # If this was the latest, promote next version
+            promoted = None
+            if release.is_latest:
+                for table in ('b2c_routes', 'b2b_routes'):
+                    result = route_repo.promote_next_latest(slug, table=table)
+                    if result:
+                        promoted = result
+
+            return {
+                'success': True,
+                'promoted_version': promoted,
+            }
+
+        except Exception as e:
+            logger.warning(f"Route deletion failed (non-fatal): {e}", exc_info=True)
+            return {'success': False, 'error': str(e)}
 
     # =========================================================================
     # ADF INTEGRATION

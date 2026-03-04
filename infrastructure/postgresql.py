@@ -613,7 +613,75 @@ class PostgreSQLRepository(BaseRepository):
             logger.error(f"❌ {error_msg}")
             logger.error(f"   Error type: {type(e).__name__}")
             raise RuntimeError(error_msg) from e
-    
+
+    @staticmethod
+    def _is_managed_identity_auth_error(error: Exception) -> bool:
+        """
+        Return True when error looks like token/auth failure for PostgreSQL MI auth.
+        """
+        if error is None:
+            return False
+
+        auth_markers = [
+            "password authentication failed",
+            "invalid password",
+            "authentication failed",
+            "token",
+            "expired",
+        ]
+
+        # Check direct error + one level of wrappers (common in pool/runtime wrappers)
+        for candidate in (error, getattr(error, '__cause__', None), getattr(error, '__context__', None)):
+            if candidate is None:
+                continue
+
+            sqlstate = getattr(candidate, 'sqlstate', None)
+            if sqlstate in {"28P01", "28000"}:
+                return True
+
+            msg = str(candidate).lower()
+            if any(marker in msg for marker in auth_markers):
+                return True
+
+        return False
+
+    def _is_managed_identity_effective(self) -> bool:
+        """
+        Return True when effective auth path is managed identity.
+
+        Uses config intent + environment signals to avoid retry-gating drift when
+        config flags are inconsistent.
+        """
+        if self.target_database == "public" and self.config.is_public_database_configured():
+            public_db = self.config.public_database
+            if public_db and (public_db.use_managed_identity or public_db.managed_identity_client_id):
+                return True
+
+        db_cfg = self.config.database
+        return bool(
+            db_cfg.use_managed_identity
+            or db_cfg.managed_identity_client_id
+            or db_cfg.is_azure_environment
+        )
+
+    def _refresh_managed_identity_conn_string(self) -> str:
+        """
+        Rebuild managed-identity connection string with a fresh access token.
+        """
+        refreshed = self._get_connection_string()
+        self.conn_string = refreshed
+        return refreshed
+
+    def _refresh_pooled_managed_identity_credentials(self) -> None:
+        """
+        Refresh Docker pooled PostgreSQL credentials and recreate connection pool.
+        """
+        from infrastructure.auth import refresh_postgres_token
+        from infrastructure.connection_pool import ConnectionPoolManager
+
+        refresh_postgres_token()
+        ConnectionPoolManager.recreate_pool()
+
     @contextmanager
     def _get_connection(self):
         """
@@ -691,14 +759,29 @@ class PostgreSQLRepository(BaseRepository):
         from infrastructure.connection_pool import ConnectionPoolManager
 
         logger.debug("🔗 Getting connection from pool...")
+        use_managed_identity = self._is_managed_identity_effective()
+        max_attempts = 2 if use_managed_identity else 1
 
-        try:
-            with ConnectionPoolManager.get_connection() as conn:
-                logger.debug("✅ Got pooled connection")
-                yield conn
-        except Exception as e:
-            logger.error(f"❌ Pool connection error: {e}")
-            raise
+        for attempt in range(1, max_attempts + 1):
+            try:
+                with ConnectionPoolManager.get_connection() as conn:
+                    logger.debug(f"✅ Got pooled connection (attempt {attempt}/{max_attempts})")
+                    yield conn
+                    return
+            except Exception as e:
+                logger.error(f"❌ Pool connection error: {e}")
+
+                can_retry = (
+                    use_managed_identity
+                    and attempt < max_attempts
+                    and self._is_managed_identity_auth_error(e)
+                )
+
+                if not can_retry:
+                    raise
+
+                logger.warning("🔄 Pooled managed identity auth failed; refreshing token, recreating pool, retrying once")
+                self._refresh_pooled_managed_identity_credentials()
 
     @contextmanager
     def _get_single_use_connection(self):
@@ -706,57 +789,74 @@ class PostgreSQLRepository(BaseRepository):
         Create single-use connection (Function App mode).
 
         Original connection behavior - each request gets a new connection
-        that is closed after use.
+        that is closed after use. Includes reactive retry on MI auth failure.
         """
         conn = None
+        use_managed_identity = self._is_managed_identity_effective()
+        max_attempts = 2 if use_managed_identity else 1
+
         try:
-            # Create connection with connection string
-            logger.debug(f"🔗 Attempting PostgreSQL connection...")
-            logger.debug(f"  Connection string length: {len(self.conn_string)} chars")
+            for attempt in range(1, max_attempts + 1):
+                current_conn_string = self.conn_string
 
-            # Extract and log the host being connected to
-            if '@' in self.conn_string and '/' in self.conn_string:
-                try:
-                    # Extract host from connection string
-                    after_at = self.conn_string.split('@')[1]
-                    host_port = after_at.split('/')[0]
-                    host = host_port.split(':')[0] if ':' in host_port else host_port
-                    logger.debug(f"  Connecting to host: {host}")
-                except (IndexError, ValueError) as parse_err:
-                    logger.debug(f"  Could not parse host from connection string: {parse_err}")
+                logger.debug(f"🔗 Attempting PostgreSQL connection (attempt {attempt}/{max_attempts})...")
+                logger.debug(f"  Connection string length: {len(current_conn_string)} chars")
 
-            conn = psycopg.connect(self.conn_string, row_factory=dict_row)
-            _register_type_adapters(conn)
-            logger.debug(f"✅ PostgreSQL connection established successfully")
-            yield conn
-
-        except psycopg.Error as e:
-            # Log connection errors with context
-            logger.error(f"❌ PostgreSQL connection error: {e}")
-            logger.error(f"  Error type: {type(e).__name__}")
-            logger.error(f"  Error details: {str(e)}")
-
-            # Try to extract more details about DNS errors
-            if "Name or service not known" in str(e) or "could not translate host name" in str(e):
-                logger.error(f"  🚨 DNS Resolution Error - Cannot resolve database hostname")
-                if '@' in self.conn_string and '/' in self.conn_string:
+                if '@' in current_conn_string and '/' in current_conn_string:
                     try:
-                        after_at = self.conn_string.split('@')[1]
+                        after_at = current_conn_string.split('@')[1]
                         host_port = after_at.split('/')[0]
                         host = host_port.split(':')[0] if ':' in host_port else host_port
-                        logger.error(f"  Failed to resolve hostname: {host}")
+                        logger.debug(f"  Connecting to host: {host}")
                     except (IndexError, ValueError) as parse_err:
-                        logger.error(f"  Could not extract hostname for error reporting: {parse_err}")
+                        logger.debug(f"  Could not parse host from connection string: {parse_err}")
 
-            # Rollback any pending transaction
+                try:
+                    conn = psycopg.connect(current_conn_string, row_factory=dict_row)
+                    _register_type_adapters(conn)
+                    logger.debug("✅ PostgreSQL connection established successfully")
+                    yield conn
+                    return
+
+                except psycopg.Error as e:
+                    logger.error(f"❌ PostgreSQL connection error: {e}")
+                    logger.error(f"  Error type: {type(e).__name__}")
+                    logger.error(f"  Error details: {str(e)}")
+
+                    if "Name or service not known" in str(e) or "could not translate host name" in str(e):
+                        logger.error("  🚨 DNS Resolution Error - Cannot resolve database hostname")
+                        if '@' in current_conn_string and '/' in current_conn_string:
+                            try:
+                                after_at = current_conn_string.split('@')[1]
+                                host_port = after_at.split('/')[0]
+                                host = host_port.split(':')[0] if ':' in host_port else host_port
+                                logger.error(f"  Failed to resolve hostname: {host}")
+                            except (IndexError, ValueError) as parse_err:
+                                logger.error(f"  Could not extract hostname for error reporting: {parse_err}")
+
+                    if conn:
+                        conn.rollback()
+                        conn.close()
+                        conn = None
+
+                    can_retry = (
+                        use_managed_identity
+                        and attempt < max_attempts
+                        and self._is_managed_identity_auth_error(e)
+                    )
+
+                    if not can_retry:
+                        raise
+
+                    logger.warning("🔄 Managed identity auth failed; refreshing token and retrying connection")
+                    self._refresh_managed_identity_conn_string()
+
+        except psycopg.Error as e:
             if conn:
                 conn.rollback()
-
-            # Re-raise for caller to handle
             raise
 
         finally:
-            # Always close connection to free resources
             if conn:
                 conn.close()
     

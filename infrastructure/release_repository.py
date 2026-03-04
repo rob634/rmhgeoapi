@@ -822,6 +822,7 @@ class ReleaseRepository(PostgreSQLRepository):
         """
         Revoke a release with audit trail.
 
+        Snapshots + audits + mutates in a single transaction (BS-4 fix).
         Sets approval_state to REVOKED, is_latest to false, and
         is_served to false (SG2-2 fix: revoked releases must not
         remain served).
@@ -832,32 +833,33 @@ class ReleaseRepository(PostgreSQLRepository):
             revocation_reason: Why (required for audit)
 
         Returns:
-            True if updated, False if release not found
+            True if updated, False if release not found or not approved
         """
         logger.info(f"AUDIT: Revoking release {release_id[:16]}... by {revoked_by}")
-
-        # Snapshot BEFORE revocation (non-fatal)
-        try:
-            release = self.get_by_id(release_id)
-            if release:
-                from infrastructure.release_audit_repository import ReleaseAuditRepository
-                from core.models.release_audit import ReleaseAuditEventType
-                audit_repo = ReleaseAuditRepository()
-                audit_repo.record_event(
-                    release_id=release_id,
-                    asset_id=release.asset_id,
-                    version_ordinal=release.version_ordinal,
-                    revision=release.revision,
-                    event_type=ReleaseAuditEventType.REVOKED,
-                    actor=revoked_by,
-                    reason=revocation_reason,
-                    snapshot=release.to_dict(),
-                )
-        except Exception as audit_err:
-            logger.warning(f"Audit emission failed (non-fatal): {audit_err}")
+        from core.models.release_audit import ReleaseAuditEventType
 
         with self._get_connection() as conn:
             with conn.cursor() as cur:
+                # Step 1: Snapshot for audit (same transaction)
+                cur.execute(
+                    sql.SQL("SELECT * FROM {}.{} WHERE release_id = %s").format(
+                        sql.Identifier(self.schema), sql.Identifier(self.table)),
+                    (release_id,)
+                )
+                snapshot_row = cur.fetchone()
+                if snapshot_row:
+                    self._record_audit_inline(
+                        cur, release_id=release_id,
+                        asset_id=snapshot_row['asset_id'],
+                        version_ordinal=snapshot_row['version_ordinal'],
+                        revision=snapshot_row['revision'],
+                        event_type=ReleaseAuditEventType.REVOKED,
+                        actor=revoked_by,
+                        reason=revocation_reason,
+                        snapshot=dict(snapshot_row),
+                    )
+
+                # Step 2: Mutation (same transaction)
                 cur.execute(
                     sql.SQL("""
                         UPDATE {}.{}
@@ -1020,68 +1022,67 @@ class ReleaseRepository(PostgreSQLRepository):
         """
         Reset processing lifecycle for re-submission (overwrite).
 
-        Emits OVERWRITTEN audit event BEFORE resetting fields.
-        Clears all processing, approval, AND revocation fields.
+        Snapshots + audits + mutates in a single transaction so audit and
+        mutation commit or rollback together (BS-4 fix).
+        WHERE clause guards against invalid states (AR-3 fix).
 
         Args:
             release_id: Release to reset
             revision: New revision number
 
         Returns:
-            True if updated, False if release not found
+            True if updated, False if release not found or invalid state
         """
         logger.info(f"Resetting release {release_id[:16]}... for overwrite (revision={revision})")
-
-        # Snapshot BEFORE reset (non-fatal)
-        try:
-            release = self.get_by_id(release_id)
-            if release:
-                from infrastructure.release_audit_repository import ReleaseAuditRepository
-                from core.models.release_audit import ReleaseAuditEventType
-                audit_repo = ReleaseAuditRepository()
-                audit_repo.record_event(
-                    release_id=release_id,
-                    asset_id=release.asset_id,
-                    version_ordinal=release.version_ordinal,
-                    revision=release.revision,
-                    event_type=ReleaseAuditEventType.OVERWRITTEN,
-                    actor="system",
-                    reason="Release overwritten for resubmission",
-                    snapshot=release.to_dict(),
-                )
-        except Exception as audit_err:
-            logger.warning(f"Audit emission failed (non-fatal): {audit_err}")
+        from core.models.release_audit import ReleaseAuditEventType
 
         with self._get_connection() as conn:
             with conn.cursor() as cur:
+                # Step 1: Snapshot for audit (same transaction)
+                cur.execute(
+                    sql.SQL("SELECT * FROM {}.{} WHERE release_id = %s").format(
+                        sql.Identifier(self.schema), sql.Identifier(self.table)),
+                    (release_id,)
+                )
+                snapshot_row = cur.fetchone()
+                if snapshot_row:
+                    self._record_audit_inline(
+                        cur, release_id=release_id,
+                        asset_id=snapshot_row['asset_id'],
+                        version_ordinal=snapshot_row['version_ordinal'],
+                        revision=snapshot_row['revision'],
+                        event_type=ReleaseAuditEventType.OVERWRITTEN,
+                        actor="system",
+                        reason="Release overwritten for resubmission",
+                        snapshot=dict(snapshot_row),
+                    )
+
+                # Step 2: Mutation (same transaction, with state guards)
                 cur.execute(
                     sql.SQL("""
                         UPDATE {}.{}
-                        SET revision = %s,
-                            processing_status = %s,
+                        SET revision = %s, processing_status = %s,
                             approval_state = %s,
-                            rejection_reason = NULL,
-                            reviewer = NULL,
-                            reviewed_at = NULL,
-                            revoked_at = NULL,
-                            revoked_by = NULL,
-                            revocation_reason = NULL,
-                            is_served = FALSE,
-                            job_id = NULL,
+                            version_id = NULL,
+                            rejection_reason = NULL, reviewer = NULL,
+                            reviewed_at = NULL, revoked_at = NULL,
+                            revoked_by = NULL, revocation_reason = NULL,
+                            is_served = FALSE, job_id = NULL,
                             processing_started_at = NULL,
                             processing_completed_at = NULL,
-                            last_error = NULL,
-                            updated_at = NOW()
+                            last_error = NULL, updated_at = NOW()
                         WHERE release_id = %s
+                          AND approval_state IN (%s, %s, %s)
+                          AND processing_status != %s
                     """).format(
-                        sql.Identifier(self.schema),
-                        sql.Identifier(self.table)
-                    ),
-                    (revision, ProcessingStatus.PENDING, ApprovalState.PENDING_REVIEW, release_id)
+                        sql.Identifier(self.schema), sql.Identifier(self.table)),
+                    (revision, ProcessingStatus.PENDING, ApprovalState.PENDING_REVIEW,
+                     release_id,
+                     ApprovalState.PENDING_REVIEW, ApprovalState.REJECTED, ApprovalState.REVOKED,
+                     ProcessingStatus.PROCESSING)
                 )
-                conn.commit()
-
                 updated = cur.rowcount > 0
+                conn.commit()
                 if updated:
                     logger.info(f"Reset release {release_id[:16]}... for overwrite at revision {revision}")
                 return updated
@@ -1353,29 +1354,29 @@ class ReleaseRepository(PostgreSQLRepository):
         )
 
         is_public = (clearance_state == ClearanceState.PUBLIC)
-
-        # Snapshot BEFORE approval (non-fatal)
-        try:
-            release = self.get_by_id(release_id)
-            if release:
-                from infrastructure.release_audit_repository import ReleaseAuditRepository
-                from core.models.release_audit import ReleaseAuditEventType
-                audit_repo = ReleaseAuditRepository()
-                audit_repo.record_event(
-                    release_id=release_id,
-                    asset_id=release.asset_id,
-                    version_ordinal=release.version_ordinal,
-                    revision=release.revision,
-                    event_type=ReleaseAuditEventType.APPROVED,
-                    actor=reviewer,
-                    snapshot=release.to_dict(),
-                )
-        except Exception as audit_err:
-            logger.warning(f"Audit emission failed (non-fatal): {audit_err}")
+        from core.models.release_audit import ReleaseAuditEventType
 
         with self._get_connection() as conn:
             with conn.cursor() as cur:
                 try:
+                    # Step 0: Snapshot + audit (same transaction as approval)
+                    cur.execute(
+                        sql.SQL("SELECT * FROM {}.{} WHERE release_id = %s").format(
+                            sql.Identifier(self.schema), sql.Identifier(self.table)),
+                        (release_id,)
+                    )
+                    snapshot_row = cur.fetchone()
+                    if snapshot_row:
+                        self._record_audit_inline(
+                            cur, release_id=release_id,
+                            asset_id=snapshot_row['asset_id'],
+                            version_ordinal=snapshot_row['version_ordinal'],
+                            revision=snapshot_row['revision'],
+                            event_type=ReleaseAuditEventType.APPROVED,
+                            actor=reviewer,
+                            snapshot=dict(snapshot_row),
+                        )
+
                     # Step 1: Clear is_latest for all releases of this asset
                     cur.execute(
                         sql.SQL("""

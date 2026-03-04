@@ -291,29 +291,34 @@ class AssetService:
             ReleaseStateError: If overwrite requested but draft is in
                                non-overwritable state (APPROVED or REVOKED)
         """
-        existing_draft = self.release_repo.get_draft(asset_id)
-
-        if existing_draft:
-            if overwrite:
-                if not existing_draft.can_overwrite():
-                    current = f"{existing_draft.approval_state.value}/processing={existing_draft.processing_status.value}"
+        if overwrite:
+            # Use broader query that includes REVOKED releases
+            candidate = self.release_repo.get_overwrite_candidate(asset_id)
+            if candidate:
+                if not candidate.can_overwrite():
+                    current = f"{candidate.approval_state.value}/processing={candidate.processing_status.value}"
                     raise ReleaseStateError(
-                        existing_draft.release_id,
+                        candidate.release_id,
                         current,
-                        "pending_review or rejected (and not actively processing)",
+                        "pending_review, rejected, or revoked (and not actively processing)",
                         "overwrite"
                     )
                 self.release_repo.update_overwrite(
-                    existing_draft.release_id,
-                    revision=existing_draft.revision + 1,
+                    candidate.release_id,
+                    revision=candidate.revision + 1,
                 )
-                updated = self.release_repo.get_by_id(existing_draft.release_id)
+                updated = self.release_repo.get_by_id(candidate.release_id)
                 logger.info(
-                    f"Overwritten release {existing_draft.release_id[:16]}... "
+                    f"Overwritten release {candidate.release_id[:16]}... "
                     f"(revision {updated.revision})"
                 )
                 return updated, "overwritten"
-            else:
+            # No overwrite candidate — fall through to draft check or new creation
+
+        # Non-overwrite path: check for existing draft
+        existing_draft = self.release_repo.get_draft(asset_id)
+        if existing_draft:
+            if not overwrite:
                 # Draft exists, no overwrite flag -- return existing (idempotent)
                 logger.info(
                     f"Existing draft found: {existing_draft.release_id[:16]}..."

@@ -1325,6 +1325,25 @@ class ReleaseRepository(PostgreSQLRepository):
 
         is_public = (clearance_state == ClearanceState.PUBLIC)
 
+        # Snapshot BEFORE approval (non-fatal)
+        try:
+            release = self.get_by_id(release_id)
+            if release:
+                from infrastructure.release_audit_repository import ReleaseAuditRepository
+                from core.models.release_audit import ReleaseAuditEventType
+                audit_repo = ReleaseAuditRepository()
+                audit_repo.record_event(
+                    release_id=release_id,
+                    asset_id=release.asset_id,
+                    version_ordinal=release.version_ordinal,
+                    revision=release.revision,
+                    event_type=ReleaseAuditEventType.APPROVED,
+                    actor=reviewer,
+                    snapshot=release.to_dict(),
+                )
+        except Exception as audit_err:
+            logger.warning(f"Audit emission failed (non-fatal): {audit_err}")
+
         with self._get_connection() as conn:
             with conn.cursor() as cur:
                 try:

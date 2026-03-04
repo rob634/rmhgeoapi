@@ -655,7 +655,7 @@ class AssetRelease(BaseModel):
 
     def can_overwrite(self) -> bool:
         """Check if this release can be overwritten with new data."""
-        if self.approval_state not in (ApprovalState.PENDING_REVIEW, ApprovalState.REJECTED):
+        if self.approval_state not in (ApprovalState.PENDING_REVIEW, ApprovalState.REJECTED, ApprovalState.REVOKED):
             return False
         if self.processing_status == ProcessingStatus.PROCESSING:
             return False

@@ -5,7 +5,7 @@
 # PURPOSE: Query Platform request/job status and diagnostics for gateway integration
 # LAST_REVIEWED: 23 FEB 2026
 # REVIEW_STATUS: V0.9.1 Clean B2B response - outputs/services/approval from Release record
-# EXPORTS: platform_request_status, platform_job_status, platform_health, platform_failures, platform_lineage, platform_validate
+# EXPORTS: platform_request_status, platform_health, platform_failures, platform_lineage, platform_validate
 # DEPENDENCIES: infrastructure.PlatformRepository, infrastructure.JobRepository, infrastructure.AssetRepository, infrastructure.ReleaseRepository
 # ============================================================================
 """
@@ -19,8 +19,6 @@ Status Endpoints:
         Accepts EITHER request_id OR job_id OR asset_id - auto-detects ID type
     GET /api/platform/status?dataset_id=X&resource_id=Y - Lookup by platform refs (18 FEB 2026)
     GET /api/platform/status - List all platform requests
-    GET /api/platform/jobs/{job_id}/status - DEPRECATED (use /status/{job_id})
-
 Diagnostic Endpoints (F7.12 - 15 JAN 2026):
     GET /api/platform/health - Simplified system readiness check
     GET /api/platform/failures - Recent failures with sanitized errors
@@ -29,7 +27,6 @@ Diagnostic Endpoints (F7.12 - 15 JAN 2026):
 
 Exports:
     platform_request_status: HTTP trigger for GET /api/platform/status/{id}
-    platform_job_status: DEPRECATED - HTTP trigger for GET /api/platform/jobs/{job_id}/status
     platform_health: HTTP trigger for GET /api/platform/health
     platform_failures: HTTP trigger for GET /api/platform/failures
     platform_lineage: HTTP trigger for GET /api/platform/lineage/{request_id}
@@ -251,158 +248,6 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
             status_code=500,
             headers={"Content-Type": "application/json"}
         )
-
-
-# ============================================================================
-# DIRECT JOB STATUS (14 JAN 2026)
-# ============================================================================
-# DEPRECATED: Use /api/platform/status/{job_id} instead (21 JAN 2026)
-# This endpoint is maintained for backward compatibility but will be removed.
-# The consolidated /api/platform/status/{id} endpoint accepts either request_id
-# or job_id and returns the full Platform response with DDH identifiers.
-# ============================================================================
-
-async def platform_job_status(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    DEPRECATED: Get status of a CoreMachine job directly by job_id.
-
-    ⚠️ DEPRECATED (21 JAN 2026): Use GET /api/platform/status/{job_id} instead.
-    The consolidated endpoint accepts either request_id or job_id and returns
-    the full Platform response with DDH identifiers.
-
-    GET /api/platform/jobs/{job_id}/status
-        Returns job status with task summary - same format as /api/jobs/status/{job_id}.
-        Query params:
-            - verbose=true: Include full task details (default: false)
-
-    Response:
-    {
-        "jobId": "abc123...",
-        "jobType": "process_raster_v2",
-        "status": "completed",
-        "stage": 3,
-        "totalStages": 3,
-        "parameters": {...},
-        "stageResults": {...},
-        "createdAt": "2025-01-14T10:00:00Z",
-        "updatedAt": "2025-01-14T10:05:00Z",
-        "resultData": {...},
-        "taskSummary": {
-            "total": 5,
-            "completed": 5,
-            "failed": 0,
-            "byStage": {...}
-        },
-        "_deprecated": "Use /api/platform/status/{job_id} instead"
-    }
-    """
-    # Log deprecation warning
-    logger.warning("DEPRECATED: /api/platform/jobs/{job_id}/status called - use /api/platform/status/{id} instead")
-
-    try:
-        job_repo = JobRepository()
-        task_repo = TaskRepository()
-
-        # Extract job_id from route
-        job_id = req.route_params.get('job_id')
-        verbose = req.params.get('verbose', 'false').lower() == 'true'
-
-        if not job_id:
-            return func.HttpResponse(
-                json.dumps({
-                    "success": False,
-                    "error": "job_id is required"
-                }),
-                status_code=400,
-                headers={"Content-Type": "application/json"}
-            )
-
-        logger.debug(f"🔍 Retrieving job status for: {job_id}")
-
-        # Retrieve job record
-        job_record = job_repo.get_job(job_id)
-
-        if not job_record:
-            return func.HttpResponse(
-                json.dumps({
-                    "success": False,
-                    "error": f"Job not found: {job_id}"
-                }),
-                status_code=404,
-                headers={"Content-Type": "application/json"}
-            )
-
-        logger.debug(f"📋 Job found: {job_id[:16]}... status={job_record.status}")
-
-        # Format job response (camelCase for API compatibility)
-        response_data = _format_job_response(job_record)
-
-        # Add task summary
-        task_summary = _get_task_summary(task_repo, job_id, verbose=verbose)
-        response_data["taskSummary"] = task_summary
-
-        # Add deprecation notice to response (21 JAN 2026)
-        response_data["_deprecated"] = "Use /api/platform/status/{job_id} instead"
-        response_data["_migration_url"] = f"/api/platform/status/{job_id}"
-
-        return func.HttpResponse(
-            json.dumps(response_data, indent=2, default=str),
-            status_code=200,
-            headers={
-                "Content-Type": "application/json",
-                "Deprecation": "true",
-                "Sunset": "2026-04-01",
-                "Link": f'</api/platform/status/{job_id}>; rel="successor-version"'
-            }
-        )
-
-    except Exception as e:
-        logger.error(f"Platform job status query failed: {e}", exc_info=True)
-        return func.HttpResponse(
-            json.dumps({
-                "success": False,
-                "error": str(e),
-                "error_type": type(e).__name__
-            }),
-            status_code=500,
-            headers={"Content-Type": "application/json"}
-        )
-
-
-def _format_job_response(job_record) -> Dict[str, Any]:
-    """
-    Format job record for API response.
-
-    Converts internal snake_case fields to camelCase for JavaScript compatibility.
-    Matches the format of /api/jobs/status/{job_id} for consistency.
-
-    Args:
-        job_record: JobRecord from repository
-
-    Returns:
-        API response dictionary with camelCase fields
-    """
-    # Basic job information (camelCase for API compatibility)
-    response = {
-        "jobId": job_record.job_id,
-        "jobType": job_record.job_type,
-        "status": job_record.status.value if hasattr(job_record.status, 'value') else str(job_record.status),
-        "stage": job_record.stage,
-        "totalStages": job_record.total_stages,
-        "parameters": job_record.parameters,
-        "stageResults": job_record.stage_results,
-        "createdAt": job_record.created_at.isoformat() if job_record.created_at else None,
-        "updatedAt": job_record.updated_at.isoformat() if job_record.updated_at else None
-    }
-
-    # Optional fields
-    if job_record.result_data:
-        response["resultData"] = job_record.result_data
-
-    if job_record.error_details:
-        response["errorDetails"] = job_record.error_details
-
-    return response
 
 
 # ============================================================================

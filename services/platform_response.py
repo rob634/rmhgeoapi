@@ -40,11 +40,11 @@ def _get_config():
     return _config
 
 
-def _generate_job_status_url(job_id: str) -> str:
-    """Generate absolute URL for platform job status endpoint."""
+def _generate_monitor_url(request_id: str) -> str:
+    """Generate absolute URL for platform status endpoint."""
     config = _get_config()
     base_url = config.etl_app_base_url.rstrip('/')
-    return f"{base_url}/api/platform/jobs/{job_id}/status"
+    return f"{base_url}/api/platform/status/{request_id}"
 
 
 # ============================================================================
@@ -147,7 +147,7 @@ def submit_accepted(
     """
     Build a 202 Accepted response for successful job submission.
 
-    Includes standard fields: request_id, job_id, job_type, monitor_url, job_status_url
+    Includes standard fields: request_id, job_id, job_type, monitor_url
 
     Args:
         request_id: Platform request ID
@@ -164,8 +164,7 @@ def submit_accepted(
             "request_id": request_id,
             "job_id": job_id,
             "job_type": job_type,
-            "monitor_url": f"/api/platform/status/{request_id}",
-            "job_status_url": _generate_job_status_url(job_id),
+            "monitor_url": _generate_monitor_url(request_id),
             **extra_fields
         },
         status_code=202,
@@ -196,8 +195,7 @@ def idempotent_response(
     data = {
         "request_id": request_id,
         "job_id": job_id,
-        "monitor_url": f"/api/platform/status/{request_id}",
-        "job_status_url": _generate_job_status_url(job_id),
+        "monitor_url": _generate_monitor_url(request_id),
         **extra_fields
     }
     if hint:
@@ -239,8 +237,7 @@ def unpublish_accepted(
             "job_type": job_type,
             "data_type": data_type,
             "dry_run": dry_run,
-            "monitor_url": f"/api/platform/status/{request_id}",
-            "job_status_url": _generate_job_status_url(job_id),
+            "monitor_url": _generate_monitor_url(request_id),
             **extra_fields
         },
         status_code=202,

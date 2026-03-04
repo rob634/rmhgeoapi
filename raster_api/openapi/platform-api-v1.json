@@ -185,47 +185,6 @@
         }
       }
     },
-    "/api/platform/jobs/{job_id}/status": {
-      "get": {
-        "summary": "Get job status by job_id",
-        "description": "Get status of a CoreMachine job directly by job_id.\nUseful when only job_id is available (from webhook callbacks, etc.).",
-        "operationId": "platformJobStatus",
-        "tags": ["Platform"],
-        "parameters": [
-          {
-            "name": "job_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "verbose",
-            "in": "query",
-            "schema": {
-              "type": "boolean",
-              "default": false
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Job status with task summary",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PlatformJobStatus"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Job not found"
-          }
-        }
-      }
-    },
     "/api/platform/health": {
       "get": {
         "summary": "Platform health check",
@@ -1064,40 +1023,6 @@
               "ogc_features_url": {"type": "string"},
               "cog_url": {"type": "string"}
             }
-          }
-        }
-      },
-      "PlatformJobStatus": {
-        "type": "object",
-        "properties": {
-          "job_id": {
-            "type": "string"
-          },
-          "job_type": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string",
-            "enum": ["queued", "processing", "completed", "failed", "completed_with_errors"]
-          },
-          "stage": {
-            "type": "integer"
-          },
-          "total_stages": {
-            "type": "integer"
-          },
-          "task_summary": {
-            "type": "object",
-            "properties": {
-              "total": {"type": "integer"},
-              "completed": {"type": "integer"},
-              "failed": {"type": "integer"},
-              "pending": {"type": "integer"}
-            }
-          },
-          "result_data": {
-            "type": "object",
-            "description": "Job results (when completed)"
           }
         }
       },

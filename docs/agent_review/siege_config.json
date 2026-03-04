@@ -29,7 +29,6 @@
     "action_endpoints": {
       "_comment": "Agents MUST use these for all test actions (submit, approve, status, etc.). This is the B2B API surface.",
       "submit": "POST /api/platform/submit",
-      "validate": "POST /api/platform/validate",
       "status_by_id": "GET  /api/platform/status/{request_id}",
       "status_list": "GET  /api/platform/status",
       "approve": "POST /api/platform/approve",
@@ -48,7 +47,6 @@
       "catalog_lookup_unified": "GET  /api/platform/catalog/lookup-unified",
       "platform_health": "GET  /api/platform/health",
       "platform_failures": "GET  /api/platform/failures",
-      "platform_lineage": "GET  /api/platform/lineage/{request_id}",
       "platforms_list": "GET  /api/platforms",
       "platforms_by_id": "GET  /api/platforms/{platform_id}"
     },
@@ -588,6 +586,12 @@
       "version_id": "v1",
       "_comment": "No release_id, asset_id, job_id, request_id, or dataset_id — should fail 400",
       "attack_use": "Sequence 12f — Missing Required Fields"
+    },
+    "_comment_overwrite": "--- Overwrite workflow fixtures ---",
+    "valid_revocation_for_overwrite": {
+      "reviewer": "siege-qa@example.com",
+      "reason": "SIEGE test — revoking for overwrite resubmission test",
+      "attack_use": "Sequence 14/18 — Revoke→Overwrite flow"
     }
   },
   "prerequisites": {

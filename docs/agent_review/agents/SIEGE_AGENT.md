@@ -137,11 +137,10 @@ Cartographer probes every known endpoint with a minimal request to verify livene
 | `/api/platform/reject` | OPTIONS or GET | Check if live | 405 or method listing |
 | `/api/platform/unpublish` | OPTIONS or GET | Check if live | 405 or method listing |
 | `/api/platform/resubmit` | OPTIONS or GET | Check if live | 405 or method listing |
-| `/api/platform/validate` | OPTIONS or GET | Check if live | 405 or method listing |
 | `/api/platform/approvals` | GET | No params | 200 |
 | `/api/platform/catalog/lookup` | GET | Missing params | 400 or empty |
+| `/api/platform/catalog/lookup-unified` | GET | `?dataset_id=test&resource_id=test` | 400 or empty |
 | `/api/platform/failures` | GET | No params | 200 |
-| `/api/platform/lineage/{random-uuid}` | GET | Random UUID | 404 or empty |
 | `/api/platforms` | GET | No params | 200 |
 
 **Verification endpoints (admin — health check only)**:
@@ -266,8 +265,10 @@ Uses releases created in previous sequences. Each step is independent.
 | 11e | POST `/api/platform/approve` (v3 from Seq 9, revoked) | revoked→approved | HTTP 400 `"expected 'pending_review'"` | IST-5 |
 | 11f | POST `/api/platform/revoke` (v3 from Seq 9, already revoked) | revoked→revoked | HTTP 400 `"expected 'approved'"` | IST-6 |
 | 11g | POST `/api/platform/revoke` (pending_review release) | pending→revoked | HTTP 400 `"expected 'approved'"` | IST-7 |
+| 11h | POST `/api/platform/approve` on pending_review release with processing_status != completed | pending+processing | HTTP 400 (processing guard) | IST-8 |
+| 11i | POST `/api/platform/submit` with overwrite on APPROVED release | approved+overwrite | New version created (not overwrite) — verify ordinal incremented | IST-9 |
 
-**CHECKPOINT IST**: All 7 transitions returned 400 (not 200 or 500). Record each HTTP code and error message.
+**CHECKPOINT IST**: All 9 checks returned expected results (400 for 11a-11h, new version for 11i — not 200 or 500 where errors expected). Record each HTTP code and error message.
 
 **Sequence 12: Missing Required Fields**
 
@@ -294,6 +295,82 @@ Fresh requests — no prior state needed. Each step expects HTTP 400.
 3. POST `/api/platform/submit` (same dataset_id, new resource or overwrite) → poll until completed
 4. POST `/api/platform/approve` (version_id="v1" AGAIN, same version_id) → expect HTTP 409 `VersionConflict`
 5. **CHECKPOINT VC1**: Second approval rejected with 409, first v1 unaffected
+
+**Sequence 14: Revoke → Overwrite → Reapprove (Golden Path)**
+
+The core flow that was previously dead code (BS-1). Tests `get_overwrite_candidate()` finding a REVOKED release.
+
+| Step | Action | Verify |
+|------|--------|--------|
+| 1 | POST `/api/platform/submit` (raster, `sg-revoke-ow-test`) | request_id, job_id |
+| 2 | Poll until completed | release_id, asset_id |
+| 3 | POST `/api/platform/approve` (v1) | approved |
+| 4 | GET `/api/platform/status` | version_id="v1", ordinal=1, revision=1, is_latest=true |
+| 5 | POST `/api/platform/revoke` | revoked |
+| 6 | GET `/api/platform/status` | approval_state=revoked, is_latest=false, is_served=false |
+| 7 | POST `/api/platform/submit` (same, `processing_options: {overwrite: true}`) | new job created |
+| 8 | Poll until completed | revision=2, approval_state=pending_review, version_id=null |
+| 9 | POST `/api/platform/approve` (v1) | re-approved at same ordinal |
+| 10 | GET `/api/platform/status` | version_id="v1", ordinal=1, revision=2, is_latest=true, is_served=true |
+
+**CHECKPOINT RVOW1**: Full round-trip. Ordinal preserved, revision incremented, version_id restored.
+
+**Sequence 15: Overwrite APPROVED Release (Should Create New Version)**
+
+Ensures `get_overwrite_candidate()` correctly excludes APPROVED releases — overwrite flag on an approved release creates a new version instead.
+
+| Step | Action | Verify |
+|------|--------|--------|
+| 1 | (Use approved raster from Seq 14) | v1 re-approved, revision=2 |
+| 2 | POST `/api/platform/submit` (same, `processing_options: {overwrite: true}`) | new release created |
+| 3 | Poll until completed | NEW release with version_ordinal=2, NOT a mutation of v1 |
+
+**CHECKPOINT RVOW2**: Overwrite flag on approved release creates new version, does not corrupt existing.
+
+**Sequence 16: Triple Revision (Reject → Overwrite → Reject → Overwrite → Approve)**
+
+Stress-test revision counter and repeated overwrite.
+
+| Step | Action | Verify |
+|------|--------|--------|
+| 1 | POST `/api/platform/submit` (`sg-triple-rev-test`) → poll | completed, revision=1 |
+| 2 | POST `/api/platform/reject` | rejected |
+| 3 | POST `/api/platform/submit` (same, `processing_options: {overwrite: true}`) → poll | completed, revision=2 |
+| 4 | POST `/api/platform/reject` | rejected again |
+| 5 | POST `/api/platform/submit` (same, `processing_options: {overwrite: true}`) → poll | completed, revision=3 |
+| 6 | POST `/api/platform/approve` (v1) | approved |
+| 7 | GET `/api/platform/status` | revision=3, version_id="v1", approved |
+
+**CHECKPOINT TREV1**: Three revisions tracked correctly, final approval succeeds.
+
+**Sequence 17: Overwrite Race Guard (Overwrite While PROCESSING)**
+
+Verify the `processing_status != 'processing'` guard prevents overwrite of an in-flight release.
+
+| Step | Action | Verify |
+|------|--------|--------|
+| 1 | POST `/api/platform/submit` (`sg-race-test`) | request_id (do NOT poll) |
+| 2 | Immediately POST `/api/platform/submit` (same, `processing_options: {overwrite: true}`) | idempotent response OR error |
+
+**CHECKPOINT RACE1**: Guard prevented overwrite of processing release. No data corruption.
+
+Note: Timing-dependent — if first completes before second arrives, overwrite succeeds (correct behavior). Lancer records whichever outcome; Auditor verifies consistency regardless.
+
+**Sequence 18: Multi-Revoke Overwrite Target (Pick Most Recent)**
+
+Tests `get_overwrite_candidate()` ORDER BY behavior — must select the most recently created revoked release.
+
+| Step | Action | Verify |
+|------|--------|--------|
+| 1 | POST `/api/platform/submit` (`sg-multi-revoke-test`) → poll | completed |
+| 2 | POST `/api/platform/approve` (v1) | approved |
+| 3 | POST `/api/platform/submit` (same, new version) → poll | completed, capture v2 release_id |
+| 4 | POST `/api/platform/approve` (v2) | approved |
+| 5 | POST `/api/platform/revoke` (v2) | revoked |
+| 6 | POST `/api/platform/revoke` (v1) | revoked |
+| 7 | POST `/api/platform/submit` (same, `processing_options: {overwrite: true}`) → poll | overwritten release = v2's release_id |
+
+**CHECKPOINT MREV1**: Most recent revoked release selected. v1's revoked release untouched.
 
 ### Lancer Checkpoint Format
 
@@ -359,6 +436,20 @@ For each checkpoint, prefer Platform API endpoints. Use admin endpoints only for
 | Job detail | `/api/dbadmin/jobs/{job_id}` | Expected status, result_data |
 | Overall stats | `/api/dbadmin/stats` | No unexpected counts |
 | Orphaned tasks | `/api/dbadmin/diagnostics/all` | Clean diagnostics |
+
+### Overwrite-Specific Audit Checks
+
+For each overwrite checkpoint, Auditor MUST verify these fields via `/api/platform/status/{request_id}`:
+
+| Checkpoint | Key Assertions |
+|------------|---------------|
+| **RVOW1** (Seq 14) | revision=2, version_ordinal=1, version_id="v1", is_latest=true, is_served=true. Versions array shows single release with revision=2. |
+| **RVOW2** (Seq 15) | New release_id (not same as v1's release_id), version_ordinal=2. Original v1 release unchanged. |
+| **TREV1** (Seq 16) | revision=3, version_id="v1", approval_state=approved. Versions array shows revision=3. |
+| **RACE1** (Seq 17) | No corrupted state regardless of timing outcome. If overwrite succeeded: revision=2. If guard blocked: original release intact at revision=1. |
+| **MREV1** (Seq 18) | Overwritten release_id matches v2's original release_id. v1's revoked release untouched (still revoked, same revision). |
+| **IST-8** (Seq 11h) | Release still in pending_review + processing. No state mutation occurred. |
+| **IST-9** (Seq 11i) | New release created with version_ordinal incremented. Original approved release unchanged. |
 
 ### Auditor Output Format
 
@@ -437,9 +528,14 @@ Assessment: {HEALTHY | DEGRADED | DOWN}
 | 8. Reject→Resubmit→Approve | {n} | {n} | {n} | {n} |
 | 9. Revoke + is_latest Cascade | {n} | {n} | {n} | {n} |
 | 10. Overwrite Draft | {n} | {n} | {n} | {n} |
-| 11. Invalid State Transitions (7) | {n} | {n} | {n} | {n} |
+| 11. Invalid State Transitions (9) | {n} | {n} | {n} | {n} |
 | 12. Missing Required Fields (10) | {n} | {n} | {n} | {n} |
 | 13. Version Conflict | {n} | {n} | {n} | {n} |
+| 14. Revoke→Overwrite→Reapprove | {n} | {n} | {n} | {n} |
+| 15. Overwrite Approved (→New Version) | {n} | {n} | {n} | {n} |
+| 16. Triple Revision | {n} | {n} | {n} | {n} |
+| 17. Overwrite Race Guard | {n} | {n} | {n} | {n} |
+| 18. Multi-Revoke Overwrite Target | {n} | {n} | {n} | {n} |
 
 ## Service URL Verification
 | Data Type | Probe | HTTP | Verdict |

@@ -1,14 +1,445 @@
 # Project History
 
-**Last Updated**: 11 FEB 2026
-**Active Log**: Dec 2025 - Present
+**Last Updated**: 04 MAR 2026
+**Active Log**: FEB - MAR 2026
 **Rolling Archive**: When this file exceeds ~600 lines, older content is archived with a UUID filename.
 
 **Archives** (chronological):
 - [HISTORY_26e76e95.md](./HISTORY_26e76e95.md) - Sep-Nov 2025 (4,500+ lines)
 - [HISTORY_ARCHIVE_DEC2025.md](./HISTORY_ARCHIVE_DEC2025.md) - TODO.md cleanup archive
+- [HISTORY_e1fc3ce2.md](./HISTORY_e1fc3ce2.md) - DEC 2025 - JAN 2026
 
 This document tracks completed architectural changes and improvements to the Azure Geospatial ETL Pipeline.
+
+---
+
+## 04 MAR 2026: Platform API Cleanup (v0.9.12.1) ✅
+
+**Status**: ✅ **COMPLETE**
+**Trigger**: ADVOCATE Run 31 findings (ADV-1, ADV-3)
+
+### Achievement
+
+Cleaned platform API surface: removed dead endpoints, normalized error responses, fixed broken URLs.
+
+### Changes
+
+| Change | Details | Commits |
+|--------|---------|---------|
+| Remove 5 dead endpoints | `/lineage`, `/validate`, 3x deprecated 410s — ~568 lines deleted | `88d7793` |
+| Normalize error responses (ADV-3) | All `/platform/*` endpoints guarantee `{success, error, error_type}` on errors | `bfebb32` |
+| Remove from OpenAPI specs | Removed validate and lineage from spec docs | `2dea466` |
+| Fix ADV-1: dead `job_status_url` | Removed dead field, made `monitor_url` absolute | `9d96e09` |
+
+---
+
+## 04 MAR 2026: Release Audit Trail (v0.9.12.1) ✅
+
+**Status**: ✅ **COMPLETE**
+**Reviewed by**: COMPETE Run 33
+
+### Achievement
+
+Append-only audit log for release lifecycle events. Every approval, revocation, and overwrite is permanently recorded with full context snapshot.
+
+### Components
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| `ReleaseAuditEvent` model | `core/models/release_audit.py` | Pydantic model + `ReleaseAuditAction` enum |
+| `ReleaseAuditRepository` | `infrastructure/release_audit_repository.py` | Append-only persistence |
+| Audit emission | `services/asset_approval_service.py` | APPROVED, REVOKED events inline with mutations |
+| Overwrite audit | `infrastructure/release_repository.py` | OVERWRITTEN event via `_record_audit_inline()` |
+
+### Key Design Decisions
+
+- **Single-transaction audit** (BS-4 fix): Audit write happens in same transaction as the mutation it records — no phantom events
+- **Inline recording** via `_record_audit_inline()` — SQL INSERT embedded in mutation methods, not separate repo calls
+- **Registered in DDL generator** — table created automatically via `action=ensure`
+
+### COMPETE Run 33 Fixes Applied
+
+| ID | Severity | Fix |
+|----|----------|-----|
+| BS-1 | CRITICAL | `get_overwrite_candidate()` — broader lookup including REVOKED releases |
+| F-2 | HIGH | Remove `dict(zip(columns, dict_row))` garbage in 4 audit read methods |
+| BS-4 | HIGH | Single-transaction audit via `_record_audit_inline()` |
+| AR-3 | HIGH | WHERE state guard on `update_overwrite()` |
+| F-4 | HIGH | Fix `INTERVAL '%s hours'` → `make_interval(hours => %s)` for psycopg3 |
+| AR-1 | HIGH | Register `ReleaseAuditRepository` in `infrastructure/__init__.py` |
+
+---
+
+## 03-04 MAR 2026: Stale Ordinal Guard & In-Place Revision (v0.9.12.1) ✅
+
+**Status**: ✅ **COMPLETE**
+**Verified by**: REFLEXION Run 32
+
+### Achievement
+
+Fixed inoperative stale-ordinal guard and enabled in-place ordinal revision (overwriting REVOKED releases).
+
+### Changes
+
+| Change | Commit | Details |
+|--------|--------|---------|
+| Fix positional row indexing | REFLEXION Run 32 P1 | `row[0]`→`row['release_id']` in `has_newer_active_ordinal()` — was silently crashing on `dict_row` cursors |
+| Stale ordinal exemption | `56d8704` | Exempt in-place revision (revision > 1) from stale ordinal check |
+| Accept REVOKED for overwrite | `ebaa61d` | `can_overwrite()` now accepts REVOKED state for in-place ordinal revision |
+| ADV-2 approval guard verified | REFLEXION Run 32 | Both Python guard + SQL WHERE clause confirmed working — CANNOT be bypassed |
+
+---
+
+## 02-03 MAR 2026: Observability & Reliability (v0.9.12.0) ✅
+
+**Status**: ✅ **COMPLETE**
+
+### Changes
+
+| Change | Commit | Details |
+|--------|--------|---------|
+| DB token refresh fix | `302f1a1` | Docker worker: refresh on startup + per-message freshness check |
+| Orphaned release cleanup | `d6e3210` | Compensating cleanup if job creation fails after release creation |
+| OBSERVATORY diagnostic gaps | `81c52cc` | 3 P0 bugs fixed + 5 observability enhancements |
+
+---
+
+## 02 MAR 2026: Zarr Service Layer (v0.9.11.8-11.10) ✅
+
+**Status**: ✅ **COMPLETE**
+
+### Achievement
+
+Native Zarr ingest pipeline alongside existing VirtualiZarr, plus xarray TiTiler URL injection for Zarr visualization.
+
+### Components
+
+| Component | Version | Details |
+|-----------|---------|---------|
+| IngestZarr job | v0.9.11.8 | 3-stage pipeline: validate → copy → register (`jobs/ingest_zarr.py`) |
+| IngestZarr handlers | v0.9.11.8 | `services/handler_ingest_zarr.py` — validate, copy, register handlers |
+| Pipeline routing | v0.9.11.8 | `submit.py` routes to `ingest_zarr` or `virtualzarr` based on `pipeline` field |
+| xarray TiTiler URLs | v0.9.11.10 | `generate_xarray_tile_urls()` injected into STAC items at materialization |
+| B2C/B2B route models | v0.9.11.10 | `core/models/` — URL resolution for service layer routing |
+| .zarr auto-detection | v0.9.11.8 | Files ending `.zarr` automatically detected as zarr data type |
+
+---
+
+## 01-02 MAR 2026: Web Dashboard (v0.9.11.5) ✅
+
+**Status**: ✅ **COMPLETE**
+**Built by**: GREENFIELD Run 19 (initial), Run 24 (submit form)
+
+### Achievement
+
+HTMX-powered single-page dashboard replacing the legacy per-endpoint web interfaces for operational monitoring.
+
+### Structure
+
+| Tab | Sub-tabs | Key Features |
+|-----|----------|------------|
+| Platform | Requests, Approvals | Release table with approval actions, status badges |
+| Jobs | Active, History | Job progress, task details, error display |
+| Data | Storage, STAC, Queues | Zone-grouped container browser, blob listing, Service Bus peek/DLQ |
+| System | Health, Config | Diagnostics overview |
+
+### Key Details
+
+- **Location**: `web_dashboard/` — 9 files, ~4,500 LOC
+- **HTMX CDN**: Async load with `s.onload` callback for `htmx.process(document.body)`
+- **Auto-refresh**: 15s on queue monitoring, 30s on active jobs
+- **Submit form** (GREENFIELD Run 24): File browser with container/blob selection
+- **P0/P1 fixes**: Applied from GREENFIELD Validator findings in v0.9.11.5
+
+### Files
+
+| File | Purpose |
+|------|---------|
+| `web_dashboard/__init__.py` | Blueprint registration |
+| `web_dashboard/base_panel.py` | Shared `data_table()`, `status_badge()`, escaping utilities |
+| `web_dashboard/platform_panel.py` | Platform requests + approval actions |
+| `web_dashboard/jobs_panel.py` | Job monitoring + task details |
+| `web_dashboard/data_panel.py` | Storage browser + STAC overview |
+| `web_dashboard/system_panel.py` | Health + config diagnostics |
+| `web_dashboard/queue_panel.py` | Service Bus monitoring |
+| `web_dashboard/submit_panel.py` | File browser submit form |
+
+---
+
+## 01 MAR 2026: Web Interface Security Hardening (v0.9.11.0) ✅
+
+**Status**: ✅ **COMPLETE**
+**Scope**: 5 files in `web_interfaces/`
+
+### Achievement
+
+XSS hardening across all legacy web interfaces.
+
+### Patterns Applied
+
+| Pattern | Implementation |
+|---------|---------------|
+| Server-side HTML escaping | `html_mod.escape()` for all dynamic content in HTML context |
+| Server-side JS escaping | `_js_escape()` static method on `BaseInterface` for JS single-quoted literals |
+| Client-side escaping | `escapeHtml()` JS function wraps all API data before `innerHTML` assignment |
+| URL validation | Protocol check (`/^https?:\/\//i.test(url)`) + `encodeURIComponent()` for path segments |
+| Double-escape for JS-in-HTML | `onclick` handlers get JS-escaped then HTML-escaped |
+
+### Also Identified
+
+- ~11,500 lines (25%) dead/unreachable code in web_interfaces — metrics, integration, submit_raster, submit_vector, submit_raster_collection, plus orphan chain (platform, execution)
+- `html` variable shadowing bug in `__init__.py` — renamed to `html_content`
+
+---
+
+## 01 MAR 2026: VirtualiZarr Pipeline Fixes (v0.9.11.6-11.8) ✅
+
+**Status**: ✅ **COMPLETE**
+
+### Fixes
+
+| Fix | Commit | Details |
+|-----|--------|---------|
+| GAP-1, GAP-2, GAP-7 | `482c499` | NetCDF pipeline gaps for clean end-to-end run |
+| SG6-L1 | `30e685d` | Replace scipy with netCDF4 engine for lazy metadata read |
+| Validate handler | `f498230`, `8b0f79c` | Download NetCDF to temp file for netCDF4 engine |
+| Combine stage | `885ab4c` | Pass full `abfs://` URL to `open_virtual_dataset` |
+| scipy dependency | `fb6a078` | Added for kerchunk NetCDF3 chunking |
+
+---
+
+## 28 FEB 2026: VirtualiZarr Pipeline (v0.9.9.0) ✅
+
+**Status**: ✅ **COMPLETE** (implemented earlier, fixes applied 28 FEB - 01 MAR)
+
+### Achievement
+
+5-stage NetCDF-to-Zarr pipeline using VirtualiZarr for lazy reference-based Zarr stores.
+
+### Pipeline Stages
+
+```
+Stage 1: scan_netcdf_variables   → Extract variable metadata from NetCDF files
+Stage 2: copy_netcdf_to_silver   → Copy raw NetCDF to silver storage
+Stage 3: validate_netcdf         → Validate file integrity with netCDF4
+Stage 4: combine_virtual_zarr    → Build virtual Zarr reference store
+Stage 5: register_zarr_catalog   → Register in STAC catalog
+```
+
+### Key Files
+
+- `jobs/virtualzarr.py` — Job definition (5 stages)
+- `services/handler_virtualzarr.py` — All 5 stage handlers
+- `jobs/unpublish_zarr.py` — Reverse pipeline (inventory → delete_blobs → cleanup)
+- `services/unpublish_handlers.py` — Unpublish handlers including `inventory_zarr_item`
+
+### CoreMachine Enhancement
+
+- **Zero-task stage guard** in `core/machine.py` — when `create_tasks_for_stage` returns `[]`, stage auto-advances to next stage instead of hanging
+
+---
+
+## 26 FEB - 04 MAR 2026: Agent Review Campaign ✅
+
+**Status**: ✅ **COMPLETE** (33 runs across 7 pipelines)
+**Token usage**: ~6,564,653 instrumented tokens (Runs 9-33)
+**Full log**: `docs/agent_review/AGENT_RUNS.md`
+
+### Pipeline Summary
+
+| Pipeline | Runs | Purpose |
+|----------|------|---------|
+| COMPETE | 13 (Runs 1-6, 9, 12, 19, 28-30, 33) | Adversarial code review — Alpha/Beta split + Gamma blind-spot finder + Delta judge |
+| GREENFIELD | 4 (Runs 7-8, 10, 24) | Greenfield implementation — multi-agent build + validator |
+| SIEGE | 9 (Runs 11, 13, 18, 20-23, 25-26) | Live API smoke testing — sequential HTTP scenario execution |
+| REFLEXION | 5 (Runs 14-17, 32) | Targeted deep analysis — Reverse Engineer → Fault Injector → Patch Author → Judge |
+| TOURNAMENT | 1 (Run 27) | Full-spectrum adversarial — golden-path + attacks + blind audit + boundary-value |
+| ADVOCATE | 1 (Run 31) | B2B developer experience audit — friction log + REST dimension grading |
+
+### Key Outcomes
+
+- **SIEGE Runs**: Started at FAIL (11 findings), improved to 90.8% pass rate (52/54 steps)
+- **TOURNAMENT Run 27**: 87.2% score, 0 state divergences, found PRV-1 CRITICAL (malformed JSON 500s)
+- **ADVOCATE Run 31**: DX score 37% (pre-beta), 25 findings. Led to ADV-1/ADV-3 fixes in v0.9.12.1
+- **REFLEXION Run 32**: Confirmed approval guard CANNOT be bypassed. Found stale-ordinal guard inoperative — fixed
+- **COMPETE Run 33**: Release audit trail reviewed. BS-1 CRITICAL (REVOKED overwrite unreachable) fixed
+
+### Bug Fix Tally
+
+| Category | Fixed | By Design | Still Open |
+|----------|-------|-----------|------------|
+| CRITICAL | 6 | 0 | 0 |
+| HIGH | 8 | 0 | 0 |
+| MEDIUM | 7 | 3 | 10 |
+| LOW | 3 | 1 | 3 |
+
+---
+
+## 23 FEB 2026: V0.9 Asset/Release Entity Split (v0.8.21 → v0.9.0.0) ✅
+
+**Status**: ✅ **COMPLETE**
+**Version jump**: v0.8.21.0 → v0.9.0.0
+
+### Achievement
+
+Split monolithic `GeospatialAsset` (identity + version + approval + processing in one row) into two entities:
+
+```
+Asset (stable identity container)
+  └── AssetRelease (versioned artifact with lifecycle)
+       ├── version_ordinal: 1, 2, 3...
+       ├── approval_state: pending_review → approved/rejected → revoked
+       ├── processing_status: pending → processing → completed/failed
+       └── stac_item_json: cached STAC materialization
+```
+
+### Phases
+
+| Phase | Description | Commit |
+|-------|-------------|--------|
+| 1a-c | Define Asset + AssetRelease models, register in DDL | `d7ee000`, `b2399d9`, `ea4d36a` |
+| 2a-c | AssetRepositoryV2, ReleaseRepository, register in infra | `8480c27`, `9e3d274`, `6749ffe` |
+| 3a-b | AssetServiceV2, AssetApprovalServiceV2 | `3b8f7e1`, `633c847` |
+| 4a-d | Rewrite platform submit, approval, status, resubmit | `b2eec6f`, `e909f57`, `8ef055e`, `82ae46a` |
+| 5a-e | Handlers, STAC caching, unpublish, catalog, validation | `a8c42eb`-`1a887f8` |
+| 6a-c | Archive V0.8 entities, rename V2→canonical, update tests | `a850e88`-`4498c9c` |
+
+### Key Design Decisions
+
+- **STAC materialization deferred to approval** — cached dict on Release, written to pgSTAC only when approved
+- **Version ordinal reservation** at submit time — guarantees ordinal even if processing fails
+- **Ordinal naming** (`ord1`, `ord2`) replaces "draft" placeholder in blob paths
+- **Forward foreign keys** — Release points to Asset (not reverse lookup)
+
+---
+
+## 23 FEB 2026: V0.9.1-9.2 UI Sweep + STAC Fixes ✅
+
+**Status**: ✅ **COMPLETE**
+
+### Changes
+
+| Version | Change |
+|---------|--------|
+| v0.9.1.0 | Asset Versions interface, approval stats, navbar links, STAC V0.9 patterns |
+| v0.9.2.0 | Fix STAC materialization bugs, raster ordinal naming, approval endpoints |
+| v0.9.2.1 | Fix blob_path: store silver COG path on Release, not bronze input |
+| v0.9.2.3 | Vector approve UI fix |
+
+---
+
+## 23 FEB 2026: Security Hardening (COMPETE Runs 1-6 Fixes) ✅
+
+**Status**: ✅ **COMPLETE**
+
+### Changes Applied
+
+| ID | Category | Fix | Commit |
+|----|----------|-----|--------|
+| C3.1-C3.3 | SQL Injection | `sql.Identifier` for column names, schema, batch operations | `17f4370`-`a5ae176` |
+| C5.1 | Access Control | Mode guard + query length limit on appinsights endpoint | `8030cdd` |
+| C7.1-C7.2 | Error Leaks | Keyword args for DB connect, sanitize error messages, App Insights context | `bc2792b`, `fcc0ba4` |
+| C8.1 | XSS | HTML-escape interface_name and exception in error page | `4266042` |
+| C1.1-C1.3 | Correctness | StageResultContract, error_details field, transitions reconciliation | `73fe30f`-`5d32d35` |
+| C4.1-C4.3 | Consistency | SHA256 hash includes job_type, JobBaseMixin enforcement, SQL composition | `8e3375f`-`713a83a` |
+| C6.1 | Logic | `_resolve_release()` uses operation param for correct draft/approved resolution | `357c67f` |
+
+---
+
+## 22-23 FEB 2026: Vector Ordinal Naming (v0.8.22-23) ✅
+
+**Status**: ✅ **COMPLETE**
+
+### Achievement
+
+Replaced "draft" placeholder with `ord{N}` in vector blob paths and identifiers. New version workflow with release ordinal reservation and defense-in-depth validation.
+
+| Version | Change |
+|---------|--------|
+| v0.8.22.0 | New version workflow, release ordinal reservation, defense-in-depth |
+| v0.8.23.0 | Vector ordinal naming: replace "draft" with `ord{N}` in paths |
+
+---
+
+## 19-20 FEB 2026: STAC as B2C Materialized View (v0.8.20) ✅
+
+**Status**: ✅ **COMPLETE**
+
+### Achievement
+
+Deferred pgSTAC writes to approval time. STAC is now a materialized view for consumer discovery, not the source of truth.
+
+- Block coexisting drafts, reset identity on overwrite
+- Fix revoke-first workflow
+- `api_requests` stale job_id fix: upsert on new version submission
+
+---
+
+## 18 FEB 2026: EN-TD.2 Phase 1 — psycopg3 Type Adapters (v0.8.19.2) ✅
+
+**Status**: ✅ **COMPLETE**
+**Trigger**: Production bug — `assign_version()` passed raw dict to psycopg3 `%s` param
+
+### Achievement
+
+Registered `JsonbBinaryDumper` for dict/list and custom `_EnumDumper` for Enum at both connection creation points. All repositories automatically inherit dict→JSONB and Enum→.value conversion.
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `infrastructure/postgresql.py:108-125` | `_EnumDumper` class + `_register_type_adapters()` function |
+| `infrastructure/postgresql.py:729` | Call in `_get_single_use_connection()` |
+| `infrastructure/connection_pool.py:240-241` | Call in `_configure_connection()` |
+
+### Phase 2 Also Done
+
+- v0.8.19.3: Reverted bandaid `json.dumps()` in `asset_repository.update()` (`479b944`)
+
+### Remaining (Phases 3-4)
+
+- Phase 3: Remove ~50+ redundant `json.dumps()` calls across repos (harmless but noisy)
+- Phase 4: Cleanup dead `to_dict()`, deprecated `json_encoders`, check `_parse_jsonb_column()`
+
+---
+
+## 28 FEB 2026: SIEGE Bug Fixes (v0.9.10.0 - v0.9.10.1) ✅
+
+**Status**: ✅ **COMPLETE**
+
+### SIEGE Run 1 Fixes (v0.9.10.0)
+
+| ID | Severity | Fix |
+|----|----------|-----|
+| SG-1 | CRITICAL | STAC materialization ordering |
+| SG-2 | HIGH | SQL error leak on approvals/status |
+| SG-3 | HIGH | catalog/dataset returns 500 |
+| SG-7 | MEDIUM | is_latest not restored after rollback |
+| SG-8 | LOW | Inconsistent lineage 404 shape |
+| SG-6 | MEDIUM | STAC naming mismatch + 4 bonus COMPETE Run 12 findings |
+
+### REFLEXION Fixes (v0.9.10.1)
+
+| Run | ID | Fix |
+|-----|-----|-----|
+| Run 14 | SG-3 | catalog/dataset 500 (deeper fix) |
+| Run 15 | SG-5 | Unpublish blob deletion no-op |
+| Run 16 | SG2-2 | Revoked release retains is_served=true |
+| Run 17 | SG2-3 | Catalog API strips STAC 1.0.0 fields |
+
+---
+
+## 02 MAR 2026: Ad Hoc Bug Fixes (v0.9.11.10-11.11) ✅
+
+**Status**: ✅ **COMPLETE**
+
+| Version | ID | Fix |
+|---------|-----|-----|
+| v0.9.11.10 | OW1-F1 | `is_served=true` on pending_review — now only set at approval |
+| v0.9.11.10 | SVC-F3 | Double container path in zarr URLs |
+| v0.9.11.10 | REJ1-F1 | Rejection reason not surfaced in /status |
+| v0.9.11.11 | PRV-1 | /approve, /reject, /revoke crash 500 on malformed JSON |
+| v0.9.11.11 | PRV-2 | SSRF info leak via URL in container_name |
 
 ---
 
@@ -40,942 +471,49 @@ Moved to `docs/archive/v0.7_approval/`:
 - `approval_repository.py` (ApprovalRepository)
 - `approval_service.py` (ApprovalService)
 
-### Code Cleanup
-
-- Removed `dataset_approvals` DDL from `sql_generator.py`
-- Removed from `schema_analyzer.py` expected schema
-- Removed exports from `core/models/__init__.py` and `infrastructure/__init__.py`
-- Added missing `GET /api/platform/approvals/status` to docs landing page
-
 ### Design Document
 
 Full plan: `docs_claude/V0.8_APPROVAL_CONSOLIDATION.md`
 
 ---
 
-## 10 FEB 2026: Technical Debt Assessment ✅
-
-**Status**: ✅ **RESOLVED**
-
-### Job Version Tracking
-Already implemented as of V0.8.12 (08 FEB 2026). The `etl_version` field on `JobRecord` captures app version at job creation across all three paths:
-- Platform submissions (`platform_job_submit.py`)
-- Mixin-based jobs (`jobs/mixins.py`)
-- Direct repository (`infrastructure/jobs_tasks.py`)
-
-### Vector Revision Tracking
-**Not needed** - architectural decision confirmed:
-- All vector ingestion goes through Platform API
-- Platform API creates GeospatialAsset with revision tracking
-- `app.asset_revisions` provides audit trail for superseded versions
-- ETL layer is execution-only, doesn't need its own revision concept
-
-**Key Principle**: Revision tracking lives at the Platform/Asset layer, not ETL layer.
-
----
-
 ## 10 FEB 2026: US 4.2.1 Approval-Aware Overwrite & Version Validation ✅
 
 **Status**: ✅ **COMPLETE**
-**Epic**: E4 Data Governance
-**Version**: 0.8.16.7 - 0.8.16.8
 
 ### Achievement
 
-Implemented approval-aware validation for overwrites and semantic versioning:
 - Block overwrite if asset is APPROVED (must revoke first)
 - Reset approval to pending_review on successful overwrite (not at submit time)
 - Require approved predecessor for semantic version advances
-
-### Bug Fixes
-
-| Version | Issue | Fix |
-|---------|-------|-----|
-| V0.8.16.7 | Approval reset at submit time (before job success) | Moved reset to handler completion |
-| V0.8.16.8 | `idx_single_latest_per_lineage` constraint violation | Clear `is_latest` on previous version BEFORE insert |
-
-### All Tests Passed
-
-| Test | Result |
-|------|--------|
-| Revocation Flow | ✅ Asset revoked, STAC updated |
-| Overwrite Blocked on APPROVED | ✅ Correctly blocked |
-| Overwrite After Revoke | ✅ Reset to pending_review after job success |
-| Semantic Version Blocked | ✅ Blocked when previous not approved |
-| Semantic Version Allowed | ✅ v2.0 created after v1.0 approved |
+- Bug fixes: v0.8.16.7-16.8 resolved approval reset timing and constraint violations
 
 ---
 
 ## 09 FEB 2026: V0.8.16 Forward FK Architecture ✅
 
 **Status**: ✅ **COMPLETE**
-**Epic**: E7 Pipeline Infrastructure
-**Version**: 0.8.16.0 - 0.8.16.5
 
 ### Achievement
 
-Refactored platform status and approval workflows to use forward foreign keys instead of reverse lookups via `current_job_id`. Forward FKs are set at job creation time and don't depend on job completion.
-
-### Key Changes
-
-| Component | Before | After |
-|-----------|--------|-------|
-| Platform status asset resolution | `asset_repo.get_by_job_id(current_job_id)` | `platform_request.asset_id` or `job.asset_id` |
-| Approval trigger asset resolution | `get_by_job_id()` reverse lookup | Direct FK from JobRecord |
-| Handler asset linking code | Dead code in handlers | Removed (CoreMachine factory handles it) |
-
-### Files Modified
-
-| File | Change |
-|------|--------|
-| `triggers/trigger_platform_status.py` | Use forward FKs for asset_id resolution |
-| `triggers/trigger_approvals.py` | Use forward FKs in `_resolve_asset_id()` |
-| `services/handler_vector_docker_complete.py` | Removed dead asset linking code |
-| `services/handler_process_raster_complete.py` | Removed dead asset linking code |
-
-### Query Param Deprecation (V0.8.16.5)
-
-Deprecated query parameter lookups on `/api/platform/status`:
-
-| Pattern | Response |
-|---------|----------|
-| `?job_id=xxx` | 400 - "Use /api/platform/status/{id} instead" |
-| `?request_id=xxx` | 400 - "Use /api/platform/status/{id} instead" |
-| `/status/{id}` | 200 - Auto-detects request_id, job_id, or asset_id |
+Refactored platform status and approval workflows from reverse lookups to forward foreign keys:
+- Before: `asset_repo.get_by_job_id(current_job_id)` (reverse lookups via job completion)
+- After: `platform_request.asset_id` or `job.asset_id` (direct FKs set at job creation)
+- Query param deprecation: `/api/platform/status?job_id=xxx` now returns 400
 
 ---
 
-## 09 FEB 2026: BUG_REFORM Error Handling - Phase 6 Documentation ✅
-
-**Status**: ✅ **COMPLETE** (All Phases)
-**Epic**: E7 Pipeline Infrastructure
-**Impact**: Comprehensive error handling documentation for B2B integration
-
-### Summary
-
-Completed the final phase of BUG_REFORM error handling implementation - Phase 6: Documentation.
-All 6 phases of the error handling reform are now complete.
-
-### Documentation Created
-
-| Document | Purpose | Location |
-|----------|---------|----------|
-| **ERROR_CODE_REFERENCE.md** | Complete inventory of all 47 error codes with categories, scopes, HTTP status, and remediation | `docs_claude/` |
-| **B2B_ERROR_HANDLING_GUIDE.md** | Integration guide for DDH Platform and external API consumers | `docs_claude/` |
-| **ERROR_TROUBLESHOOTING.md** | Step-by-step troubleshooting organized by error category | `docs_claude/` |
-
-### BUG_REFORM Complete Summary
-
-| Phase | Description | Completed |
-|-------|-------------|-----------|
-| Phase 1 | Error Category System (ErrorCategory, ErrorScope, Pydantic models) | 06 FEB 2026 |
-| Phase 2 | New Error Codes (47 total, up from 25) | 06 FEB 2026 |
-| Phase 3 | Collection Homogeneity Validator | 06 FEB 2026 |
-| Phase 4 | Enhanced Raster Validation (nodata, empty, extreme values) | 06 FEB 2026 |
-| Phase 5 | B2B Error Message Cleanup (remediation, error_id) | 06 FEB 2026 |
-| Phase 6 | Documentation | 09 FEB 2026 |
-
-### Key Features Delivered
-
-- **ErrorCategory enum**: 7 categories for blame assignment (DATA_MISSING, DATA_QUALITY, DATA_INCOMPATIBLE, PARAMETER_ERROR, SYSTEM_ERROR, SERVICE_UNAVAILABLE, CONFIGURATION)
-- **ErrorScope enum**: NODE vs WORKFLOW for DAG-ready error classification (v0.9)
-- **ErrorResponse Pydantic model**: Type-safe B2B error responses
-- **ErrorDebug Pydantic model**: Debug info stored in job records
-- **47 error codes**: Including RASTER_*, VECTOR_*, COLLECTION_* prefixed codes
-- **Remediation messages**: Actionable guidance for all user-fixable errors
-- **error_id generation**: Support ticket correlation (ERR-{date}-{time}-{random})
-
-### Design Document
-
-Full design and implementation details: `/BUG_REFORM.md`
-
----
-
-## 07 FEB 2026: STAC Architecture - Optional Cataloging for Vectors ✅
+## 09 FEB 2026: BUG_REFORM Error Handling (All 6 Phases) ✅
 
 **Status**: ✅ **COMPLETE**
-**Epic**: E7 Pipeline Infrastructure
-**Impact**: STAC is now purely for discovery, not application logic
-
-### Architecture Decision
-
-**Before**: All vectors were automatically added to a `system-vectors` STAC collection, duplicating metadata from `geo.table_catalog`.
-
-**After**: STAC cataloging is optional. Users must explicitly provide `collection_id` to create STAC items. This enables:
-- Mixed raster/vector collections (future)
-- User-defined collection organization
-- STAC as pure discovery layer (not application logic)
-
-### Key Principle
-
-> **STAC is for discovery, not application logic.**
-> `geo.table_catalog` is the source of truth for vector metadata.
-> OGC Features API reads from `table_catalog`, not STAC.
-
-### Changes Made
-
-| File | Change |
-|------|--------|
-| `config/defaults.py` | Removed `VECTOR_COLLECTION`, `SYSTEM_COLLECTIONS = []`, removed `system-vectors` from `COLLECTION_METADATA` |
-| `infrastructure/pgstac_bootstrap.py` | `get_system_stac_collections()` now returns `[]` |
-| `services/stac_vector_catalog.py` | `collection_id` is now required (validation error if missing) |
-| `jobs/process_vector.py` | Stage 3 is conditional on `collection_id`, added `stac_item_id` parameter |
-
-### process_vector Job Changes
-
-**New Parameters**:
-- `collection_id` (optional) - STAC collection to add item to
-- `stac_item_id` (optional) - Custom STAC item ID
-
-**Stage 3 Behavior**:
-- If `collection_id` provided: Creates STAC item in specified collection
-- If `collection_id` omitted: Stage 3 skipped, no STAC item created
-
-**Job Result** (when STAC skipped):
-```json
-{
-  "stac": {
-    "stac_skipped": true,
-    "stac_item_created": false,
-    "reason": "No collection_id provided - STAC cataloging skipped (data accessible via OGC Features API)"
-  }
-}
-```
-
-### Data Access Without STAC
-
-Vector data remains fully accessible:
-- **OGC Features API**: `/api/features/collections/{schema}-{table}/items`
-- **Vector Tiles**: TiPG MVT endpoints
-- **Metadata**: `geo.table_catalog` (source of truth)
-
----
-
-## 21 JAN 2026: Docker Worker Application Insights AAD Auth Fix ✅
-
-**Status**: ✅ **COMPLETE**
-**Epic**: E7 Pipeline Infrastructure
-**Feature**: F7.12.E Docker Worker OpenTelemetry
-
-### Problem
-
-Docker worker logs were not appearing in Application Insights. Investigation revealed three issues:
-1. Wrong App Insights connection string (different instrumentation key)
-2. App Insights has `DisableLocalAuth=true` requiring Entra ID authentication
-3. Missing RBAC role for managed identity
-
-### Solution
-
-1. **Updated connection string** - Pointed Docker worker to same App Insights as Function App (`rmhazuregeoapi`)
-2. **Added AAD authentication support** - Updated `configure_azure_monitor_telemetry()` to detect `APPLICATIONINSIGHTS_AUTHENTICATION_STRING=Authorization=AAD` and pass `DefaultAzureCredential`
-3. **Assigned RBAC role** - "Monitoring Metrics Publisher" to Docker worker's managed identity
-
-### Files Modified
-
-| File | Change |
-|------|--------|
-| `docker_service.py` | Added AAD auth support to `configure_azure_monitor_telemetry()` |
-| `docker_service.py` | Added `/test/logging` and `/test/logging/verify` health check endpoints |
-| `docs_claude/DEPLOYMENT_GUIDE.md` | Added Docker Worker Application Insights Setup section |
-| `docs_claude/ERRORS_AND_FIXES.md` | Added OBSERVABILITY category with OBS-001, OBS-002, OBS-003 |
-
-### Environment Variables Required
-
-```bash
-APPLICATIONINSIGHTS_CONNECTION_STRING=InstrumentationKey=6aa0e75f-...;IngestionEndpoint=...
-APPLICATIONINSIGHTS_AUTHENTICATION_STRING=Authorization=AAD
-APP_NAME=rmhheavyapi
-ENVIRONMENT=dev
-```
-
-### RBAC Role Assignment
-
-```bash
-az role assignment create \
-  --assignee cea30c4b-8d75-4a39-8b53-adab9a904345 \
-  --role "Monitoring Metrics Publisher" \
-  --scope "/subscriptions/fc7a176b-9a1d-47eb-8a7f-08cc8058fcfa/resourceGroups/rmhazure_rg/providers/microsoft.insights/components/rmhazuregeoapi"
-```
-
----
-
-## 21 JAN 2026: Platform Routing Improvements ✅
-
-**Status**: ✅ **COMPLETE**
-**Epic**: E7 Pipeline Infrastructure
-
-### Changes
-
-1. **Platform Default to Docker** - When `docker_worker_enabled=true` in config, platform raster jobs automatically route to Docker worker without requiring `processing_mode=docker` parameter
-2. **Endpoint Consolidation** - Removed redundant `/api/platform/raster` and `/api/platform/raster-collection` endpoints. All platform submissions now go through unified `/api/platform/submit`
-3. **Expected Data Type Validation** - Added validation for `expected_data_type` parameter
-
-### Files Modified
-
-| File | Change |
-|------|--------|
-| `web_interfaces/stac/interface.py` | Default `processing_mode` based on config |
-| `web_interfaces/vector/interface.py` | Removed redundant endpoints |
-
----
-
-## 15 JAN 2026: Platform API Diagnostics (F7.12) ✅
-
-**Status**: ✅ **COMPLETE**
-**Epic**: E7 Pipeline Infrastructure
-**Goal**: Expose diagnostic endpoints via Platform API for external service layer apps
-
-### Endpoints Created
-
-| Endpoint | Purpose |
-|----------|---------|
-| `GET /api/platform/health` | Simplified system readiness check (ready_for_jobs boolean, queue backlog, avg job time) |
-| `GET /api/platform/failures` | Recent failures with sanitized errors, grouped by pattern |
-| `GET /api/platform/lineage/{request_id}` | Data lineage by request ID (source → processing → output) |
-| `POST /api/platform/validate` | Pre-flight validation (file exists, readable, size, recommended job type) |
-
-### Files Created/Modified
-
-| File | Change |
-|------|--------|
-| `triggers/platform/diagnostics.py` | New file with all diagnostic endpoints |
-| `triggers/platform/__init__.py` | Register diagnostic blueprint |
-
----
-
-## 10-11 JAN 2026: F7.12 Logging Architecture Consolidation ✅
-
-**Status**: ✅ **COMPLETE**
-**Epic**: E7 Pipeline Infrastructure
-**Goal**: Eliminate duplicate debug flags, unify diagnostics, add global log context for multi-app filtering
-
-### Subsections Completed
-
-| Section | Description | Status |
-|---------|-------------|--------|
-| F7.12.A | Global Log Context - Every log includes app_name, instance_id, environment | ✅ |
-| F7.12.B | Unify Diagnostics Module | ⏭️ SKIPPED (existing structure adequate) |
-| F7.12.C | Consolidate Debug Flags - Reduced 4 flags to 2 (`OBSERVABILITY_MODE`, `METRICS_ENABLED`) | ✅ |
-| F7.12.D | Python App Insights Log Export - `/api/logs/export` endpoint | ✅ |
-| F7.12.E | Docker Worker OpenTelemetry - Docker logs to same App Insights | ✅ |
-| F7.12.F | JSONL Log Dump System - Level-based filtering with retention | ✅ |
-
-### Key Files Created/Modified
-
-| File | Purpose |
-|------|---------|
-| `config/observability_config.py` | Unified observability configuration |
-| `infrastructure/appinsights_exporter.py` | App Insights REST API client |
-| `infrastructure/jsonl_log_handler.py` | JSONL blob handler for log export |
-| `triggers/admin/log_cleanup_timer.py` | Log retention cleanup timer |
-| `util_logger.py` | Global log context injection |
-
-### Environment Variables
-
-```bash
-OBSERVABILITY_MODE=true           # Master switch for debug diagnostics
-METRICS_ENABLED=true              # ETL job progress to PostgreSQL
-VERBOSE_LOG_DUMP=true             # Combined with OBSERVABILITY_MODE, dumps ALL logs
-JSONL_DEBUG_RETENTION_DAYS=7      # Days to keep verbose logs
-JSONL_WARNING_RETENTION_DAYS=30   # Days to keep warning+ logs
-```
-
-### KQL Query for Multi-App Filtering
-
-```kql
-traces
-| where cloud_RoleName in ("rmhazuregeoapi", "rmhheavyapi")
-| project timestamp, cloud_RoleName, message
-| order by timestamp desc
-```
-
----
-
-## 21 JAN 2026: Artifact Registry - Blob Version Tracking ✅
-
-**Status**: ✅ **COMPLETE**
-**Epic**: E4 Security Zones / Externalization
-**Version**: 0.7.16.x (pending deployment)
 
 ### Achievement
 
-Added `blob_version_id` field to artifact tracking system. When Azure Blob Storage versioning is enabled, the artifact registry now captures the Azure blob version ID for each artifact. This enables linking internal revision tracking to actual blob storage versions for recovery and audit scenarios.
-
-### Use Case
-
-When a dataset is updated (metadata + file change) without a semantic version change:
-- New artifact created with revision N+1, new `content_hash`, new `blob_version_id`
-- Old artifact marked `SUPERSEDED`, retains its original `blob_version_id`
-- Full lineage preserved: `supersedes`/`superseded_by` links + Azure version IDs
-
-### Files Modified
-
-| File | Change |
-|------|--------|
-| `core/models/artifact.py` | Added `blob_version_id` field |
-| `infrastructure/artifact_repository.py` | Added field to INSERT/SELECT |
-| `services/artifact_service.py` | Added `blob_version_id` parameter |
-| `infrastructure/blob.py` | Capture `version_id` from Azure upload response |
-| `services/raster_cog.py` | Return `blob_version_id` in COG result |
-| `services/raster_mosaicjson.py` | Return `blob_version_id` in MosaicJSON result |
-| `services/handler_process_raster_complete.py` | Pass to artifact creation |
-| `services/handler_process_large_raster_complete.py` | Pass to artifact creation |
-
-### Schema Change
-
-**New Column**: `app.artifacts.blob_version_id VARCHAR(64)`
-
-**Deployment** (breaking - requires rebuild):
-```bash
-# Deploy code
-func azure functionapp publish rmhazuregeoapi --python --build remote
-
-# Rebuild app schema (creates new column)
-curl -X POST ".../api/dbadmin/maintenance?action=rebuild&target=app&confirm=yes"
-```
-
-### Enable Azure Blob Versioning
-
-```bash
-az storage account blob-service-properties update \
-  --account-name <silver_account> \
-  --resource-group <rg> \
-  --enable-versioning true
-```
-
----
-
-## 20-21 JAN 2026: Artifact Registry (Core) ✅
-
-**Status**: ✅ **COMPLETE**
-**Epic**: E4 Security Zones / Externalization
-
-### Achievement
-
-Created internal artifact registry for tracking pipeline outputs with supersession/lineage support. Tracks artifacts independently of STAC with client-agnostic UUIDs and flexible `client_refs` JSONB for any client schema (DDH, Data360, manual, etc.).
-
-### Key Features
-
-- Internal `artifact_id` (UUID) - never exposed to clients
-- `content_hash` (SHA256 multihash) for duplicate detection
-- `supersedes`/`superseded_by` links for overwrite lineage
-- `revision` - global monotonic counter per `client_refs`
-- `status` - active, superseded, archived, deleted lifecycle
-- `client_refs` JSONB - flexible client parameter storage
-
-### Files Created
-
-| File | Purpose |
-|------|---------|
-| `core/models/artifact.py` | Artifact model + ArtifactStatus enum |
-| `infrastructure/artifact_repository.py` | CRUD operations |
-| `services/artifact_service.py` | Business logic |
-
----
-
-## 12 JAN 2026: F7.12 Docker Worker Infrastructure ✅
-
-**Status**: ✅ **COMPLETE**
-**Epic**: E7 Pipeline Infrastructure
-**Deployed**: 11 JAN 2026 to `rmhheavyapi` Web App
-**Image**: `rmhazureacr.azurecr.io/rmh-gdal-worker:latest`
-**Version**: 0.7.8
-
-### Achievement
-
-Deployed Docker worker for long-running tasks that exceed Azure Functions 30-minute timeout. Uses same CoreMachine as Function App - only the trigger mechanism differs.
-
-### Stories Completed
-
-| Story | Description |
-|-------|-------------|
-| S7.12.1 | Create `docker_main.py` (queue polling entry point) |
-| S7.12.2 | Create `workers_entrance.py` (FastAPI + health endpoints) |
-| S7.12.3 | Create `Dockerfile`, `requirements-docker.txt`, `docker.env.example` |
-| S7.12.5 | Create `.funcignore` to exclude Docker files from Functions deploy |
-| S7.12.6 | Create `infrastructure/auth/` module for Managed Identity OAuth |
-| S7.12.7 | Verify ACR build succeeds |
-| S7.12.8 | Deploy to rmhheavyapi Web App |
-| S7.12.9 | Configure identities (PostgreSQL: user-assigned, Storage: system-assigned) |
-| S7.12.10 | Verify all health endpoints (`/livez`, `/readyz`, `/health`) |
-
-### Key Files Created
-
-- `docker_main.py` - Queue polling entry point
-- `workers_entrance.py` → `docker_service.py` - FastAPI app with health endpoints
-- `Dockerfile` - OSGeo GDAL ubuntu-full-3.10.1 base
-- `requirements-docker.txt` - Dependencies (minus azure-functions)
-- `infrastructure/auth/` - Token cache, PostgreSQL OAuth, Storage OAuth
-
-### Identity Configuration (All Identity-Based - No Secrets)
-
-| Resource | Identity | Type | RBAC Role |
-|----------|----------|------|-----------|
-| PostgreSQL | `a533cb80-a590-4fad-8e52-1eb1f72659d7` | User-assigned MI | PostgreSQL AAD Auth |
-| Storage | `cea30c4b-8d75-4a39-8b53-adab9a904345` | System-assigned MI | Storage Blob Data Contributor |
-| Service Bus | `cea30c4b-8d75-4a39-8b53-adab9a904345` | System-assigned MI | Data Sender + Data Receiver |
-
----
-
-## 12 JAN 2026: F7.13 Docker Job Definitions (Phase 1) ✅
-
-**Status**: ✅ **PHASE 1 COMPLETE** (checkpoint infrastructure + BackgroundQueueWorker)
-**Epic**: E7 Pipeline Infrastructure
-
-### Achievement
-
-Created checkpoint/resume infrastructure for Docker tasks and integrated BackgroundQueueWorker into FastAPI service.
-
-### Stories Completed
-
-| Story | Description |
-|-------|-------------|
-| S7.13.1 | Create `jobs/process_raster_docker.py` - single-stage job |
-| S7.13.2 | Create `services/handler_process_raster_complete.py` - consolidated handler |
-| S7.13.3 | Register job and handler in `__init__.py` files |
-| S7.13.4 | Rename `heartbeat` → `last_pulse` throughout codebase |
-| S7.13.5 | Add checkpoint fields to `TaskRecord` model and schema |
-| S7.13.6 | Create `CheckpointManager` class for resume support |
-| S7.13.7 | Update handler to use `CheckpointManager` |
-| S7.13.8 | Add BackgroundQueueWorker to workers_entrance.py |
-| S7.13.9 | Rename `workers_entrance.py` → `docker_service.py` |
-
-### Checkpoint Architecture
-
-Docker tasks are "atomic" from orchestrator's perspective but internally resumable:
-- `checkpoint_phase` - Current phase number (1, 2, 3...)
-- `checkpoint_data` - Phase-specific state (JSONB)
-- `checkpoint_updated_at` - Last checkpoint timestamp
-
-### Remaining (F7.13 Phase 2)
-
-- S7.13.11-14: Deploy, end-to-end test, checkpoint resume test, vector job
-
----
-
-## 12 JAN 2026: F7.12 Logging Architecture Consolidation ✅
-
-**Status**: ✅ **COMPLETE**
-**Epic**: E7 Pipeline Infrastructure
-
-### Achievement
-
-Unified observability infrastructure with global log context and consolidated debug flags.
-
-### Sub-Features Completed
-
-| Feature | Description | Status |
-|---------|-------------|--------|
-| F7.12.A | Global Log Context (app_name, instance_id, environment in every log) | ✅ |
-| F7.12.B | Unify Diagnostics Module | ⏭️ Skipped (existing structure adequate) |
-| F7.12.C | Consolidate Debug Flags (4 → 2: OBSERVABILITY_MODE, METRICS_ENABLED) | ✅ |
-| F7.12.D | Python App Insights Log Export (`/api/logs/export`) | ✅ |
-| F7.12.E | Docker Worker OpenTelemetry (logs to same App Insights) | ✅ |
-| F7.12.F | JSONL Log Dump System (level-based blob export) | ✅ |
-
-### Key Files
-
-- `config/observability_config.py` - Unified observability configuration
-- `infrastructure/jsonl_log_handler.py` - JSONL blob handler
-- `infrastructure/appinsights_exporter.py` - App Insights REST API client
-- `util_logger.py` - Global log context integration
-
----
-
-## 12 JAN 2026: F7.16 Code Maintenance (Phase 1) ✅
-
-**Status**: ✅ **PHASE 1 COMPLETE**
-**Goal**: Split 2,673-line monolithic db_maintenance.py into focused modules
-
-### Results
-
-- `db_maintenance.py`: 2,673 → 1,922 lines (28% reduction)
-- Extracted `data_cleanup.py`: 195 lines (cleanup + prerequisites)
-- Extracted `geo_table_operations.py`: 578 lines (geo table management)
-- Schema operations remain in db_maintenance.py (future extraction)
-
----
-
-## 09 JAN 2026: F7.8 Unified Metadata Architecture 📋
-
-**Status**: ✅ **COMPLETE** - Phase 1 & 2
-**Epic**: E7 Pipeline Infrastructure
-**Impact**: Pydantic-based metadata models as single source of truth across all data types
-**Author**: Robert and Claude
-
-### Achievement
-
-Created unified metadata architecture with Pydantic models providing consistent metadata patterns:
-
-```
-BaseMetadata (abstract)
-    ├── VectorMetadata      → geo.table_metadata
-    ├── RasterMetadata      → app.cog_metadata (F7.9)
-    └── Future formats      → extensible via inheritance
-```
-
-### Stories Completed
-
-| Story | Description |
-|-------|-------------|
-| S7.8.1 | Created `core/models/unified_metadata.py` with BaseMetadata + VectorMetadata |
-| S7.8.2 | Created `core/models/external_refs.py` with DDHRefs + ExternalRefs models |
-| S7.8.3 | Created `app.dataset_refs` table DDL (cross-type external linkage) |
-| S7.8.4 | Added `providers JSONB` and `custom_properties JSONB` to geo.table_metadata |
-| S7.8.5 | Refactored `ogc_features/repository.py` to return VectorMetadata model |
-| S7.8.6 | Refactored `ogc_features/service.py` to use VectorMetadata.to_ogc_collection() |
-| S7.8.7 | Refactored `services/service_stac_vector.py` to use VectorMetadata |
-| S7.8.8 | Wired Platform layer to populate app.dataset_refs on ingest |
-| S7.8.9 | Documented pattern for future RasterMetadata, ZarrMetadata |
-| S7.8.10 | Archived METADATA.md design doc to docs/archive |
-
-### Key Files
-
-- `core/models/unified_metadata.py` - Main metadata models (Provider, Extent, BaseMetadata, VectorMetadata)
-- `core/models/external_refs.py` - DDH linkage models (DatasetRef, DatasetRefRecord)
-- `core/schema/sql_generator.py` - DDL for app.dataset_refs table
-- `ogc_features/repository.py` - `get_vector_metadata()` method
-
-### Principles Established
-
-1. Pydantic models as single source of truth
-2. Typed columns over JSONB (minimize JSONB usage)
-3. pgstac as catalog index (populated FROM metadata tables)
-4. Open/Closed Principle — extend via inheritance
-5. External refs in app schema — cross-cutting DDH linkage spans all data types
-
----
-
-## 09 JAN 2026: F12.5 Web Interface DRY Consolidation 🎨
-
-**Status**: ✅ **COMPLETE**
-**Epic**: E12 Interface Modernization
-**Impact**: Eliminated copy-pasted CSS/JS across web interfaces, clean template for frontend teams
-**Author**: Robert and Claude
-
-### Achievement
-
-Consolidated duplicate CSS and JavaScript across web interfaces:
-
-| Before | After |
-|--------|-------|
-| `.header-with-count` copied 4x | Moved to COMMON_CSS |
-| `.action-bar` + `.filter-group` copied 3x | Moved to COMMON_CSS |
-| `filterCollections()` JS copied 3x | Moved to COMMON_JS |
-
-### Stories Completed
-
-| Story | Description | Files |
-|-------|-------------|-------|
-| S12.5.1 | Move `.header-with-count` CSS to COMMON_CSS | `base.py` |
-| S12.5.2 | Move `.action-bar` + `.filter-group` CSS to COMMON_CSS | `base.py` |
-| S12.5.3 | Remove duplicated CSS from interfaces | `stac/`, `vector/` |
-| S12.5.4 | Add `filterCollections()` JS to COMMON_JS | `base.py` |
-| S12.5.5 | Remove duplicated JS from interfaces | `stac/`, `vector/` |
-| S12.5.6 | Fix naming: `_generate_css` → `_generate_custom_css` | `pipeline/interface.py` |
-| S12.5.7 | Verify all affected interfaces render correctly | Browser testing |
-
-### Verification
-
-All interfaces verified post-deployment:
-- `/api/interface/stac` - Header badge, search, type filter working
-- `/api/interface/vector` - Header badge, search input present
-- `/api/interface/stac-map` - Uses own DOM-based filter (as designed)
-- `/api/interface/pipeline` - Renders correctly, pipeline cards visible
-
----
-
-## 07 JAN 2026: F9.1 FATHOM Rwanda Pipeline 🌊
-
-**Status**: ✅ **COMPLETE**
-**Epic**: E9 Large Data Hosting
-**Impact**: End-to-end FATHOM flood data processing on Rwanda (1,872 TIF files, 1.85 GB)
-**Author**: Robert and Claude
-**Docs**: [FATHOM_ETL.md](./FATHOM_ETL.md), [WIKI_JOB_FATHOM_ETL.md](/docs/wiki/WIKI_JOB_FATHOM_ETL.md)
-
-### Achievement
-
-Built and executed two-phase ETL pipeline for FATHOM global flood data on Rwanda test region:
-
-```
-Phase 1: Band Stacking (8 return periods → 1 multi-band COG per scenario)
-Phase 2: Spatial Merge (6 tiles → merged COGs per scenario)
-```
-
-### Rwanda Data Dimensions
-
-| Dimension | Values |
-|-----------|--------|
-| Flood Types | FLUVIAL_DEFENDED, FLUVIAL_UNDEFENDED, PLUVIAL_DEFENDED |
-| Years | 2020, 2030, 2050, 2080 |
-| SSP Scenarios | SSP1_2.6, SSP2_4.5, SSP3_7.0, SSP5_8.5 (future only) |
-| Return Periods | 1in5, 1in10, 1in20, 1in50, 1in100, 1in200, 1in500, 1in1000 |
-| Tiles | 6 tiles covering Rwanda |
-
-### Performance Results
-
-| Metric | Value |
-|--------|-------|
-| Inventory | 6 tiles, 234 Phase 1 groups, 39 Phase 2 groups |
-| Phase 1 | 234/234 tasks completed, 0 failures (~7 min) |
-| Phase 2 | 39/39 tasks completed, 0 failures (~8 min) |
-| Total pipeline | ~17 minutes |
-| Throughput | 33 tasks/min (Phase 1), 5 tasks/min (Phase 2) |
-
-### Stories Completed
-
-| Story | Description |
-|-------|-------------|
-| S9.1.R1 | Add `base_prefix` parameter to `inventory_fathom_container` job |
-| S9.1.R2 | Deploy and run inventory for Rwanda (`base_prefix: "rwa"`) |
-| S9.1.R3 | Run Phase 1 band stacking |
-| S9.1.R4 | Run Phase 2 spatial merge |
-| S9.1.R5 | Verify outputs in silver-fathom storage |
-| S9.1.R7 | Change FATHOM grid from 5×5 to 4×4 degrees |
-| S9.1.R8 | Fix region filtering bug (`source_metadata->>'region'` WHERE clauses) |
-
-### Key Files
-
-- `jobs/inventory_fathom_container.py` - Inventory job with region filtering
-- `services/fathom_container_inventory.py` - Bronze scanner with region extraction
-- `services/fathom_etl.py` - Core handlers with region filtering
-- `jobs/process_fathom_stack.py` - Phase 1 job
-- `jobs/process_fathom_merge.py` - Phase 2 job
-
----
-
-## 06 JAN 2026: System Diagnostics & Configuration Drift Detection 🔍
-
-**Status**: ✅ **COMPLETE**
-**Impact**: Azure platform configuration snapshots for drift detection and audit trails
-**Author**: Robert and Claude
-
-### Achievement
-
-Built system snapshot infrastructure to capture and compare Azure platform configurations:
-
-| Component | Description |
-|-----------|-------------|
-| `app.system_snapshots` table | Stores configuration snapshots with Pydantic model |
-| Health: network_environment | Captures 90+ WEBSITE_*/AZURE_* environment vars |
-| Health: instance_info | Instance ID, worker config, cold start detection |
-| Snapshot service | Capture + drift detection via config hash comparison |
-
-### Snapshot Trigger Types
-
-| Trigger | When | Purpose |
-|---------|------|---------|
-| `startup` | App cold start | Baseline for each instance |
-| `scheduled` | Timer (hourly) | Detect drift over time |
-| `manual` | Admin endpoint | On-demand debugging |
-| `drift_detected` | Hash changed | Record moment of change |
-
-### Key Files
-
-| File | Purpose |
-|------|---------|
-| `core/models/system_snapshot.py` | Pydantic model + SnapshotTriggerType enum |
-| `core/schema/sql_generator.py` | DDL generation for system_snapshots table |
-| `services/snapshot_service.py` | SnapshotService + SnapshotRepository |
-| `triggers/admin/snapshot.py` | Blueprint with HTTP endpoints |
-| `function_app.py` | Timer trigger + startup capture |
-
-### Azure Configuration
-
-- Scale controller logging enabled: `SCALE_CONTROLLER_LOGGING_ENABLED=AppInsights:Verbose`
-- Drift detection via SHA256 hash of stable config fields
-
----
-
-## 05 JAN 2026: Thread Safety Fix for BlobRepository 🔒
-
-**Status**: ✅ **COMPLETE**
-**Trigger**: KeyError race condition with 8 instances × 4 concurrent calls = 32 parallel executions
-**Impact**: Fixed container client caching race condition
-**Author**: Robert and Claude
-
-### Problem
-
-With `maxConcurrentCalls: 4` and 8 instances, hit race conditions in BlobRepository's container client caching due to check-then-act pattern without locking:
-
-```python
-# UNSAFE: Three separate bytecode ops, GIL releases between them
-if key not in dict:      # ① CHECK
-    dict[key] = value    # ② STORE (may trigger dict resize!)
-return dict[key]         # ③ RETURN (KeyError during resize!)
-```
-
-### Solution
-
-Implemented double-checked locking pattern:
-
-```python
-# SAFE: Lock protects entire sequence
-if key in dict:                    # Fast path (no lock)
-    return dict[key]
-with lock:                         # Slow path (locked)
-    if key not in dict:            # Double-check
-        dict[key] = create_value()
-    return dict[key]
-```
-
-### Key Concepts Documented
-
-| Coordination Type | Scope | Lock Mechanism | Example |
-|-------------------|-------|----------------|---------|
-| **Distributed** | Across instances/processes | PostgreSQL `pg_advisory_xact_lock` | "Last task turns out lights" |
-| **Local** | Within single process | Python `threading.Lock` | Dict caching in singletons |
-
-### Files Changed
-
-- `infrastructure/blob.py` - Added `_instances_lock`, `_container_clients_lock`, double-checked locking
-
----
-
-## 02 JAN 2026: Root Folder Cleanup & Consolidation 🧹
-
-**Status**: ✅ **COMPLETE**
-**Impact**: Reduced root folders from 26 to 22, improved discoverability
-**Author**: Robert and Claude
-**Archive**: [docs/archive/FOLDER_CLEANUP.md](../docs/archive/FOLDER_CLEANUP.md)
-
-### Achievement
-
-Comprehensive folder structure cleanup consolidating orphaned files and reorganizing misplaced content:
-
-| Phase | Action | Result |
-|-------|--------|--------|
-| Phase 1 | Docs consolidation | `titiler/` (18 files) → `docs/titiler/`, `fathom/` → `docs_claude/` |
-| Phase 2 | Models consolidation | `band_mapping.py` → `core/models/`, `h3_base.py` archived |
-| Phase 3 | Routes consolidation | Blueprints → `triggers/admin/`, imports updated |
-| Phase 4 | Utils review | KEPT - Valid utility package (16+ active usages) |
-| Phase 5 | SQL review | SKIPPED - H3 refactor will handle |
-| Phase 6 | Optional moves | SKIPPED - `openapi/`, `scripts/` valid as-is |
-
-### Root File Cleanup
-
-Also cleaned 52 root files (~1.8MB):
-- 10 files → `docs_claude/` (planning docs)
-- 20 files → `docs/wiki/` (markdown documentation)
-- 8 files → `docs/archive/` (deprecated/historical)
-- 6 files deleted (test HTML artifacts)
-- 2 files deleted (`service_stac.py`, `service_statistics.py` - dead code)
-
-### Key Changes
-
-1. **Deleted dead code**: `service_stac.py`, `service_statistics.py`, `models/h3_base.py`
-2. **Updated imports**: `services/tiling_scheme.py`, `services/tiling_extraction.py` now use `core.models.band_mapping`
-3. **Moved blueprints**: `routes/admin_*.py` → `triggers/admin/`, updated `function_app.py`
-
----
-
-## 01 JAN 2026: DDL Utilities Consolidation 🔧
-
-**Status**: ✅ **COMPLETE** - DRY refactoring of SQL DDL generation
-**Impact**: Code reduction, consistency, maintainability
-**Author**: Robert and Claude
-
-### Achievement
-
-Created centralized `ddl_utils.py` module consolidating SQL DDL patterns across all schema generators:
-
-```
-core/schema/ddl_utils.py (NEW - 646 lines)
-├── IndexBuilder     (btree, gist, gin, unique with partial/descending)
-├── TriggerBuilder   (updated_at triggers)
-├── CommentBuilder   (schema/table/column/index comments)
-└── SchemaUtils      (create_schema, set_search_path, grant_all)
-```
-
-### Files Migrated
-
-| File | Before | After | Reduction |
-|------|--------|-------|-----------|
-| `infrastructure/h3_schema.py` | 1419 | 1161 | -258 (-18%) |
-| `core/schema/geo_table_builder.py` | 602 | 520 | -82 (-14%) |
-| `core/schema/sql_generator.py` | — | 1073 | Updated |
-
-### Changes Made
-
-1. **Fixed f-string SQL injection** in `triggers/admin/h3_debug.py` - converted to `sql.Identifier()`
-2. **Created IndexBuilder** with support for:
-   - Composite indexes (multiple columns)
-   - Partial indexes (`partial_where` clause)
-   - Descending indexes for temporal queries
-3. **Updated sql_generator.py**:
-   - Fixed `etl_fathom` → `etl_source_files` table name
-   - Added missing primary keys for curated_datasets, curated_update_log, promoted_datasets
-   - Added 15+ new indexes for newer tables
-4. **Fixed config attribute** `admin_identity_name` → `managed_identity_admin_name`
-
-### Testing Verified
-
-| Schema | Test Method | Result |
-|--------|-------------|--------|
-| App | `full-rebuild` endpoint | ✅ 9 tables, 39 indexes, 5 functions |
-| H3 | Drop + rebuild | ✅ 16 tables created |
-| Geo | Vector ETL job | ✅ Table created with indexes/triggers |
-
-### Key Pattern
-
-```python
-from core.schema.ddl_utils import IndexBuilder, TriggerBuilder, CommentBuilder
-
-# Create indexes
-IndexBuilder.btree('app', 'jobs', 'status', name='idx_jobs_status')
-IndexBuilder.gist('geo', 'countries', 'geom')
-IndexBuilder.btree('app', 'tasks', 'heartbeat', partial_where='heartbeat IS NOT NULL')
-
-# Create triggers
-TriggerBuilder.updated_at_trigger('geo', 'countries')
-
-# Add comments
-CommentBuilder.table('geo', 'countries', 'Country boundaries')
-```
-
----
-
-## 21 DEC 2025: FATHOM Flood Data ETL Pipeline 🌊
-
-**Status**: ⚠️ **Phase 1 Complete, Phase 2 In Progress**
-**Impact**: Global flood hazard data processing at scale
-**Author**: Robert and Claude
-**Docs**: [FATHOM_ETL.md](./FATHOM_ETL.md)
-
-### Achievement
-
-Built two-phase ETL pipeline for FATHOM global flood data:
-
-```
-Phase 1: Band Stacking (8 return periods → 1 multi-band COG per tile)
-Phase 2: Spatial Merge (N×N tiles → 1 larger merged COG)
-```
-
-### Test Region: Côte d'Ivoire
-
-| Phase | Status | Output |
-|-------|--------|--------|
-| Phase 1 | ✅ Complete | 32 stacked COGs in `silver-fathom/fathom-stacked/ci/` |
-| Phase 2 | ⚠️ 46/47 | Merged COGs in `silver-fathom/fathom/ci/` |
-
-### Bugs Fixed
-
-1. **dict_row access pattern**: psycopg3 returns dicts, code used tuple unpacking
-2. **source_container filter**: Phase 2 inventory filtered wrong container
-
-### Performance Metrics
-
-- Phase 2 avg task: 96.8 seconds
-- Peak memory: ~5 GB RSS (grid_size=3)
-- Safe grid_size limit: 3 (larger causes OOM)
-
-### Key Files
-
-| File | Purpose |
-|------|---------|
-| `jobs/process_fathom_stack.py` | Phase 1 job |
-| `jobs/process_fathom_merge.py` | Phase 2 job |
-| `services/fathom_etl.py` | All handlers |
-| `services/fathom_container_inventory.py` | Bronze scanner |
+- `ErrorCategory` enum (7 categories for blame assignment)
+- `ErrorScope` enum (NODE vs WORKFLOW for DAG-ready classification)
+- 47 error codes (up from 25)
+- `error_id` generation for support ticket correlation
+- Remediation messages for all user-fixable errors
+- Docs: ERROR_CODE_REFERENCE.md, B2B_ERROR_HANDLING_GUIDE.md, ERROR_TROUBLESHOOTING.md
 
 ---

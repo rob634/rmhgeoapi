@@ -1103,19 +1103,95 @@ All pipeline executions in chronological order.
 | Editor | ~8,000 |
 | **Total** | **~115,000** |
 
+### Run 32 — REFLEXION: ADV-2 Approval Guard (04 MAR 2026)
+
+**Pipeline**: REFLEXION | **Target**: ADV-2 approval guard bypass concern | **Version**: v0.9.12.1
+
+**Scope**: `services/asset_approval_service.py`, `triggers/trigger_approvals.py`, `infrastructure/release_repository.py` (3 files, ~3,886 lines)
+
+**ADV-2 Verdict**: The approval guard **CANNOT be bypassed**. Both the Python guard (line 155) and SQL WHERE clause (`processing_status = 'completed'`) work correctly. The live test was explained by Docker worker completing processing between status check and approval call.
+
+**Critical Discovery**: The stale-ordinal guard (SG5-1/LA-1) has been **completely inoperative** since implementation — `has_newer_active_ordinal()` used positional row indexing (`row[0]`-`row[3]`) that crashes with `KeyError` on `dict_row` cursors, silently caught upstream.
+
+**Faults Found**: 18 total (1 CRITICAL, 6 HIGH, 7 MEDIUM, 4 LOW)
+
+**Patches Applied**: 5 of 6 approved
+
+| Patch | Fault | Description | Verdict |
+|-------|-------|-------------|---------|
+| P1 | F-02 | Fix positional row indexing in `has_newer_active_ordinal()` | **APPROVE (P0)** |
+| P2 | F-06 | Fix version_ordinal coercion to 0 | **REJECT** (by design) |
+| P3 | F-16 | Parameterize `'completed'` string in SQL | **APPROVE** |
+| P4 | F-08 | Null guard after atomic commit re-read | **APPROVE** |
+| P5 | F-04 | Add `is_served = false` to rollback | **APPROVE** (modified: keep version_ordinal) |
+| P6 | F-05 | Improve rejection error message | **APPROVE** |
+
+**Residual Risks**: F-01 (approve+revoke race), F-03 (STAC partial failure orphans), F-07 (no DB retry)
+
+**Report**: `docs/agent_review/agent_docs/REFLEXION_ADV2_APPROVAL_GUARD.md`
+
+**Token Usage**:
+
+| Agent | Tokens (est) |
+|-------|-------------|
+| R (Reverse Engineer) | ~85,000 |
+| F (Fault Injector) | ~91,000 |
+| P (Patch Author) | ~85,000 |
+| J (Judge) | ~82,000 |
+| **Total** | **~343,000** |
+
+---
+
+### Run 33 — COMPETE: Release Audit Log & In-Place Ordinal Revision (03 MAR 2026)
+
+**Pipeline**: COMPETE | **Split**: A (Design vs Runtime) | **Version**: v0.9.12.1
+
+**Scope**: Release audit log subsystem + in-place ordinal revision enablement (6 files reviewed, 3 priority files added by Gamma)
+
+**Files**: `core/models/release_audit.py` (NEW), `infrastructure/release_audit_repository.py` (NEW), `infrastructure/release_repository.py`, `core/models/asset.py`, `services/asset_approval_service.py`, `core/schema/sql_generator.py`
+
+**Verdict**: **FAIL** — 1 CRITICAL, 6 HIGH. Primary spec feature (overwrite of revoked ordinals) is unreachable.
+
+**Findings**: 17 total (1 CRITICAL, 6 HIGH, 4 MEDIUM, 6 LOW)
+
+| ID | Severity | Description |
+|----|----------|-------------|
+| BS-1 | **CRITICAL** | `get_draft()` excludes REVOKED releases — in-place ordinal revision unreachable |
+| F-2 | **HIGH** | All audit read methods produce garbage via `dict(zip(columns, dict_row))` |
+| BS-4 | **HIGH** | Audit and mutation in separate transactions — phantom events |
+| AR-3 | **HIGH** | `update_overwrite()` no state guard in WHERE — TOCTOU race |
+| F-4 | **HIGH** | `INTERVAL '%s hours'` broken with psycopg3 |
+| AR-1 | **HIGH** | `ReleaseAuditRepository` not in `infrastructure/__init__.py` |
+| AR-2 | **HIGH** | 3 identical audit blocks — DRY violation + overbroad `except Exception` |
+
+**Key Blind Spot (Gamma)**: Neither Alpha nor Beta reviewed the caller chain — `asset_service.py:create_or_get_draft()` calls `get_draft()` which has `version_id IS NULL AND approval_state != REVOKED`. Revoked releases have `version_id`, so they're excluded by BOTH conditions. The `can_overwrite()` change to accept REVOKED is dead code.
+
+**Report**: `agent_docs/COMPETE_RELEASE_AUDIT.md`
+
+**Token Usage**:
+
+| Agent | Tokens (est) |
+|-------|-------------|
+| Omega | -- (inline) |
+| Alpha | ~64,900 |
+| Beta | ~79,900 |
+| Gamma | ~83,300 |
+| Delta | ~53,300 |
+| **Total** | **~281,400** |
+
 ---
 
 ## Cumulative Token Usage
 
 | Pipeline | Runs | Total Tokens |
 |----------|------|-------------|
-| COMPETE | Runs 1-6, 9, 12, 19, 28, 29, 30 | ~2,153,504 (prior 1,803,504 + Run 30: ~350,000) |
+| COMPETE | Runs 1-6, 9, 12, 19, 28, 29, 30, 33 | ~2,434,904 (prior 2,153,504 + Run 33: ~281,400) |
 | GREENFIELD | Runs 7, 8, 10, 24 | ~944,196 (Run 10: 631,196 + Run 24: ~313,000; Runs 7-8 predated instrumentation) |
 | SIEGE | Runs 11, 13, 18, 20, 21, 22, 23, 25, 26 | ~1,817,587 |
-| REFLEXION | Runs 14, 15, 16, 17 | 631,966 (Run 14: 232,684 + Run 15: 278,900 + Run 16: 50,775 + Run 17: 69,607) |
+| REFLEXION | Runs 14, 15, 16, 17, 32 | ~974,966 (prior 631,966 + Run 32: ~343,000) |
 | TOURNAMENT | Run 27 | ~278,000 |
 | ADVOCATE | Run 31 | ~115,000 |
-| **Instrumented Total** | Runs 9-31 | **~5,940,253** |
+| **Instrumented Total** | Runs 9-33 | **~6,564,653** |
 
 **Note**: Runs 1-8 predated the token instrumentation described in `agents/AGENT_METRICS.md`. Per-agent token breakdowns are available for Runs 9-31.
 

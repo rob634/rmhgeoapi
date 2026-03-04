@@ -1,6 +1,6 @@
 # Working Backlog - ADO Aligned
 
-**Last Updated**: 18 FEB 2026
+**Last Updated**: 04 MAR 2026
 **Source of Truth**: [V0.8_ADO_WORKITEMS.md](/ado_wiki/V0.8_ADO_WORKITEMS.md)
 **Structure**: EPIC → FEATURE → User Story → Tasks
 
@@ -36,13 +36,18 @@
 | pg_cron SQL setup (DEV) | 🔲 Ready | SQL in reference doc |
 | pg_cron eService (QA/UAT/PROD) | 🔲 Not started | [ESERVICE_PG_CRON_REQUEST.md](/operations/ESERVICE_PG_CRON_REQUEST.md) |
 
-### US 1.5: VirtualiZarr NetCDF Pipeline `[FUTURE]`
+### US 1.5: VirtualiZarr NetCDF Pipeline ✅ COMPLETE (v0.9.9.0)
+
+5-stage pipeline implemented: scan → copy → validate → combine → register.
+Native Zarr ingest (IngestZarr) also added in v0.9.11.8 as 3-stage pipeline.
+xarray TiTiler URL injection into STAC items at materialization (v0.9.11.10).
 
 | Task | Status | Details |
 |------|--------|---------|
-| Kerchunk JSON references for NetCDF | 🔲 Not started | Future |
-| TiTiler-xarray integration | 🔲 Not started | Future |
-| STAC collection with VirtualiZarr assets | 🔲 Not started | Future |
+| Kerchunk JSON references for NetCDF | ✅ Done | VirtualiZarr pipeline (v0.9.9.0) |
+| TiTiler-xarray integration | ✅ Done | xarray TiTiler URLs injected at STAC materialization (v0.9.11.10) |
+| STAC collection with VirtualiZarr assets | ✅ Done | Zarr STAC items created at approval |
+| Native Zarr ingest pipeline | ✅ Done | IngestZarr 3-stage pipeline (v0.9.11.8) |
 
 ### EN 1.6: DAG Orchestration Migration `[FUTURE]`
 
@@ -193,38 +198,42 @@ Items below are tracked here but not yet added to ADO. Add to ADO when prioritiz
 **Root cause**: psycopg3 (unlike psycopg2) does not auto-adapt `dict → jsonb`. Fix is to register type adapters at connection level, not scatter `json.dumps()` across 40+ call sites.
 **Scope**: 2 connection creation points, then incremental cleanup of 15 repos
 
-#### Phase 1: Register psycopg3 Type Adapters (THE FIX)
+#### Phase 1: Register psycopg3 Type Adapters (THE FIX) ✅ COMPLETE
 
-**Register once at connection level → all repos inherit automatically. Zero repo code changes.**
+**Completed ~FEB 2026. Adapters registered at both connection paths — all repos inherit automatically.**
 
 | Task | Status | File | Details |
 |------|--------|------|---------|
-| T-TD2.1: Register `JsonbBinaryDumper` for dict+list on single-use connections | 🔲 Ready | `infrastructure/postgresql.py` | In `_get_single_use_connection()` after line 696 (`conn = psycopg.connect(...)`), add: `conn.adapters.register_dumper(dict, psycopg.types.json.JsonbBinaryDumper)` and same for `list`. ~3 lines. |
-| T-TD2.2: Register `JsonbBinaryDumper` for dict+list on pooled connections | 🔲 Ready | `infrastructure/connection_pool.py` | In `_configure_connection()` after search_path setup, add same adapter registration. ~3 lines. |
-| T-TD2.3: Register Enum adapter (or add `_prepare_value()` fallback) | 🔲 Ready | `infrastructure/postgresql.py` | Option A: Custom `EnumDumper` registered for `Enum` base class. Option B: Add lightweight `_prepare_value()` static method that only handles Enum→.value (dicts handled by adapter). **Test whether psycopg3 dumper inheritance covers Enum subclasses** — if not, use Option B. |
-| T-TD2.4: Verify existing code still works (no repo changes) | 🔲 Ready | N/A | After adapter registration, all existing `json.dumps()` calls still work (strings are valid for JSONB). Run: submit flow, approval flow, job creation. Zero behavior change expected. |
+| T-TD2.1: Register `JsonbBinaryDumper` for dict+list on single-use connections | ✅ Done | `infrastructure/postgresql.py:729` | `_register_type_adapters(conn)` called after `psycopg.connect()` in `_get_single_use_connection()` |
+| T-TD2.2: Register `JsonbBinaryDumper` for dict+list on pooled connections | ✅ Done | `infrastructure/connection_pool.py:240-241` | `_register_type_adapters(conn)` called in `_configure_connection()` |
+| T-TD2.3: Register Enum adapter | ✅ Done | `infrastructure/postgresql.py:108-112` | Custom `_EnumDumper` class registered for `Enum` base class (Option A). |
+| T-TD2.4: Verify existing code still works (no repo changes) | ✅ Done | N/A | Deployed and verified — submit, approval, job creation all work. Existing `json.dumps()` calls are harmless. |
+
+**Implementation**: `_register_type_adapters()` function at `postgresql.py:115-125` registers dict→`JsonbBinaryDumper`, list→`JsonbBinaryDumper`, Enum→`_EnumDumper`.
 
 #### Phase 2: Revert Bandaid + Simplify asset_repository.update()
 
 | Task | Status | File | Details |
 |------|--------|------|---------|
-| T-TD2.5: Revert isinstance dict/list check in `update()` | 🔲 Blocked by Phase 1 | `infrastructure/asset_repository.py` | Revert commit `dafc46f` lines 604-608. With adapter registered, dicts pass straight through. Also remove manual enum pre-conversion (lines 592-597). |
-| T-TD2.6: Test assign_version + approval end-to-end | 🔲 Blocked by T-TD2.5 | N/A | The flow that originally triggered the bug. Must work with raw dicts and enums. |
+| T-TD2.5: Revert isinstance dict/list check in `update()` | 🔲 Ready | `infrastructure/asset_repository.py` | Revert commit `dafc46f` lines 604-608. With adapter registered, dicts pass straight through. Also remove manual enum pre-conversion (lines 592-597). |
+| T-TD2.6: Test assign_version + approval end-to-end | 🔲 Ready | N/A | The flow that originally triggered the bug. Must work with raw dicts and enums. |
 
 #### Phase 3: Remove json.dumps() Across Repositories (incremental)
 
-**With adapters registered, all `json.dumps()` calls become unnecessary — they convert dict→string, but psycopg3 now also accepts dicts. Existing calls are harmless but redundant.**
+**With adapters registered, all `json.dumps()` calls become unnecessary — they convert dict→string, but psycopg3 now also accepts dicts. Existing calls are harmless but redundant. ~50+ sites across infrastructure repos.**
 
 **IMPORTANT for Claude**: One repo per commit. Test after each. Do NOT batch.
 
 | Task | Status | File | Details |
 |------|--------|------|---------|
-| T-TD2.7: GeospatialAssetRepository — remove 7 `json.dumps()` + 3 enum `.value` sites | 🔲 Blocked by Phase 1 | `infrastructure/asset_repository.py` | Replace `json.dumps(platform_refs)` → `platform_refs` everywhere. Remove enum isinstance checks. Pass raw Python objects — adapter handles serialization. |
-| T-TD2.8: PostgreSQLJobRepository — remove json.dumps in create_job/update_job | 🔲 Blocked by Phase 1 | `infrastructure/postgresql.py` | 4 JSONB cols, 2 enums. |
-| T-TD2.9: PostgreSQLTaskRepository — remove json.dumps in create_task/update_task | 🔲 Blocked by Phase 1 | `infrastructure/postgresql.py` | 3 JSONB cols, 1 enum. |
-| T-TD2.10: ArtifactRepository — remove 6 json.dumps sites | 🔲 Blocked by Phase 1 | `infrastructure/artifact_repository.py` | |
-| T-TD2.11: ExternalServiceRepository — remove 4 json.dumps + 2 enum sites | 🔲 Blocked by Phase 1 | `infrastructure/external_service_repository.py` | |
-| T-TD2.12: Remaining repos — PlatformRegistry, H3, JobEvent, Metrics, Promoted | 🔲 Blocked by Phase 1 | Various | PromotedDatasetRepository: also remove `Jsonb()` wrapper (inconsistent). |
+| T-TD2.7: GeospatialAssetRepository — remove 7 `json.dumps()` + 3 enum `.value` sites | 🔲 Ready | `infrastructure/asset_repository.py` | Replace `json.dumps(platform_refs)` → `platform_refs` everywhere. Remove enum isinstance checks. Pass raw Python objects — adapter handles serialization. |
+| T-TD2.8: PostgreSQLJobRepository — remove ~10 json.dumps in job/task CRUD | 🔲 Ready | `infrastructure/postgresql.py` | 4 JSONB cols in create_job, 3 in create_task, plus update paths. |
+| T-TD2.9: MapStateRepository — remove ~10 json.dumps sites | 🔲 Ready | `infrastructure/map_state_repository.py` | bounds, layers, custom_attributes, tags, state fields. |
+| T-TD2.10: ArtifactRepository — remove 5 json.dumps sites | 🔲 Ready | `infrastructure/artifact_repository.py` | client_refs, metadata fields. |
+| T-TD2.11: ExternalServiceRepository — remove 5 json.dumps sites | 🔲 Ready | `infrastructure/external_service_repository.py` | tags, detected_capabilities, health_history, metadata. |
+| T-TD2.12: Remaining repos — PlatformRegistry, H3, JobEvent, Janitor, ReleaseAudit, JobsTasks, RasterRender, RasterMetadata | 🔲 Ready | Various | ~15 sites across 8 repos. |
+
+**Note**: `pgstac_repository.py` and `pgstac_bootstrap.py` use `json.dumps()` to build JSON strings for pgSTAC SQL functions — these are NOT redundant and must be kept.
 
 #### Phase 4: Cleanup Models + Documentation
 
@@ -232,13 +241,13 @@ Items below are tracked here but not yet added to ADO. Add to ADO when prioritiz
 |------|--------|------|---------|
 | T-TD2.13: Delete `to_dict()` from GeospatialAsset + AssetRevision | 🔲 Blocked by Phase 3 | `core/models/asset.py` | Dead code — no repo calls it. Only remove after Phase 3 confirms model_dump() works everywhere. |
 | T-TD2.14: Remove deprecated `json_encoders` from model_config | 🔲 Blocked by Phase 3 | `core/models/asset.py` | Deprecated in Pydantic V2, was dead code already (TODO from 17 FEB 2026). |
-| T-TD2.15: Verify `_parse_jsonb_column()` still needed for reads | 🔲 Blocked by Phase 3 | `infrastructure/postgresql.py` | psycopg3 `row_factory=dict_row` auto-parses JSONB on read. If so, `_parse_jsonb_column()` (line 95) is dead code. |
+| T-TD2.15: Verify `_parse_jsonb_column()` still needed for reads | 🔲 Blocked by Phase 3 | `infrastructure/postgresql.py` | psycopg3 `row_factory=dict_row` auto-parses JSONB on read. If so, `_parse_jsonb_column()` (line 128) is dead code. |
 | T-TD2.16: Add pattern to DEV_BEST_PRACTICES.md | 🔲 Ready | `docs_claude/DEV_BEST_PRACTICES.md` | Document: "psycopg3 adapters registered at connection level. NEVER call json.dumps() or .value in repo code. Pass raw Python objects." |
 
 #### Delegation Notes
 
-- **Phase 1**: Ship first and alone. ~10 lines across 2 files. Test by running existing flows — zero behavior change.
-- **Phase 2**: Revert the bandaid. Only after Phase 1 is deployed and verified.
+- **Phase 1**: ✅ COMPLETE. Deployed and verified.
+- **Phase 2**: Revert the bandaid. Ready now that Phase 1 is live.
 - **Phase 3**: Incremental cleanup. One repo per commit. Existing json.dumps calls are harmless, so no urgency — can be done over multiple sessions.
 - **Phase 4**: Only after Phase 3 complete. Low priority.
 - **Models stay clean**: No `@field_serializer` needed. `model_dump()` returns native Python types. psycopg3 adapter handles serialization at the driver layer.
@@ -256,7 +265,7 @@ Items below are tracked here but not yet added to ADO. Add to ADO when prioritiz
 | T-TD3.3: Remove unused app URLs from AppModeConfig | 🔲 Ready | `config/app_mode_config.py` — `raster_app_url`, `vector_app_url` |
 | T-TD3.4: Remove `WORKER_FUNCTIONAPP` mode + `functionapp-tasks` config | 🔲 Ready | `config/app_mode_config.py`, `config/queue_config.py` |
 | T-TD3.5: Remove obsolete TaskRecord fields (schema migration) | 🔲 Ready | `core/models/task.py` — requires ALTER TABLE or model-only removal |
-| T-TD3.6: Remove 410 Gone endpoint stubs | 🔲 Blocked | `triggers/platform/platform_bp.py` — keep until DDH migration complete |
+| T-TD3.6: Remove 410 Gone endpoint stubs | ✅ Done | `triggers/platform/platform_bp.py` — deleted 04 MAR 2026 in platform cleanup (commit `88d7793`) |
 
 ### EN-TD.4: Core Orchestration Refactors `[DEFERRED 24 FEB 2026]`
 
@@ -301,14 +310,24 @@ Migrated 37 occurrences across 22 code files from raw `req.get_json()` to `parse
 
 | Date | Feature | Task |
 |------|---------|------|
+| 04 MAR 2026 | Platform | ADV-3: Normalize platform response contracts — all `/platform/*` guarantee `{success, error, error_type}` |
+| 04 MAR 2026 | Platform | Remove 5 dead endpoints (lineage, validate, 3x deprecated 410s) — ~568 lines deleted |
+| 04 MAR 2026 | Platform | ADV-1: Remove dead `job_status_url`, make `monitor_url` absolute |
+| 04 MAR 2026 | Audit | Release audit trail — append-only `ReleaseAuditEvent` model + repository |
+| 04 MAR 2026 | Approval | Stale ordinal guard fix (positional row indexing) + in-place revision exemption |
+| 04 MAR 2026 | Approval | `can_overwrite()` accepts REVOKED for in-place ordinal revision |
+| 03 MAR 2026 | EN-TD.2 | Phase 1 COMPLETE: psycopg3 type adapters registered at connection level |
+| 02 MAR 2026 | Reliability | DB token refresh fix for Docker worker (startup + per-message freshness) |
+| 02 MAR 2026 | Reliability | Compensating cleanup for orphaned releases on job creation failure |
+| 02 MAR 2026 | Observability | OBSERVATORY diagnostic gaps — 3 P0 bugs + 5 observability enhancements |
+| 01 MAR 2026 | Zarr | Zarr service layer: native ingest pipeline + xarray TiTiler URLs |
+| 01 MAR 2026 | Zarr | B2C/B2B route models for URL resolution |
+| 28 FEB 2026 | Dashboard | Web dashboard submit form with file browser (GREENFIELD Run 24) |
+| 28 FEB 2026 | Dashboard | Storage browser + Queue monitoring panels (v0.9.11.7) |
+| 27 FEB 2026 | Dashboard | Web dashboard v1 (GREENFIELD Run 19) — 4 tabs, HTMX SPA |
+| 26 FEB-04 MAR | Review | Agent review campaign: 33 runs, 7 pipelines, ~6.5M tokens |
 | 18 FEB 2026 | F7 | dataset_id + resource_id lookup on platform/status (v0.8.19.1) |
-| 18 FEB 2026 | F7 | Fix draft self-conflict bypass (empty string vs None) |
-| 18 FEB 2026 | F7 | Fix psycopg3 dict adaptation in asset_repository.update() |
 | 18 FEB 2026 | EN-TD.2 | Pydantic V2 serialization review + implementation plan |
 | 11 FEB 2026 | US 4.2 | Approval consolidation COMPLETE - all 5 phases + post-migration docs verified |
-| 10 FEB 2026 | US 4.2.1 | Approval-aware overwrite & version validation |
-| 09 FEB 2026 | F7 | Forward FK architecture (V0.8.16) |
-| 09 FEB 2026 | F7 | Query param deprecation on platform/status |
-| 06 FEB 2026 | US 6.1 | Docker worker required infrastructure |
 
 *For full history, see [HISTORY.md](./HISTORY.md)*

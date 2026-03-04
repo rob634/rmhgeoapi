@@ -101,7 +101,7 @@ class FloodRiskCOGJob(JobBaseMixin, JobBase):  # ← Mixin FIRST!
 
         elif stage == 2:
             # Stage 2: Fan-out based on file size from stage 1
-            file_info = previous_results[0]['result']
+            file_info = previous_results[0]
             zoom_levels = range(10, 10 + job_params['zoom_levels'])
 
             return [
@@ -119,7 +119,7 @@ class FloodRiskCOGJob(JobBaseMixin, JobBase):  # ← Mixin FIRST!
 
         elif stage == 3:
             # Stage 3: Update STAC catalog with all tiles
-            tile_paths = [r['result']['tile_path'] for r in previous_results]
+            tile_paths = [r['tile_path'] for r in previous_results]
             return [{
                 "task_id": f"{job_id[:8]}-stac",
                 "task_type": "update_stac_catalog",

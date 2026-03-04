@@ -24,7 +24,7 @@ Workflow:
     3. Reviewer approves/rejects via this service
     4. At approval: version assigned, STAC materialized to pgSTAC
     5. If PUBLIC: ADF pipeline triggered
-    6. If revoked: STAC deleted from pgSTAC, is_latest flipped
+    6. If revoked: STAC deleted from pgSTAC
 
 State Transitions:
     PENDING_REVIEW -> APPROVED (with clearance_state)
@@ -68,7 +68,7 @@ class AssetApprovalService:
         3. Reviewer approves/rejects via this service
         4. At approval: version assigned, STAC materialized to pgSTAC
         5. If PUBLIC: ADF pipeline triggered
-        6. If revoked: STAC deleted from pgSTAC, is_latest flipped
+        6. If revoked: STAC deleted from pgSTAC
     """
 
     def __init__(self):
@@ -99,7 +99,7 @@ class AssetApprovalService:
         Steps:
         1. Validate release exists and is PENDING_REVIEW
         2. Warn (don't block) if processing_status != COMPLETED
-        3. Atomic approval (version + is_latest + clearance + NOT EXISTS guard)
+        3. Atomic approval (version + clearance + NOT EXISTS guard)
         4. On False: probe get_approved_by_version to distinguish VersionConflict
         5. On True: post-atomic stac_item_id update + STAC materialization
         6. On STAC failure: rollback_approval_atomic, return typed error
@@ -558,9 +558,6 @@ class AssetApprovalService:
         This is a terminal state - to re-publish, submit a new version.
         DB is updated first (source of truth), then STAC item is deleted.
 
-        If the revoked release was is_latest, the next most recent
-        approved release is promoted to is_latest.
-
         Args:
             release_id: Release to revoke
             revoker: Who is revoking (user email or system ID)
@@ -632,40 +629,8 @@ class AssetApprovalService:
         else:
             logger.warning(f"Could not load asset {release.asset_id[:16]}... for route deletion")
 
-        # If revoked release was is_latest, flip to next most recent approved release
-        if release.is_latest:
-            versions = self.release_repo.list_by_asset(release.asset_id)
-            next_latest = None
-            for v in reversed(versions):  # list is ordered by ordinal
-                if v.release_id != release_id and v.approval_state == ApprovalState.APPROVED:
-                    next_latest = v
-                    break
-            if next_latest:
-                # Guard: check if another release already became is_latest
-                # (e.g., concurrent approval flipped it while we were revoking)
-                current_latest = self.release_repo.get_latest(release.asset_id)
-                if current_latest and current_latest.release_id != release_id:
-                    logger.info(
-                        f"Skipping is_latest flip — {current_latest.release_id[:16]}... "
-                        f"already promoted"
-                    )
-                else:
-                    self.release_repo.flip_is_latest(release.asset_id, next_latest.release_id)
-                    logger.info(
-                        f"Flipped is_latest to {next_latest.release_id[:16]}... "
-                        f"({next_latest.version_id})"
-                    )
-                    # Create routes for the promoted release (syncs route table with release table)
-                    if asset_for_routes and next_latest.version_id:
-                        promoted_route_result = self._create_routes(
-                            next_latest, asset_for_routes, next_latest.version_id,
-                            next_latest.clearance_state or ClearanceState.OUO,
-                            revoker
-                        )
-                        if promoted_route_result.get('success'):
-                            logger.info(f"Routes created for promoted release {next_latest.release_id[:16]}...")
-            else:
-                logger.info(f"No other approved releases for asset {release.asset_id[:16]}...")
+        # Note: No is_latest flip needed — "latest" is now computed as
+        # MAX(version_ordinal) WHERE approval_state='approved' (F-01 fix).
 
         # Get updated release
         updated_release = self.release_repo.get_by_id(release_id)
@@ -898,7 +863,6 @@ class AssetApprovalService:
                 'slug': slug,
                 'version_id': version_id,
                 'data_type': data_type,
-                'is_latest': True,
                 'version_ordinal': release.version_ordinal,
                 'table_name': table_name,
                 'stac_item_id': release.stac_item_id,
@@ -918,13 +882,13 @@ class AssetApprovalService:
 
             tables_written = []
 
-            # Always write to b2b_routes (atomic clear + upsert in one txn)
-            route_repo.upsert_as_latest(route, table='b2b_routes')
+            # Always write to b2b_routes
+            route_repo.upsert_route(route, table='b2b_routes')
             tables_written.append('b2b_routes')
 
             # Write to b2c_routes only for PUBLIC clearance
             if clearance_state == ClearanceState.PUBLIC:
-                route_repo.upsert_as_latest(route, table='b2c_routes')
+                route_repo.upsert_route(route, table='b2c_routes')
                 tables_written.append('b2c_routes')
 
             return {
@@ -945,8 +909,7 @@ class AssetApprovalService:
         """
         Delete route records on revocation and promote next latest (NON-FATAL).
 
-        Deletes from both b2c_routes and b2b_routes. If the revoked release
-        was is_latest, promotes the next highest ordinal.
+        Deletes from both b2c_routes and b2b_routes.
 
         Args:
             release: The release being revoked
@@ -973,10 +936,8 @@ class AssetApprovalService:
             for table in ('b2c_routes', 'b2b_routes'):
                 route_repo.delete_route(slug, release.version_id, table=table)
 
-            # NOTE: Route promotion is NOT done here. The revoke_release caller
-            # handles is_latest promotion at the release level, then calls
-            # _create_routes for the newly-promoted release. This ensures
-            # route and release state stay synchronized.
+            # NOTE: No route promotion needed — "latest" is computed as
+            # MAX(version_ordinal) per slug at query time.
 
             return {'success': True}
 

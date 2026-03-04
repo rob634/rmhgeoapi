@@ -214,7 +214,6 @@ class AssetService:
             version_ordinal=version_ordinal,
             revision=1,
             # Flags
-            is_latest=False,
             is_served=False,
             request_id=request_id,
             # Physical outputs (table_name removed → app.release_tables)
@@ -428,7 +427,7 @@ class AssetService:
         """
         Get the latest approved release for an asset.
 
-        Uses the is_latest=true + approval_state='approved' filter.
+        Computed: highest version_ordinal among approved releases.
 
         Args:
             asset_id: Parent asset identifier

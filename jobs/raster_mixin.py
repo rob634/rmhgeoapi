@@ -249,11 +249,8 @@ class RasterMixin:
         logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, "raster_mixin")
         config = get_config()
 
-        # Check for validation failures
-        failed = [r for r in validation_results if not r.get("success")]
-        if failed:
-            failed_count = len(failed)
-            raise ValueError(f"{failed_count} tiles failed validation - cannot proceed to COG creation")
+        # CoreMachine's _get_completed_stage_results() only returns COMPLETED tasks
+        # and unwraps the handler envelope, so validation_results are payloads directly.
 
         tasks = []
         container = container_override or job_params["container_name"]
@@ -265,7 +262,7 @@ class RasterMixin:
         jpeg_quality = job_params.get("jpeg_quality") or config.raster.cog_jpeg_quality
 
         for i, blob_name in enumerate(blob_list):
-            validation_result = validation_results[i].get("result", {})
+            validation_result = validation_results[i]
             source_crs = validation_result.get("source_crs")
 
             if not source_crs:

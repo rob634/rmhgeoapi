@@ -315,6 +315,7 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                     return idempotent_response(
                         request_id=request_id,
                         job_id=release.job_id,
+                        job_type=job_type,
                         hint="Use processing_options.overwrite=true to force reprocessing"
                     )
 

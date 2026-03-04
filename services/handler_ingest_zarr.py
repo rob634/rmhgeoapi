@@ -597,11 +597,10 @@ def ingest_zarr_register(
         else:
             properties["datetime"] = now_iso
 
-        # Build HTTPS URL for the Zarr store asset
-        zarr_https_url = (
-            f"https://{silver_account}.blob.core.windows.net/"
-            f"{silver_container}/{store_prefix}"
-        )
+        # Build abfs:// URL for the Zarr store asset
+        # TiTiler-xarray passes URLs to fsspec which routes abfs:// to
+        # Azure Blob with managed identity. https:// would be anonymous.
+        zarr_abfs_url = f"abfs://{silver_container}/{store_prefix}"
 
         # Build STAC item
         stac_item = {
@@ -616,7 +615,7 @@ def ingest_zarr_register(
             "links": [],
             "assets": {
                 "zarr-store": {
-                    "href": zarr_https_url,
+                    "href": zarr_abfs_url,
                     "type": "application/vnd+zarr",
                     "title": "Native Zarr Store",
                     "roles": ["data"],
@@ -670,7 +669,7 @@ def ingest_zarr_register(
                 "stac_item_cached": stac_updated,
                 "release_updated": outputs_updated and status_updated,
                 "blob_path": store_prefix,
-                "zarr_https_url": zarr_https_url,
+                "zarr_url": zarr_abfs_url,
             },
         }
 

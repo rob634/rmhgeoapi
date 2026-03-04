@@ -441,6 +441,9 @@ class STACMaterializer:
             # Step 0: Ensure collection exists (required for item insert)
             # pgSTAC requires collections BEFORE items — items partition by collection.
             # materialize_collection() can't go first because it needs items to compute extent.
+            # ADV-17: Track whether we created a new collection so we can clean up
+            # if item materialization fails (avoids leaving empty shell collections).
+            created_new_collection = False
             if not self.pgstac.collection_exists(release.stac_collection_id):
                 from services.stac_collection import build_raster_stac_collection
                 collection_dict = build_raster_stac_collection(
@@ -448,12 +451,30 @@ class STACMaterializer:
                     bbox=[-180, -90, 180, 90],  # Placeholder, updated by Step 2
                 )
                 self.pgstac.insert_collection(collection_dict)
+                created_new_collection = True
                 logger.info(f"Created collection '{release.stac_collection_id}' for first item")
 
             # Step 1: Materialize item
             item_result = self.materialize_item(release, reviewer, clearance_state)
 
             if not item_result.get('success'):
+                # ADV-17: Clean up empty shell collection if we just created it
+                if created_new_collection:
+                    try:
+                        self.pgstac.delete_collection(release.stac_collection_id)
+                        logger.warning(
+                            f"Cleaned up empty collection '{release.stac_collection_id}' "
+                            f"after item materialization failed: {item_result.get('error')}"
+                        )
+                    except Exception as cleanup_err:
+                        logger.error(
+                            f"Failed to clean up empty collection '{release.stac_collection_id}': {cleanup_err}"
+                        )
+                else:
+                    logger.warning(
+                        f"Item materialization failed for release {release.release_id[:16]}... "
+                        f"in existing collection '{release.stac_collection_id}': {item_result.get('error')}"
+                    )
                 return item_result
 
             # Step 2: Update collection extent
@@ -468,7 +489,11 @@ class STACMaterializer:
             return result
 
         except Exception as e:
-            logger.error(f"Error materializing release: {e}")
+            logger.error(
+                f"Error materializing release {release.release_id[:16]}... "
+                f"(collection={release.stac_collection_id}, item={release.stac_item_id}): {e}",
+                exc_info=True
+            )
             return {'success': False, 'error': str(e)}
 
     # =========================================================================

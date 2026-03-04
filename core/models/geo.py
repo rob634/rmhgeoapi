@@ -732,7 +732,7 @@ class _RouteBase(BaseModel):
 
     Design:
         - One row per version of a published dataset
-        - is_latest=True marks the current version (partial unique on slug)
+        - "latest" = highest version_ordinal per slug (computed, not stored)
         - data_type determines which resolution fields apply:
             vector  -> table_name (geo.{table_name})
             raster  -> stac_item_id + stac_collection_id
@@ -769,11 +769,6 @@ class _RouteBase(BaseModel):
         ...,
         max_length=20,
         description="Data type: raster, vector, or zarr"
-    )
-
-    is_latest: bool = Field(
-        default=False,
-        description="Whether this is the latest version for the slug (only one TRUE per slug)"
     )
 
     version_ordinal: int = Field(
@@ -867,7 +862,6 @@ class _RouteBase(BaseModel):
             slug=row.get('slug'),
             version_id=row.get('version_id'),
             data_type=row.get('data_type'),
-            is_latest=row.get('is_latest', False),
             version_ordinal=row.get('version_ordinal'),
             table_name=row.get('table_name'),
             stac_item_id=row.get('stac_item_id'),
@@ -894,8 +888,7 @@ class B2CRoute(_RouteBase):
     __sql_schema: ClassVar[str] = "geo"
     __sql_primary_key: ClassVar[List[str]] = ["slug", "version_id"]
     __sql_indexes: ClassVar[List[Dict[str, Any]]] = [
-        {"columns": ["slug"], "name": "idx_b2c_routes_latest", "partial_where": "is_latest = true", "unique": True},
-        {"columns": ["slug", "version_ordinal"], "name": "idx_b2c_routes_slug_ordinal"},
+        {"columns": ["slug", "version_ordinal"], "name": "idx_b2c_routes_slug_ordinal", "descending": True},
         {"columns": ["data_type"], "name": "idx_b2c_routes_data_type"},
     ]
 
@@ -907,7 +900,6 @@ class B2BRoute(_RouteBase):
     __sql_schema: ClassVar[str] = "geo"
     __sql_primary_key: ClassVar[List[str]] = ["slug", "version_id"]
     __sql_indexes: ClassVar[List[Dict[str, Any]]] = [
-        {"columns": ["slug"], "name": "idx_b2b_routes_latest", "partial_where": "is_latest = true", "unique": True},
-        {"columns": ["slug", "version_ordinal"], "name": "idx_b2b_routes_slug_ordinal"},
+        {"columns": ["slug", "version_ordinal"], "name": "idx_b2b_routes_slug_ordinal", "descending": True},
         {"columns": ["data_type"], "name": "idx_b2b_routes_data_type"},
     ]

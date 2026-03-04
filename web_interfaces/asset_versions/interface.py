@@ -564,8 +564,7 @@ class AssetVersionsInterface(BaseInterface):
             if (!v.version_id) {{
                 return '<span class="version-chip version-draft">draft</span>';
             }}
-            const latestStar = v.is_latest ? '<span class="latest-star">&#9733;</span>' : '';
-            return `<span class="version-chip">${{v.version_id}}${{latestStar}}</span>`;
+            return `<span class="version-chip">${{v.version_id}}</span>`;
         }}
 
         function renderProcessingBadge(status) {{

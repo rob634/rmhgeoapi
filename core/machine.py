@@ -2330,11 +2330,18 @@ class CoreMachine:
                 f"Cannot generate tasks for next stage."
             )
 
-        # Extract result_data from each task
+        # Extract result_data from each task, unwrapping the handler envelope.
+        # Handlers return {"success": True, "result": {payload...}}.
+        # Jobs need the payload directly — not the envelope.
+        # If "result" key is missing, return the full dict as fallback.
         results = []
         for task in stage_tasks:
             if task.result_data:
-                results.append(task.result_data)
+                data = task.result_data
+                if isinstance(data, dict) and "result" in data:
+                    results.append(data["result"])
+                else:
+                    results.append(data)
 
         self.logger.debug(f"Retrieved {len(results)} completed task results from stage {stage}")
         return results

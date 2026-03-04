@@ -310,6 +310,11 @@ Migrated 37 occurrences across 22 code files from raw `req.get_json()` to `parse
 
 | Date | Feature | Task |
 |------|---------|------|
+| 04 MAR 2026 | Platform | ADV-11: Idempotent submit response includes `job_type` — matches fresh submit shape |
+| 04 MAR 2026 | Platform | ADV-12: Fix catalog 500s — `list_dataset_unified()` missing `dict_row` cursor |
+| 04 MAR 2026 | OpenAPI | ADV-15: Spec bumped to 0.9.12, +4 endpoints (registry x2, approvals/{id}, catalog/asset/{id}), stale copy deleted |
+| 04 MAR 2026 | STAC | ADV-17: Materialization cleans up empty shell collections on item failure |
+| 04 MAR 2026 | Platform | ADV-18: Status list enriched with `processing_status`, `approval_state`, `clearance_state` via JOIN |
 | 04 MAR 2026 | Platform | ADV-3: Normalize platform response contracts — all `/platform/*` guarantee `{success, error, error_type}` |
 | 04 MAR 2026 | Platform | Remove 5 dead endpoints (lineage, validate, 3x deprecated 410s) — ~568 lines deleted |
 | 04 MAR 2026 | Platform | ADV-1: Remove dead `job_status_url`, make `monitor_url` absolute |

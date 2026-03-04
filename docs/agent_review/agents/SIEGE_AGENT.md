@@ -139,7 +139,6 @@ Cartographer probes every known endpoint with a minimal request to verify livene
 | `/api/platform/resubmit` | OPTIONS or GET | Check if live | 405 or method listing |
 | `/api/platform/approvals` | GET | No params | 200 |
 | `/api/platform/catalog/lookup` | GET | Missing params | 400 or empty |
-| `/api/platform/catalog/lookup-unified` | GET | `?dataset_id=test&resource_id=test` | 400 or empty |
 | `/api/platform/failures` | GET | No params | 200 |
 | `/api/platforms` | GET | No params | 200 |
 
@@ -178,14 +177,14 @@ Lancer executes canonical lifecycle sequences and records state checkpoints.
 2. GET `/api/platform/status/{request_id}` (poll until completed) → capture release_id, asset_id
 3. POST `/api/platform/approve` (version_id="v1") → verify STAC materialized
 4. GET `/api/platform/catalog/item/{collection}/{item_id}` → verify exists
-5. GET `/api/platform/catalog/lookup-unified?dataset_id={ds}&resource_id={rs}` → verify `titiler_urls` present with keys [xyz, tilejson, preview, info, statistics]. Verify URLs contain TiTiler base hostname. → **CHECKPOINT R1-URLS**
+5. GET `/api/platform/catalog/lookup?dataset_id={ds}&resource_id={rs}` → verify `titiler_urls` present with keys [xyz, tilejson, preview, info, statistics]. Verify URLs contain TiTiler base hostname. → **CHECKPOINT R1-URLS**
 6. **CHECKPOINT R1**: Record all IDs and expected DB/STAC state
 
 **Sequence 2: Vector Lifecycle**
 1. POST `/api/platform/submit` (vector) → capture IDs
 2. Poll until completed → capture release_id
 3. POST `/api/platform/approve` → verify OGC Features
-4. GET `/api/platform/catalog/lookup-unified?dataset_id={ds}&resource_id={rs}` → verify `endpoints.features` present, `tiles.tilejson` present. Verify URLs contain TiPG base path. → **CHECKPOINT V1-URLS**
+4. GET `/api/platform/catalog/lookup?dataset_id={ds}&resource_id={rs}` → verify `endpoints.features` present, `tiles.tilejson` present. Verify URLs contain TiPG base path. → **CHECKPOINT V1-URLS**
 5. **CHECKPOINT V1**: Record all IDs
 
 **Sequence 3: Multi-Version**
@@ -203,7 +202,7 @@ Lancer executes canonical lifecycle sequences and records state checkpoints.
 2. Poll until completed (VirtualiZarr pipeline: scan → copy → validate → combine → register)
 3. POST `/api/platform/approve` (version_id="v1") → verify STAC materialized (zarr items go in STAC)
 4. GET `/api/platform/catalog/dataset/{dataset_id}` → verify catalog entry exists
-5. GET `/api/platform/catalog/lookup-unified?dataset_id={ds}&resource_id={rs}` → verify `xarray_urls` present with keys [variables, tiles, tilejson, preview, info, point]. Verify URLs contain TiTiler base hostname and `/xarray/` path. → **CHECKPOINT Z1-URLS**
+5. GET `/api/platform/catalog/lookup?dataset_id={ds}&resource_id={rs}` → verify `xarray_urls` present with keys [variables, tiles, tilejson, preview, info, point]. Verify URLs contain TiTiler base hostname and `/xarray/` path. → **CHECKPOINT Z1-URLS**
 6. **CHECKPOINT Z1**: Record all IDs, verify job_type=virtualzarr, STAC item present
 
 Note: NetCDF (.nc) routes to the VirtualiZarr pipeline, NOT the raster pipeline.
@@ -214,7 +213,7 @@ Use `data_type_override: "zarr"` from siege_config.json. Submit body must includ
 1. POST `/api/platform/submit` with `data_type=zarr`, native `.zarr` store (`zarr_cmip6_tasmax` from config) → capture request_id, job_id
 2. Poll until completed → verify job completes (different code path from VirtualiZarr .nc)
 3. POST `/api/platform/approve` (version_id="v1") → verify STAC materialized
-4. GET `/api/platform/catalog/lookup-unified?dataset_id={ds}&resource_id={rs}` → verify `xarray_urls` present → **CHECKPOINT NZ1-URLS**
+4. GET `/api/platform/catalog/lookup?dataset_id={ds}&resource_id={rs}` → verify `xarray_urls` present → **CHECKPOINT NZ1-URLS**
 5. **CHECKPOINT NZ1**: Record all IDs, verify direct zarr path (NOT virtualzarr pipeline)
 
 **Sequence 7: Rejection Path**
@@ -229,7 +228,7 @@ Use `data_type_override: "zarr"` from siege_config.json. Submit body must includ
    **CRITICAL**: `overwrite` MUST be inside `processing_options`, NOT at the top level. Top-level `overwrite` is silently ignored by Pydantic.
 2. Poll until completed → verify revision counter incremented (revision=2), approval_state=pending_review
 3. POST `/api/platform/approve` (version_id="v1") → expect success
-4. GET `/api/platform/catalog/lookup-unified?dataset_id={ds}&resource_id={rs}` → verify catalog entry
+4. GET `/api/platform/catalog/lookup?dataset_id={ds}&resource_id={rs}` → verify catalog entry
 5. **CHECKPOINT REJ2**: Recovered from rejection, release approved after resubmit
 
 **Sequence 9: Revocation + is_latest Cascade**

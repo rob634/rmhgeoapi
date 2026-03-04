@@ -177,6 +177,7 @@ def idempotent_response(
     job_id: str,
     message: str = "Request already submitted (idempotent)",
     hint: Optional[str] = None,
+    job_type: Optional[str] = None,
     **extra_fields
 ) -> func.HttpResponse:
     """
@@ -187,6 +188,7 @@ def idempotent_response(
         job_id: CoreMachine job ID
         message: Idempotent message
         hint: Optional hint (e.g., "Use overwrite=true to force reprocessing")
+        job_type: Job type (e.g., 'process_raster_docker') — matches fresh submit shape
         **extra_fields: Additional fields
 
     Returns:
@@ -198,6 +200,8 @@ def idempotent_response(
         "monitor_url": _generate_monitor_url(request_id),
         **extra_fields
     }
+    if job_type:
+        data["job_type"] = job_type
     if hint:
         data["hint"] = hint
 

@@ -3469,14 +3469,13 @@ class TasksInterface(BaseInterface):
                     const vAppr = escapeHtml((v.approval_state || '').replace('_', ' '));
                     const vClear = escapeHtml(v.clearance_state || '');
                     const vDate = v.created_at ? new Date(v.created_at).toLocaleDateString() : '';
-                    const vLatest = v.is_latest ? '<span class="ps-is-latest">Latest</span>' : '';
                     vRows += `<tr>
                         <td class="mono">${{vLabel}}</td>
                         <td>${{v.version_ordinal || ''}}</td>
                         <td><span class="status-badge status-${{vProc}}">${{vProc}}</span></td>
                         <td>${{vAppr}}</td>
                         <td>${{vClear}}</td>
-                        <td>${{vDate}} ${{vLatest}}</td>
+                        <td>${{vDate}}</td>
                     </tr>`;
                 }}
                 versionsHtml = `
@@ -3534,7 +3533,6 @@ class TasksInterface(BaseInterface):
                         <div class="ps-row"><span class="ps-label">Processing</span><span class="status-badge ${{procClass}}">${{escapeHtml(procStatus)}}</span></div>
                         ${{approvalState ? `<div class="ps-row"><span class="ps-label">Approval</span><span class="status-badge ${{approvalClass}}">${{escapeHtml(approvalState.replace('_', ' '))}}</span></div>` : ''}}
                         <div class="ps-row"><span class="ps-label">Clearance</span><span class="ps-clearance-badge ${{clearanceClass}}">${{escapeHtml(clearanceState)}}</span></div>
-                        ${{release.is_latest ? '<div class="ps-row"><span class="ps-label">Latest</span><span class="ps-is-latest">Latest Release</span></div>' : ''}}
                         ${{release.release_id ? `<div class="ps-row"><span class="ps-label">Release ID</span><span class="ps-value mono" title="${{escapeHtml(release.release_id)}}">${{escapeHtml(release.release_id.substring(0, 16))}}...</span></div>` : ''}}
                     </div>
                     <div class="ps-section">

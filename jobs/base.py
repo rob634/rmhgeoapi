@@ -383,7 +383,7 @@ class JobBase(ABC):
                         raise ValueError("Stage 2 requires Stage 1 results")
 
                     # Extract file list from Stage 1 task result
-                    file_list = previous_results[0]['result']['files']  # ← Runtime discovery
+                    file_list = previous_results[0]['files']  # ← Runtime discovery (envelope unwrapped by CoreMachine)
 
                     # Create one task per file
                     return [

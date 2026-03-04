@@ -160,7 +160,17 @@ async def platform_catalog_lookup(req: func.HttpRequest) -> func.HttpResponse:
         )
 
     except Exception as e:
-        logger.error(f"Platform catalog lookup failed: {e}", exc_info=True)
+        error_type = type(e).__name__
+        logger.error(f"Platform catalog lookup failed ({error_type}): {e}", exc_info=True)
+
+        if 'OperationalError' in error_type or 'UndefinedTable' in error_type:
+            return _catalog_error_response(
+                503,
+                "Database schema not available for catalog lookup. "
+                "This may be a temporary issue — retry or contact support.",
+                "DatabaseError"
+            )
+
         return _catalog_error_response(500, "Internal server error")
 
 
@@ -524,7 +534,16 @@ async def platform_catalog_dataset(req: func.HttpRequest) -> func.HttpResponse:
     except Exception as e:
         error_type = type(e).__name__
         ds_id = locals().get('dataset_id', 'unknown')
-        logger.error(f"Platform catalog dataset failed: {e}", exc_info=True)
+        logger.error(f"Platform catalog dataset failed ({error_type}): {e}", exc_info=True)
+
+        if 'OperationalError' in error_type or 'UndefinedTable' in error_type:
+            return _catalog_error_response(
+                503,
+                f"Database schema not available for dataset listing. "
+                f"This may be a temporary issue — retry or contact support.",
+                "DatabaseError"
+            )
+
         return _catalog_error_response(
             500,
             f"Internal server error retrieving dataset '{ds_id}'. "

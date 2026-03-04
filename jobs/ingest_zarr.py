@@ -188,8 +188,8 @@ class IngestZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                     "Stage 2 (copy) requires previous_results from validate stage"
                 )
 
-            # IMPORTANT: CoreMachine._get_completed_stage_results() returns
-            # result_data dicts DIRECTLY, not TaskRecord objects.
+            # CoreMachine._get_completed_stage_results() unwraps the handler
+            # envelope and returns the "result" payload directly.
             validate_result = previous_results[0] if previous_results else {}
             blob_list = validate_result.get("blob_list", [])
             if not blob_list:

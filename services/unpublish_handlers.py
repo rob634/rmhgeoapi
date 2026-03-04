@@ -1129,7 +1129,7 @@ def delete_stac_and_audit(params: Dict[str, Any], context: Optional[Dict[str, An
                             rel_row = cur.fetchone()
                             if rel_row and rel_row.get('approval_state') == 'approved':
                                 cur.execute(
-                                    "UPDATE app.asset_releases SET approval_state = 'revoked', is_served = false, is_latest = false, revoked_at = NOW() WHERE release_id = %s",
+                                    "UPDATE app.asset_releases SET approval_state = 'revoked', is_served = false, revoked_at = NOW() WHERE release_id = %s",
                                     (rel_row['release_id'],)
                                 )
                                 logger.warning(f"AUDIT: Revoked release {rel_row['release_id'][:16]}... during unpublish (atomic with STAC delete)")

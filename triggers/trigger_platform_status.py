@@ -504,7 +504,6 @@ def _build_single_status_response(
             "version_id": release.version_id,
             "version_ordinal": release.version_ordinal,
             "revision": release.revision,
-            "is_latest": release.is_latest,
             "processing_status": release.processing_status.value if hasattr(release.processing_status, 'value') else str(release.processing_status),
             "approval_state": release.approval_state.value if hasattr(release.approval_state, 'value') else str(release.approval_state),
             "clearance_state": release.clearance_state.value if hasattr(release.clearance_state, 'value') else str(release.clearance_state),
@@ -615,7 +614,6 @@ def _build_version_summary(releases: list) -> list:
             "approval_state": release.approval_state.value if hasattr(release.approval_state, 'value') else str(release.approval_state),
             "clearance_state": release.clearance_state.value if hasattr(release.clearance_state, 'value') else str(release.clearance_state),
             "processing_status": release.processing_status.value if hasattr(release.processing_status, 'value') else str(release.processing_status),
-            "is_latest": release.is_latest,
             "version_ordinal": release.version_ordinal,
             "revision": release.revision,
             "created_at": release.created_at.isoformat() if release.created_at else None,
@@ -890,7 +888,7 @@ def _handle_platform_refs_lookup(
                 break
     if not primary_release:
         for r in releases:
-            if r.is_latest:
+            if (r.approval_state.value if hasattr(r.approval_state, 'value') else str(r.approval_state)) == 'approved':
                 primary_release = r
                 break
     if not primary_release:

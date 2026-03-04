@@ -1103,6 +1103,31 @@ All pipeline executions in chronological order.
 | Editor | ~8,000 |
 | **Total** | **~115,000** |
 
+**Fixes Applied** (across v0.9.12.1 and v0.9.12.2):
+
+| ID | Severity | Fix Summary | Version |
+|----|----------|-------------|---------|
+| ADV-1 | CRITICAL | Removed dead `job_status_url`, made `monitor_url` absolute | v0.9.12.1 |
+| ADV-2 | CRITICAL | Confirmed guard works (REFLEXION Run 32); stale ordinal guard fixed | v0.9.12.1 |
+| ADV-3 | HIGH | Normalized all `/platform/*` error responses to `{success, error, error_type}` | v0.9.12.1 |
+| ADV-4 | HIGH | `services`/`outputs` populated from Release record in status detail | v0.9.12.1 |
+| ADV-5 | HIGH | Status list `?status=` filter now works | v0.9.12.1 |
+| ADV-6 | HIGH | API discovery linked from health endpoint | v0.9.12.1 |
+| ADV-7 | HIGH | TiTiler cross-linked from platform status `services` block | v0.9.12.1 |
+| ADV-8 | HIGH | Failed job error propagated to status response | v0.9.12.1 |
+| ADV-9 | HIGH | Malformed JSON returns 400 not 500 (fixed in v0.9.11.11) | v0.9.11.11 |
+| ADV-10 | HIGH | Dead endpoints removed (5 deleted) | v0.9.12.1 |
+| ADV-11 | MEDIUM | Idempotent response now includes `job_type` — matches fresh submit shape | v0.9.12.2 |
+| ADV-12 | MEDIUM | Catalog 500 fixed — `list_dataset_unified()` missing `dict_row` on cursor | v0.9.12.2 |
+| ADV-13 | MEDIUM | Fixed (with ADV-3 batch) | v0.9.12.1 |
+| ADV-14 | MEDIUM | Fixed (with ADV-3 batch) | v0.9.12.1 |
+| ADV-15 | MEDIUM | OpenAPI spec bumped to 0.9.12, +4 endpoints, stale copy deleted | v0.9.12.2 |
+| ADV-16 | MEDIUM | Fixed (with ADV-3 batch) | v0.9.12.1 |
+| ADV-17 | MEDIUM | STAC materialization cleans up empty shell collections on item failure | v0.9.12.2 |
+| ADV-18 | MEDIUM | Status list enriched with `processing_status`, `approval_state`, `clearance_state` | v0.9.12.2 |
+
+**Remaining** (not fixed): ADV-19 through ADV-25 (5 LOW, 1 INFO) — tracked in Known Bugs
+
 ### Run 32 — REFLEXION: ADV-2 Approval Guard (04 MAR 2026)
 
 **Pipeline**: REFLEXION | **Target**: ADV-2 approval guard bypass concern | **Version**: v0.9.12.1
@@ -1181,19 +1206,79 @@ All pipeline executions in chronological order.
 
 ---
 
+## Run 34: SIEGE Run 10 — Overwrite Hardening + Full Regression (04 MAR 2026)
+
+| Field | Value |
+|-------|-------|
+| **Pipeline** | SIEGE |
+| **Date** | 04 MAR 2026 |
+| **Version** | 0.9.12.2 |
+| **Focus** | Overwrite hardening (Sequences 14-18) + full regression (Sequences 1-13) |
+| **Output** | `agent_docs/SIEGE_RUN_10.md` |
+
+**Sequences Tested**: 18 (up from 13 in Run 9)
+
+| Category | Sequences | Steps | Pass | Fail |
+|----------|-----------|-------|------|------|
+| Happy-path lifecycles (1-6) | Raster, Vector, Multi-Version, Unpublish, NetCDF/Zarr, Native Zarr | 25 | 24 | 1 |
+| Extended lifecycle (7-10) | Rejection, Reject→Resubmit, Revoke+Cascade, Overwrite Draft | 21 | 21 | 0 |
+| Invalid transitions (11-13) | 9 state guards + 10 field validations + version conflict | 24 | 24 | 0 |
+| **NEW: Overwrite hardening (14-18)** | Revoke→OW→Reapprove, OW Approved, Triple Revision, Race Guard, Multi-Revoke | 31 | 31 | 0 |
+| **Total** | | **110** | **108** | **1** |
+
+**Score**: 98.2% — up from 90.8% in Run 9 (+7.4%)
+
+**New Sequences Added (14-18)**:
+
+| Seq | Checkpoint | Description | Result |
+|-----|-----------|-------------|--------|
+| 14 | RVOW1 | Revoke → Overwrite → Reapprove (golden path) | **PASS** — revision=2, ordinal preserved, version_id restored |
+| 15 | RVOW2 | Overwrite on APPROVED → new version | **PASS** — new release at ordinal=2, v1 untouched |
+| 16 | TREV1 | Triple revision (reject→OW→reject→OW→approve) | **PASS** — revision=3, same release_id throughout |
+| 17 | RACE1 | Overwrite while PROCESSING (race guard) | **PASS** — safe fallthrough, new version created, no corruption |
+| 18 | MREV1 | Multi-revoke overwrite target (pick most recent) | **PASS** — v2 selected over v1, ORDER BY correct |
+
+**Auditor**: 12/12 checkpoints PASS, 62 checks, zero divergences, zero stuck jobs.
+
+**Findings**:
+
+| ID | Severity | Description |
+|----|----------|-------------|
+| NZ1-FAIL | MEDIUM | Native Zarr `ingest_zarr` blob_list extraction bug (pre-existing) |
+| F-1 | HIGH | `/api/health` returns 503 despite all components healthy |
+| ~~F-3~~ | ~~MEDIUM~~ | ~~Retracted — `lookup-unified` was phantom endpoint in agent docs~~ |
+
+**Observations**:
+- Overwrite on PROCESSING creates new version (safe fallthrough, no explicit error)
+- clearance_state persists through overwrite (cosmetic only)
+- Unpublish defaults to dry_run=true (safety behavior)
+
+**Token Usage**:
+
+| Agent | Tokens | Duration |
+|-------|--------|----------|
+| Cartographer | ~25,000 | 70s |
+| Lancer Seq 1-10 | ~77,000 | 23m |
+| Lancer Seq 11-13 | ~36,000 | 4m |
+| Lancer Seq 14-18 | ~47,000 | 14m |
+| Auditor | ~37,000 | 1.5m |
+| **Total** | **~222,000** | **~43m** |
+
+---
+
 ## Cumulative Token Usage
 
 | Pipeline | Runs | Total Tokens |
 |----------|------|-------------|
-| COMPETE | Runs 1-6, 9, 12, 19, 28, 29, 30, 33 | ~2,434,904 (prior 2,153,504 + Run 33: ~281,400) |
-| GREENFIELD | Runs 7, 8, 10, 24 | ~944,196 (Run 10: 631,196 + Run 24: ~313,000; Runs 7-8 predated instrumentation) |
-| SIEGE | Runs 11, 13, 18, 20, 21, 22, 23, 25, 26 | ~1,817,587 |
-| REFLEXION | Runs 14, 15, 16, 17, 32 | ~974,966 (prior 631,966 + Run 32: ~343,000) |
+| COMPETE | Runs 1-6, 9, 12, 19, 28, 29, 30, 33 | ~2,434,904 |
+| GREENFIELD | Runs 7, 8, 10, 24 | ~944,196 |
+| SIEGE | Runs 11, 13, 18, 20, 21, 22, 23, 25, 26, 34 | ~2,039,587 (prior 1,817,587 + Run 34: ~222,000) |
+| REFLEXION | Runs 14, 15, 16, 17, 32 | ~974,966 |
 | TOURNAMENT | Run 27 | ~278,000 |
 | ADVOCATE | Run 31 | ~115,000 |
-| **Instrumented Total** | Runs 9-33 | **~6,564,653** |
+| **Instrumented Total** | Runs 9-34 | **~6,786,653** |
 
-**Note**: Runs 1-8 predated the token instrumentation described in `agents/AGENT_METRICS.md`. Per-agent token breakdowns are available for Runs 9-31.
+**Note**: Runs 1-8 predated the token instrumentation described in `agents/AGENT_METRICS.md`. Per-agent token breakdowns are available for Runs 9-34.
 
 ---
 

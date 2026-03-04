@@ -148,8 +148,6 @@ class PlatformInterface(BaseInterface):
             ordinal = release.get('version_ordinal')
             parts.append(self._field('Ordinal', f'ord{ordinal}' if ordinal is not None else ''))
             parts.append(self._field('Revision', self._esc(release.get('revision'))))
-            is_latest = release.get('is_latest')
-            parts.append(self._field('Latest', 'Yes' if is_latest else 'No'))
             parts.append(self._field('Processing', self._status_badge(release.get('processing_status', 'unknown'))))
             parts.append(self._field('Approval', self._approval_badge(release.get('approval_state', 'unknown'))))
             parts.append(self._field('Clearance', self._clearance_badge(release.get('clearance_state', 'unknown'))))
@@ -272,7 +270,7 @@ class PlatformInterface(BaseInterface):
             parts.append(
                 '<thead><tr>'
                 '<th>Version</th><th>Ordinal</th><th>Processing</th>'
-                '<th>Approval</th><th>Clearance</th><th>Latest</th><th>Release ID</th>'
+                '<th>Approval</th><th>Clearance</th><th>Release ID</th>'
                 '</tr></thead>'
             )
             parts.append('<tbody>')
@@ -287,7 +285,6 @@ class PlatformInterface(BaseInterface):
                     f'<td>{self._status_badge(v.get("processing_status", "unknown"))}</td>'
                     f'<td>{self._approval_badge(v.get("approval_state", "unknown"))}</td>'
                     f'<td>{self._clearance_badge(v.get("clearance_state", "unknown"))}</td>'
-                    f'<td>{"Yes" if v.get("is_latest") else "No"}</td>'
                     f'<td title="{release_id}"><span class="mono">{truncated_id}</span></td>'
                     f'</tr>'
                 )
@@ -1010,12 +1007,12 @@ class PlatformInterface(BaseInterface):
                         <tr><td colspan="3" class="endpoint-group">Platform Registry</td></tr>
                         <tr>
                             <td><span class="method get">GET</span></td>
-                            <td><code class="endpoint-path">/api/platforms</code></td>
+                            <td><code class="endpoint-path">/api/platform/registry</code></td>
                             <td>List supported B2B platforms</td>
                         </tr>
                         <tr>
                             <td><span class="method get">GET</span></td>
-                            <td><code class="endpoint-path">/api/platforms/{id}</code></td>
+                            <td><code class="endpoint-path">/api/platform/registry/{id}</code></td>
                             <td>Platform details with required/optional refs</td>
                         </tr>
                     </tbody>

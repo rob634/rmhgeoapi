@@ -105,12 +105,12 @@ async def platform_status_list(req: func.HttpRequest) -> func.HttpResponse:
 # PLATFORM REGISTRY ENDPOINTS (V0.8 - 29 JAN 2026)
 # ============================================================================
 
-@bp.route(route="platforms", methods=["GET"])
+@bp.route(route="platform/registry", methods=["GET"])
 def platforms_list_route(req: func.HttpRequest) -> func.HttpResponse:
     """
     List all supported B2B platforms.
 
-    GET /api/platforms
+    GET /api/platform/registry
 
     Returns list of platforms with their identifier requirements.
     Used by B2B clients to understand what identifiers are needed for each platform.
@@ -177,12 +177,12 @@ def platforms_list_route(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
-@bp.route(route="platforms/{platform_id}", methods=["GET"])
+@bp.route(route="platform/registry/{platform_id}", methods=["GET"])
 def platform_get_route(req: func.HttpRequest) -> func.HttpResponse:
     """
     Get details of a specific platform.
 
-    GET /api/platforms/{platform_id}
+    GET /api/platform/registry/{platform_id}
 
     Path Parameters:
         platform_id: Platform identifier (e.g., "ddh")

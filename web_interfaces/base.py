@@ -2305,11 +2305,10 @@ class BaseInterface(ABC):
         safe = state.lower()
         return f'<span class="clearance-badge clearance-{safe}">{safe}</span>'
 
-    def render_version_chip(self, version_id: str | None, ordinal: int, is_latest: bool = False) -> str:
+    def render_version_chip(self, version_id: str | None, ordinal: int) -> str:
         """Render a V0.9 version chip (navy pill for versions, dashed for drafts)."""
         if version_id:
-            star = '<span class="latest-star">&#9733;</span>' if is_latest else ''
-            return f'<span class="version-chip">{version_id}{star}</span>'
+            return f'<span class="version-chip">{version_id}</span>'
         else:
             return f'<span class="version-chip version-draft">ord {ordinal}</span>'
 

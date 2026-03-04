@@ -13,6 +13,27 @@ This document tracks completed architectural changes and improvements to the Azu
 
 ---
 
+## 04 MAR 2026: ADVOCATE MEDIUM Fixes (v0.9.12.2) ✅
+
+**Status**: ✅ **COMPLETE**
+**Trigger**: ADVOCATE Run 31 findings — 5 remaining MEDIUM items (ADV-11, 12, 15, 17, 18)
+
+### Changes
+
+| ADV | Fix | Files |
+|-----|-----|-------|
+| ADV-11 | Idempotent submit response now includes `job_type` — matches fresh 202 shape | `services/platform_response.py`, `triggers/platform/submit.py` |
+| ADV-12 | Catalog 500 fixed — `list_dataset_unified()` cursor missing `row_factory=dict_row` | `services/platform_catalog_service.py`, `triggers/trigger_platform_catalog.py` |
+| ADV-15 | OpenAPI spec bumped to 0.9.12, +4 missing endpoints, stale `raster_api/openapi/` copy deleted | `openapi/platform-api-v1.json` |
+| ADV-17 | STAC materialization cleans up empty shell collections on item failure | `services/stac_materialization.py` |
+| ADV-18 | Status list enriched with `processing_status`, `approval_state`, `clearance_state` via LEFT JOIN | `infrastructure/platform.py` |
+
+### ADVOCATE Run 31 Resolution Summary
+
+Of 25 original findings: **18 fixed** (2 CRITICAL, 7 HIGH, 9 MEDIUM), 7 remain as known bugs (5 MEDIUM, 1 LOW, 1 INFO). DX score estimated improvement from 37% to ~65%.
+
+---
+
 ## 04 MAR 2026: Platform API Cleanup (v0.9.12.1) ✅
 
 **Status**: ✅ **COMPLETE**

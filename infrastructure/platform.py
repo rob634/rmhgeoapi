@@ -251,6 +251,10 @@ class ApiRequestRepository(PostgreSQLRepository):
         """
         List Platform requests with optional filtering.
 
+        Enriched with release status fields (ADV-18, 04 MAR 2026):
+        LEFT JOINs asset_releases to include processing_status, approval_state,
+        and clearance_state — making the list a useful subset of the detail response.
+
         Args:
             limit: Maximum number of results (default 100)
             dataset_id: Filter by DDH dataset ID (optional)
@@ -261,31 +265,54 @@ class ApiRequestRepository(PostgreSQLRepository):
         with self._error_context("list platform requests", f"limit={limit}"):
             if dataset_id:
                 query = sql.SQL("""
-                    SELECT * FROM {}.{}
-                    WHERE dataset_id = %s
-                    ORDER BY created_at DESC
+                    SELECT ar.*,
+                           rel.processing_status,
+                           rel.approval_state,
+                           rel.clearance_state
+                    FROM {schema}.{requests} ar
+                    LEFT JOIN LATERAL (
+                        SELECT processing_status, approval_state, clearance_state
+                        FROM {schema}.{releases}
+                        WHERE asset_id = ar.asset_id AND approval_state = 'approved'
+                        ORDER BY version_ordinal DESC LIMIT 1
+                    ) rel ON true
+                    WHERE ar.dataset_id = %s
+                    ORDER BY ar.created_at DESC
                     LIMIT %s
                 """).format(
-                    sql.Identifier(self.schema_name),
-                    sql.Identifier("api_requests")
+                    schema=sql.Identifier(self.schema_name),
+                    requests=sql.Identifier("api_requests"),
+                    releases=sql.Identifier("asset_releases")
                 )
                 params = (dataset_id, limit)
             else:
                 query = sql.SQL("""
-                    SELECT * FROM {}.{}
-                    ORDER BY created_at DESC
+                    SELECT ar.*,
+                           rel.processing_status,
+                           rel.approval_state,
+                           rel.clearance_state
+                    FROM {schema}.{requests} ar
+                    LEFT JOIN LATERAL (
+                        SELECT processing_status, approval_state, clearance_state
+                        FROM {schema}.{releases}
+                        WHERE asset_id = ar.asset_id AND approval_state = 'approved'
+                        ORDER BY version_ordinal DESC LIMIT 1
+                    ) rel ON true
+                    ORDER BY ar.created_at DESC
                     LIMIT %s
                 """).format(
-                    sql.Identifier(self.schema_name),
-                    sql.Identifier("api_requests")
+                    schema=sql.Identifier(self.schema_name),
+                    requests=sql.Identifier("api_requests"),
+                    releases=sql.Identifier("asset_releases")
                 )
                 params = (limit,)
 
             rows = self._execute_query(query, params, fetch='all')
 
-            # V0.8.16: Include asset_id, platform_id FK columns (09 FEB 2026)
-            return [
-                {
+            # V0.9.12: Include release status fields (ADV-18)
+            results = []
+            for row in rows:
+                item = {
                     'request_id': row['request_id'],
                     'dataset_id': row['dataset_id'],
                     'resource_id': row['resource_id'],
@@ -296,10 +323,18 @@ class ApiRequestRepository(PostgreSQLRepository):
                     'platform_id': row.get('platform_id'),
                     'retry_count': row.get('retry_count', 0),
                     'created_at': row['created_at'].isoformat() if row['created_at'] else None,
-                    'updated_at': row['updated_at'].isoformat() if row.get('updated_at') else None
+                    'updated_at': row['updated_at'].isoformat() if row.get('updated_at') else None,
                 }
-                for row in rows
-            ]
+                # Release status enrichment (ADV-18)
+                ps = row.get('processing_status')
+                item['processing_status'] = ps.value if hasattr(ps, 'value') else ps
+                aps = row.get('approval_state')
+                item['approval_state'] = aps.value if hasattr(aps, 'value') else aps
+                cs = row.get('clearance_state')
+                item['clearance_state'] = cs.value if hasattr(cs, 'value') else cs
+                results.append(item)
+
+            return results
 
     def update_job_id(self, request_id: str, new_job_id: str) -> bool:
         """

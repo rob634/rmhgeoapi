@@ -267,9 +267,9 @@ class VirtualZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                 )
 
             # Extract manifest_url from stage 1 result
+            # CoreMachine unwraps the handler envelope — we get the payload directly.
             scan_result = previous_results[0] if previous_results else {}
-            result_data = scan_result.get("result", {})
-            manifest_url = result_data.get("manifest_url")
+            manifest_url = scan_result.get("manifest_url")
             if not manifest_url:
                 raise ValueError(
                     "Stage 2 requires manifest_url from scan stage result"
@@ -370,12 +370,12 @@ class VirtualZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                     "Stage 5 (register) requires previous_results from combine stage"
                 )
 
+            # CoreMachine unwraps the handler envelope — we get the payload directly.
             combine_result = previous_results[0] if previous_results else {}
-            result_data = combine_result.get("result", {})
 
             silver_container = _get_silver_netcdf_container()
             ref_prefix = job_params["ref_output_prefix"]
-            combined_ref_url = result_data.get(
+            combined_ref_url = combine_result.get(
                 "combined_ref_url",
                 f"abfs://{silver_container}/{ref_prefix}/combined_ref.json"
             )
@@ -391,11 +391,11 @@ class VirtualZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                         "dataset_id": job_params["dataset_id"],
                         "resource_id": job_params["resource_id"],
                         "combined_ref_url": combined_ref_url,
-                        "spatial_extent": result_data.get("spatial_extent"),
-                        "time_range": result_data.get("time_range"),
-                        "variables": result_data.get("variables", []),
-                        "dimensions": result_data.get("dimensions", {}),
-                        "source_files": result_data.get("source_files", 0),
+                        "spatial_extent": combine_result.get("spatial_extent"),
+                        "time_range": combine_result.get("time_range"),
+                        "variables": combine_result.get("variables", []),
+                        "dimensions": combine_result.get("dimensions", {}),
+                        "source_files": combine_result.get("source_files", 0),
                     },
                 }
             ]

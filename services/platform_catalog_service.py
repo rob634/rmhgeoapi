@@ -647,7 +647,6 @@ class PlatformCatalogService:
                 "asset_id": asset.get('asset_id'),
                 "version_id": release.get('version_id'),
                 "version_ordinal": release.get('version_ordinal'),
-                "is_latest": release.get('is_latest'),
                 "is_served": release.get('is_served')
             },
 
@@ -731,7 +730,6 @@ class PlatformCatalogService:
                 "asset_id": asset.get('asset_id'),
                 "version_id": release.get('version_id'),
                 "version_ordinal": release.get('version_ordinal'),
-                "is_latest": release.get('is_latest'),
                 "is_served": release.get('is_served')
             },
 
@@ -779,7 +777,6 @@ class PlatformCatalogService:
                 "asset_id": asset.get('asset_id'),
                 "version_id": release.get('version_id'),
                 "version_ordinal": release.get('version_ordinal'),
-                "is_latest": release.get('is_latest'),
                 "is_served": release.get('is_served')
             },
 
@@ -875,7 +872,6 @@ class PlatformCatalogService:
                 "asset_id": asset.get('asset_id'),
                 "version_id": release.get('version_id'),
                 "version_ordinal": release.get('version_ordinal'),
-                "is_latest": release.get('is_latest'),
                 "is_served": release.get('is_served'),
             },
 
@@ -963,7 +959,7 @@ class PlatformCatalogService:
             SELECT a.asset_id, a.platform_id, a.dataset_id, a.resource_id,
                    a.data_type, a.created_at as asset_created_at,
                    r.release_id, r.version_id, r.version_ordinal,
-                   r.is_latest, r.is_served,
+                   r.is_served,
                    r.blob_path,
                    (SELECT rt.table_name FROM {schema}.{release_tables} rt
                     WHERE rt.release_id = r.release_id
@@ -973,8 +969,11 @@ class PlatformCatalogService:
                    r.processing_status, r.approval_state, r.clearance_state,
                    r.created_at as release_created_at
             FROM {schema}.{assets} a
-            LEFT JOIN {schema}.{releases} r
-                ON r.asset_id = a.asset_id AND r.is_latest = true
+            LEFT JOIN LATERAL (
+                SELECT * FROM {schema}.{releases}
+                WHERE asset_id = a.asset_id AND approval_state = 'approved'
+                ORDER BY version_ordinal DESC LIMIT 1
+            ) r ON true
             WHERE a.platform_id = 'ddh'
               AND a.dataset_id = %s
               AND a.deleted_at IS NULL
@@ -987,8 +986,10 @@ class PlatformCatalogService:
             release_tables=sql.Identifier("release_tables")
         )
 
+        from psycopg.rows import dict_row
+
         with self._asset_repo._get_connection() as conn:
-            with conn.cursor() as cur:
+            with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute(query, (dataset_id, limit, offset))
                 rows = cur.fetchall()
 
@@ -1010,7 +1011,6 @@ class PlatformCatalogService:
                     "asset_id": row.get('asset_id'),
                     "version_id": row.get('version_id'),
                     "version_ordinal": row.get('version_ordinal'),
-                    "is_latest": row.get('is_latest'),
                     "is_served": row.get('is_served')
                 }
             }

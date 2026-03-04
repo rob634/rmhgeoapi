@@ -187,7 +187,7 @@ Execute these lifecycle sequences using `tn-` prefix test data. Record state che
 2. Poll until completed (VirtualiZarr pipeline: scan → copy → validate → combine → register — may take longer than raster)
 3. Approve with version_id="v1" → verify STAC materialized (zarr items go in STAC)
 4. GET `/api/platform/catalog/dataset/{dataset_id}` → verify catalog entry exists
-5. GET `/api/platform/catalog/lookup-unified?dataset_id=tn-netcdf-test&resource_id=spei-ssp370` → verify `xarray_urls` present with keys [variables, tiles, tilejson, preview, info, point]. Verify URLs contain TiTiler base hostname and `/xarray/` path. No double container prefix in URLs. → **CHECKPOINT P-Z1-URLS**
+5. GET `/api/platform/catalog/lookup?dataset_id=tn-netcdf-test&resource_id=spei-ssp370` → verify `xarray_urls` present with keys [variables, tiles, tilejson, preview, info, point]. Verify URLs contain TiTiler base hostname and `/xarray/` path. No double container prefix in URLs. → **CHECKPOINT P-Z1-URLS**
 6. **CHECKPOINT P-Z1**: Record all IDs, verify job_type=virtualzarr, STAC item present
 
 Note: NetCDF (.nc) routes to the VirtualiZarr pipeline, NOT the raster pipeline.
@@ -315,7 +315,7 @@ curl -s "${BASE_URL}/api/platform/catalog/item/{collection}/{item_id}"
 curl -s "${BASE_URL}/api/platform/catalog/dataset/{dataset_id}"
 
 # Unified catalog lookup (includes service URLs: titiler_urls, xarray_urls, endpoints)
-curl -s "${BASE_URL}/api/platform/catalog/lookup-unified?dataset_id={dataset_id}&resource_id={resource_id}"
+curl -s "${BASE_URL}/api/platform/catalog/lookup?dataset_id={dataset_id}&resource_id={resource_id}"
 
 # Approval status
 curl -s "${BASE_URL}/api/platform/approvals/status?stac_item_ids={ids}"

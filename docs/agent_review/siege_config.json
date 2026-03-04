@@ -7,7 +7,7 @@
     "service_urls": {
       "titiler_base": "https://rmhtitiler-ghcyd7g0bxdvc2hc.eastus-01.azurewebsites.net",
       "titiler_liveness": "/livez",
-      "catalog_lookup_unified": "GET /api/platform/catalog/lookup-unified?dataset_id={dataset_id}&resource_id={resource_id}",
+      "catalog_lookup": "GET /api/platform/catalog/lookup?dataset_id={dataset_id}&resource_id={resource_id}",
       "raster_probes": {
         "info": "/cog/info?url={encoded_url}",
         "preview": "/cog/preview.png?url={encoded_url}&max_size=256",
@@ -44,11 +44,10 @@
       "catalog_item": "GET  /api/platform/catalog/item/{collection_id}/{item_id}",
       "catalog_assets": "GET  /api/platform/catalog/assets/{collection_id}/{item_id}",
       "catalog_dataset": "GET  /api/platform/catalog/dataset/{dataset_id}",
-      "catalog_lookup_unified": "GET  /api/platform/catalog/lookup-unified",
       "platform_health": "GET  /api/platform/health",
       "platform_failures": "GET  /api/platform/failures",
-      "platforms_list": "GET  /api/platforms",
-      "platforms_by_id": "GET  /api/platforms/{platform_id}"
+      "platforms_list": "GET  /api/platform/registry",
+      "platforms_by_id": "GET  /api/platform/registry/{platform_id}"
     },
     "verification_endpoints": {
       "_comment": "Agents may use these ONLY for auditing and state verification — never for test actions.",

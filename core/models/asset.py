@@ -310,11 +310,11 @@ class AssetRelease(BaseModel):
         - Rejected -> can be overwritten with new data
         - Approved -> can be revoked (requires audit trail)
 
-    Fields (~45):
+    Fields (~44):
         Identity: release_id, asset_id
         Version: version_id, suggested_version_id, version_ordinal, revision,
                  previous_release_id
-        Flags: is_latest, is_served, request_id
+        Flags: is_served, request_id
         Physical: blob_path, table_name, stac_item_id, stac_collection_id,
                   stac_item_json, content_hash, source_file_hash, output_file_hash
         Processing: job_id, processing_status, processing_started_at,
@@ -368,10 +368,9 @@ class AssetRelease(BaseModel):
         {"columns": ["stac_item_id"], "name": "idx_releases_stac_item"},
         {"columns": ["created_at"], "name": "idx_releases_created", "descending": True},
         {
-            "columns": ["asset_id"],
-            "name": "idx_releases_latest",
-            "unique": True,
-            "partial_where": "is_latest = true AND approval_state = 'approved'"
+            "columns": ["asset_id", "approval_state", "version_ordinal"],
+            "name": "idx_releases_latest_approved",
+            "partial_where": "approval_state = 'approved'"
         },
         {
             "columns": ["asset_id"],
@@ -441,10 +440,6 @@ class AssetRelease(BaseModel):
     # =========================================================================
     # FLAGS
     # =========================================================================
-    is_latest: bool = Field(
-        default=False,
-        description="True if this is the latest approved release for the asset"
-    )
     is_served: bool = Field(
         default=False,
         description="True if this release should be served via STAC/OGC APIs"
@@ -699,7 +694,6 @@ class AssetRelease(BaseModel):
             'revision': self.revision,
             'previous_release_id': self.previous_release_id,
             # Flags
-            'is_latest': self.is_latest,
             'is_served': self.is_served,
             'request_id': self.request_id,
             # Physical outputs

@@ -95,6 +95,8 @@ class ZarrInterface(BaseInterface):
         const CONTAINER = "{container}";
 
         // Dataset configurations
+        // URLs use abfs:// scheme so TiTiler-xarray routes through fsspec
+        // to Azure Blob with managed identity (https:// would be anonymous).
         const DATASETS = {{
             'cmip6-sample': {{
                 name: 'CMIP6 Temperature Sample',
@@ -110,9 +112,10 @@ class ZarrInterface(BaseInterface):
             }}
         }};
 
-        // Current dataset URL
+        // Current dataset URL — abfs:// for fsspec/managed identity via TiTiler-xarray
+        // Storage account is configured server-side (GEOTILER_STORAGE_ACCOUNT).
         let currentDataset = 'cmip6-sample';
-        let ZARR_URL = `https://${{STORAGE_ACCOUNT}}.blob.core.windows.net/${{CONTAINER}}/${{DATASETS[currentDataset].path}}`;
+        let ZARR_URL = `abfs://${{CONTAINER}}/${{DATASETS[currentDataset].path}}`;
 
         {self._generate_js()}
     </script>
@@ -1104,7 +1107,7 @@ class ZarrInterface(BaseInterface):
         // Dataset switch handler
         document.getElementById('dataset-select').addEventListener('change', function() {
             currentDataset = this.value;
-            ZARR_URL = `https://${STORAGE_ACCOUNT}.blob.core.windows.net/${CONTAINER}/${DATASETS[currentDataset].path}`;
+            ZARR_URL = `abfs://${CONTAINER}/${DATASETS[currentDataset].path}`;
 
             // Stop any animation
             if (isPlaying) {

@@ -13,7 +13,7 @@ Release Repository -- Versioned Artifact Lifecycle CRUD.
 
 Part of the V0.9 Asset/Release entity split. Handles all persistence for
 app.asset_releases, including version assignment, approval state updates,
-STAC caching, and is_latest management.
+STAC caching, and approval lifecycle.
 
 Table: app.asset_releases
 Primary Key: release_id
@@ -51,7 +51,6 @@ Methods:
         update_physical_outputs(...) - Set blob_path, table_name, etc.
 
     LIFECYCLE:
-        flip_is_latest(asset_id, new_latest_release_id) - Atomic is_latest swap
         count_by_approval_state() - Dashboard statistics
 
 Exports:
@@ -80,7 +79,7 @@ class ReleaseRepository(PostgreSQLRepository):
 
     Handles CRUD operations for app.asset_releases table.
     Manages versioned artifact lifecycle including approval,
-    clearance, processing, and is_latest tracking.
+    clearance, and processing tracking.
 
     Table: app.asset_releases
     """
@@ -90,7 +89,7 @@ class ReleaseRepository(PostgreSQLRepository):
         "release_id", "asset_id",
         "version_id", "suggested_version_id", "version_ordinal",
         "revision", "previous_release_id",
-        "is_latest", "is_served", "request_id",
+        "is_served", "request_id",
         "blob_path", "stac_item_id", "stac_collection_id",
         "stac_item_json", "content_hash", "source_file_hash", "output_file_hash",
         "output_mode", "tile_count", "search_id",
@@ -144,7 +143,7 @@ class ReleaseRepository(PostgreSQLRepository):
             release.version_id, release.suggested_version_id,
             release.version_ordinal,
             release.revision, release.previous_release_id,
-            release.is_latest, release.is_served, release.request_id,
+            release.is_served, release.request_id,
             release.blob_path,
             release.stac_item_id, release.stac_collection_id,
             release.stac_item_json, release.content_hash,
@@ -494,7 +493,8 @@ class ReleaseRepository(PostgreSQLRepository):
         """
         Get the latest approved release for an asset.
 
-        Uses the is_latest flag + approval_state='approved' filter.
+        Computed: highest version_ordinal among approved releases.
+        Replaces the denormalized is_latest flag (removed to fix F-01 race).
 
         Args:
             asset_id: Parent asset identifier
@@ -508,8 +508,9 @@ class ReleaseRepository(PostgreSQLRepository):
                     sql.SQL("""
                         SELECT * FROM {}.{}
                         WHERE asset_id = %s
-                          AND is_latest = true
                           AND approval_state = %s
+                        ORDER BY version_ordinal DESC
+                        LIMIT 1
                     """).format(
                         sql.Identifier(self.schema),
                         sql.Identifier(self.table)
@@ -854,9 +855,8 @@ class ReleaseRepository(PostgreSQLRepository):
         Revoke a release with audit trail.
 
         Snapshots + audits + mutates in a single transaction (BS-4 fix).
-        Sets approval_state to REVOKED, is_latest to false, and
-        is_served to false (SG2-2 fix: revoked releases must not
-        remain served).
+        Sets approval_state to REVOKED and is_served to false
+        (SG2-2 fix: revoked releases must not remain served).
 
         Args:
             release_id: Release to revoke
@@ -898,7 +898,6 @@ class ReleaseRepository(PostgreSQLRepository):
                             revoked_at = NOW(),
                             revoked_by = %s,
                             revocation_reason = %s,
-                            is_latest = false,
                             is_served = false,
                             updated_at = NOW()
                         WHERE release_id = %s
@@ -1006,8 +1005,7 @@ class ReleaseRepository(PostgreSQLRepository):
         self,
         release_id: str,
         version_id: str,
-        version_ordinal: int,
-        is_latest: bool
+        version_ordinal: int
     ) -> bool:
         """
         Assign version at approval time.
@@ -1019,7 +1017,6 @@ class ReleaseRepository(PostgreSQLRepository):
             release_id: Release to update
             version_id: Version identifier (e.g., "v1")
             version_ordinal: Numeric ordering (1, 2, 3...)
-            is_latest: Whether this becomes the latest release
 
         Returns:
             True if updated, False if release not found
@@ -1033,14 +1030,13 @@ class ReleaseRepository(PostgreSQLRepository):
                         UPDATE {}.{}
                         SET version_id = %s,
                             version_ordinal = %s,
-                            is_latest = %s,
                             updated_at = NOW()
                         WHERE release_id = %s
                     """).format(
                         sql.Identifier(self.schema),
                         sql.Identifier(self.table)
                     ),
-                    (version_id, version_ordinal, is_latest, release_id)
+                    (version_id, version_ordinal, release_id)
                 )
                 conn.commit()
 
@@ -1270,70 +1266,6 @@ class ReleaseRepository(PostgreSQLRepository):
     # LIFECYCLE
     # =========================================================================
 
-    def flip_is_latest(self, asset_id: str, new_latest_release_id: str) -> bool:
-        """
-        Atomically flip is_latest from all releases to a specific one.
-
-        In a single transaction:
-        1. Sets is_latest=false for ALL releases of this asset
-        2. Sets is_latest=true for the specified release
-
-        Args:
-            asset_id: Parent asset identifier
-            new_latest_release_id: Release to mark as latest
-
-        Returns:
-            True if the target release was updated, False otherwise
-        """
-        logger.info(f"Flipping is_latest for asset {asset_id[:16]}... to release {new_latest_release_id[:16]}...")
-
-        now = datetime.now(timezone.utc)
-
-        with self._get_connection() as conn:
-            with conn.cursor() as cur:
-                # Step 1: Clear is_latest for all releases of this asset
-                cur.execute(
-                    sql.SQL("""
-                        UPDATE {}.{}
-                        SET is_latest = false, updated_at = %s
-                        WHERE asset_id = %s
-                    """).format(
-                        sql.Identifier(self.schema),
-                        sql.Identifier(self.table)
-                    ),
-                    (now, asset_id)
-                )
-
-                # Step 2: Set is_latest for the specific release
-                cur.execute(
-                    sql.SQL("""
-                        UPDATE {}.{}
-                        SET is_latest = true, updated_at = %s
-                        WHERE release_id = %s
-                    """).format(
-                        sql.Identifier(self.schema),
-                        sql.Identifier(self.table)
-                    ),
-                    (now, new_latest_release_id)
-                )
-                target_updated = cur.rowcount > 0
-
-                if target_updated:
-                    conn.commit()
-                    logger.info(f"Flipped is_latest: asset {asset_id[:16]}... -> release {new_latest_release_id[:16]}...")
-                else:
-                    # Target release not found -- rollback Step 1 (which
-                    # cleared is_latest on ALL sibling releases). Without
-                    # rollback, every release for this asset would have
-                    # is_latest=false with no latest release.
-                    conn.rollback()
-                    logger.warning(
-                        f"flip_is_latest: target release {new_latest_release_id[:16]}... "
-                        f"not found, rolled back is_latest clear for asset {asset_id[:16]}..."
-                    )
-
-                return target_updated
-
     def approve_release_atomic(
         self,
         release_id: str,
@@ -1347,25 +1279,24 @@ class ReleaseRepository(PostgreSQLRepository):
         approval_notes: str = None
     ) -> bool:
         """
-        Atomically approve a release: flip is_latest + assign version +
-        set approval state + set clearance in a single transaction.
+        Atomically approve a release: assign version + set approval state +
+        set clearance in a single transaction.
 
         Spec: version-conflict-guard -- adds NOT EXISTS subquery to prevent
         two releases for the same (asset_id, version_id) from both being
         approved. UniqueViolation from idx_releases_version_conflict is
         caught as a concurrent-race fallback (R2).
 
-        Combines flip_is_latest(), update_version_assignment(),
-        update_approval_state(), and update_clearance() into one
-        connection/commit to prevent partial state on failure.
-
         The WHERE guard 'approval_state = pending_review' ensures
         idempotent safety -- concurrent approvals fail cleanly (0 rows).
         The NOT EXISTS guard prevents version_id collisions across releases.
 
+        Note: is_latest was removed (04 MAR 2026) — "latest" is now computed
+        as MAX(version_ordinal) WHERE approval_state='approved', fixing F-01.
+
         Args:
             release_id: Release to approve
-            asset_id: Parent asset (for flip_is_latest across siblings)
+            asset_id: Parent asset (for version conflict check)
             version_id: Version to assign (e.g., "v1")
             version_ordinal: Numeric ordering (1, 2, 3...)
             approval_state: Must be APPROVED
@@ -1408,20 +1339,7 @@ class ReleaseRepository(PostgreSQLRepository):
                             snapshot=dict(snapshot_row),
                         )
 
-                    # Step 1: Clear is_latest for all releases of this asset
-                    cur.execute(
-                        sql.SQL("""
-                            UPDATE {}.{}
-                            SET is_latest = false, updated_at = %s
-                            WHERE asset_id = %s AND is_latest = true
-                        """).format(
-                            sql.Identifier(self.schema),
-                            sql.Identifier(self.table)
-                        ),
-                        (reviewed_at, asset_id)
-                    )
-
-                    # Step 2: Approve + version + is_latest + clearance in one UPDATE
+                    # Step 1: Approve + version + clearance in one UPDATE
                     # NOT EXISTS prevents approving when another release already
                     # holds the same (asset_id, version_id) in approved state.
                     if is_public:
@@ -1430,7 +1348,6 @@ class ReleaseRepository(PostgreSQLRepository):
                                 UPDATE {}.{}
                                 SET version_id = %s,
                                     version_ordinal = %s,
-                                    is_latest = true,
                                     is_served = true,
                                     approval_state = %s,
                                     reviewer = %s,
@@ -1479,7 +1396,6 @@ class ReleaseRepository(PostgreSQLRepository):
                                 UPDATE {}.{}
                                 SET version_id = %s,
                                     version_ordinal = %s,
-                                    is_latest = true,
                                     is_served = true,
                                     approval_state = %s,
                                     reviewer = %s,
@@ -1541,7 +1457,6 @@ class ReleaseRepository(PostgreSQLRepository):
                     # R2: READ COMMITTED race -- another transaction committed the
                     # same (asset_id, version_id) between our NOT EXISTS check and
                     # our UPDATE. The partial unique index catches this at commit.
-                    # Explicit rollback undoes Step 1's is_latest clear.
                     conn.rollback()
                     logger.warning(
                         f"UniqueViolation on approve: {release_id[:16]}... "
@@ -1560,16 +1475,18 @@ class ReleaseRepository(PostgreSQLRepository):
         Roll back a committed approval when post-atomic operations fail.
 
         Spec: version-conflict-guard -- reverts approval_state to PENDING_REVIEW,
-        clears version_id/is_latest/clearance_state, and promotes the next
-        most recent approved sibling to is_latest if one exists.
+        clears version_id/clearance_state.
 
         Preserves: reviewer, reviewed_at, approval_notes, stac_item_id,
         stac_collection_id, blob_path (for audit trail and retry).
-        Clears: version_id, is_latest, clearance_state.
+        Clears: version_id, clearance_state.
+
+        Note: No sibling promotion needed — "latest" is computed from
+        MAX(version_ordinal) WHERE approval_state='approved'.
 
         Args:
             release_id: The release whose approval is being rolled back
-            asset_id: Parent asset (for sibling is_latest promotion)
+            asset_id: Parent asset (unused, kept for API compatibility)
             reason: Why the rollback occurred (stored in last_error)
 
         Returns:
@@ -1582,13 +1499,11 @@ class ReleaseRepository(PostgreSQLRepository):
 
         with self._get_connection() as conn:
             with conn.cursor() as cur:
-                # Step 1: Revert the target release
                 cur.execute(
                     sql.SQL("""
                         UPDATE {}.{}
                         SET approval_state = %s,
                             version_id = NULL,
-                            is_latest = false,
                             is_served = false,
                             clearance_state = %s,
                             last_error = %s,
@@ -1612,38 +1527,10 @@ class ReleaseRepository(PostgreSQLRepository):
                 reverted = cur.rowcount > 0
 
                 if reverted:
-                    # Step 2: Promote next most recent approved sibling to is_latest
-                    cur.execute(
-                        sql.SQL("""
-                            UPDATE {}.{}
-                            SET is_latest = true,
-                                updated_at = %s
-                            WHERE release_id = (
-                                SELECT release_id FROM {}.{}
-                                WHERE asset_id = %s
-                                  AND approval_state = %s
-                                  AND release_id != %s
-                                ORDER BY version_ordinal DESC, reviewed_at DESC
-                                LIMIT 1
-                            )
-                        """).format(
-                            sql.Identifier(self.schema),
-                            sql.Identifier(self.table),
-                            sql.Identifier(self.schema),
-                            sql.Identifier(self.table)
-                        ),
-                        (
-                            datetime.now(timezone.utc),
-                            asset_id,
-                            ApprovalState.APPROVED,
-                            release_id
-                        )
-                    )
-                    sibling_promoted = cur.rowcount > 0
                     conn.commit()
                     logger.warning(
                         f"Approval rollback committed: {release_id[:16]}... "
-                        f"reason={reason}, sibling_promoted={sibling_promoted}"
+                        f"reason={reason}"
                     )
                 else:
                     conn.rollback()
@@ -1799,7 +1686,6 @@ class ReleaseRepository(PostgreSQLRepository):
             revision=row.get('revision', 1),
             previous_release_id=row.get('previous_release_id'),
             # Flags
-            is_latest=row.get('is_latest', False),
             is_served=row.get('is_served', False),
             request_id=row.get('request_id'),
             # Physical outputs (table_name removed → app.release_tables)

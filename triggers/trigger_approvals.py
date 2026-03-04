@@ -43,6 +43,46 @@ logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "ApprovalTriggers")
 # V0.9 Entity Architecture imports
 from core.models.asset import ClearanceState, ApprovalState
 
+def _release_to_dto(release) -> dict:
+    """
+    Curated release DTO for API responses (ADV-10).
+
+    Returns ~20 consumer-relevant fields instead of the 46-field to_dict()
+    which was designed for database persistence.
+    """
+    from enum import Enum
+    return {
+        # Identity
+        "release_id": release.release_id,
+        "asset_id": release.asset_id,
+        "request_id": release.request_id,
+        # Version
+        "version_id": release.version_id,
+        "version_ordinal": release.version_ordinal,
+        "revision": release.revision,
+        "is_served": release.is_served,
+        # Approval lifecycle
+        "approval_state": release.approval_state.value if isinstance(release.approval_state, Enum) else release.approval_state,
+        "reviewer": release.reviewer,
+        "reviewed_at": release.reviewed_at.isoformat() if release.reviewed_at else None,
+        "rejection_reason": release.rejection_reason,
+        "approval_notes": release.approval_notes,
+        # Clearance
+        "clearance_state": release.clearance_state.value if isinstance(release.clearance_state, Enum) else release.clearance_state,
+        # Processing
+        "processing_status": release.processing_status.value if isinstance(release.processing_status, Enum) else release.processing_status,
+        "job_id": release.job_id,
+        "last_error": release.last_error,
+        # Physical outputs
+        "blob_path": release.blob_path,
+        "stac_item_id": release.stac_item_id,
+        "stac_collection_id": release.stac_collection_id,
+        # Timestamps
+        "created_at": release.created_at.isoformat() if release.created_at else None,
+        "updated_at": release.updated_at.isoformat() if release.updated_at else None,
+    }
+
+
 # Spec: version-conflict-guard -- maps error_type to HTTP status code
 ERROR_STATUS_MAP = {
     'VersionConflict': 409,
@@ -747,11 +787,8 @@ def platform_approvals_list(req: func.HttpRequest) -> func.HttpResponse:
         # Get status counts
         status_counts = approval_service.get_approval_stats()
 
-        # Convert to JSON-serializable format
-        releases_data = []
-        for release in releases:
-            release_dict = release.to_dict()
-            releases_data.append(release_dict)
+        # Convert to curated DTO (ADV-10: ~22 fields, not 46-field raw dump)
+        releases_data = [_release_to_dto(r) for r in releases]
 
         return func.HttpResponse(
             json.dumps({
@@ -832,7 +869,7 @@ def platform_approval_get(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             json.dumps({
                 "success": True,
-                "release": release.to_dict()
+                "release": _release_to_dto(release)
             }),
             status_code=200,
             headers={"Content-Type": "application/json"}

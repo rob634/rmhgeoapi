@@ -208,11 +208,10 @@ class StacCatalogContainerWorkflow(JobBaseMixin, JobBase):
                 raise ValueError("Stage 2 requires Stage 1 results for fan-out")
 
             # Extract raster file names from Stage 1 result
+            # CoreMachine unwraps the handler envelope — we get the payload directly.
+            # Failed tasks are filtered out by _get_completed_stage_results().
             stage_1_result = previous_results[0]  # Single Stage 1 task
-            if not stage_1_result.get('success'):
-                raise ValueError(f"Stage 1 failed: {stage_1_result.get('error')}")
-
-            raster_files = stage_1_result['result']['raster_files']
+            raster_files = stage_1_result['raster_files']
 
             if not raster_files:
                 # No files to process - return empty list

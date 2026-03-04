@@ -2,8 +2,8 @@
   "openapi": "3.0.1",
   "info": {
     "title": "Geospatial Platform API",
-    "version": "0.8",
-    "description": "**B2B Integration API for DDH (Data Hub)**\n\nThis API provides endpoints for automated data onboarding, processing status, and catalog verification.\n\n## What's New in v0.8 (02 FEB 2026)\n\n- **Version Lineage**: Track data versions with `previous_version_id`\n- **Dry Run Validation**: `?dry_run=true` validates without creating jobs\n- **Three-State Entity Model**: processing_status, approval_state, clearance_state\n- **Unified Unpublish**: Single endpoint replaces separate vector/raster\n- **Reject/Revoke/Resubmit**: Complete approval lifecycle management\n- **Platform Registry**: List registered B2B platforms\n\n## Endpoint Categories\n\n### Platform - Data Onboarding\n- Submit vector/raster data with version lineage\n- Validate requests before submission (dry_run)\n- Monitor job status and failures\n- Unpublish/resubmit data\n\n### Approvals - QA Workflow\n- Review pending datasets before publication\n- Approve, reject, or revoke with audit trail\n- Batch approval status queries\n\n### Catalog - STAC Verification\n- Verify processed data exists in catalog\n- Get asset URLs for downstream consumption\n- Query by DDH identifiers or STAC IDs\n\n**Note:** B2C data query endpoints (OGC Features, tile serving, point queries) are provided by the TiTiler service.\n",
+    "version": "0.9.12",
+    "description": "**B2B Integration API for DDH (Data Hub)**\n\nThis API provides endpoints for automated data onboarding, processing status, and catalog verification.\n\n## What's New in v0.9.12 (04 MAR 2026)\n\n- **Asset+Release Model**: Two-entity architecture (Asset = identity, Release = versioned artifact)\n- **Ordinal Versioning**: Version ordinals (`ord1`, `ord2`) replace draft placeholders\n- **Release Audit Trail**: Append-only audit events (APPROVED, REVOKED, OVERWRITTEN)\n- **Zarr Support**: Native Zarr and VirtualiZarr pipelines\n- **Platform Registry**: List registered B2B platforms\n- **Unified Catalog**: Single lookup works for raster, vector, and zarr\n\n## Endpoint Categories\n\n### Platform - Data Onboarding\n- Submit vector/raster/zarr data\n- Validate requests before submission (dry_run)\n- Monitor job status and failures\n- Unpublish/resubmit data\n\n### Approvals - QA Workflow\n- Review pending datasets before publication\n- Approve, reject, or revoke with audit trail\n- Batch approval status queries\n\n### Catalog - Asset Verification\n- Unified lookup by DDH identifiers (raster + vector + zarr)\n- Get asset URLs for downstream consumption\n- Browse datasets with pagination\n\n### Registry - Platform Configuration\n- List supported B2B platforms\n- Get platform identifier requirements\n\n**Note:** B2C data query endpoints (OGC Features, tile serving, point queries) are provided by the TiTiler service.\n",
     "contact": {
       "name": "Geospatial Platform Team",
       "email": "platform-support@example.com"
@@ -29,7 +29,11 @@
     },
     {
       "name": "Catalog",
-      "description": "STAC catalog verification for processed data.\nLookup items by DDH identifiers, verify assets exist.\n"
+      "description": "Asset catalog verification for processed data.\nUnified lookup by DDH identifiers works for raster, vector, and zarr.\n"
+    },
+    {
+      "name": "Registry",
+      "description": "B2B platform registry.\nList supported platforms and their identifier requirements.\n"
     }
   ],
   "paths": {
@@ -723,6 +727,155 @@
         }
       }
     },
+    "/api/platform/registry": {
+      "get": {
+        "summary": "List registered B2B platforms",
+        "description": "List all supported B2B platforms with their identifier requirements.\nUsed by clients to understand what identifiers are needed for each platform.",
+        "operationId": "platformRegistryList",
+        "tags": ["Registry"],
+        "parameters": [
+          {
+            "name": "active_only",
+            "in": "query",
+            "description": "If false, include inactive platforms (default: true)",
+            "schema": {
+              "type": "boolean",
+              "default": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of platforms",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {"type": "boolean"},
+                    "platforms": {
+                      "type": "array",
+                      "items": {"$ref": "#/components/schemas/PlatformRegistryEntry"}
+                    },
+                    "count": {"type": "integer"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/platform/registry/{platform_id}": {
+      "get": {
+        "summary": "Get platform details",
+        "description": "Get details of a specific registered B2B platform.",
+        "operationId": "platformRegistryGet",
+        "tags": ["Registry"],
+        "parameters": [
+          {
+            "name": "platform_id",
+            "in": "path",
+            "required": true,
+            "description": "Platform identifier (e.g., 'ddh')",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Platform details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {"type": "boolean"},
+                    "platform": {"$ref": "#/components/schemas/PlatformRegistryEntry"}
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Platform not found"
+          }
+        }
+      }
+    },
+    "/api/platform/approvals/{approval_id}": {
+      "get": {
+        "summary": "Get single approval by ID",
+        "description": "Get details of a specific approval record by its approval_id.",
+        "operationId": "platformApprovalGet",
+        "tags": ["Approvals"],
+        "parameters": [
+          {
+            "name": "approval_id",
+            "in": "path",
+            "required": true,
+            "description": "Approval record identifier",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approval details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {"type": "boolean"},
+                    "approval": {"$ref": "#/components/schemas/GeospatialAssetSummary"}
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Approval not found"
+          }
+        }
+      }
+    },
+    "/api/platform/catalog/asset/{asset_id}": {
+      "get": {
+        "summary": "Get asset details by asset_id",
+        "description": "Get asset details and service URLs by asset_id.\nReturns appropriate service URLs based on data_type (raster, vector, or zarr).",
+        "operationId": "catalogAssetById",
+        "tags": ["Catalog"],
+        "parameters": [
+          {
+            "name": "asset_id",
+            "in": "path",
+            "required": true,
+            "description": "Asset identifier (SHA256 hash)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Asset details with service URLs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogLookupResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Asset not found"
+          }
+        }
+      }
+    },
     "/api/platform/catalog/dataset/{dataset_id}": {
       "get": {
         "summary": "List items for DDH dataset",
@@ -875,23 +1028,52 @@
       },
       "PlatformResponse": {
         "type": "object",
+        "description": "Standard response envelope for submit (202) and idempotent (200) responses",
         "properties": {
+          "success": {
+            "type": "boolean",
+            "description": "Always true for successful responses"
+          },
           "request_id": {
             "type": "string",
             "description": "Idempotent request ID (SHA256 of DDH identifiers)"
           },
           "job_id": {
-            "type": "string"
+            "type": "string",
+            "description": "CoreMachine job ID"
           },
-          "status": {
-            "type": "string"
+          "job_type": {
+            "type": "string",
+            "description": "Job type (e.g., 'process_raster_docker', 'process_vector')"
+          },
+          "monitor_url": {
+            "type": "string",
+            "description": "Absolute URL to check request status"
           },
           "message": {
             "type": "string"
           },
-          "monitor_url": {
+          "hint": {
             "type": "string",
-            "description": "URL to check request status"
+            "description": "Present on idempotent (200) responses only"
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "description": "Standard error envelope for all /platform/* endpoints",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [false]
+          },
+          "error": {
+            "type": "string",
+            "description": "Human-readable error message"
+          },
+          "error_type": {
+            "type": "string",
+            "description": "Error category (e.g., ValidationError, NotFound, InternalError)"
           }
         }
       },
@@ -919,7 +1101,7 @@
           },
           "data_type": {
             "type": "string",
-            "enum": ["vector", "raster"]
+            "enum": ["vector", "raster", "zarr"]
           },
           "created_at": {
             "type": "string",
@@ -972,6 +1154,35 @@
           }
         }
       },
+      "PlatformRegistryEntry": {
+        "type": "object",
+        "description": "A registered B2B platform",
+        "properties": {
+          "platform_id": {
+            "type": "string",
+            "description": "Platform identifier (e.g., 'ddh')"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "required_refs": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Required identifier fields (e.g., ['dataset_id', 'resource_id', 'version_id'])"
+          },
+          "optional_refs": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Optional identifier fields"
+          },
+          "is_active": {
+            "type": "boolean"
+          }
+        }
+      },
       "CatalogLookupResponse": {
         "type": "object",
         "properties": {
@@ -980,7 +1191,7 @@
           },
           "data_type": {
             "type": "string",
-            "enum": ["vector", "raster"]
+            "enum": ["vector", "raster", "zarr"]
           },
           "collection_id": {
             "type": "string"
@@ -1512,7 +1723,7 @@
           },
           "data_type": {
             "type": "string",
-            "enum": ["raster", "vector"]
+            "enum": ["raster", "vector", "zarr"]
           },
           "stac_item_id": {
             "type": "string"

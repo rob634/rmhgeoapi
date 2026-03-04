@@ -60,6 +60,7 @@ Exports:
 Created: 21 FEB 2026 as part of V0.9 Asset/Release entity split
 """
 
+import json
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 
@@ -107,6 +108,34 @@ class ReleaseRepository(PostgreSQLRepository):
         super().__init__()
         self.table = "asset_releases"
         self.schema = "app"
+
+    def _record_audit_inline(
+        self, cur, release_id, asset_id, version_ordinal, revision,
+        event_type, actor=None, reason=None, snapshot=None, metadata=None
+    ) -> Optional[int]:
+        """Insert audit event using caller's cursor/transaction. Non-fatal."""
+        try:
+            from core.models.release_audit import ReleaseAuditEventType
+            cur.execute(
+                sql.SQL("""
+                    INSERT INTO {}.{}
+                        (release_id, asset_id, version_ordinal, revision,
+                         event_type, actor, reason, snapshot, metadata, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, NOW())
+                    RETURNING audit_id
+                """).format(sql.Identifier("app"), sql.Identifier("release_audit")),
+                (release_id, asset_id, version_ordinal, revision,
+                 event_type.value, actor, reason,
+                 json.dumps(snapshot or {}), json.dumps(metadata or {}))
+            )
+            row = cur.fetchone()
+            audit_id = row['audit_id'] if row else None
+            if audit_id:
+                logger.info(f"Audit event {audit_id} recorded inline")
+            return audit_id
+        except Exception as e:
+            logger.warning(f"Inline audit emission failed (non-fatal): {e}")
+            return None
 
     def _build_insert_values(self, release: AssetRelease, now: datetime) -> tuple:
         """Extract ordered values from release model to match _INSERT_COLUMNS."""

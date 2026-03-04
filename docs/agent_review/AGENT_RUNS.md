@@ -1038,6 +1038,73 @@ All pipeline executions in chronological order.
 
 ---
 
+## Run 31: ADVOCATE Run 1 — B2B Developer Experience Audit (First ADVOCATE)
+
+| Field | Value |
+|-------|-------|
+| **Pipeline** | ADVOCATE (B2B Developer Experience Audit) |
+| **Date** | 03 MAR 2026 |
+| **Version** | 0.9.12.0 |
+| **Focus** | Full consumer API surface — DX quality, consistency, discoverability |
+| **Prerequisites** | Schema rebuild + STAC nuke |
+| **Output** | `agent_docs/ADVOCATE_RUN_1.md` |
+
+**DX Score**: **37%** (pre-beta integration quality)
+
+| Category | Weight | Score |
+|----------|--------|-------|
+| Discoverability | 20% | 40% |
+| Error Quality | 20% | 25% |
+| Consistency | 20% | 30% |
+| Response Design | 15% | 45% |
+| Service URL Integrity | 15% | 40% |
+| Workflow Clarity | 10% | 50% |
+
+**Phase Execution**:
+
+| Phase | Agent | Role | HTTP Calls |
+|-------|-------|------|------------|
+| 0 | Dispatcher | Setup + prerequisites | N/A |
+| 1 | Intern | First-impressions friction log | ~45 |
+| 2 | Architect | Structured REST audit (12 dimensions) | 65 |
+| 3 | Editor | Synthesis + scoring | N/A |
+
+**Findings**: 25 total (2 CRITICAL, 7 HIGH, 10 MEDIUM, 5 LOW, 1 INFO)
+
+| ID | Severity | Description |
+|----|----------|-------------|
+| ADV-1 | **CRITICAL** | `job_status_url` permanently broken (404) — first-contact failure for every integration |
+| ADV-2 | **CRITICAL** | Approval allows failed/unprocessed releases — `is_served=true` on non-existent data (SG5-1/LA-1 reconfirmed) |
+| ADV-3 | HIGH | 5 distinct error response shapes — unified error handler impossible |
+| ADV-4 | HIGH | `services`/`outputs` always null — write-only API, no path from approved to consumable |
+| ADV-5 | HIGH | Silent parameter ignoring on `/status` list — pagination and filters have no effect |
+| ADV-6 | HIGH | No API discovery page — OpenAPI exists but not linked from anywhere |
+| ADV-7 | HIGH | TiTiler not cross-linked from platform responses |
+| ADV-8 | HIGH | `error: null` on failed jobs, `error_summary: "Unknown error"` |
+| ADV-9 | HIGH | Malformed JSON on `/approve`/`/reject`/`/revoke` returns 500 (fixed in v0.9.11.11) |
+
+**REST Dimension Grades**: A- (Idempotency), B+ (HTTP Methods), B (Status Codes), C/C- (HATEOAS, Response Bloat, Naming), D/D+ (Pagination, Versioning, Consistency), F (Error Format, Content Negotiation, Cacheability)
+
+**8 Themes**: Dead URLs, State Machine Integrity, Five Error Shapes, Services/Outputs Gap, Silent Parameter Ignoring, Discoverability Gap, Response Shape Inconsistency, Broken Catalog
+
+**New findings** (not previously identified):
+- ADV-1 (`job_status_url` broken) — new, first found by ADVOCATE
+- ADV-5 (silent param ignoring) — new, first found by ADVOCATE
+- ADV-4 (services/outputs gap) — known gap, first formally documented
+- ADV-6/ADV-7 (discoverability) — new DX findings
+
+**Token Usage**:
+
+| Agent | Tokens (est) |
+|-------|-------------|
+| Dispatcher | ~2,000 |
+| Intern | ~50,000 |
+| Architect | ~55,000 |
+| Editor | ~8,000 |
+| **Total** | **~115,000** |
+
+---
+
 ## Cumulative Token Usage
 
 | Pipeline | Runs | Total Tokens |
@@ -1047,9 +1114,10 @@ All pipeline executions in chronological order.
 | SIEGE | Runs 11, 13, 18, 20, 21, 22, 23, 25, 26 | ~1,817,587 |
 | REFLEXION | Runs 14, 15, 16, 17 | 631,966 (Run 14: 232,684 + Run 15: 278,900 + Run 16: 50,775 + Run 17: 69,607) |
 | TOURNAMENT | Run 27 | ~278,000 |
-| **Instrumented Total** | Runs 9-30 | **~5,825,253** |
+| ADVOCATE | Run 31 | ~115,000 |
+| **Instrumented Total** | Runs 9-31 | **~5,940,253** |
 
-**Note**: Runs 1-8 predated the token instrumentation described in `agents/AGENT_METRICS.md`. Per-agent token breakdowns are available for Runs 9-30.
+**Note**: Runs 1-8 predated the token instrumentation described in `agents/AGENT_METRICS.md`. Per-agent token breakdowns are available for Runs 9-31.
 
 ---
 

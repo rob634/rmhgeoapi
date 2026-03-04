@@ -2,134 +2,95 @@
 
 ## Overview
 
-This document describes how to instrument the adversarial agent pipelines (Greenfield, Adversarial Review, Reflexion, etc.) to capture token usage and output quality metrics per agent per run. The goal is to answer two questions:
+This document describes how to capture token usage and output quality metrics per agent per pipeline run. The goal is to answer two questions:
 
 1. **How does token use scale** with task complexity (small feature vs. full project review)?
 2. **How well does the instruction set scale** — does output quality degrade as scope increases?
+
+**Last Updated**: 03 MAR 2026
 
 ---
 
 ## Part 1: Token Usage Tracking
 
-### The Problem
+### How Pipelines Actually Run
 
-Claude Code tracks token usage per session, but a single pipeline run dispatches 5–7 agents sequentially and in parallel. You need per-agent granularity to understand where tokens are actually going.
+All agent pipelines run inside a single Claude Code interactive session. The operator (Robert) plays the first agent (Sentinel/Omega/Strategist/etc.) directly, then dispatches each subsequent agent via the **Agent tool** as a Task subagent.
 
-### Approach: Wrapper Script + Structured Log
+Each Agent tool invocation returns per-agent usage metadata in the result:
 
-Add a `run_agent.sh` wrapper that captures Claude Code's token output for each agent invocation and appends it to a structured JSONL log file.
-
-#### `run_agent.sh`
-
-```bash
-#!/bin/bash
-# Usage: ./run_agent.sh <pipeline> <run_id> <agent> <prompt_file> <output_file>
-#
-# Example:
-#   ./run_agent.sh greenfield run_001 agent_a prompts/agent_a.md outputs/agent_a.md
-
-PIPELINE="$1"
-RUN_ID="$2"
-AGENT="$3"
-PROMPT_FILE="$4"
-OUTPUT_FILE="$5"
-LOG_FILE="metrics/token_log.jsonl"
-TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
-mkdir -p metrics outputs
-
-# Run Claude Code and capture both output and token usage
-# The --output-format json flag gives structured output including token counts
-START_TIME=$(date +%s%N)
-
-claude -p "$(cat "$PROMPT_FILE")" --output-format json > "/tmp/claude_raw_${AGENT}.json" 2>&1
-
-END_TIME=$(date +%s%N)
-ELAPSED_MS=$(( (END_TIME - START_TIME) / 1000000 ))
-
-# Extract token usage from Claude Code's JSON output
-# Claude Code reports: input_tokens, output_tokens, cache_read, cache_write
-INPUT_TOKENS=$(jq -r '.usage.input_tokens // .input_tokens // "unknown"' "/tmp/claude_raw_${AGENT}.json")
-OUTPUT_TOKENS=$(jq -r '.usage.output_tokens // .output_tokens // "unknown"' "/tmp/claude_raw_${AGENT}.json")
-CACHE_READ=$(jq -r '.usage.cache_read_input_tokens // .cache_read // 0' "/tmp/claude_raw_${AGENT}.json")
-CACHE_WRITE=$(jq -r '.usage.cache_creation_input_tokens // .cache_write // 0' "/tmp/claude_raw_${AGENT}.json")
-
-# Extract the actual response text and save to output file
-jq -r '.result // .content // .text // .' "/tmp/claude_raw_${AGENT}.json" > "$OUTPUT_FILE"
-
-# Calculate output file size (proxy for response complexity)
-OUTPUT_BYTES=$(wc -c < "$OUTPUT_FILE")
-OUTPUT_LINES=$(wc -l < "$OUTPUT_FILE")
-
-# Append structured log entry
-cat >> "$LOG_FILE" << EOF
-{"timestamp":"${TIMESTAMP}","pipeline":"${PIPELINE}","run_id":"${RUN_ID}","agent":"${AGENT}","input_tokens":${INPUT_TOKENS},"output_tokens":${OUTPUT_TOKENS},"cache_read":${CACHE_READ},"cache_write":${CACHE_WRITE},"total_tokens":$((INPUT_TOKENS + OUTPUT_TOKENS)),"elapsed_ms":${ELAPSED_MS},"output_bytes":${OUTPUT_BYTES},"output_lines":${OUTPUT_LINES}}
-EOF
-
-echo "  ${AGENT}: ${INPUT_TOKENS} in / ${OUTPUT_TOKENS} out / ${ELAPSED_MS}ms"
+```
+<usage>total_tokens: 85094
+tool_uses: 9
+duration_ms: 79563</usage>
 ```
 
-#### What This Captures Per Agent Call
+This is the **primary data source** for token tracking. No wrapper scripts are needed.
 
-| Field | What It Tells You |
-|-------|------------------|
-| `input_tokens` | Size of the prompt (spec + agent instructions + any context) |
-| `output_tokens` | How much the agent generated |
-| `cache_read` | Prompt caching hits (shared prefix across A/C/O) |
-| `cache_write` | New cache entries created |
-| `total_tokens` | Billing-relevant total |
-| `elapsed_ms` | Wall clock time |
-| `output_bytes` / `output_lines` | Output complexity proxy |
+### What's Available Per Agent
 
-### Per-Run Summary
+| Field | Source | What It Tells You |
+|-------|--------|------------------|
+| `total_tokens` | Agent tool `<usage>` | Combined input + output tokens for the agent's full execution |
+| `tool_uses` | Agent tool `<usage>` | Number of tool calls the agent made (file reads, searches, HTTP calls) |
+| `duration_ms` | Agent tool `<usage>` | Wall clock time for the agent's execution |
 
-Add a summary step at the end of each pipeline run:
+**Note**: The Agent tool reports `total_tokens` (combined), not split into input/output. For parallel agents (e.g., Alpha + Beta in COMPETE, A + C + O in GREENFIELD), each agent's usage is reported independently.
 
-```bash
-#!/bin/bash
-# summarize_run.sh <run_id>
-RUN_ID="$1"
-LOG_FILE="metrics/token_log.jsonl"
+### What's NOT Available Per Agent
 
-echo "=== Run Summary: ${RUN_ID} ==="
-echo ""
+| Field | Why Not | Workaround |
+|-------|---------|------------|
+| `input_tokens` vs `output_tokens` | Agent tool reports combined total only | Estimate: agents that read more code have higher input ratio; agents that generate reports have higher output ratio |
+| `cache_read` / `cache_write` | Not broken out in Agent tool results | Session-level caching is automatic; parallel agents sharing the same codebase context benefit from cache hits, but this isn't quantified per agent |
+| Output size (bytes/lines) | Agent output is returned as text, not measured | Count lines in the saved report file after the run |
 
-# Per-agent breakdown
-echo "Agent Breakdown:"
-grep "\"run_id\":\"${RUN_ID}\"" "$LOG_FILE" | \
-  jq -r '[.agent, .input_tokens, .output_tokens, .total_tokens, .elapsed_ms] | @tsv' | \
-  column -t -N "AGENT,INPUT,OUTPUT,TOTAL,MS"
+### Where Token Data Is Recorded
 
-echo ""
+**Primary log**: `docs/agent_review/AGENT_RUNS.md`
 
-# Run totals
-echo "Run Totals:"
-grep "\"run_id\":\"${RUN_ID}\"" "$LOG_FILE" | \
-  jq -s '{
-    total_input: (map(.input_tokens) | add),
-    total_output: (map(.output_tokens) | add),
-    total_tokens: (map(.total_tokens) | add),
-    total_cache_read: (map(.cache_read) | add),
-    total_elapsed_ms: (map(.elapsed_ms) | add),
-    agent_count: length
-  }'
+Each run entry (Run 9+) includes a **Token Usage** table:
+
+```markdown
+**Token Usage**:
+
+| Agent | Role | Tokens | Duration |
+|-------|------|--------|----------|
+| Alpha | Data Integrity | 81,312 | 4m 36s |
+| Beta | Flow Control | 114,589 | 4m 19s |
+| Gamma | Contradictions | 82,310 | 3m 57s |
+| Delta | Final Report | 68,445 | 3m 25s |
+| **Total** | | **346,656** | **~16m 17s** |
 ```
 
-### Cross-Run Comparison
+**Recording protocol** (for the operator running the pipeline):
 
-After multiple runs, you can compare scaling:
+1. After each Agent tool call completes, copy `total_tokens` and `duration_ms` from the `<usage>` block.
+2. Convert `duration_ms` to human-readable format (e.g., 276000 → 4m 36s).
+3. For inline agents (Sentinel/Omega/etc. played by Claude directly), record "—" for tokens and "inline" for duration.
+4. Sum all agent tokens for the run total.
+5. Record in the AGENT_RUNS.md entry for that run.
 
-```bash
-# Compare token usage across runs
-cat metrics/token_log.jsonl | \
-  jq -s 'group_by(.run_id) | map({
-    run_id: .[0].run_id,
-    pipeline: .[0].pipeline,
-    total_tokens: (map(.total_tokens) | add),
-    agent_count: length,
-    heaviest_agent: (sort_by(.total_tokens) | last | {agent: .agent, tokens: .total_tokens})
-  })'
-```
+### Historical Data
+
+| Run Range | Token Data? | Notes |
+|-----------|------------|-------|
+| Runs 1–8 | No | Pre-instrumentation; no per-agent tracking |
+| Runs 9–27 | Yes | Instrumented total: ~4,743,688 tokens across 19 runs |
+| Run 28+ | Yes | Current standard |
+
+### Token Benchmarks by Pipeline (from actual runs)
+
+| Pipeline | Runs | Agents | Avg Tokens/Run | Range | Heaviest Agent |
+|----------|------|--------|---------------|-------|----------------|
+| **COMPETE** | 9 (Runs 1-6, 9, 12) | 4 (Alpha+Beta parallel, Gamma, Delta) | ~340K (instrumented runs) | 337K–347K | Beta (correctness reviewer) |
+| **GREENFIELD** | 3 (Runs 7, 8, 10) | 6 (A+C+O parallel, M, B, V) | ~631K (Run 10) | — | B (builder, 7-8 min) |
+| **REFLEXION** | 4 (Runs 14-17) | 4 (R→F→P→J sequential) | ~153K | 51K–279K | F (fault injector) |
+| **SIEGE** | 9 (Runs 11, 13, 18-26) | 4 (Cartographer→Lancer→Auditor→Scribe) | ~230K | 179K–251K | Lancer (lifecycle execution) |
+| **TOURNAMENT** | 1 (Run 27) | 5 (Pathfinder+Saboteur parallel, Inspector+Provocateur parallel, Tribunal) | ~580K | — | Saboteur |
+| **WARGAME** | 0 | — | — | — | — |
+| **ADVOCATE** | 0 | — | — | — | — |
+| **OBSERVATORY** | 0 | — | — | — | — |
 
 ---
 
@@ -137,96 +98,79 @@ cat metrics/token_log.jsonl | \
 
 ### The Problem
 
-"Was the output good?" is subjective unless you define what good means. The pipeline structure gives you two built-in quality signals:
+"Was the output good?" is subjective unless you define what good means. Each pipeline has different quality signals.
 
-1. **V's spec diff** (Greenfield) — gaps between what S specified and what V inferred from the code
-2. **Section completeness** — did each agent produce all required sections?
+### Pipeline-Specific Quality Rubrics
 
-### Approach: Structured Quality Scores Per Agent
+#### GREENFIELD Quality Signals
 
-Add a scoring step after each pipeline run that extracts quality signals from the agent outputs themselves. This can be done by Claude Code as a final analysis step.
+| Signal | Source | Metric |
+|--------|--------|--------|
+| **Spec fidelity** | V's spec diff (Step 7) | `matches / (matches + gaps)` — ratio of spec coverage |
+| **Scope creep** | V's spec diff (Step 7) | `extras / (matches + extras)` — ratio of unspecified behavior |
+| **Conflict resolution** | M's output | Conflicts found vs resolved; concerns dropped (should be 0) |
+| **Builder completeness** | B's code output | Did B produce all components in M's resolved spec, or did later components become stubs? |
+| **Section completeness** | All agents | Per-section score: 2 = substantive, 1 = thin, 0 = missing |
 
-#### Quality Rubric (append to pipeline markdown)
+**Known scaling issue** (Run 19): Builder output budget collapse on large specs. B exhausts output capacity and later components degrade to stubs. Watch for this on `large` complexity runs.
 
-Add this section to the end of each pipeline's markdown file:
+#### COMPETE Quality Signals
 
-```markdown
-## Step 9: Quality Metrics
+| Signal | Source | Metric |
+|--------|--------|--------|
+| **Blind spot discovery** | Gamma's output | Findings that Alpha missed AND Beta missed — Gamma's unique contribution |
+| **Asymmetry effectiveness** | Gamma's contradictions | Count of productive contradictions (Alpha and Beta disagree, both partially right) |
+| **Actionability** | Delta's Top 5 Fixes | Each fix has WHAT/WHY/WHERE/HOW/EFFORT/RISK — score completeness |
+| **False positive rate** | Post-run verification | Findings that turned out to be non-issues when code was actually tested |
 
-After the pipeline completes, produce a quality report as a JSON object.
-Save to `metrics/quality_{run_id}.json`.
+#### REFLEXION Quality Signals
 
-### Agent Section Completeness
+| Signal | Source | Metric |
+|--------|--------|--------|
+| **R accuracy** | Reflexion check | Does R's inferred purpose match actual intent? Gaps reveal misleading code or missing docs |
+| **Fault coverage** | F's output | How many of 9 fault categories were tested? (Network, Dependencies, Database, Concurrency, Resources, Data, Time, Infrastructure, Authentication) |
+| **Patch surgical-ness** | P's patches | Do patches touch ONLY the fault? No happy-path changes, no rewrites, no signature changes |
+| **Fix rate** | Post-deployment | Patches that actually fixed the bug vs introduced new issues |
 
-For each agent, check whether all required sections are present and non-trivial
-(more than 3 sentences). Score each section as:
-- 2 = present and substantive
-- 1 = present but thin (under 3 sentences or generic)
-- 0 = missing
+#### SIEGE Quality Signals
 
-### Spec Fidelity (from V's analysis)
+| Signal | Source | Metric |
+|--------|--------|--------|
+| **Sequence pass rate** | Scribe's summary | Passed sequences / total sequences (target: 100%) |
+| **Regression detection** | Cross-run comparison | Did previously-passing sequences regress? |
+| **Service URL integrity** | Auditor's probes | Do rendered outputs (TiTiler, TiPG, xarray) actually work? |
+| **State divergence count** | Auditor's output | Expected vs actual state mismatches (target: 0) |
 
-From V's output in Step 6 and the Spec Diff in Step 7:
-- `matches_count`: Number of MATCHES (spec requirements V correctly inferred)
-- `gaps_count`: Number of GAPS (spec requirements not reflected in code)
-- `extras_count`: Number of EXTRAS (code behavior not in spec)
-- `fidelity_score`: matches / (matches + gaps)  — ratio of spec coverage
-- `scope_creep_score`: extras / (matches + extras) — ratio of unspecified behavior
+#### TOURNAMENT Quality Signals
 
-### Conflict Resolution Quality (from M's output)
+| Signal | Source | Metric |
+|--------|--------|--------|
+| **Pathfinder pass rate** | Pathfinder output | Golden-path sequences that completed successfully |
+| **Saboteur block rate** | Saboteur output | Attacks that were correctly rejected / total attacks |
+| **Inspector divergences** | Inspector output | Unexplained state differences from Pathfinder's checkpoints |
+| **Provocateur validation gaps** | Provocateur output | Invalid inputs that got through / total invalid inputs tested |
+| **Unique findings per agent** | Tribunal scoreboard | Findings only discoverable through one agent's lens |
 
-- `conflicts_found`: Number of explicit conflicts M identified between A, C, O
-- `conflicts_resolved`: Number with clear resolution (not "TBD" or "deferred")
-- `design_tensions`: Number of Tier 2 tensions noted
-- `concerns_dropped`: Number of C's concerns not addressed in M's resolved spec
-  (should be 0; if >0, M failed its job)
+#### OBSERVATORY Quality Signals
 
-### Produce This JSON
+| Signal | Source | Metric |
+|--------|--------|--------|
+| **Coverage score** | Assessor's matrix | Systems scoring >= 2 on Detection + Diagnosis / total systems |
+| **az CLI gap count** | Assessor's gap analysis | Operations still requiring az CLI |
+| **Incident scenario readiness** | Assessor's scenario grading | Scenarios diagnosable via API-only / total scenarios |
+| **Endpoint quality** | Cartographer's probes | Average completeness + actionability + freshness across all probed endpoints |
 
-{
-  "run_id": "...",
-  "pipeline": "greenfield",
-  "timestamp": "...",
-  "task_description": "one-line summary of what was built",
-  "task_complexity": "small | medium | large",
+### Section Completeness Scoring (All Pipelines)
 
-  "section_completeness": {
-    "S": {"purpose": 2, "boundaries": 2, "contracts": 2, ...},
-    "A": {"component_design": 2, "interface_contracts": 1, ...},
-    "C": {"ambiguities": 2, "missing_edge_cases": 2, ...},
-    "O": {"infrastructure_fit": 2, "failure_modes": 2, ...},
-    "M": {"conflicts_found": 2, "resolved_spec": 2, ...},
-    "V": {"inferred_purpose": 2, "concerns": 2, ...}
-  },
-  "section_completeness_score": 0.0-1.0,
+For each agent's output, check whether all required sections are present and non-trivial (more than 3 sentences):
 
-  "spec_fidelity": {
-    "matches": 12,
-    "gaps": 2,
-    "extras": 1,
-    "fidelity_score": 0.857,
-    "scope_creep_score": 0.077
-  },
-
-  "conflict_resolution": {
-    "conflicts_found": 8,
-    "conflicts_resolved": 8,
-    "design_tensions": 2,
-    "concerns_dropped": 0
-  },
-
-  "v_verdict": "PRODUCTION READY | NEEDS MINOR WORK | NEEDS SIGNIFICANT WORK",
-
-  "token_summary": {
-    "total_tokens": 0,
-    "by_agent": {"S": 0, "A": 0, "C": 0, "O": 0, "M": 0, "B": 0, "V": 0}
-  }
-}
-```
+- **2** = present and substantive
+- **1** = present but thin (under 3 sentences or generic)
+- **0** = missing
 
 ### Complexity Classification
 
-To make cross-run comparisons meaningful, classify each run's complexity:
+Tag complexity **before** the run starts. Do not change it after seeing results.
 
 | Complexity | Indicators |
 |-----------|-----------|
@@ -234,71 +178,104 @@ To make cross-run comparisons meaningful, classify each run's complexity:
 | **medium** | 2-4 endpoints or components, 3-5 files, 300-1000 lines, multiple integration points |
 | **large** | Full subsystem, 5+ files, 1000+ lines, multiple downstream services, auth/security concerns |
 
-This is a judgment call — tag it when you create the run, not after. Your "build this 500-line feature" is medium. Your "review this entire fucking project" is large.
-
 ---
 
 ## Part 3: Aggregation and Analysis
 
-### After 5+ Runs: Scaling Analysis
+### Cross-Run Comparison (from AGENT_RUNS.md)
 
-```bash
-# Token scaling by complexity
-cat metrics/quality_*.json | \
-  jq -s 'group_by(.task_complexity) | map({
-    complexity: .[0].task_complexity,
-    runs: length,
-    avg_tokens: (map(.token_summary.total_tokens) | add / length),
-    avg_fidelity: (map(.spec_fidelity.fidelity_score) | add / length),
-    avg_completeness: (map(.section_completeness_score) | add / length)
-  })'
-```
+Since all token data lives in `AGENT_RUNS.md` as markdown tables, cross-run analysis is done by reading the tables. Key comparisons:
+
+**Token scaling by pipeline**:
+- REFLEXION is cheapest (~150K avg) — sequential, focused scope
+- COMPETE is mid-range (~340K) — parallel asymmetric review
+- SIEGE is mid-range (~230K) — sequential endpoint probing
+- GREENFIELD is most expensive (~630K) — 7 agents, Builder generates code
+- TOURNAMENT is expensive (~580K) — 5 agents, heavy adversarial testing
+
+**Token scaling by complexity** (within a pipeline):
+- REFLEXION: small scope (1 file) = ~50K (Run 16), medium scope (10 files) = ~280K (Run 15)
+- SIEGE: consistent ~180K-250K regardless of pass/fail (endpoint count is fixed)
 
 ### What You're Looking For
 
 **Token scaling (Question 1):**
-- Does total token usage scale linearly with complexity, or worse?
-- Which agent is the token hog? (Probably B, but M might surprise you)
-- Do A/C/O stay proportional, or does one blow up on large tasks?
-- How much does prompt caching save when A/C/O share the same spec prefix?
+- Does total token usage scale linearly with scope (file count), or worse?
+- Which agent is the token hog per pipeline? (See benchmarks table above)
+- Do parallel agents (Alpha+Beta, A+C+O) stay proportional, or does one blow up on large tasks?
 
 **Quality scaling (Question 2):**
-- Does `fidelity_score` drop as complexity increases? If so, the pipeline instructions don't scale.
-- Does `scope_creep_score` increase with complexity? B is adding stuff the spec didn't ask for.
-- Does `concerns_dropped` increase? M is overwhelmed and silently dropping C's findings.
-- Does V's verdict correlate with complexity? If large tasks always "NEED SIGNIFICANT WORK," the pipeline needs a decomposition step.
+- Does sequence pass rate drop as the API grows? (SIEGE)
+- Does spec fidelity drop as complexity increases? (GREENFIELD)
+- Does the number of findings plateau or keep growing with scope? (COMPETE)
+- Does patch correctness hold when fault count is high? (REFLEXION)
 
 ### Red Flags to Watch For
+
+#### GREENFIELD Red Flags
 
 | Signal | What It Means |
 |--------|--------------|
 | `fidelity_score` < 0.7 | More than 30% of the spec isn't in the code. Pipeline is losing information. |
 | `scope_creep_score` > 0.2 | B is freelancing. M's resolved spec may not be specific enough. |
 | `concerns_dropped` > 0 | M is failing. C's work is being wasted. |
-| Agent O token count >> A or C | O is generating generic cloud advice instead of specific operational assessment. Tighten the infra profile. |
-| V verdict doesn't match fidelity score | V is being too generous or too harsh. Calibrate V's prompt. |
-| M token count > B token count | M is over-elaborating. The resolved spec is too verbose for B to follow. |
+| Agent O tokens >> A or C | O is generating generic cloud advice instead of specific operational assessment. |
+| M tokens > B tokens | M is over-elaborating. The resolved spec is too verbose for B to follow. |
+| B output trails off into stubs | Output budget collapse. Scope is too large for single-pass Builder. |
+
+#### COMPETE Red Flags
+
+| Signal | What It Means |
+|--------|--------------|
+| Gamma finds 0 contradictions | Alpha/Beta scope split is too clean — not enough overlap to create productive friction. |
+| Delta's Top 5 missing HOW or WHERE | Delta is summarizing, not synthesizing. Findings aren't actionable. |
+| Alpha and Beta token counts differ by >3x | One scope is much larger than the other. Rebalance the split. |
+
+#### SIEGE Red Flags
+
+| Signal | What It Means |
+|--------|--------------|
+| Same sequence fails across multiple runs | Persistent bug — REFLEXION or manual fix needed. |
+| Lancer tokens >> 100K | Lancer is retrying or polling excessively. Check poll interval. |
+| Auditor finds divergences Lancer didn't flag | Lancer's checkpoints are incomplete. |
+
+#### REFLEXION Red Flags
+
+| Signal | What It Means |
+|--------|--------------|
+| R's inferred purpose is wrong | Code is misleading. This is itself a finding (documentation bug). |
+| F tests <5 of 9 fault categories | F is being lazy or the scope is too narrow. |
+| P changes function signatures | Violation of hard constraint. Patch must be rejected. |
+| J approves everything | J is rubber-stamping. Check J's prompt for rigor. |
+
+#### OBSERVATORY Red Flags
+
+| Signal | What It Means |
+|--------|--------------|
+| Any system scores 0 on Detection | Blind spot — system failure is invisible. Immediate P0 gap. |
+| Cartographer gets errors on >20% of endpoints | Endpoints are broken or misconfigured. Fix before assessing coverage. |
+| Surveyor finds systems not in the inventory | Inventory (S1–S12) is stale. Update before continuing. |
 
 ---
 
 ## Part 4: Pipeline Instructions Integration
 
-### Where to Add These Instructions
+### Instrumentation Protocol
 
-Add the following to the END of each pipeline markdown file, after the last step:
+Every pipeline run MUST record token usage in `AGENT_RUNS.md`. The recording process:
 
-```markdown
-## Instrumentation
-
-Every pipeline run MUST produce two artifacts in the `metrics/` directory:
-
-1. `metrics/token_log.jsonl` — Append one line per agent invocation (see instrumentation guide).
-2. `metrics/quality_{run_id}.json` — Quality assessment produced as the final step.
+1. **Before the run**: Assign the next run number (check AGENT_RUNS.md for the latest).
+2. **During the run**: After each Agent tool dispatch completes, note the `total_tokens`, `tool_uses`, and `duration_ms` from the `<usage>` block in the result.
+3. **After the run**: Add the run entry to AGENT_RUNS.md with:
+   - Standard fields (Date, Pipeline, Scope, Verdict, Output file)
+   - Token Usage table (per-agent breakdown + total)
+   - Finding Summary table (if applicable)
 
 ### Run ID Convention
 
-Run IDs follow the format: `{pipeline}_{YYYYMMDD}_{seq}`
-Example: `greenfield_20260228_001`
+Run IDs in AGENT_RUNS.md are sequential integers: Run 1, Run 2, ... Run 28, etc.
+
+For file-based artifacts, use: `{PIPELINE}_RUN_{N}.md` (e.g., `SIEGE_RUN_9.md`).
 
 ### How to Tag Complexity
 
@@ -307,16 +284,16 @@ Before starting Step 1, classify the task:
 - **medium**: Multiple components, 300-1000 lines, 3+ integration points
 - **large**: Full subsystem, 1000+ lines, auth/security/multi-service
 
-Record this in the quality JSON. Do not change it after seeing the results.
-```
+Record this in the AGENT_RUNS.md entry. Do not change it after seeing the results.
 
-### For Claude Code Specifically
+### Duration Conversion
 
-When running these pipelines in Claude Code, the key integration point is capturing
-token usage from each `claude` CLI invocation. Claude Code's `--output-format json`
-flag provides structured output including token counts. The wrapper script above
-handles this extraction.
+Convert `duration_ms` from Agent tool output to human-readable format for AGENT_RUNS.md:
 
-If running agents as Task subagents within a single Claude Code session,
-the session-level token tracking captures totals but not per-agent breakdown.
-The wrapper script approach gives you the granularity you need.
+| duration_ms | Display |
+|-------------|---------|
+| 79563 | 1m 20s |
+| 276000 | 4m 36s |
+| 467000 | 7m 47s |
+
+Formula: `minutes = ms / 60000`, `seconds = (ms % 60000) / 1000`

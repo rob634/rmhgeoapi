@@ -83,6 +83,7 @@ from ..models.platform_registry import Platform, DDH_PLATFORM  # Platform regist
 from ..models.artifact import Artifact, ArtifactStatus  # Artifact registry (20 JAN 2026)
 from ..models.external_service import ExternalService, ServiceType, ServiceStatus  # External service registry (22 JAN 2026)
 from ..models.job_event import JobEvent, JobEventType, JobEventStatus  # Job event tracking (23 JAN 2026)
+from ..models.release_audit import ReleaseAuditEvent, ReleaseAuditEventType  # Release audit log (03 MAR 2026)
 
 # Geo and ETL schema models (21 JAN 2026 - F7.IaC)
 from ..models.geo import GeoTableCatalog, FeatureCollectionStyles, B2CRoute, B2BRoute  # OGC Styles (22 JAN 2026), Routes (02 MAR 2026)
@@ -1695,6 +1696,7 @@ INSERT INTO {schema}.{table} (
         composed.extend(self.generate_enum("approval_state", ApprovalState))  # Geospatial assets (29 JAN 2026 - V0.8)
         composed.extend(self.generate_enum("clearance_state", ClearanceState))  # Geospatial assets (29 JAN 2026 - V0.8)
         composed.extend(self.generate_enum("processing_status", ProcessingStatus))  # DAG Orchestration (29 JAN 2026 - V0.8)
+        composed.extend(self.generate_enum("release_audit_event_type", ReleaseAuditEventType))  # Release audit log (03 MAR 2026)
 
         # For tables, indexes, functions, and triggers, we still need string format
         # because they are complex multi-line statements
@@ -1721,6 +1723,7 @@ INSERT INTO {schema}.{table} (
         composed.append(self.generate_table_from_model(Asset))  # V0.9 Asset (21 FEB 2026)
         composed.append(self.generate_table_from_model(AssetRelease))  # V0.9 AssetRelease (21 FEB 2026)
         composed.append(self.generate_table_from_model(ReleaseTable))  # Release→tables junction (26 FEB 2026)
+        composed.append(self.generate_table_from_model(ReleaseAuditEvent))  # Release audit log (03 MAR 2026)
 
         # Indexes - now using composed SQL
         composed.extend(self.generate_indexes_composed("jobs", JobRecord))
@@ -1742,6 +1745,7 @@ INSERT INTO {schema}.{table} (
         composed.extend(self.generate_indexes_from_model(Asset))  # V0.9 Asset (21 FEB 2026)
         composed.extend(self.generate_indexes_from_model(AssetRelease))  # V0.9 AssetRelease (21 FEB 2026)
         composed.extend(self.generate_indexes_from_model(ReleaseTable))  # Release→tables junction (26 FEB 2026)
+        composed.extend(self.generate_indexes_from_model(ReleaseAuditEvent))  # Release audit log (03 MAR 2026)
 
         # Functions - already sql.Composed objects
         composed.extend(self.generate_static_functions())

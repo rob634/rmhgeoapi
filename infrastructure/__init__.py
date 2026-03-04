@@ -91,6 +91,8 @@ if TYPE_CHECKING:
     # V0.9 Asset/Release entity split (21 FEB 2026)
     from .asset_repository import AssetRepository as _AssetRepository
     from .release_repository import ReleaseRepository as _ReleaseRepository
+    # Release audit log (03 MAR 2026 - Append-only audit events)
+    from .release_audit_repository import ReleaseAuditRepository as _ReleaseAuditRepository
     # Release→tables junction (26 FEB 2026 - Multi-table Release)
     from .release_table_repository import ReleaseTableRepository as _ReleaseTableRepository
     # Route tables (02 MAR 2026 - Service Layer Routing)
@@ -215,6 +217,11 @@ def __getattr__(name: str):
         from .release_repository import ReleaseRepository
         return ReleaseRepository
 
+    # Release audit log (03 MAR 2026 - Append-only audit events)
+    elif name == "ReleaseAuditRepository":
+        from .release_audit_repository import ReleaseAuditRepository
+        return ReleaseAuditRepository
+
     # Release→tables junction (26 FEB 2026 - Multi-table Release)
     elif name == "ReleaseTableRepository":
         from .release_table_repository import ReleaseTableRepository
@@ -315,6 +322,8 @@ __all__ = [
     # V0.9 Asset/Release entity split (21 FEB 2026)
     "AssetRepository",
     "ReleaseRepository",
+    # Release audit log (03 MAR 2026 - Append-only audit events)
+    "ReleaseAuditRepository",
     # Release→tables junction (26 FEB 2026 - Multi-table Release)
     "ReleaseTableRepository",
     "MetricsRepository",

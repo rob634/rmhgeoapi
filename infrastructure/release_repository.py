@@ -971,8 +971,8 @@ class ReleaseRepository(PostgreSQLRepository):
         """
         Reset processing lifecycle for re-submission (overwrite).
 
-        Increments the revision counter and resets all processing fields
-        so the release can be re-processed.
+        Emits OVERWRITTEN audit event BEFORE resetting fields.
+        Clears all processing, approval, AND revocation fields.
 
         Args:
             release_id: Release to reset
@@ -982,6 +982,26 @@ class ReleaseRepository(PostgreSQLRepository):
             True if updated, False if release not found
         """
         logger.info(f"Resetting release {release_id[:16]}... for overwrite (revision={revision})")
+
+        # Snapshot BEFORE reset (non-fatal)
+        try:
+            release = self.get_by_id(release_id)
+            if release:
+                from infrastructure.release_audit_repository import ReleaseAuditRepository
+                from core.models.release_audit import ReleaseAuditEventType
+                audit_repo = ReleaseAuditRepository()
+                audit_repo.record_event(
+                    release_id=release_id,
+                    asset_id=release.asset_id,
+                    version_ordinal=release.version_ordinal,
+                    revision=release.revision,
+                    event_type=ReleaseAuditEventType.OVERWRITTEN,
+                    actor="system",
+                    reason="Release overwritten for resubmission",
+                    snapshot=release.to_dict(),
+                )
+        except Exception as audit_err:
+            logger.warning(f"Audit emission failed (non-fatal): {audit_err}")
 
         with self._get_connection() as conn:
             with conn.cursor() as cur:
@@ -994,6 +1014,10 @@ class ReleaseRepository(PostgreSQLRepository):
                             rejection_reason = NULL,
                             reviewer = NULL,
                             reviewed_at = NULL,
+                            revoked_at = NULL,
+                            revoked_by = NULL,
+                            revocation_reason = NULL,
+                            is_served = FALSE,
                             job_id = NULL,
                             processing_started_at = NULL,
                             processing_completed_at = NULL,
@@ -1321,7 +1345,7 @@ class ReleaseRepository(PostgreSQLRepository):
                                     updated_at = %s
                                 WHERE release_id = %s
                                   AND approval_state = %s
-                                  AND processing_status = 'completed'
+                                  AND processing_status = %s
                                   AND NOT EXISTS (
                                       SELECT 1 FROM {}.{}
                                       WHERE asset_id = %s
@@ -1344,6 +1368,7 @@ class ReleaseRepository(PostgreSQLRepository):
                                 reviewed_at,
                                 release_id,
                                 ApprovalState.PENDING_REVIEW,
+                                ProcessingStatus.COMPLETED,
                                 asset_id, version_id,
                                 ApprovalState.APPROVED, release_id
                             )
@@ -1367,7 +1392,7 @@ class ReleaseRepository(PostgreSQLRepository):
                                     updated_at = %s
                                 WHERE release_id = %s
                                   AND approval_state = %s
-                                  AND processing_status = 'completed'
+                                  AND processing_status = %s
                                   AND NOT EXISTS (
                                       SELECT 1 FROM {}.{}
                                       WHERE asset_id = %s
@@ -1389,6 +1414,7 @@ class ReleaseRepository(PostgreSQLRepository):
                                 reviewed_at,
                                 release_id,
                                 ApprovalState.PENDING_REVIEW,
+                                ProcessingStatus.COMPLETED,
                                 asset_id, version_id,
                                 ApprovalState.APPROVED, release_id
                             )
@@ -1463,6 +1489,7 @@ class ReleaseRepository(PostgreSQLRepository):
                         SET approval_state = %s,
                             version_id = NULL,
                             is_latest = false,
+                            is_served = false,
                             clearance_state = %s,
                             last_error = %s,
                             updated_at = %s
@@ -1589,10 +1616,10 @@ class ReleaseRepository(PostgreSQLRepository):
                 if not row:
                     return None
                 return {
-                    "release_id": row[0],
-                    "version_ordinal": row[1],
-                    "processing_status": row[2],
-                    "approval_state": row[3],
+                    "release_id": row['release_id'],
+                    "version_ordinal": row['version_ordinal'],
+                    "processing_status": row['processing_status'],
+                    "approval_state": row['approval_state'],
                 }
 
     def count_by_approval_state(self) -> Dict[str, int]:

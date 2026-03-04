@@ -97,9 +97,9 @@ class ReleaseAuditRepository(PostgreSQLRepository):
                         json.dumps(metadata or {}),
                     )
                 )
-                conn.commit()
                 row = cur.fetchone()
-                audit_id = row[0] if row else None
+                conn.commit()
+                audit_id = row['audit_id'] if row else None
                 if audit_id:
                     logger.info(f"Audit event {audit_id} recorded")
                 return audit_id
@@ -120,8 +120,7 @@ class ReleaseAuditRepository(PostgreSQLRepository):
                     (release_id,)
                 )
                 rows = cur.fetchall()
-                columns = [desc.name for desc in cur.description]
-                return [self._row_to_event(dict(zip(columns, row))) for row in rows]
+                return [self._row_to_event(row) for row in rows]
 
     def get_events_for_ordinal(
         self, asset_id: str, version_ordinal: int
@@ -141,8 +140,7 @@ class ReleaseAuditRepository(PostgreSQLRepository):
                     (asset_id, version_ordinal)
                 )
                 rows = cur.fetchall()
-                columns = [desc.name for desc in cur.description]
-                return [self._row_to_event(dict(zip(columns, row))) for row in rows]
+                return [self._row_to_event(row) for row in rows]
 
     def get_events_by_type(
         self, event_type: ReleaseAuditEventType, limit: int = 50
@@ -163,8 +161,7 @@ class ReleaseAuditRepository(PostgreSQLRepository):
                     (event_type.value, limit)
                 )
                 rows = cur.fetchall()
-                columns = [desc.name for desc in cur.description]
-                return [self._row_to_event(dict(zip(columns, row))) for row in rows]
+                return [self._row_to_event(row) for row in rows]
 
     def get_recent_events(
         self, hours: int = 24, limit: int = 100
@@ -175,7 +172,7 @@ class ReleaseAuditRepository(PostgreSQLRepository):
                 cur.execute(
                     sql.SQL("""
                         SELECT * FROM {}.{}
-                        WHERE created_at >= NOW() - INTERVAL '%s hours'
+                        WHERE created_at >= NOW() - make_interval(hours => %s)
                         ORDER BY created_at DESC
                         LIMIT %s
                     """).format(
@@ -185,8 +182,7 @@ class ReleaseAuditRepository(PostgreSQLRepository):
                     (hours, limit)
                 )
                 rows = cur.fetchall()
-                columns = [desc.name for desc in cur.description]
-                return [self._row_to_event(dict(zip(columns, row))) for row in rows]
+                return [self._row_to_event(row) for row in rows]
 
     def _row_to_event(self, row: Dict[str, Any]) -> ReleaseAuditEvent:
         """Convert database row dict to ReleaseAuditEvent model."""

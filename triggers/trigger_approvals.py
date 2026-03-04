@@ -41,6 +41,7 @@ from util_logger import LoggerFactory, ComponentType
 logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "ApprovalTriggers")
 
 # V0.9 Entity Architecture imports
+from psycopg.rows import dict_row
 from core.models.asset import ClearanceState, ApprovalState
 
 def _release_to_dto(release) -> dict:
@@ -982,7 +983,7 @@ def _lookup_releases_by_stac_item_ids(release_repo, stac_item_ids, statuses):
 
     try:
         with release_repo._get_connection() as conn:
-            with conn.cursor() as cur:
+            with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute(
                     psql.SQL("""
                         SELECT stac_item_id, release_id, asset_id, approval_state,
@@ -1041,7 +1042,7 @@ def _lookup_releases_by_stac_collection_ids(release_repo, stac_collection_ids, s
 
     try:
         with release_repo._get_connection() as conn:
-            with conn.cursor() as cur:
+            with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute(
                     psql.SQL("""
                         SELECT stac_collection_id,
@@ -1093,7 +1094,7 @@ def _lookup_releases_by_table_names(release_repo, table_names, statuses):
 
     try:
         with release_repo._get_connection() as conn:
-            with conn.cursor() as cur:
+            with conn.cursor(row_factory=dict_row) as cur:
                 for table_name in table_names:
                     # Resolve table_name -> stac_item_id from table_catalog
                     cur.execute(

@@ -1244,7 +1244,7 @@ All pipeline executions in chronological order.
 
 | ID | Severity | Description |
 |----|----------|-------------|
-| NZ1-FAIL | MEDIUM | Native Zarr `ingest_zarr` blob_list extraction bug (pre-existing) |
+| ~~NZ1-FAIL~~ | ~~MEDIUM~~ | ~~Native Zarr `ingest_zarr` blob_list extraction bug — FIXED in v0.9.13.0 (CoreMachine envelope unwrap)~~ |
 | ~~F-1~~ | ~~HIGH~~ | ~~`/api/health` 503 — App Insights check returned unhealthy. Fixed: check disabled (not a supported feature), dry_run defaults→false~~ |
 | ~~F-3~~ | ~~MEDIUM~~ | ~~Retracted — `lookup-unified` was phantom endpoint in agent docs~~ |
 
@@ -1257,6 +1257,9 @@ All pipeline executions in chronological order.
 - F-1 FIXED: Disabled App Insights ingestion health check (not a supported feature). `/api/health` now returns 200.
 - F-3 RETRACTED: `lookup-unified` was a phantom endpoint in agent docs. All refs replaced with `/api/platform/catalog/lookup`.
 - dry_run defaults: Changed from `True` to `False` across 8 files (trigger, model, handlers, 3 unpublish jobs).
+- AUD-R1-1 FIXED: Added `row_factory=dict_row` to 3 cursor creations in `trigger_approvals.py` (stac_item, collection, table_name lookups).
+- NZ1-F1 FIXED: Already resolved in v0.9.13.0 — CoreMachine `_get_completed_stage_results()` unwraps handler envelope automatically.
+- SVC-F2 RESOLVED: TiTiler missing `zarr` package — `titiler.xarray[minimal]` 0.24.x doesn't include zarr. Fix: add `zarr>=3.1.0` to `rmhtitiler/requirements.txt`. Implementation in rmhtitiler repo.
 
 **Token Usage**:
 

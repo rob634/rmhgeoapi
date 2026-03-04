@@ -164,7 +164,9 @@ class AssetApprovalService:
             }
 
         # Block approval of stale ordinals when a newer ordinal exists (SG5-1/LA-1)
-        if release.version_ordinal:
+        # Skip guard for in-place revisions (revision > 1 means previously approved,
+        # revoked, then overwritten for resubmission)
+        if release.version_ordinal and release.revision == 1:
             newer = self.release_repo.has_newer_active_ordinal(
                 release.asset_id, release.version_ordinal
             )
@@ -238,6 +240,24 @@ class AssetApprovalService:
 
         # Step 4: Re-read the approved release for post-atomic operations
         release = self.release_repo.get_by_id(release_id)
+        if not release:
+            logger.critical(
+                f"INCONSISTENT_STATE: approve_release_atomic() committed for "
+                f"{release_id[:16]}... but re-read returned None. "
+                f"DB is APPROVED but post-atomic ops skipped."
+            )
+            return {
+                'success': False,
+                'error': (
+                    "Approval was committed to DB but re-read failed. "
+                    "Release IS approved but STAC materialization was skipped."
+                ),
+                'error_type': 'PostAtomicReadFailure',
+                'remediation': (
+                    'Release is approved in DB. Retry approval to trigger '
+                    'STAC materialization, or manually materialize STAC.'
+                )
+            }
 
         # Step 5: Post-atomic operations -- stac_item_id update + STAC materialization
         # Vector data does not go in STAC (01 MAR 2026 design decision)
@@ -505,7 +525,11 @@ class AssetApprovalService:
         if not success:
             return {
                 'success': False,
-                'error': "Failed to update release approval state"
+                'error': (
+                    "Failed to update release approval state — release may have "
+                    "been concurrently approved or rejected"
+                ),
+                'error_type': 'RejectionFailed'
             }
 
         # Get updated release

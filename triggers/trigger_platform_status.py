@@ -115,6 +115,7 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
                 json.dumps({
                     "success": False,
                     "error": f"Query parameter '{param_name}' is not supported for lookups",
+                    "error_type": "ValidationError",
                     "hint": f"Use path-based lookup instead: /api/platform/status/{param_value}",
                     "correct_usage": {
                         "single_lookup": "/api/platform/status/{id}  (id auto-detected as request_id, job_id, release_id, or asset_id)",
@@ -182,6 +183,7 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
                     json.dumps({
                         "success": False,
                         "error": f"No Platform request found for ID: {lookup_id}",
+                        "error_type": "NotFound",
                         "hint": "ID can be a request_id, job_id, release_id, or asset_id"
                     }),
                     status_code=404,
@@ -1075,6 +1077,7 @@ async def platform_health(req: func.HttpRequest) -> func.HttpResponse:
             job_stats = {"error": "unavailable"}
 
         result = {
+            "success": True,
             "status": status,
             "ready_for_jobs": ready_for_jobs,
             "version": __version__,
@@ -1094,9 +1097,11 @@ async def platform_health(req: func.HttpRequest) -> func.HttpResponse:
         logger.error(f"Platform health check failed: {e}", exc_info=True)
         return func.HttpResponse(
             json.dumps({
+                "success": False,
                 "status": "unavailable",
                 "ready_for_jobs": False,
                 "error": "Health check failed",
+                "error_type": "HealthCheckError",
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }),
             status_code=500,
@@ -1151,6 +1156,7 @@ async def platform_failures(req: func.HttpRequest) -> func.HttpResponse:
         job_repo = repos['job_repo']
 
         result = {
+            "success": True,
             "period_hours": hours,
             "total_failures": 0,
             "total_jobs": 0,
@@ -1293,7 +1299,9 @@ async def platform_failures(req: func.HttpRequest) -> func.HttpResponse:
         logger.error(f"Platform failures query failed: {e}", exc_info=True)
         return func.HttpResponse(
             json.dumps({
+                "success": False,
                 "error": "Failed to retrieve failure data",
+                "error_type": "QueryError",
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }),
             status_code=500,

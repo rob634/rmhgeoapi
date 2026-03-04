@@ -23,8 +23,6 @@ Endpoints (17 total):
     Diagnostics:
         GET  /platform/health - System readiness
         GET  /platform/failures - Recent failures
-        GET  /platform/lineage/{id} - Data lineage trace
-        POST /platform/validate - Pre-flight validation
 
     Unpublish:
         POST /platform/unpublish - Consolidated unpublish

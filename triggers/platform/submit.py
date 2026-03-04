@@ -253,6 +253,7 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
             if dry_run:
                 return func.HttpResponse(
                     json.dumps({
+                        "success": True,
                         "valid": True,
                         "dry_run": True,
                         "request_id": request_id,

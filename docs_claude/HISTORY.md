@@ -1,6 +1,6 @@
 # Project History
 
-**Last Updated**: 04 MAR 2026
+**Last Updated**: 04 MAR 2026 (v0.9.13.0)
 **Active Log**: FEB - MAR 2026
 **Rolling Archive**: When this file exceeds ~600 lines, older content is archived with a UUID filename.
 
@@ -10,6 +10,39 @@
 - [HISTORY_e1fc3ce2.md](./HISTORY_e1fc3ce2.md) - DEC 2025 - JAN 2026
 
 This document tracks completed architectural changes and improvements to the Azure Geospatial ETL Pipeline.
+
+---
+
+## 04 MAR 2026: Remove `is_latest` Denormalized Flag (v0.9.13.0) ✅
+
+**Status**: ✅ **COMPLETE**
+**Trigger**: F-01 MEDIUM — approve+revoke race condition on `is_latest`
+
+### Design Decision
+
+Replaced the mutable `is_latest` boolean with a computed approach: "latest" = `MAX(version_ordinal)` via `ORDER BY version_ordinal DESC LIMIT 1`. Applied to both `app.asset_releases` and `geo.b2c_routes`/`geo.b2b_routes`.
+
+**Rationale**: `is_latest` was a denormalized flag requiring two-phase flip logic (`clear_latest` → `set_latest`) across multiple methods. Concurrent approve+revoke could leave it inconsistent (F-01). In an ETL architecture where consistency trumps query speed, the computed approach is correct by construction — no flip, no race.
+
+### Changes (15 files)
+
+| Area | Changes |
+|------|---------|
+| **Model** (`core/models/asset.py`) | Removed `is_latest` field, replaced `idx_releases_latest` partial unique index with `idx_releases_latest_approved` composite |
+| **Model** (`core/models/geo.py`) | Removed `is_latest` field from route models, replaced `idx_b2c/b2b_routes_latest` partial unique indexes with descending `slug_ordinal` indexes |
+| **Release Repository** | Deleted `flip_is_latest()` (~60 lines), rewrote `get_latest()`, simplified `approve_release_atomic()` (removed Step 1 is_latest clear), simplified `rollback_approval_atomic()` (removed Step 2 sibling promotion), removed from `update_revocation()`, `update_version_assignment()`, `_INSERT_COLUMNS`, `_build_insert_values`, `_row_to_model` |
+| **Route Repository** | Full rewrite (401→213 lines). Deleted `upsert_as_latest()`, `clear_latest()`, `promote_next_latest()`. `get_by_slug(version='latest')` now uses `ORDER BY version_ordinal DESC LIMIT 1` |
+| **Approval Service** | Deleted `if release.is_latest:` promotion block (~30 lines) from `revoke_release()`. Route creation uses `upsert_route()` instead of `upsert_as_latest()` |
+| **Catalog/Triggers/UI** | Removed `is_latest` from 5 response dicts, LATERAL subqueries replace `LEFT JOIN ON is_latest=true` in catalog listing and platform request listing, removed from web interface display |
+
+### Net Effect
+
+- ~250 lines deleted (more removed than added)
+- F-01 resolved by construction
+- Simpler approve/revoke flows (no flip logic)
+- Route repository cut in half
+
+**Requires**: Schema rebuild (`action=rebuild&target=app`) + geo schema rebuild for route index changes.
 
 ---
 

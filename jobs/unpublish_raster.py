@@ -23,7 +23,7 @@ Three-Stage Workflow:
     Stage 3 (cleanup): Delete STAC item, cleanup empty collection, audit record
 
 Safety Features:
-    - dry_run=True by default (preview only, no deletions)
+    - dry_run=False by default (executes deletions)
     - Pre-flight validation confirms STAC item exists
     - Idempotent blob deletion (succeeds if already deleted)
     - System collections protected (STACDefaults.SYSTEM_COLLECTIONS)
@@ -154,7 +154,7 @@ class UnpublishRasterJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                 "parameters": {
                     "stac_item_id": job_params["stac_item_id"],
                     "collection_id": job_params["collection_id"],
-                    "dry_run": job_params.get("dry_run", True),
+                    "dry_run": job_params.get("dry_run", False),
                     "force_approved": job_params.get("force_approved", False),  # 16 JAN 2026
                     # Pass through validated STAC item data from resource_validators
                     "_stac_item": job_params.get("_stac_item"),
@@ -175,7 +175,7 @@ class UnpublishRasterJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
             # So previous_results[0] IS the inventory result dict.
             inventory_result = previous_results[0]
             blobs_to_delete = inventory_result.get("blobs_to_delete", [])
-            dry_run = job_params.get("dry_run", True)
+            dry_run = job_params.get("dry_run", False)
 
             if not blobs_to_delete:
                 # No blobs found - this is okay for stac_catalog_container items
@@ -222,7 +222,7 @@ class UnpublishRasterJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                 "parameters": {
                     "stac_item_id": job_params["stac_item_id"],
                     "collection_id": job_params["collection_id"],
-                    "dry_run": job_params.get("dry_run", True),
+                    "dry_run": job_params.get("dry_run", False),
                     "unpublish_job_id": job_id,
                     "unpublish_type": "raster",
                     # Pass through inventory data for audit record
@@ -268,7 +268,7 @@ class UnpublishRasterJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
             if cleanup_results:
                 # Access result_data as attribute, then treat as dict
                 cleanup = getattr(cleanup_results[0], "result_data", {}) or {}
-                dry_run = cleanup.get("dry_run", True)
+                dry_run = cleanup.get("dry_run", False)
 
                 if dry_run:
                     logger.info(

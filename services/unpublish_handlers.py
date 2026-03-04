@@ -75,7 +75,7 @@ def inventory_raster_item(params: Dict[str, Any], context: Optional[Dict[str, An
     try:
         stac_item_id = params.get('stac_item_id')
         collection_id = params.get('collection_id')
-        dry_run = params.get('dry_run', True)
+        dry_run = params.get('dry_run', False)
 
         # Get pre-validated STAC item from validator
         stac_item = params.get('_stac_item')
@@ -230,7 +230,7 @@ def inventory_vector_item(params: Dict[str, Any], context: Optional[Dict[str, An
         # Get schema from params or from VectorConfig
         vector_config = VectorConfig.from_environment()
         schema_name = params.get('schema_name') or vector_config.target_schema
-        dry_run = params.get('dry_run', True)
+        dry_run = params.get('dry_run', False)
 
         if not table_name:
             return {
@@ -448,7 +448,7 @@ def inventory_zarr_item(params: Dict[str, Any], context: Optional[Dict[str, Any]
     try:
         stac_item_id = params.get('stac_item_id')
         collection_id = params.get('collection_id')
-        dry_run = params.get('dry_run', True)
+        dry_run = params.get('dry_run', False)
         delete_data_files = params.get('delete_data_files', True)
         force_approved = params.get('force_approved', False)
 
@@ -781,7 +781,7 @@ def delete_blob(params: Dict[str, Any], context: Optional[Dict[str, Any]] = None
     try:
         container = params.get('container')
         blob_path = params.get('blob_path')
-        dry_run = params.get('dry_run', True)
+        dry_run = params.get('dry_run', False)
 
         if not container or not blob_path:
             return {
@@ -870,7 +870,7 @@ def drop_postgis_table(params: Dict[str, Any], context: Optional[Dict[str, Any]]
         vector_config = VectorConfig.from_environment()
         schema_name = params.get('schema_name') or vector_config.target_schema
         delete_metadata = params.get('delete_metadata', True)
-        dry_run = params.get('dry_run', True)
+        dry_run = params.get('dry_run', False)
 
         if not table_name:
             return {
@@ -1054,7 +1054,7 @@ def delete_stac_and_audit(params: Dict[str, Any], context: Optional[Dict[str, An
         stac_item_snapshot = params.get('stac_item_snapshot', {})  # Raster STAC item
         postgis_table = params.get('postgis_table')
         table_dropped = params.get('table_dropped', False)
-        dry_run = params.get('dry_run', True)
+        dry_run = params.get('dry_run', False)
 
         # For vectors: stac_item_id is OPTIONAL (may not have STAC item)
         # For rasters: stac_item_id is REQUIRED

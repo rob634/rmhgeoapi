@@ -1245,13 +1245,18 @@ All pipeline executions in chronological order.
 | ID | Severity | Description |
 |----|----------|-------------|
 | NZ1-FAIL | MEDIUM | Native Zarr `ingest_zarr` blob_list extraction bug (pre-existing) |
-| F-1 | HIGH | `/api/health` returns 503 despite all components healthy |
+| ~~F-1~~ | ~~HIGH~~ | ~~`/api/health` 503 — App Insights check returned unhealthy. Fixed: check disabled (not a supported feature), dry_run defaults→false~~ |
 | ~~F-3~~ | ~~MEDIUM~~ | ~~Retracted — `lookup-unified` was phantom endpoint in agent docs~~ |
 
 **Observations**:
 - Overwrite on PROCESSING creates new version (safe fallthrough, no explicit error)
 - clearance_state persists through overwrite (cosmetic only)
-- Unpublish defaults to dry_run=true (safety behavior)
+- ~~Unpublish defaults to dry_run=true~~ **FIXED**: All dry_run defaults changed to false
+
+**Post-SIEGE Fixes (same session)**:
+- F-1 FIXED: Disabled App Insights ingestion health check (not a supported feature). `/api/health` now returns 200.
+- F-3 RETRACTED: `lookup-unified` was a phantom endpoint in agent docs. All refs replaced with `/api/platform/catalog/lookup`.
+- dry_run defaults: Changed from `True` to `False` across 8 files (trigger, model, handlers, 3 unpublish jobs).
 
 **Token Usage**:
 

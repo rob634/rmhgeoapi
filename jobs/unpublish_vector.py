@@ -21,7 +21,7 @@ Three-Stage Workflow:
     Stage 3 (cleanup): Delete STAC item if linked, record audit
 
 Safety Features:
-    - dry_run=True by default (preview only, no deletions)
+    - dry_run=False by default (executes deletions)
     - Pre-flight validation confirms table exists
     - Idempotent operations (succeed if already deleted)
     - System collections protected (STACDefaults.SYSTEM_COLLECTIONS)
@@ -146,7 +146,7 @@ class UnpublishVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
         # Get schema from params or use default
         schema_name = job_params.get("schema_name", "geo")
         table_name = job_params.get("table_name")
-        dry_run = job_params.get("dry_run", True)
+        dry_run = job_params.get("dry_run", False)
 
         if stage == 1:
             # Stage 1: Inventory - query geo.table_metadata for ETL/STAC linkage
@@ -242,7 +242,7 @@ class UnpublishVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
             inventory_data = {}
             table_dropped = False
             stac_deleted = False
-            dry_run = True
+            dry_run = False
 
             for result in context.task_results:
                 task_type = getattr(result, "task_type", None)
@@ -254,7 +254,7 @@ class UnpublishVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                     table_dropped = task_result.get("table_dropped", False)
                 elif task_type == "unpublish_delete_stac":
                     stac_deleted = task_result.get("stac_item_deleted", False)
-                    dry_run = task_result.get("dry_run", True)
+                    dry_run = task_result.get("dry_run", False)
 
             table_name = inventory_data.get("table_name", "unknown")
 

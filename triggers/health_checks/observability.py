@@ -40,13 +40,13 @@ class ObservabilityHealthChecks(HealthCheckPlugin):
         """Return observability health checks."""
         return [
             ("metrics_pipeline", self.check_metrics_pipeline),
-            ("appinsights_ingestion", self.check_appinsights_ingestion),
+            # ("appinsights_ingestion", self.check_appinsights_ingestion),  # Disabled — not a supported feature yet
         ]
 
     def get_parallel_checks(self) -> List[Tuple[str, Callable[[], Dict[str, Any]]]]:
         """App Insights check involves HTTP — run in parallel."""
         return [
-            ("appinsights_ingestion", self.check_appinsights_ingestion),
+            # ("appinsights_ingestion", self.check_appinsights_ingestion),  # Disabled — not a supported feature yet
         ]
 
     def is_enabled(self, config) -> bool:
@@ -150,6 +150,7 @@ class ObservabilityHealthChecks(HealthCheckPlugin):
                     result["error"] = "No traces in last 15 minutes — ingestion may be stale"
             else:
                 result["reachable"] = False
+                result["_status"] = "warning"
                 result["error"] = query_result.error or "Query failed"
 
             return result

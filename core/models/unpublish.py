@@ -149,7 +149,7 @@ class UnpublishJobRecord(BaseModel):
         description="Status of the unpublish operation"
     )
     dry_run: bool = Field(
-        default=True,
+        default=False,
         description="Whether this was a dry-run (preview only, no deletions)"
     )
     error_details: Optional[str] = Field(

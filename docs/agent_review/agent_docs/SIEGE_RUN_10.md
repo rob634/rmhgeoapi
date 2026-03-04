@@ -106,7 +106,7 @@
 
 | # | Severity | Category | Description | Status |
 |---|----------|----------|-------------|--------|
-| F-1 | HIGH | Health | `/api/health` returns 503 despite all components healthy. 10 warnings trigger unhealthy flag. 5.2s response time. | NEW |
+| ~~F-1~~ | ~~HIGH~~ | ~~Health~~ | ~~`/api/health` returns 503 — App Insights ingestion check returned 403 (insufficient access), defaulted to "unhealthy". Fixed: check disabled (not a supported feature).~~ | FIXED |
 | F-2 | LOW | Azure | PRV-9: 5 POST-only endpoints return 404 instead of 405 (Azure Functions limitation) | KNOWN |
 | ~~F-3~~ | ~~MEDIUM~~ | ~~Endpoint~~ | ~~`/api/platform/catalog/lookup-unified` — phantom endpoint in agent docs, never existed. Removed from all specs.~~ | RETRACTED |
 | F-4 | LOW | Endpoint | SG-9: `/api/dbadmin/stats` returns 404 | KNOWN |
@@ -114,7 +114,7 @@
 
 ### Observations (Non-Blocking)
 
-1. **Unpublish defaults to `dry_run=true`** — must explicitly set `"dry_run": false` to execute. Safe behavior but may confuse integrators.
+1. ~~**Unpublish defaults to `dry_run=true`**~~ — **FIXED**: All `dry_run` defaults changed to `false` across 8 files.
 2. **clearance_state persists through overwrite** — after overwriting a revoked release, `clearance_state=ouo` retained from original approval. Cosmetic only (approval_state resets to pending_review).
 3. **Overwrite on PROCESSING creates new version** — no explicit race guard error. System safely falls through since PROCESSING is not in `{pending_review, rejected, revoked}`. No corruption.
 4. **request_id is deterministic** — same `dataset_id`/`resource_id` always produces the same `request_id`. Status endpoint shows most recently submitted release.
@@ -181,5 +181,5 @@ The overwrite hardening subsystem (BS-1, AR-1, AR-3) is **fully operational**. A
 
 **Remaining issues**:
 - NZ1-FAIL (native Zarr blob_list bug) — pre-existing, not overwrite-related
-- F-1 (`/api/health` 503) — monitoring concern
-- ~~F-3 retracted — `lookup-unified` was a phantom endpoint in agent docs, not a real API gap~~
+- ~~F-1 FIXED — App Insights health check disabled (not supported feature)~~
+- ~~F-3 RETRACTED — phantom endpoint in agent docs~~

@@ -131,7 +131,7 @@ def platform_unpublish(req: func.HttpRequest) -> func.HttpResponse:
 
     try:
         req_body = parse_request_json(req)
-        dry_run = req_body.get('dry_run', True)  # Defaults to preview mode — caller must set false to delete
+        dry_run = req_body.get('dry_run', False)
 
         # Resolve data type and parameters
         data_type, resolved_params, original_request = _resolve_unpublish_data_type(req_body)

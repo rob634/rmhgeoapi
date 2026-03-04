@@ -403,6 +403,37 @@ class ReleaseRepository(PostgreSQLRepository):
                 row = cur.fetchone()
                 return self._row_to_model(row) if row else None
 
+    def get_overwrite_candidate(self, asset_id: str) -> Optional[AssetRelease]:
+        """
+        Find a release eligible for overwrite, including REVOKED.
+
+        Unlike get_draft() which only finds un-versioned non-revoked releases,
+        this method finds any release in an overwritable state:
+        PENDING_REVIEW, REJECTED, or REVOKED (and not actively processing).
+
+        Returns the most recent candidate.
+        """
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL("""
+                        SELECT * FROM {}.{}
+                        WHERE asset_id = %s
+                          AND approval_state IN (%s, %s, %s)
+                          AND processing_status != %s
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                    """).format(
+                        sql.Identifier(self.schema),
+                        sql.Identifier(self.table)
+                    ),
+                    (asset_id,
+                     ApprovalState.PENDING_REVIEW, ApprovalState.REJECTED, ApprovalState.REVOKED,
+                     ProcessingStatus.PROCESSING)
+                )
+                row = cur.fetchone()
+                return self._row_to_model(row) if row else None
+
     def get_by_version(self, asset_id: str, version_id: str) -> Optional[AssetRelease]:
         """
         Get a specific version of a release.

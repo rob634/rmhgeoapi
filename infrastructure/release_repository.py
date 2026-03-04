@@ -807,6 +807,26 @@ class ReleaseRepository(PostgreSQLRepository):
         """
         logger.info(f"AUDIT: Revoking release {release_id[:16]}... by {revoked_by}")
 
+        # Snapshot BEFORE revocation (non-fatal)
+        try:
+            release = self.get_by_id(release_id)
+            if release:
+                from infrastructure.release_audit_repository import ReleaseAuditRepository
+                from core.models.release_audit import ReleaseAuditEventType
+                audit_repo = ReleaseAuditRepository()
+                audit_repo.record_event(
+                    release_id=release_id,
+                    asset_id=release.asset_id,
+                    version_ordinal=release.version_ordinal,
+                    revision=release.revision,
+                    event_type=ReleaseAuditEventType.REVOKED,
+                    actor=revoked_by,
+                    reason=revocation_reason,
+                    snapshot=release.to_dict(),
+                )
+        except Exception as audit_err:
+            logger.warning(f"Audit emission failed (non-fatal): {audit_err}")
+
         with self._get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(

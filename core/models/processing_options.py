@@ -292,11 +292,15 @@ class ZarrProcessingOptions(BaseProcessingOptions):
     Processing options for Zarr pipelines.
 
     Supports two pipelines:
-        - "virtualzarr": For NetCDF files — creates virtual Zarr references via VirtualiZarr
+        - "netcdf_to_zarr": For NetCDF files — converts to native Zarr via xr.open_mfdataset → to_zarr (DEFAULT)
         - "ingest_zarr": For native Zarr stores — copies Zarr directory tree to silver tier
 
+    Note: "virtualzarr" is deprecated (05 MAR 2026) — kerchunk references dropped
+    in favour of real Zarr conversion. Kept in Literal for backward compat but
+    routes to netcdf_to_zarr at translation time.
+
     Fields:
-        pipeline: Pipeline selector ("virtualzarr" or "ingest_zarr")
+        pipeline: Pipeline selector ("netcdf_to_zarr" or "ingest_zarr")
         concat_dim: Dimension to concatenate along (default "time")
         file_pattern: Glob pattern for source files (default "*.nc")
         fail_on_chunking_warnings: Fail validation on chunking warnings
@@ -304,9 +308,9 @@ class ZarrProcessingOptions(BaseProcessingOptions):
     """
     model_config = ConfigDict(extra='ignore')
 
-    pipeline: Literal["virtualzarr", "ingest_zarr"] = Field(
-        default="virtualzarr",
-        description="Pipeline selector: 'virtualzarr' for NetCDF, 'ingest_zarr' for native Zarr stores"
+    pipeline: Literal["netcdf_to_zarr", "ingest_zarr", "virtualzarr"] = Field(
+        default="netcdf_to_zarr",
+        description="Pipeline selector: 'netcdf_to_zarr' for NetCDF (default), 'ingest_zarr' for native Zarr stores"
     )
     concat_dim: str = Field(default="time", description="Dimension to concatenate along")
     file_pattern: str = Field(default="*.nc", description="Glob pattern for source files")

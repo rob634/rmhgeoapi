@@ -826,10 +826,11 @@ class AppConfig(BaseModel):
         return {
             "variables":  f"{base}/xarray/variables?url={encoded}",
             "tiles":      f"{base}/xarray/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}@1x.png?url={encoded}&variable={{variable}}&decode_times=false",
-            "tilejson":   f"{base}/xarray/tilejson.json?url={encoded}&variable={{variable}}&decode_times=false",
+            "tilejson":   f"{base}/xarray/WebMercatorQuad/tilejson.json?url={encoded}&variable={{variable}}&decode_times=false",
             "preview":    f"{base}/xarray/preview.png?url={encoded}&variable={{variable}}&decode_times=false",
             "info":       f"{base}/xarray/info?url={encoded}&variable={{variable}}&decode_times=false",
             "point":      f"{base}/xarray/point/{{lon}},{{lat}}?url={encoded}&variable={{variable}}&decode_times=false",
+            "viewer":     f"{base}/xarray/WebMercatorQuad/map.html?url={encoded}&variable={{variable}}&decode_times=false",
         }
 
     def generate_titiler_urls(self, collection_id: str, item_id: str) -> dict:

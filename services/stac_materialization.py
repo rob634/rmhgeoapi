@@ -912,6 +912,14 @@ class STACMaterializer:
                 "title": "TileJSON (substitute {variable})",
             })
 
+            # Add map viewer link (with {variable} template)
+            links.append({
+                "rel": "viewer",
+                "href": xarray_urls["viewer"],
+                "type": "text/html",
+                "title": "Map Viewer (substitute {variable})",
+            })
+
             logger.info("[STAC] Injected xarray URLs for zarr item")
 
         except Exception as e:

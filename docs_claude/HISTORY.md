@@ -1,6 +1,6 @@
 # Project History
 
-**Last Updated**: 04 MAR 2026 (v0.9.13.0)
+**Last Updated**: 05 MAR 2026 (v0.9.13.4)
 **Active Log**: FEB - MAR 2026
 **Rolling Archive**: When this file exceeds ~600 lines, older content is archived with a UUID filename.
 
@@ -10,6 +10,45 @@
 - [HISTORY_e1fc3ce2.md](./HISTORY_e1fc3ce2.md) - DEC 2025 - JAN 2026
 
 This document tracks completed architectural changes and improvements to the Azure Geospatial ETL Pipeline.
+
+---
+
+## 05 MAR 2026: Zarr Chunking Optimization for Tile Serving (v0.9.13.4) ✅
+
+**Status**: ✅ **COMPLETE**
+**Trigger**: ZARR_MAGIC.md spec — spatial 256×256, time 1, Blosc+LZ4 for tile serving
+
+### Achievement
+
+Wired optimized chunking into both Zarr pipelines (`netcdf_to_zarr` and `ingest_zarr`) so output Zarr stores are chunk-aligned for performant tile serving via TiTiler-xarray.
+
+### Design
+
+- **`netcdf_to_zarr`**: Always applies optimized chunking (conversion — we control output)
+- **`ingest_zarr`**: Optional `rechunk` flag. When true, Stage 2 reads source Zarr via xarray and rechunks instead of fan-out blob copy. Stub comment for future dynamic analysis (skip if already optimal).
+- **Scope**: Chunking + compression only. Pyramids deferred.
+
+### Changes (8 files)
+
+| File | Change |
+|------|--------|
+| `core/models/processing_options.py` | Added 5 fields to `ZarrProcessingOptions`: `spatial_chunk_size` (64-1024, default 256), `time_chunk_size` (1-100, default 1), `compressor` (lz4/zstd/none), `compression_level` (1-9), `rechunk` (bool) |
+| `services/platform_translation.py` | Passes chunking params to `netcdf_to_zarr` (4 keys) and `ingest_zarr` (5 keys incl. `rechunk`) |
+| `jobs/netcdf_to_zarr.py` | Added 4 entries to `parameters_schema` + passes all 4 to Stage 4 task params |
+| `jobs/ingest_zarr.py` | Added 5 entries to `parameters_schema` + conditional Stage 2: `rechunk=True` → single `ingest_zarr_rechunk` task, `False` → original fan-out blob copy |
+| `services/handler_netcdf_to_zarr.py` | Added `_build_zarr_encoding()` helper (detects spatial/time dims, builds `numcodecs.Blosc`, per-variable encoding). Wired into `netcdf_convert` with `ds.chunk()` + `encoding=` |
+| `services/handler_ingest_zarr.py` | Added `ingest_zarr_rechunk` handler — opens source Zarr, calls `_build_zarr_encoding()`, rechunks, writes to silver |
+| `services/__init__.py` | Registered `ingest_zarr_rechunk` in handler registry |
+| `config/defaults.py` | Added `ingest_zarr_rechunk` to `DOCKER_TASKS` routing |
+
+### `_build_zarr_encoding()` Helper
+
+Module-level function in `handler_netcdf_to_zarr.py`, imported by `handler_ingest_zarr.py`:
+1. Detects spatial dims (`lat/latitude/y`, `lon/longitude/x`) and time dim (`time/t`)
+2. Builds `target_chunks` dict — clamps each to `min(chunk_size, dim_size)`
+3. Builds `numcodecs.Blosc` compressor (or None for "none")
+4. Returns `(target_chunks, encoding)` for `ds.chunk()` and `ds.to_zarr(encoding=...)`
+5. Only encodes data vars, not coordinate vars
 
 ---
 

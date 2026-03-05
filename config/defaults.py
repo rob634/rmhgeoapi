@@ -465,6 +465,7 @@ class TaskRoutingDefaults:
         "ingest_zarr_validate",
         "ingest_zarr_copy",
         "ingest_zarr_register",
+        "ingest_zarr_rechunk",
 
         # =====================================================================
         # NETCDF-TO-ZARR PIPELINE (replaces VirtualiZarr)

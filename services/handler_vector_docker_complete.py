@@ -1173,6 +1173,12 @@ def _map_exception_to_error_code(e: Exception) -> 'ErrorCode':
     if 'encoding' in error_str or 'codec' in error_str or 'utf' in error_str:
         return ErrorCode.VECTOR_ENCODING_ERROR
 
+    # ZIP/archive errors (ERH-7)
+    if 'badzipfile' in error_type.lower() or 'bad zip' in error_str or 'not a zip' in error_str:
+        return ErrorCode.VECTOR_UNREADABLE
+    if 'nested zip' in error_str or ('zip' in error_str and 'flatten' in error_str):
+        return ErrorCode.VECTOR_UNREADABLE
+
     # Mixed geometry types
     if 'mixed geometry types' in error_str:
         return ErrorCode.VECTOR_MIXED_GEOMETRY
@@ -1183,6 +1189,8 @@ def _map_exception_to_error_code(e: Exception) -> 'ErrorCode':
     if 'geometry' in error_str and ('null' in error_str or 'empty' in error_str):
         return ErrorCode.VECTOR_GEOMETRY_EMPTY
     if 'no features' in error_str or ('empty' in error_str and 'geodataframe' in error_str) or 'contains 0 features' in error_str:
+        return ErrorCode.VECTOR_NO_FEATURES
+    if 'no data rows' in error_str or 'only a header row' in error_str:
         return ErrorCode.VECTOR_NO_FEATURES
 
     # Coordinate/CRS errors

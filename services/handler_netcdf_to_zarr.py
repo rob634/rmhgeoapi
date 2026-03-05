@@ -51,6 +51,75 @@ def _get_storage_account() -> str:
     return get_config().storage.silver.account_name
 
 
+def _build_zarr_encoding(ds, spatial_chunk_size=256, time_chunk_size=1,
+                         compressor_name="lz4", compression_level=5):
+    """
+    Build optimized Zarr encoding for tile-serving performance.
+
+    Generates target chunk sizes and per-variable encoding dicts for
+    ds.to_zarr(encoding=...). Only encodes data variables, not coordinates.
+
+    Args:
+        ds: xarray.Dataset to encode
+        spatial_chunk_size: Chunk size for spatial dims (lat/lon/y/x), clamped to dim size
+        time_chunk_size: Chunk size for time dim, clamped to dim size
+        compressor_name: "lz4", "zstd", or "none"
+        compression_level: 1-9 (passed to Blosc clevel)
+
+    Returns:
+        (target_chunks, encoding) tuple:
+            target_chunks: dict for ds.chunk() — {dim_name: chunk_size}
+            encoding: dict for ds.to_zarr(encoding=...) — {var_name: {compressor, chunks}}
+    """
+    import numcodecs
+
+    # Detect spatial and time dimensions
+    spatial_names = {"lat", "latitude", "y", "lon", "longitude", "x"}
+    time_names = {"time", "t"}
+
+    target_chunks = {}
+    for dim_name, dim_size in ds.dims.items():
+        dim_lower = dim_name.lower()
+        if dim_lower in spatial_names:
+            target_chunks[dim_name] = min(spatial_chunk_size, int(dim_size))
+        elif dim_lower in time_names:
+            target_chunks[dim_name] = min(time_chunk_size, int(dim_size))
+        else:
+            # Non-spatial, non-time dims: keep full extent (single chunk)
+            target_chunks[dim_name] = int(dim_size)
+
+    # Build compressor
+    if compressor_name == "none":
+        compressor = None
+    else:
+        compressor = numcodecs.Blosc(
+            cname=compressor_name,
+            clevel=compression_level,
+            shuffle=numcodecs.Blosc.BITSHUFFLE,
+        )
+
+    # Build per-variable encoding (data vars only, not coords)
+    encoding = {}
+    for var_name in ds.data_vars:
+        var = ds[var_name]
+        var_chunks = tuple(
+            target_chunks.get(dim, int(ds.dims[dim]))
+            for dim in var.dims
+        )
+        encoding[var_name] = {
+            "compressor": compressor,
+            "chunks": var_chunks,
+        }
+
+    logger.info(
+        f"_build_zarr_encoding: spatial={spatial_chunk_size}, "
+        f"time={time_chunk_size}, compressor={compressor_name}(L{compression_level}), "
+        f"{len(encoding)} vars encoded, chunks={target_chunks}"
+    )
+
+    return target_chunks, encoding
+
+
 # =============================================================================
 # HANDLER 1: netcdf_scan
 # =============================================================================
@@ -555,11 +624,19 @@ def netcdf_convert(
     dataset_id = params.get("dataset_id", "unknown")
     resource_id = params.get("resource_id", "unknown")
 
+    # Chunking optimization params
+    spatial_chunk_size = params.get("spatial_chunk_size", 256)
+    time_chunk_size = params.get("time_chunk_size", 1)
+    compressor_name = params.get("compressor", "lz4")
+    compression_level = params.get("compression_level", 5)
+
     logger.info(
         f"netcdf_convert: local_dir={local_dir}, "
         f"concat_dim={concat_dim}, "
         f"output={zarr_container}/{output_folder}, "
-        f"dataset_id={dataset_id}"
+        f"dataset_id={dataset_id}, "
+        f"chunks=spatial:{spatial_chunk_size}/time:{time_chunk_size}, "
+        f"compressor={compressor_name}(L{compression_level})"
     )
 
     import shutil
@@ -679,6 +756,13 @@ def netcdf_convert(
             "credential": silver_repo.credential,
         }
 
+        # Apply optimized chunking for tile serving
+        target_chunks, encoding = _build_zarr_encoding(
+            ds, spatial_chunk_size, time_chunk_size,
+            compressor_name, compression_level,
+        )
+        ds = ds.chunk(target_chunks)
+
         logger.info(f"netcdf_convert: Writing Zarr to {zarr_az_url}")
 
         ds.to_zarr(
@@ -686,6 +770,7 @@ def netcdf_convert(
             mode="w",
             consolidated=True,
             storage_options=storage_options,
+            encoding=encoding,
         )
 
         zarr_store_url = f"abfs://{zarr_container}/{output_folder}"

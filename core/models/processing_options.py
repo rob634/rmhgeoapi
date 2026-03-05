@@ -310,7 +310,34 @@ class ZarrProcessingOptions(BaseProcessingOptions):
     fail_on_chunking_warnings: bool = Field(default=False, description="Fail validation on chunking warnings")
     max_files: int = Field(default=500, ge=1, le=5000, description="Maximum files to process")
 
-    @field_validator('fail_on_chunking_warnings', mode='before')
+    # Chunking optimization for tile serving (05 MAR 2026)
+    spatial_chunk_size: int = Field(
+        default=256, ge=64, le=1024,
+        description="Spatial chunk dimension in pixels (256 or 512 typical)"
+    )
+    time_chunk_size: int = Field(
+        default=1, ge=1, le=100,
+        description="Time dimension chunk size (1 = one timestep per chunk)"
+    )
+    compressor: Literal["lz4", "zstd", "none"] = Field(
+        default="lz4",
+        description="Compression codec: lz4 (fastest), zstd (best ratio), none"
+    )
+    compression_level: int = Field(
+        default=5, ge=1, le=9,
+        description="Compression level (1=fastest, 9=best ratio)"
+    )
+    rechunk: bool = Field(
+        default=False,
+        description="For ingest_zarr: rechunk existing store during ingest"
+    )
+
+    @field_validator('fail_on_chunking_warnings', 'rechunk', mode='before')
     @classmethod
-    def coerce_fail_on_chunking(cls, v):
+    def coerce_bools(cls, v):
         return _coerce_bool(v)
+
+    @field_validator('compressor', mode='before')
+    @classmethod
+    def normalize_compressor(cls, v):
+        return _normalize_enum_str(v)

@@ -681,3 +681,152 @@ def ingest_zarr_register(
             "error": str(e),
             "error_type": type(e).__name__,
         }
+
+
+# =============================================================================
+# HANDLER 4: ingest_zarr_rechunk
+# =============================================================================
+
+def ingest_zarr_rechunk(
+    params: Dict[str, Any],
+    context: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    Rechunk a source Zarr store and write optimized output to silver-zarr.
+
+    Opens the source Zarr via xarray, applies optimized chunking for tile
+    serving (spatial 256x256, time 1, Blosc+LZ4), and writes to silver.
+    Replaces the blob-copy stage when rechunk=True.
+
+    Args:
+        params: Task parameters
+            - source_url (str): abfs:// URL to source Zarr store
+            - source_account (str): Source storage account name
+            - target_container (str): Target container (e.g. "silver-zarr")
+            - target_prefix (str): Target blob prefix within container
+            - spatial_chunk_size (int): Spatial chunk dim (default 256)
+            - time_chunk_size (int): Time chunk dim (default 1)
+            - compressor (str): "lz4", "zstd", or "none"
+            - compression_level (int): 1-9
+            - dataset_id (str): Dataset identifier for logging
+            - resource_id (str): Resource identifier for logging
+        context: Optional execution context
+
+    Returns:
+        {"success": True, "result": {"target_chunks": {...}, "compressor": "...", ...}}
+    """
+    start = time.time()
+
+    source_url = params.get("source_url")
+    source_account = params.get("source_account")
+    target_container = params.get("target_container")
+    target_prefix = params.get("target_prefix")
+    spatial_chunk_size = params.get("spatial_chunk_size", 256)
+    time_chunk_size = params.get("time_chunk_size", 1)
+    compressor_name = params.get("compressor", "lz4")
+    compression_level = params.get("compression_level", 5)
+    dataset_id = params.get("dataset_id", "unknown")
+    resource_id = params.get("resource_id", "unknown")
+
+    logger.info(
+        f"ingest_zarr_rechunk: source={source_url}, "
+        f"target={target_container}/{target_prefix}, "
+        f"chunks=spatial:{spatial_chunk_size}/time:{time_chunk_size}, "
+        f"compressor={compressor_name}(L{compression_level})"
+    )
+
+    try:
+        import xarray as xr
+        from infrastructure import BlobRepository
+        from services.handler_netcdf_to_zarr import _build_zarr_encoding
+
+        # Parse source_url
+        source_path = source_url.replace("abfs://", "")
+        parts = source_path.split("/", 1)
+        source_container = parts[0]
+        source_prefix = parts[1] if len(parts) > 1 else ""
+
+        # Get source blob repo
+        if source_account:
+            source_repo = BlobRepository(account_name=source_account)
+        else:
+            source_repo = BlobRepository.for_zone("bronze")
+
+        # Open source Zarr
+        source_az_url = f"az://{source_container}/{source_prefix}"
+        source_storage_options = {
+            "account_name": source_repo.account_name,
+            "credential": source_repo.credential,
+        }
+
+        # Try consolidated first, fall back to non-consolidated
+        try:
+            ds = xr.open_zarr(
+                source_az_url,
+                storage_options=source_storage_options,
+                consolidated=True,
+            )
+        except Exception:
+            ds = xr.open_zarr(
+                source_az_url,
+                storage_options=source_storage_options,
+                consolidated=False,
+            )
+
+        # TODO: Analyze source chunk layout — skip rechunking if already optimal
+
+        # Build optimized encoding
+        target_chunks, encoding = _build_zarr_encoding(
+            ds, spatial_chunk_size, time_chunk_size,
+            compressor_name, compression_level,
+        )
+
+        # Rechunk in-memory
+        ds = ds.chunk(target_chunks)
+
+        # Write to silver-zarr
+        silver_repo = BlobRepository.for_zone("silver")
+        target_az_url = f"az://{target_container}/{target_prefix}"
+        target_storage_options = {
+            "account_name": silver_repo.account_name,
+            "credential": silver_repo.credential,
+        }
+
+        logger.info(f"ingest_zarr_rechunk: Writing rechunked Zarr to {target_az_url}")
+
+        ds.to_zarr(
+            target_az_url,
+            mode="w",
+            consolidated=True,
+            storage_options=target_storage_options,
+            encoding=encoding,
+        )
+
+        ds.close()
+
+        elapsed = time.time() - start
+        logger.info(
+            f"ingest_zarr_rechunk: Completed rechunk to "
+            f"{target_container}/{target_prefix}, "
+            f"chunks={target_chunks}, compressor={compressor_name} ({elapsed:.1f}s)"
+        )
+
+        return {
+            "success": True,
+            "result": {
+                "target_chunks": target_chunks,
+                "compressor": compressor_name,
+                "compression_level": compression_level,
+                "target_container": target_container,
+                "target_prefix": target_prefix,
+            },
+        }
+
+    except Exception as e:
+        elapsed = time.time() - start
+        logger.error(f"ingest_zarr_rechunk failed: {e} ({elapsed:.1f}s)")
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": type(e).__name__,
+        }

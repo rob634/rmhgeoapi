@@ -260,6 +260,13 @@ def _convert_csv(
         f"{'wkt_column=' + wkt_column if wkt_column else f'lat={lat_name}, lon={lon_name}'}"
     )
 
+    # Check for empty sample — header-only file (ERH-8)
+    if len(sample_df) == 0:
+        raise ValueError(
+            "CSV file contains only a header row with no data rows. "
+            "Ensure the file has at least one data row below the header."
+        )
+
     # Validate types on sample
     if not wkt_column:
         for col_name, col_label in [(lat_name, 'latitude'), (lon_name, 'longitude')]:

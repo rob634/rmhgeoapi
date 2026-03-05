@@ -128,6 +128,33 @@ class IngestZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
             "type": "str",
             "required": True,
         },
+        # Chunking optimization (05 MAR 2026)
+        "rechunk": {
+            "type": "bool",
+            "default": False,
+        },
+        "spatial_chunk_size": {
+            "type": "int",
+            "min": 64,
+            "max": 1024,
+            "default": 256,
+        },
+        "time_chunk_size": {
+            "type": "int",
+            "min": 1,
+            "max": 100,
+            "default": 1,
+        },
+        "compressor": {
+            "type": "str",
+            "default": "lz4",
+        },
+        "compression_level": {
+            "type": "int",
+            "min": 1,
+            "max": 9,
+            "default": 5,
+        },
     }
 
     # ========================================================================
@@ -182,23 +209,46 @@ class IngestZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
             ]
 
         elif stage == 2:
-            # Stage 2 (copy): Fan-out -- chunk blob list for parallel copy
+            # Stage 2: rechunk (single task) or copy (fan-out)
             if not previous_results:
                 raise ValueError(
-                    "Stage 2 (copy) requires previous_results from validate stage"
+                    "Stage 2 requires previous_results from validate stage"
                 )
 
             # CoreMachine._get_completed_stage_results() unwraps the handler
             # envelope and returns the "result" payload directly.
             validate_result = previous_results[0] if previous_results else {}
+
+            target_container = _get_silver_zarr_container()
+            target_prefix = f"{job_params['dataset_id']}/{job_params['resource_id']}"
+
+            # Rechunk mode: single task reads source Zarr, rechunks, writes to silver
+            if job_params.get("rechunk", False):
+                return [
+                    {
+                        "task_id": f"{job_id[:8]}-s2-rechunk",
+                        "task_type": "ingest_zarr_rechunk",
+                        "parameters": {
+                            "source_url": job_params["source_url"],
+                            "source_account": job_params["source_account"],
+                            "target_container": target_container,
+                            "target_prefix": target_prefix,
+                            "spatial_chunk_size": job_params.get("spatial_chunk_size", 256),
+                            "time_chunk_size": job_params.get("time_chunk_size", 1),
+                            "compressor": job_params.get("compressor", "lz4"),
+                            "compression_level": job_params.get("compression_level", 5),
+                            "dataset_id": job_params["dataset_id"],
+                            "resource_id": job_params["resource_id"],
+                        },
+                    }
+                ]
+
+            # Copy mode: fan-out blob copy (original behavior)
             blob_list = validate_result.get("blob_list", [])
             if not blob_list:
                 raise ValueError(
                     "Stage 2 (copy) requires non-empty blob_list from validate stage"
                 )
-
-            target_container = _get_silver_zarr_container()
-            target_prefix = f"{job_params['dataset_id']}/{job_params['resource_id']}"
 
             # Chunk blob_list into groups for parallel copy tasks
             num_chunks = math.ceil(len(blob_list) / COPY_CHUNK_SIZE)

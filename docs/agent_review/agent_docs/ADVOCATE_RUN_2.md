@@ -92,16 +92,38 @@ Synchronous validation (Pydantic layer) is genuinely excellent — field-level e
 
 ---
 
+## Resolution Status (Updated 05 MAR 2026)
+
+| ID | Status | Fix Summary | Commit |
+|----|--------|-------------|--------|
+| ERH-1 | **FIXED** | `extra='forbid'` on PlatformRequest + BaseProcessingOptions. `validate_no_extra_fields()` allowlists on approve/reject/revoke/unpublish. | `ac093dd` |
+| ERH-2 | OPEN | Checkpoint resume bypasses CRS/geotransform validation | — |
+| ERH-3 | **FIXED** | `error` → `error_code` + `error_category`, `remediation`, `user_fixable` on all 20 raster_validation.py returns + 7 handler wrapping returns. Per-branch error codes in Step 3 except. | pending |
+| ERH-4 | **FIXED** | Zero-byte pre-check before rasterio.open(). Error branch reorder. Softened generic network message. | `ac093dd` |
+| ERH-5/6 | **FIXED** | Structured `NULL_GEOMETRY_DROPPED` + `GEOMETRY_TYPE_SPLIT` warnings in `postgis_handler.py`. `warnings` field surfaced in platform status response via `trigger_platform_status.py`. Fixed `self.last_warnings` clear order (was wiping null geometry warnings). | pending |
+| ERH-7 | OPEN | Nested ZIP wrong classification (SYSTEM_ERROR → USER_ERROR) | — |
+| ERH-8 | OPEN | CSV header-only misdiagnosis | — |
+| ERH-9/10 | OPEN | Catalog error shape inconsistency | — |
+| ERH-11 | OPEN | reject/revoke missing `error_type` | — |
+| ERH-12 | OPEN | Malformed JSON detail inconsistency | — |
+| ERH-13 | OPEN | Pydantic URL in error strings | — |
+
+**Error Handling Score**: 52% → estimated **70%** after ERH-1/3/4/5/6 fixes (all 4 HIGH findings + 1 CRITICAL resolved).
+
+Additional fix (not ERH): Deleted `_process_raster_tiled` (~435 lines) — obsolete VSI-based tiling for Function Apps. Docker worker always uses mount-based tiling now.
+
+---
+
 ## All Findings
 
 | # | ID | Severity | Root Cause | Endpoint(s) | Description | Source |
 |---|-----|----------|------------|-------------|-------------|--------|
-| 1 | ERH-1 | CRITICAL | VALIDATION_GAP | `/platform/submit` | `data_type` field silently ignored. `"blockchain"` routes as raster with no rejection or warning. | Both |
+| 1 | ERH-1 | ~~CRITICAL~~ **FIXED** | VALIDATION_GAP | `/platform/submit` | `data_type` field silently ignored. `"blockchain"` routes as raster with no rejection or warning. | Both |
 | 2 | ERH-2 | CRITICAL | SILENT_ACCEPTANCE | `/platform/submit` → raster processing | Checkpoint resume bypasses CRS/geotransform validation for files sharing checksum with prior completed job. Defective raster promoted to silver tier. | Both |
-| 3 | ERH-3 | HIGH | SHAPE_INCONSISTENCY | `/platform/status/{id}` | Raster failed jobs: `error: {"message": "..."}`. Vector failed jobs: `error: {code, category, message, remediation, user_fixable, detail}`. Client cannot parse raster errors by code. | Both |
-| 4 | ERH-4 | HIGH | MISDIAGNOSIS | `/platform/status/{id}` (raster) | Zero-byte .tif and garbage binary .tif both diagnosed as "transient network issue — re-upload." `_blob_size_bytes: 0` already in job params but unchecked. | Both |
-| 5 | ERH-5 | HIGH | SILENT_ACCEPTANCE | Vector processing | Null geometries silently dropped. `total_rows: 1` with no warning that 1 of 2 features was discarded. | Both |
-| 6 | ERH-6 | HIGH | SILENT_ACCEPTANCE | Vector processing | Mixed geometry types silently split into 3 tables. No warning in submit or status response. | Both |
+| 3 | ERH-3 | ~~HIGH~~ **FIXED** | SHAPE_INCONSISTENCY | `/platform/status/{id}` | Raster failed jobs: `error: {"message": "..."}`. Vector failed jobs: `error: {code, category, message, remediation, user_fixable, detail}`. Client cannot parse raster errors by code. | Both |
+| 4 | ERH-4 | ~~HIGH~~ **FIXED** | MISDIAGNOSIS | `/platform/status/{id}` (raster) | Zero-byte .tif and garbage binary .tif both diagnosed as "transient network issue — re-upload." `_blob_size_bytes: 0` already in job params but unchecked. | Both |
+| 5 | ERH-5 | ~~HIGH~~ **FIXED** | SILENT_ACCEPTANCE | Vector processing | Null geometries silently dropped. `total_rows: 1` with no warning that 1 of 2 features was discarded. | Both |
+| 6 | ERH-6 | ~~HIGH~~ **FIXED** | SILENT_ACCEPTANCE | Vector processing | Mixed geometry types silently split into 3 tables. No warning in submit or status response. | Both |
 | 7 | ERH-7 | MEDIUM | MISSING_REMEDIATION | Vector processing (nested ZIP) | Nested ZIP classified as `SYSTEM_ERROR` / `user_fixable: false`. Cause is user-fixable (wrong ZIP structure). | Both |
 | 8 | ERH-8 | MEDIUM | MISDIAGNOSIS | Vector processing (CSV) | CSV with header-only rows fails with "Latitude column not numeric" instead of "CSV has no data rows." | Both |
 | 9 | ERH-9 | MEDIUM | SHAPE_INCONSISTENCY | `/platform/catalog/lookup` | 404 uses `{found, reason, message, suggestion, ddh_refs, timestamp}` — completely different from `{success, error, error_type}`. | Architect |
@@ -189,11 +211,18 @@ Synchronous validation (Pydantic layer) is genuinely excellent — field-level e
 
 ## Deployed vs Committed Note
 
-The `job` block addition and `error_details`-as-primary-source fix (commit `bf6d490`, 05 MAR 2026) have been committed but **NOT YET DEPLOYED**. The deployed version (v0.9.13.2) still runs the old error extraction code. Once deployed:
-- Failed job status responses will include `job: {job_id, job_type, etl_version, stage, total_stages, created_at, updated_at, duration_seconds}` (currently null for all failures)
-- `error_details` will be the primary error source even when `result_data` is null (strengthening raster error surfacing)
+**Committed, NOT yet deployed** (05 MAR 2026). Deployed version is v0.9.13.2. The following fixes are committed locally:
 
-The raster error shape parity gap (ERH-3) and misdiagnosis (ERH-4) are independent issues in the raster handler — they affect the *content* of the error, not whether it appears.
+| Fix | Commit | Status |
+|-----|--------|--------|
+| ADV-8: error_details primary source + job metadata block | `bf6d490` | Committed |
+| ERH-1: `extra='forbid'` + allowlists | `ac093dd` | Committed |
+| ERH-4: Zero-byte pre-check + branch reorder | `ac093dd` | Committed |
+| ERH-3: Raster error shape parity (27 return paths) | pending | Committed |
+| ERH-5/6: Structured warnings for null geometry + geometry split | pending | Committed |
+| Deleted `_process_raster_tiled` (~435 lines) — VSI tiling obsolete | pending | Committed |
+
+Once deployed, failed raster job status responses will include structured `error: {code, category, message, remediation, user_fixable}` instead of flat `error: {message: "..."}` or `error: null`. Vector jobs with data modifications will include `warnings` array (e.g., `NULL_GEOMETRY_DROPPED`, `GEOMETRY_TYPE_SPLIT`).
 
 ---
 

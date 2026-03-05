@@ -143,14 +143,12 @@ async def platform_catalog_lookup(req: func.HttpRequest) -> func.HttpResponse:
 
         result = service.lookup_unified(dataset_id, resource_id, version_id)
 
-        # Return 404 for not-found results
+        # Return 404 for not-found results (ERH-9: normalized shape)
         if not result.get("found", True):
-            result["success"] = False
-            return func.HttpResponse(
-                json.dumps(result, indent=2, default=str),
-                status_code=404,
-                headers={"Content-Type": "application/json"}
-            )
+            message = result.get("message", "Not found")
+            suggestion = result.get("suggestion")
+            error_msg = f"{message}. {suggestion}" if suggestion else message
+            return _catalog_error_response(404, error_msg, "NotFound")
 
         result["success"] = True
         return func.HttpResponse(
@@ -215,14 +213,10 @@ async def platform_catalog_asset_by_id(req: func.HttpRequest) -> func.HttpRespon
         asset_id = req.route_params.get('asset_id')
 
         if not asset_id:
-            return func.HttpResponse(
-                json.dumps({
-                    "error": "missing_parameters",
-                    "message": "asset_id is required in path",
-                    "example": "/api/platform/catalog/asset/{asset_id}"
-                }, indent=2),
-                status_code=400,
-                headers={"Content-Type": "application/json"}
+            return _catalog_error_response(
+                400,
+                "asset_id is required in path. Example: /api/platform/catalog/asset/{asset_id}",
+                "ValidationError"
             )
 
         logger.debug(f"Getting asset by ID: {asset_id[:16]}...")
@@ -233,13 +227,10 @@ async def platform_catalog_asset_by_id(req: func.HttpRequest) -> func.HttpRespon
 
         result = service.get_unified_urls(asset_id)
 
-        # Check if not found
+        # Check if not found (ERH-10: normalized shape)
         if not result.get("found", True):
-            return func.HttpResponse(
-                json.dumps(result, indent=2),
-                status_code=404,
-                headers={"Content-Type": "application/json"}
-            )
+            message = result.get("message", f"Asset '{asset_id}' not found")
+            return _catalog_error_response(404, message, "NotFound")
 
         return func.HttpResponse(
             json.dumps(result, indent=2, default=str),
@@ -297,14 +288,11 @@ async def platform_catalog_item(req: func.HttpRequest) -> func.HttpResponse:
         item_id = req.route_params.get('item_id')
 
         if not collection_id or not item_id:
-            return func.HttpResponse(
-                json.dumps({
-                    "error": "missing_parameters",
-                    "message": "Both collection_id and item_id are required in path",
-                    "example": "/api/platform/catalog/item/{collection_id}/{item_id}"
-                }, indent=2),
-                status_code=400,
-                headers={"Content-Type": "application/json"}
+            return _catalog_error_response(
+                400,
+                "Both collection_id and item_id are required in path. "
+                "Example: /api/platform/catalog/item/{collection_id}/{item_id}",
+                "ValidationError"
             )
 
         logger.debug(f"Getting item: {collection_id}/{item_id}")
@@ -392,14 +380,11 @@ async def platform_catalog_assets(req: func.HttpRequest) -> func.HttpResponse:
         item_id = req.route_params.get('item_id')
 
         if not collection_id or not item_id:
-            return func.HttpResponse(
-                json.dumps({
-                    "error": "missing_parameters",
-                    "message": "Both collection_id and item_id are required in path",
-                    "example": "/api/platform/catalog/assets/{collection_id}/{item_id}"
-                }, indent=2),
-                status_code=400,
-                headers={"Content-Type": "application/json"}
+            return _catalog_error_response(
+                400,
+                "Both collection_id and item_id are required in path. "
+                "Example: /api/platform/catalog/assets/{collection_id}/{item_id}",
+                "ValidationError"
             )
 
         # Parse optional query parameter
@@ -413,13 +398,10 @@ async def platform_catalog_assets(req: func.HttpRequest) -> func.HttpResponse:
 
         result = service.get_asset_urls(collection_id, item_id, include_titiler)
 
-        # Check for error response
+        # Check for error response (ERH-10: normalized shape)
         if "error" in result:
-            return func.HttpResponse(
-                json.dumps(result, indent=2),
-                status_code=404,
-                headers={"Content-Type": "application/json"}
-            )
+            message = result.get("message", result.get("error", "Not found"))
+            return _catalog_error_response(404, message, "NotFound")
 
         # Add timestamp
         result["timestamp"] = datetime.now(timezone.utc).isoformat()
@@ -493,14 +475,10 @@ async def platform_catalog_dataset(req: func.HttpRequest) -> func.HttpResponse:
         dataset_id = req.route_params.get('dataset_id')
 
         if not dataset_id:
-            return func.HttpResponse(
-                json.dumps({
-                    "error": "missing_parameters",
-                    "message": "dataset_id is required in path",
-                    "example": "/api/platform/catalog/dataset/{dataset_id}"
-                }, indent=2),
-                status_code=400,
-                headers={"Content-Type": "application/json"}
+            return _catalog_error_response(
+                400,
+                "dataset_id is required in path. Example: /api/platform/catalog/dataset/{dataset_id}",
+                "ValidationError"
             )
 
         # Parse optional limit and offset

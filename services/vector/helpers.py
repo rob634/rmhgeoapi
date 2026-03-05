@@ -180,6 +180,17 @@ def extract_zip_file(
         # Extract all files
         zf.extractall(dest_dir)
 
+        # Check for nested ZIPs (ERH-7) — users must flatten archives
+        for root, dirs, files in os.walk(dest_dir):
+            for file in files:
+                if file.lower().endswith('.zip'):
+                    raise ValueError(
+                        f"ZIP archive contains a nested ZIP file '{file}'. "
+                        f"Please flatten the archive so that data files "
+                        f"(.shp, .geojson, etc.) are at the top level, "
+                        f"not inside nested ZIPs."
+                    )
+
         # Find target file
         for root, dirs, files in os.walk(dest_dir):
             for file in files:

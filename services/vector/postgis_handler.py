@@ -115,6 +115,10 @@ class VectorToPostGISHandler:
         def emit(event_name: str, details: Dict[str, Any]):
             if event_callback:
                 event_callback(event_name, details)
+
+        # Clear warnings from previous calls (collected throughout prepare_gdf)
+        self.last_warnings = []
+
         # Remove null geometries with detailed diagnostics
         original_count = len(gdf)
         null_mask = gdf.geometry.isna()
@@ -153,12 +157,25 @@ class VectorToPostGISHandler:
 
         if len(gdf) < original_count:
             removed = original_count - len(gdf)
-            logger.warning(f"   - ⚠️  Removed {removed} null geometries ({removed/original_count*100:.1f}%)")
+            pct = round(removed / original_count * 100, 1)
+            logger.warning(f"   - ⚠️  Removed {removed} null geometries ({pct}%)")
             logger.info(f"   - ✅ Valid geometries remaining: {len(gdf)}")
             emit("null_geometry_removal", {
                 "removed": removed,
                 "remaining": len(gdf),
-                "percent_removed": round(removed / original_count * 100, 1)
+                "percent_removed": pct
+            })
+            # ERH-5: Surface warning to client via job result
+            self.last_warnings.append({
+                "type": "NULL_GEOMETRY_DROPPED",
+                "severity": "WARNING",
+                "count": removed,
+                "original_count": original_count,
+                "remaining_count": len(gdf),
+                "message": (
+                    f"{removed} of {original_count} features had null geometries and were dropped. "
+                    f"{len(gdf)} features remaining."
+                ),
             })
         else:
             emit("null_geometry_check", {
@@ -506,7 +523,6 @@ class VectorToPostGISHandler:
         # Solution: Set out-of-range datetime values to NULL (NaT) with warning.
         # Warnings are stored in self.last_warnings for inclusion in job results.
         # ========================================================================
-        self.last_warnings = []  # Clear warnings from previous calls
 
         # Python datetime valid range
         MIN_YEAR = 1
@@ -712,6 +728,18 @@ class VectorToPostGISHandler:
             emit("geometry_type_split", {
                 "types": type_summary,
                 "total_features": len(gdf)
+            })
+            # ERH-6: Surface warning to client via job result
+            type_list = ', '.join(f"{k} ({v})" for k, v in type_summary.items())
+            self.last_warnings.append({
+                "type": "GEOMETRY_TYPE_SPLIT",
+                "severity": "WARNING",
+                "tables_created": len(groups),
+                "geometry_types": type_summary,
+                "message": (
+                    f"File contains mixed geometry types. "
+                    f"Data was split into {len(groups)} tables: {type_list}."
+                ),
             })
         else:
             key = list(groups.keys())[0]

@@ -132,8 +132,11 @@ def validate_raster_header(params: dict) -> dict:
                 "memory_estimation": {...},
                 "warnings": [...]
             },
-            "error": "ERROR_CODE" (if failed),
-            "message": "Error description" (if failed)
+            "error_code": "ERROR_CODE" (if failed),
+            "error_category": "CATEGORY" (if failed),
+            "message": "Error description" (if failed),
+            "remediation": "How to fix" (if failed),
+            "user_fixable": bool (if failed)
         }
     """
     import traceback
@@ -151,8 +154,10 @@ def validate_raster_header(params: dict) -> dict:
         print(f"❌ STEP 0 FAILED: Logger initialization error: {e}", file=sys.stderr, flush=True)
         return {
             "success": False,
-            "error": "LOGGER_INIT_FAILED",
+            "error_code": "LOGGER_INIT_FAILED",
+            "error_category": "SYSTEM_ERROR",
             "message": f"Failed to initialize logger: {e}",
+            "user_fixable": False,
             "blob_name": params.get("blob_name")
         }
 
@@ -171,8 +176,10 @@ def validate_raster_header(params: dict) -> dict:
             logger.error("❌ [HEADER] STEP 1 FAILED: blob_url parameter is required")
             return {
                 "success": False,
-                "error": "MISSING_PARAMETER",
+                "error_code": "MISSING_PARAMETER",
+                "error_category": "SYSTEM_ERROR",
                 "message": "blob_url parameter is required",
+                "user_fixable": False,
                 "blob_name": blob_name,
                 "container_name": container_name
             }
@@ -180,8 +187,10 @@ def validate_raster_header(params: dict) -> dict:
         logger.error(f"❌ [HEADER] STEP 1 FAILED: Parameter extraction error: {e}\n{traceback.format_exc()}")
         return {
             "success": False,
-            "error": "PARAMETER_ERROR",
+            "error_code": "PARAMETER_ERROR",
+            "error_category": "SYSTEM_ERROR",
             "message": f"Failed to extract parameters: {e}",
+            "user_fixable": False,
             "traceback": traceback.format_exc()
         }
 
@@ -206,8 +215,10 @@ def validate_raster_header(params: dict) -> dict:
         logger.error(f"❌ [HEADER] STEP 2 FAILED: Import error: {e}\n{traceback.format_exc()}")
         return {
             "success": False,
-            "error": "IMPORT_ERROR",
+            "error_code": "IMPORT_ERROR",
+            "error_category": "SYSTEM_ERROR",
             "message": f"Failed to import dependencies: {e}",
+            "user_fixable": False,
             "blob_name": blob_name,
             "container_name": container_name,
             "traceback": traceback.format_exc()
@@ -216,9 +227,11 @@ def validate_raster_header(params: dict) -> dict:
         logger.error(f"❌ [HEADER] STEP 2 FAILED: Unexpected error during import: {e}\n{traceback.format_exc()}")
         return {
             "success": False,
-            "error": "IMPORT_ERROR",
+            "error_code": "IMPORT_ERROR",
+            "error_category": "SYSTEM_ERROR",
             "error_type": type(e).__name__,
             "message": f"Unexpected error loading dependencies: {e}",
+            "user_fixable": False,
             "blob_name": blob_name,
             "container_name": container_name,
             "traceback": traceback.format_exc()
@@ -313,12 +326,15 @@ def validate_raster_header(params: dict) -> dict:
         logger.error(f"❌ [HEADER] STEP 2c FAILED: File is zero bytes: {blob_name}")
         return {
             "success": False,
-            "error": "FILE_EMPTY",
+            "error_code": "FILE_EMPTY",
+            "error_category": "DATA_QUALITY",
             "message": (
                 f"File '{blob_name}' is empty (0 bytes). "
                 f"The file may not have uploaded correctly, or the source is an empty placeholder. "
                 f"Verify the file has content before resubmitting."
             ),
+            "remediation": "Re-upload the file or verify it has content before submitting.",
+            "user_fixable": True,
             "blob_name": blob_name,
             "container_name": container_name,
         }
@@ -338,13 +354,16 @@ def validate_raster_header(params: dict) -> dict:
             logger.error(f"❌ [HEADER] STEP 3b FAILED: File is {src.driver}, not GTiff")
             return {
                 "success": False,
-                "error": "INVALID_FORMAT",
+                "error_code": "INVALID_FORMAT",
+                "error_category": "DATA_QUALITY",
                 "message": (
                     f"File '{blob_name}' has a .tif extension but is actually "
                     f"a {src.driver} format (detected by GDAL). "
                     f"This is not a GeoTIFF. "
                     f"Convert: gdal_translate -of GTiff '{blob_name}' output.tif"
                 ),
+                "remediation": f"Convert to GeoTIFF: gdal_translate -of GTiff '{blob_name}' output.tif",
+                "user_fixable": True,
                 "blob_name": blob_name,
                 "container_name": container_name,
                 "detected_driver": src.driver
@@ -353,43 +372,62 @@ def validate_raster_header(params: dict) -> dict:
         logger.error(f"❌ [HEADER] STEP 3 FAILED: Cannot open raster file: {e}\n{traceback.format_exc()}")
 
         error_str = str(e).lower()
+        error_code = "FILE_UNREADABLE"
+        error_category = "DATA_QUALITY"
+        user_fixable = True
+        remediation = f"Verify the file locally with 'gdalinfo {blob_name}' before re-uploading."
+
         if 'not recognized as a supported file format' in error_str:
+            error_code = "INVALID_FORMAT"
             user_message = (
                 f"File '{blob_name}' is not a valid raster image. "
                 f"It may be corrupted, a text file, PDF, ZIP archive, or other non-raster format. "
                 f"Verify the file opens in QGIS or with 'gdalinfo {blob_name}' before uploading."
             )
+            remediation = f"Upload a valid GeoTIFF. Verify with 'gdalinfo {blob_name}' before uploading."
         elif ('http' in error_str or 'curl' in error_str) and blob_size_bytes is not None and blob_size_bytes == 0:
             # Zero-byte file triggers HTTP 403/416 from Azure — not a network issue (ERH-4)
+            error_code = "FILE_EMPTY"
             user_message = (
                 f"File '{blob_name}' is empty (0 bytes). "
                 f"The file may not have uploaded correctly, or the source is an empty placeholder. "
                 f"Verify the file has content before resubmitting."
             )
+            remediation = "Re-upload the file or verify it has content before submitting."
         elif ('http' in error_str or 'curl' in error_str) and blob_size_bytes is not None and blob_size_bytes < 100:
             # Very small file (under 100 bytes) — not a real raster
+            error_code = "FILE_TOO_SMALL"
             user_message = (
                 f"File '{blob_name}' is only {blob_size_bytes} bytes — too small to be a valid raster. "
                 f"The file may be corrupted or a placeholder. "
                 f"Verify the file has content before resubmitting."
             )
+            remediation = "Re-upload the file or verify it has content before submitting."
         elif 'http' in error_str or 'curl' in error_str:
+            error_category = "STORAGE_ERROR"
+            user_fixable = False
             user_message = (
                 f"Could not read file '{blob_name}' from storage. "
                 f"This may be a transient network issue, or the file may be corrupted. "
                 f"Verify the file opens locally with 'gdalinfo {blob_name}', then resubmit."
             )
+            remediation = "Retry the submission. If the error persists, verify the file locally and re-upload."
         elif 'ireadblock' in error_str or 'tiffread' in error_str:
+            error_code = "FILE_CORRUPTED"
             user_message = (
                 f"File '{blob_name}' has a valid TIFF header but the pixel data is corrupted. "
                 f"The upload may have been interrupted or the source file is damaged. "
                 f"Re-upload the file or re-export from the source application."
             )
+            remediation = "Re-upload the file or re-export from the source application."
         elif 'no such file' in error_str or 'does not exist' in error_str:
+            error_code = "FILE_NOT_FOUND"
+            error_category = "DATA_MISSING"
             user_message = (
                 f"File '{blob_name}' was not found at the expected storage path. "
                 f"Check the container name and file path are correct."
             )
+            remediation = "Check the container name and file path are correct, then resubmit."
         else:
             user_message = (
                 f"Cannot open raster file '{blob_name}'. "
@@ -399,8 +437,11 @@ def validate_raster_header(params: dict) -> dict:
 
         return {
             "success": False,
-            "error": "FILE_UNREADABLE",
+            "error_code": error_code,
+            "error_category": error_category,
             "message": user_message,
+            "remediation": remediation,
+            "user_fixable": user_fixable,
             "gdal_error": str(e),
             "blob_name": blob_name,
             "container_name": container_name,
@@ -471,8 +512,11 @@ def validate_raster_header(params: dict) -> dict:
                 logger.error(f"❌ [HEADER] STEP 5 FAILED: CRS validation error: {e}\n{traceback.format_exc()}")
                 return {
                     "success": False,
-                    "error": "CRS_VALIDATION_ERROR",
+                    "error_code": "CRS_VALIDATION_ERROR",
+                    "error_category": "DATA_QUALITY",
                     "message": f"CRS validation failed: {e}",
+                    "remediation": "Verify the file has a valid CRS. Assign one with: gdal_edit.py -a_srs EPSG:XXXX your_file.tif",
+                    "user_fixable": True,
                     "blob_name": blob_name,
                     "container_name": container_name,
                     "traceback": traceback.format_exc()
@@ -483,12 +527,12 @@ def validate_raster_header(params: dict) -> dict:
                 logger.info("🔄 [HEADER] STEP 6: Validating geotransform...")
                 geotransform_result = _validate_geotransform(src)
                 if not geotransform_result["success"]:
-                    logger.error(f"❌ [HEADER] STEP 6 FAILED: {geotransform_result.get('error')}")
+                    logger.error(f"❌ [HEADER] STEP 6 FAILED: {geotransform_result.get('error_code')}")
                     return geotransform_result
                 logger.info("✅ [HEADER] STEP 6: Geotransform valid")
             except Exception as e:
                 logger.error(f"❌ [HEADER] STEP 6 FAILED: {e}")
-                return {"success": False, "error": "GEOTRANSFORM_CHECK_FAILED", "message": str(e)}
+                return {"success": False, "error_code": "GEOTRANSFORM_CHECK_FAILED", "error_category": "DATA_QUALITY", "message": str(e), "remediation": "Verify the file has a valid geotransform.", "user_fixable": True}
 
             # Build header-only result (no raster_type, cog_tiers, bit_depth_check)
             try:
@@ -534,8 +578,10 @@ def validate_raster_header(params: dict) -> dict:
                 logger.error(f"❌ [HEADER] Result build error: {e}\n{traceback.format_exc()}")
                 return {
                     "success": False,
-                    "error": "RESULT_BUILD_ERROR",
+                    "error_code": "RESULT_BUILD_ERROR",
+                    "error_category": "SYSTEM_ERROR",
                     "message": f"Failed to build header validation result: {e}",
+                    "user_fixable": False,
                     "blob_name": blob_name,
                     "container_name": container_name,
                     "traceback": traceback.format_exc()
@@ -545,9 +591,11 @@ def validate_raster_header(params: dict) -> dict:
         logger.error(f"❌ [HEADER] Unexpected error: {e}\n{traceback.format_exc()}")
         return {
             "success": False,
-            "error": "VALIDATION_ERROR",
+            "error_code": "VALIDATION_ERROR",
+            "error_category": "SYSTEM_ERROR",
             "error_type": type(e).__name__,
             "message": f"Unexpected header validation error: {e}",
+            "user_fixable": False,
             "blob_name": blob_name,
             "container_name": container_name,
             "traceback": traceback.format_exc()
@@ -588,8 +636,11 @@ def validate_raster_data(data_params: dict, header_result: dict) -> dict:
                     "cog_tiers": COGTierInfo,
                     "bit_depth_check": BitDepthCheck,
                 },
-                "error": "ERROR_CODE" (if failed),
-                "message": "Error description" (if failed)
+                "error_code": "ERROR_CODE" (if failed),
+                "error_category": "CATEGORY" (if failed),
+                "message": "Error description" (if failed),
+                "remediation": "How to fix" (if failed),
+                "user_fixable": bool (if failed)
             }
     """
     import traceback
@@ -603,8 +654,10 @@ def validate_raster_data(data_params: dict, header_result: dict) -> dict:
         print(f"❌ [DATA] Logger init failed: {e}", file=sys.stderr, flush=True)
         return {
             "success": False,
-            "error": "LOGGER_INIT_FAILED",
+            "error_code": "LOGGER_INIT_FAILED",
+            "error_category": "SYSTEM_ERROR",
             "message": f"Failed to initialize logger: {e}",
+            "user_fixable": False,
         }
 
     # Extract parameters
@@ -623,8 +676,10 @@ def validate_raster_data(data_params: dict, header_result: dict) -> dict:
         logger.error("❌ [DATA] file_path parameter is required")
         return {
             "success": False,
-            "error": "MISSING_PARAMETER",
+            "error_code": "MISSING_PARAMETER",
+            "error_category": "SYSTEM_ERROR",
             "message": "file_path parameter is required for data validation",
+            "user_fixable": False,
         }
 
     try:
@@ -633,8 +688,10 @@ def validate_raster_data(data_params: dict, header_result: dict) -> dict:
         logger.error(f"❌ [DATA] Import error: {e}")
         return {
             "success": False,
-            "error": "IMPORT_ERROR",
+            "error_code": "IMPORT_ERROR",
+            "error_category": "SYSTEM_ERROR",
             "message": f"Failed to import dependencies: {e}",
+            "user_fixable": False,
             "traceback": traceback.format_exc()
         }
 
@@ -686,8 +743,11 @@ def validate_raster_data(data_params: dict, header_result: dict) -> dict:
                         logger.error("❌ [DATA] STEP D3: CRITICAL bit-depth policy violation")
                         return {
                             "success": False,
-                            "error": "BIT_DEPTH_POLICY_VIOLATION",
+                            "error_code": "BIT_DEPTH_POLICY_VIOLATION",
+                            "error_category": "DATA_QUALITY",
                             "message": bit_depth_result["warning"]["message"],
+                            "remediation": "Reduce bit depth (e.g., float64 → float32) before uploading.",
+                            "user_fixable": True,
                             "bit_depth_check": bit_depth_result,
                             "blob_name": blob_name,
                             "container_name": container_name
@@ -742,8 +802,10 @@ def validate_raster_data(data_params: dict, header_result: dict) -> dict:
                 logger.error(f"❌ [DATA] STEP D5: Type detection error: {e}\n{traceback.format_exc()}")
                 return {
                     "success": False,
-                    "error": "TYPE_DETECTION_ERROR",
+                    "error_code": "TYPE_DETECTION_ERROR",
+                    "error_category": "SYSTEM_ERROR",
                     "message": f"Type detection failed: {e}",
+                    "user_fixable": False,
                     "blob_name": blob_name,
                     "container_name": container_name,
                     "traceback": traceback.format_exc()
@@ -847,8 +909,10 @@ def validate_raster_data(data_params: dict, header_result: dict) -> dict:
                 logger.error(f"❌ [DATA] Result build error: {e}\n{traceback.format_exc()}")
                 return {
                     "success": False,
-                    "error": "RESULT_BUILD_ERROR",
+                    "error_code": "RESULT_BUILD_ERROR",
+                    "error_category": "SYSTEM_ERROR",
                     "message": f"Failed to build data validation result: {e}",
+                    "user_fixable": False,
                     "blob_name": blob_name,
                     "container_name": container_name,
                     "traceback": traceback.format_exc()
@@ -858,9 +922,11 @@ def validate_raster_data(data_params: dict, header_result: dict) -> dict:
         logger.error(f"❌ [DATA] Unexpected error: {e}\n{traceback.format_exc()}")
         return {
             "success": False,
-            "error": "VALIDATION_ERROR",
+            "error_code": "VALIDATION_ERROR",
+            "error_category": "SYSTEM_ERROR",
             "error_type": type(e).__name__,
             "message": f"Unexpected data validation error: {e}",
+            "user_fixable": False,
             "blob_name": blob_name,
             "container_name": container_name,
             "traceback": traceback.format_exc()
@@ -888,8 +954,11 @@ def validate_raster(params: dict) -> dict:
         dict: {
             "success": True/False,
             "result": {...validation metadata...},
-            "error": "ERROR_CODE" (if failed),
-            "message": "Error description" (if failed)
+            "error_code": "ERROR_CODE" (if failed),
+            "error_category": "CATEGORY" (if failed),
+            "message": "Error description" (if failed),
+            "remediation": "How to fix" (if failed),
+            "user_fixable": bool (if failed)
         }
     """
     # Phase 1: Header validation (cheap, no pixel reads)
@@ -956,12 +1025,15 @@ def _validate_crs(src, input_crs: Optional[str], bounds, skip_validation: bool =
                     logger.error(f"❌ VALIDATION CRS: MISMATCH - File: {file_crs_str}, User: {input_crs}")
                     return {
                         "success": False,
-                        "error": "CRS_MISMATCH",
+                        "error_code": "CRS_MISMATCH",
+                        "error_category": "DATA_QUALITY",
                         "file_crs": file_crs_str,
                         "user_crs": input_crs,
                         "message": f"CRS mismatch: File metadata indicates {file_crs_str} but user specified {input_crs}. "
                                    f"Either the file is mislabeled or the user parameter is wrong. "
                                    f"Fix the source file metadata or remove the source_crs parameter to use file CRS.",
+                        "remediation": "Fix the source file CRS metadata, or remove the source_crs parameter to use the file's embedded CRS.",
+                        "user_fixable": True,
                         "file_info": {
                             "bounds": list(bounds),
                             "shape": src.shape
@@ -1016,7 +1088,8 @@ def _validate_crs(src, input_crs: Optional[str], bounds, skip_validation: bool =
             logger.error(f"❌ VALIDATION CRS: Missing CRS, rejecting file")
             return {
                 "success": False,
-                "error": "CRS_MISSING",
+                "error_code": "CRS_MISSING",
+                "error_category": "DATA_QUALITY",
                 "message": (
                     "Raster file has no coordinate reference system (CRS) in its metadata. "
                     "This file cannot be processed. Re-export from the source application "
@@ -1049,7 +1122,8 @@ def _validate_geotransform(src) -> dict:
     if is_identity or is_zero_scale:
         return {
             "success": False,
-            "error": "GEOTRANSFORM_MISSING",
+            "error_code": "GEOTRANSFORM_MISSING",
+            "error_category": "DATA_QUALITY",
             "message": "Raster file has no valid geotransform (spatial reference). "
                        "Pixel coordinates cannot be mapped to geographic coordinates. "
                        "Re-export from the source application with georeferencing, or assign with: "
@@ -1384,7 +1458,8 @@ def _detect_raster_type(src, band_stats: dict, user_type: str) -> dict:
             logger.error(f"❌ VALIDATION TYPE: MISMATCH - User: {user_type}, Detected: {detected_type}")
             return {
                 "success": False,
-                "error": "RASTER_TYPE_MISMATCH",
+                "error_code": "RASTER_TYPE_MISMATCH",
+                "error_category": "DATA_QUALITY",
                 "user_specified_type": user_type,
                 "detected_type": detected_type,
                 "confidence": confidence,
@@ -1397,7 +1472,9 @@ def _detect_raster_type(src, band_stats: dict, user_type: str) -> dict:
                 "message": f"User specified raster_type='{user_type}' but file characteristics indicate '{detected_type}'. "
                            f"File has {band_count} bands, dtype {dtype}. "
                            f"Evidence: {'; '.join(evidence)}. "
-                           f"Either fix the source file or use correct raster_type parameter."
+                           f"Either fix the source file or use correct raster_type parameter.",
+                "remediation": f"Either use raster_type='{detected_type}' or fix the source file to match '{user_type}'.",
+                "user_fixable": True,
             }
 
     return {
@@ -1805,8 +1882,10 @@ def _check_data_quality(
             "nodata_percent": float,
             "value_range": (min, max),
             "warnings": [...],
-            "error": ErrorCode (if failed),
-            "message": str (if failed)
+            "error_code": ErrorCode (if failed),
+            "error_category": str (if failed),
+            "message": str (if failed),
+            "user_fixable": bool (if failed)
         }
 
     Error Codes Used:

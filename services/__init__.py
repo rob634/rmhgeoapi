@@ -91,6 +91,7 @@ from .handler_ingest_zarr import (
     ingest_zarr_validate,
     ingest_zarr_copy,
     ingest_zarr_register,
+    ingest_zarr_rechunk,
 )
 
 # NetCDF-to-Zarr handlers (real conversion pipeline, replaces virtualzarr)
@@ -175,6 +176,7 @@ ALL_HANDLERS = {
     "ingest_zarr_validate": ingest_zarr_validate,
     "ingest_zarr_copy": ingest_zarr_copy,
     "ingest_zarr_register": ingest_zarr_register,
+    "ingest_zarr_rechunk": ingest_zarr_rechunk,
 
     # NetCDF-to-Zarr handlers (real conversion pipeline)
     "netcdf_scan": netcdf_scan,

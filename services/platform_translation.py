@@ -466,6 +466,12 @@ def translate_to_coremachine(
                 'dataset_id': request.dataset_id,
                 'resource_id': request.resource_id,
                 'version_id': request.version_id,
+                # Chunking optimization (05 MAR 2026)
+                'spatial_chunk_size': getattr(opts, 'spatial_chunk_size', 256),
+                'time_chunk_size': getattr(opts, 'time_chunk_size', 1),
+                'compressor': getattr(opts, 'compressor', 'lz4'),
+                'compression_level': getattr(opts, 'compression_level', 5),
+                'rechunk': getattr(opts, 'rechunk', False),
             }
 
         elif pipeline == 'virtualzarr':
@@ -502,6 +508,11 @@ def translate_to_coremachine(
                 'dataset_id': request.dataset_id,
                 'resource_id': request.resource_id,
                 'version_id': request.version_id,
+                # Chunking optimization (05 MAR 2026)
+                'spatial_chunk_size': getattr(opts, 'spatial_chunk_size', 256),
+                'time_chunk_size': getattr(opts, 'time_chunk_size', 1),
+                'compressor': getattr(opts, 'compressor', 'lz4'),
+                'compression_level': getattr(opts, 'compression_level', 5),
             }
 
     # ========================================================================

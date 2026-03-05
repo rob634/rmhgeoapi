@@ -562,6 +562,17 @@ def _build_single_status_response(
     else:
         result["job"] = None
 
+    # Warnings (ERH-5/6): Surface data_warnings from handler result
+    # These include NULL_GEOMETRY_DROPPED, GEOMETRY_TYPE_SPLIT, datetime issues, etc.
+    warnings_list = None
+    if job_result and isinstance(job_result, dict):
+        inner_result = job_result.get("result", {})
+        if isinstance(inner_result, dict):
+            raw_warnings = inner_result.get("data_warnings")
+            if raw_warnings:
+                warnings_list = raw_warnings
+    result["warnings"] = warnings_list
+
     # Outputs (from Release record, not job_result)
     result["outputs"] = _build_outputs_block(release, job_result)
 

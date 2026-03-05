@@ -1,6 +1,6 @@
 # Working Backlog - ADO Aligned
 
-**Last Updated**: 04 MAR 2026
+**Last Updated**: 05 MAR 2026
 **Source of Truth**: [V0.8_ADO_WORKITEMS.md](/ado_wiki/V0.8_ADO_WORKITEMS.md)
 **Structure**: EPIC → FEATURE → User Story → Tasks
 
@@ -41,6 +41,7 @@
 5-stage pipeline implemented: scan → copy → validate → combine → register.
 Native Zarr ingest (IngestZarr) also added in v0.9.11.8 as 3-stage pipeline.
 xarray TiTiler URL injection into STAC items at materialization (v0.9.11.10).
+Zarr chunking optimization for tile serving added in v0.9.13.4.
 
 | Task | Status | Details |
 |------|--------|---------|
@@ -48,6 +49,7 @@ xarray TiTiler URL injection into STAC items at materialization (v0.9.11.10).
 | TiTiler-xarray integration | ✅ Done | xarray TiTiler URLs injected at STAC materialization (v0.9.11.10) |
 | STAC collection with VirtualiZarr assets | ✅ Done | Zarr STAC items created at approval |
 | Native Zarr ingest pipeline | ✅ Done | IngestZarr 3-stage pipeline (v0.9.11.8) |
+| Zarr chunking optimization | ✅ Done | Optimized chunking (256×256 spatial, time=1, Blosc+LZ4) in both pipelines (v0.9.13.4) |
 
 ### EN 1.6: DAG Orchestration Migration `[FUTURE]`
 
@@ -310,6 +312,14 @@ Migrated 37 occurrences across 22 code files from raw `req.get_json()` to `parse
 
 | Date | Feature | Task |
 |------|---------|------|
+| 05 MAR 2026 | Zarr Pipeline | Zarr chunking optimization — `_build_zarr_encoding()` helper, `ingest_zarr_rechunk` handler, 5 new `ZarrProcessingOptions` fields (v0.9.13.4) |
+| 05 MAR 2026 | Error Handling | ERH-5/6: Vector data warnings — structured `NULL_GEOMETRY_DROPPED` + `GEOMETRY_TYPE_SPLIT` in postgis_handler.py, `warnings` field in platform status response |
+| 05 MAR 2026 | Raster Pipeline | Deleted `_process_raster_tiled` (~435 lines) — obsolete VSI tiling for Function Apps. Docker worker always uses mount-based tiling. |
+| 05 MAR 2026 | Error Handling | ERH-3: Raster error shape parity — `error_code` + `error_category`, `remediation`, `user_fixable` on 27 return paths across raster_validation.py + handler |
+| 05 MAR 2026 | Error Handling | ERH-4: Raster misdiagnosis — zero-byte pre-check, error branch reorder, softened network message |
+| 05 MAR 2026 | Error Handling | ERH-1: Unknown field rejection — `extra='forbid'` on Pydantic models + `validate_no_extra_fields()` allowlists on 4 raw-dict endpoints |
+| 05 MAR 2026 | Error Handling | ADV-8: Platform status `error: null` fix — `error_details` primary source + job metadata block on failure |
+| 05 MAR 2026 | Review | ADVOCATE Run 2 (Run 36): Error handling audit — 34 test vectors, 13 findings, score 52% |
 | 04 MAR 2026 | Platform | ADV-11: Idempotent submit response includes `job_type` — matches fresh submit shape |
 | 04 MAR 2026 | Platform | ADV-12: Fix catalog 500s — `list_dataset_unified()` missing `dict_row` cursor |
 | 04 MAR 2026 | OpenAPI | ADV-15: Spec bumped to 0.9.12, +4 endpoints (registry x2, approvals/{id}, catalog/asset/{id}), stale copy deleted |

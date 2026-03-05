@@ -211,6 +211,29 @@ class NetCDFToZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
             "type": "str",
             "required": True,
         },
+        # Chunking optimization (05 MAR 2026)
+        "spatial_chunk_size": {
+            "type": "int",
+            "min": 64,
+            "max": 1024,
+            "default": 256,
+        },
+        "time_chunk_size": {
+            "type": "int",
+            "min": 1,
+            "max": 100,
+            "default": 1,
+        },
+        "compressor": {
+            "type": "str",
+            "default": "lz4",
+        },
+        "compression_level": {
+            "type": "int",
+            "min": 1,
+            "max": 9,
+            "default": 5,
+        },
     }
 
     # ========================================================================
@@ -367,6 +390,11 @@ class NetCDFToZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                         "zarr_container": zarr_container,
                         "dataset_id": job_params["dataset_id"],
                         "resource_id": job_params["resource_id"],
+                        # Chunking optimization
+                        "spatial_chunk_size": job_params.get("spatial_chunk_size", 256),
+                        "time_chunk_size": job_params.get("time_chunk_size", 1),
+                        "compressor": job_params.get("compressor", "lz4"),
+                        "compression_level": job_params.get("compression_level", 5),
                     },
                 }
             ]

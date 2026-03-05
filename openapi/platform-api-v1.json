@@ -1515,7 +1515,8 @@
           },
           "approval_state": {
             "type": "string",
-            "enum": ["PENDING", "APPROVED", "REJECTED", "REVOKED"]
+            "enum": ["PENDING", "APPROVED", "REJECTED", "REVOKED"],
+            "description": "Resulting QA workflow state after the action."
           },
           "reviewer": {
             "type": "string"
@@ -1531,22 +1532,22 @@
       },
       "EntityState": {
         "type": "object",
-        "description": "Three-state entity model",
+        "description": "Three independent state dimensions for every asset release.\n\n- **processing_status**: Pipeline execution state (set by CoreMachine).\n- **approval_state**: QA workflow state (set by reviewers via /approve, /reject, /revoke).\n- **clearance_state**: Access-control / distribution scope (set at approval time).\n\nThese three states are orthogonal — a release can be processing=COMPLETED, approval=pending_review, clearance=uncleared simultaneously.",
         "properties": {
           "processing_status": {
             "type": "string",
             "enum": ["PENDING", "PROCESSING", "COMPLETED", "FAILED"],
-            "description": "Job processing state"
+            "description": "Pipeline execution state. Set automatically by CoreMachine as the job progresses."
           },
           "approval_state": {
             "type": "string",
             "enum": ["pending_review", "approved", "rejected", "revoked"],
-            "description": "QA approval state"
+            "description": "QA workflow state. Controls whether data is published. pending_review = awaiting QA, approved = published to catalog, rejected = failed QA review, revoked = previously approved but unpublished."
           },
           "clearance_state": {
             "type": "string",
             "enum": ["uncleared", "ouo", "public"],
-            "description": "Data access clearance level"
+            "description": "Access-control level that determines distribution scope. uncleared = default/internal only (not yet reviewed for sensitivity), ouo = Official Use Only (confirmed internal distribution), public = approved for external distribution (triggers ADF export to public zone)."
           }
         }
       },
@@ -1659,11 +1660,13 @@
           },
           "approval_state": {
             "type": "string",
-            "enum": ["approved", "rejected", "revoked"]
+            "enum": ["approved", "rejected", "revoked"],
+            "description": "Resulting QA workflow state after the action."
           },
           "clearance_state": {
             "type": "string",
-            "enum": ["ouo", "public"]
+            "enum": ["ouo", "public"],
+            "description": "Access-control level granted (only present for approvals). ouo = internal, public = external distribution."
           },
           "action": {
             "type": "string",
@@ -1733,11 +1736,13 @@
           },
           "approval_state": {
             "type": "string",
-            "enum": ["pending_review", "approved", "rejected", "revoked"]
+            "enum": ["pending_review", "approved", "rejected", "revoked"],
+            "description": "QA workflow state. Controls publication. See EntityState for value meanings."
           },
           "clearance_state": {
             "type": "string",
-            "enum": ["uncleared", "ouo", "public"]
+            "enum": ["uncleared", "ouo", "public"],
+            "description": "Access-control level. Determines distribution scope. See EntityState for value meanings."
           },
           "reviewer": {
             "type": "string"
@@ -1771,13 +1776,15 @@
                 },
                 "approval_state": {
                   "type": "string",
-                  "enum": ["pending_review", "approved", "rejected", "revoked"]
+                  "enum": ["pending_review", "approved", "rejected", "revoked"],
+                  "description": "QA workflow state. See EntityState for value meanings."
                 },
                 "is_approved": {
                   "type": "boolean"
                 },
                 "clearance_state": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Access-control level. See EntityState for value meanings."
                 },
                 "reviewer": {
                   "type": "string"

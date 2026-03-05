@@ -1258,7 +1258,7 @@ All pipeline executions in chronological order.
 - F-3 RETRACTED: `lookup-unified` was a phantom endpoint in agent docs. All refs replaced with `/api/platform/catalog/lookup`.
 - dry_run defaults: Changed from `True` to `False` across 8 files (trigger, model, handlers, 3 unpublish jobs).
 - AUD-R1-1 FIXED: Added `row_factory=dict_row` to 3 cursor creations in `trigger_approvals.py` (stac_item, collection, table_name lookups).
-- NZ1-F1 FIXED: Already resolved in v0.9.13.0 — CoreMachine `_get_completed_stage_results()` unwraps handler envelope automatically.
+- ~~NZ1-F1 FIXED: Already resolved in v0.9.13.0 — CoreMachine `_get_completed_stage_results()` unwraps handler envelope automatically.~~ **REDIAGNOSED in SIEGE Run 11**: CoreMachine fix resolved stage-handoff issue, but native Zarr still fails because `version_id` is `required: True` in `ingest_zarr.py` `parameters_schema` but is null at submit time. Two separate bugs; one fixed, one remains.
 - SVC-F2 RESOLVED: TiTiler missing `zarr` package — `titiler.xarray[minimal]` 0.24.x doesn't include zarr. Fix: add `zarr>=3.1.0` to `rmhtitiler/requirements.txt`. Implementation in rmhtitiler repo.
 
 **Token Usage**:
@@ -1274,19 +1274,72 @@ All pipeline executions in chronological order.
 
 ---
 
+## Run 35: SIEGE Run 11 — Post-Fix Verification + Full Regression (04 MAR 2026)
+
+| Field | Value |
+|-------|-------|
+| **Pipeline** | SIEGE |
+| **Date** | 04 MAR 2026 |
+| **Version** | 0.9.13.1 |
+| **Focus** | Post-fix verification (F-1 health, dry_run, AUD-R1-1) + full regression (18 sequences) |
+| **Prerequisites** | Schema rebuild + STAC nuke |
+| **Output** | `agent_docs/SIEGE_RUN_11.md` |
+
+**Sequences Tested**: 18
+
+| Category | Sequences | Steps | Pass | Fail |
+|----------|-----------|-------|------|------|
+| Happy-path lifecycles (1-6) | Raster, Vector, Multi-Version, Unpublish, NetCDF/Zarr, Native Zarr | 25 | 21 | 2 |
+| Extended lifecycle (7-10) | Rejection, Reject→Resubmit, Revoke+Cascade, Overwrite Draft | 21 | 21 | 0 |
+| Invalid transitions (11-13) | 9 state guards + 10 field validations + version conflict | 24 | 22 | 2 |
+| Overwrite hardening (14-18) | Revoke→OW→Reapprove, OW Approved, Triple Revision, Race Guard, Multi-Revoke | 31 | 31 | 0 |
+| **Total** | | **98** | **93** | **5** |
+
+**Step score**: 94.9%
+
+**Fix Verification**:
+
+| Fix | Status |
+|-----|--------|
+| F-1 (health 503) | **VERIFIED FIXED** — `/api/health` returns 200 |
+| dry_run defaults | **VERIFIED FIXED** — code-level change confirmed |
+| AUD-R1-1 (bulk lookup) | **VERIFIED FIXED** — `/api/platform/approvals` returns 200 |
+
+**Auditor**: 10/10 checkpoints PASS. 24 jobs, 24 completed, 0 failed, 0 stuck. Zero state divergences.
+
+**Findings**:
+
+| ID | Severity | Description |
+|----|----------|-------------|
+| NZ1-F1 | MEDIUM | **REDIAGNOSED** — native Zarr fails because `version_id` is `required: True` in `ingest_zarr.py` but null at submit. CoreMachine envelope fix (v0.9.13.0) was a different bug. |
+| SG11-1 | LOW | version_id not validated against version_ordinal — accepts v99 for ordinal=1 |
+
+**Token Usage**:
+
+| Agent | Tokens (est) | Duration |
+|-------|-------------|----------|
+| Cartographer | ~25,000 | ~1m |
+| Lancer Seq 1-10 | ~75,000 | ~20m |
+| Lancer Seq 11-13 | ~35,000 | ~5m |
+| Lancer Seq 14-18 | ~47,000 | ~15m |
+| Auditor | ~84,000 | ~4m |
+| **Total** | **~266,000** | **~45m** |
+
+---
+
 ## Cumulative Token Usage
 
 | Pipeline | Runs | Total Tokens |
 |----------|------|-------------|
 | COMPETE | Runs 1-6, 9, 12, 19, 28, 29, 30, 33 | ~2,434,904 |
 | GREENFIELD | Runs 7, 8, 10, 24 | ~944,196 |
-| SIEGE | Runs 11, 13, 18, 20, 21, 22, 23, 25, 26, 34 | ~2,039,587 (prior 1,817,587 + Run 34: ~222,000) |
+| SIEGE | Runs 11, 13, 18, 20, 21, 22, 23, 25, 26, 34, 35 | ~2,305,587 (prior 2,039,587 + Run 35: ~266,000) |
 | REFLEXION | Runs 14, 15, 16, 17, 32 | ~974,966 |
 | TOURNAMENT | Run 27 | ~278,000 |
 | ADVOCATE | Run 31 | ~115,000 |
-| **Instrumented Total** | Runs 9-34 | **~6,786,653** |
+| **Instrumented Total** | Runs 9-35 | **~7,052,653** |
 
-**Note**: Runs 1-8 predated the token instrumentation described in `agents/AGENT_METRICS.md`. Per-agent token breakdowns are available for Runs 9-34.
+**Note**: Runs 1-8 predated the token instrumentation described in `agents/AGENT_METRICS.md`. Per-agent token breakdowns are available for Runs 9-35.
 
 ---
 

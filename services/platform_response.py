@@ -4,7 +4,7 @@
 # STATUS: Service layer - HTTP response construction helpers
 # PURPOSE: Reduce duplication in platform trigger response building
 # CREATED: 27 JAN 2026 (Phase 4 of trigger_platform.py refactor)
-# EXPORTS: success_response, error_response, validation_error, submit_accepted, idempotent_response
+# EXPORTS: success_response, error_response, validation_error, submit_accepted, idempotent_response, check_accept_header
 # ============================================================================
 """
 Platform Response Builders.
@@ -19,6 +19,7 @@ Exports:
     not_implemented_error: 501 Not Implemented
     submit_accepted: 202 Accepted for job submissions
     idempotent_response: 200 OK for already-submitted requests
+    check_accept_header: 406 guard for content negotiation (ADV-21)
 """
 
 import json
@@ -54,7 +55,8 @@ def _generate_monitor_url(request_id: str) -> str:
 def success_response(
     data: Dict[str, Any],
     status_code: int = 200,
-    message: Optional[str] = None
+    message: Optional[str] = None,
+    cache_control: Optional[str] = None
 ) -> func.HttpResponse:
     """
     Build a success HTTP response.
@@ -63,6 +65,7 @@ def success_response(
         data: Response payload (will be merged with success=True)
         status_code: HTTP status code (default 200)
         message: Optional message to include
+        cache_control: Optional Cache-Control header value (ADV-20)
 
     Returns:
         Azure Functions HttpResponse
@@ -71,10 +74,14 @@ def success_response(
     if message:
         payload["message"] = message
 
+    headers = {"Content-Type": "application/json"}
+    if cache_control:
+        headers["Cache-Control"] = cache_control
+
     return func.HttpResponse(
         json.dumps(payload),
         status_code=status_code,
-        headers={"Content-Type": "application/json"}
+        headers=headers
     )
 
 
@@ -106,7 +113,7 @@ def error_response(
     return func.HttpResponse(
         json.dumps(payload),
         status_code=status_code,
-        headers={"Content-Type": "application/json"}
+        headers={"Content-Type": "application/json", "Cache-Control": "no-store"}
     )
 
 
@@ -168,7 +175,8 @@ def submit_accepted(
             **extra_fields
         },
         status_code=202,
-        message=message
+        message=message,
+        cache_control="no-store"
     )
 
 
@@ -245,5 +253,32 @@ def unpublish_accepted(
             **extra_fields
         },
         status_code=202,
-        message=message
+        message=message,
+        cache_control="no-store"
+    )
+
+
+# ============================================================================
+# CONTENT NEGOTIATION (ADV-21)
+# ============================================================================
+
+def check_accept_header(req: func.HttpRequest) -> Optional[func.HttpResponse]:
+    """
+    Return 406 Not Acceptable if the client explicitly requests a non-JSON media type.
+
+    Returns None when the request is acceptable (no Accept header, or Accept
+    includes application/json or */*).  Returns an HttpResponse(406) otherwise.
+    """
+    accept = req.headers.get("Accept", "")
+    if not accept or "application/json" in accept or "*/*" in accept:
+        return None
+
+    return func.HttpResponse(
+        json.dumps({
+            "success": False,
+            "error": "This API only supports application/json responses.",
+            "error_type": "NotAcceptable"
+        }),
+        status_code=406,
+        headers={"Content-Type": "application/json", "Cache-Control": "no-store"}
     )

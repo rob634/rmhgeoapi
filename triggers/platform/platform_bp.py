@@ -27,12 +27,26 @@ Endpoint Groups:
 
 import azure.functions as func
 
+from services.platform_response import check_accept_header
 from util_logger import LoggerFactory, ComponentType
 
 logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "PlatformBlueprint")
 
 # Create Blueprint
 bp = func.Blueprint()
+
+
+# ============================================================================
+# CACHE HEADER HELPER (ADV-20)
+# ============================================================================
+
+def _with_cache(response: func.HttpResponse, success_policy: str) -> func.HttpResponse:
+    """Add Cache-Control header. Errors (4xx/5xx) always get no-store."""
+    if response.status_code >= 400:
+        response.headers["Cache-Control"] = "no-store"
+    else:
+        response.headers["Cache-Control"] = success_policy
+    return response
 
 
 # ============================================================================
@@ -66,8 +80,10 @@ def platform_submit(req: func.HttpRequest) -> func.HttpResponse:
             "monitor_url": "/api/platform/status/abc123"
         }
     """
+    if (reject := check_accept_header(req)):
+        return reject
     from triggers.trigger_platform import platform_request_submit
-    return platform_request_submit(req)
+    return _with_cache(platform_request_submit(req), "no-store")
 
 
 @bp.route(route="platform/status/{request_id}", methods=["GET"])
@@ -84,8 +100,10 @@ async def platform_status_by_id(req: func.HttpRequest) -> func.HttpResponse:
     The endpoint auto-detects which type of ID was provided.
     Returns detailed status including DDH identifiers and CoreMachine job status.
     """
+    if (reject := check_accept_header(req)):
+        return reject
     from triggers.trigger_platform_status import platform_request_status
-    return await platform_request_status(req)
+    return _with_cache(await platform_request_status(req), "private, no-cache")
 
 
 @bp.route(route="platform/status", methods=["GET"])
@@ -97,8 +115,10 @@ async def platform_status_list(req: func.HttpRequest) -> func.HttpResponse:
 
     Returns list of all platform requests with optional filtering.
     """
+    if (reject := check_accept_header(req)):
+        return reject
     from triggers.trigger_platform_status import platform_request_status
-    return await platform_request_status(req)
+    return _with_cache(await platform_request_status(req), "private, no-cache")
 
 
 # ============================================================================
@@ -134,6 +154,9 @@ def platforms_list_route(req: func.HttpRequest) -> func.HttpResponse:
             "count": 1
         }
     """
+    if (reject := check_accept_header(req)):
+        return reject
+
     import json
 
     try:
@@ -162,7 +185,7 @@ def platforms_list_route(req: func.HttpRequest) -> func.HttpResponse:
                 "count": len(platforms)
             }),
             status_code=200,
-            headers={"Content-Type": "application/json"}
+            headers={"Content-Type": "application/json", "Cache-Control": "private, max-age=300"}
         )
     except Exception as e:
         logger.error(f"Failed to list platforms: {e}", exc_info=True)
@@ -173,7 +196,7 @@ def platforms_list_route(req: func.HttpRequest) -> func.HttpResponse:
                 "error_type": type(e).__name__
             }),
             status_code=500,
-            headers={"Content-Type": "application/json"}
+            headers={"Content-Type": "application/json", "Cache-Control": "no-store"}
         )
 
 
@@ -200,6 +223,9 @@ def platform_get_route(req: func.HttpRequest) -> func.HttpResponse:
             }
         }
     """
+    if (reject := check_accept_header(req)):
+        return reject
+
     import json
 
     try:
@@ -214,7 +240,7 @@ def platform_get_route(req: func.HttpRequest) -> func.HttpResponse:
                     "error_type": "ValidationError"
                 }),
                 status_code=400,
-                headers={"Content-Type": "application/json"}
+                headers={"Content-Type": "application/json", "Cache-Control": "no-store"}
             )
 
         repo = PlatformRegistryRepository()
@@ -228,7 +254,7 @@ def platform_get_route(req: func.HttpRequest) -> func.HttpResponse:
                     "error_type": "NotFound"
                 }),
                 status_code=404,
-                headers={"Content-Type": "application/json"}
+                headers={"Content-Type": "application/json", "Cache-Control": "no-store"}
             )
 
         return func.HttpResponse(
@@ -244,7 +270,7 @@ def platform_get_route(req: func.HttpRequest) -> func.HttpResponse:
                 }
             }),
             status_code=200,
-            headers={"Content-Type": "application/json"}
+            headers={"Content-Type": "application/json", "Cache-Control": "private, max-age=300"}
         )
     except Exception as e:
         logger.error(f"Failed to get platform: {e}", exc_info=True)
@@ -255,7 +281,7 @@ def platform_get_route(req: func.HttpRequest) -> func.HttpResponse:
                 "error_type": type(e).__name__
             }),
             status_code=500,
-            headers={"Content-Type": "application/json"}
+            headers={"Content-Type": "application/json", "Cache-Control": "no-store"}
         )
 
 
@@ -273,8 +299,10 @@ async def platform_health_route(req: func.HttpRequest) -> func.HttpResponse:
     Returns simplified health status (ready_for_jobs, queue backlog, etc.)
     without exposing internal details like enum errors or storage accounts.
     """
+    if (reject := check_accept_header(req)):
+        return reject
     from triggers.trigger_platform_status import platform_health
-    return await platform_health(req)
+    return _with_cache(await platform_health(req), "private, no-cache")
 
 
 @bp.route(route="platform/failures", methods=["GET"])
@@ -287,8 +315,10 @@ async def platform_failures_route(req: func.HttpRequest) -> func.HttpResponse:
     Returns failure patterns and recent failures with sanitized messages
     (no internal paths, secrets, or stack traces).
     """
+    if (reject := check_accept_header(req)):
+        return reject
     from triggers.trigger_platform_status import platform_failures
-    return await platform_failures(req)
+    return _with_cache(await platform_failures(req), "private, no-cache")
 
 
 # ============================================================================
@@ -335,8 +365,10 @@ def platform_unpublish_route(req: func.HttpRequest) -> func.HttpResponse:
 
     Note: dry_run=true by default (preview mode, no deletions).
     """
+    if (reject := check_accept_header(req)):
+        return reject
     from triggers.trigger_platform import platform_unpublish
-    return platform_unpublish(req)
+    return _with_cache(platform_unpublish(req), "no-store")
 
 
 # ============================================================================
@@ -403,8 +435,10 @@ def platform_resubmit_route(req: func.HttpRequest) -> func.HttpResponse:
             "monitor_url": "/api/platform/status/a3f2c1b8..."
         }
     """
+    if (reject := check_accept_header(req)):
+        return reject
     from triggers.platform.resubmit import platform_resubmit
-    return platform_resubmit(req)
+    return _with_cache(platform_resubmit(req), "no-store")
 
 
 # ============================================================================
@@ -434,8 +468,10 @@ def platform_approve_route(req: func.HttpRequest) -> func.HttpResponse:
             "message": "Dataset approved successfully"
         }
     """
+    if (reject := check_accept_header(req)):
+        return reject
     from triggers.trigger_approvals import platform_approve
-    return platform_approve(req)
+    return _with_cache(platform_approve(req), "no-store")
 
 
 @bp.route(route="platform/reject", methods=["POST"])
@@ -466,8 +502,10 @@ def platform_reject_route(req: func.HttpRequest) -> func.HttpResponse:
             "message": "Dataset rejected"
         }
     """
+    if (reject := check_accept_header(req)):
+        return reject
     from triggers.trigger_approvals import platform_reject
-    return platform_reject(req)
+    return _with_cache(platform_reject(req), "no-store")
 
 
 @bp.route(route="platform/revoke", methods=["POST"])
@@ -498,8 +536,10 @@ def platform_revoke_route(req: func.HttpRequest) -> func.HttpResponse:
             "message": "Approval revoked successfully"
         }
     """
+    if (reject := check_accept_header(req)):
+        return reject
     from triggers.trigger_approvals import platform_revoke
-    return platform_revoke(req)
+    return _with_cache(platform_revoke(req), "no-store")
 
 
 @bp.route(route="platform/approvals", methods=["GET"])
@@ -523,8 +563,10 @@ def platform_approvals_list_route(req: func.HttpRequest) -> func.HttpResponse:
             "status_counts": {"pending": 5, "approved": 15, ...}
         }
     """
+    if (reject := check_accept_header(req)):
+        return reject
     from triggers.trigger_approvals import platform_approvals_list
-    return platform_approvals_list(req)
+    return _with_cache(platform_approvals_list(req), "private, no-cache")
 
 
 @bp.route(route="platform/approvals/{approval_id}", methods=["GET"])
@@ -540,8 +582,10 @@ def platform_approval_get_route(req: func.HttpRequest) -> func.HttpResponse:
             "approval": {...}
         }
     """
+    if (reject := check_accept_header(req)):
+        return reject
     from triggers.trigger_approvals import platform_approval_get
-    return platform_approval_get(req)
+    return _with_cache(platform_approval_get(req), "private, no-cache")
 
 
 @bp.route(route="platform/approvals/status", methods=["GET"])
@@ -564,8 +608,10 @@ def platform_approvals_status_route(req: func.HttpRequest) -> func.HttpResponse:
             }
         }
     """
+    if (reject := check_accept_header(req)):
+        return reject
     from triggers.trigger_approvals import platform_approvals_status
-    return platform_approvals_status(req)
+    return _with_cache(platform_approvals_status(req), "private, no-cache")
 
 
 # ============================================================================
@@ -585,8 +631,10 @@ async def platform_catalog_lookup_route(req: func.HttpRequest) -> func.HttpRespo
     V0.8 UNIFIED (10 FEB 2026): Queries app.geospatial_assets directly.
     Returns asset details with bbox and appropriate service URLs.
     """
+    if (reject := check_accept_header(req)):
+        return reject
     from triggers.trigger_platform_catalog import platform_catalog_lookup
-    return await platform_catalog_lookup(req)
+    return _with_cache(await platform_catalog_lookup(req), "private, max-age=60")
 
 
 @bp.route(route="platform/catalog/asset/{asset_id}", methods=["GET"])
@@ -599,8 +647,10 @@ async def platform_catalog_asset_route(req: func.HttpRequest) -> func.HttpRespon
     V0.8 UNIFIED (10 FEB 2026): New endpoint for direct asset lookup.
     Returns asset details with appropriate service URLs based on data_type.
     """
+    if (reject := check_accept_header(req)):
+        return reject
     from triggers.trigger_platform_catalog import platform_catalog_asset_by_id
-    return await platform_catalog_asset_by_id(req)
+    return _with_cache(await platform_catalog_asset_by_id(req), "private, max-age=60")
 
 
 @bp.route(route="platform/catalog/item/{collection_id}/{item_id}", methods=["GET"])
@@ -612,8 +662,10 @@ async def platform_catalog_item_route(req: func.HttpRequest) -> func.HttpRespons
 
     Returns the complete STAC item (GeoJSON Feature) with all metadata.
     """
+    if (reject := check_accept_header(req)):
+        return reject
     from triggers.trigger_platform_catalog import platform_catalog_item
-    return await platform_catalog_item(req)
+    return _with_cache(await platform_catalog_item(req), "private, max-age=60")
 
 
 @bp.route(route="platform/catalog/assets/{collection_id}/{item_id}", methods=["GET"])
@@ -626,8 +678,10 @@ async def platform_catalog_assets_route(req: func.HttpRequest) -> func.HttpRespo
     Returns asset URLs and TiTiler URLs for visualization.
     Query param: include_titiler=false to skip TiTiler URLs.
     """
+    if (reject := check_accept_header(req)):
+        return reject
     from triggers.trigger_platform_catalog import platform_catalog_assets
-    return await platform_catalog_assets(req)
+    return _with_cache(await platform_catalog_assets(req), "private, max-age=60")
 
 
 @bp.route(route="platform/catalog/dataset/{dataset_id}", methods=["GET"])
@@ -640,8 +694,10 @@ async def platform_catalog_dataset_route(req: func.HttpRequest) -> func.HttpResp
     V0.8 UNIFIED (10 FEB 2026): Queries app.geospatial_assets directly.
     Returns all assets (rasters AND vectors) for the specified dataset.
     """
+    if (reject := check_accept_header(req)):
+        return reject
     from triggers.trigger_platform_catalog import platform_catalog_dataset
-    return await platform_catalog_dataset(req)
+    return _with_cache(await platform_catalog_dataset(req), "private, max-age=60")
 
 
 # ============================================================================

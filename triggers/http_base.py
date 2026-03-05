@@ -83,6 +83,33 @@ def parse_request_json(req: func.HttpRequest, required: bool = True) -> Optional
     return body
 
 
+def validate_no_extra_fields(body: Dict[str, Any], allowed_fields: set, endpoint: str = "") -> Optional[func.HttpResponse]:
+    """
+    Reject request bodies containing unknown fields.
+
+    Returns an error HttpResponse if extra fields are found, None if clean.
+    Use at the top of endpoints that parse raw dicts (approve/reject/revoke/unpublish).
+    """
+    extra = set(body.keys()) - allowed_fields
+    if extra:
+        extra_list = sorted(extra)
+        if len(extra_list) == 1:
+            msg = f"'{extra_list[0]}' is not a valid parameter for {endpoint}" if endpoint else f"'{extra_list[0]}' is not a valid parameter"
+        else:
+            msg = f"{extra_list} are not valid parameters for {endpoint}" if endpoint else f"{extra_list} are not valid parameters"
+        return func.HttpResponse(
+            json.dumps({
+                "success": False,
+                "error": msg,
+                "error_type": "ValidationError",
+                "valid_parameters": sorted(allowed_fields),
+            }),
+            status_code=400,
+            headers={"Content-Type": "application/json"}
+        )
+    return None
+
+
 def safe_error_response(
     status_code: int,
     logger_instance,

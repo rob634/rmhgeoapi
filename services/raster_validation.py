@@ -307,6 +307,22 @@ def validate_raster_header(params: dict) -> dict:
                 }
             )
 
+    # STEP 2c: Zero-byte file pre-check (05 MAR 2026 — ERH-4)
+    blob_size_bytes = params.get('_blob_size_bytes')
+    if blob_size_bytes is not None and blob_size_bytes == 0:
+        logger.error(f"❌ [HEADER] STEP 2c FAILED: File is zero bytes: {blob_name}")
+        return {
+            "success": False,
+            "error": "FILE_EMPTY",
+            "message": (
+                f"File '{blob_name}' is empty (0 bytes). "
+                f"The file may not have uploaded correctly, or the source is an empty placeholder. "
+                f"Verify the file has content before resubmitting."
+            ),
+            "blob_name": blob_name,
+            "container_name": container_name,
+        }
+
     # STEP 3: Open raster file (header read only)
     try:
         logger.info(f"🔄 [HEADER] STEP 3: Opening raster file...")
@@ -343,11 +359,25 @@ def validate_raster_header(params: dict) -> dict:
                 f"It may be corrupted, a text file, PDF, ZIP archive, or other non-raster format. "
                 f"Verify the file opens in QGIS or with 'gdalinfo {blob_name}' before uploading."
             )
+        elif ('http' in error_str or 'curl' in error_str) and blob_size_bytes is not None and blob_size_bytes == 0:
+            # Zero-byte file triggers HTTP 403/416 from Azure — not a network issue (ERH-4)
+            user_message = (
+                f"File '{blob_name}' is empty (0 bytes). "
+                f"The file may not have uploaded correctly, or the source is an empty placeholder. "
+                f"Verify the file has content before resubmitting."
+            )
+        elif ('http' in error_str or 'curl' in error_str) and blob_size_bytes is not None and blob_size_bytes < 100:
+            # Very small file (under 100 bytes) — not a real raster
+            user_message = (
+                f"File '{blob_name}' is only {blob_size_bytes} bytes — too small to be a valid raster. "
+                f"The file may be corrupted or a placeholder. "
+                f"Verify the file has content before resubmitting."
+            )
         elif 'http' in error_str or 'curl' in error_str:
             user_message = (
-                f"Could not download file '{blob_name}' from storage. "
-                f"This is likely a transient network issue. "
-                f"Re-upload the file or resubmit the job."
+                f"Could not read file '{blob_name}' from storage. "
+                f"This may be a transient network issue, or the file may be corrupted. "
+                f"Verify the file opens locally with 'gdalinfo {blob_name}', then resubmit."
             )
         elif 'ireadblock' in error_str or 'tiffread' in error_str:
             user_message = (

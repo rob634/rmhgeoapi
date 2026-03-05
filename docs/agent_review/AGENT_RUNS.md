@@ -1327,19 +1327,93 @@ All pipeline executions in chronological order.
 
 ---
 
+## Run 36: ADVOCATE Run 2 — Error Handling Audit (05 MAR 2026)
+
+| Field | Value |
+|-------|-------|
+| **Pipeline** | ADVOCATE (Error Handling variant) |
+| **Date** | 05 MAR 2026 |
+| **Version** | 0.9.13.2 |
+| **Focus** | Error handling quality only — 34 test vectors (20 bad-data files, 14 invalid parameters) |
+| **Prerequisites** | None (error audit against production-like state) |
+| **Output** | `agent_docs/ADVOCATE_RUN_2.md` |
+| **Campaign Brief** | `agent_docs/ADVOCATE_RUN_2_CAMPAIGN_BRIEF.md` |
+
+**Error Handling Score**: **52%** (up from 25% in Run 1, +27 points)
+
+| Category | Weight | Score | Run 1 Score | Delta |
+|----------|--------|-------|-------------|-------|
+| Error Actionability | 35% | 55% | 25% | **+30** |
+| Error Consistency | 25% | 45% | 20% | **+25** |
+| Status Code Correctness | 15% | 85% | 70% | **+15** |
+| Information Safety | 15% | 70% | N/A | new |
+| Regression Validation | 10% | 60% | N/A | new |
+
+**Phase Execution**:
+
+| Phase | Agent | Role | HTTP Calls |
+|-------|-------|------|------------|
+| 0 | Dispatcher | Verify bad-data files exist | ~2 |
+| 1 | Intern | Error grading — 34 test vectors | ~70 |
+| 2 | Architect | Structured error audit, shape matrix, root cause classification | ~115 |
+| 3 | Editor | Synthesis + scoring | N/A |
+
+**Intern Grade Distribution**: 19A (54%) / 5B (14%) / 5C (14%) / 4D (11%) / 3F (9%)
+
+**Findings**: 13 total (2 CRITICAL, 4 HIGH, 4 MEDIUM, 3 LOW)
+
+| ID | Severity | Description |
+|----|----------|-------------|
+| ERH-1 | **CRITICAL** | `data_type` field silently ignored — `"blockchain"` routes as raster, no rejection |
+| ERH-2 | **CRITICAL** | Checkpoint resume bypasses CRS/geotransform validation for matching checksums |
+| ERH-3 | HIGH | Raster errors flat `{"message": "..."}` vs vector structured `{code, category, message, remediation, user_fixable, detail}` |
+| ERH-4 | HIGH | Zero-byte/garbage .tif misdiagnosed as "transient network issue" — `_blob_size_bytes: 0` unchecked |
+| ERH-5 | HIGH | Null geometries silently dropped without warning |
+| ERH-6 | HIGH | Mixed geometry types silently split into multiple tables without warning |
+| ERH-7 | MEDIUM | Nested ZIP classified as SYSTEM_ERROR / user_fixable: false (should be user-fixable) |
+| ERH-8 | MEDIUM | CSV header-only misdiagnosed as "column not numeric" instead of "no data rows" |
+| ERH-9 | MEDIUM | `/catalog/lookup` 404 uses completely different error shape from platform standard |
+| ERH-10 | MEDIUM | `/catalog/asset/` missing path param returns empty body 404 |
+| ERH-11 | LOW | `/reject` and `/revoke` missing `error_type` field |
+| ERH-12 | LOW | Malformed JSON parse detail inconsistency between `/submit` and `/approve` |
+| ERH-13 | LOW | Pydantic URL in validation error strings |
+
+**Regression Check**:
+
+| Run 1 Finding | Status |
+|---------------|--------|
+| ADV-8 (error: null on failed jobs) | **PARTIALLY FIXED** — vector errors full structure, raster errors flat message only |
+| ADV-3 (5 error shapes) | **MOSTLY FIXED** — reject/revoke missing error_type, catalog still divergent |
+| ADV-9 (malformed JSON 500) | **FIXED** — 400 on all endpoints |
+| ADV-12 (catalog 500) | **FIXED** — proper 404 responses |
+
+**Key Structural Finding**: Error quality splits on data type — vector errors score 55% A-grade, raster errors score 0% A-grade. Sync validation (Pydantic layer) scores 83% A-grade.
+
+**Token Usage**:
+
+| Agent | Tokens (est) | Duration |
+|-------|-------------|----------|
+| Dispatcher | ~2,000 | ~10s |
+| Intern | ~58,000 | ~7m |
+| Architect | ~155,000 | ~13m |
+| Editor | ~5,000 | synthesis |
+| **Total** | **~220,000** | **~20m** |
+
+---
+
 ## Cumulative Token Usage
 
 | Pipeline | Runs | Total Tokens |
 |----------|------|-------------|
 | COMPETE | Runs 1-6, 9, 12, 19, 28, 29, 30, 33 | ~2,434,904 |
 | GREENFIELD | Runs 7, 8, 10, 24 | ~944,196 |
-| SIEGE | Runs 11, 13, 18, 20, 21, 22, 23, 25, 26, 34, 35 | ~2,305,587 (prior 2,039,587 + Run 35: ~266,000) |
+| SIEGE | Runs 11, 13, 18, 20, 21, 22, 23, 25, 26, 34, 35 | ~2,305,587 |
 | REFLEXION | Runs 14, 15, 16, 17, 32 | ~974,966 |
 | TOURNAMENT | Run 27 | ~278,000 |
-| ADVOCATE | Run 31 | ~115,000 |
-| **Instrumented Total** | Runs 9-35 | **~7,052,653** |
+| ADVOCATE | Runs 31, 36 | ~335,000 |
+| **Instrumented Total** | Runs 9-36 | **~7,272,653** |
 
-**Note**: Runs 1-8 predated the token instrumentation described in `agents/AGENT_METRICS.md`. Per-agent token breakdowns are available for Runs 9-35.
+**Note**: Runs 1-8 predated the token instrumentation described in `agents/AGENT_METRICS.md`. Per-agent token breakdowns are available for Runs 9-36.
 
 ---
 

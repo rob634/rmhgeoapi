@@ -35,7 +35,22 @@ Updated: 21 FEB 2026 - V0.9 Release-based approval
 import json
 import azure.functions as func
 
-from triggers.http_base import parse_request_json, safe_error_response
+from triggers.http_base import parse_request_json, safe_error_response, validate_no_extra_fields
+
+# Valid fields for approval endpoint request bodies (05 MAR 2026)
+_APPROVE_FIELDS = {
+    'release_id', 'asset_id', 'approval_id', 'job_id', 'request_id',
+    'dataset_id', 'resource_id', 'reviewer', 'notes', 'clearance_state',
+    'clearance_level', 'version_id',
+}
+_REJECT_FIELDS = {
+    'release_id', 'asset_id', 'approval_id', 'job_id', 'request_id',
+    'dataset_id', 'resource_id', 'reviewer', 'reason',
+}
+_REVOKE_FIELDS = {
+    'release_id', 'asset_id', 'approval_id', 'job_id', 'request_id',
+    'dataset_id', 'resource_id', 'reviewer', 'revoker', 'reason',
+}
 from util_logger import LoggerFactory, ComponentType
 
 logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "ApprovalTriggers")
@@ -253,6 +268,11 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
     try:
         req_body = parse_request_json(req)
 
+        # Reject unknown fields (05 MAR 2026)
+        extra_err = validate_no_extra_fields(req_body, _APPROVE_FIELDS, "/api/platform/approve")
+        if extra_err:
+            return extra_err
+
         # Extract identifiers (support multiple lookup methods)
         release_id_param = req_body.get('release_id')
         asset_id_param = req_body.get('asset_id')
@@ -448,6 +468,11 @@ def platform_reject(req: func.HttpRequest) -> func.HttpResponse:
     try:
         req_body = parse_request_json(req)
 
+        # Reject unknown fields (05 MAR 2026)
+        extra_err = validate_no_extra_fields(req_body, _REJECT_FIELDS, "/api/platform/reject")
+        if extra_err:
+            return extra_err
+
         # Extract identifiers
         release_id_param = req_body.get('release_id')
         asset_id_param = req_body.get('asset_id')
@@ -589,6 +614,11 @@ def platform_revoke(req: func.HttpRequest) -> func.HttpResponse:
 
     try:
         req_body = parse_request_json(req)
+
+        # Reject unknown fields (05 MAR 2026)
+        extra_err = validate_no_extra_fields(req_body, _REVOKE_FIELDS, "/api/platform/revoke")
+        if extra_err:
+            return extra_err
 
         # Extract identifiers
         release_id_param = req_body.get('release_id')

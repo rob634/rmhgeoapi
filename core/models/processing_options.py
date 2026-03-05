@@ -168,7 +168,7 @@ class BaseProcessingOptions(BaseModel):
         collection_id: Custom STAC collection ID override
         expected_data_type: Validate detected data type matches expectation
     """
-    model_config = ConfigDict(extra='ignore')
+    model_config = ConfigDict(extra='forbid')
 
     overwrite: bool = Field(default=False, description="Force reprocessing of existing data")
     collection_id: Optional[str] = Field(default=None, description="Custom STAC collection ID override")
@@ -179,13 +179,6 @@ class BaseProcessingOptions(BaseModel):
     def coerce_overwrite(cls, v):
         return _coerce_bool(v)
 
-    @model_validator(mode='after')
-    def _log_ignored_fields(self):
-        """Log any fields that were silently ignored (extra='ignore')."""
-        # This runs after construction; Pydantic has already dropped extras.
-        # We can't access them here, but the model_validator on PlatformRequest
-        # logs the raw dict keys vs model fields before dispatch.
-        return self
 
 
 class VectorProcessingOptions(BaseProcessingOptions):
@@ -306,7 +299,7 @@ class ZarrProcessingOptions(BaseProcessingOptions):
         fail_on_chunking_warnings: Fail validation on chunking warnings
         max_files: Maximum files to process (1-5000)
     """
-    model_config = ConfigDict(extra='ignore')
+    model_config = ConfigDict(extra='forbid')
 
     pipeline: Literal["netcdf_to_zarr", "ingest_zarr", "virtualzarr"] = Field(
         default="netcdf_to_zarr",

@@ -22,7 +22,15 @@ import logging
 from typing import Dict, Any, Optional, Tuple
 
 import azure.functions as func
-from triggers.http_base import parse_request_json
+from triggers.http_base import parse_request_json, validate_no_extra_fields
+
+# Valid fields for unpublish request body (05 MAR 2026)
+_UNPUBLISH_FIELDS = {
+    'request_id', 'job_id', 'dataset_id', 'resource_id', 'version_id',
+    'data_type', 'table_name', 'schema_name', 'stac_item_id', 'collection_id',
+    'dry_run', 'force_approved', 'delete_collection', 'delete_data_files',
+    'deleted_by',
+}
 
 from util_logger import LoggerFactory, ComponentType
 logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "platform_unpublish")
@@ -131,6 +139,12 @@ def platform_unpublish(req: func.HttpRequest) -> func.HttpResponse:
 
     try:
         req_body = parse_request_json(req)
+
+        # Reject unknown fields (05 MAR 2026)
+        extra_err = validate_no_extra_fields(req_body, _UNPUBLISH_FIELDS, "/api/platform/unpublish")
+        if extra_err:
+            return extra_err
+
         dry_run = req_body.get('dry_run', False)
 
         # Resolve data type and parameters

@@ -41,7 +41,7 @@ Removed (22 NOV 2025):
     - metadata column (pass through, don't store twice)
 """
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from typing import Dict, Any, List, Optional, Union
 from datetime import datetime
 from enum import Enum
@@ -122,8 +122,9 @@ class PlatformRequest(BaseModel):
     - Validate container names and access levels
     - Create deterministic request_id from DDH identifiers
 
-    Updated: 22 NOV 2025 - Simplified validation, delegate to PlatformConfig
+    Updated: 05 MAR 2026 - extra='forbid' rejects unknown fields at API boundary
     """
+    model_config = ConfigDict(extra='forbid')
 
     # ========================================================================
     # DDH Core Identifiers (Required: dataset_id, resource_id; Optional: version_id)
@@ -366,7 +367,7 @@ class PlatformRequest(BaseModel):
         RasterCollectionProcessingOptions. From this point forward, all
         access is typed attribute access — no more .get().
 
-        Unknown keys are logged and dropped (extra='ignore').
+        Unknown keys are rejected (extra='forbid' on BaseProcessingOptions).
         """
         opts = self.processing_options
         # Already resolved (e.g., constructed programmatically)

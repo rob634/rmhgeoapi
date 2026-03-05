@@ -575,11 +575,11 @@ class DockerDefaults:
     Docker workers use Azure Files mount for temp files (GDAL CPL_TMPDIR, vector staging).
     This allows processing files larger than container RAM without OOM.
 
-    Mount path: /mounts/etl-temp (configured via Azure Portal)
+    Mount path: Set via RASTER_ETL_MOUNT_PATH env var (no default — must be explicit)
     """
 
     USE_ETL_MOUNT = True  # Mount is expected (False = degraded state)
-    ETL_MOUNT_PATH = "/mounts/etl-temp"  # Mount path in Docker container
+    ETL_MOUNT_PATH = None  # No default — RASTER_ETL_MOUNT_PATH must be set explicitly
 
 
 # =============================================================================

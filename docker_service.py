@@ -1012,6 +1012,12 @@ def validate_etl_mount() -> Dict[str, Any]:
 
     # Mount was requested (use_etl_mount=true) - validate it
     mount_path = docker_config.etl_mount_path
+    if not mount_path:
+        result["error"] = "RASTER_ETL_MOUNT_PATH is not set"
+        result["degraded"] = True
+        result["message"] = "Please set RASTER_ETL_MOUNT_PATH to the Azure Files mount path (e.g. /mount/etl-temp)"
+        logger.error("❌ RASTER_ETL_MOUNT_PATH is not set — cannot validate ETL mount")
+        return result
     logger.info(f"📁 ETL Mount: Validating {mount_path}...")
 
     # Helper to handle validation failure - sets degraded state instead of raising
@@ -1450,7 +1456,7 @@ def test_storage():
 @app.get("/test/mount")
 def test_mount():
     """
-    Test Azure Files mount at /mounts/etl-temp.
+    Test Azure Files mount at configured RASTER_ETL_MOUNT_PATH.
 
     Verifies:
     1. Mount path exists
@@ -1464,8 +1470,15 @@ def test_mount():
     """
     import shutil
     import uuid
+    from config import get_config
 
-    mount_path = "/mounts/etl-temp"
+    config = get_config()
+    mount_path = config.docker.etl_mount_path
+    if not mount_path:
+        return {
+            "error": "RASTER_ETL_MOUNT_PATH is not set. Please set RASTER_ETL_MOUNT_PATH to the Azure Files mount path.",
+            "mount_path": None,
+        }
     test_id = uuid.uuid4().hex[:8]
     test_file = f"{mount_path}/.mount-test-{test_id}"
     timestamp = datetime.now(timezone.utc).isoformat()

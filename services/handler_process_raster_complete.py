@@ -1230,13 +1230,15 @@ def _process_raster_tiled_mount(
         header_response = validate_raster_header(header_params)
 
         if not header_response.get('success'):
-            error_code = header_response.get('error_code') or header_response.get('error', 'UNKNOWN')
+            error_code = header_response.get('error_code', 'UNKNOWN')
             logger.error(f"❌ PHASE 0: Header validation failed: {error_code}")
             return {
                 "success": False,
-                "error": "VALIDATION_FAILED",
-                "error_type": error_code,
+                "error_code": error_code,
+                "error_category": header_response.get('error_category', 'DATA_QUALITY'),
                 "message": header_response.get('message', 'Header validation failed'),
+                "remediation": header_response.get('remediation'),
+                "user_fixable": header_response.get('user_fixable'),
                 "phase": 0,
                 "output_mode": "tiled_mount",
                 "validation": header_response,
@@ -1253,8 +1255,10 @@ def _process_raster_tiled_mount(
         logger.error(f"❌ PHASE 0: Header validation error: {e}")
         return {
             "success": False,
-            "error": "VALIDATION_FAILED",
+            "error_code": "VALIDATION_FAILED",
+            "error_category": "SYSTEM_ERROR",
             "message": f"Header validation failed: {e}",
+            "user_fixable": False,
             "phase": 0,
             "output_mode": "tiled_mount",
             "retryable": False,
@@ -1330,7 +1334,7 @@ def _process_raster_tiled_mount(
             data_response = validate_raster_data(data_params, header_result)
 
             if not data_response.get('success'):
-                error_code = data_response.get('error_code') or data_response.get('error', 'UNKNOWN')
+                error_code = data_response.get('error_code', 'UNKNOWN')
                 logger.error(f"❌ PHASE 1.5: Data validation failed: {error_code}")
 
                 # Cleanup mount directory on validation failure
@@ -1343,9 +1347,11 @@ def _process_raster_tiled_mount(
 
                 return {
                     "success": False,
-                    "error": "VALIDATION_FAILED",
-                    "error_type": error_code,
+                    "error_code": error_code,
+                    "error_category": data_response.get('error_category', 'DATA_QUALITY'),
                     "message": data_response.get('message', 'Data validation failed'),
+                    "remediation": data_response.get('remediation'),
+                    "user_fixable": data_response.get('user_fixable'),
                     "phase": 1.5,
                     "output_mode": "tiled_mount",
                     "validation": data_response,
@@ -1363,8 +1369,10 @@ def _process_raster_tiled_mount(
             logger.error(f"❌ PHASE 1.5: Data validation error: {e}")
             return {
                 "success": False,
-                "error": "VALIDATION_FAILED",
+                "error_code": "VALIDATION_FAILED",
+                "error_category": "SYSTEM_ERROR",
                 "message": f"Data validation failed: {e}",
+                "user_fixable": False,
                 "phase": 1.5,
                 "output_mode": "tiled_mount",
                 "retryable": False,
@@ -1982,121 +1990,120 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
         # =====================================================================
         # PHASE 1: VALIDATION (0-15%)
         # =====================================================================
+        # ERH-2 FIX: Never skip validation on checkpoint resume.
+        # Validation is cheap (~seconds) and is the data quality gate.
+        # Skipping it on resume allows defective rasters (missing CRS,
+        # identity geotransform) to bypass quality checks.
         if checkpoint and checkpoint.should_skip(1):
-            logger.info("⏭️ PHASE 1: Skipping validation (already completed)")
-            _report_progress(docker_context, 15, 1, 4, "Validation", "Skipped (resumed)")
-            # Restore validation result from checkpoint
-            validation_result = checkpoint.get_data('validation_result', {})
-            source_crs = checkpoint.get_data('source_crs')
-            if not source_crs:
-                logger.error("❌ Resume error: No source_crs in checkpoint data")
-                return {
-                    "success": False,
-                    "error": "CHECKPOINT_MISSING_DATA",
-                    "message": "Checkpoint missing source_crs from phase 1",
-                    "phase": "resume_validation",
-                    "retryable": False,
-                }
+            logger.info("🔄 PHASE 1: Re-validating despite checkpoint (ERH-2 safety)")
         else:
             logger.info("🔄 PHASE 1: Validating raster (split: header + data)...")
-            _report_progress(docker_context, 3, 1, 4, "Validation", "Header validation")
-            phase1_start = time.time()
 
-            _emit_job_event(job_id, task_id, 1, 'raster_validation_started',
-                            {'blob_name': blob_name, 'raster_type_param': params.get('raster_type', 'auto')})
+        _report_progress(docker_context, 3, 1, 4, "Validation", "Header validation")
+        phase1_start = time.time()
 
-            from .raster_validation import validate_raster_header, validate_raster_data
+        _emit_job_event(job_id, task_id, 1, 'raster_validation_started',
+                        {'blob_name': blob_name, 'raster_type_param': params.get('raster_type', 'auto')})
 
-            # Phase 1A: Header validation (cheap, no pixel reads)
-            header_params = {
-                'blob_url': params.get('blob_url'),
-                'blob_name': blob_name,
-                'container_name': container_name,
-                'input_crs': params.get('input_crs'),
-                'strict_mode': params.get('strict_mode', False),
+        from .raster_validation import validate_raster_header, validate_raster_data
+
+        # Phase 1A: Header validation (cheap, no pixel reads)
+        header_params = {
+            'blob_url': params.get('blob_url'),
+            'blob_name': blob_name,
+            'container_name': container_name,
+            'input_crs': params.get('input_crs'),
+            'strict_mode': params.get('strict_mode', False),
+        }
+
+        header_response = validate_raster_header(header_params)
+
+        if not header_response.get('success'):
+            error_code = header_response.get('error_code', 'UNKNOWN')
+            logger.error(f"❌ Header validation failed: {error_code}")
+            return {
+                "success": False,
+                "error_code": error_code,
+                "error_category": header_response.get('error_category', 'DATA_QUALITY'),
+                "message": header_response.get('message', 'Header validation failed'),
+                "remediation": header_response.get('remediation'),
+                "user_fixable": header_response.get('user_fixable'),
+                "phase": "validation_header",
+                "validation": header_response,
+                "retryable": False,
             }
 
-            header_response = validate_raster_header(header_params)
+        header_result = header_response.get('result', {})
+        source_crs = header_result.get('source_crs')
 
-            if not header_response.get('success'):
-                error_code = header_response.get('error_code') or header_response.get('error', 'UNKNOWN')
-                logger.error(f"❌ Header validation failed: {error_code}")
-                return {
-                    "success": False,
-                    "error": "VALIDATION_FAILED",
-                    "error_type": error_code,
-                    "message": header_response.get('message', 'Header validation failed'),
-                    "phase": "validation_header",
-                    "validation": header_response,
-                    "retryable": False,
-                }
-
-            header_result = header_response.get('result', {})
-            source_crs = header_result.get('source_crs')
-
-            if not source_crs:
-                logger.error("❌ No source_crs in header validation results")
-                return {
-                    "success": False,
-                    "error": "NO_SOURCE_CRS",
-                    "message": "Header validation did not return source CRS",
-                    "phase": "validation_header",
-                    "validation": header_result,
-                    "retryable": False,
-                }
-
-            logger.info(f"✅ PHASE 1A: Header validated - CRS={source_crs}")
-            _report_progress(docker_context, 8, 1, 4, "Validation", "Data validation (GDAL stats)")
-
-            # Phase 1B: Data validation (GDAL statistics on SAS URL)
-            data_params = {
-                'file_path': params.get('blob_url'),
-                'blob_name': blob_name,
-                'container_name': container_name,
-                'raster_type': params.get('raster_type', 'auto'),
-                'strict_mode': params.get('strict_mode', False),
+        if not source_crs:
+            logger.error("❌ No source_crs in header validation results")
+            return {
+                "success": False,
+                "error_code": "NO_SOURCE_CRS",
+                "error_category": "DATA_QUALITY",
+                "message": "Header validation did not return source CRS",
+                "remediation": "Ensure the raster file has a CRS, or provide source_crs parameter.",
+                "user_fixable": True,
+                "phase": "validation_header",
+                "validation": header_result,
+                "retryable": False,
             }
 
-            validation_response = validate_raster_data(data_params, header_result)
+        logger.info(f"✅ PHASE 1A: Header validated - CRS={source_crs}")
+        _report_progress(docker_context, 8, 1, 4, "Validation", "Data validation (GDAL stats)")
 
-            if not validation_response.get('success'):
-                error_code = validation_response.get('error_code') or validation_response.get('error', 'UNKNOWN')
-                logger.error(f"❌ Data validation failed: {error_code}")
-                return {
-                    "success": False,
-                    "error": "VALIDATION_FAILED",
-                    "error_type": error_code,
-                    "message": validation_response.get('message', 'Data validation failed'),
-                    "phase": "validation_data",
-                    "validation": validation_response,
-                    "retryable": False,
+        # Phase 1B: Data validation (GDAL statistics on SAS URL)
+        data_params = {
+            'file_path': params.get('blob_url'),
+            'blob_name': blob_name,
+            'container_name': container_name,
+            'raster_type': params.get('raster_type', 'auto'),
+            'strict_mode': params.get('strict_mode', False),
+        }
+
+        validation_response = validate_raster_data(data_params, header_result)
+
+        if not validation_response.get('success'):
+            error_code = validation_response.get('error_code', 'UNKNOWN')
+            logger.error(f"❌ Data validation failed: {error_code}")
+            return {
+                "success": False,
+                "error_code": error_code,
+                "error_category": validation_response.get('error_category', 'DATA_QUALITY'),
+                "message": validation_response.get('message', 'Data validation failed'),
+                "remediation": validation_response.get('remediation'),
+                "user_fixable": validation_response.get('user_fixable'),
+                "phase": "validation_data",
+                "validation": validation_response,
+                "retryable": False,
+            }
+
+        validation_result = validation_response.get('result', {})
+
+        phase1_duration = time.time() - phase1_start
+        raster_type_info = validation_result.get('raster_type', {})
+        logger.info(f"✅ PHASE 1 complete: {phase1_duration:.2f}s")
+        logger.info(f"   Source CRS: {source_crs}")
+        logger.info(f"   Raster type: {raster_type_info.get('detected_type')}")
+        _report_progress(docker_context, 15, 1, 4, "Validation", f"Complete ({phase1_duration:.1f}s)")
+
+        _emit_job_event(job_id, task_id, 1, 'raster_validation_complete', {
+            'detected_type': raster_type_info.get('detected_type'),
+            'confidence': raster_type_info.get('confidence'),
+            'band_count': raster_type_info.get('band_count'),
+            'dtype': raster_type_info.get('data_type'),
+        }, duration_ms=int(phase1_duration * 1000))
+
+        # Save checkpoint after phase 1
+        if checkpoint:
+            checkpoint.save(
+                phase=1,
+                data={
+                    'source_crs': source_crs,
+                    'validation_result': validation_result,
                 }
-
-            validation_result = validation_response.get('result', {})
-
-            phase1_duration = time.time() - phase1_start
-            raster_type_info = validation_result.get('raster_type', {})
-            logger.info(f"✅ PHASE 1 complete: {phase1_duration:.2f}s")
-            logger.info(f"   Source CRS: {source_crs}")
-            logger.info(f"   Raster type: {raster_type_info.get('detected_type')}")
-            _report_progress(docker_context, 15, 1, 4, "Validation", f"Complete ({phase1_duration:.1f}s)")
-
-            _emit_job_event(job_id, task_id, 1, 'raster_validation_complete', {
-                'detected_type': raster_type_info.get('detected_type'),
-                'confidence': raster_type_info.get('confidence'),
-                'band_count': raster_type_info.get('band_count'),
-                'dtype': raster_type_info.get('data_type'),
-            }, duration_ms=int(phase1_duration * 1000))
-
-            # Save checkpoint after phase 1
-            if checkpoint:
-                checkpoint.save(
-                    phase=1,
-                    data={
-                        'source_crs': source_crs,
-                        'validation_result': validation_result,
-                    }
-                )
+            )
 
         # F7.18: Check for graceful shutdown before Phase 2
         if docker_context and docker_context.should_stop():

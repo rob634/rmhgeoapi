@@ -514,35 +514,53 @@ def _build_single_status_response(
     # Job status (single field)
     result["job_status"] = job_status
 
-    # Error block (25 FEB 2026): Surface structured error info when job failed.
-    # The handler response in job_result already contains error_code, error_category,
-    # remediation, user_fixable, detail — just not exposed in the default response.
-    if job_status == "failed" and job_result and isinstance(job_result, dict):
+    # Error block (05 MAR 2026): Surface error info when job failed.
+    # Primary source: error_details (always set by fail_job()).
+    # Secondary: result_data JSONB (structured ErrorResponse from handler).
+    if job_status == "failed":
         error_block = {}
-        if job_result.get("error_code"):
-            error_block["code"] = job_result["error_code"]
-        if job_result.get("error_category"):
-            error_block["category"] = job_result["error_category"]
-        if job_result.get("message"):
-            error_block["message"] = job_result["message"]
-        if job_result.get("remediation"):
-            error_block["remediation"] = job_result["remediation"]
-        if "user_fixable" in job_result:
-            error_block["user_fixable"] = job_result["user_fixable"]
-        if job_result.get("detail"):
-            error_block["detail"] = job_result["detail"]
-        # Fallback: if handler didn't use structured errors (e.g., raster),
-        # pull what we can from the flat response
-        if not error_block and job_result.get("error"):
-            error_block["code"] = job_result.get("error")
-            error_block["message"] = job_result.get("message") or job_result.get("error")
-        # Also fallback to job-level error_details string
-        if not error_block and job and job.error_details:
+
+        # Primary: error_details string (always set on failed jobs)
+        if job and job.error_details:
             error_block["message"] = job.error_details
+
+        # Enrich from structured ErrorResponse when handler provided one
+        if job_result and isinstance(job_result, dict):
+            if job_result.get("error_code"):
+                error_block["code"] = job_result["error_code"]
+            if job_result.get("error_category"):
+                error_block["category"] = job_result["error_category"]
+            if job_result.get("message"):
+                error_block["message"] = job_result["message"]
+            if job_result.get("remediation"):
+                error_block["remediation"] = job_result["remediation"]
+            if "user_fixable" in job_result:
+                error_block["user_fixable"] = job_result["user_fixable"]
+            if job_result.get("details"):
+                error_block["detail"] = job_result["details"]
+            elif job_result.get("detail"):
+                error_block["detail"] = job_result["detail"]
+            if job_result.get("error_id"):
+                error_block["error_id"] = job_result["error_id"]
 
         result["error"] = error_block if error_block else None
     else:
         result["error"] = None
+
+    # Job metadata block: promote to default response on failure
+    if job_status == "failed" and job:
+        result["job"] = {
+            "job_id": job_id,
+            "job_type": job.job_type,
+            "etl_version": job.etl_version,
+            "stage": job.stage,
+            "total_stages": job.total_stages,
+            "created_at": job.created_at.isoformat() if job.created_at else None,
+            "updated_at": job.updated_at.isoformat() if job.updated_at else None,
+            "duration_seconds": round((job.updated_at - job.created_at).total_seconds(), 2) if (job.created_at and job.updated_at) else None,
+        }
+    else:
+        result["job"] = None
 
     # Outputs (from Release record, not job_result)
     result["outputs"] = _build_outputs_block(release, job_result)

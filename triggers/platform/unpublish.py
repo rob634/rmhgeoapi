@@ -425,6 +425,50 @@ def _resolve_unpublish_data_type(req_body: dict) -> Tuple[Optional[str], dict, O
 
 
 # ============================================================================
+# APPROVAL STATE CHECK (LA-2 — 06 MAR 2026)
+# ============================================================================
+
+def _check_approved_block(data_type: str, resolved_params: dict, force_approved: bool) -> Optional[func.HttpResponse]:
+    """
+    Check if target release is approved and force_approved is not set.
+
+    Returns a 400 error response if blocked, None if OK to proceed.
+    Used by dry_run and live paths for consistent enforcement.
+    """
+    if force_approved:
+        return None
+
+    try:
+        from infrastructure import ReleaseRepository
+        release_repo = ReleaseRepository()
+        release = None
+
+        if data_type in ("raster", "zarr"):
+            stac_item_id = resolved_params.get('stac_item_id')
+            if stac_item_id:
+                release = release_repo.get_by_stac_item_id(stac_item_id)
+        elif data_type == "vector":
+            table_name = resolved_params.get('table_name')
+            if table_name:
+                from infrastructure import ReleaseTableRepository
+                rt_repo = ReleaseTableRepository()
+                rt = rt_repo.get_by_table_name(table_name)
+                if rt:
+                    release = release_repo.get_by_id(rt.release_id)
+
+        if release and release.approval_state.value == 'approved':
+            return validation_error(
+                "Cannot unpublish approved release without force_approved=true",
+                approval_state="approved",
+                release_id=release.release_id
+            )
+    except Exception as e:
+        logger.warning(f"Could not verify approval state: {e}")
+
+    return None
+
+
+# ============================================================================
 # EXECUTION HELPERS
 # ============================================================================
 
@@ -438,6 +482,11 @@ def _execute_vector_unpublish(
     """Execute vector unpublish job."""
     if not table_name:
         return validation_error("table_name is required for vector unpublish")
+
+    # LA-2: Block unpublish of approved releases without force_approved
+    blocked = _check_approved_block("vector", {'table_name': table_name}, force_approved)
+    if blocked:
+        return blocked
 
     # Dry run: preview only — no job, no tracking record (20 FEB 2026)
     if dry_run:
@@ -527,6 +576,11 @@ def _execute_raster_unpublish(
     """Execute raster unpublish job."""
     if not stac_item_id or not collection_id:
         return validation_error("stac_item_id and collection_id are required for raster unpublish")
+
+    # LA-2: Block unpublish of approved releases without force_approved
+    blocked = _check_approved_block("raster", {'stac_item_id': stac_item_id}, force_approved)
+    if blocked:
+        return blocked
 
     # Dry run: preview only — no job, no tracking record (20 FEB 2026)
     if dry_run:
@@ -638,6 +692,11 @@ def _execute_zarr_unpublish(
     """
     if not stac_item_id or not collection_id:
         return validation_error("stac_item_id and collection_id are required for zarr unpublish")
+
+    # LA-2: Block unpublish of approved releases without force_approved
+    blocked = _check_approved_block("zarr", {'stac_item_id': stac_item_id}, force_approved)
+    if blocked:
+        return blocked
 
     # Dry run: preview only -- no job, no tracking record
     if dry_run:

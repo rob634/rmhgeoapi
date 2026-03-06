@@ -932,7 +932,7 @@ All pipeline executions in chronological order.
 | PRV-1 | CRITICAL | Provocateur | `/approve`, `/reject`, `/revoke` return 500 on malformed JSON — `ValueError` vs `JSONDecodeError` mismatch — ✅ FIXED (catches both ValueError+JSONDecodeError) |
 | LA-1/SG5-1 | CRITICAL | Saboteur | Stale release approved during active processing (reconfirmed from SIEGE Run 25) — ✅ FIXED (4 guards: soft check, SQL WHERE, stale ordinal, newer active ordinal) |
 | PRV-2 | HIGH | Provocateur | SSRF info leak — URL in container_name leaks Azure Storage internal errors |
-| LA-2 | MEDIUM | Saboteur | Unpublish dry_run accepts non-approved releases |
+| LA-2 | MEDIUM | Saboteur | Unpublish dry_run accepts non-approved releases — ✅ FIXED v0.9.14.3 |
 | ID-1 | MEDIUM | Inspector+Saboteur | No authorization model on approvals — any caller can approve |
 | PRV-3 | MEDIUM | Provocateur | No length limits on approve/reject free-text fields — ✅ FIXED v0.9.14.3 |
 | PRV-7 | MEDIUM | Provocateur | Unpublish broken for DDH identifier-based lookups — ✅ FIXED v0.9.14.3 |

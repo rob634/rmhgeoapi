@@ -27,6 +27,7 @@ from triggers.http_base import parse_request_json, validate_no_extra_fields
 # Valid fields for unpublish request body (05 MAR 2026)
 _UNPUBLISH_FIELDS = {
     'request_id', 'job_id', 'dataset_id', 'resource_id', 'version_id',
+    'release_id', 'version_ordinal',  # SG2-1
     'data_type', 'table_name', 'schema_name', 'stac_item_id', 'collection_id',
     'dry_run', 'force_approved', 'delete_collection', 'delete_data_files',
     'deleted_by',
@@ -152,7 +153,7 @@ def platform_unpublish(req: func.HttpRequest) -> func.HttpResponse:
 
         if not data_type:
             return validation_error(
-                "Could not determine data type. Provide: request_id, job_id, DDH identifiers (dataset_id, resource_id, version_id), or explicit data_type with identifiers."
+                "Could not determine data type. Provide: request_id, job_id, release_id, DDH identifiers (dataset_id, resource_id, version_id), version_ordinal with DDH identifiers, or explicit data_type with identifiers."
             )
 
         logger.info(f"Unpublish: data_type={data_type}, dry_run={dry_run}, params={resolved_params}")
@@ -273,8 +274,10 @@ def _resolve_unpublish_data_type(req_body: dict) -> Tuple[Optional[str], dict, O
     Resolution order:
     1. request_id → lookup platform request, get data_type
     2. job_id → lookup platform request by job, get data_type
+    2b. release_id → lookup release and asset, get data_type (SG2-1)
     3. DDH identifiers → lookup platform request, get data_type
-    4. Explicit data_type parameter → use direct identifiers
+    3b. version_ordinal + DDH → lookup asset then release by ordinal (SG2-1)
+    4. Explicit data_type parameter → use direct identifiers (+ DDH fallback PRV-7)
 
     Args:
         req_body: Request body dict
@@ -308,6 +311,31 @@ def _resolve_unpublish_data_type(req_body: dict) -> Tuple[Optional[str], dict, O
             resolved_params = get_unpublish_params_from_request(original_request, data_type)
             return data_type, resolved_params, original_request
 
+    # Option 2b: By release_id (SG2-1)
+    release_id_param = req_body.get('release_id')
+    if release_id_param:
+        from infrastructure import ReleaseRepository, AssetRepository, ReleaseTableRepository
+        release_repo = ReleaseRepository()
+        release = release_repo.get_by_id(release_id_param)
+        if release:
+            asset_repo = AssetRepository()
+            asset = asset_repo.get_by_id(release.asset_id)
+            if asset:
+                data_type = normalize_data_type(asset.data_type)
+                if data_type == "vector":
+                    release_table_repo = ReleaseTableRepository()
+                    table_names = release_table_repo.get_table_names(release.release_id)
+                    if table_names:
+                        resolved_params = {'table_names': table_names, 'table_name': table_names[0]}
+                        return data_type, resolved_params, None
+                elif data_type in ("raster", "zarr"):
+                    if release.stac_item_id:
+                        resolved_params = {
+                            'stac_item_id': release.stac_item_id,
+                            'collection_id': release.stac_collection_id or asset.dataset_id
+                        }
+                        return data_type, resolved_params, None
+
     # Option 3: By DDH identifiers
     dataset_id = req_body.get('dataset_id')
     resource_id = req_body.get('resource_id')
@@ -319,6 +347,32 @@ def _resolve_unpublish_data_type(req_body: dict) -> Tuple[Optional[str], dict, O
             resolved_params = get_unpublish_params_from_request(original_request, data_type)
             return data_type, resolved_params, original_request
 
+    # Option 3b: By version_ordinal + DDH identifiers (SG2-1)
+    version_ordinal = req_body.get('version_ordinal')
+    if version_ordinal is not None and dataset_id and resource_id:
+        from infrastructure import AssetRepository, ReleaseRepository, ReleaseTableRepository
+        asset_repo = AssetRepository()
+        asset = asset_repo.get_by_identity("ddh", dataset_id, resource_id)
+        if asset:
+            release_repo = ReleaseRepository()
+            releases = release_repo.list_by_asset(asset.asset_id)
+            release = next((r for r in releases if r.version_ordinal == int(version_ordinal)), None)
+            if release:
+                data_type = normalize_data_type(asset.data_type)
+                if data_type == "vector":
+                    release_table_repo = ReleaseTableRepository()
+                    table_names = release_table_repo.get_table_names(release.release_id)
+                    if table_names:
+                        resolved_params = {'table_names': table_names, 'table_name': table_names[0]}
+                        return data_type, resolved_params, None
+                elif data_type in ("raster", "zarr"):
+                    if release.stac_item_id:
+                        resolved_params = {
+                            'stac_item_id': release.stac_item_id,
+                            'collection_id': release.stac_collection_id or dataset_id
+                        }
+                        return data_type, resolved_params, None
+
     # Option 4: Explicit data_type with direct identifiers (cleanup mode)
     explicit_data_type = req_body.get('data_type')
     if explicit_data_type:
@@ -326,6 +380,11 @@ def _resolve_unpublish_data_type(req_body: dict) -> Tuple[Optional[str], dict, O
         if data_type == "vector":
             table_name = req_body.get('table_name')
             if table_name:
+                resolved_params = {'table_name': table_name}
+                return data_type, resolved_params, None
+            # PRV-7: Generate table_name from DDH identifiers if available
+            elif dataset_id and resource_id:
+                table_name = generate_table_name(dataset_id, resource_id, version_id)
                 resolved_params = {'table_name': table_name}
                 return data_type, resolved_params, None
         elif data_type == "raster":
@@ -337,10 +396,22 @@ def _resolve_unpublish_data_type(req_body: dict) -> Tuple[Optional[str], dict, O
             elif collection_id and req_body.get('delete_collection'):
                 resolved_params = {'collection_id': collection_id}
                 return data_type, resolved_params, None
+            # PRV-7: Generate stac identifiers from DDH if available
+            elif dataset_id and resource_id:
+                stac_item_id = generate_stac_item_id(dataset_id, resource_id, version_id)
+                collection_id = dataset_id
+                resolved_params = {'stac_item_id': stac_item_id, 'collection_id': collection_id}
+                return data_type, resolved_params, None
         elif data_type == "zarr":
             stac_item_id = req_body.get('stac_item_id')
             collection_id = req_body.get('collection_id')
             if stac_item_id and collection_id:
+                resolved_params = {'stac_item_id': stac_item_id, 'collection_id': collection_id}
+                return data_type, resolved_params, None
+            # PRV-7: Generate stac identifiers from DDH if available
+            elif dataset_id and resource_id:
+                stac_item_id = generate_stac_item_id(dataset_id, resource_id, version_id)
+                collection_id = dataset_id
                 resolved_params = {'stac_item_id': stac_item_id, 'collection_id': collection_id}
                 return data_type, resolved_params, None
 

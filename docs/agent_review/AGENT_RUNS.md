@@ -233,7 +233,7 @@ All pipeline executions in chronological order.
 | SG-3 | HIGH | /api/platform/catalog/dataset/{id} returns 500 instead of 404 |
 | SG-4 | MEDIUM | Approval rollbacks not surfaced on /api/platform/failures |
 | SG-5 | MEDIUM | Orphaned 127 MB COG blob with no catalog reference |
-| SG-6 | MEDIUM | stac_item_id mismatch: release says -v1, cached JSON says -ord1 |
+| SG-6 | MEDIUM | stac_item_id mismatch: release says -v1, cached JSON says -ord1 — ✅ FIXED (COMPETE fixes) |
 | SG-7 | MEDIUM | is_latest not restored after approval rollback |
 | SG-8 | LOW | Inconsistent 404 response shape on lineage endpoint |
 | SG-9 | LOW | /api/dbadmin/stats and diagnostics/all return 404 |
@@ -326,7 +326,7 @@ All pipeline executions in chronological order.
 
 | ID | Severity | Description |
 |----|----------|-------------|
-| SG2-1 | MEDIUM | Unpublish doesn't accept release_id or version_ordinal |
+| SG2-1 | MEDIUM | Unpublish doesn't accept release_id or version_ordinal — ✅ FIXED v0.9.14.3 |
 | SG2-2 | MEDIUM | Revoked release retains is_served=true |
 | SG2-3 | MEDIUM | Catalog API strips required STAC 1.0.0 fields |
 | SG2-4 | LOW | Status endpoint shows revoked release as primary |
@@ -672,7 +672,7 @@ All pipeline executions in chronological order.
 |----|----------|-------------|
 | SG6-L1 | HIGH | scipy engine does not support storage_options -- validate handler fails on all NetCDF files |
 | SG6-L2 | HIGH | Approval allows failed releases (reconfirms SG5-1) |
-| SG6-L3 | MEDIUM | Zarr submit with file_name creates orphaned release |
+| SG6-L3 | MEDIUM | Zarr submit with file_name creates orphaned release — ⚠️ MITIGATED (orphan auto-cleanup on resubmit) |
 | SG6-P1 | MEDIUM | Raster without CRS silently processed into COG |
 | SG6-P2 | MEDIUM | Raster without geotransform silently processed |
 | SG6-P3 | LOW | Empty/garbage rasters produce misleading "transient network" error |
@@ -934,9 +934,9 @@ All pipeline executions in chronological order.
 | PRV-2 | HIGH | Provocateur | SSRF info leak — URL in container_name leaks Azure Storage internal errors |
 | LA-2 | MEDIUM | Saboteur | Unpublish dry_run accepts non-approved releases |
 | ID-1 | MEDIUM | Inspector+Saboteur | No authorization model on approvals — any caller can approve |
-| PRV-3 | MEDIUM | Provocateur | No length limits on approve/reject free-text fields |
-| PRV-7 | MEDIUM | Provocateur | Unpublish broken for DDH identifier-based lookups |
-| PRV-10 | MEDIUM | Provocateur | Inconsistent error format between /submit and /approve |
+| PRV-3 | MEDIUM | Provocateur | No length limits on approve/reject free-text fields — ✅ FIXED v0.9.14.3 |
+| PRV-7 | MEDIUM | Provocateur | Unpublish broken for DDH identifier-based lookups — ✅ FIXED v0.9.14.3 |
+| PRV-10 | MEDIUM | Provocateur | Inconsistent error format between /submit and /approve — ✅ FIXED (ERH-12/13) |
 | ID-2 | LOW | Inspector+Saboteur | Race condition resolved correctly (approve wins) |
 | PRV-8 | LOW | Provocateur | XSS payloads accepted in stored fields |
 | PRV-9 | LOW | Provocateur | 404 vs 405 for wrong HTTP methods |

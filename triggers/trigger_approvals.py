@@ -289,6 +289,18 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
         clearance_level_str = req_body.get('clearance_state') or req_body.get('clearance_level')
         version_id = req_body.get('version_id')
 
+        # PRV-3: Max-length validation on free-text fields
+        if reviewer and len(reviewer) > 200:
+            return func.HttpResponse(
+                json.dumps({"success": False, "error": "reviewer must be 200 characters or fewer", "error_type": "ValidationError"}),
+                status_code=400, headers={"Content-Type": "application/json"}
+            )
+        if notes and len(notes) > 2000:
+            return func.HttpResponse(
+                json.dumps({"success": False, "error": "notes must be 2000 characters or fewer", "error_type": "ValidationError"}),
+                status_code=400, headers={"Content-Type": "application/json"}
+            )
+
         # Validate reviewer is provided
         if not reviewer:
             return func.HttpResponse(
@@ -487,6 +499,18 @@ def platform_reject(req: func.HttpRequest) -> func.HttpResponse:
         reviewer = req_body.get('reviewer')
         reason = req_body.get('reason')
 
+        # PRV-3: Max-length validation on free-text fields
+        if reviewer and len(reviewer) > 200:
+            return func.HttpResponse(
+                json.dumps({"success": False, "error": "reviewer must be 200 characters or fewer", "error_type": "ValidationError"}),
+                status_code=400, headers={"Content-Type": "application/json"}
+            )
+        if reason and len(reason) > 2000:
+            return func.HttpResponse(
+                json.dumps({"success": False, "error": "reason must be 2000 characters or fewer", "error_type": "ValidationError"}),
+                status_code=400, headers={"Content-Type": "application/json"}
+            )
+
         # Validate required fields
         if not reviewer:
             return func.HttpResponse(
@@ -634,6 +658,18 @@ def platform_revoke(req: func.HttpRequest) -> func.HttpResponse:
         # Standardized: accept 'reviewer' as the actor field (also accept 'revoker' for backward compat)
         reviewer = req_body.get('reviewer') or req_body.get('revoker')
         reason = req_body.get('reason')
+
+        # PRV-3: Max-length validation on free-text fields
+        if reviewer and len(reviewer) > 200:
+            return func.HttpResponse(
+                json.dumps({"success": False, "error": "reviewer must be 200 characters or fewer", "error_type": "ValidationError"}),
+                status_code=400, headers={"Content-Type": "application/json"}
+            )
+        if reason and len(reason) > 2000:
+            return func.HttpResponse(
+                json.dumps({"success": False, "error": "reason must be 2000 characters or fewer", "error_type": "ValidationError"}),
+                status_code=400, headers={"Content-Type": "application/json"}
+            )
 
         # Validate required fields
         if not reviewer:

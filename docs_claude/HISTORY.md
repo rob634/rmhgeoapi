@@ -1,6 +1,6 @@
 # Project History
 
-**Last Updated**: 05 MAR 2026 (v0.9.13.4)
+**Last Updated**: 06 MAR 2026 (v0.9.14.3)
 **Active Log**: FEB - MAR 2026
 **Rolling Archive**: When this file exceeds ~600 lines, older content is archived with a UUID filename.
 
@@ -10,6 +10,38 @@
 - [HISTORY_e1fc3ce2.md](./HISTORY_e1fc3ce2.md) - DEC 2025 - JAN 2026
 
 This document tracks completed architectural changes and improvements to the Azure Geospatial ETL Pipeline.
+
+---
+
+## 06 MAR 2026: Remaining MEDIUM Bug Fixes — PRV-3, PRV-7, SG2-1 (v0.9.14.3) ✅
+
+**Status**: ✅ **COMPLETE**
+**Trigger**: ADVOCATE/TOURNAMENT/SIEGE agent findings — last 3 open MEDIUM bugs
+
+### Fixes
+
+| Bug | Fix | File |
+|-----|-----|------|
+| **PRV-3** | Max-length validation on free-text fields: `reviewer` ≤ 200 chars, `reason`/`notes` ≤ 2000 chars. Applied to all 3 handlers (approve, reject, revoke). | `triggers/trigger_approvals.py` |
+| **PRV-7** | DDH identifier fallback in unpublish Option 4. When `data_type` is explicit but no direct identifiers provided, generates `table_name` or `stac_item_id` from `dataset_id`/`resource_id`/`version_id`. | `triggers/platform/unpublish.py` |
+| **SG2-1** | Unpublish now accepts `release_id` (Option 2b) and `version_ordinal` + DDH identifiers (Option 3b). Added to `_UNPUBLISH_FIELDS` allowlist. Release-based lookup resolves data_type from parent Asset. | `triggers/platform/unpublish.py` |
+
+### Also Closed (Already Fixed/Mitigated)
+
+| Bug | Status | Rationale |
+|-----|--------|-----------|
+| **PRV-10** | Already fixed | ERH-12/13 aligned error shapes between `/submit` and `/approve` |
+| **SG-6** | Already fixed | All 5 COMPETE fixes implemented — `stac_item_json` patched at approval time |
+| **SG6-L3** | Mitigated | Orphan auto-cleanup on resubmit + compensating delete on job-create failure |
+
+### Remaining Known Bugs (LOW only)
+
+| Bug | Severity | Description |
+|-----|----------|-------------|
+| SG11-1 | LOW | version_id not validated against version_ordinal (cosmetic) |
+| PRV-8 | LOW | XSS in stored free-text fields (safe at API, dangerous in UI) |
+| PRV-9 | LOW | 404 instead of 405 for unsupported HTTP methods (Azure Functions limitation) |
+| SG-9 | LOW | dbadmin/stats returns 404 |
 
 ---
 

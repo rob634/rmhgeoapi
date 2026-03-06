@@ -1445,6 +1445,60 @@ How to fix it
 
 ---
 
+### COD-PRV3: No max-length validation on approval free-text fields
+
+**Date**: 06 MAR 2026
+**Severity**: MEDIUM
+**Source**: TOURNAMENT Run 27 (Provocateur agent)
+
+**Error Symptom**: Approve/reject/revoke accept arbitrarily long strings for `reviewer`, `reason`, `notes`. DB column `reviewer`/`revoked_by` is `VARCHAR(200)` — would truncate or error. `reason`/`notes` are `TEXT` — 10MB strings accepted.
+
+**Root Cause**: No length validation before DB write.
+
+**Fix**: Added max-length checks in all 3 handlers in `triggers/trigger_approvals.py`:
+- `reviewer` ≤ 200 characters
+- `reason`/`notes` ≤ 2000 characters
+- Returns 400 with `ValidationError` if exceeded
+
+**Prevention**: Validate free-text field lengths at the trigger layer before passing to services.
+
+---
+
+### COD-PRV7: Unpublish fails DDH identifier lookups with explicit data_type
+
+**Date**: 06 MAR 2026
+**Severity**: MEDIUM
+**Source**: TOURNAMENT Run 27 (Provocateur agent)
+
+**Error Symptom**: `POST /api/platform/unpublish` with `{"data_type": "vector", "dataset_id": "x", "resource_id": "y", "version_id": "v1"}` returns "Could not determine data type" even though DDH identifiers are provided.
+
+**Root Cause**: Option 3 (DDH lookup) requires a platform request record to exist. Option 4 (explicit data_type) only checked for direct identifiers (`table_name`, `stac_item_id`), not DDH fallback.
+
+**Fix**: Added DDH fallback in Option 4 of `_resolve_unpublish_data_type()` in `triggers/platform/unpublish.py`. When explicit `data_type` is given but no direct identifiers, generates them via `generate_table_name()` or `generate_stac_item_id()`.
+
+**Prevention**: When adding resolution paths, always consider the DDH→identifier generation fallback.
+
+---
+
+### COD-SG21: Unpublish doesn't accept release_id or version_ordinal
+
+**Date**: 06 MAR 2026
+**Severity**: MEDIUM
+**Source**: SIEGE Run 2
+
+**Error Symptom**: `POST /api/platform/unpublish` with `{"release_id": "abc123"}` returns "unknown field 'release_id'" or fails resolution.
+
+**Root Cause**: `_UNPUBLISH_FIELDS` allowlist didn't include `release_id` or `version_ordinal`. No resolution path existed for release-based lookup.
+
+**Fix**: In `triggers/platform/unpublish.py`:
+1. Added `release_id` and `version_ordinal` to `_UNPUBLISH_FIELDS`
+2. Added Option 2b: `release_id` → lookup release → asset → resolve data_type and identifiers
+3. Added Option 3b: `version_ordinal` + DDH identifiers → lookup asset → find release by ordinal
+
+**Prevention**: When entities gain new identifiers, update all resolution paths that accept identifiers.
+
+---
+
 ## Related Documents
 
 - `APPLICATION_INSIGHTS.md` - Log query patterns for debugging
@@ -1454,4 +1508,4 @@ How to fix it
 
 ---
 
-**Last Updated**: 19 FEB 2026
+**Last Updated**: 06 MAR 2026

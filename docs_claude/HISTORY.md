@@ -34,14 +34,27 @@ This document tracks completed architectural changes and improvements to the Azu
 | **SG-6** | Already fixed | All 5 COMPETE fixes implemented — `stac_item_json` patched at approval time |
 | **SG6-L3** | Mitigated | Orphan auto-cleanup on resubmit + compensating delete on job-create failure |
 
-### Remaining Known Bugs (LOW only)
+### Also Verified Fixed (CRITICALs — reproduced 06 MAR 2026)
+
+| Bug | Status | Evidence |
+|-----|--------|----------|
+| **PRV-1** | ✅ Fixed | Malformed JSON to /approve, /reject, /revoke all return 400 `ValidationError`. `(ValueError, json.JSONDecodeError)` catch in all 3 handlers. |
+| **LA-1/SG5-1** | ✅ Fixed | Approving a `processing_status=failed` release returns 400 `"Cannot approve: processing_status is 'failed'"`. 4 guards: soft check (service layer), hard SQL WHERE, stale ordinal guard, newer active ordinal query. |
+
+### Remaining Known Bugs
 
 | Bug | Severity | Description |
 |-----|----------|-------------|
+| RCH-1 | HIGH | Zarr rechunk fails — `dask` not in Docker worker requirements |
+| PRV-2 | HIGH | SSRF info leak — URL in container_name exposes Azure Storage errors |
+| LA-2 | MEDIUM | Unpublish dry_run accepts non-approved releases |
+| ID-1 | MEDIUM | No authorization model on approvals (design limitation) |
+| SEQ5-1 | MEDIUM | NetCDF handler can't find .nc files in Docker mount path (infra) |
 | SG11-1 | LOW | version_id not validated against version_ordinal (cosmetic) |
 | PRV-8 | LOW | XSS in stored free-text fields (safe at API, dangerous in UI) |
 | PRV-9 | LOW | 404 instead of 405 for unsupported HTTP methods (Azure Functions limitation) |
 | SG-9 | LOW | dbadmin/stats returns 404 |
+| DIAG-1 | LOW | dbadmin/diagnostics/all returns 404 (new regression) |
 
 ---
 

@@ -209,7 +209,7 @@ curl .../api/dbadmin/tasks/{JOB_ID}
 curl ".../api/dbadmin/jobs?status=failed&limit=10"
 
 # Database stats
-curl .../api/dbadmin/stats
+curl ".../api/dbadmin/diagnostics?type=stats"
 ```
 
 ### Application Insights

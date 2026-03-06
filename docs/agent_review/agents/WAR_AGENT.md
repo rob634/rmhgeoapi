@@ -288,7 +288,7 @@ curl "${BASE_URL}/api/platform/failures"
 
 # Admin (verification only — deeper state inspection)
 curl "${BASE_URL}/api/dbadmin/jobs/{job_id}"
-curl "${BASE_URL}/api/dbadmin/stats"
+curl "${BASE_URL}/api/dbadmin/diagnostics?type=stats"
 ```
 
 Compare actual state to Blue's expected state. Flag divergences.

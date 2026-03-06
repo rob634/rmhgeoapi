@@ -365,7 +365,7 @@ curl -X POST "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/dbadmin/maintena
 
 ```bash
 # Check database statistics
-curl "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/dbadmin/stats"
+curl "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/dbadmin/diagnostics?type=stats"
 ```
 
 **Expected response**:
@@ -506,7 +506,7 @@ pool_timeout: int = 30  # seconds
 ### View Database Statistics
 
 ```bash
-curl https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/dbadmin/stats
+curl "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/dbadmin/diagnostics?type=stats"
 ```
 
 ### Query Jobs

@@ -76,7 +76,7 @@ Endpoints:
     Database Queries (DEV/TEST):
         GET  /api/dbadmin/jobs?status=failed&limit=10 - Query jobs
         GET  /api/dbadmin/tasks/{job_id} - Query tasks for job
-        GET  /api/dbadmin/stats - Database statistics
+        GET  /api/dbadmin/diagnostics?type=stats - Database statistics
 
     Schema Management (DEV ONLY):
         POST /api/dbadmin/maintenance?action=rebuild&confirm=yes - Atomic schema rebuild (both app+pgstac)

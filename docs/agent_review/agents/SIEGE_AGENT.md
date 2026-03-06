@@ -147,7 +147,7 @@ Cartographer probes every known endpoint with a minimal request to verify livene
 | Endpoint | Method | Probe | Expected |
 |----------|--------|-------|----------|
 | `/api/health` | GET | No params | 200 |
-| `/api/dbadmin/stats` | GET | No params | 200 |
+| `/api/dbadmin/diagnostics?type=stats` | GET | No params | 200 |
 | `/api/dbadmin/jobs` | GET | `?limit=1` | 200 |
 
 ### Cartographer Output Format
@@ -450,8 +450,8 @@ For each checkpoint, prefer Platform API endpoints. Use admin endpoints only for
 | Check | Query | Compare Against |
 |-------|-------|-----------------|
 | Job detail | `/api/dbadmin/jobs/{job_id}` | Expected status, result_data |
-| Overall stats | `/api/dbadmin/stats` | No unexpected counts |
-| Orphaned tasks | `/api/dbadmin/diagnostics/all` | Clean diagnostics |
+| Overall stats | `/api/dbadmin/diagnostics?type=stats` | No unexpected counts |
+| Orphaned tasks | `/api/dbadmin/diagnostics?type=all` | Clean diagnostics |
 
 ### Overwrite-Specific Audit Checks
 

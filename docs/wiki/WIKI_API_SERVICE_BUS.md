@@ -734,7 +734,7 @@ curl -X POST "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/dbadmin/maintena
 
 **7.2 Verify tables exist**:
 ```bash
-curl "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/dbadmin/stats"
+curl "https://<YOUR_FUNCTION_APP>.azurewebsites.net/api/dbadmin/diagnostics?type=stats"
 ```
 
 **Expected response**:

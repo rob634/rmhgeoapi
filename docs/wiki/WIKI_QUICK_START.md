@@ -194,7 +194,7 @@ POST /api/stac/search
 GET /api/health
 
 # Database statistics
-GET /api/dbadmin/stats
+GET /api/dbadmin/diagnostics?type=stats
 ```
 
 ---

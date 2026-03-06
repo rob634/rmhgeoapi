@@ -353,10 +353,10 @@ curl -s "${BASE_URL}/api/dbadmin/jobs/{job_id}"
 curl -s "${BASE_URL}/api/dbadmin/jobs?status=failed"
 
 # System diagnostics
-curl -s "${BASE_URL}/api/dbadmin/diagnostics/all"
+curl -s "${BASE_URL}/api/dbadmin/diagnostics?type=all"
 
 # Database stats
-curl -s "${BASE_URL}/api/dbadmin/stats"
+curl -s "${BASE_URL}/api/dbadmin/diagnostics?type=stats"
 ```
 
 **What to look for**:

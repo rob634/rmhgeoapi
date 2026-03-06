@@ -213,7 +213,7 @@ class DatabaseHealthChecks(HealthCheckPlugin):
 
                     query_metrics = {
                         "connection_time_ms": connection_time_ms,
-                        "note": "Detailed metrics available at /api/dbadmin/stats",
+                        "note": "Detailed metrics available at /api/dbadmin/diagnostics?type=stats",
                         "metrics_removed_reason": "Performance optimization - health check should be <5s"
                     }
 

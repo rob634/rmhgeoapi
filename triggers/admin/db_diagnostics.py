@@ -209,7 +209,7 @@ class AdminDbDiagnosticsTrigger:
         """
         Get comprehensive database statistics.
 
-        GET /api/dbadmin/stats
+        GET /api/dbadmin/diagnostics?type=stats
 
         Returns:
             {
@@ -572,7 +572,7 @@ class AdminDbDiagnosticsTrigger:
         """
         Get all diagnostics (stats + enums + functions).
 
-        GET /api/dbadmin/diagnostics/all
+        GET /api/dbadmin/diagnostics?type=all
 
         Returns:
             {

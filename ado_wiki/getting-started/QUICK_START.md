@@ -223,7 +223,7 @@ GET /api/health
 GET /api/readyz
 
 # Database statistics
-GET /api/dbadmin/stats
+GET /api/dbadmin/diagnostics?type=stats
 ```
 
 ---

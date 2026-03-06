@@ -331,7 +331,7 @@ Or for WKT geometry:
 **Solutions**:
 1. Wait and retry after 30 seconds
 2. Reduce concurrent job submissions
-3. Check database health: `GET /api/dbadmin/stats`
+3. Check database health: `GET /api/dbadmin/diagnostics?type=stats`
 
 ---
 

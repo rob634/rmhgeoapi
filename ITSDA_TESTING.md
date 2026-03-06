@@ -315,7 +315,7 @@ curl "${BASE_URL}/api/platform/status/{REQUEST_ID}"
 # EXPECTED: 200 with job_status eventually "completed"
 
 # 1C. VERIFY ASSET EXISTS — Check asset record in DB
-curl "${BASE_URL}/api/dbadmin/diagnostics/all" | python3 -m json.tool | grep -A5 assets
+curl "${BASE_URL}/api/dbadmin/diagnostics?type=all" | python3 -m json.tool | grep -A5 assets
 # Or direct: query app.geospatial_assets WHERE asset_id = ...
 
 # 1D. APPROVE — Finalize with version + clearance
@@ -389,7 +389,7 @@ curl "${BASE_URL}/api/dbadmin/jobs?limit=5"
 # If empty → schema rebuild destroyed all data (expected)
 
 # 3C. Check if geospatial_assets table has any rows
-curl "${BASE_URL}/api/dbadmin/diagnostics/all"
+curl "${BASE_URL}/api/dbadmin/diagnostics?type=all"
 ```
 
 ---

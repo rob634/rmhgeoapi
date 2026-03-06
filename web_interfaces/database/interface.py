@@ -128,11 +128,11 @@ class DatabaseInterface(BaseInterface):
                             <span class="action-icon">API</span>
                             <span class="action-text">Utilization JSON</span>
                         </a>
-                        <a href="/api/dbadmin/stats" target="_blank" class="action-link">
+                        <a href="/api/dbadmin/diagnostics?type=stats" target="_blank" class="action-link">
                             <span class="action-icon">API</span>
                             <span class="action-text">Database Stats</span>
                         </a>
-                        <a href="/api/dbadmin/diagnostics/all" target="_blank" class="action-link">
+                        <a href="/api/dbadmin/diagnostics?type=all" target="_blank" class="action-link">
                             <span class="action-icon">API</span>
                             <span class="action-text">All Diagnostics</span>
                         </a>

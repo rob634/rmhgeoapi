@@ -414,7 +414,6 @@ def ingest_zarr_register(
             - collection_id (str): STAC collection identifier
             - dataset_id (str): Dataset identifier
             - resource_id (str): Resource identifier
-            - version_id (str): Version identifier
             - title (str): Optional title
             - description (str): Optional description
             - tags (list): Optional tags
@@ -432,7 +431,6 @@ def ingest_zarr_register(
     collection_id = params.get("collection_id")
     dataset_id = params.get("dataset_id")
     resource_id = params.get("resource_id")
-    version_id = params.get("version_id")
     title = params.get("title")
     description = params.get("description")
     tags = params.get("tags", [])

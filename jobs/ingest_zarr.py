@@ -108,10 +108,6 @@ class IngestZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
             "type": "str",
             "required": True,
         },
-        "version_id": {
-            "type": "str",
-            "default": None,
-        },
         "title": {
             "type": "str",
             "required": False,
@@ -293,7 +289,6 @@ class IngestZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                         "collection_id": job_params["collection_id"],
                         "dataset_id": job_params["dataset_id"],
                         "resource_id": job_params["resource_id"],
-                        "version_id": job_params.get("version_id"),
                         "title": job_params.get("title"),
                         "description": job_params.get("description"),
                         "tags": job_params.get("tags", []),

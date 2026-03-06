@@ -454,8 +454,9 @@ class BlobRepository(IBlobRepository):
                     container_client.get_container_properties()
                 except ResourceNotFoundError:
                     logger.error(f"Container does not exist: {container}")
+                    # PRV-2: Don't expose storage account name in error messages
                     raise ResourceNotFoundError(
-                        f"Container '{container}' does not exist in storage account '{self.account_name}'"
+                        f"Container '{container}' does not exist"
                     )
 
             self._container_clients[container] = container_client
@@ -580,7 +581,8 @@ class BlobRepository(IBlobRepository):
 
         # Check container first
         if not self.container_exists(container):
-            result["message"] = f"Container '{container}' does not exist in storage account '{self.account_name}'"
+            # PRV-2: Don't expose storage account name in error messages
+            result["message"] = f"Container '{container}' does not exist"
             return result
 
         result["container_exists"] = True

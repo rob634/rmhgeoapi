@@ -101,7 +101,7 @@ def configure_azure_monitor_telemetry():
             "connection_string": connection_string,
             "resource_attributes": {
                 "service.name": app_name,
-                "service.namespace": "rmhgeoapi",
+                "service.namespace": "rmhgeo-platform",
                 "deployment.environment": environment,
             },
             "enable_live_metrics": True,

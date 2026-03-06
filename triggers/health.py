@@ -186,6 +186,8 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
         # Initialize health data structure
         health_data = {
             "status": "healthy",
+            "app": "rmhgeoapi",
+            "role": "etl-orchestrator",
             "version": __version__,
             "components": {},
             "warnings": [],
@@ -260,6 +262,11 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             "details": {"message": "Key Vault disabled - using environment variables only"},
             "checked_at": datetime.now(timezone.utc).isoformat()
         }
+
+        # Combined issues array (warnings + errors) for platform-level aggregation
+        health_data["issues"] = health_data["warnings"] + health_data["errors"]
+        if not health_data["issues"]:
+            health_data["issues"] = None
 
         # Observability status - always include
         health_data["observability_status"] = config.get_debug_status()

@@ -150,6 +150,15 @@ Cartographer probes every known endpoint with a minimal request to verify livene
 | `/api/dbadmin/diagnostics?type=stats` | GET | No params | 200 |
 | `/api/dbadmin/jobs` | GET | `?limit=1` | 200 |
 
+**Service Layer health (TiTiler/TiPG — required for URL verification)**:
+
+| Endpoint | Base | Probe | Expected |
+|----------|------|-------|----------|
+| `/livez` | `{titiler_base}` from siege_config.json | No params | 200, `{"status":"alive","app":"rmhtitiler"}` |
+| `/health` | `{titiler_base}` | No params | 200, verify `app` and `role` fields present |
+
+If the Service Layer is DOWN (non-200 from `/livez`), Cartographer MUST report `SERVICE_LAYER: DOWN` in the Health Assessment. Lancer should still run lifecycle sequences, but service URL probes will FAIL — this is expected and should be recorded as `FAIL (service layer down)`, not skipped.
+
 ### Cartographer Output Format
 
 ```markdown
@@ -178,14 +187,25 @@ Lancer executes canonical lifecycle sequences and records state checkpoints.
 3. POST `/api/platform/approve` (version_id="v1") → verify STAC materialized
 4. GET `/api/platform/catalog/item/{collection}/{item_id}` → verify exists
 5. GET `/api/platform/catalog/lookup?dataset_id={ds}&resource_id={rs}` → verify `titiler_urls` present with keys [xyz, tilejson, preview, info, statistics]. Verify URLs contain TiTiler base hostname. → **CHECKPOINT R1-URLS**
-6. **CHECKPOINT R1**: Record all IDs and expected DB/STAC state
+6. **PROBE SERVICE URLS** (mandatory — this is the platform success criterion):
+   - GET `{titiler_urls.info}` → expect HTTP 200, JSON with `band_metadata`
+   - GET `{titiler_urls.preview}` → expect HTTP 200, Content-Type contains `image/`
+   - GET `{titiler_urls.tilejson}` → expect HTTP 200, JSON with `tiles` array
+   - Record each: URL, HTTP code, Content-Type, verdict (PASS/FAIL/ERROR)
+   - If ANY probe fails: log the full response body (truncated to 500 chars) for diagnosis
+7. **CHECKPOINT R1**: Record all IDs, expected DB/STAC state, and service URL probe results
 
 **Sequence 2: Vector Lifecycle**
 1. POST `/api/platform/submit` (vector) → capture IDs
 2. Poll until completed → capture release_id
 3. POST `/api/platform/approve` → verify OGC Features
 4. GET `/api/platform/catalog/lookup?dataset_id={ds}&resource_id={rs}` → verify `endpoints.features` present, `tiles.tilejson` present. Verify URLs contain TiPG base path. → **CHECKPOINT V1-URLS**
-5. **CHECKPOINT V1**: Record all IDs
+5. **PROBE SERVICE URLS** (mandatory):
+   - GET `{tipg_base}/collections/{schema}.{table_name}` → expect HTTP 200, JSON with collection metadata
+   - GET `{tipg_base}/collections/{schema}.{table_name}/items?limit=1` → expect HTTP 200, JSON with `type: "FeatureCollection"` and `features` array
+   - Record each: URL, HTTP code, Content-Type, verdict (PASS/FAIL/ERROR)
+   - If ANY probe fails: log the full response body (truncated to 500 chars) for diagnosis
+6. **CHECKPOINT V1**: Record all IDs and service URL probe results
 
 **Sequence 3: Multi-Version**
 1. POST `/api/platform/submit` (resubmit raster, same dataset_id) → capture v2 IDs
@@ -203,7 +223,13 @@ Lancer executes canonical lifecycle sequences and records state checkpoints.
 3. POST `/api/platform/approve` (version_id="v1") → verify STAC materialized (zarr items go in STAC)
 4. GET `/api/platform/catalog/dataset/{dataset_id}` → verify catalog entry exists
 5. GET `/api/platform/catalog/lookup?dataset_id={ds}&resource_id={rs}` → verify `xarray_urls` present with keys [variables, tiles, tilejson, preview, info, point]. Verify URLs contain TiTiler base hostname and `/xarray/` path. → **CHECKPOINT Z1-URLS**
-6. **CHECKPOINT Z1**: Record all IDs, verify job_type=virtualzarr, STAC item present
+6. **PROBE SERVICE URLS** (mandatory):
+   - GET `{xarray_urls.variables}` → expect HTTP 200, JSON array of variable names
+   - If variables response is 200, pick the first variable name from the array, then:
+     - GET `{xarray_urls.info}&variable={first_var}` → expect HTTP 200, JSON metadata
+   - Record each: URL, HTTP code, Content-Type, verdict (PASS/FAIL/ERROR)
+   - If ANY probe fails: log the full response body (truncated to 500 chars) for diagnosis
+7. **CHECKPOINT Z1**: Record all IDs, verify job_type=virtualzarr, STAC item present, service URL probe results
 
 Note: NetCDF (.nc) routes to the VirtualiZarr pipeline, NOT the raster pipeline.
 Use `data_type_override: "zarr"` from siege_config.json. Submit body must include
@@ -214,7 +240,13 @@ Use `data_type_override: "zarr"` from siege_config.json. Submit body must includ
 2. Poll until completed → verify job completes (different code path from VirtualiZarr .nc)
 3. POST `/api/platform/approve` (version_id="v1") → verify STAC materialized
 4. GET `/api/platform/catalog/lookup?dataset_id={ds}&resource_id={rs}` → verify `xarray_urls` present → **CHECKPOINT NZ1-URLS**
-5. **CHECKPOINT NZ1**: Record all IDs, verify direct zarr path (NOT virtualzarr pipeline)
+5. **PROBE SERVICE URLS** (mandatory):
+   - GET `{xarray_urls.variables}` → expect HTTP 200, JSON array of variable names
+   - If variables response is 200, pick the first variable name from the array, then:
+     - GET `{xarray_urls.info}&variable={first_var}` → expect HTTP 200, JSON metadata
+   - Record each: URL, HTTP code, Content-Type, verdict (PASS/FAIL/ERROR)
+   - If ANY probe fails: log the full response body (truncated to 500 chars) for diagnosis
+6. **CHECKPOINT NZ1**: Record all IDs, verify direct zarr path (NOT virtualzarr pipeline), service URL probe results
 
 **Sequence 7: Rejection Path**
 1. POST `/api/platform/submit` (raster, new dataset_id `sg-reject-test`) → capture request_id
@@ -384,7 +416,8 @@ Tests the `ingest_zarr_rechunk` handler — submitting a native Zarr with `rechu
 | 2 | Poll until completed | Job succeeds — `ingest_zarr_rechunk` handler fired (Stage 2 rechunk instead of blob copy) |
 | 3 | POST `/api/platform/approve` (version_id="v1") | STAC materialized |
 | 4 | GET `/api/platform/catalog/lookup?dataset_id={ds}&resource_id={rs}` | `xarray_urls` present with keys [variables, tiles, tilejson, preview, info, point] |
-| 5 | **CHECKPOINT RCH1**: Rechunked Zarr ingested and served. Verify job_type=ingest_zarr. |
+| 5 | **PROBE SERVICE URLS**: GET `{xarray_urls.variables}` → 200, JSON array. If 200: GET `{xarray_urls.info}&variable={first_var}` → 200 | Service Layer serves rechunked data |
+| 6 | **CHECKPOINT RCH1**: Rechunked Zarr ingested and served. Verify job_type=ingest_zarr. Record service URL probe results. |
 
 Note: `rechunk` MUST be inside `processing_options`, same as `overwrite`. The `ingest_zarr_rechunk` handler reads source Zarr via xarray, rechunks to 256×256 spatial / time=1 / Blosc+LZ4, and writes to silver-zarr.
 
@@ -400,16 +433,29 @@ EXPECTED STATE:
     - {release_id} → approval_state={state}, version_ordinal={n}
   STAC Items:
     - {item_id} → {exists | not exists}
-  Service URLs:
+  Service URLs (from catalog response):
     - raster: titiler_urls keys={list} | MISSING
     - vector: endpoints.features={url}, tiles.tilejson={url} | MISSING
     - zarr: xarray_urls keys={list} | MISSING
+  Service URL Probes (Lancer actually hit these — PASS/FAIL/SKIP):
+    - {probe_name}: {url} → HTTP {code}, {Content-Type} → {PASS|FAIL|ERROR}
+    - {probe_name}: {url} → HTTP {code}, {Content-Type} → {PASS|FAIL|ERROR}
+    - (if FAIL: response body excerpt for diagnosis)
   Captured IDs:
     - request_id={value}
     - job_id={value}
     - release_id={value}
     - asset_id={value}
 ```
+
+**Service URL probe rules**:
+- Probes are mandatory for all `*-URLS` checkpoints (R1, V1, Z1, NZ1, RCH1)
+- Use `{titiler_base}` from `siege_config.json → target.service_urls.titiler_base`
+- Use probe URL templates from `siege_config.json → target.service_urls.{raster,vector,zarr}_probes`
+- Substitute `{encoded_url}` with the actual URL-encoded blob path from the catalog response
+- Substitute `{schema}` and `{table_name}` from the catalog vector response
+- Substitute `{variable}` with the first variable from `/xarray/variables` response
+- If the Service Layer is unreachable, record `FAIL (service layer down)` — do NOT skip
 
 ### Lancer HTTP Log Format
 
@@ -487,23 +533,25 @@ For each overwrite checkpoint, Auditor MUST verify these fields via `/api/platfo
 | Checkpoint | Expected | Actual | Severity |
 ...
 
-### Service URL Integrity
-| Data Type | Probe | URL | HTTP | Content-Type | Verdict |
-|-----------|-------|-----|------|-------------|---------|
+### Service URL Integrity (Re-verification of Lancer probes)
+| Data Type | Probe | Lancer Result | Auditor Re-probe | Verdict |
+|-----------|-------|---------------|------------------|---------|
 ...
 ```
 
-### Service URL Integrity
+### Service URL Integrity (Re-verification)
 
-For each approved release in the checkpoint map:
+Lancer performs the primary service URL probes during lifecycle sequences.
+Auditor cross-checks Lancer's probe results and re-verifies any that failed.
 
-1. **TiTiler Liveness**: GET `{titiler_base}/livez` → expect HTTP 200 with `{"status":"alive"}`
-2. **Per data type probes** (using URLs from Lancer's catalog response):
+1. **Check Lancer's probe results**: For each `*-URLS` checkpoint, verify Lancer recorded PASS/FAIL/ERROR for all expected probes. If any probe is missing from the checkpoint, flag as `AUDIT_GAP`.
+2. **Re-probe failures**: For any probe that Lancer recorded as FAIL, re-run the same GET request. If it now passes, record `FLAKY`. If it still fails, record `CONFIRMED_FAIL`.
+3. **TiTiler health cross-check**: GET `{titiler_base}/health` → verify response contains `"app": "rmhtitiler"` and `"status"` field. This confirms the Service Layer is identity-aware (platform contract alignment).
 
 | Data Type | Probe | Expected |
 |-----------|-------|----------|
 | Raster | GET `{titiler_urls.info}` | HTTP 200, JSON with `band_metadata` |
-| Raster | GET `{titiler_urls.preview}` | HTTP 200, Content-Type: image/png |
+| Raster | GET `{titiler_urls.preview}` | HTTP 200, Content-Type contains `image/` |
 | Raster | GET `{titiler_urls.tilejson}` | HTTP 200, JSON with `tiles` array |
 | Vector | GET `{tipg_base}/collections/{table}` | HTTP 200, collection metadata |
 | Vector | GET `{tipg_base}/collections/{table}/items?limit=1` | HTTP 200, GeoJSON FeatureCollection |
@@ -554,18 +602,31 @@ Assessment: {HEALTHY | DEGRADED | DOWN}
 | 18. Multi-Revoke Overwrite Target | {n} | {n} | {n} | {n} |
 | 19. Zarr Rechunk Path | {n} | {n} | {n} | {n} |
 
-## Service URL Verification
-| Data Type | Probe | HTTP | Verdict |
-|-----------|-------|------|---------|
-| TiTiler liveness | /livez | {code} | PASS/FAIL |
-| Raster info | /cog/info | {code} | PASS/FAIL |
-| Raster preview | /cog/preview | {code} | PASS/FAIL |
-| Vector collection | /vector/collections/{table} | {code} | PASS/FAIL |
-| Vector items | /vector/collections/{table}/items | {code} | PASS/FAIL |
-| Zarr variables | /xarray/variables | {code} | PASS/FAIL |
-| Zarr info | /xarray/info | {code} | PASS/FAIL |
+## Service URL Verification (Platform Success Criterion)
+
+**This is the primary measure of platform health.** ETL pipelines are only successful
+if the Service Layer can serve the data they produced. URLs are probed by Lancer
+during lifecycle sequences and re-verified by Auditor for any failures.
+
+| Seq | Data Type | Probe | URL | HTTP | Verdict |
+|-----|-----------|-------|-----|------|---------|
+| 1 | TiTiler liveness | /livez | {url} | {code} | PASS/FAIL |
+| 1 | Raster info | /cog/info | {url} | {code} | PASS/FAIL |
+| 1 | Raster preview | /cog/preview | {url} | {code} | PASS/FAIL |
+| 1 | Raster tilejson | /cog/tilejson | {url} | {code} | PASS/FAIL |
+| 2 | Vector collection | /vector/collections/{table} | {url} | {code} | PASS/FAIL |
+| 2 | Vector items | /vector/collections/{table}/items | {url} | {code} | PASS/FAIL |
+| 5 | Zarr variables (VirtualiZarr) | /xarray/variables | {url} | {code} | PASS/FAIL |
+| 5 | Zarr info (VirtualiZarr) | /xarray/info | {url} | {code} | PASS/FAIL |
+| 6 | Zarr variables (native) | /xarray/variables | {url} | {code} | PASS/FAIL |
+| 6 | Zarr info (native) | /xarray/info | {url} | {code} | PASS/FAIL |
+| 19 | Zarr variables (rechunk) | /xarray/variables | {url} | {code} | PASS/FAIL |
+| 19 | Zarr info (rechunk) | /xarray/info | {url} | {code} | PASS/FAIL |
 
 Assessment: {ALL PASS | DEGRADED | UNAVAILABLE}
+- **ALL PASS**: Platform is fully operational — ETL data is discoverable and servable
+- **DEGRADED**: Some data types not served (e.g. zarr 500 but raster OK)
+- **UNAVAILABLE**: Service Layer down or all probes failing
 
 ## State Divergences
 {from Auditor — expected vs actual for each failing checkpoint}
@@ -590,9 +651,9 @@ Log the run in `docs/agent_review/AGENT_RUNS.md`.
 | Agent | Gets | Doesn't Get |
 |-------|------|-------------|
 | Sentinel | V0.9_TEST.md, API docs | Nothing (defines everything) |
-| Cartographer | Campaign Brief, endpoint list | Test data, lifecycle sequences |
-| Lancer | Campaign Brief, test data, sequences | Cartographer's findings |
-| Auditor | Lancer's State Checkpoint Map, captured IDs, service URLs from checkpoints. Also probes external TiTiler/TiPG endpoints. | Lancer's raw HTTP responses |
+| Cartographer | Campaign Brief, endpoint list, `siege_config.json` service URLs | Test data, lifecycle sequences |
+| Lancer | Campaign Brief, test data, sequences, `siege_config.json` service URL templates | Cartographer's findings |
+| Auditor | Lancer's State Checkpoint Map (incl. service URL probe results). Re-probes TiTiler/TiPG for failures. | Lancer's raw HTTP responses |
 | Scribe | All outputs from all agents | Nothing hidden |
 
 **Note**: SIEGE has minimal information asymmetry by design. Its value is speed and completeness, not adversarial competition. For adversarial testing, use WARGAME or TOURNAMENT.

@@ -65,6 +65,7 @@ class LivezProbe:
         return func.HttpResponse(
             json.dumps({
                 "status": "alive",
+                "app": "rmhgeoapi",
                 "probe": "livez",
                 "message": "Process is running"
             }),

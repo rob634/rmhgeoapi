@@ -68,6 +68,7 @@ netCDF4>=1.6.0                        # NetCDF3/4 engine for xarray (lazy metada
 fsspec>=2024.2.0
 adlfs>=2024.2.0
 aiohttp>=3.13.3                       # CVE-2025-69223 + 5 others fixed in 3.13.3
+dask>=2024.11.0                        # Required by xarray .chunk() for Zarr rechunking (RCH-1)
 
 # === VirtualiZarr pipeline (NetCDF → virtual Zarr references) ===
 virtualizarr>=1.1.0,<2.0.0           # 2.0+ requires xarray>=2025.3; stay on 1.x for now

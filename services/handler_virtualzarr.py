@@ -428,8 +428,9 @@ def virtualzarr_validate(
         fs = _get_blob_fs()
 
         # Use ETL mount for temp storage if available, else system temp
-        etl_mount = "/mounts/etl-temp"
-        temp_dir = etl_mount if os.path.isdir(etl_mount) else None
+        from config import get_config
+        etl_mount = get_config().docker.etl_mount_path
+        temp_dir = etl_mount if etl_mount and os.path.isdir(etl_mount) else None
 
         variables = {}
         dimensions = {}

@@ -43,6 +43,12 @@ def _get_silver_zarr_container() -> str:
     return get_config().storage.silver.zarr
 
 
+def _get_etl_mount_path() -> str:
+    """Get the ETL mount path from Docker config (NOT hardcoded)."""
+    from config import get_config
+    return get_config().docker.etl_mount_path
+
+
 # Manifest filename — single source of truth shared with handler_netcdf_to_zarr.py
 MANIFEST_FILENAME = "manifest.json"
 
@@ -313,7 +319,7 @@ class NetCDFToZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                 )
 
             # Local temp dir for this job on the mount
-            local_dir = f"/mounts/etl-temp/{job_id}"
+            local_dir = f"{_get_etl_mount_path()}/{job_id}"
 
             return [
                 {
@@ -352,7 +358,7 @@ class NetCDFToZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                 )
 
             # Build full local paths from job_id
-            local_dir = f"/mounts/etl-temp/{job_id}"
+            local_dir = f"{_get_etl_mount_path()}/{job_id}"
             fail_on_warnings = job_params.get("fail_on_chunking_warnings", False)
 
             return [
@@ -374,7 +380,7 @@ class NetCDFToZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                     "Stage 4 (convert) requires previous_results from validate stage"
                 )
 
-            local_dir = f"/mounts/etl-temp/{job_id}"
+            local_dir = f"{_get_etl_mount_path()}/{job_id}"
             zarr_container = _get_silver_zarr_container()
             output_folder = job_params["output_folder"]
 

@@ -285,8 +285,11 @@ Fresh requests — no prior state needed. Each step expects HTTP 400.
 | 12h | POST `/api/platform/reject` with `reason=""` (empty string) | reason (blank) | HTTP 400 |
 | 12i | POST `/api/platform/revoke` without `reason` | reason | HTTP 400 |
 | 12j | POST `/api/platform/approve` for nonexistent release_id (UUID zeros) | valid structure, no target | HTTP 404 |
+| 12k | POST `/api/platform/submit` with valid raster body + unknown field `"bogus_field": "test"` | unknown top-level field (ERH-1 extra='forbid') | HTTP 400 |
+| 12l | POST `/api/platform/submit` with valid body + `"processing_options": {"overwrite": true, "fake_option": 99}` | unknown processing_options field (ERH-1 extra='forbid') | HTTP 400 |
+| 12m | POST `/api/platform/approve` with valid approval + `"extra_junk": true` | unknown approval field (ERH-1 extra='forbid') | HTTP 400 |
 
-**CHECKPOINT MRF**: All 10 requests returned 400/404 (not 200 or 500). Record each HTTP code and error body.
+**CHECKPOINT MRF**: All 13 requests returned 400/404 (not 200 or 500). Record each HTTP code and error body.
 
 **Sequence 13: Version Conflict**
 1. POST `/api/platform/submit` (new dataset_id `sg-conflict-test`) → poll until completed
@@ -370,6 +373,20 @@ Tests `get_overwrite_candidate()` ORDER BY behavior — must select the most rec
 | 7 | POST `/api/platform/submit` (same, `processing_options: {overwrite: true}`) → poll | overwritten release = v2's release_id |
 
 **CHECKPOINT MREV1**: Most recent revoked release selected. v1's revoked release untouched.
+
+**Sequence 19: Zarr Rechunk Path (v0.9.14.0)**
+
+Tests the `ingest_zarr_rechunk` handler — submitting a native Zarr with `rechunk=True` processing option. Uses a different Zarr fixture than Seq 6 to avoid dataset_id collision.
+
+| Step | Action | Verify |
+|------|--------|--------|
+| 1 | POST `/api/platform/submit` with `zarr_era5_global` from config (`data_type=zarr`, `processing_options: {rechunk: true}`), dataset_id `sg-zarr-rechunk-test` | request_id, job_id |
+| 2 | Poll until completed | Job succeeds — `ingest_zarr_rechunk` handler fired (Stage 2 rechunk instead of blob copy) |
+| 3 | POST `/api/platform/approve` (version_id="v1") | STAC materialized |
+| 4 | GET `/api/platform/catalog/lookup?dataset_id={ds}&resource_id={rs}` | `xarray_urls` present with keys [variables, tiles, tilejson, preview, info, point] |
+| 5 | **CHECKPOINT RCH1**: Rechunked Zarr ingested and served. Verify job_type=ingest_zarr. |
+
+Note: `rechunk` MUST be inside `processing_options`, same as `overwrite`. The `ingest_zarr_rechunk` handler reads source Zarr via xarray, rechunks to 256×256 spatial / time=1 / Blosc+LZ4, and writes to silver-zarr.
 
 ### Lancer Checkpoint Format
 
@@ -528,13 +545,14 @@ Assessment: {HEALTHY | DEGRADED | DOWN}
 | 9. Revoke + is_latest Cascade | {n} | {n} | {n} | {n} |
 | 10. Overwrite Draft | {n} | {n} | {n} | {n} |
 | 11. Invalid State Transitions (9) | {n} | {n} | {n} | {n} |
-| 12. Missing Required Fields (10) | {n} | {n} | {n} | {n} |
+| 12. Missing Required Fields (13) | {n} | {n} | {n} | {n} |
 | 13. Version Conflict | {n} | {n} | {n} | {n} |
 | 14. Revoke→Overwrite→Reapprove | {n} | {n} | {n} | {n} |
 | 15. Overwrite Approved (→New Version) | {n} | {n} | {n} | {n} |
 | 16. Triple Revision | {n} | {n} | {n} | {n} |
 | 17. Overwrite Race Guard | {n} | {n} | {n} | {n} |
 | 18. Multi-Revoke Overwrite Target | {n} | {n} | {n} | {n} |
+| 19. Zarr Rechunk Path | {n} | {n} | {n} | {n} |
 
 ## Service URL Verification
 | Data Type | Probe | HTTP | Verdict |

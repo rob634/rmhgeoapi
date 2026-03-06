@@ -241,6 +241,17 @@
       "container_name": "wargames",
       "data_type_override": "zarr",
       "description": "Native Zarr store (ERA5 global sample) — tests direct zarr submission path, NOT VirtualiZarr"
+    },
+    "zarr_era5_rechunk": {
+      "dataset_id_suffix": "zarr-rechunk-test",
+      "resource_id": "era5-rechunk",
+      "file_name": "good-data/era5-global-sample.zarr",
+      "container_name": "wargames",
+      "data_type_override": "zarr",
+      "processing_options": {
+        "rechunk": true
+      },
+      "description": "Native Zarr with rechunk=true — tests ingest_zarr_rechunk handler (Seq 19). Same source file as zarr_era5_global but with rechunk processing option."
     }
   },
   "invalid_files": {
@@ -585,6 +596,34 @@
       "version_id": "v1",
       "_comment": "No release_id, asset_id, job_id, request_id, or dataset_id — should fail 400",
       "attack_use": "Sequence 12f — Missing Required Fields"
+    },
+    "_comment_erh1_unknown_fields": "--- ERH-1 unknown field rejection fixtures (extra='forbid') ---",
+    "submit_with_unknown_field": {
+      "dataset_id": "sg-erh1-test",
+      "resource_id": "dctest",
+      "file_name": "dctest.tif",
+      "bogus_field": "test",
+      "_comment": "Should fail with 400 — bogus_field is not a valid PlatformRequest field",
+      "attack_use": "Sequence 12k — ERH-1 unknown top-level field"
+    },
+    "submit_with_unknown_processing_option": {
+      "dataset_id": "sg-erh1-opt-test",
+      "resource_id": "dctest",
+      "file_name": "dctest.tif",
+      "processing_options": {
+        "overwrite": true,
+        "fake_option": 99
+      },
+      "_comment": "Should fail with 400 — fake_option is not a valid processing option",
+      "attack_use": "Sequence 12l — ERH-1 unknown processing_options field"
+    },
+    "approve_with_unknown_field": {
+      "reviewer": "siege-qa@example.com",
+      "clearance_level": "ouo",
+      "version_id": "v1",
+      "extra_junk": true,
+      "_comment": "Should fail with 400 — extra_junk is not a valid approval field",
+      "attack_use": "Sequence 12m — ERH-1 unknown approval field"
     },
     "_comment_overwrite": "--- Overwrite workflow fixtures ---",
     "valid_revocation_for_overwrite": {

@@ -49,6 +49,7 @@ from config import get_config, generate_platform_request_id
 from infrastructure import PlatformRepository
 
 # Import core models
+from pydantic import ValidationError
 from core.models import ApiRequest, DataType, PlatformRequest
 
 # Import services (extracted from trigger_platform.py)
@@ -462,6 +463,16 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
             message="Platform request submitted. CoreMachine job created.",
             **({"warnings": submit_warnings} if submit_warnings else {})
         )
+
+    except ValidationError as e:
+        # ERH-13: Strip Pydantic internal URL from client-facing errors
+        clean_errors = []
+        for err in e.errors():
+            msg = err.get('msg', '')
+            loc = ' → '.join(str(l) for l in err.get('loc', []))
+            clean_errors.append(f"{loc}: {msg}" if loc else msg)
+        logger.warning(f"Pydantic validation error: {'; '.join(clean_errors)}")
+        return validation_error("; ".join(clean_errors))
 
     except ValueError as e:
         logger.warning(f"Validation error: {e}")

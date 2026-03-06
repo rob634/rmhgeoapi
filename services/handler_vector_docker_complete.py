@@ -1238,6 +1238,16 @@ def _get_vector_remediation(error_code: 'ErrorCode', e: Exception) -> str:
     """
     from core.errors import ErrorCode
 
+    # ERH-7: Specific remediation for nested ZIP before generic lookup
+    error_str = str(e).lower()
+    if error_code == ErrorCode.VECTOR_UNREADABLE and 'nested zip' in error_str:
+        return (
+            "Your ZIP archive contains a nested ZIP file. "
+            "Please flatten the archive so that data files "
+            "(.shp, .dbf, .shx, .prj, .geojson, etc.) are at the top level, "
+            "not inside nested ZIPs."
+        )
+
     remediation_map = {
         ErrorCode.FILE_NOT_FOUND: (
             "Verify the file path is correct and the file exists in the specified container. "

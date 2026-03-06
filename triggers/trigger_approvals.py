@@ -419,11 +419,11 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
             headers={"Content-Type": "application/json"}
         )
 
-    except (ValueError, json.JSONDecodeError):
+    except (ValueError, json.JSONDecodeError) as e:
         return func.HttpResponse(
             json.dumps({
                 "success": False,
-                "error": "Invalid JSON in request body",
+                "error": str(e) if str(e) else "Invalid JSON in request body",
                 "error_type": "ValidationError"
             }),
             status_code=400,
@@ -563,11 +563,11 @@ def platform_reject(req: func.HttpRequest) -> func.HttpResponse:
             headers={"Content-Type": "application/json"}
         )
 
-    except (ValueError, json.JSONDecodeError):
+    except (ValueError, json.JSONDecodeError) as e:
         return func.HttpResponse(
             json.dumps({
                 "success": False,
-                "error": "Invalid JSON in request body",
+                "error": str(e) if str(e) else "Invalid JSON in request body",
                 "error_type": "ValidationError"
             }),
             status_code=400,
@@ -713,11 +713,11 @@ def platform_revoke(req: func.HttpRequest) -> func.HttpResponse:
             headers={"Content-Type": "application/json"}
         )
 
-    except (ValueError, json.JSONDecodeError):
+    except (ValueError, json.JSONDecodeError) as e:
         return func.HttpResponse(
             json.dumps({
                 "success": False,
-                "error": "Invalid JSON in request body",
+                "error": str(e) if str(e) else "Invalid JSON in request body",
                 "error_type": "ValidationError"
             }),
             status_code=400,

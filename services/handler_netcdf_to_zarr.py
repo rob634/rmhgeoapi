@@ -69,47 +69,48 @@ def _build_zarr_encoding(ds, spatial_chunk_size=256, time_chunk_size=1,
     Returns:
         (target_chunks, encoding) tuple:
             target_chunks: dict for ds.chunk() — {dim_name: chunk_size}
-            encoding: dict for ds.to_zarr(encoding=...) — {var_name: {compressor, chunks}}
+            encoding: dict for ds.to_zarr(encoding=...) — {var_name: {compressors, chunks}}
     """
-    import numcodecs
+    from zarr.codecs import BloscCodec
 
     # Detect spatial and time dimensions
     spatial_names = {"lat", "latitude", "y", "lon", "longitude", "x"}
     time_names = {"time", "t"}
 
     target_chunks = {}
-    for dim_name, dim_size in ds.dims.items():
+    for dim_name, dim_size in ds.sizes.items():
         dim_lower = dim_name.lower()
         if dim_lower in spatial_names:
-            target_chunks[dim_name] = min(spatial_chunk_size, int(dim_size))
+            target_chunks[dim_name] = min(spatial_chunk_size, dim_size)
         elif dim_lower in time_names:
-            target_chunks[dim_name] = min(time_chunk_size, int(dim_size))
+            target_chunks[dim_name] = min(time_chunk_size, dim_size)
         else:
             # Non-spatial, non-time dims: keep full extent (single chunk)
-            target_chunks[dim_name] = int(dim_size)
+            target_chunks[dim_name] = dim_size
 
-    # Build compressor
+    # Build compressor — zarr 3.x requires zarr.codecs.BloscCodec (not numcodecs.Blosc)
     if compressor_name == "none":
-        compressor = None
+        compressors = None
     else:
-        compressor = numcodecs.Blosc(
+        compressors = [BloscCodec(
             cname=compressor_name,
             clevel=compression_level,
-            shuffle=numcodecs.Blosc.BITSHUFFLE,
-        )
+            shuffle="bitshuffle",
+        )]
 
     # Build per-variable encoding (data vars only, not coords)
+    # zarr 3.x uses "compressors" key (list), not "compressor" (single)
     encoding = {}
     for var_name in ds.data_vars:
         var = ds[var_name]
         var_chunks = tuple(
-            target_chunks.get(dim, int(ds.dims[dim]))
+            target_chunks.get(dim, ds.sizes[dim])
             for dim in var.dims
         )
-        encoding[var_name] = {
-            "compressor": compressor,
-            "chunks": var_chunks,
-        }
+        enc = {"chunks": var_chunks}
+        if compressors is not None:
+            enc["compressors"] = compressors
+        encoding[var_name] = enc
 
     logger.info(
         f"_build_zarr_encoding: spatial={spatial_chunk_size}, "
@@ -332,14 +333,15 @@ def netcdf_copy(
     """
     Copy a single NetCDF file from bronze to local mounted storage.
 
-    Downloads the file from Azure Blob Storage to /mounts/etl-temp/{job_id}/
-    for fast local processing in subsequent stages.
+    Downloads the file from Azure Blob Storage to {etl_mount_path}/{job_id}/
+    for fast local processing in subsequent stages. Mount path is resolved
+    at execution time from config (not baked into task params).
 
     Args:
         params: Task parameters
             - source_url (str): abfs:// URL to the source file
             - source_account (str): Source storage account name
-            - local_dir (str): Local mount directory (e.g. /mounts/etl-temp/{job_id})
+            - job_id (str): Job ID (used to build local dir on mount)
             - filename (str): Target filename within local_dir
             - size_bytes (int): Expected file size for verification
         context: Optional execution context
@@ -351,9 +353,19 @@ def netcdf_copy(
 
     source_url = params.get("source_url")
     source_account = params.get("source_account")
-    local_dir = params.get("local_dir")
+    job_id = params.get("job_id")
     filename = params.get("filename")
     expected_size = params.get("size_bytes", 0)
+
+    # Resolve mount path at execution time (on Docker worker)
+    from config import get_config
+    etl_mount_path = get_config().docker.etl_mount_path
+    if not etl_mount_path:
+        return {
+            "success": False,
+            "error": "RASTER_ETL_MOUNT_PATH not configured — cannot copy files to local mount",
+        }
+    local_dir = f"{etl_mount_path}/{job_id}"
 
     logger.info(
         f"netcdf_copy: {source_url} → {local_dir}/{filename}"
@@ -445,11 +457,13 @@ def netcdf_validate(
 
     Opens the file with xarray from local disk, extracts variable metadata
     (shape, dtype, chunks, encoding), and generates warnings for
-    problematic chunking configurations.
+    problematic chunking configurations. Mount path is resolved at execution
+    time from config (not baked into task params).
 
     Args:
         params: Task parameters
-            - local_path (str): Path to the NetCDF file on local mount
+            - job_id (str): Job ID (used to build local dir on mount)
+            - relative_path (str): Relative path within job's mount dir
             - fail_on_warnings (bool): If True, return success=False when warnings found
         context: Optional execution context
 
@@ -458,8 +472,19 @@ def netcdf_validate(
     """
     start = time.time()
 
-    local_path = params.get("local_path")
+    job_id = params.get("job_id")
+    relative_path = params.get("relative_path")
     fail_on_warnings = params.get("fail_on_warnings", False)
+
+    # Resolve mount path at execution time (on Docker worker)
+    from config import get_config
+    etl_mount_path = get_config().docker.etl_mount_path
+    if not etl_mount_path:
+        return {
+            "success": False,
+            "error": "RASTER_ETL_MOUNT_PATH not configured — cannot access local mount",
+        }
+    local_path = f"{etl_mount_path}/{job_id}/{relative_path}"
 
     logger.info(f"netcdf_validate: local_path={local_path}, fail_on_warnings={fail_on_warnings}")
 
@@ -597,12 +622,12 @@ def netcdf_convert(
     Opens all NetCDF files from local mount with xr.open_mfdataset(),
     writes to silver-zarr container via adlfs, then cleans up temp files.
 
-    Preserves source chunking (no rechunking). Extracts spatial extent
-    and time range metadata from the combined dataset.
+    Applies optimized chunking (spatial 256×256, time=1) with Blosc+LZ4
+    compression. Mount path is resolved at execution time from config.
 
     Args:
         params: Task parameters
-            - local_dir (str): Directory containing NetCDF files on local mount
+            - job_id (str): Job ID (used to build local dir on mount)
             - file_pattern (str): Glob pattern (default "*.nc")
             - concat_dim (str): Dimension to concatenate along (default "time")
             - output_folder (str): Output folder in silver-zarr container
@@ -616,7 +641,16 @@ def netcdf_convert(
     """
     start = time.time()
 
-    local_dir = params.get("local_dir")
+    # Resolve mount path at execution time (on Docker worker)
+    job_id = params.get("job_id")
+    from config import get_config as _get_config
+    _etl_mount = _get_config().docker.etl_mount_path
+    if not _etl_mount:
+        return {
+            "success": False,
+            "error": "RASTER_ETL_MOUNT_PATH not configured — cannot access local mount",
+        }
+    local_dir = f"{_etl_mount}/{job_id}"
     file_pattern = params.get("file_pattern", "*.nc")
     concat_dim = params.get("concat_dim", "time")
     output_folder = params.get("output_folder")

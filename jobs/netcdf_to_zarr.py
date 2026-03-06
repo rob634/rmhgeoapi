@@ -21,7 +21,7 @@ kerchunk/virtualizarr references that are no longer compatible with TiTiler.
 
 Five-Stage Workflow:
     Stage 1 (scan): List NetCDF files from bronze, build manifest
-    Stage 2 (copy): Fan-out — copy each file from bronze → /mounts/etl-temp/{job_id}/
+    Stage 2 (copy): Fan-out — copy each file from bronze → {etl_mount_path}/{job_id}/
     Stage 3 (validate): Fan-out — validate each file's structure with xarray
     Stage 4 (convert): xr.open_mfdataset() → ds.to_zarr() to silver-zarr
     Stage 5 (register): Build STAC item, update release record
@@ -41,12 +41,6 @@ def _get_silver_zarr_container() -> str:
     """Get the silver-zarr container name from config."""
     from config import get_config
     return get_config().storage.silver.zarr
-
-
-def _get_etl_mount_path() -> str:
-    """Get the ETL mount path from Docker config (NOT hardcoded)."""
-    from config import get_config
-    return get_config().docker.etl_mount_path
 
 
 # Manifest filename — single source of truth shared with handler_netcdf_to_zarr.py
@@ -318,9 +312,6 @@ class NetCDFToZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                     f"Manifest at {manifest_url} contains no files"
                 )
 
-            # Local temp dir for this job on the mount
-            local_dir = f"{_get_etl_mount_path()}/{job_id}"
-
             return [
                 {
                     "task_id": f"{job_id[:8]}-s2-copy-{i}",
@@ -328,7 +319,7 @@ class NetCDFToZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                     "parameters": {
                         "source_url": f_entry["source_url"],
                         "source_account": job_params.get("source_account"),
-                        "local_dir": local_dir,
+                        "job_id": job_id,
                         "filename": f_entry["relative_path"],
                         "size_bytes": f_entry["size_bytes"],
                     },
@@ -357,8 +348,6 @@ class NetCDFToZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                     f"Manifest at {manifest_url} contains no local_files"
                 )
 
-            # Build full local paths from job_id
-            local_dir = f"{_get_etl_mount_path()}/{job_id}"
             fail_on_warnings = job_params.get("fail_on_chunking_warnings", False)
 
             return [
@@ -366,7 +355,8 @@ class NetCDFToZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                     "task_id": f"{job_id[:8]}-s3-val-{i}",
                     "task_type": "netcdf_validate",
                     "parameters": {
-                        "local_path": f"{local_dir}/{rel_path}",
+                        "job_id": job_id,
+                        "relative_path": rel_path,
                         "fail_on_warnings": fail_on_warnings,
                     },
                 }
@@ -380,7 +370,6 @@ class NetCDFToZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                     "Stage 4 (convert) requires previous_results from validate stage"
                 )
 
-            local_dir = f"{_get_etl_mount_path()}/{job_id}"
             zarr_container = _get_silver_zarr_container()
             output_folder = job_params["output_folder"]
 
@@ -389,7 +378,7 @@ class NetCDFToZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                     "task_id": f"{job_id[:8]}-s4-convert",
                     "task_type": "netcdf_convert",
                     "parameters": {
-                        "local_dir": local_dir,
+                        "job_id": job_id,
                         "file_pattern": job_params.get("file_pattern", "*.nc"),
                         "concat_dim": job_params.get("concat_dim", "time"),
                         "output_folder": output_folder,

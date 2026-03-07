@@ -673,6 +673,7 @@ def netcdf_convert(
     time_chunk_size = params.get("time_chunk_size", 1)
     compressor_name = params.get("compressor", "lz4")
     compression_level = params.get("compression_level", 5)
+    zarr_format = params.get("zarr_format", 3)
 
     logger.info(
         f"netcdf_convert: local_dir={local_dir}, "
@@ -804,6 +805,7 @@ def netcdf_convert(
         target_chunks, encoding = _build_zarr_encoding(
             ds, spatial_chunk_size, time_chunk_size,
             compressor_name, compression_level,
+            zarr_format=zarr_format,
         )
         ds = ds.chunk(target_chunks)
 
@@ -815,6 +817,7 @@ def netcdf_convert(
             consolidated=True,
             storage_options=storage_options,
             encoding=encoding,
+            zarr_format=zarr_format,
         )
 
         zarr_store_url = f"abfs://{zarr_container}/{output_folder}"

@@ -233,6 +233,7 @@ class IngestZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                             "time_chunk_size": job_params.get("time_chunk_size", 1),
                             "compressor": job_params.get("compressor", "lz4"),
                             "compression_level": job_params.get("compression_level", 5),
+                            "zarr_format": job_params.get("zarr_format", 3),
                             "dataset_id": job_params["dataset_id"],
                             "resource_id": job_params["resource_id"],
                         },

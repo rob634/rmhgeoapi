@@ -723,6 +723,7 @@ def ingest_zarr_rechunk(
     time_chunk_size = params.get("time_chunk_size", 1)
     compressor_name = params.get("compressor", "lz4")
     compression_level = params.get("compression_level", 5)
+    zarr_format = params.get("zarr_format", 3)
     dataset_id = params.get("dataset_id", "unknown")
     resource_id = params.get("resource_id", "unknown")
 
@@ -777,6 +778,7 @@ def ingest_zarr_rechunk(
         target_chunks, encoding = _build_zarr_encoding(
             ds, spatial_chunk_size, time_chunk_size,
             compressor_name, compression_level,
+            zarr_format=zarr_format,
         )
 
         # Rechunk in-memory
@@ -798,6 +800,7 @@ def ingest_zarr_rechunk(
             consolidated=True,
             storage_options=target_storage_options,
             encoding=encoding,
+            zarr_format=zarr_format,
         )
 
         ds.close()

@@ -689,7 +689,7 @@ def _build_outputs_block(release, job_result: Optional[dict] = None) -> Optional
         "stac_collection_id": release.stac_collection_id,
     }
 
-    # Raster outputs
+    # Raster/Zarr outputs
     if release.blob_path:
         outputs["blob_path"] = release.blob_path
         # Container from job_result (not stored on release)
@@ -698,7 +698,14 @@ def _build_outputs_block(release, job_result: Optional[dict] = None) -> Optional
             cog_data = job_result.get('cog', {})
             if isinstance(cog_data, dict):
                 container = cog_data.get('cog_container')
-        outputs["container"] = container or "silver-cogs"
+            if not container:
+                zarr_url = job_result.get('zarr_store_url', '')
+                if zarr_url and zarr_url.startswith('abfs://'):
+                    container = zarr_url.replace('abfs://', '').split('/')[0]
+        # SG13-4: Default based on blob_path prefix
+        if not container:
+            container = "silver-zarr" if release.blob_path.startswith("zarr/") else "silver-cogs"
+        outputs["container"] = container
 
     # Vector outputs
     table_names = _get_release_table_names(release.release_id)

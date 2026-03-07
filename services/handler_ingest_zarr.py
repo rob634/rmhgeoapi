@@ -292,6 +292,8 @@ def ingest_zarr_copy(
         f"target={target_container}/{target_prefix}"
     )
 
+    cleanup_before_copy = params.get("cleanup_before_copy", False)
+
     try:
         from infrastructure import BlobRepository
 
@@ -307,6 +309,19 @@ def ingest_zarr_copy(
         else:
             source_repo = BlobRepository.for_zone("bronze")
         silver_repo = BlobRepository.for_zone("silver")
+
+        # Pre-cleanup: first copy task deletes existing blobs at target
+        # prefix to prevent orphan metadata when format/chunking changes
+        if cleanup_before_copy:
+            cleanup = silver_repo.delete_blobs_by_prefix(
+                target_container, target_prefix
+            )
+            if cleanup["deleted_count"] > 0:
+                logger.info(
+                    f"ingest_zarr_copy: pre-cleanup deleted "
+                    f"{cleanup['deleted_count']} existing blobs under "
+                    f"{target_container}/{target_prefix}"
+                )
 
         copied_count = 0
         failed_count = 0
@@ -626,10 +641,6 @@ def ingest_zarr_register(
 
         # Cache STAC item JSON
         stac_updated = release_repo.update_stac_item_json(release_id, stac_item)
-        if not stac_updated:
-            logger.warning(
-                f"ingest_zarr_register: Failed to update STAC item for release {release_id}"
-            )
 
         # Update physical outputs
         outputs_updated = release_repo.update_physical_outputs(
@@ -638,10 +649,6 @@ def ingest_zarr_register(
             stac_item_id=stac_item_id,
             output_mode="zarr_store",
         )
-        if not outputs_updated:
-            logger.warning(
-                f"ingest_zarr_register: Failed to update physical outputs for release {release_id}"
-            )
 
         # Update processing status to completed
         status_updated = release_repo.update_processing_status(
@@ -649,10 +656,6 @@ def ingest_zarr_register(
             ProcessingStatus.COMPLETED,
             completed_at=datetime.now(timezone.utc),
         )
-        if not status_updated:
-            logger.warning(
-                f"ingest_zarr_register: Failed to update processing status for release {release_id}"
-            )
 
         elapsed = time.time() - start
         logger.info(
@@ -661,11 +664,24 @@ def ingest_zarr_register(
             f"store_prefix={store_prefix} ({elapsed:.1f}s)"
         )
 
+        # Fail on any partial DB update — incomplete release records
+        # are worse than a failed task that can be retried
+        if not stac_updated or not outputs_updated or not status_updated:
+            failed = []
+            if not stac_updated: failed.append("stac_item_json")
+            if not outputs_updated: failed.append("physical_outputs")
+            if not status_updated: failed.append("processing_status")
+            return {
+                "success": False,
+                "error": f"Partial DB update failure: {', '.join(failed)} not updated for release {release_id}",
+                "error_type": "DatabaseError",
+            }
+
         return {
             "success": True,
             "result": {
                 "stac_item_cached": stac_updated,
-                "release_updated": outputs_updated and status_updated,
+                "release_updated": True,
                 "blob_path": store_prefix,
                 "zarr_url": zarr_abfs_url,
             },
@@ -791,6 +807,15 @@ def ingest_zarr_rechunk(
             "account_name": silver_repo.account_name,
             "credential": silver_repo.credential,
         }
+
+        # Pre-cleanup: delete existing blobs at target prefix to prevent
+        # orphan metadata when format/chunking changes
+        cleanup = silver_repo.delete_blobs_by_prefix(target_container, target_prefix)
+        if cleanup["deleted_count"] > 0:
+            logger.info(
+                f"ingest_zarr_rechunk: pre-cleanup deleted {cleanup['deleted_count']} "
+                f"existing blobs under {target_container}/{target_prefix}"
+            )
 
         logger.info(f"ingest_zarr_rechunk: Writing rechunked Zarr to {target_az_url}")
 

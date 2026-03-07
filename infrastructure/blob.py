@@ -159,6 +159,11 @@ class IBlobRepository(ABC):
         pass
 
     @abstractmethod
+    def delete_blobs_by_prefix(self, container: str, prefix: str) -> Dict[str, Any]:
+        """Delete all blobs under a prefix (batch). Returns {"deleted_count": N, ...}"""
+        pass
+
+    @abstractmethod
     def stream_blob_to_mount(
         self,
         container: str,
@@ -995,6 +1000,53 @@ class BlobRepository(IBlobRepository):
         except Exception as e:
             logger.error(f"Failed to delete blob: {e}")
             raise
+
+    @dec_validate_container
+    def delete_blobs_by_prefix(self, container: str, prefix: str) -> Dict[str, Any]:
+        """
+        Delete all blobs under a prefix using Azure SDK batch delete.
+
+        Safety: Rejects empty prefix or prefix with fewer than 2 path segments
+        to prevent accidental deletion of entire containers.
+
+        Args:
+            container: Container name
+            prefix: Blob name prefix (e.g. "dataset_id/resource_id")
+
+        Returns:
+            {"deleted_count": N, "prefix": prefix, "container": container}
+        """
+        if not prefix or not prefix.strip():
+            raise ValueError("delete_blobs_by_prefix requires a non-empty prefix")
+
+        normalized = prefix.strip("/")
+        segments = normalized.split("/")
+        if len(segments) < 2:
+            raise ValueError(
+                f"delete_blobs_by_prefix requires prefix with at least 2 path "
+                f"segments (got {len(segments)}: '{prefix}'). "
+                f"This guard prevents accidental deletion of entire containers."
+            )
+
+        container_client = self._get_container_client(container)
+        blob_names = [
+            blob.name
+            for blob in container_client.list_blobs(name_starts_with=prefix)
+        ]
+
+        if not blob_names:
+            logger.info(f"delete_blobs_by_prefix: no blobs under {container}/{prefix}")
+            return {"deleted_count": 0, "prefix": prefix, "container": container}
+
+        BATCH_SIZE = 256
+        deleted_count = 0
+        for i in range(0, len(blob_names), BATCH_SIZE):
+            batch = blob_names[i : i + BATCH_SIZE]
+            container_client.delete_blobs(*batch)
+            deleted_count += len(batch)
+
+        logger.info(f"delete_blobs_by_prefix: deleted {deleted_count} blobs under {container}/{prefix}")
+        return {"deleted_count": deleted_count, "prefix": prefix, "container": container}
 
     # =========================================================================
     # BLOB ↔ MOUNT STREAMING METHODS (25 JAN 2026)

@@ -809,6 +809,15 @@ def netcdf_convert(
         )
         ds = ds.chunk(target_chunks)
 
+        # Pre-cleanup: delete existing blobs at target prefix to prevent
+        # orphan metadata when format/chunking changes (ZARR_NOTES.md §153)
+        cleanup = silver_repo.delete_blobs_by_prefix(zarr_container, output_folder)
+        if cleanup["deleted_count"] > 0:
+            logger.info(
+                f"netcdf_convert: pre-cleanup deleted {cleanup['deleted_count']} "
+                f"existing blobs under {zarr_container}/{output_folder}"
+            )
+
         logger.info(f"netcdf_convert: Writing Zarr to {zarr_az_url}")
 
         ds.to_zarr(
@@ -1056,10 +1065,6 @@ def netcdf_register(
 
         # Cache STAC item JSON
         stac_updated = release_repo.update_stac_item_json(release_id, stac_item)
-        if not stac_updated:
-            logger.warning(
-                f"netcdf_register: Failed to update STAC item for release {release_id}"
-            )
 
         # Update physical outputs
         outputs_updated = release_repo.update_physical_outputs(
@@ -1068,10 +1073,6 @@ def netcdf_register(
             stac_item_id=stac_item_id,
             output_mode="zarr_store",
         )
-        if not outputs_updated:
-            logger.warning(
-                f"netcdf_register: Failed to update physical outputs for release {release_id}"
-            )
 
         # Update processing status to completed
         status_updated = release_repo.update_processing_status(
@@ -1079,15 +1080,6 @@ def netcdf_register(
             ProcessingStatus.COMPLETED,
             completed_at=datetime.now(timezone.utc),
         )
-        if not status_updated:
-            logger.error(
-                f"netcdf_register: Failed to update processing status for release {release_id}"
-            )
-            return {
-                "success": False,
-                "error": f"Failed to update processing status for release {release_id}",
-                "error_type": "DatabaseError",
-            }
 
         elapsed = time.time() - start
         logger.info(
@@ -1096,11 +1088,24 @@ def netcdf_register(
             f"store_prefix={store_prefix} ({elapsed:.1f}s)"
         )
 
+        # Fail on any partial DB update — incomplete release records
+        # are worse than a failed task that can be retried
+        if not stac_updated or not outputs_updated or not status_updated:
+            failed = []
+            if not stac_updated: failed.append("stac_item_json")
+            if not outputs_updated: failed.append("physical_outputs")
+            if not status_updated: failed.append("processing_status")
+            return {
+                "success": False,
+                "error": f"Partial DB update failure: {', '.join(failed)} not updated for release {release_id}",
+                "error_type": "DatabaseError",
+            }
+
         return {
             "success": True,
             "result": {
                 "stac_item_cached": stac_updated,
-                "release_updated": outputs_updated and status_updated,
+                "release_updated": True,
                 "blob_path": store_prefix,
                 "zarr_url": zarr_abfs_url,
             },

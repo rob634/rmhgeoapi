@@ -215,7 +215,7 @@ class UnpublishZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                     "unpublish_type": "zarr",
                     # original_job_id not available from Stage 2 results
                     "original_job_id": None,
-                    "original_job_type": "virtualzarr",
+                    "original_job_type": "zarr",
                     "original_parameters": None,
                     "blobs_deleted": blobs_deleted
                 }

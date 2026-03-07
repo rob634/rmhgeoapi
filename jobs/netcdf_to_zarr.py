@@ -234,6 +234,12 @@ class NetCDFToZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
             "max": 9,
             "default": 5,
         },
+        "zarr_format": {
+            "type": "int",
+            "min": 2,
+            "max": 3,
+            "default": 3,
+        },
     }
 
     # ========================================================================

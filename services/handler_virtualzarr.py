@@ -984,8 +984,6 @@ def virtualzarr_register(
 
         # Cache STAC item JSON
         stac_updated = release_repo.update_stac_item_json(release_id, stac_item)
-        if not stac_updated:
-            logger.warning(f"virtualzarr_register: Failed to update STAC item for release {release_id}")
 
         # Extract blob path from combined_ref_url for physical outputs
         ref_blob_path = combined_ref_url.replace("abfs://", "")
@@ -997,10 +995,6 @@ def virtualzarr_register(
             stac_item_id=stac_item_id,
             output_mode="zarr_reference",
         )
-        if not outputs_updated:
-            logger.warning(
-                f"virtualzarr_register: Failed to update physical outputs for release {release_id}"
-            )
 
         # Update processing status to completed
         status_updated = release_repo.update_processing_status(
@@ -1008,10 +1002,6 @@ def virtualzarr_register(
             ProcessingStatus.COMPLETED,
             completed_at=datetime.now(timezone.utc),
         )
-        if not status_updated:
-            logger.warning(
-                f"virtualzarr_register: Failed to update processing status for release {release_id}"
-            )
 
         elapsed = time.time() - start
         logger.info(
@@ -1020,11 +1010,24 @@ def virtualzarr_register(
             f"blob_path={ref_blob_path} ({elapsed:.1f}s)"
         )
 
+        # Fail on any partial DB update — incomplete release records
+        # are worse than a failed task that can be retried
+        if not stac_updated or not outputs_updated or not status_updated:
+            failed = []
+            if not stac_updated: failed.append("stac_item_json")
+            if not outputs_updated: failed.append("physical_outputs")
+            if not status_updated: failed.append("processing_status")
+            return {
+                "success": False,
+                "error": f"Partial DB update failure: {', '.join(failed)} not updated for release {release_id}",
+                "error_type": "DatabaseError",
+            }
+
         return {
             "success": True,
             "result": {
                 "stac_item_cached": stac_updated,
-                "release_updated": outputs_updated and status_updated,
+                "release_updated": True,
                 "blob_path": ref_blob_path,
             },
         }

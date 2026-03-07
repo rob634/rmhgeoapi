@@ -597,13 +597,12 @@ def inventory_zarr_item(params: Dict[str, Any], context: Optional[Dict[str, Any]
             # Native Zarr path (netcdf_to_zarr / ingest_zarr)
             # zarr_store_href is HTTPS: https://account.blob.core.windows.net/container/prefix
             # ---------------------------------------------------------------
-            from urllib.parse import urlparse
-            parsed = urlparse(zarr_store_href)
-            # path is "/container/prefix..." — strip leading slash, split once
-            path_no_slash = parsed.path.lstrip("/")
-            path_parts = path_no_slash.split("/", 1)
-            container = path_parts[0]
-            store_prefix = path_parts[1] if len(path_parts) > 1 else ""
+            # Strip scheme (abfs:// or az://) — urlparse misparses these
+            # (puts container into netloc instead of path)
+            clean_href = zarr_store_href.replace("abfs://", "").replace("az://", "")
+            href_parts = clean_href.split("/", 1)
+            container = href_parts[0]
+            store_prefix = href_parts[1] if len(href_parts) > 1 else ""
 
             # Enumerate all blobs under the Zarr store prefix
             from infrastructure import BlobRepository

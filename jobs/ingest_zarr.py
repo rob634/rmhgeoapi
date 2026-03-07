@@ -151,6 +151,12 @@ class IngestZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
             "max": 9,
             "default": 5,
         },
+        "zarr_format": {
+            "type": "int",
+            "min": 2,
+            "max": 3,
+            "default": 3,
+        },
     }
 
     # ========================================================================
@@ -254,16 +260,21 @@ class IngestZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                 chunk_start = i * COPY_CHUNK_SIZE
                 chunk_end = chunk_start + COPY_CHUNK_SIZE
                 chunk = blob_list[chunk_start:chunk_end]
+                task_params = {
+                    "source_url": job_params["source_url"],
+                    "source_account": job_params["source_account"],
+                    "blob_list": chunk,
+                    "target_container": target_container,
+                    "target_prefix": target_prefix,
+                }
+                # First chunk cleans up existing blobs before copy to
+                # prevent orphan metadata (runs on worker, not orchestrator)
+                if i == 0:
+                    task_params["cleanup_before_copy"] = True
                 tasks.append({
                     "task_id": f"{job_id[:8]}-s2-copy-{i}",
                     "task_type": "ingest_zarr_copy",
-                    "parameters": {
-                        "source_url": job_params["source_url"],
-                        "source_account": job_params["source_account"],
-                        "blob_list": chunk,
-                        "target_container": target_container,
-                        "target_prefix": target_prefix,
-                    },
+                    "parameters": task_params,
                 })
 
             return tasks

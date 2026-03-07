@@ -1437,8 +1437,8 @@ All pipeline executions in chronological order.
 
 | ID | Severity | Category | Description |
 |----|----------|----------|-------------|
-| RCH-1 | P1 | DOCKER | `rechunk=True` fails — `dask` package not installed in Docker worker requirements |
-| SEQ5-1 | P2 | PIPELINE | NetCDF `netcdf_convert` handler can't find .nc files in `/mounts/etl-temp/`. Stages 1-3 succeed, stage 4 fails. Mount path visibility issue. |
+| RCH-1 | P1 | DOCKER | ~~`rechunk=True` fails — `dask` package not installed in Docker worker requirements~~ **FIXED** (06 MAR 2026): `dask>=2024.11.0` already in `requirements-docker.txt`. Fixed by Docker rebuild v0.9.14.4 |
+| SEQ5-1 | P2 | PIPELINE | ~~NetCDF `netcdf_convert` handler can't find .nc files in `/mounts/etl-temp/`. Stages 1-3 succeed, stage 4 fails. Mount path visibility issue.~~ **RESOLVED** (06 MAR 2026): Mount confirmed operational — `/mount/etl-temp` exists, writable, GDAL test passes, 18 job dirs present. Transient issue during SIEGE run. |
 | DIAG-1 | LOW | ENDPOINT | `/api/dbadmin/diagnostics/all` returns 404 (new regression, not seen in Run 11) |
 
 **Comparison with Run 11 (SIEGE Run 11, v0.9.13.1)**:
@@ -1454,19 +1454,128 @@ All pipeline executions in chronological order.
 
 ---
 
+### Run 38: SIEGE Run 13 (07 MAR 2026) — v0.9.14.4
+
+**Pipeline**: SIEGE | **Agents**: Sentinel → Cartographer → Lancer → Auditor → Scribe
+**Target**: Orchestrator + Docker Worker v0.9.14.4 (fresh rebuild)
+**Report**: `agent_docs/SIEGE_RUN_13.md`
+
+**Results**: 19 sequences, 98 steps — **93 pass (94.9%), 18/19 sequences PASS**
+
+| Seq | Name | Verdict |
+|-----|------|---------|
+| 1 | Raster Lifecycle | PASS |
+| 2 | Vector Lifecycle | PASS |
+| 3 | Multi-Version | PASS |
+| 4 | Unpublish v2 | PASS |
+| 5 | NetCDF/VirtualiZarr | PASS (xarray serve degraded) |
+| 6 | Native Zarr | PASS (xarray WORKS via correct container) |
+| 7 | Rejection Path | PASS |
+| 8 | Reject-Resubmit-Approve | PASS |
+| 9 | Revocation + Latest Cascade | PASS |
+| 10 | Overwrite Draft | PASS |
+| 11 | Invalid State Transitions (9) | PASS |
+| 12 | Missing Required Fields (13) | PASS |
+| 13 | Version Conflict | PASS |
+| 14 | Revoke-Overwrite-Reapprove | PASS |
+| 15 | Overwrite Approved (New Version) | PASS |
+| 16 | Triple Revision | PASS |
+| 17 | Overwrite Race Guard | PASS |
+| 18 | Multi-Revoke Overwrite Target | PASS |
+| 19 | Zarr Rechunk Path | **FAIL** |
+
+**Service URL Verification**:
+
+| Type | Probe | Verdict |
+|------|-------|---------|
+| Raster info/preview/tilejson | TiTiler /cog/* | PASS (tilejson needs WebMercatorQuad) |
+| Vector collection/items | TiPG /vector/collections/* | PASS (1401 features) |
+| Zarr native variables | /xarray/variables (silver-zarr) | PASS (returns ["tasmax"]) |
+| Zarr NetCDF variables | /xarray/variables (silver-zarr) | DEGRADED (returns []) |
+| Zarr rechunk | N/A | FAIL (pipeline failed) |
+
+**New Findings**:
+
+| ID | Severity | Category | Description |
+|----|----------|----------|-------------|
+| SG13-1 | HIGH | PIPELINE | Zarr rechunk fails — `numcodecs.Blosc` incompatible with Zarr v3's `BytesBytesCodec` requirement |
+| SG13-2 | MEDIUM | ENDPOINT | Catalog lookup requires version_id — no "get latest" path |
+| SG13-3 | MEDIUM | SERVICE | TiTiler tilejson URLs missing WebMercatorQuad path segment |
+| SG13-4 | HIGH | SERVICE | Status endpoint `outputs.container` returns `silver-cogs` for zarr — should be `silver-zarr`. Causes false 500 errors |
+| SG13-5 | LOW | ENDPOINT | Unpublish with force_approved=true fails when STAC collection naming mismatches |
+| SG13-6 | MEDIUM | PIPELINE | NetCDF-converted Zarr returns empty variables [] — store structure issue |
+
+**Auditor Divergences**: 2 substantive (container mismatch + false negative on native zarr), 3 minor (Lancer skipped steps)
+
+**Comparison**:
+
+| Metric | Run 12 (v0.9.14.0) | Run 13 (v0.9.14.4) | Delta |
+|--------|---------------------|---------------------|-------|
+| Sequence pass | 17/19 (89.5%) | 18/19 (94.7%) | +5.2% |
+| Step pass rate | 95.5% | 94.9% | -0.6% |
+| New findings | 3 | 6 | +3 (deeper testing) |
+| Service Layer tested | Partial | Full (raster+vector+zarr) | Expanded |
+| SEQ5-1 mount path | OPEN | RESOLVED | Fixed |
+| RCH-1 dask | OPEN | Still broken (codec issue, not dependency) | Reclassified |
+
+**Verdict**: **CONDITIONAL PASS** — 18/19 sequences pass. Core platform (state machine, validation, multi-version, overwrite, revocation) is rock solid at 100%. Raster and vector pipelines fully operational end-to-end including Service Layer serving. Zarr ingestion works but serving has container mapping issue (SG13-4). Rechunk broken by Zarr v3 codec change (SG13-1).
+
+---
+
+## Run 39: Zarr/NetCDF Pipeline End-to-End Review (COMPETE)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 07 MAR 2026 |
+| **Pipeline** | COMPETE |
+| **Version** | v0.9.14.5 |
+| **Scope** | All Zarr/NetCDF pipelines — ingest_zarr, netcdf_to_zarr, virtualzarr, unpublish_zarr |
+| **Scope Split** | Split C — Data Integrity (Alpha) vs Orchestration/Control Flow (Beta) |
+| **Files Reviewed** | 28 |
+| **Findings** | 25 total (1 CRITICAL, 5 HIGH, 8 MEDIUM, 11 LOW) |
+| **Top 5 Fixes** | Pre-cleanup off orchestrator, urlparse abfs fix, zarr_format wiring, register fail-on-partial, unpublish job_type |
+| **Output** | `agent_docs/COMPETE_ZARR_NETCDF_PIPELINES.md` |
+
+**Token Usage**:
+
+| Agent | Role | Tokens | Duration |
+|-------|------|--------|----------|
+| Omega | Scope Splitter | ~5,000 | inline |
+| Alpha | Data Integrity | ~45,000 | ~3m |
+| Beta | Orchestration | ~40,000 | ~3m |
+| Gamma | Contradiction Finder | ~50,000 | ~3m |
+| Delta | Final Arbiter | ~88,728 | ~3m 16s |
+| **Total** | | **~228,728** | **~12m** |
+
+**Top Findings**:
+
+| # | Severity | Finding |
+|---|----------|---------|
+| 1 | CRITICAL | Pre-cleanup I/O in `create_tasks_for_stage` — orchestrator should not do network I/O (Constitution §5.1) |
+| 2 | HIGH | `urlparse("abfs://silver-zarr/...")` puts container in `netloc` — unpublish finds zero blobs |
+| 3 | HIGH | `zarr_format` severed at translation layer AND job `parameters_schema` — v3 always wins silently |
+| 4 | HIGH | Register handlers return `success: True` on partial DB update failure |
+| 5 | HIGH | Double pre-cleanup in rechunk path (orchestrator + handler) |
+
+**Architecture Wins**: Consistent handler envelope, stage decomposition with zero-task guard, `_build_zarr_encoding()` shared helper, declarative mixin pattern, source account baked at submit time.
+
+**Verdict**: **Structurally sound** — five targeted fixes required. No architectural rework needed.
+
+---
+
 ## Cumulative Token Usage
 
 | Pipeline | Runs | Total Tokens |
 |----------|------|-------------|
-| COMPETE | Runs 1-6, 9, 12, 19, 28, 29, 30, 33 | ~2,434,904 |
+| COMPETE | Runs 1-6, 9, 12, 19, 28, 29, 30, 33, 39 | ~2,663,632 |
 | GREENFIELD | Runs 7, 8, 10, 24 | ~944,196 |
 | SIEGE | Runs 11, 13, 18, 20, 21, 22, 23, 25, 26, 34, 35, 37 | ~2,305,587 (Run 37 tokens pending) |
 | REFLEXION | Runs 14, 15, 16, 17, 32 | ~974,966 |
 | TOURNAMENT | Run 27 | ~278,000 |
 | ADVOCATE | Runs 31, 36 | ~335,000 |
-| **Instrumented Total** | Runs 9-37 | **~7,272,653+** (Run 37 pending) |
+| **Instrumented Total** | Runs 9-39 | **~7,501,381+** |
 
-**Note**: Runs 1-8 predated the token instrumentation described in `agents/AGENT_METRICS.md`. Per-agent token breakdowns are available for Runs 9-37.
+**Note**: Runs 1-8 predated the token instrumentation described in `agents/AGENT_METRICS.md`. Per-agent token breakdowns are available for Runs 9-39.
 
 ---
 

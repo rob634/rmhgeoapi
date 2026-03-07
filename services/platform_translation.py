@@ -472,6 +472,7 @@ def translate_to_coremachine(
                 'compressor': getattr(opts, 'compressor', 'lz4'),
                 'compression_level': getattr(opts, 'compression_level', 5),
                 'rechunk': getattr(opts, 'rechunk', False),
+                'zarr_format': getattr(opts, 'zarr_format', 3),
             }
 
         elif pipeline == 'virtualzarr':
@@ -513,6 +514,7 @@ def translate_to_coremachine(
                 'time_chunk_size': getattr(opts, 'time_chunk_size', 1),
                 'compressor': getattr(opts, 'compressor', 'lz4'),
                 'compression_level': getattr(opts, 'compression_level', 5),
+                'zarr_format': getattr(opts, 'zarr_format', 3),
             }
 
     # ========================================================================

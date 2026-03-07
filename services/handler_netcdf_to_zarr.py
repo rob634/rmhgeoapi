@@ -52,7 +52,8 @@ def _get_storage_account() -> str:
 
 
 def _build_zarr_encoding(ds, spatial_chunk_size=256, time_chunk_size=1,
-                         compressor_name="lz4", compression_level=5):
+                         compressor_name="lz4", compression_level=5,
+                         zarr_format=3):
     """
     Build optimized Zarr encoding for tile-serving performance.
 
@@ -65,14 +66,13 @@ def _build_zarr_encoding(ds, spatial_chunk_size=256, time_chunk_size=1,
         time_chunk_size: Chunk size for time dim, clamped to dim size
         compressor_name: "lz4", "zstd", or "none"
         compression_level: 1-9 (passed to Blosc clevel)
+        zarr_format: 2 or 3 — determines codec objects and encoding keys
 
     Returns:
         (target_chunks, encoding) tuple:
             target_chunks: dict for ds.chunk() — {dim_name: chunk_size}
-            encoding: dict for ds.to_zarr(encoding=...) — {var_name: {compressors, chunks}}
+            encoding: dict for ds.to_zarr(encoding=...) — {var_name: {...}}
     """
-    from zarr.codecs import BloscCodec
-
     # Detect spatial and time dimensions
     spatial_names = {"lat", "latitude", "y", "lon", "longitude", "x"}
     time_names = {"time", "t"}
@@ -85,21 +85,27 @@ def _build_zarr_encoding(ds, spatial_chunk_size=256, time_chunk_size=1,
         elif dim_lower in time_names:
             target_chunks[dim_name] = min(time_chunk_size, dim_size)
         else:
-            # Non-spatial, non-time dims: keep full extent (single chunk)
             target_chunks[dim_name] = dim_size
 
-    # Build compressor — zarr 3.x requires zarr.codecs.BloscCodec (not numcodecs.Blosc)
-    if compressor_name == "none":
-        compressors = None
-    else:
-        compressors = [BloscCodec(
-            cname=compressor_name,
-            clevel=compression_level,
-            shuffle="bitshuffle",
-        )]
+    # Build compressor — format-specific codec objects
+    compressor_obj = None
+    if compressor_name != "none":
+        if zarr_format == 2:
+            import numcodecs
+            compressor_obj = numcodecs.Blosc(
+                cname=compressor_name,
+                clevel=compression_level,
+                shuffle=numcodecs.Blosc.BITSHUFFLE,
+            )
+        else:
+            from zarr.codecs import BloscCodec
+            compressor_obj = BloscCodec(
+                cname=compressor_name,
+                clevel=compression_level,
+                shuffle="bitshuffle",
+            )
 
     # Build per-variable encoding (data vars only, not coords)
-    # zarr 3.x uses "compressors" key (list), not "compressor" (single)
     encoding = {}
     for var_name in ds.data_vars:
         var = ds[var_name]
@@ -108,12 +114,16 @@ def _build_zarr_encoding(ds, spatial_chunk_size=256, time_chunk_size=1,
             for dim in var.dims
         )
         enc = {"chunks": var_chunks}
-        if compressors is not None:
-            enc["compressors"] = compressors
+        if compressor_obj is not None:
+            if zarr_format == 2:
+                enc["compressor"] = compressor_obj
+            else:
+                enc["compressors"] = [compressor_obj]
         encoding[var_name] = enc
 
     logger.info(
-        f"_build_zarr_encoding: spatial={spatial_chunk_size}, "
+        f"_build_zarr_encoding: zarr_format={zarr_format}, "
+        f"spatial={spatial_chunk_size}, "
         f"time={time_chunk_size}, compressor={compressor_name}(L{compression_level}), "
         f"{len(encoding)} vars encoded, chunks={target_chunks}"
     )

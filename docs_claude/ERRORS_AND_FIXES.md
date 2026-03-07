@@ -1,6 +1,6 @@
 # ERRORS_AND_FIXES.md - Error Tracking and Resolution Log
 
-**Last Updated**: 24 FEB 2026
+**Last Updated**: 07 MAR 2026
 **Purpose**: Canonical error tracking for pattern analysis and faster troubleshooting
 
 ---
@@ -883,6 +883,59 @@ status_code = 200 if validation_result.valid else 400
 ---
 
 ## CODE Errors
+
+### COD-SG131: Zarr Rechunk Blosc Codec Incompatibility
+
+**Date**: 07 MAR 2026
+**Version**: 0.9.14.4
+**Severity**: HIGH (SG13-1)
+**SIEGE Run**: 13 (Run 38)
+
+**Error Message**: `Expected a BytesBytesCodec. Got <class 'numcodecs.blosc.Blosc'>`
+
+**Root Cause**: `_build_zarr_encoding()` only produced zarr v3 `BloscCodec` objects. When reading a v2 source Zarr store (with `numcodecs.Blosc` metadata) and writing with v3 encoding, the codec systems conflicted.
+
+**Fix**: Made `_build_zarr_encoding()` format-aware — accepts `zarr_format=2|3`, produces matching codec objects and encoding keys. v2: `numcodecs.Blosc` + `"compressor"` (singular). v3: `zarr.codecs.BloscCodec` + `"compressors"` (plural list). Both `netcdf_convert` and `ingest_zarr_rechunk` handlers pass `zarr_format` through to `ds.to_zarr()`.
+
+**Files Modified**: `services/handler_netcdf_to_zarr.py`, `services/handler_ingest_zarr.py`, `core/models/processing_options.py`, `jobs/netcdf_to_zarr.py`, `jobs/ingest_zarr.py`
+
+**Prevention**: Always match codec object types to the target zarr format version.
+
+---
+
+### COD-SG134: Status Endpoint Wrong Container for Zarr
+
+**Date**: 07 MAR 2026
+**Version**: 0.9.14.4
+**Severity**: HIGH (SG13-4)
+**SIEGE Run**: 13 (Run 38)
+
+**Error Message**: Status response `outputs.container` returns `silver-cogs` for zarr releases
+
+**Root Cause**: `_build_outputs_block()` in `trigger_platform_status.py:701` defaulted to `"silver-cogs"` for all data types. Zarr stores live in `silver-zarr`.
+
+**Fix**: Three-tier container inference: (1) check `job_result.cog.cog_container`, (2) check `job_result.zarr_store_url` and extract container from abfs:// URL, (3) infer from `release.blob_path` prefix — `zarr/` → `silver-zarr`, else `silver-cogs`.
+
+**Files Modified**: `triggers/trigger_platform_status.py`
+
+---
+
+### COD-SG136: NetCDF-Converted Zarr Empty Variables
+
+**Date**: 07 MAR 2026
+**Version**: 0.9.14.4
+**Severity**: MEDIUM (SG13-6)
+**SIEGE Run**: 13 (Run 38)
+
+**Error Message**: TiTiler `/xarray/variables` returns `[]` for NetCDF-converted Zarr stores
+
+**Root Cause**: `ds.to_zarr()` with zarr 3.1.5 writes v3 format by default (`zarr.json`, `c/` chunk paths). TiTiler's `titiler.xarray 0.24.x` reads v2 format only (`.zgroup`, `.zarray`, dot-separated chunks). Same root cause as COD-SG131.
+
+**Fix**: `zarr_format` parameter in `ZarrProcessingOptions` lets callers choose v2 (TiTiler compat) or v3. Default is v3; set to 2 until TiTiler upgrade to titiler-pgstac 2.1.0.
+
+**Files Modified**: Same as COD-SG131
+
+---
 
 ### COD-001: JPEG visualization tier INTERLEAVE bug
 

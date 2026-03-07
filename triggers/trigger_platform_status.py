@@ -574,7 +574,7 @@ def _build_single_status_response(
     result["warnings"] = warnings_list
 
     # Outputs (from Release record, not job_result)
-    result["outputs"] = _build_outputs_block(release, job_result)
+    result["outputs"] = _build_outputs_block(release, job_result, asset)
 
     # Services (focused URLs)
     result["services"] = _build_services_block(release, data_type) if data_type else None
@@ -661,7 +661,7 @@ def _build_version_summary(releases: list) -> list:
     return summaries
 
 
-def _build_outputs_block(release, job_result: Optional[dict] = None) -> Optional[dict]:
+def _build_outputs_block(release, job_result: Optional[dict] = None, asset=None) -> Optional[dict]:
     """
     Build the outputs block from Release physical fields.
 
@@ -672,6 +672,7 @@ def _build_outputs_block(release, job_result: Optional[dict] = None) -> Optional
     Args:
         release: AssetRelease object
         job_result: Optional job result dict for supplementary fields
+        asset: Optional Asset object for data_type-based container inference
 
     Returns:
         Dict with output artifact locations, or None if no outputs yet
@@ -702,9 +703,16 @@ def _build_outputs_block(release, job_result: Optional[dict] = None) -> Optional
                 zarr_url = job_result.get('zarr_store_url', '')
                 if zarr_url and zarr_url.startswith('abfs://'):
                     container = zarr_url.replace('abfs://', '').split('/')[0]
-        # SG13-4: Default based on blob_path prefix
+        # SG13-4: Default based on asset data_type or blob_path prefix
         if not container:
-            container = "silver-zarr" if release.blob_path.startswith("zarr/") else "silver-cogs"
+            asset_data_type = getattr(asset, 'data_type', None) if asset else None
+            dt_val = asset_data_type.value if hasattr(asset_data_type, 'value') else str(asset_data_type or '')
+            if dt_val in ('zarr', 'raster_zarr'):
+                container = "silver-zarr"
+            elif release.blob_path.startswith("zarr/"):
+                container = "silver-zarr"
+            else:
+                container = "silver-cogs"
         outputs["container"] = container
 
     # Vector outputs

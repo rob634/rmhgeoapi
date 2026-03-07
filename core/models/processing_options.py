@@ -331,6 +331,10 @@ class ZarrProcessingOptions(BaseProcessingOptions):
         default=False,
         description="For ingest_zarr: rechunk existing store during ingest"
     )
+    zarr_format: Literal[2, 3] = Field(
+        default=3,
+        description="Zarr format version: 2 (legacy, TiTiler <2.1 compat) or 3 (default, native v3)"
+    )
 
     @field_validator('fail_on_chunking_warnings', 'rechunk', mode='before')
     @classmethod

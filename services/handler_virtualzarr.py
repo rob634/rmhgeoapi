@@ -45,6 +45,9 @@ logger = LoggerFactory.create_logger(ComponentType.SERVICE, "handler_virtualzarr
 # Consolidate: _get_silver_netcdf_container lives in jobs/virtualzarr.py (V-8)
 from jobs.virtualzarr import _get_silver_netcdf_container
 
+# Shared Zarr helpers from netcdf_to_zarr
+from services.handler_netcdf_to_zarr import _get_spatial_extent
+
 
 def _get_storage_account() -> str:
     """Get silver storage account name from config."""
@@ -748,30 +751,7 @@ def virtualzarr_combine(
         all_variables = list(combined.data_vars)
 
         # Extract spatial extent from lat/lon coordinate variables
-        spatial_extent = None
-        lat_names = ["lat", "latitude", "y"]
-        lon_names = ["lon", "longitude", "x"]
-
-        lat_coord = None
-        lon_coord = None
-        for name in lat_names:
-            if name in combined.coords:
-                lat_coord = combined.coords[name]
-                break
-        for name in lon_names:
-            if name in combined.coords:
-                lon_coord = combined.coords[name]
-                break
-
-        if lat_coord is not None and lon_coord is not None:
-            try:
-                lat_min = float(np.nanmin(lat_coord.values))
-                lat_max = float(np.nanmax(lat_coord.values))
-                lon_min = float(np.nanmin(lon_coord.values))
-                lon_max = float(np.nanmax(lon_coord.values))
-                spatial_extent = [lon_min, lat_min, lon_max, lat_max]
-            except Exception as ext_err:
-                logger.warning(f"virtualzarr_combine: Could not extract spatial extent: {ext_err}")
+        spatial_extent = _get_spatial_extent(combined)
 
         # Extract time range from time coordinate
         time_range = None

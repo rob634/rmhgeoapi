@@ -73,7 +73,7 @@ async def platform_catalog_lookup(req: func.HttpRequest) -> func.HttpResponse:
     Query Parameters:
         dataset_id (required): DDH dataset identifier
         resource_id (required): DDH resource identifier
-        version_id (required): DDH version identifier
+        version_id (optional): DDH version identifier. If omitted, returns latest version.
 
     Response (found - vector):
         {
@@ -116,10 +116,10 @@ async def platform_catalog_lookup(req: func.HttpRequest) -> func.HttpResponse:
     logger.info("Platform catalog lookup endpoint called (unified)")
 
     try:
-        # Extract required parameters
+        # Extract parameters (version_id is optional — omit for latest)
         dataset_id = req.params.get('dataset_id')
         resource_id = req.params.get('resource_id')
-        version_id = req.params.get('version_id')
+        version_id = req.params.get('version_id') or None
 
         # Validate required parameters
         missing = []
@@ -127,8 +127,6 @@ async def platform_catalog_lookup(req: func.HttpRequest) -> func.HttpResponse:
             missing.append('dataset_id')
         if not resource_id:
             missing.append('resource_id')
-        if not version_id:
-            missing.append('version_id')
 
         if missing:
             return _catalog_error_response(

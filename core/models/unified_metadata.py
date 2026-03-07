@@ -1565,7 +1565,7 @@ class RasterMetadata(BaseMetadata):
             # TileJSON link
             item["links"].append({
                 "rel": "tiles",
-                "href": f"{titiler_base_url}/cog/tilejson.json?url={encoded_url}",
+                "href": f"{titiler_base_url}/cog/WebMercatorQuad/tilejson.json?url={encoded_url}",
                 "type": "application/json",
                 "title": "TileJSON"
             })

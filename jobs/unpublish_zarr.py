@@ -153,7 +153,7 @@ class UnpublishZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                 "parameters": {
                     "stac_item_id": job_params["stac_item_id"],
                     "collection_id": job_params["collection_id"],
-                    "dry_run": job_params.get("dry_run", False),
+                    "dry_run": job_params.get("dry_run", True),
                     "delete_data_files": job_params.get("delete_data_files", True),
                     "force_approved": job_params.get("force_approved", False),
                 }
@@ -171,7 +171,7 @@ class UnpublishZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
             # So previous_results[0] IS the inventory result dict.
             inventory_result = previous_results[0]
             blobs_to_delete = inventory_result.get("blobs_to_delete", [])
-            dry_run = job_params.get("dry_run", False)
+            dry_run = job_params.get("dry_run", True)
 
             if not blobs_to_delete:
                 # No blobs found - reference-only deletion
@@ -210,7 +210,7 @@ class UnpublishZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                 "parameters": {
                     "stac_item_id": job_params["stac_item_id"],
                     "collection_id": job_params["collection_id"],
-                    "dry_run": job_params.get("dry_run", False),
+                    "dry_run": job_params.get("dry_run", True),
                     "unpublish_job_id": job_id,
                     "unpublish_type": "zarr",
                     # original_job_id not available from Stage 2 results

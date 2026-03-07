@@ -42,6 +42,9 @@ logger = LoggerFactory.create_logger(ComponentType.SERVICE, "handler_ingest_zarr
 # Container helper lives in jobs/ingest_zarr.py (mirrors virtualzarr pattern)
 from jobs.ingest_zarr import _get_silver_zarr_container
 
+# Shared Zarr helpers from netcdf_to_zarr (where _build_zarr_encoding also lives)
+from services.handler_netcdf_to_zarr import _get_spatial_extent
+
 
 def _get_storage_account() -> str:
     """Get silver storage account name from config."""
@@ -165,58 +168,33 @@ def ingest_zarr_validate(
             storage_options=storage_options,
             consolidated=has_consolidated_metadata,
         )
+        try:
+            # Extract variable names
+            variables = list(ds.data_vars)
 
-        # Extract variable names
-        variables = list(ds.data_vars)
+            # Extract dimensions with sizes
+            dimensions = {dim: int(size) for dim, size in ds.dims.items()}
 
-        # Extract dimensions with sizes
-        dimensions = {dim: int(size) for dim, size in ds.dims.items()}
+            # Extract spatial extent from lat/lon coordinates
+            spatial_extent = _get_spatial_extent(ds)
 
-        # Extract spatial extent from lat/lon coordinates
-        spatial_extent = None
-        lat_names = ["lat", "latitude", "y"]
-        lon_names = ["lon", "longitude", "x"]
-
-        lat_coord = None
-        lon_coord = None
-        for name in lat_names:
-            if name in ds.coords:
-                lat_coord = ds.coords[name]
-                break
-        for name in lon_names:
-            if name in ds.coords:
-                lon_coord = ds.coords[name]
-                break
-
-        if lat_coord is not None and lon_coord is not None:
-            try:
-                lat_min = float(np.nanmin(lat_coord.values))
-                lat_max = float(np.nanmax(lat_coord.values))
-                lon_min = float(np.nanmin(lon_coord.values))
-                lon_max = float(np.nanmax(lon_coord.values))
-                spatial_extent = [lon_min, lat_min, lon_max, lat_max]
-            except Exception as ext_err:
-                logger.warning(
-                    f"ingest_zarr_validate: Could not extract spatial extent: {ext_err}"
-                )
-
-        # Extract time range from time coordinate
-        time_range = None
-        time_names = ["time", "t"]
-        for name in time_names:
-            if name in ds.coords:
-                try:
-                    time_vals = ds.coords[name].values
-                    time_min = str(np.nanmin(time_vals))
-                    time_max = str(np.nanmax(time_vals))
-                    time_range = [time_min, time_max]
-                except Exception as time_err:
-                    logger.warning(
-                        f"ingest_zarr_validate: Could not extract time range: {time_err}"
-                    )
-                break
-
-        ds.close()
+            # Extract time range from time coordinate
+            time_range = None
+            time_names = ["time", "t"]
+            for name in time_names:
+                if name in ds.coords:
+                    try:
+                        time_vals = ds.coords[name].values
+                        time_min = str(np.nanmin(time_vals))
+                        time_max = str(np.nanmax(time_vals))
+                        time_range = [time_min, time_max]
+                    except Exception as time_err:
+                        logger.warning(
+                            f"ingest_zarr_validate: Could not extract time range: {time_err}"
+                        )
+                    break
+        finally:
+            ds.close()
 
         elapsed = time.time() - start
         logger.info(
@@ -501,32 +479,7 @@ def ingest_zarr_register(
         dimensions = {dim: int(size) for dim, size in ds.dims.items()}
 
         # Extract spatial extent
-        spatial_extent = None
-        lat_names = ["lat", "latitude", "y"]
-        lon_names = ["lon", "longitude", "x"]
-
-        lat_coord = None
-        lon_coord = None
-        for name in lat_names:
-            if name in ds.coords:
-                lat_coord = ds.coords[name]
-                break
-        for name in lon_names:
-            if name in ds.coords:
-                lon_coord = ds.coords[name]
-                break
-
-        if lat_coord is not None and lon_coord is not None:
-            try:
-                lat_min = float(np.nanmin(lat_coord.values))
-                lat_max = float(np.nanmax(lat_coord.values))
-                lon_min = float(np.nanmin(lon_coord.values))
-                lon_max = float(np.nanmax(lon_coord.values))
-                spatial_extent = [lon_min, lat_min, lon_max, lat_max]
-            except Exception as ext_err:
-                logger.warning(
-                    f"ingest_zarr_register: Could not extract spatial extent: {ext_err}"
-                )
+        spatial_extent = _get_spatial_extent(ds)
 
         # Extract time range
         time_range = None
@@ -787,48 +740,48 @@ def ingest_zarr_rechunk(
                 storage_options=source_storage_options,
                 consolidated=False,
             )
+        try:
+            # TODO: Analyze source chunk layout — skip rechunking if already optimal
 
-        # TODO: Analyze source chunk layout — skip rechunking if already optimal
-
-        # Build optimized encoding
-        target_chunks, encoding = _build_zarr_encoding(
-            ds, spatial_chunk_size, time_chunk_size,
-            compressor_name, compression_level,
-            zarr_format=zarr_format,
-        )
-
-        # Rechunk in-memory
-        ds = ds.chunk(target_chunks)
-
-        # Write to silver-zarr
-        silver_repo = BlobRepository.for_zone("silver")
-        target_az_url = f"az://{target_container}/{target_prefix}"
-        target_storage_options = {
-            "account_name": silver_repo.account_name,
-            "credential": silver_repo.credential,
-        }
-
-        # Pre-cleanup: delete existing blobs at target prefix to prevent
-        # orphan metadata when format/chunking changes
-        cleanup = silver_repo.delete_blobs_by_prefix(target_container, target_prefix)
-        if cleanup["deleted_count"] > 0:
-            logger.info(
-                f"ingest_zarr_rechunk: pre-cleanup deleted {cleanup['deleted_count']} "
-                f"existing blobs under {target_container}/{target_prefix}"
+            # Build optimized encoding
+            target_chunks, encoding = _build_zarr_encoding(
+                ds, spatial_chunk_size, time_chunk_size,
+                compressor_name, compression_level,
+                zarr_format=zarr_format,
             )
 
-        logger.info(f"ingest_zarr_rechunk: Writing rechunked Zarr to {target_az_url}")
+            # Rechunk in-memory
+            ds = ds.chunk(target_chunks)
 
-        ds.to_zarr(
-            target_az_url,
-            mode="w",
-            consolidated=True,
-            storage_options=target_storage_options,
-            encoding=encoding,
-            zarr_format=zarr_format,
-        )
+            # Write to silver-zarr
+            silver_repo = BlobRepository.for_zone("silver")
+            target_az_url = f"az://{target_container}/{target_prefix}"
+            target_storage_options = {
+                "account_name": silver_repo.account_name,
+                "credential": silver_repo.credential,
+            }
 
-        ds.close()
+            # Pre-cleanup: delete existing blobs at target prefix to prevent
+            # orphan metadata when format/chunking changes
+            cleanup = silver_repo.delete_blobs_by_prefix(target_container, target_prefix)
+            if cleanup["deleted_count"] > 0:
+                logger.info(
+                    f"ingest_zarr_rechunk: pre-cleanup deleted {cleanup['deleted_count']} "
+                    f"existing blobs under {target_container}/{target_prefix}"
+                )
+
+            logger.info(f"ingest_zarr_rechunk: Writing rechunked Zarr to {target_az_url}")
+
+            ds.to_zarr(
+                target_az_url,
+                mode="w",
+                consolidated=True,
+                storage_options=target_storage_options,
+                encoding=encoding,
+                zarr_format=zarr_format,
+            )
+        finally:
+            ds.close()
 
         elapsed = time.time() - start
         logger.info(

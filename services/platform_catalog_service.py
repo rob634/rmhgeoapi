@@ -403,7 +403,7 @@ class PlatformCatalogService:
             "info": f"{titiler_base}/cog/info?url={encoded_url}",
             "statistics": f"{titiler_base}/cog/statistics?url={encoded_url}",
             "tiles": f"{titiler_base}/cog/tiles/{{z}}/{{x}}/{{y}}?url={encoded_url}",
-            "tilejson": f"{titiler_base}/cog/tilejson.json?url={encoded_url}",
+            "tilejson": f"{titiler_base}/cog/WebMercatorQuad/tilejson.json?url={encoded_url}",
             "wmts": f"{titiler_base}/cog/WMTSCapabilities.xml?url={encoded_url}",
             "bounds": f"{titiler_base}/cog/bounds?url={encoded_url}"
         }
@@ -687,7 +687,7 @@ class PlatformCatalogService:
 
             titiler_urls = {
                 "xyz": f"{titiler_base}/cog/tiles/{{z}}/{{x}}/{{y}}?url={encoded_url}",
-                "tilejson": f"{titiler_base}/cog/tilejson.json?url={encoded_url}",
+                "tilejson": f"{titiler_base}/cog/WebMercatorQuad/tilejson.json?url={encoded_url}",
                 "preview": f"{titiler_base}/cog/preview?url={encoded_url}",
                 "info": f"{titiler_base}/cog/info?url={encoded_url}",
                 "statistics": f"{titiler_base}/cog/statistics?url={encoded_url}",

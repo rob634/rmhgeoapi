@@ -863,7 +863,7 @@ class STACMaterializer:
             links[:] = [l for l in links if l.get('rel') not in ('tiles', 'viewer')]
             links.append({
                 "rel": "tiles",
-                "href": f"{titiler_base}/cog/tilejson.json?url={encoded_url}",
+                "href": f"{titiler_base}/cog/WebMercatorQuad/tilejson.json?url={encoded_url}",
                 "type": "application/json",
                 "title": "TileJSON"
             })

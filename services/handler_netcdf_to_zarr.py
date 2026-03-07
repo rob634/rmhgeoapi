@@ -51,6 +51,26 @@ def _get_storage_account() -> str:
     return get_config().storage.silver.account_name
 
 
+def _get_spatial_extent(ds) -> list | None:
+    """Extract [lon_min, lat_min, lon_max, lat_max] bbox from xarray dataset."""
+    import numpy as np
+    lat_names = ["lat", "latitude", "y"]
+    lon_names = ["lon", "longitude", "x"]
+    lat_coord = next((ds.coords[n] for n in lat_names if n in ds.coords), None)
+    lon_coord = next((ds.coords[n] for n in lon_names if n in ds.coords), None)
+    if lat_coord is None or lon_coord is None:
+        return None
+    try:
+        return [
+            float(np.nanmin(lon_coord.values)),
+            float(np.nanmin(lat_coord.values)),
+            float(np.nanmax(lon_coord.values)),
+            float(np.nanmax(lat_coord.values)),
+        ]
+    except Exception:
+        return None
+
+
 def _build_zarr_encoding(ds, spatial_chunk_size=256, time_chunk_size=1,
                          compressor_name="lz4", compression_level=5,
                          zarr_format=3):
@@ -754,30 +774,7 @@ def netcdf_convert(
         all_variables = list(ds.data_vars)
 
         # Extract spatial extent from lat/lon coordinate variables
-        spatial_extent = None
-        lat_names = ["lat", "latitude", "y"]
-        lon_names = ["lon", "longitude", "x"]
-
-        lat_coord = None
-        lon_coord = None
-        for name in lat_names:
-            if name in ds.coords:
-                lat_coord = ds.coords[name]
-                break
-        for name in lon_names:
-            if name in ds.coords:
-                lon_coord = ds.coords[name]
-                break
-
-        if lat_coord is not None and lon_coord is not None:
-            try:
-                lat_min = float(np.nanmin(lat_coord.values))
-                lat_max = float(np.nanmax(lat_coord.values))
-                lon_min = float(np.nanmin(lon_coord.values))
-                lon_max = float(np.nanmax(lon_coord.values))
-                spatial_extent = [lon_min, lat_min, lon_max, lat_max]
-            except Exception as ext_err:
-                logger.warning(f"netcdf_convert: Could not extract spatial extent: {ext_err}")
+        spatial_extent = _get_spatial_extent(ds)
 
         # Extract time range from time coordinate
         time_range = None

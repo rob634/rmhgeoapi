@@ -7,7 +7,7 @@
 # CREATED: 29 JAN 2026
 # VERSION: V0.8.1.1
 # EXPORTS: get_all_subsystems, HealthAggregator
-# DEPENDENCIES: base, shared, runtime, classic_worker, dag_worker
+# DEPENDENCIES: base, shared, runtime, classic_worker
 # ============================================================================
 """
 Docker Health Subsystem Architecture.
@@ -20,7 +20,6 @@ Subsystems:
 - SharedInfrastructureSubsystem: Database, storage, service bus (common)
 - RuntimeSubsystem: Hardware, GDAL, imports, deployment config
 - ClassicWorkerSubsystem: Existing queue-based job processing
-- DAGWorkerSubsystem: Future DAG-driven workflow processing (stub)
 
 Usage:
     from docker_health import get_all_subsystems, HealthAggregator
@@ -47,7 +46,6 @@ def get_all_subsystems(
     worker_lifecycle,
     token_refresh_worker,
     etl_mount_status: Optional[dict] = None,
-    dag_processor=None,  # Future: DAG processor reference
 ) -> List["WorkerSubsystem"]:
     """
     Get all health subsystems with their dependencies injected.
@@ -57,7 +55,6 @@ def get_all_subsystems(
         worker_lifecycle: DockerWorkerLifecycle instance
         token_refresh_worker: TokenRefreshWorker instance
         etl_mount_status: ETL mount status dict (optional)
-        dag_processor: Future DAG processor reference (optional)
 
     Returns:
         List of WorkerSubsystem instances in priority order
@@ -65,7 +62,6 @@ def get_all_subsystems(
     from .shared import SharedInfrastructureSubsystem
     from .runtime import RuntimeSubsystem
     from .classic_worker import ClassicWorkerSubsystem
-    from .dag_worker import DAGWorkerSubsystem
 
     subsystems = [
         # Priority 10: Shared infrastructure (database, storage, service bus)
@@ -85,10 +81,6 @@ def get_all_subsystems(
             token_refresh_worker=token_refresh_worker,
         ),
 
-        # Priority 40: DAG worker (future system - currently disabled)
-        DAGWorkerSubsystem(
-            dag_processor=dag_processor,
-        ),
     ]
 
     # Sort by priority (lower = runs first)

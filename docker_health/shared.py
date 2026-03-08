@@ -3,7 +3,7 @@
 # ============================================================================
 # EPOCH: 4 - ACTIVE
 # STATUS: Health Subsystem - Database, Storage, Service Bus
-# PURPOSE: Health checks for infrastructure shared between Classic and DAG workers
+# PURPOSE: Health checks for Docker Worker shared infrastructure
 # CREATED: 29 JAN 2026
 # EXPORTS: SharedInfrastructureSubsystem
 # DEPENDENCIES: base.WorkerSubsystem, config, psycopg
@@ -11,7 +11,7 @@
 """
 Shared Infrastructure Health Subsystem.
 
-Monitors infrastructure components used by both Classic and DAG workers:
+Monitors infrastructure components used by the Docker Worker:
 - database: PostgreSQL connectivity and authentication
 - storage_containers: Azure Blob Storage access
 - service_bus: Azure Service Bus connectivity

@@ -349,7 +349,6 @@ class BlobRepository(IBlobRepository):
             zone_config.rasters,
             zone_config.cogs,
             zone_config.tiles,
-            zone_config.mosaicjson,
             zone_config.stac_assets,
             zone_config.misc,
             zone_config.temp
@@ -1498,8 +1497,8 @@ class BlobRepository(IBlobRepository):
             Full HTTPS URL to the blob
 
         Example:
-            url = repo.get_blob_url('silver-cogs', 'mosaics/my_mosaic.json')
-            # Returns: https://<account>.blob.core.windows.net/silver-cogs/mosaics/my_mosaic.json
+            url = repo.get_blob_url('silver-cogs', 'data/my_file.tif')
+            # Returns: https://<account>.blob.core.windows.net/silver-cogs/data/my_file.tif
         """
         return f"https://{self.account_name}.blob.core.windows.net/{container}/{blob_path}"
 

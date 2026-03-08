@@ -144,7 +144,6 @@ Each trust zone can have its own storage account. Required accounts are in Secti
 | `SILVER_RASTERS_CONTAINER` | `silver-rasters` | Processed rasters |
 | `SILVER_VECTORS_CONTAINER` | `silver-vectors` | Processed vectors |
 | `SILVER_TILES_CONTAINER` | `silver-tiles` | Pre-rendered tiles |
-| `SILVER_MOSAICJSON_CONTAINER` | `silver-mosaicjson` | MosaicJSON definitions |
 | `SILVER_STAC_ASSETS_CONTAINER` | `silver-stac-assets` | STAC asset storage |
 | `SILVER_MISC_CONTAINER` | `silver-misc` | Miscellaneous processed data |
 | `SILVER_TEMP_CONTAINER` | `silver-temp` | Temporary processing files |
@@ -157,7 +156,6 @@ Each trust zone can have its own storage account. Required accounts are in Secti
 | `SILVEREXT_RASTERS_CONTAINER` | `silverext-rasters` | Rasters for external access |
 | `SILVEREXT_VECTORS_CONTAINER` | `silverext-vectors` | Vectors for external access |
 | `SILVEREXT_TILES_CONTAINER` | `silverext-tiles` | Tiles for external access |
-| `SILVEREXT_MOSAICJSON_CONTAINER` | `silverext-mosaicjson` | MosaicJSON for external access |
 | `SILVEREXT_STAC_ASSETS_CONTAINER` | `silverext-stac-assets` | STAC assets for external access |
 
 ### 4.4 Gold Tier (Analytics/Export)
@@ -184,7 +182,6 @@ Each trust zone can have its own storage account. Required accounts are in Secti
 | `RASTER_REPROJECT_RESAMPLING` | `bilinear` | Reprojection resampling method |
 | `RASTER_STRICT_VALIDATION` | `true` | Strict input validation |
 | `RASTER_INTERMEDIATE_PREFIX` | `intermediate/` | Temp file prefix |
-| `RASTER_MOSAICJSON_MAXZOOM` | `14` | Max zoom for MosaicJSON |
 | `RASTER_SIZE_THRESHOLD_MB` | `100` | Size threshold for large raster handling |
 | `RASTER_MAX_FILE_SIZE_MB` | `2048` | Maximum file size (2GB) |
 | `RASTER_IN_MEMORY_THRESHOLD_MB` | `500` | Threshold for in-memory processing |

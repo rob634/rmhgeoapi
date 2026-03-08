@@ -345,10 +345,9 @@ def analyze_delivery_structure(blob_list: List[str], folder_path: str = None) ->
                 "blob_list": raster_files,
                 "collection_id": f"{folder_path.replace('/', '_')}" if folder_path else "delivery",
                 "output_tier": "analysis",
-                "create_mosaicjson": True,
                 "output_folder": f"cogs/{folder_path}" if folder_path else "cogs/delivery"
             },
-            "description": f"Process {len(raster_files)} tiles as collection with MosaicJSON"
+            "description": f"Process {len(raster_files)} tiles as collection"
         }
     elif delivery_type == 'single_file':
         recommended_workflow = {

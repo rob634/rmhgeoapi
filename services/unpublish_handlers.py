@@ -50,7 +50,6 @@ def inventory_raster_item(params: Dict[str, Any], context: Optional[Dict[str, An
 
     Extracts:
     - COG blobs from item['assets']['data']['href']
-    - MosaicJSON from item['assets']['mosaic']['href'] (if present)
     - Tile COGs from item['assets']['tile_*']['href'] (large raster/collection workflows)
 
     Args:

@@ -61,7 +61,7 @@ paths:
         **Processing Workflows by Data Type:**
         - `raster`: Validate → COG creation → STAC cataloging
         - `vector`: Validate → PostGIS ingestion → STAC cataloging
-        - `collection`: Tile detection → Parallel COG creation → MosaicJSON
+        - `collection`: Tile detection → Parallel COG creation → STAC cataloging
 
         **Request ID Generation:**
         - Deterministic SHA256 hash of (dataset_id + resource_id + version_id + timestamp)
@@ -125,7 +125,7 @@ paths:
 
               rasterCollection:
                 summary: Raster collection (satellite tiles)
-                description: Process multiple rasters as unified collection with MosaicJSON
+                description: Process multiple rasters as unified collection
                 value:
                   dataset_id: "landsat-8-collection"
                   resource_id: "scene-123456"
@@ -134,7 +134,6 @@ paths:
                   source_location: "https://rmhazuregeo.blob.core.windows.net/rmhazuregeobronze/landsat/*.tif"
                   parameters:
                     output_tier: "visualization"
-                    create_mosaicjson: true
                   client_id: "ddh"
 
       responses:
@@ -1038,8 +1037,6 @@ components:
             **Raster Processing:**
             - `output_tier`: "visualization" | "analysis" | "archive" (COG compression tier)
             - `target_crs`: "EPSG:4326" (reproject to CRS)
-            - `create_mosaicjson`: true (for collections)
-
             **Vector Processing:**
             - `target_crs`: "EPSG:4326" (reproject to CRS)
             - `table_name`: "my_table" (PostGIS table name)

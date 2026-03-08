@@ -3146,8 +3146,7 @@ class TasksInterface(BaseInterface):
                     {{ number: 1, name: 'Tiling Scheme', description: 'Generate tile grid' }},
                     {{ number: 2, name: 'Tile Extraction', description: 'Extract tiles from source' }},
                     {{ number: 3, name: 'COG Creation', description: 'Create COGs from tiles' }},
-                    {{ number: 4, name: 'MosaicJSON', description: 'Generate mosaic definition' }},
-                    {{ number: 5, name: 'STAC Registration', description: 'Register with STAC catalog' }}
+                    {{ number: 4, name: 'STAC Registration', description: 'Register with STAC catalog' }}
                 ]
             }},
             // Docker H3 Pyramid Job (F7.20 - 20 JAN 2026)

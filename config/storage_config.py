@@ -37,7 +37,7 @@ REQUIRED AZURE RESOURCES
         - SKU: Standard_LRS (or GRS for production)
         - Access: Private + SAS tokens for TiTiler
         - Containers: silver-vectors, silver-rasters, silver-cogs, silver-tiles,
-                      silver-mosaicjson, silver-stac-assets, silver-misc, silver-temp
+                      silver-stac-assets, silver-misc, silver-temp
 
         GOLD ZONE (Analytics exports - OPTIONAL):
         - Name: {app-name}-gold
@@ -76,7 +76,7 @@ REQUIRED AZURE RESOURCES
        "Create blob containers in each storage account:
         Bronze: bronze-vectors, bronze-rasters, bronze-misc, bronze-temp
         Silver: silver-vectors, silver-rasters, silver-cogs, silver-tiles,
-                silver-mosaicjson, silver-stac-assets, silver-misc, silver-temp
+                silver-stac-assets, silver-misc, silver-temp
         Gold: gold-geoparquet, gold-h3-grids, gold-temp"
 
 --------------------------------------------------------------------------------
@@ -408,7 +408,6 @@ class StorageAccountConfig(BaseModel):
     rasters: str = Field(description="Raster data container (GeoTIFF, raw rasters)")
     cogs: str = Field(description="Cloud Optimized GeoTIFFs (analysis + visualization tiers)")
     tiles: str = Field(description="Raster tiles (temporary or permanent)")
-    mosaicjson: str = Field(description="MosaicJSON metadata files")
     stac_assets: str = Field(description="STAC asset files (thumbnails, metadata)")
     misc: str = Field(description="Miscellaneous files (logs, reports)")
     temp: str = Field(description="Temporary processing files (auto-cleanup)")
@@ -435,7 +434,7 @@ class StorageAccountConfig(BaseModel):
         if not hasattr(self, purpose):
             raise ValueError(
                 f"Unknown container purpose: {purpose}. "
-                f"Valid options: vectors, rasters, cogs, tiles, mosaicjson, "
+                f"Valid options: vectors, rasters, cogs, tiles, "
                 f"stac_assets, misc, temp, netcdf, zarr"
             )
         return getattr(self, purpose)
@@ -468,7 +467,6 @@ class MultiAccountStorageConfig(BaseModel):
         SILVER_RASTERS_CONTAINER  - Processed rasters (default: "silver-rasters")
         SILVER_COGS_CONTAINER     - Cloud Optimized GeoTIFFs (default: "silver-cogs")
         SILVER_TILES_CONTAINER    - Raster tiles (default: "silver-tiles")
-        SILVER_MOSAICJSON_CONTAINER - MosaicJSON files (default: "silver-mosaicjson")
         SILVER_STAC_ASSETS_CONTAINER - STAC assets (default: "silver-stac-assets")
         SILVER_MISC_CONTAINER     - Misc files (default: "silver-misc")
         SILVER_TEMP_CONTAINER     - Temp processing (default: "silver-temp")
@@ -518,7 +516,6 @@ class MultiAccountStorageConfig(BaseModel):
             # Not used in Bronze (no processed outputs):
             cogs=os.getenv("BRONZE_COGS_CONTAINER", StorageDefaults.NOT_USED),
             tiles=os.getenv("BRONZE_TILES_CONTAINER", StorageDefaults.NOT_USED),
-            mosaicjson=os.getenv("BRONZE_MOSAICJSON_CONTAINER", StorageDefaults.NOT_USED),
             stac_assets=os.getenv("BRONZE_STAC_ASSETS_CONTAINER", StorageDefaults.NOT_USED),
             netcdf=StorageDefaults.NOT_USED,
             zarr=StorageDefaults.NOT_USED,
@@ -537,7 +534,6 @@ class MultiAccountStorageConfig(BaseModel):
             rasters=os.getenv("SILVER_RASTERS_CONTAINER", StorageDefaults.SILVER_RASTERS),
             cogs=os.getenv("SILVER_COGS_CONTAINER", StorageDefaults.SILVER_COGS),
             tiles=os.getenv("SILVER_TILES_CONTAINER", StorageDefaults.SILVER_TILES),
-            mosaicjson=os.getenv("SILVER_MOSAICJSON_CONTAINER", StorageDefaults.SILVER_MOSAICJSON),
             stac_assets=os.getenv("SILVER_STAC_ASSETS_CONTAINER", StorageDefaults.SILVER_STAC_ASSETS),
             misc=os.getenv("SILVER_MISC_CONTAINER", StorageDefaults.SILVER_MISC),
             temp=os.getenv("SILVER_TEMP_CONTAINER", StorageDefaults.SILVER_TEMP),
@@ -558,7 +554,6 @@ class MultiAccountStorageConfig(BaseModel):
             rasters=os.getenv("SILVEREXT_RASTERS_CONTAINER", StorageDefaults.SILVEREXT_RASTERS),
             cogs=os.getenv("SILVEREXT_COGS_CONTAINER", StorageDefaults.SILVEREXT_COGS),
             tiles=os.getenv("SILVEREXT_TILES_CONTAINER", StorageDefaults.SILVEREXT_TILES),
-            mosaicjson=os.getenv("SILVEREXT_MOSAICJSON_CONTAINER", StorageDefaults.SILVEREXT_MOSAICJSON),
             stac_assets=os.getenv("SILVEREXT_STAC_ASSETS_CONTAINER", StorageDefaults.SILVEREXT_STAC_ASSETS),
             misc=os.getenv("SILVEREXT_MISC_CONTAINER", StorageDefaults.SILVEREXT_MISC),
             temp=os.getenv("SILVEREXT_TEMP_CONTAINER", StorageDefaults.SILVEREXT_TEMP),
@@ -579,7 +574,6 @@ class MultiAccountStorageConfig(BaseModel):
             rasters=os.getenv("GOLD_RASTERS_CONTAINER", StorageDefaults.NOT_USED),
             cogs=os.getenv("GOLD_COGS_CONTAINER", StorageDefaults.NOT_USED),
             tiles=os.getenv("GOLD_TILES_CONTAINER", StorageDefaults.NOT_USED),
-            mosaicjson=os.getenv("GOLD_MOSAICJSON_CONTAINER", StorageDefaults.NOT_USED),
             stac_assets=os.getenv("GOLD_STAC_ASSETS_CONTAINER", StorageDefaults.NOT_USED),
             misc=os.getenv("GOLD_H3_GRIDS_CONTAINER", StorageDefaults.GOLD_H3_GRIDS),
             temp=os.getenv("GOLD_TEMP_CONTAINER", StorageDefaults.GOLD_TEMP),

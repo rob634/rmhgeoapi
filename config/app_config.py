@@ -479,11 +479,6 @@ class AppConfig(BaseModel):
         return self.raster.target_crs
 
     @property
-    def raster_mosaicjson_maxzoom(self) -> int:
-        """Legacy compatibility - use raster.mosaicjson_maxzoom instead."""
-        return self.raster.mosaicjson_maxzoom
-
-    @property
     def vector_pickle_container(self) -> str:
         """Legacy compatibility - use vector.pickle_container instead."""
         return self.vector.pickle_container
@@ -585,10 +580,7 @@ class AppConfig(BaseModel):
         """
         Get intermediate tiles container, defaulting to silver-cogs if not specified.
 
-        UPDATED (19 DEC 2025): Changed default from "silver-mosaicjson" to "silver-cogs"
-        to store MosaicJSON files alongside COGs in the same container.
-
-        Returns container name for MosaicJSON files (Stage 3 output).
+        Returns intermediate tiles container.
         If intermediate_tiles_container is None, falls back to silver-cogs.
 
         Usage:
@@ -597,11 +589,6 @@ class AppConfig(BaseModel):
             # Returns: "silver-cogs" (or custom value if env var set)
         """
         return self.raster.intermediate_tiles_container or StorageDefaults.SILVER_COGS
-
-    @property
-    def titiler_pgstac_base_url(self) -> str:
-        """Legacy compatibility - same as titiler_base_url for pgstac mode."""
-        return self.titiler_base_url
 
     # ========================================================================
     # Public Database Helper Methods (07 JAN 2026 - renamed from business_database)
@@ -833,27 +820,6 @@ class AppConfig(BaseModel):
             "viewer":     f"{base}/xarray/WebMercatorQuad/map.html?url={encoded}&variable={{variable}}&decode_times=false",
         }
 
-    def generate_titiler_urls(self, collection_id: str, item_id: str) -> dict:
-        """
-        Generate TiTiler-PgSTAC URLs for raster visualization.
-
-        Legacy compatibility method - uses titiler_pgstac_base_url field.
-
-        Args:
-            collection_id: STAC collection ID
-            item_id: STAC item ID
-
-        Returns:
-            Dictionary with TiTiler endpoint URLs
-        """
-        base = self.titiler_pgstac_base_url.rstrip('/')
-        return {
-            "info": f"{base}/info?collection={collection_id}&item={item_id}",
-            "tilejson": f"{base}/tilejson.json?collection={collection_id}&item={item_id}",
-            "viewer": f"{base}/viewer?collection={collection_id}&item={item_id}",
-            "preview": f"{base}/preview.png?collection={collection_id}&item={item_id}"
-        }
-
     def generate_titiler_urls_unified(
         self,
         mode: str,
@@ -864,15 +830,14 @@ class AppConfig(BaseModel):
         """
         Generate TiTiler URLs for all three access patterns.
 
-        Consolidates three TiTiler visualization patterns into single method:
+        Consolidates TiTiler visualization patterns into single method:
         1. Single COG - Direct /vsiaz/ access to individual raster
-        2. MosaicJSON - Collection of COGs as single layer
-        3. PgSTAC Search - Dynamic queries across STAC catalog
+        2. PgSTAC Search - Dynamic queries across STAC catalog
 
         Args:
-            mode: URL generation mode ('cog', 'mosaicjson', 'pgstac')
-            container: Azure container name (required for cog/mosaicjson modes)
-            blob_name: Blob path within container (required for cog/mosaicjson modes)
+            mode: URL generation mode ('cog', 'pgstac')
+            container: Azure container name (required for cog mode)
+            blob_name: Blob path within container (required for cog mode)
             search_id: PgSTAC search hash (required for pgstac mode)
 
         Returns:
@@ -904,31 +869,6 @@ class AppConfig(BaseModel):
                 "tiles_url_template": f"{base}/cog/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}.png?url={encoded_vsiaz}"
             }
 
-        elif mode == "mosaicjson":
-            if not container or not blob_name:
-                raise ValueError(
-                    f"mode='mosaicjson' requires container and blob_name. "
-                    f"Got: container={container}, blob_name={blob_name}"
-                )
-
-            if not blob_name.endswith('.json'):
-                raise ValueError(
-                    f"mode='mosaicjson' requires blob_name to be a .json file. Got: {blob_name}"
-                )
-
-            vsiaz_path = f"/vsiaz/{container}/{blob_name}"
-            encoded_vsiaz = urllib.parse.quote(vsiaz_path, safe='')
-
-            return {
-                "viewer_url": f"{base}/mosaicjson/WebMercatorQuad/map.html?url={encoded_vsiaz}",
-                "info_url": f"{base}/mosaicjson/info?url={encoded_vsiaz}",
-                "bounds_url": f"{base}/mosaicjson/bounds?url={encoded_vsiaz}",
-                "tilejson_url": f"{base}/mosaicjson/WebMercatorQuad/tilejson.json?url={encoded_vsiaz}",
-                "tiles_url_template": f"{base}/mosaicjson/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}.png?url={encoded_vsiaz}",
-                "assets_url_template": f"{base}/mosaicjson/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}/assets?url={encoded_vsiaz}",
-                "point_url_template": f"{base}/mosaicjson/point/{{lon}},{{lat}}?url={encoded_vsiaz}"
-            }
-
         elif mode == "pgstac":
             raise NotImplementedError(
                 "PgSTAC search URL generation not yet implemented. "
@@ -936,7 +876,7 @@ class AppConfig(BaseModel):
             )
 
         else:
-            raise ValueError(f"Invalid mode: {mode}. Must be one of: 'cog', 'mosaicjson', 'pgstac'")
+            raise ValueError(f"Invalid mode: {mode}. Must be one of: 'cog', 'pgstac'")
 
     # ========================================================================
     # Observability Helper Methods (Updated 10 JAN 2026 - F7.12.C)

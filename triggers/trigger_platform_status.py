@@ -577,7 +577,7 @@ def _build_single_status_response(
     result["outputs"] = _build_outputs_block(release, job_result, asset)
 
     # Services (focused URLs)
-    result["services"] = _build_services_block(release, data_type) if data_type else None
+    result["services"] = _build_services_block(release, data_type, asset) if data_type else None
 
     # Approval (only when pending_review + completed)
     asset_id = asset.asset_id if asset else None
@@ -725,16 +725,42 @@ def _build_outputs_block(release, job_result: Optional[dict] = None, asset=None)
     return outputs
 
 
-def _build_services_block(release, data_type: str) -> Optional[dict]:
-    """
-    Build focused service URLs for accessing the output data.
+def _build_zarr_url(release, config) -> Optional[str]:
+    """Build abfs:// URL for zarr store from release fields."""
+    blob_path = release.blob_path
+    if not blob_path:
+        return None
+    output_mode = getattr(release, 'output_mode', '') or ''
+    if output_mode == 'zarr_store':
+        container = config.storage.silver.zarr
+    else:
+        container = config.storage.silver.netcdf
+    return f"abfs://{container}/{blob_path}"
 
-    Raster: preview, tiles, viewer (from titiler)
-    Vector: collection, items (from OGC Features/TiPG)
+
+def _infer_raster_container(release, asset, config) -> str:
+    """Infer the correct silver container for raster COGs."""
+    asset_data_type = getattr(asset, 'data_type', None) if asset else None
+    dt_val = asset_data_type.value if hasattr(asset_data_type, 'value') else str(asset_data_type or '')
+    if dt_val in ('zarr', 'raster_zarr'):
+        return config.storage.silver.zarr
+    if release.blob_path and release.blob_path.startswith("zarr/"):
+        return config.storage.silver.zarr
+    return config.storage.silver.cogs
+
+
+def _build_services_block(release, data_type: str, asset=None) -> Optional[dict]:
+    """
+    Build normalized service URLs for accessing the output data.
+
+    Returns a consistent shape with 6 guaranteed keys (service_url, preview,
+    stac_collection, stac_item, viewer, tiles) regardless of data type.
+    Zarr adds a bonus 'variables' key; vector multi-table adds 'tables'.
 
     Args:
         release: AssetRelease object
-        data_type: "raster" or "vector"
+        data_type: "raster", "vector", or "zarr"
+        asset: GeospatialAsset object (used for container inference)
 
     Returns:
         Dict with service URLs, or None if no outputs
@@ -747,15 +773,24 @@ def _build_services_block(release, data_type: str) -> Optional[dict]:
         return None
 
     from config import get_config
+    from urllib.parse import quote
     config = get_config()
 
-    services = {}
+    # Initialize consistent shape — all keys present for every data type
+    services = {
+        "service_url": None,
+        "preview": None,
+        "stac_collection": None,
+        "stac_item": None,
+        "viewer": None,
+        "tiles": None,
+    }
 
     if data_type == "raster" and release.blob_path:
-        titiler_base = config.titiler_base_url
-        from urllib.parse import quote
-        cog_url = quote(f"/vsiaz/silver-cogs/{release.blob_path}", safe='')
-        services["collection"] = f"{titiler_base}/cog/WebMercatorQuad/tilejson.json?url={cog_url}"
+        titiler_base = config.titiler_base_url.rstrip('/')
+        container = _infer_raster_container(release, asset, config)
+        cog_url = quote(f"/vsiaz/{container}/{release.blob_path}", safe='')
+        services["service_url"] = f"{titiler_base}/cog/WebMercatorQuad/tilejson.json?url={cog_url}"
         services["preview"] = f"{titiler_base}/cog/preview.png?url={cog_url}&max_size=512"
         services["tiles"] = f"{titiler_base}/cog/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}.png?url={cog_url}"
         services["viewer"] = f"{titiler_base}/cog/WebMercatorQuad/map.html?url={cog_url}"
@@ -764,31 +799,48 @@ def _build_services_block(release, data_type: str) -> Optional[dict]:
         table_names = _get_release_table_names(release.release_id)
         if table_names:
             tipg_base = config.tipg_base_url
-            # Return URLs for ALL tables (multi-table releases)
-            if len(table_names) == 1:
-                qualified = f"geo.{table_names[0]}"
-                services["collection"] = f"{tipg_base}/collections/{qualified}"
-                services["items"] = f"{tipg_base}/collections/{qualified}/items"
-            else:
-                services["collections"] = []
+            # Primary table populates top-level keys
+            primary = f"geo.{table_names[0]}"
+            services["service_url"] = f"{tipg_base}/collections/{primary}"
+            # preview: TiPG built-in viewer (future: custom platform viewer)
+            services["preview"] = f"{tipg_base}/collections/{primary}/tiles/WebMercatorQuad/map"
+            services["viewer"] = f"{tipg_base}/collections/{primary}/tiles/WebMercatorQuad/map"
+            services["tiles"] = f"{tipg_base}/collections/{primary}/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}.pbf"
+            # Vector has no STAC
+            services["stac_collection"] = None
+            services["stac_item"] = None
+            # Multi-table: include all tables
+            if len(table_names) > 1:
+                services["tables"] = []
                 for tn in table_names:
                     qualified = f"geo.{tn}"
-                    services["collections"].append({
+                    services["tables"].append({
                         "table_name": tn,
-                        "collection": f"{tipg_base}/collections/{qualified}",
-                        "items": f"{tipg_base}/collections/{qualified}/items",
+                        "service_url": f"{tipg_base}/collections/{qualified}",
+                        "tiles": f"{tipg_base}/collections/{qualified}/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}.pbf",
                     })
+
+    elif data_type == "zarr" and release.blob_path:
+        zarr_url = _build_zarr_url(release, config)
+        if zarr_url:
+            xarray_urls = config.generate_xarray_tile_urls(zarr_url)
+            services["service_url"] = xarray_urls["tilejson"]
+            services["preview"] = xarray_urls["preview"]
+            services["viewer"] = xarray_urls["viewer"]
+            services["tiles"] = xarray_urls["tiles"]
+            services["variables"] = xarray_urls["variables"]
 
     # STAC URLs via Service Layer (titiler-pgstac STAC API)
     # The Service Layer Docker app hosts STAC at /stac/ — this is the B2C endpoint.
-    # The Orchestrator's /api/stac/ is legacy and being phased out.
-    if release.stac_collection_id:
+    # Vector has no STAC — skip if already set to None above.
+    if data_type != "vector" and release.stac_collection_id:
         stac_base = f"{config.titiler_base_url.rstrip('/')}/stac"
         services["stac_collection"] = f"{stac_base}/collections/{release.stac_collection_id}"
         if release.stac_item_id:
             services["stac_item"] = f"{stac_base}/collections/{release.stac_collection_id}/items/{release.stac_item_id}"
 
-    return services if services else None
+    # Return None only if no service_url was populated (no outputs to show)
+    return services if services["service_url"] else None
 
 
 def _build_approval_block(release, asset_id: str, data_type: str) -> Optional[dict]:
@@ -830,7 +882,8 @@ def _build_approval_block(release, asset_id: str, data_type: str) -> Optional[di
         # Always use direct COG URL (?url=) for approval preview.
         # STAC item doesn't exist yet — it's materialized AFTER approval.
         # TiTiler works directly from blob_path, no STAC needed.
-        cog_url = quote(f"/vsiaz/silver-cogs/{release.blob_path}", safe='')
+        container = _infer_raster_container(release, None, config)
+        cog_url = quote(f"/vsiaz/{container}/{release.blob_path}", safe='')
         approval["viewer_url"] = f"{platform_base}/api/interface/raster-viewer?url={cog_url}&asset_id={asset_id}"
         approval["embed_url"] = f"{platform_base}/api/interface/raster-viewer?url={cog_url}&asset_id={asset_id}&embed=true"
 
@@ -843,6 +896,16 @@ def _build_approval_block(release, asset_id: str, data_type: str) -> Optional[di
             approval["embed_url"] = f"{platform_base}/api/interface/vector-viewer?collection={primary_table}&asset_id={asset_id}&embed=true"
             if len(table_names) > 1:
                 approval["all_tables"] = table_names
+
+    elif data_type == "zarr" and release.blob_path:
+        from urllib.parse import quote
+        # Build zarr preview URL for reviewer
+        # No {variable} substitution — reviewer selects variable interactively in TiTiler map UI
+        zarr_url = _build_zarr_url(release, config)
+        if zarr_url:
+            encoded = quote(zarr_url, safe='')
+            titiler_base = config.titiler_base_url.rstrip('/')
+            approval["viewer_url"] = f"{titiler_base}/xarray/WebMercatorQuad/map.html?url={encoded}&decode_times=false"
 
     return approval
 

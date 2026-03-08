@@ -32,7 +32,7 @@ Tiled Mode (files > threshold):
     1. Generate tiling scheme
     2. Extract tiles (tile_r{row}_c{col}.tif naming)
     3. Create COGs for each tile
-    4. Create STAC collection (pgSTAC-based, no MosaicJSON)
+    4. Create STAC collection (pgSTAC-based)
     5. Write metadata.json for disaster recovery
 
 V0.8.2 Tile Naming (27 JAN 2026):

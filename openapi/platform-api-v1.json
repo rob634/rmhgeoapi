@@ -245,7 +245,7 @@
     "/api/platform/unpublish": {
       "post": {
         "summary": "Unpublish data (unified)",
-        "description": "Remove data from the platform (vector or raster).\nAutomatically determines data type and handles appropriate cleanup.\n\n**Identification Options:**\n- DDH identifiers (dataset_id, resource_id, version_id)\n- request_id from original submission\n\n**Actions Performed:**\n- Vector: Drops PostGIS table, deletes metadata, removes STAC item\n- Raster: Deletes COG/MosaicJSON blobs, removes STAC item\n\n**Note:** dry_run=true by default (preview mode)",
+        "description": "Remove data from the platform (vector or raster).\nAutomatically determines data type and handles appropriate cleanup.\n\n**Identification Options:**\n- DDH identifiers (dataset_id, resource_id, version_id)\n- request_id from original submission\n\n**Actions Performed:**\n- Vector: Drops PostGIS table, deletes metadata, removes STAC item\n- Raster: Deletes COG blobs, removes STAC item\n\n**Note:** dry_run=true by default (preview mode)",
         "operationId": "platformUnpublish",
         "tags": ["Platform"],
         "requestBody": {
@@ -689,7 +689,7 @@
     "/api/platform/catalog/assets/{collection_id}/{item_id}": {
       "get": {
         "summary": "Get asset URLs for item",
-        "description": "Get direct access URLs for all assets in a STAC item.\nReturns COG URLs, MosaicJSON URLs, and any thumbnails.\n\n**Use case:** Get URLs to pass to TiTiler or data clients.",
+        "description": "Get direct access URLs for all assets in a STAC item.\nReturns COG URLs and any thumbnails.\n\n**Use case:** Get URLs to pass to TiTiler or data clients.",
         "operationId": "catalogAssets",
         "tags": ["Catalog"],
         "parameters": [
@@ -1207,7 +1207,6 @@
             "type": "object",
             "properties": {
               "cog_url": {"type": "string"},
-              "mosaic_url": {"type": "string"},
               "ogc_features_url": {"type": "string"},
               "stac_item_url": {"type": "string"}
             }

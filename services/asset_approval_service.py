@@ -412,7 +412,7 @@ class AssetApprovalService:
         # Step 6b: Create route records (NON-FATAL)
         route_result = self._create_routes(release, asset, version_id, clearance_state, reviewer)
         if route_result.get('success'):
-            logger.info(f"Routes created: {route_result.get('slug')}")
+            logger.info(f"Routes created: {route_result.get('routes_created')} route(s) for {route_result.get('slugs')}")
         else:
             logger.warning(f"Route creation failed (non-fatal): {route_result.get('error')}")
 
@@ -818,6 +818,11 @@ class AssetApprovalService:
         PUBLIC clearance: writes both b2b_routes AND b2c_routes.
         OUO clearance: writes b2b_routes only.
 
+        For vector releases with multiple tables (geometry-split), creates
+        one route per table. Split tables get a suffixed slug (e.g.,
+        "kigali-infrastructure-point") so each table is independently
+        discoverable.
+
         Args:
             release: The approved AssetRelease
             asset: The parent Asset (for dataset_id, resource_id, data_type)
@@ -826,7 +831,7 @@ class AssetApprovalService:
             reviewer: Who approved
 
         Returns:
-            Dict with success, slug, tables_written (on success)
+            Dict with success, slugs, routes_created, tables_written (on success)
             or success=False, error (on failure)
         """
         try:
@@ -839,7 +844,7 @@ class AssetApprovalService:
             route_repo = RouteRepository()
             now = datetime.now(timezone.utc)
 
-            slug = _slugify_for_stac(f"{asset.dataset_id}-{asset.resource_id}")
+            base_slug = _slugify_for_stac(f"{asset.dataset_id}-{asset.resource_id}")
 
             # Determine data_type
             data_type = getattr(asset, 'data_type', None) or 'raster'
@@ -848,52 +853,81 @@ class AssetApprovalService:
                     and release.stac_item_json.get('properties', {}).get('geoetl:data_type') == 'zarr'):
                 data_type = 'zarr'
 
-            # Get table_name for vector releases
-            table_name = None
+            base_title = (
+                (release.stac_item_json or {}).get('properties', {}).get('title')
+                or f"{asset.dataset_id} / {asset.resource_id}"
+            )
+            description = (release.stac_item_json or {}).get('properties', {}).get('description')
+
+            # Build list of (slug, table_name, title) tuples to route
+            route_entries = []
+
             if data_type == 'vector':
                 try:
                     release_table_repo = ReleaseTableRepository()
-                    table_names = release_table_repo.get_table_names(release.release_id)
-                    if table_names:
-                        table_name = table_names[0]
+                    release_tables = release_table_repo.get_tables(release.release_id)
                 except Exception as tbl_err:
-                    logger.warning(f"Could not get table_name for route: {tbl_err}")
+                    logger.warning(f"Could not get release_tables for routing: {tbl_err}")
+                    release_tables = []
 
-            route = {
-                'slug': slug,
-                'version_id': version_id,
-                'data_type': data_type,
-                'version_ordinal': release.version_ordinal,
-                'table_name': table_name,
-                'stac_item_id': release.stac_item_id,
-                'stac_collection_id': release.stac_collection_id,
-                'blob_path': release.blob_path,
-                'title': (
-                    (release.stac_item_json or {}).get('properties', {}).get('title')
-                    or f"{asset.dataset_id} / {asset.resource_id}"
-                ),
-                'description': (release.stac_item_json or {}).get('properties', {}).get('description'),
-                'asset_id': asset.asset_id,
-                'release_id': release.release_id,
-                'cleared_by': reviewer,
-                'cleared_at': now,
-                'created_at': now,
-            }
+                if release_tables:
+                    has_splits = len(release_tables) > 1
+                    for rt in release_tables:
+                        if has_splits and rt.table_suffix:
+                            # Geometry-split: suffixed slug for independent discovery
+                            suffix = rt.table_suffix.lstrip('_')
+                            slug = f"{base_slug}-{suffix}"
+                            title = f"{base_title} ({suffix})"
+                        else:
+                            slug = base_slug
+                            title = base_title
+                        route_entries.append((slug, rt.table_name, title))
+                else:
+                    # No release_tables yet — single route with no table_name
+                    route_entries.append((base_slug, None, base_title))
+            else:
+                # Raster/zarr: single route, no table_name
+                route_entries.append((base_slug, None, base_title))
 
             tables_written = []
+            slugs_created = []
 
-            # Always write to b2b_routes
-            route_repo.upsert_route(route, table='b2b_routes')
-            tables_written.append('b2b_routes')
+            for slug, table_name, title in route_entries:
+                route = {
+                    'slug': slug,
+                    'version_id': version_id,
+                    'data_type': data_type,
+                    'version_ordinal': release.version_ordinal,
+                    'table_name': table_name,
+                    'stac_item_id': release.stac_item_id,
+                    'stac_collection_id': release.stac_collection_id,
+                    'blob_path': release.blob_path,
+                    'title': title,
+                    'description': description,
+                    'asset_id': asset.asset_id,
+                    'release_id': release.release_id,
+                    'cleared_by': reviewer,
+                    'cleared_at': now,
+                    'created_at': now,
+                }
 
-            # Write to b2c_routes only for PUBLIC clearance
+                # Always write to b2b_routes
+                route_repo.upsert_route(route, table='b2b_routes')
+
+                # Write to b2c_routes only for PUBLIC clearance
+                if clearance_state == ClearanceState.PUBLIC:
+                    route_repo.upsert_route(route, table='b2c_routes')
+
+                slugs_created.append(slug)
+
+            tables_written = ['b2b_routes']
             if clearance_state == ClearanceState.PUBLIC:
-                route_repo.upsert_route(route, table='b2c_routes')
                 tables_written.append('b2c_routes')
 
             return {
                 'success': True,
-                'slug': slug,
+                'slugs': slugs_created,
+                'routes_created': len(route_entries),
                 'tables_written': tables_written,
             }
 
@@ -907,39 +941,66 @@ class AssetApprovalService:
         asset  # Asset model
     ) -> Dict[str, Any]:
         """
-        Delete route records on revocation and promote next latest (NON-FATAL).
+        Delete route records on revocation (NON-FATAL).
 
-        Deletes from both b2c_routes and b2b_routes.
+        Deletes from both b2c_routes and b2b_routes. For vector releases
+        with geometry-split tables, deletes the suffixed slug for each
+        split table (mirrors _create_routes).
 
         Args:
             release: The release being revoked
             asset: The parent Asset (for dataset_id, resource_id)
 
         Returns:
-            Dict with success and promoted_version (on success)
+            Dict with success and routes_deleted count (on success)
             or success=False, error (on failure)
         """
         try:
-            from infrastructure import RouteRepository
+            from infrastructure import RouteRepository, ReleaseTableRepository
             from config.platform_config import _slugify_for_stac
 
             if not asset:
                 return {'success': False, 'error': 'Asset not found for route deletion'}
 
             route_repo = RouteRepository()
-            slug = _slugify_for_stac(f"{asset.dataset_id}-{asset.resource_id}")
+            base_slug = _slugify_for_stac(f"{asset.dataset_id}-{asset.resource_id}")
 
             if not release.version_id:
                 return {'success': False, 'error': 'Release has no version_id -- cannot delete routes'}
 
-            # Delete from both tables
-            for table in ('b2c_routes', 'b2b_routes'):
-                route_repo.delete_route(slug, release.version_id, table=table)
+            # Build list of slugs to delete — mirrors _create_routes logic
+            data_type = getattr(asset, 'data_type', None) or 'raster'
+            slugs_to_delete = [base_slug]
+
+            if data_type == 'vector':
+                try:
+                    release_table_repo = ReleaseTableRepository()
+                    release_tables = release_table_repo.get_tables(release.release_id)
+                    if len(release_tables) > 1:
+                        # Geometry-split: delete each suffixed slug
+                        slugs_to_delete = []
+                        for rt in release_tables:
+                            if rt.table_suffix:
+                                suffix = rt.table_suffix.lstrip('_')
+                                slugs_to_delete.append(f"{base_slug}-{suffix}")
+                            else:
+                                slugs_to_delete.append(base_slug)
+                except Exception as tbl_err:
+                    logger.warning(
+                        f"Could not get release_tables for route deletion, "
+                        f"falling back to base slug: {tbl_err}"
+                    )
+
+            routes_deleted = 0
+            for slug in slugs_to_delete:
+                for table in ('b2c_routes', 'b2b_routes'):
+                    if route_repo.delete_route(slug, release.version_id, table=table):
+                        routes_deleted += 1
 
             # NOTE: No route promotion needed — "latest" is computed as
             # MAX(version_ordinal) per slug at query time.
 
-            return {'success': True}
+            return {'success': True, 'routes_deleted': routes_deleted}
 
         except Exception as e:
             logger.warning(f"Route deletion failed (non-fatal): {e}", exc_info=True)

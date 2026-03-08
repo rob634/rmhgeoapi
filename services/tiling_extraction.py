@@ -18,7 +18,7 @@ Architectural Pattern:
     Stage 1: Generate tiling scheme (1 task)
     Stage 2: Sequential tile extraction via VSI + BytesIO (1 long task)
     Stage 3: Parallel COG conversion (N tasks)
-    Stage 4: MosaicJSON + STAC metadata
+    Stage 4: STAC metadata
 
 VSI Architecture:
     - Zero /tmp disk usage: Reads via /vsicurl/ from Azure Blob

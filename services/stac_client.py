@@ -15,7 +15,7 @@ Internal STAC Client Service (SYNC VERSION).
 Queries our own STAC API (pgSTAC) to resolve:
 - Collection metadata
 - Item metadata
-- Asset URLs (COG, Zarr, MosaicJSON)
+- Asset URLs (COG, Zarr)
 
 Used by raster_api and xarray_api modules to look up asset URLs
 from friendly collection/item identifiers.

@@ -287,8 +287,7 @@ class ProcessRasterDockerJob(JobBaseMixin, JobBase):
 
         # V0.8: Format response based on output mode
         if output_mode == 'tiled':
-            # Tiled output - COGs array with pgSTAC collection (no MosaicJSON)
-            # NOTE: MosaicJSON removed in V0.8 (25 JAN 2026) - use pgSTAC search for mosaic access
+            # Tiled output - COGs array with pgSTAC collection
             tiling = unwrapped.get('tiling', {})
             extraction = unwrapped.get('extraction', {})
             cogs = unwrapped.get('cogs', {})

@@ -53,7 +53,6 @@ from .service_hello_world import handle_greeting, handle_reply
 from .stac_catalog import list_raster_files, extract_stac_metadata
 from .raster_validation import validate_raster, validate_raster_header, validate_raster_data
 from .raster_cog import create_cog
-from .raster_mosaicjson import create_mosaicjson
 from .stac_collection import create_stac_collection
 from .tiling_scheme import generate_tiling_scheme
 from .tiling_extraction import extract_tiles
@@ -145,7 +144,6 @@ ALL_HANDLERS = {
     "raster_extract_stac_metadata": extract_stac_metadata,
     "raster_validate": validate_raster,
     "raster_create_cog": create_cog,
-    "raster_create_mosaicjson": create_mosaicjson,
     "raster_create_stac_collection": create_stac_collection,
     "raster_generate_tiling_scheme": generate_tiling_scheme,
     "raster_extract_tiles": extract_tiles,

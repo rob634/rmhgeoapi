@@ -290,7 +290,6 @@ class StorageDefaults:
     SILVER_RASTERS = "silver-rasters"
     SILVER_COGS = "silver-cogs"
     SILVER_TILES = "silver-tiles"
-    SILVER_MOSAICJSON = "silver-cogs"  # MosaicJSON stored alongside COGs (15 DEC 2025)
     SILVER_STAC_ASSETS = "silver-cogs"  # Consolidated into silver-cogs (15 DEC 2025)
     SILVER_MISC = "silver-cogs"  # Consolidated into silver-cogs (15 DEC 2025)
     SILVER_TEMP = "silver-temp"
@@ -302,7 +301,6 @@ class StorageDefaults:
     SILVEREXT_RASTERS = "silverext-rasters"
     SILVEREXT_COGS = "silverext-cogs"
     SILVEREXT_TILES = "silverext-tiles"
-    SILVEREXT_MOSAICJSON = "silverext-cogs"  # MosaicJSON stored alongside COGs (19 DEC 2025)
     SILVEREXT_STAC_ASSETS = "silverext-cogs"  # Consolidated into silverext-cogs (19 DEC 2025)
     SILVEREXT_MISC = "silverext-cogs"  # Consolidated into silverext-cogs (19 DEC 2025)
     SILVEREXT_TEMP = "silverext-temp"
@@ -432,7 +430,6 @@ class TaskRoutingDefaults:
         "raster_list_files",
         "raster_generate_tiling_scheme",
         "raster_extract_tiles",
-        "raster_create_mosaicjson",
         "raster_create_stac_collection",
 
         # =====================================================================
@@ -495,7 +492,7 @@ class RasterDefaults:
     """
     Raster processing pipeline defaults.
 
-    Controls COG creation, validation, and MosaicJSON generation.
+    Controls COG creation and validation.
 
     V0.8 Architecture (24 JAN 2026):
         - ALL raster operations run on Docker worker
@@ -554,9 +551,6 @@ class RasterDefaults:
     OVERVIEW_RESAMPLING = "average"
     REPROJECT_RESAMPLING = "bilinear"
     STRICT_VALIDATION = True
-
-    # MosaicJSON
-    MOSAICJSON_MAXZOOM = 19
 
     # Intermediate storage
     INTERMEDIATE_PREFIX = "temp/raster_etl"

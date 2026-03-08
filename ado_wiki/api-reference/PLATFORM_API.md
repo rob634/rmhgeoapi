@@ -614,7 +614,7 @@ Remove a dataset from the platform. Auto-detects data type and removes all outpu
 | Data Type | Outputs Removed |
 |-----------|-----------------|
 | **Vector** | PostGIS table, `geo.table_catalog` metadata, STAC item |
-| **Raster** | COG blob(s), MosaicJSON (if collection), STAC item |
+| **Raster** | COG blob(s), STAC item |
 
 ---
 

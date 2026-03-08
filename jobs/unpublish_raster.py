@@ -1,7 +1,7 @@
 # ============================================================================
 # UNPUBLISH RASTER JOB
 # ============================================================================
-# STATUS: Jobs - 3-stage surgical raster removal (STAC+COG+MosaicJSON)
+# STATUS: Jobs - 3-stage surgical raster removal (STAC+COG)
 # PURPOSE: Reverse process_raster workflows with dry_run safety by default
 # LAST_REVIEWED: 13 FEB 2026
 # REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
@@ -15,11 +15,11 @@ Reverses these ETL workflows:
     - stac_catalog_container: STAC-only catalog (no blobs created by ETL)
     - ingest_collection: Copied COGs + STAC items (per-item unpublish)
 
-Removes STAC items, COG blobs, MosaicJSON files, and tile COGs.
+Removes STAC items, COG blobs, and tile COGs.
 
 Three-Stage Workflow:
     Stage 1 (inventory): Query STAC item, extract asset hrefs for deletion
-    Stage 2 (delete_blobs): Fan-out deletion of COG/MosaicJSON blobs
+    Stage 2 (delete_blobs): Fan-out deletion of COG blobs
     Stage 3 (cleanup): Delete STAC item, cleanup empty collection, audit record
 
 Safety Features:
@@ -58,7 +58,7 @@ class UnpublishRasterJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
     # DECLARATIVE CONFIGURATION
     # ========================================================================
     job_type = "unpublish_raster"
-    description = "Remove raster STAC item and associated COG/MosaicJSON blobs"
+    description = "Remove raster STAC item and associated COG blobs"
 
     # Declarative ETL linkage - which forward workflows this job reverses
     reverses = [

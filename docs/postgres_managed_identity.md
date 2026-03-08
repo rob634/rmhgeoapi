@@ -64,7 +64,7 @@ GRANT SELECT ON ALL TABLES IN SCHEMA pgstac TO "rmhtitiler-identity";
 ALTER DEFAULT PRIVILEGES IN SCHEMA pgstac 
     GRANT SELECT ON TABLES TO "rmhtitiler-identity";
 
--- Optional: Enable TiTiler's /register endpoint for dynamic mosaics
+-- Optional: Enable TiTiler's /register endpoint for dynamic searches
 -- (allows storing STAC search queries - can be omitted for stricter security)
 -- GRANT INSERT, UPDATE ON TABLE pgstac.searches TO "rmhtitiler-identity";
 

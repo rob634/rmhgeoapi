@@ -79,7 +79,7 @@ A containerized processing environment for memory-intensive geospatial operation
 A distributed processing pattern where a single stage creates multiple parallel tasks. For example, processing 100 raster tiles creates 100 parallel COG creation tasks.
 
 ### Fan-In Pattern
-A distributed processing pattern where multiple parallel tasks converge into a single aggregation task. For example, 100 COG creation tasks complete and then a single MosaicJSON task aggregates all results.
+A distributed processing pattern where multiple parallel tasks converge into a single aggregation task. For example, 100 COG creation tasks complete and then a single STAC registration task aggregates all results.
 
 ### Last Task Completion Detection Pattern
 The method used to detect when all parallel tasks in a stage have completed. Uses atomic database operations to ensure exactly one task triggers the next stage.
@@ -147,9 +147,6 @@ A JSON format for encoding geographic features. Contains geometry (points, lines
 
 ### GeoParquet
 A columnar file format for geospatial data based on Apache Parquet. Efficient for large datasets and analytical queries.
-
-### MosaicJSON
-A JSON file that indexes multiple COG files into a virtual seamless mosaic. Allows tile servers to efficiently serve tiles from multiple source files.
 
 ### Overview
 A reduced-resolution copy of a raster image stored within the same file. COGs contain multiple overviews for efficient display at different zoom levels.

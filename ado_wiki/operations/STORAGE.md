@@ -53,8 +53,7 @@ Azure Storage Account
 │   │   └── dem_cog.tif
 │   ├── vectors/
 │   │   └── validated_features.parquet
-│   └── tiles/
-│       └── mosaicjson/
+│   └── stac-assets/
 │
 └── Gold Container (Exports) - Future
     ├── geoparquet/
@@ -101,7 +100,7 @@ az storage account show \
 | Bronze | <bronze-storage> | Raw user uploads |
 | Silver | <silver-storage> | Processed COGs and tiles |
 | Gold | <gold-storage> | Final exports (future) |
-| Intermediate | <tiles-storage> | MosaicJSON and tile indexes |
+| Intermediate | <tiles-storage> | Tile indexes |
 
 ### 3. Access Keys
 
@@ -167,7 +166,7 @@ az storage container create \
   --connection-string "$CONNECTION_STRING" \
   --public-access off
 
-# Create Tiles container (for MosaicJSON)
+# Create Tiles container
 az storage container create \
   --name <tiles-storage> \
   --connection-string "$CONNECTION_STRING" \
@@ -272,7 +271,7 @@ Lifecycle Policy: None (frequently accessed)
 
 ### Tiles Container
 
-**Purpose**: Store MosaicJSON indexes and tile metadata
+**Purpose**: Store tile indexes and metadata
 
 **Configuration**:
 ```yaml
@@ -283,7 +282,6 @@ Lifecycle Policy: None
 ```
 
 **Typical contents**:
-- MosaicJSON files (.json)
 - Tile index metadata
 
 ---
@@ -379,7 +377,7 @@ curl "https://<platform-function-app>-.../api/storage/containers?prefix=silver-"
       "account": "<geo-storage>",
       "containers": ["silver-cogs"],
       "container_count": 1,
-      "note": "MosaicJSON files stored in silver-cogs alongside COGs (19 DEC 2025)"
+      "note": "COGs and STAC assets in silver-cogs"
     },
     "silverext": {
       "account": "<geo-storage>",
@@ -565,7 +563,6 @@ sas_url = blob_repo.get_blob_url_with_sas(
 | Use Case | Lifetime | Reason |
 |----------|----------|--------|
 | Job processing | 2 hours | Sufficient for most tasks |
-| MosaicJSON references | 24 hours | Longer validity for tile serving |
 | TiTiler access | 1 hour | Short-lived for security |
 | External sharing | Variable | Set based on requirements |
 

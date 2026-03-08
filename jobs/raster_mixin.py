@@ -36,7 +36,6 @@ class RasterMixin:
         class MyRasterJob(RasterMixin, RasterWorkflowsBase, JobBaseMixin, JobBase):
             parameters_schema = {
                 **RasterMixin.COMMON_RASTER_SCHEMA,
-                **RasterMixin.MOSAICJSON_SCHEMA,  # If producing MosaicJSON
                 'my_custom_param': {'type': 'str', 'required': True},
             }
 
@@ -52,7 +51,7 @@ class RasterMixin:
     # SHARED PARAMETER SCHEMAS
     # =========================================================================
     # These can be composed into job-specific schemas using ** operator:
-    #   parameters_schema = {**COMMON_RASTER_SCHEMA, **MOSAICJSON_SCHEMA, ...}
+    #   parameters_schema = {**COMMON_RASTER_SCHEMA, **PLATFORM_PASSTHROUGH_SCHEMA, ...}
     # =========================================================================
 
     # Common parameters shared by ALL raster processing jobs.
@@ -75,17 +74,6 @@ class RasterMixin:
         'jpeg_quality': {'type': 'int', 'default': None, 'min': 1, 'max': 100},
         'in_memory': {'type': 'bool', 'default': None},
         'input_crs': {'type': 'str', 'default': None},
-    }
-
-    # Additional parameters for jobs that produce MosaicJSON output.
-    # 6 fields for collection metadata and MosaicJSON configuration.
-    MOSAICJSON_SCHEMA = {
-        'collection_id': {'type': 'str', 'required': True},
-        'collection_description': {'type': 'str', 'default': None},
-        'maxzoom': {'type': 'int', 'default': None, 'min': 0, 'max': 24},
-        'stac_item_id': {'type': 'str', 'default': None},
-        'create_mosaicjson': {'type': 'bool', 'default': True},
-        'create_stac_collection': {'type': 'bool', 'default': True},
     }
 
     # DDH Platform metadata fields passed through to STAC items.
@@ -128,9 +116,6 @@ class RasterMixin:
 
         if resolved.get('jpeg_quality') is None:
             resolved['jpeg_quality'] = config.raster.cog_jpeg_quality
-
-        if resolved.get('maxzoom') is None:
-            resolved['maxzoom'] = getattr(config.raster, 'default_maxzoom', 22)
 
         if resolved.get('output_container') is None:
             # Modern pattern (30 NOV 2025): config.storage.silver.cogs

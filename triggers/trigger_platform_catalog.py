@@ -358,7 +358,7 @@ async def platform_catalog_assets(req: func.HttpRequest) -> func.HttpResponse:
                 "preview": "https://titiler.example.com/cog/preview?url=...",
                 "tiles": "https://titiler.example.com/cog/tiles/{z}/{x}/{y}?url=...",
                 "info": "https://titiler.example.com/cog/info?url=...",
-                "tilejson": "https://titiler.example.com/cog/tilejson.json?url=..."
+                "tilejson": "https://titiler.example.com/cog/WebMercatorQuad/tilejson.json?url=..."
             },
             "temporal": {
                 "datetime": "2026-01-15T00:00:00Z"

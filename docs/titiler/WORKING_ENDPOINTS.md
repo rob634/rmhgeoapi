@@ -254,8 +254,7 @@ The collections exist but have **no STAC items yet**. You need to:
 1. Run your raster processing pipeline (`process_large_raster` job)
 2. This will create:
    - Individual COG tiles in Azure Storage
-   - MosaicJSON in `silver/mosaics/` folder
-   - STAC Item in the `cogs` collection with MosaicJSON asset
+   - STAC Item in the `cogs` collection
 3. Then TiTiler can serve tiles from those items
 
 ### **Testing Workflow**

@@ -102,7 +102,7 @@ Provides configuration for:
     - COG creation settings (compression, tile size, quality)
     - Raster validation settings
     - Size thresholds for pipeline selection
-    - MosaicJSON configuration
+    - STAC cataloging configuration
     - Intermediate file storage
 
 Exports:
@@ -234,20 +234,6 @@ class RasterConfig(BaseModel):
         description="Enable strict validation (fails on warnings)"
     )
 
-    # MosaicJSON settings
-    mosaicjson_maxzoom: int = Field(
-        default=RasterDefaults.MOSAICJSON_MAXZOOM,
-        ge=0,
-        le=24,
-        description="Default maximum zoom level for MosaicJSON tile serving. "
-                    "Can be overridden per-job via 'maxzoom' parameter. "
-                    "Zoom 18 = 0.60m/pixel (standard satellite), "
-                    "Zoom 19 = 0.30m/pixel (high-res satellite), "
-                    "Zoom 20 = 0.15m/pixel (drone imagery), "
-                    "Zoom 21 = 0.07m/pixel (very high-res drone). "
-                    "Set based on your imagery's native resolution."
-    )
-
     # stac_default_collection removed (14 JAN 2026)
     # collection_id is now a required parameter for all raster jobs - no more "system-rasters" catch-all
 
@@ -282,7 +268,5 @@ class RasterConfig(BaseModel):
             overview_resampling=os.environ.get("RASTER_OVERVIEW_RESAMPLING", RasterDefaults.OVERVIEW_RESAMPLING),
             reproject_resampling=os.environ.get("RASTER_REPROJECT_RESAMPLING", RasterDefaults.REPROJECT_RESAMPLING),
             strict_validation=os.environ.get("RASTER_STRICT_VALIDATION", str(RasterDefaults.STRICT_VALIDATION).lower()).lower() == "true",
-            # MosaicJSON
-            mosaicjson_maxzoom=int(os.environ.get("RASTER_MOSAICJSON_MAXZOOM", str(RasterDefaults.MOSAICJSON_MAXZOOM))),
             # stac_default_collection removed (14 JAN 2026) - collection_id required
         )

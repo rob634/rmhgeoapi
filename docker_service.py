@@ -1297,14 +1297,10 @@ def readiness_probe():
 # ╔═══════════════════════════════════════════════════════════════════════════╗
 # ║  HEALTH SUBSYSTEM ARCHITECTURE - 29 JAN 2026 - V0.8.1.1                   ║
 # ║                                                                           ║
-# ║  Refactored to use modular subsystem architecture anticipating dual       ║
-# ║  queue systems: Classic Worker (existing) + DAG Worker (future).          ║
-# ║                                                                           ║
 # ║  Subsystems:                                                              ║
 # ║  - SharedInfrastructureSubsystem: Database, Storage, Service Bus          ║
 # ║  - RuntimeSubsystem: Hardware, GDAL, ETL Mount, Deployment                ║
 # ║  - ClassicWorkerSubsystem: Queue worker, Auth, Lifecycle                  ║
-# ║  - DAGWorkerSubsystem: Future DAG workflow processing (stub)              ║
 # ╚═══════════════════════════════════════════════════════════════════════════╝
 
 
@@ -1317,7 +1313,6 @@ def health_check():
     - SharedInfrastructure: Database, Storage, Service Bus
     - Runtime: Hardware, GDAL, ETL Mount, Deployment
     - ClassicWorker: Queue worker, Auth tokens, Lifecycle
-    - DAGWorker: Future DAG workflow processing (currently disabled)
 
     Format maintains compatibility with health.js UI while adding
     subsystem-level grouping for operational visibility.
@@ -1333,7 +1328,6 @@ def health_check():
         worker_lifecycle=worker_lifecycle,
         token_refresh_worker=token_refresh_worker,
         etl_mount_status=_etl_mount_status,
-        dag_processor=None,  # Future: inject DAG processor when implemented
     )
 
     # Aggregate health from all subsystems

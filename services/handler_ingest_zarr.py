@@ -753,6 +753,11 @@ def ingest_zarr_rechunk(
             # Rechunk in-memory
             ds = ds.chunk(target_chunks)
 
+            # Clear inherited v2 encoding (e.g. numcodecs.Blosc) to prevent
+            # codec type mismatch when writing as zarr_format=3
+            for var in ds.variables:
+                ds[var].encoding.clear()
+
             # Write to silver-zarr
             silver_repo = BlobRepository.for_zone("silver")
             target_az_url = f"az://{target_container}/{target_prefix}"

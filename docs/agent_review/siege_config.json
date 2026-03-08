@@ -632,6 +632,51 @@
       "attack_use": "Sequence 14/18 — Revoke→Overwrite flow"
     }
   },
+  "services_contract": {
+    "_comment": "Expected shape of the `services` block in /api/platform/status responses. Used by SIEGE Auditor and TOURNAMENT Inspector for shape validation.",
+    "guaranteed_keys": ["service_url", "preview", "stac_collection", "stac_item", "viewer", "tiles"],
+    "type_specific_keys": {
+      "zarr": ["variables"],
+      "vector_multi_table": ["tables"]
+    },
+    "key_assertions": {
+      "raster": {
+        "service_url_contains": "/cog/WebMercatorQuad/tilejson.json",
+        "preview_contains": "/cog/preview.png",
+        "viewer_contains": "/cog/WebMercatorQuad/map.html",
+        "tiles_contains": "/cog/tiles/WebMercatorQuad/{z}/{x}/{y}",
+        "stac_collection_pre_approval": null,
+        "stac_item_pre_approval": null,
+        "stac_collection_post_approval_contains": "/stac/collections/",
+        "stac_item_post_approval_contains": "/stac/collections/"
+      },
+      "vector": {
+        "service_url_contains": "/collections/geo.",
+        "preview_contains": "/tiles/WebMercatorQuad/map",
+        "viewer_contains": "/tiles/WebMercatorQuad/map",
+        "tiles_contains": "/{z}/{x}/{y}.pbf",
+        "stac_collection": null,
+        "stac_item": null
+      },
+      "zarr": {
+        "service_url_contains": "/xarray/WebMercatorQuad/tilejson.json",
+        "preview_contains": "/xarray/preview.png",
+        "viewer_contains": "/xarray/WebMercatorQuad/map.html",
+        "tiles_contains": "/xarray/tiles/WebMercatorQuad/{z}/{x}/{y}",
+        "variables_contains": "/xarray/variables",
+        "stac_collection_pre_approval": null,
+        "stac_item_pre_approval": null,
+        "stac_collection_post_approval_contains": "/stac/collections/",
+        "stac_item_post_approval_contains": "/stac/collections/"
+      }
+    },
+    "cross_check": {
+      "_comment": "Status services.service_url should match catalog lookup URL for each data type",
+      "raster": "services.service_url ↔ titiler_urls.tilejson",
+      "vector": "services.service_url ↔ catalog vector collection URL",
+      "zarr": "services.service_url ↔ xarray_urls.tilejson"
+    }
+  },
   "prerequisites": {
     "rebuild_schema": "POST /api/dbadmin/maintenance?action=rebuild&confirm=yes",
     "nuke_stac": "POST /api/stac/nuke?confirm=yes&mode=all",

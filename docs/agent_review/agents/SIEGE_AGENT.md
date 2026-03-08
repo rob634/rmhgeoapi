@@ -184,28 +184,49 @@ Lancer executes canonical lifecycle sequences and records state checkpoints.
 **Sequence 1: Raster Lifecycle**
 1. POST `/api/platform/submit` (raster) → capture request_id, job_id
 2. GET `/api/platform/status/{request_id}` (poll until completed) → capture release_id, asset_id
-3. POST `/api/platform/approve` (version_id="v1") → verify STAC materialized
-4. GET `/api/platform/catalog/item/{collection}/{item_id}` → verify exists
-5. GET `/api/platform/catalog/lookup?dataset_id={ds}&resource_id={rs}` → verify `titiler_urls` present with keys [xyz, tilejson, preview, info, statistics]. Verify URLs contain TiTiler base hostname. → **CHECKPOINT R1-URLS**
-6. **PROBE SERVICE URLS** (mandatory — this is the platform success criterion):
+3. **ASSERT STATUS SERVICES** (pre-approval): GET `/api/platform/status/{request_id}` → assert `services` block present:
+   - `services.service_url` contains `/cog/WebMercatorQuad/tilejson.json`
+   - `services.preview` contains `/cog/preview.png`
+   - `services.viewer` contains `/cog/WebMercatorQuad/map.html`
+   - `services.tiles` contains `/cog/tiles/WebMercatorQuad/{z}/{x}/{y}`
+   - `services.stac_collection` is null (pre-approval)
+   - `services.stac_item` is null (pre-approval)
+   → **CHECKPOINT R1-SVC**: Record full `services` block
+4. POST `/api/platform/approve` (version_id="v1") → verify STAC materialized
+5. **ASSERT STATUS SERVICES** (post-approval): GET `/api/platform/status/{request_id}` → assert STAC keys populated:
+   - `services.stac_collection` starts with `{titiler_base}/stac/collections/`
+   - `services.stac_item` starts with `{titiler_base}/stac/collections/`
+6. GET `/api/platform/catalog/item/{collection}/{item_id}` → verify exists
+7. GET `/api/platform/catalog/lookup?dataset_id={ds}&resource_id={rs}` → verify `titiler_urls` present with keys [xyz, tilejson, preview, info, statistics]. Verify URLs contain TiTiler base hostname. → **CHECKPOINT R1-URLS**
+8. **PROBE SERVICE URLS** (mandatory — this is the platform success criterion):
    - GET `{titiler_urls.info}` → expect HTTP 200, JSON with `band_metadata`
    - GET `{titiler_urls.preview}` → expect HTTP 200, Content-Type contains `image/`
    - GET `{titiler_urls.tilejson}` → expect HTTP 200, JSON with `tiles` array
    - Record each: URL, HTTP code, Content-Type, verdict (PASS/FAIL/ERROR)
    - If ANY probe fails: log the full response body (truncated to 500 chars) for diagnosis
-7. **CHECKPOINT R1**: Record all IDs, expected DB/STAC state, and service URL probe results
+9. **CROSS-CHECK**: Compare `services.service_url` from status (step 5) against `titiler_urls.tilejson` from catalog (step 7) — URL paths should match (ignore encoding differences)
+10. **CHECKPOINT R1**: Record all IDs, expected DB/STAC state, services block, and service URL probe results
 
 **Sequence 2: Vector Lifecycle**
 1. POST `/api/platform/submit` (vector) → capture IDs
 2. Poll until completed → capture release_id
-3. POST `/api/platform/approve` → verify OGC Features
-4. GET `/api/platform/catalog/lookup?dataset_id={ds}&resource_id={rs}` → verify `endpoints.features` present, `tiles.tilejson` present. Verify URLs contain TiPG base path. → **CHECKPOINT V1-URLS**
-5. **PROBE SERVICE URLS** (mandatory):
+3. **ASSERT STATUS SERVICES** (pre-approval): GET `/api/platform/status/{request_id}` → assert `services` block present:
+   - `services.service_url` contains `/collections/geo.`
+   - `services.preview` contains `/tiles/WebMercatorQuad/map`
+   - `services.viewer` contains `/tiles/WebMercatorQuad/map`
+   - `services.tiles` contains `/{z}/{x}/{y}.pbf`
+   - `services.stac_collection` is null (vector never has STAC)
+   - `services.stac_item` is null (vector never has STAC)
+   → **CHECKPOINT V1-SVC**: Record full `services` block
+4. POST `/api/platform/approve` → verify OGC Features
+5. GET `/api/platform/catalog/lookup?dataset_id={ds}&resource_id={rs}` → verify `endpoints.features` present, `tiles.tilejson` present. Verify URLs contain TiPG base path. → **CHECKPOINT V1-URLS**
+6. **PROBE SERVICE URLS** (mandatory):
    - GET `{tipg_base}/collections/{schema}.{table_name}` → expect HTTP 200, JSON with collection metadata
    - GET `{tipg_base}/collections/{schema}.{table_name}/items?limit=1` → expect HTTP 200, JSON with `type: "FeatureCollection"` and `features` array
    - Record each: URL, HTTP code, Content-Type, verdict (PASS/FAIL/ERROR)
    - If ANY probe fails: log the full response body (truncated to 500 chars) for diagnosis
-6. **CHECKPOINT V1**: Record all IDs and service URL probe results
+7. **CROSS-CHECK**: Compare `services.service_url` from status (step 3) against catalog vector collection URL (step 5) — should match exactly
+8. **CHECKPOINT V1**: Record all IDs, services block, and service URL probe results
 
 **Sequence 3: Multi-Version**
 1. POST `/api/platform/submit` (resubmit raster, same dataset_id) → capture v2 IDs
@@ -220,16 +241,29 @@ Lancer executes canonical lifecycle sequences and records state checkpoints.
 **Sequence 5: NetCDF / VirtualiZarr Lifecycle**
 1. POST `/api/platform/submit` with `data_type=zarr`, NetCDF file from wargames container → capture request_id, job_id
 2. Poll until completed (VirtualiZarr pipeline: scan → copy → validate → combine → register)
-3. POST `/api/platform/approve` (version_id="v1") → verify STAC materialized (zarr items go in STAC)
-4. GET `/api/platform/catalog/dataset/{dataset_id}` → verify catalog entry exists
-5. GET `/api/platform/catalog/lookup?dataset_id={ds}&resource_id={rs}` → verify `xarray_urls` present with keys [variables, tiles, tilejson, preview, info, point]. Verify URLs contain TiTiler base hostname and `/xarray/` path. → **CHECKPOINT Z1-URLS**
-6. **PROBE SERVICE URLS** (mandatory):
+3. **ASSERT STATUS SERVICES** (pre-approval): GET `/api/platform/status/{request_id}` → assert `services` block present:
+   - `services.service_url` contains `/xarray/WebMercatorQuad/tilejson.json`
+   - `services.preview` contains `/xarray/preview.png`
+   - `services.viewer` contains `/xarray/WebMercatorQuad/map.html`
+   - `services.tiles` contains `/xarray/tiles/WebMercatorQuad/{z}/{x}/{y}`
+   - `services.variables` contains `/xarray/variables`
+   - `services.stac_collection` is null (pre-approval)
+   - `services.stac_item` is null (pre-approval)
+   → **CHECKPOINT Z1-SVC**: Record full `services` block
+4. POST `/api/platform/approve` (version_id="v1") → verify STAC materialized (zarr items go in STAC)
+5. **ASSERT STATUS SERVICES** (post-approval): GET `/api/platform/status/{request_id}` → assert STAC keys populated:
+   - `services.stac_collection` starts with `{titiler_base}/stac/collections/`
+   - `services.stac_item` starts with `{titiler_base}/stac/collections/`
+6. GET `/api/platform/catalog/dataset/{dataset_id}` → verify catalog entry exists
+7. GET `/api/platform/catalog/lookup?dataset_id={ds}&resource_id={rs}` → verify `xarray_urls` present with keys [variables, tiles, tilejson, preview, info, point]. Verify URLs contain TiTiler base hostname and `/xarray/` path. → **CHECKPOINT Z1-URLS**
+8. **PROBE SERVICE URLS** (mandatory):
    - GET `{xarray_urls.variables}` → expect HTTP 200, JSON array of variable names
    - If variables response is 200, pick the first variable name from the array, then:
      - GET `{xarray_urls.info}&variable={first_var}` → expect HTTP 200, JSON metadata
    - Record each: URL, HTTP code, Content-Type, verdict (PASS/FAIL/ERROR)
    - If ANY probe fails: log the full response body (truncated to 500 chars) for diagnosis
-7. **CHECKPOINT Z1**: Record all IDs, verify job_type=virtualzarr, STAC item present, service URL probe results
+9. **CROSS-CHECK**: Compare `services.service_url` from status (step 5) against `xarray_urls.tilejson` from catalog (step 7) — URL paths should match
+10. **CHECKPOINT Z1**: Record all IDs, verify job_type=virtualzarr, STAC item present, services block, and service URL probe results
 
 Note: NetCDF (.nc) routes to the VirtualiZarr pipeline, NOT the raster pipeline.
 Use `data_type_override: "zarr"` from siege_config.json. Submit body must include
@@ -238,15 +272,27 @@ Use `data_type_override: "zarr"` from siege_config.json. Submit body must includ
 **Sequence 6: Native Zarr Lifecycle**
 1. POST `/api/platform/submit` with `data_type=zarr`, native `.zarr` store (`zarr_cmip6_tasmax` from config) → capture request_id, job_id
 2. Poll until completed → verify job completes (different code path from VirtualiZarr .nc)
-3. POST `/api/platform/approve` (version_id="v1") → verify STAC materialized
-4. GET `/api/platform/catalog/lookup?dataset_id={ds}&resource_id={rs}` → verify `xarray_urls` present → **CHECKPOINT NZ1-URLS**
-5. **PROBE SERVICE URLS** (mandatory):
+3. **ASSERT STATUS SERVICES** (pre-approval): GET `/api/platform/status/{request_id}` → assert `services` block present:
+   - `services.service_url` contains `/xarray/WebMercatorQuad/tilejson.json`
+   - `services.preview` contains `/xarray/preview.png`
+   - `services.viewer` contains `/xarray/WebMercatorQuad/map.html`
+   - `services.tiles` contains `/xarray/tiles/WebMercatorQuad/{z}/{x}/{y}`
+   - `services.variables` contains `/xarray/variables`
+   - `services.stac_collection` is null (pre-approval)
+   → **CHECKPOINT NZ1-SVC**: Record full `services` block
+4. POST `/api/platform/approve` (version_id="v1") → verify STAC materialized
+5. **ASSERT STATUS SERVICES** (post-approval): GET `/api/platform/status/{request_id}` → assert STAC keys populated:
+   - `services.stac_collection` starts with `{titiler_base}/stac/collections/`
+   - `services.stac_item` starts with `{titiler_base}/stac/collections/`
+6. GET `/api/platform/catalog/lookup?dataset_id={ds}&resource_id={rs}` → verify `xarray_urls` present → **CHECKPOINT NZ1-URLS**
+7. **PROBE SERVICE URLS** (mandatory):
    - GET `{xarray_urls.variables}` → expect HTTP 200, JSON array of variable names
    - If variables response is 200, pick the first variable name from the array, then:
      - GET `{xarray_urls.info}&variable={first_var}` → expect HTTP 200, JSON metadata
    - Record each: URL, HTTP code, Content-Type, verdict (PASS/FAIL/ERROR)
    - If ANY probe fails: log the full response body (truncated to 500 chars) for diagnosis
-6. **CHECKPOINT NZ1**: Record all IDs, verify direct zarr path (NOT virtualzarr pipeline), service URL probe results
+8. **CROSS-CHECK**: Compare `services.service_url` from status (step 5) against `xarray_urls.tilejson` from catalog (step 6) — URL paths should match
+9. **CHECKPOINT NZ1**: Record all IDs, verify direct zarr path (NOT virtualzarr pipeline), services block, and service URL probe results
 
 **Sequence 7: Rejection Path**
 1. POST `/api/platform/submit` (raster, new dataset_id `sg-reject-test`) → capture request_id
@@ -414,10 +460,13 @@ Tests the `ingest_zarr_rechunk` handler — submitting a native Zarr with `rechu
 |------|--------|--------|
 | 1 | POST `/api/platform/submit` with `zarr_era5_global` from config (`data_type=zarr`, `processing_options: {rechunk: true}`), dataset_id `sg-zarr-rechunk-test` | request_id, job_id |
 | 2 | Poll until completed | Job succeeds — `ingest_zarr_rechunk` handler fired (Stage 2 rechunk instead of blob copy) |
-| 3 | POST `/api/platform/approve` (version_id="v1") | STAC materialized |
-| 4 | GET `/api/platform/catalog/lookup?dataset_id={ds}&resource_id={rs}` | `xarray_urls` present with keys [variables, tiles, tilejson, preview, info, point] |
-| 5 | **PROBE SERVICE URLS**: GET `{xarray_urls.variables}` → 200, JSON array. If 200: GET `{xarray_urls.info}&variable={first_var}` → 200 | Service Layer serves rechunked data |
-| 6 | **CHECKPOINT RCH1**: Rechunked Zarr ingested and served. Verify job_type=ingest_zarr. Record service URL probe results. |
+| 3 | **ASSERT STATUS SERVICES**: GET `/api/platform/status/{request_id}` → assert `services` block: `service_url` contains `/xarray/`, `preview` contains `/xarray/preview.png`, `variables` contains `/xarray/variables`, `stac_collection` is null (pre-approval) | Services block shape matches zarr contract from `siege_config.json → services_contract.key_assertions.zarr` |
+| 4 | POST `/api/platform/approve` (version_id="v1") | STAC materialized |
+| 5 | **ASSERT STATUS SERVICES** (post-approval): GET `/api/platform/status/{request_id}` → assert `stac_collection` and `stac_item` populated | STAC URLs present after approval |
+| 6 | GET `/api/platform/catalog/lookup?dataset_id={ds}&resource_id={rs}` | `xarray_urls` present with keys [variables, tiles, tilejson, preview, info, point] |
+| 7 | **PROBE SERVICE URLS**: GET `{xarray_urls.variables}` → 200, JSON array. If 200: GET `{xarray_urls.info}&variable={first_var}` → 200 | Service Layer serves rechunked data |
+| 8 | **CROSS-CHECK**: Compare `services.service_url` from status (step 5) against `xarray_urls.tilejson` from catalog (step 6) — URL paths should match | Consistency between status and catalog |
+| 9 | **CHECKPOINT RCH1**: Rechunked Zarr ingested and served. Verify job_type=ingest_zarr. Record services block and service URL probe results. | |
 
 Note: `rechunk` MUST be inside `processing_options`, same as `overwrite`. The `ingest_zarr_rechunk` handler reads source Zarr via xarray, rechunks to 256×256 spatial / time=1 / Blosc+LZ4, and writes to silver-zarr.
 
@@ -433,10 +482,20 @@ EXPECTED STATE:
     - {release_id} → approval_state={state}, version_ordinal={n}
   STAC Items:
     - {item_id} → {exists | not exists}
-  Service URLs (from catalog response):
+  Services Block (from /api/platform/status — *-SVC checkpoints):
+    - service_url={url}
+    - preview={url}
+    - stac_collection={url | null}
+    - stac_item={url | null}
+    - viewer={url}
+    - tiles={url}
+    - variables={url} (zarr only)
+  Service URLs (from catalog response — *-URLS checkpoints):
     - raster: titiler_urls keys={list} | MISSING
     - vector: endpoints.features={url}, tiles.tilejson={url} | MISSING
     - zarr: xarray_urls keys={list} | MISSING
+  Status ↔ Catalog Cross-Check:
+    - services.service_url vs catalog URL → {MATCH | DIVERGENCE}
   Service URL Probes (Lancer actually hit these — PASS/FAIL/SKIP):
     - {probe_name}: {url} → HTTP {code}, {Content-Type} → {PASS|FAIL|ERROR}
     - {probe_name}: {url} → HTTP {code}, {Content-Type} → {PASS|FAIL|ERROR}
@@ -548,6 +607,28 @@ Auditor cross-checks Lancer's probe results and re-verifies any that failed.
 2. **Re-probe failures**: For any probe that Lancer recorded as FAIL, re-run the same GET request. If it now passes, record `FLAKY`. If it still fails, record `CONFIRMED_FAIL`.
 3. **TiTiler health cross-check**: GET `{titiler_base}/health` → verify response contains `"app": "rmhtitiler"` and `"status"` field. This confirms the Service Layer is identity-aware (platform contract alignment).
 
+### Status ↔ Catalog URL Cross-Check
+
+For each completed & approved lifecycle checkpoint that has both a `*-SVC` and `*-URLS` checkpoint, compare the status `services` block against the catalog lookup response:
+
+| Data Type | Status Key | Catalog Key | Should Match |
+|-----------|-----------|-------------|--------------|
+| Raster | `services.service_url` | `titiler_urls.tilejson` | URL path match (ignore encoding diffs) |
+| Vector | `services.service_url` | `vector.collection` (from catalog) | Exact match |
+| Zarr | `services.service_url` | `xarray_urls.tilejson` | URL path match |
+
+Any divergence = FINDING (MEDIUM severity — consumers see different URLs from different endpoints).
+
+### Services Block Shape Validation
+
+For each `*-SVC` checkpoint, validate against the contract defined in `siege_config.json → services_contract`:
+
+1. Assert all 6 guaranteed keys present: `service_url`, `preview`, `stac_collection`, `stac_item`, `viewer`, `tiles`
+2. For zarr checkpoints: assert `variables` key also present
+3. Assert `service_url` is not null (primary success criterion)
+4. Assert key values match the `key_assertions` patterns for the data type (e.g., raster `service_url` contains `/cog/WebMercatorQuad/tilejson.json`)
+5. Missing keys or null `service_url` = FINDING (HIGH severity — service contract violation)
+
 | Data Type | Probe | Expected |
 |-----------|-------|----------|
 | Raster | GET `{titiler_urls.info}` | HTTP 200, JSON with `band_metadata` |
@@ -601,6 +682,29 @@ Assessment: {HEALTHY | DEGRADED | DOWN}
 | 17. Overwrite Race Guard | {n} | {n} | {n} | {n} |
 | 18. Multi-Revoke Overwrite Target | {n} | {n} | {n} | {n} |
 | 19. Zarr Rechunk Path | {n} | {n} | {n} | {n} |
+
+## Services Block Contract (Status Endpoint)
+
+**Validates that `/api/platform/status` returns a consistent `services` shape after job completion.**
+Uses expected shapes from `siege_config.json → services_contract`.
+
+| Seq | Data Type | Checkpoint | 6 Keys Present | service_url Not Null | Type-Specific Keys | Verdict |
+|-----|-----------|------------|----------------|---------------------|--------------------|---------|
+| 1 | Raster | R1-SVC | {Y/N} | {Y/N} | — | PASS/FAIL |
+| 2 | Vector | V1-SVC | {Y/N} | {Y/N} | — | PASS/FAIL |
+| 5 | Zarr (VirtualiZarr) | Z1-SVC | {Y/N} | {Y/N} | variables: {Y/N} | PASS/FAIL |
+| 6 | Zarr (native) | NZ1-SVC | {Y/N} | {Y/N} | variables: {Y/N} | PASS/FAIL |
+| 19 | Zarr (rechunk) | RCH1-SVC | {Y/N} | {Y/N} | variables: {Y/N} | PASS/FAIL |
+
+## Status ↔ Catalog URL Cross-Check
+
+| Seq | Data Type | Status service_url | Catalog URL | Match? |
+|-----|-----------|-------------------|-------------|--------|
+| 1 | Raster | {url} | titiler_urls.tilejson | {MATCH/DIVERGE} |
+| 2 | Vector | {url} | catalog vector URL | {MATCH/DIVERGE} |
+| 5 | Zarr (VirtualiZarr) | {url} | xarray_urls.tilejson | {MATCH/DIVERGE} |
+| 6 | Zarr (native) | {url} | xarray_urls.tilejson | {MATCH/DIVERGE} |
+| 19 | Zarr (rechunk) | {url} | xarray_urls.tilejson | {MATCH/DIVERGE} |
 
 ## Service URL Verification (Platform Success Criterion)
 

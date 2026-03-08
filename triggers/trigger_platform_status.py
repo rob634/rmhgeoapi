@@ -514,6 +514,12 @@ def _build_single_status_response(
     # Job status (single field)
     result["job_status"] = job_status
 
+    # Progress: show most recent checkpoint for in-progress jobs
+    if job_status == "processing" and job_id:
+        result["progress"] = _get_latest_checkpoint(job_id)
+    else:
+        result["progress"] = None
+
     # Error block (05 MAR 2026): Surface error info when job failed.
     # Primary source: error_details (always set by fail_job()).
     # Secondary: result_data JSONB (structured ErrorResponse from handler).
@@ -604,6 +610,7 @@ def _build_single_status_response(
             "job_stage": job.stage if job else None,
             "job_result": job_result,
             "task_summary": _get_task_summary(task_repo, job_id, verbose=verbose) if job_id else None,
+            "checkpoints": _get_latest_checkpoints(job_id),
             "urls": {
                 "job_status": f"/api/jobs/status/{job_id}" if job_id else None,
                 "job_tasks": f"/api/dbadmin/tasks/{job_id}" if job_id else None,
@@ -612,6 +619,48 @@ def _build_single_status_response(
         }
 
     return result
+
+
+def _get_latest_checkpoint(job_id: str) -> dict | None:
+    """Get the single most recent CHECKPOINT for a processing job."""
+    try:
+        from infrastructure.job_event_repository import JobEventRepository
+        from core.models.job_event import JobEventType
+        events = JobEventRepository().get_events_for_job(
+            job_id, limit=1, event_types=[JobEventType.CHECKPOINT]
+        )
+        if events:
+            e = events[0]
+            return {
+                "checkpoint": e.checkpoint_name,
+                "data": e.event_data,
+                "at": e.created_at.isoformat() if e.created_at else None,
+            }
+    except Exception:
+        pass
+    return None
+
+
+def _get_latest_checkpoints(job_id: str, limit: int = 10) -> list:
+    """Get recent CHECKPOINT events for a job."""
+    if not job_id:
+        return []
+    try:
+        from infrastructure.job_event_repository import JobEventRepository
+        from core.models.job_event import JobEventType
+        events = JobEventRepository().get_events_for_job(
+            job_id, limit=limit, event_types=[JobEventType.CHECKPOINT]
+        )
+        return [
+            {
+                "name": e.checkpoint_name,
+                "data": e.event_data,
+                "at": e.created_at.isoformat() if e.created_at else None,
+            }
+            for e in events
+        ] if events else []
+    except Exception:
+        return []
 
 
 def _get_release_table_names(release_id: str) -> list[str]:

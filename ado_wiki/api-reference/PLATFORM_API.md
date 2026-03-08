@@ -2,10 +2,10 @@
 
 > **Navigation**: [Quick Start](../getting-started/QUICK_START.md) | **Platform API** | [Errors](ERRORS.md) | [Glossary](../getting-started/GLOSSARY.md)
 
-**Last Updated**: 12 FEB 2026
+**Last Updated**: 08 MAR 2026
 **Purpose**: B2B integration API for geospatial data processing
 **Audience**: DDH developers, external application integrators
-**API Version**: 1.5.0 (V0.8.6.2 - Version Lineage + dry_run)
+**API Version**: 2.0.0 (V0.9.14 - Structured response blocks, services contract)
 
 ---
 
@@ -18,20 +18,19 @@ The Platform API provides a complete lifecycle for geospatial data:
 │                          PLATFORM API WORKFLOW                               │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│   0. VALIDATE        1. SUBMIT          2. POLL           3. APPROVE       │
-│   ────────────       ────────────       ────────────      ────────────     │
-│   POST /validate →   POST /submit   →   GET /status   →   POST /approve    │
-│   (or ?dry_run)                                           POST /reject     │
+│   1. SUBMIT          2. POLL           3. APPROVE        4. UNPUBLISH      │
+│   ────────────       ────────────      ────────────      ────────────     │
+│   POST /submit   →   GET /status   →   POST /approve     POST /unpublish   │
+│   (?dry_run)                            POST /reject      POST /revoke     │
 │                                                                             │
-│   Returns:           Returns:           Returns:          Triggers:         │
-│   • lineage_state    • request_id       • job_status      • Publication     │
-│   • valid: t/f       • polling URL      • progress        • Service Layer   │
-│   • suggested_params                    • preview URLs                      │
+│   Returns:           Returns:          Triggers:          Removes:          │
+│   • request_id       • asset block     • STAC publish     • STAC items     │
+│   • polling URL      • release block   • Service Layer    • COGs/tables    │
+│                      • services block                     • Zarr stores    │
+│                      • outputs block                                       │
 │                                                                             │
-│   4. UNPUBLISH                     RESUBMIT (retry failed jobs)             │
-│   ────────────                     ────────────────────────────             │
-│   POST /unpublish                  POST /resubmit → Cleanup → New job       │
-│   Removes: STAC, COGs, Tables                                               │
+│   RESUBMIT (retry failed jobs)                                              │
+│   POST /resubmit → Cleanup → New job                                        │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -40,10 +39,9 @@ The Platform API provides a complete lifecycle for geospatial data:
 
 | Category | Endpoint | Method | Purpose |
 |----------|----------|--------|---------|
-| **Submit** | `/api/platform/submit` | POST | Submit raster/vector for processing |
-| **Status** | `/api/platform/status/{id}` | GET | Check job/request status |
+| **Submit** | `/api/platform/submit` | POST | Submit raster/vector/zarr for processing |
+| **Status** | `/api/platform/status/{id}` | GET | Check job/request status (structured response) |
 | **Status** | `/api/platform/status` | GET | List all platform requests |
-| **Validate** | `/api/platform/validate` | POST | Pre-flight validation (dry run) |
 | **Approve** | `/api/platform/approve` | POST | Approve dataset for publication |
 | **Reject** | `/api/platform/reject` | POST | Reject pending dataset |
 | **Revoke** | `/api/platform/revoke` | POST | Revoke approved dataset |
@@ -54,13 +52,14 @@ The Platform API provides a complete lifecycle for geospatial data:
 | **Resubmit** | `/api/platform/resubmit` | POST | Retry failed job with cleanup |
 | **Health** | `/api/platform/health` | GET | System readiness check |
 | **Failures** | `/api/platform/failures` | GET | Recent failures with patterns |
-| **Lineage** | `/api/platform/lineage/{id}` | GET | Data lineage trace |
-| **Catalog** | `/api/platform/catalog/lookup` | GET | STAC lookup by DDH IDs |
+| **Catalog** | `/api/platform/catalog/lookup` | GET | Lookup by DDH IDs (includes service URLs) |
 | **Catalog** | `/api/platform/catalog/item/{col}/{item}` | GET | Get STAC item |
 | **Catalog** | `/api/platform/catalog/assets/{col}/{item}` | GET | Get asset URLs |
 | **Catalog** | `/api/platform/catalog/dataset/{id}` | GET | List items for dataset |
 | **Platforms** | `/api/platforms` | GET | List supported B2B platforms |
 | **Platforms** | `/api/platforms/{id}` | GET | Get platform details |
+
+> **Removed endpoints** (v0.9.13.0): `/api/platform/validate` and `/api/platform/lineage/{id}` have been deleted. Use `POST /api/platform/submit?dry_run=true` for validation.
 
 ---
 
@@ -121,7 +120,7 @@ Generic submission endpoint that auto-detects data type from file extension or e
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `data_type` | string | auto | `raster` or `vector` (auto-detected from extension) |
+| `data_type` | string | auto | `raster`, `vector`, or `zarr` (auto-detected from extension; `.nc` + `zarr` requires explicit `data_type: "zarr"`) |
 | `operation` | string | `CREATE` | `CREATE` or `UPDATE` |
 | `service_name` | string | - | Human-readable dataset name |
 | `access_level` | string | `OUO` | `OUO` (internal) or `PUBLIC` (external delivery) |
@@ -181,45 +180,228 @@ GET /api/platform/status/{job_id}
 
 The endpoint auto-detects whether the ID is a request_id or job_id.
 
-### Response
+### Response Structure (V0.9.1+)
+
+The response is a structured object with these top-level keys. All keys are always present (set to `null` when not applicable).
 
 ```json
 {
     "success": true,
     "request_id": "791147831f11d833c779f8288d34fa5a",
-    "dataset_id": "test-raster-14dec",
-    "resource_id": "dctest",
-    "version_id": "v1",
-    "data_type": "raster",
-    "created_at": "2025-12-14T03:52:23.002245",
-    "job_id": "5a5f62fd4e0526a30d8aa6fa11fac9ec...",
-    "job_type": "process_raster_v2",
+    "asset": { ... },
+    "release": { ... },
     "job_status": "completed",
-    "job_stage": 3,
-    "job_result": {
-        "cog": {
-            "size_mb": 127.07,
-            "cog_blob": "test-raster-14dec/dctest/v1/dctest_cog_analysis.tif",
-            "compression": "deflate"
-        },
-        "stac": {
-            "item_id": "test-raster-14dec-dctest-v1",
-            "collection_id": "test-raster-14dec",
-            "inserted_to_pgstac": true
-        },
-        "share_url": "{TITILER_URL}/cog/WebMercatorQuad/map.html?url=..."
-    },
-    "task_summary": {
-        "total": 3,
-        "completed": 3,
-        "failed": 0,
-        "by_stage": {
-            "1": {"total": 1, "completed": 1, "task_types": ["validate_raster"]},
-            "2": {"total": 1, "completed": 1, "task_types": ["create_cog"]},
-            "3": {"total": 1, "completed": 1, "task_types": ["extract_stac_metadata"]}
-        }
-    }
+    "error": null,
+    "job": null,
+    "warnings": null,
+    "outputs": { ... },
+    "services": { ... },
+    "approval": null,
+    "versions": [ ... ]
 }
+```
+
+### `asset` Block
+
+Present when the platform request has been matched to an asset. `null` if lookup fails.
+
+```json
+{
+    "asset_id": "a1b2c3d4...",
+    "dataset_id": "flood-maps-2025",
+    "resource_id": "mississippi-basin",
+    "data_type": "raster",
+    "release_count": 2
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `data_type` | string | `"raster"`, `"vector"`, or `"zarr"` |
+| `release_count` | integer | Total releases (all states) for this asset |
+
+### `release` Block
+
+Present when the platform request has a release. `null` during early processing.
+
+```json
+{
+    "release_id": "rel-xyz789...",
+    "version_id": "v1",
+    "version_ordinal": 1,
+    "revision": 1,
+    "processing_status": "completed",
+    "approval_state": "pending_review",
+    "clearance_state": "pending"
+}
+```
+
+| Field | Values |
+|-------|--------|
+| `processing_status` | `pending`, `processing`, `completed`, `failed` |
+| `approval_state` | `pending_review`, `approved`, `rejected`, `revoked` |
+| `clearance_state` | `pending`, `cleared`, `revoked` |
+| `revision` | Increments on overwrite (1 = first submission, 2 = first overwrite, etc.) |
+
+### `outputs` Block
+
+Present when `processing_status == "completed"`. `null` otherwise.
+
+**Raster:**
+```json
+{
+    "blob_path": "flood-maps-2025/mississippi-basin/ord1/mississippi_cog_analysis.tif",
+    "container": "silver-cogs",
+    "stac_item_id": "flood-maps-2025-mississippi-basin-v1",
+    "stac_collection_id": "flood-maps-2025"
+}
+```
+
+**Vector:**
+```json
+{
+    "table_names": ["buildings", "streets"],
+    "table_name": "buildings",
+    "schema": "geo",
+    "stac_item_id": null,
+    "stac_collection_id": null
+}
+```
+
+**Zarr:**
+```json
+{
+    "blob_path": "zarr/climate-data/temperature.zarr",
+    "container": "silver-zarr",
+    "stac_item_id": "climate-data-temperature-v1",
+    "stac_collection_id": "climate-data"
+}
+```
+
+### `services` Block (Service Contract)
+
+Present when `processing_status == "completed"` and service URLs have been generated. `null` otherwise. This block provides the primary URLs for consuming the processed data.
+
+**6 guaranteed keys** are always present in the `services` block:
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `service_url` | string | Primary tile/data access URL (TileJSON for raster/zarr, collection URL for vector) |
+| `preview` | string | Static preview image or map URL |
+| `stac_collection` | string or null | STAC collection URL (null before approval, null always for vector) |
+| `stac_item` | string or null | STAC item URL (null before approval, null always for vector) |
+| `viewer` | string | Interactive map viewer URL |
+| `tiles` | string | Tile URL template with `{z}/{x}/{y}` placeholders |
+
+**Type-specific bonus keys:**
+
+| Data Type | Bonus Key | Description |
+|-----------|-----------|-------------|
+| `zarr` | `variables` | URL to list dataset variables (xarray endpoint) |
+| `vector` (multi-table) | `tables` | Array of `{table_name, service_url, tiles}` for secondary tables |
+
+**Per-data-type URL patterns:**
+
+| Data Type | `service_url` contains | `tiles` contains | `preview` contains |
+|-----------|----------------------|-------------------|-------------------|
+| Raster | `/cog/WebMercatorQuad/tilejson.json` | `/cog/tiles/WebMercatorQuad/{z}/{x}/{y}` | `/cog/preview.png` |
+| Vector | `/collections/geo.{table_name}` | `/{z}/{x}/{y}.pbf` | `/tiles/WebMercatorQuad/map` |
+| Zarr | `/xarray/WebMercatorQuad/tilejson.json` | `/xarray/tiles/WebMercatorQuad/{z}/{x}/{y}` | `/xarray/preview.png` |
+
+**STAC key lifecycle:**
+- **Pre-approval**: `stac_collection` and `stac_item` are `null` (STAC materialization happens at approval)
+- **Post-approval**: Both populated with `{titiler_base}/stac/collections/...` URLs
+- **Vector**: Always `null` (vector data is not published to STAC)
+
+**Example (raster, pre-approval):**
+```json
+{
+    "service_url": "{TITILER_URL}/cog/WebMercatorQuad/tilejson.json?url=/vsiaz/silver-cogs/flood-maps/mississippi.tif",
+    "preview": "{TITILER_URL}/cog/preview.png?url=/vsiaz/silver-cogs/flood-maps/mississippi.tif&max_size=512",
+    "tiles": "{TITILER_URL}/cog/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=/vsiaz/silver-cogs/flood-maps/mississippi.tif",
+    "viewer": "{TITILER_URL}/cog/WebMercatorQuad/map.html?url=/vsiaz/silver-cogs/flood-maps/mississippi.tif",
+    "stac_collection": null,
+    "stac_item": null
+}
+```
+
+### `approval` Block
+
+Present only when `approval_state == "pending_review"` AND `processing_status == "completed"`. Provides the approval action URL and viewer links for the reviewer.
+
+```json
+{
+    "approve_url": "{BASE_URL}/api/platform/approve",
+    "asset_id": "a1b2c3d4...",
+    "viewer_url": "{BASE_URL}/api/interface/raster-viewer?url=/vsiaz/...&asset_id=a1b2c3d4",
+    "embed_url": "{BASE_URL}/api/interface/raster-viewer?url=/vsiaz/...&asset_id=a1b2c3d4&embed=true"
+}
+```
+
+For vector approvals, includes `all_tables` array if multi-table.
+
+### `versions` Block
+
+Array of all releases for this asset, sorted most-recent-first. `null` if no releases exist.
+
+```json
+[
+    {
+        "release_id": "rel-xyz789...",
+        "version_id": "v1",
+        "approval_state": "approved",
+        "clearance_state": "cleared",
+        "processing_status": "completed",
+        "version_ordinal": 1,
+        "revision": 1,
+        "created_at": "2026-03-08T10:15:30Z",
+        "blob_path": "flood-maps/mississippi.tif",
+        "table_names": null,
+        "stac_item_id": "flood-maps-2025-mississippi-basin-v1",
+        "stac_collection_id": "flood-maps-2025",
+        "is_served": true,
+        "reviewer": "alice@example.com",
+        "reviewed_at": "2026-03-08T10:20:00Z",
+        "rejection_reason": null,
+        "approval_notes": "QA passed"
+    }
+]
+```
+
+### `error` Block
+
+Present only when `job_status == "failed"`. `null` otherwise.
+
+```json
+{
+    "message": "File corrupted — cannot read raster bands",
+    "code": "FILE_CORRUPTED",
+    "category": "FILE_ERROR",
+    "remediation": "Re-upload the original file in GeoTIFF format",
+    "user_fixable": true
+}
+```
+
+When failed, `job` metadata block is also populated:
+
+```json
+{
+    "job_id": "abc123...",
+    "job_type": "process_raster_v2",
+    "etl_version": "0.9.14.5",
+    "stage": 2,
+    "duration_seconds": 45.2
+}
+```
+
+### `warnings` Block
+
+Array of structured warnings (e.g., dropped null geometries, geometry type splits). `null` if no warnings.
+
+```json
+[
+    {"code": "NULL_GEOMETRY_DROPPED", "message": "5 features had null geometries and were dropped", "count": 5}
+]
 ```
 
 ### List All Requests
@@ -233,37 +415,26 @@ GET /api/platform/status?limit=100&status=pending
 | `limit` | integer | 100 | Maximum results |
 | `status` | string | - | Filter: `pending`, `processing`, `completed`, `failed` |
 | `offset` | integer | 0 | Pagination offset |
+| `dataset_id` | string | - | Filter by dataset (with `resource_id`, returns single structured response) |
 
 ### Job Status Values
 
 | Status | Description |
 |--------|-------------|
-| `queued` | Job created, waiting to be processed |
+| `pending` | Job created, waiting to be processed |
 | `processing` | Job is actively being processed |
 | `completed` | Job finished successfully |
-| `failed` | Job failed (check `error_details`) |
-| `completed_with_errors` | Job finished but some tasks failed |
+| `failed` | Job failed (check `error` block) |
 
 ---
 
-## 3. Pre-flight Validation & Version Lineage
+## 3. Pre-flight Validation (dry_run)
 
 ### Overview
 
-The Platform API tracks **version lineage** for datasets. When submitting a new version (e.g., v2.0 after v1.0), you must specify `previous_version_id` to prevent race conditions where two clients submit the same version simultaneously.
+Use `POST /api/platform/submit?dry_run=true` to validate a submission without creating a job.
 
-**Two equivalent validation workflows:**
-- `POST /api/platform/validate` - Standalone validation endpoint
-- `POST /api/platform/submit?dry_run=true` - Submit with dry_run parameter
-
-Both return identical responses and use the same validation logic.
-
-### Validation Endpoint
-
-```
-POST /api/platform/validate
-POST /api/platform/submit?dry_run=true
-```
+> **Note**: The standalone `POST /api/platform/validate` endpoint was removed in v0.9.13.0. Use `?dry_run=true` instead.
 
 ### Request Body
 Same format as `/api/platform/submit`.
@@ -593,7 +764,7 @@ Remove a dataset from the platform. Auto-detects data type and removes all outpu
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `dry_run` | boolean | `true` | Preview mode - shows what would be deleted |
+| `dry_run` | boolean | `false` | Preview mode - shows what would be deleted |
 
 ### Response (202 Accepted)
 
@@ -613,8 +784,9 @@ Remove a dataset from the platform. Auto-detects data type and removes all outpu
 
 | Data Type | Outputs Removed |
 |-----------|-----------------|
-| **Vector** | PostGIS table, `geo.table_catalog` metadata, STAC item |
 | **Raster** | COG blob(s), STAC item |
+| **Vector** | PostGIS table, `geo.table_catalog` metadata |
+| **Zarr** | Zarr store blobs, STAC item |
 
 ---
 
@@ -754,39 +926,7 @@ Recent failures with sanitized error summaries (no internal paths or secrets).
 }
 ```
 
-### Platform Lineage
-
-```
-GET /api/platform/lineage/{request_id}
-```
-
-Trace data lineage (source → processing → outputs).
-
-**Response:**
-```json
-{
-    "success": true,
-    "request_id": "...",
-    "lineage": {
-        "source": {
-            "container": "bronze-rasters",
-            "blob": "image.tif",
-            "size_mb": 250.5
-        },
-        "processing": {
-            "job_id": "...",
-            "job_type": "process_raster_v2",
-            "started_at": "...",
-            "completed_at": "..."
-        },
-        "outputs": {
-            "cog_blob": "silver-cogs/.../image_cog.tif",
-            "stac_item": "dataset-resource-v1",
-            "stac_collection": "dataset"
-        }
-    }
-}
-```
+> **Note**: The `GET /api/platform/lineage/{id}` endpoint was removed in v0.9.13.0. Lineage information is available via the `versions` block in the status response.
 
 ---
 
@@ -1035,6 +1175,32 @@ The `default_ramp` parameter overrides the type-based default colormap. All valu
 | `wkt_column` | WKT geometry column name (for CSV) |
 | `overwrite` | Replace existing data |
 
+### Zarr Options (V0.9.13.4)
+
+```json
+{
+    "processing_options": {
+        "rechunk": false,
+        "spatial_chunk_size": 256,
+        "time_chunk_size": 1,
+        "compressor": "lz4",
+        "compression_level": 5,
+        "zarr_format": 3,
+        "overwrite": false
+    }
+}
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `rechunk` | boolean | `false` | Re-chunk via xarray instead of blob copy |
+| `spatial_chunk_size` | integer | 256 | Spatial chunk dimension (pixels) |
+| `time_chunk_size` | integer | 1 | Time dimension chunk size |
+| `compressor` | string | `lz4` | Compression algorithm: `lz4`, `zstd`, `none` |
+| `compression_level` | integer | 5 | Compression level (1-9) |
+| `zarr_format` | integer | 3 | Zarr format version (2 or 3) |
+| `overwrite` | boolean | `false` | Replace existing data |
+
 ---
 
 ## 11. Output Naming Convention
@@ -1093,7 +1259,7 @@ Note: `version_id` is **excluded** from the lineage hash, so all versions share 
 ### Lineage State
 
 Each lineage tracks:
-- **current_latest**: The most recent version (`is_latest=true`)
+- **current_latest**: The most recent version (computed as `MAX(version_ordinal)`, not stored)
 - **version_ordinal**: Sequential version number (1, 2, 3...)
 - **previous_asset_id**: Links to the prior version's asset
 

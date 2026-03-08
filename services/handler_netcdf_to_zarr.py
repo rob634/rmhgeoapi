@@ -45,6 +45,29 @@ logger = LoggerFactory.create_logger(ComponentType.SERVICE, "handler_netcdf_to_z
 from jobs.netcdf_to_zarr import _get_silver_zarr_container
 
 
+def _emit_checkpoint(params: dict, name: str, data: dict = None):
+    """Emit a CHECKPOINT event to job_events table. Non-fatal on failure."""
+    try:
+        from infrastructure.job_event_repository import JobEventRepository
+        from core.models.job_event import JobEventType, JobEventStatus
+        job_id = params.get('_job_id')
+        task_id = params.get('_task_id')
+        stage = params.get('_stage')
+        if not job_id or not task_id:
+            return
+        JobEventRepository().record_task_event(
+            job_id=job_id,
+            task_id=task_id,
+            stage=stage or 0,
+            event_type=JobEventType.CHECKPOINT,
+            event_status=JobEventStatus.INFO,
+            checkpoint_name=name,
+            event_data=data or {},
+        )
+    except Exception:
+        pass
+
+
 def _get_storage_account() -> str:
     """Get silver storage account name from config."""
     from config import get_config
@@ -772,6 +795,15 @@ def netcdf_convert(
         # Extract metadata before writing
         all_dims = {dim: int(size) for dim, size in ds.dims.items()}
         all_variables = list(ds.data_vars)
+        logger.info(
+            f"netcdf_convert: Opened {len(nc_files)} NetCDF file(s): "
+            f"{len(all_variables)} vars, dims={all_dims}"
+        )
+        _emit_checkpoint(params, "dataset_opened", {
+            "file_count": len(nc_files),
+            "variables": len(all_variables),
+            "dims": all_dims,
+        })
 
         # Extract spatial extent from lat/lon coordinate variables
         spatial_extent = _get_spatial_extent(ds)
@@ -815,8 +847,14 @@ def netcdf_convert(
                 f"existing blobs under {zarr_container}/{output_folder}"
             )
 
-        logger.info(f"netcdf_convert: Writing Zarr to {zarr_az_url}")
+        logger.info(
+            f"netcdf_convert: Writing {len(all_variables)} variables to {zarr_az_url}"
+        )
+        _emit_checkpoint(params, "zarr_write_started", {
+            "target_url": zarr_az_url, "zarr_format": zarr_format,
+        })
 
+        write_start = time.time()
         ds.to_zarr(
             zarr_az_url,
             mode="w",
@@ -826,7 +864,27 @@ def netcdf_convert(
             zarr_format=zarr_format,
         )
 
+        # ZARR_NOTES.md §11: xarray's consolidated=True writes an empty
+        # metadata block for Zarr v3 — explicit consolidation is mandatory
+        if zarr_format == 3:
+            import zarr
+            consolidate_store = zarr.storage.FsspecStore.from_url(
+                zarr_az_url, storage_options=storage_options,
+            )
+            zarr.consolidate_metadata(consolidate_store)
+            logger.info("netcdf_convert: Consolidated metadata (Zarr v3)")
+
+        write_elapsed = time.time() - write_start
+
         zarr_store_url = f"abfs://{zarr_container}/{output_folder}"
+
+        logger.info(
+            f"netcdf_convert: Zarr write complete ({write_elapsed:.1f}s)"
+        )
+        _emit_checkpoint(params, "zarr_write_complete", {
+            "write_seconds": round(write_elapsed, 1),
+            "variables": len(all_variables),
+        })
 
         elapsed = time.time() - start
         logger.info(

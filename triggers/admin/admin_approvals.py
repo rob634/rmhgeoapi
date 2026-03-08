@@ -254,7 +254,7 @@ def approve_dataset(req: func.HttpRequest) -> func.HttpResponse:
                 mimetype='application/json'
             )
 
-        clearance_level_str = body.get('clearance_state') or body.get('clearance_level')
+        clearance_level_str = body.get('clearance_state') or body.get('clearance_level') or body.get('access_level')
         if not clearance_level_str:
             return func.HttpResponse(
                 json.dumps({'success': False, 'error': "clearance_state is required. Must be 'ouo' or 'public'", 'error_type': 'ValidationError'}),

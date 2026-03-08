@@ -41,7 +41,7 @@ from triggers.http_base import parse_request_json, safe_error_response, validate
 _APPROVE_FIELDS = {
     'release_id', 'asset_id', 'approval_id', 'job_id', 'request_id',
     'dataset_id', 'resource_id', 'reviewer', 'notes', 'clearance_state',
-    'clearance_level', 'version_id',
+    'clearance_level', 'access_level', 'version_id',
 }
 _REJECT_FIELDS = {
     'release_id', 'asset_id', 'approval_id', 'job_id', 'request_id',
@@ -286,7 +286,7 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
 
         reviewer = req_body.get('reviewer')
         notes = req_body.get('notes')
-        clearance_level_str = req_body.get('clearance_state') or req_body.get('clearance_level')
+        clearance_level_str = req_body.get('clearance_state') or req_body.get('clearance_level') or req_body.get('access_level')
         version_id = req_body.get('version_id')
 
         # PRV-3: Max-length validation on free-text fields

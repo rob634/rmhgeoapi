@@ -8,6 +8,63 @@ Reference for ETL pipelines (Zarr2Zarr rechunking, NetCDF2Zarr conversion) produ
 
 ---
 
+## CRITICAL: Consolidated Metadata Must Be Populated (Zarr v3)
+
+**Date:** 2026-03-08 | **Affects:** Any Zarr v3 store served by titiler-xarray
+
+### The Problem
+
+Zarr v3 stores include a `consolidated_metadata` block in the root `zarr.json`. When this block is **present but empty**, xarray trusts it and concludes the store has zero variables — silently returning nothing. This is worse than omitting consolidated metadata entirely (which would cause xarray to scan the store).
+
+The ERA5 rechunk store (`abfs://silver-zarr/climate-zarr-rechunk-plat/era5-rechunk`) has this bug:
+
+```json
+{
+  "zarr_format": 3,
+  "node_type": "group",
+  "consolidated_metadata": {
+    "kind": "inline",
+    "must_understand": false,
+    "metadata": {}          // <-- EMPTY — causes zero variables
+  }
+}
+```
+
+The individual variable arrays (e.g. `air_temperature_at_2_metres/zarr.json`) have correct metadata including `dimension_names`, `shape`, `codecs`, and `attributes`. But xarray never reads them because it trusts the empty consolidated metadata.
+
+### Symptom
+
+```bash
+curl ".../xarray/variables?url=abfs://silver-zarr/.../era5-rechunk"
+# Returns: []
+# No error, no warning — just empty
+```
+
+### The Fix
+
+**ETL must run `zarr.consolidate_metadata(store)` after writing any Zarr v3 store.** This populates the `consolidated_metadata.metadata` block with references to all arrays and their metadata.
+
+```python
+import zarr
+
+# After writing the store:
+store = zarr.storage.FsspecStore.from_url(
+    "abfs://silver-zarr/path/to/store",
+    storage_options={"account_name": "...", "credential": token}
+)
+zarr.consolidate_metadata(store)
+```
+
+### Why titiler-xarray Can't Work Around This
+
+titiler-xarray calls `xarray.open_dataset(engine="zarr")` without passing `consolidated=False`. xarray's default behavior is: if consolidated metadata exists, trust it. There is no query parameter in titiler-xarray to override this. Even if there were, the correct fix is ETL-side — consolidated metadata exists for performance (avoids N+1 metadata reads on open).
+
+### Updated Checklist Item
+
+Added to **Zarr2Zarr Rechunking Checklist** below: step 6 now reads "Run `zarr.consolidate_metadata(store)` — **mandatory** for Zarr v3".
+
+---
+
 ## Chunking Requirements
 
 ### Time Dimension — Most Important
@@ -55,19 +112,24 @@ titiler.xarray 1.2.0 uses zarr>=3.1 which reads **both Zarr v2 and v3**. Zarr v3
 
 titiler-xarray validates these on open:
 
-1. **`_ARRAY_DIMENSIONS` attribute** on each data variable — tells xarray which dims are spatial vs temporal:
+1. **Consolidated metadata** (Zarr v3) — `zarr.consolidate_metadata(store)` **must** be run after writing. See "CRITICAL" section above. Empty consolidated metadata causes silent zero-variable discovery.
+
+2. **`_ARRAY_DIMENSIONS` attribute** (Zarr v2) or **`dimension_names`** (Zarr v3) on each data variable — tells xarray which dims are spatial vs temporal:
    ```json
+   // Zarr v2:
    {"_ARRAY_DIMENSIONS": ["time", "lat", "lon"]}
+   // Zarr v3 (in array zarr.json):
+   {"dimension_names": ["time", "lat", "lon"]}
    ```
 
-2. **Recognizable coordinate names** — must use standard names:
+3. **Recognizable coordinate names** — must use standard names:
    - Latitude: `lat`, `latitude`, `y`
    - Longitude: `lon`, `longitude`, `x`
    - Time: `time`
 
-3. **CF conventions** — `Conventions: "CF-1.6"` (or higher) in root `.zattrs`
+4. **CF conventions** — `Conventions: "CF-1.6"` (or higher) in root `.zattrs`
 
-4. **Coordinate arrays** — `lat` and `lon` must exist as 1D coordinate arrays with their own `.zarray` and `.zattrs`
+5. **Coordinate arrays** — `lat` and `lon` must exist as 1D coordinate arrays with their own `.zarray` and `.zattrs`
 
 ### Recommended Attributes on Data Variables
 
@@ -97,7 +159,7 @@ abfs://silver-zarr/cmip6-tasmax-sample.zarr
 abfs://silver-zarr/sg-zarr-nz1-test/cmip6-tasmax
 ```
 
-**Do NOT use `https://` URLs** — they route to anonymous HTTPFileSystem and will fail on private containers. The `.zarr` extension is optional; titiler-xarray detects Zarr stores by the presence of `.zgroup`/`.zmetadata` files.
+**Do NOT use `https://` URLs** — they route to anonymous HTTPFileSystem and will fail on private containers. The `.zarr` extension is optional; titiler-xarray detects Zarr stores by the presence of `.zgroup`/`.zmetadata` (v2) or `zarr.json` (v3) files.
 
 ---
 
@@ -168,7 +230,7 @@ The `sg-zarr-nz1-test/cmip6-tasmax` store has stale metadata: `.zarray` claims s
 3. Ensure `_ARRAY_DIMENSIONS` attr on all data variables
 4. Ensure `lat`/`lon` coordinate arrays exist with proper attrs
 5. Set CF conventions in root `.zattrs`
-6. Regenerate `.zmetadata` (consolidated metadata)
+6. **Run `zarr.consolidate_metadata(store)`** — MANDATORY for Zarr v3 (see CRITICAL section above). Empty consolidated metadata = silent failure.
 7. Verify `.zarray` shape and chunks match actual chunk file layout
 8. Document `valid_min`/`valid_max` or `actual_range` in variable attrs for rescale hints
 9. Target Zarr v3 format for new stores

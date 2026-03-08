@@ -52,6 +52,29 @@ def _get_storage_account() -> str:
     return get_config().storage.silver.account_name
 
 
+def _emit_checkpoint(params: dict, name: str, data: dict = None):
+    """Emit a CHECKPOINT event to job_events table. Non-fatal on failure."""
+    try:
+        from infrastructure.job_event_repository import JobEventRepository
+        from core.models.job_event import JobEventType, JobEventStatus
+        job_id = params.get('_job_id')
+        task_id = params.get('_task_id')
+        stage = params.get('_stage')
+        if not job_id or not task_id:
+            return
+        JobEventRepository().record_task_event(
+            job_id=job_id,
+            task_id=task_id,
+            stage=stage or 0,
+            event_type=JobEventType.CHECKPOINT,
+            event_status=JobEventStatus.INFO,
+            checkpoint_name=name,
+            event_data=data or {},
+        )
+    except Exception:
+        pass
+
+
 
 # =============================================================================
 # HANDLER 1: ingest_zarr_validate
@@ -171,6 +194,11 @@ def ingest_zarr_validate(
         try:
             # Extract variable names
             variables = list(ds.data_vars)
+            logger.info(
+                f"ingest_zarr_validate: Opened source Zarr: "
+                f"{len(ds.data_vars)} vars, {blob_count} blobs, "
+                f"dims={dict(ds.dims)}"
+            )
 
             # Extract dimensions with sizes
             dimensions = {dim: int(size) for dim, size in ds.dims.items()}
@@ -304,6 +332,12 @@ def ingest_zarr_copy(
         copied_count = 0
         failed_count = 0
         failed_blobs = []
+        total_blobs = len(blob_list)
+        log_interval = max(1, total_blobs // 10)
+
+        _emit_checkpoint(params, "copy_started", {
+            "blob_count": total_blobs, "target": f"{target_container}/{target_prefix}",
+        })
 
         for blob_name in blob_list:
             try:
@@ -322,6 +356,19 @@ def ingest_zarr_copy(
 
                 copied_count += 1
 
+                # Tier 1: progress log every ~10%
+                if copied_count % log_interval == 0 or copied_count == total_blobs:
+                    pct = 100 * copied_count // total_blobs
+                    elapsed_so_far = time.time() - start
+                    logger.info(
+                        f"ingest_zarr_copy: progress {copied_count}/{total_blobs} "
+                        f"({pct}%) [{elapsed_so_far:.1f}s]"
+                    )
+                    # Tier 2: checkpoint every ~10%
+                    _emit_checkpoint(params, "copy_progress", {
+                        "copied": copied_count, "total": total_blobs, "pct": pct,
+                    })
+
             except Exception as blob_err:
                 failed_count += 1
                 failed_blobs.append(blob_name)
@@ -330,6 +377,10 @@ def ingest_zarr_copy(
                 )
 
         elapsed = time.time() - start
+
+        _emit_checkpoint(params, "copy_complete", {
+            "copied": copied_count, "failed": failed_count, "elapsed_s": round(elapsed, 1),
+        })
 
         # Fail the task if any blob failed to copy
         if failed_count > 0:
@@ -743,6 +794,14 @@ def ingest_zarr_rechunk(
         try:
             # TODO: Analyze source chunk layout — skip rechunking if already optimal
 
+            logger.info(
+                f"ingest_zarr_rechunk: Opened source Zarr: "
+                f"{len(ds.data_vars)} vars, dims={dict(ds.dims)}"
+            )
+            _emit_checkpoint(params, "zarr_opened", {
+                "variables": len(ds.data_vars), "dims": dict(ds.dims),
+            })
+
             # Build optimized encoding
             target_chunks, encoding = _build_zarr_encoding(
                 ds, spatial_chunk_size, time_chunk_size,
@@ -752,6 +811,12 @@ def ingest_zarr_rechunk(
 
             # Rechunk in-memory
             ds = ds.chunk(target_chunks)
+            logger.info(
+                f"ingest_zarr_rechunk: Rechunked dataset: target_chunks={target_chunks}"
+            )
+            _emit_checkpoint(params, "rechunk_applied", {
+                "target_chunks": target_chunks, "compressor": compressor_name,
+            })
 
             # Clear inherited v2 encoding (e.g. numcodecs.Blosc) to prevent
             # codec type mismatch when writing as zarr_format=3
@@ -774,9 +839,31 @@ def ingest_zarr_rechunk(
                     f"ingest_zarr_rechunk: pre-cleanup deleted {cleanup['deleted_count']} "
                     f"existing blobs under {target_container}/{target_prefix}"
                 )
+            _emit_checkpoint(params, "pre_cleanup_done", {
+                "deleted_count": cleanup["deleted_count"],
+            })
 
-            logger.info(f"ingest_zarr_rechunk: Writing rechunked Zarr to {target_az_url}")
+            # Estimate chunk count for logging
+            import math
+            n_chunks = 0
+            for var_name in ds.data_vars:
+                var = ds[var_name]
+                chunks_per_var = 1
+                for dim in var.dims:
+                    dim_size = ds.dims[dim]
+                    chunk_size = target_chunks.get(dim, dim_size)
+                    chunks_per_var *= math.ceil(dim_size / chunk_size)
+                n_chunks += chunks_per_var
 
+            logger.info(
+                f"ingest_zarr_rechunk: Writing {len(ds.data_vars)} variables, "
+                f"estimated {n_chunks} chunks to {target_az_url}"
+            )
+            _emit_checkpoint(params, "zarr_write_started", {
+                "target_url": target_az_url, "zarr_format": zarr_format,
+            })
+
+            write_start = time.time()
             ds.to_zarr(
                 target_az_url,
                 mode="w",
@@ -785,6 +872,25 @@ def ingest_zarr_rechunk(
                 encoding=encoding,
                 zarr_format=zarr_format,
             )
+
+            # ZARR_NOTES.md §11: xarray's consolidated=True writes an empty
+            # metadata block for Zarr v3 — explicit consolidation is mandatory
+            if zarr_format == 3:
+                import zarr
+                consolidate_store = zarr.storage.FsspecStore.from_url(
+                    target_az_url, storage_options=target_storage_options,
+                )
+                zarr.consolidate_metadata(consolidate_store)
+                logger.info("ingest_zarr_rechunk: Consolidated metadata (Zarr v3)")
+
+            write_elapsed = time.time() - write_start
+
+            logger.info(
+                f"ingest_zarr_rechunk: Zarr write complete ({write_elapsed:.1f}s)"
+            )
+            _emit_checkpoint(params, "zarr_write_complete", {
+                "write_seconds": round(write_elapsed, 1), "target_chunks": target_chunks,
+            })
         finally:
             ds.close()
 

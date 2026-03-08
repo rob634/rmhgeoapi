@@ -209,6 +209,11 @@ Pydantic silently ignores extra top-level fields.
 
 ### Pathfinder Checkpoint Format
 
+After each poll-to-completion, capture the full `services` block from
+`/api/platform/status/{request_id}`. Assert 6 guaranteed keys are present:
+`service_url`, `preview`, `stac_collection`, `stac_item`, `viewer`, `tiles`.
+For zarr, also assert `variables` key.
+
 ```
 ## Checkpoint {ID}: {description}
 AFTER: {step}
@@ -219,7 +224,15 @@ EXPECTED STATE:
     - {release_id} → approval_state={state}, ordinal={n}
   STAC Items:
     - {item_id} → {exists | not exists}
-  Service URLs:
+  Services Block (from /api/platform/status):
+    - service_url={url}
+    - preview={url}
+    - stac_collection={url | null}
+    - stac_item={url | null}
+    - viewer={url}
+    - tiles={url}
+    - variables={url} (zarr only)
+  Service URLs (from catalog lookup):
     - raster: titiler_urls keys={list} | MISSING
     - vector: endpoints.features={url}, tiles.tilejson={url} | MISSING
     - zarr: xarray_urls keys={list} | MISSING
@@ -366,6 +379,16 @@ curl -s "${BASE_URL}/api/dbadmin/diagnostics?type=stats"
 - Failed jobs → flag as CRASH
 - Counts that don't add up → flag as DIVERGENCE
 
+### Services Block Consistency
+
+For each Pathfinder checkpoint that recorded a `services` block:
+
+1. Re-fetch `/api/platform/status/{request_id}`
+2. Assert all 6 keys present: `service_url`, `preview`, `stac_collection`, `stac_item`, `viewer`, `tiles`
+3. Assert `service_url` is not null (primary success criterion)
+4. For zarr checkpoints: assert `variables` key present
+5. Cross-reference `services.service_url` against catalog lookup URL — flag divergences as `SERVICE_CONTRACT_VIOLATION`
+
 ### Inspector Output Format
 
 ```markdown
@@ -490,6 +513,7 @@ Every finding classified into one of:
 | INTERLEAVING DEFECT | Inspector + Saboteur correlation | Saboteur action corrupted Pathfinder state |
 | INPUT VALIDATION GAP | Provocateur | Missing validation, 500, or insecure response |
 | ORPHANED ARTIFACT | Inspector | DB/STAC/blob without parent entity |
+| SERVICE CONTRACT VIOLATION | Inspector | Status `services` block missing keys, null `service_url`, inconsistent shape across data types, or status ↔ catalog URL divergence |
 
 **Step 3: Severity Scoring**
 

@@ -15,7 +15,6 @@ Each subsystem represents a logical grouping of health checks:
 - SharedInfrastructureSubsystem: Common resources (database, storage)
 - RuntimeSubsystem: Container environment (hardware, GDAL)
 - ClassicWorkerSubsystem: Queue-based job processing
-- DAGWorkerSubsystem: DAG-driven workflow processing
 
 All subsystems implement this protocol to ensure consistent health reporting.
 """

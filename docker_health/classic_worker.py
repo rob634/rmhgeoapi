@@ -17,7 +17,6 @@ Monitors the existing queue-based job processing system:
 - connection_pool: PostgreSQL connection pool
 - lifecycle: Graceful shutdown and signal handling
 
-This is the "existing system" that will run alongside the future DAG worker.
 """
 
 from typing import Dict, Any
@@ -30,8 +29,7 @@ class ClassicWorkerSubsystem(WorkerSubsystem):
     Health checks for classic queue-based job processing.
 
     This subsystem monitors the existing Service Bus queue worker that
-    processes tasks from the container-tasks queue. It will continue
-    to operate alongside the future DAG-driven workflow system.
+    processes tasks from the container-tasks queue.
 
     Components:
     - queue_worker: Service Bus consumer thread status

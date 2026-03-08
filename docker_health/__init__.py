@@ -3,7 +3,7 @@
 # ============================================================================
 # EPOCH: 4 - ACTIVE
 # STATUS: Health Check Framework - Docker Worker subsystem health monitoring
-# PURPOSE: Modular health checks anticipating dual queue systems (Classic + DAG)
+# PURPOSE: Modular health checks for Docker Worker subsystems
 # CREATED: 29 JAN 2026
 # VERSION: V0.8.1.1
 # EXPORTS: get_all_subsystems, HealthAggregator
@@ -13,8 +13,7 @@
 Docker Health Subsystem Architecture.
 
 This module provides a structured approach to health monitoring for the Docker
-Worker, anticipating the addition of a DAG-driven workflow system alongside
-the existing queue-based job processing.
+Worker.
 
 Subsystems:
 - SharedInfrastructureSubsystem: Database, storage, service bus (common)

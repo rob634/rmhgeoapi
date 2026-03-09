@@ -36,9 +36,11 @@ from .validate_raster_job import ValidateRasterJob
 from .raster_mixin import RasterMixin
 from .unpublish_raster import UnpublishRasterJob
 from .unpublish_vector import UnpublishVectorJob
+from .unpublish_vector_multi_source import UnpublishVectorMultiSourceJob
 from .process_raster_docker import ProcessRasterDockerJob
 from .process_raster_collection_docker import ProcessRasterCollectionDockerJob
 from .vector_docker_etl import VectorDockerETLJob
+from .vector_multi_source_docker import VectorMultiSourceDockerJob
 from .virtualzarr import VirtualZarrJob
 from .ingest_zarr import IngestZarrJob
 from .netcdf_to_zarr import NetCDFToZarrJob
@@ -60,6 +62,7 @@ ALL_JOBS = {
 
     # Vector ETL (Docker - single stage with checkpoints)
     "vector_docker_etl": VectorDockerETLJob,
+    "vector_multi_source_docker": VectorMultiSourceDockerJob,
 
     # Raster ETL (Docker - single stage)
     "process_raster_docker": ProcessRasterDockerJob,
@@ -68,6 +71,7 @@ ALL_JOBS = {
     # Unpublish
     "unpublish_raster": UnpublishRasterJob,
     "unpublish_vector": UnpublishVectorJob,
+    "unpublish_vector_multi_source": UnpublishVectorMultiSourceJob,
     "unpublish_zarr": UnpublishZarrJob,
 
     # VirtualiZarr (NetCDF virtual reference pipeline)

@@ -5,7 +5,7 @@
 # PURPOSE: Provide surgical data removal for raster and vector assets
 # LAST_REVIEWED: 04 JAN 2026
 # REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
-# EXPORTS: inventory_raster_item, inventory_vector_item, inventory_zarr_item, delete_blob, drop_postgis_table, delete_stac_and_audit
+# EXPORTS: inventory_raster_item, inventory_vector_item, inventory_vector_multi_source, inventory_zarr_item, delete_blob, drop_postgis_table, delete_stac_and_audit
 # DEPENDENCIES: psycopg, azure-storage-blob
 # ============================================================================
 """
@@ -394,6 +394,170 @@ def inventory_vector_item(params: Dict[str, Any], context: Optional[Dict[str, An
 
     except Exception as e:
         logger.error(f"Failed to inventory vector item {params.get('table_name')}: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": type(e).__name__
+        }
+
+
+def inventory_vector_multi_source(params: Dict[str, Any], context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Inventory all tables belonging to a multi-source vector release.
+
+    Stage 1 handler for unpublish_vector_multi_source job.
+    Uses ReleaseTableRepository.get_tables() as the single source of truth
+    for which PostGIS tables belong to the release.
+
+    Also checks approval state -- approved releases require force_approved=true.
+
+    Args:
+        params: {
+            'release_id': str,
+            'dataset_id': str (optional),
+            'resource_id': str (optional),
+            'version_id': str (optional),
+            'stac_item_id': str (optional),
+            'dry_run': bool,
+            'force_approved': bool,
+        }
+        context: Optional job context
+
+    Returns:
+        {
+            'success': True,
+            'result': {
+                'release_id': str,
+                'tables': [{'table_name': str, 'schema': str, 'geometry_type': str, ...}],
+                'table_count': int,
+                'table_names': [str],
+                'stac_item_id': str or None,
+                'collection_id': str or None,
+                'dry_run': bool,
+            }
+        }
+
+    Date: 09 MAR 2026
+    """
+    try:
+        release_id = params.get('release_id')
+        dry_run = params.get('dry_run', False)
+        force_approved = params.get('force_approved', False)
+
+        if not release_id:
+            return {
+                "success": False,
+                "error": "release_id is required",
+                "error_type": "ValidationError"
+            }
+
+        # Check approval state before proceeding
+        stac_item_id = params.get('stac_item_id')
+        collection_id = None
+        original_job_id = None
+
+        try:
+            from infrastructure import ReleaseRepository
+            release_repo = ReleaseRepository()
+            with release_repo._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        psql.SQL(
+                            "SELECT release_id, approval_state, stac_item_id, "
+                            "collection_id, job_id "
+                            "FROM {}.{} WHERE release_id = %s"
+                        ).format(
+                            psql.Identifier(release_repo.schema),
+                            psql.Identifier(release_repo.table)
+                        ),
+                        (release_id,)
+                    )
+                    row = cur.fetchone()
+
+            if row:
+                # Pick up STAC identifiers from the release if not provided
+                if not stac_item_id:
+                    stac_item_id = row.get('stac_item_id')
+                collection_id = row.get('collection_id')
+                original_job_id = row.get('job_id')
+
+                if row['approval_state'] == 'approved' and not force_approved:
+                    return {
+                        "success": False,
+                        "error": "Cannot unpublish approved release. Use force_approved=true.",
+                        "error_type": "ApprovalBlocksUnpublish",
+                        "release_id": release_id,
+                        "approval_state": row['approval_state'],
+                        "hint": "Use force_approved=true to revoke approval and unpublish"
+                    }
+                if row['approval_state'] == 'approved':
+                    logger.warning(f"Force-unpublishing approved release {release_id[:16]}...")
+            else:
+                logger.warning(
+                    f"Release {release_id[:16]}... not found in asset_releases. "
+                    f"Proceeding with release_tables lookup."
+                )
+        except Exception as e:
+            logger.error(f"Cannot verify approval status for release {release_id[:16]}...: {e}")
+            return {
+                "success": False,
+                "error": f"Approval check failed -- cannot proceed without verification: {e}",
+                "error_type": "ApprovalCheckFailed",
+                "hint": "Retry when database is available, or use force_approved=true to bypass."
+            }
+
+        # Look up all tables via ReleaseTableRepository
+        from infrastructure.release_table_repository import ReleaseTableRepository
+        release_table_repo = ReleaseTableRepository()
+        release_tables = release_table_repo.get_tables(release_id)
+
+        tables = []
+        table_names = []
+        for rt in release_tables:
+            tables.append({
+                "table_name": rt.table_name,
+                "schema": "geo",  # release_tables always target geo schema
+                "geometry_type": rt.geometry_type,
+                "feature_count": rt.feature_count,
+                "table_role": rt.table_role,
+                "table_suffix": rt.table_suffix,
+            })
+            table_names.append(rt.table_name)
+
+        table_count = len(tables)
+
+        if table_count == 0:
+            logger.warning(
+                f"{'[DRY-RUN] ' if dry_run else ''}"
+                f"No tables found in release_tables for release {release_id[:16]}..."
+            )
+        else:
+            logger.info(
+                f"{'[DRY-RUN] ' if dry_run else ''}"
+                f"Found {table_count} table(s) for release {release_id[:16]}...: "
+                f"{', '.join(table_names)}"
+            )
+
+        # Also clean up release_tables entries (unless dry_run)
+        # This happens after Stage 2 drops the actual tables.
+        # We pass the release_id through so Stage 3 can clean up.
+
+        return {
+            "success": True,
+            "result": {
+                "release_id": release_id,
+                "tables": tables,
+                "table_count": table_count,
+                "table_names": table_names,
+                "stac_item_id": stac_item_id,
+                "collection_id": collection_id,
+                "original_job_id": original_job_id,
+                "dry_run": dry_run,
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to inventory multi-source vector release {params.get('release_id')}: {e}")
         return {
             "success": False,
             "error": str(e),

@@ -255,12 +255,6 @@ def translate_to_coremachine(
             request.version_id
         )
 
-        # Detect file extension
-        file_name = request.file_name
-        if isinstance(file_name, list):
-            file_name = file_name[0]
-        file_ext = file_name.split('.')[-1].lower()
-
         # Build converter params if CSV/lon-lat columns specified
         # Note: Use 'lat_name'/'lon_name' keys to match job validator expectations
         converter_params = {}
@@ -270,6 +264,61 @@ def translate_to_coremachine(
                 'lat_name': opts.lat_column,
                 'wkt_column': opts.wkt_column
             }
+
+        # Check for multi-source vector collection BEFORE single-file handling
+        if request.is_vector_collection:
+            is_multi_file = isinstance(request.file_name, list) and len(request.file_name) > 1
+
+            # Detect file extension from first file (multi-file) or single file
+            if is_multi_file:
+                file_ext = request.file_name[0].split('.')[-1].lower()
+            else:
+                file_ext = request.file_name.split('.')[-1].lower()
+
+            logger.info(
+                f"[PLATFORM] Routing multi-source vector collection to Docker worker "
+                f"({'multi-file' if is_multi_file else 'multi-layer GPKG'})"
+            )
+
+            return 'vector_multi_source_docker', {
+                # Source (mode determined by which field is populated)
+                'blob_list': request.file_name if is_multi_file else None,
+                'blob_name': request.file_name if not is_multi_file else None,
+                'layer_names': opts.layer_names if not is_multi_file else None,
+                'file_extension': file_ext,
+                'container_name': request.container_name,
+
+                # Target
+                'base_table_name': table_name,
+                'schema': cfg.vector.target_schema,
+                'overwrite': opts.overwrite,
+
+                # DDH identifiers
+                'dataset_id': request.dataset_id,
+                'resource_id': request.resource_id,
+                'version_id': request.version_id,
+                'stac_item_id': stac_item_id,
+
+                # Metadata
+                'title': request.generated_title,
+                'description': request.description,
+                'tags': request.tags,
+                'access_level': request.access_level.value,
+
+                # Processing options
+                'converter_params': converter_params,
+
+                # GPKG layer selection (not applicable for multi-source)
+                'layer_name': None,
+            }
+
+        # --- Single-file vector (existing flow, unchanged) ---
+        # Detect file extension
+        file_name = request.file_name
+        if isinstance(file_name, list):
+            file_name = file_name[0]
+        file_ext = file_name.split('.')[-1].lower()
+
         # GPKG layer selection (24 FEB 2026)
         if file_ext == 'gpkg' and opts.layer_name:
             converter_params['layer_name'] = opts.layer_name

@@ -188,18 +188,23 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                     if has_lat and not has_lon:
                         return validation_error(
                             "CSV file requires both lat_column and lon_column, but only lat_column was provided. "
-                            "Add lon_column to processing_options."
+                            "Add lon_column to processing_options: "
+                            '{"processing_options": {"lat_column": "...", "lon_column": "..."}}'
                         )
                     elif has_lon and not has_lat:
                         return validation_error(
                             "CSV file requires both lat_column and lon_column, but only lon_column was provided. "
-                            "Add lat_column to processing_options."
+                            "Add lat_column to processing_options: "
+                            '{"processing_options": {"lat_column": "...", "lon_column": "..."}}'
                         )
                     else:
                         return validation_error(
                             "CSV file requires geometry parameters in processing_options. "
-                            "Provide either: (1) wkt_column for WKT geometry, or "
-                            "(2) both lat_column and lon_column for point coordinates."
+                            "Provide either: "
+                            "(1) lat_column + lon_column for point coordinates: "
+                            '{"processing_options": {"lat_column": "latitude", "lon_column": "longitude"}}, or '
+                            "(2) wkt_column for WKT geometry: "
+                            '{"processing_options": {"wkt_column": "geom"}}'
                         )
 
             if file_ext == 'gpkg':

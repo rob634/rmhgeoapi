@@ -869,6 +869,17 @@ class STACMaterializer:
                 "roles": ["thumbnail"]
             }
 
+            # Rewrite data asset href: /vsiaz/ is a GDAL pseudo-path, not a
+            # consumer-resolvable URI. Point to the TileJSON endpoint instead —
+            # this is the discovery document from which clients can derive all
+            # other tile/preview/info URLs. Source files are intentionally not
+            # directly downloadable; access is mediated through the Service Layer.
+            tilejson_url = f"{titiler_base}/cog/WebMercatorQuad/tilejson.json?url={encoded_url}"
+            if 'data' in assets:
+                assets['data']['href'] = tilejson_url
+                assets['data']['type'] = "application/json"
+                assets['data']['title'] = "TileJSON (Cloud-optimized GeoTIFF)"
+
             # TiTiler links (viewer, tilejson)
             links = stac_item_json.setdefault('links', [])
             # Remove stale tiles/viewer links, then re-add
@@ -906,6 +917,16 @@ class STACMaterializer:
                 return
 
             xarray_urls = config.generate_xarray_tile_urls(zarr_url)
+
+            # Rewrite zarr asset href: abfs:// and /vsiaz/ are internal paths.
+            # Point to the variables endpoint — the discovery document for zarr
+            # stores. From it clients learn available variables, then construct
+            # tilejson/tile/preview URLs. Source files not directly downloadable.
+            asset_key = next((k for k in ('zarr-store', 'zarr', 'reference') if k in assets), None)
+            if asset_key:
+                assets[asset_key]['href'] = xarray_urls["variables"]
+                assets[asset_key]['type'] = "application/json"
+                assets[asset_key]['title'] = "Variables Discovery (Zarr Store)"
 
             # Add variables discovery link
             links = stac_item_json.setdefault('links', [])

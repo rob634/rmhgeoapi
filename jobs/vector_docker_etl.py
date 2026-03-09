@@ -308,9 +308,10 @@ class VectorDockerETLJob(JobBaseMixin, JobBase):
             'wkt_param': 'wkt_column',
             'converter_params_field': 'converter_params',
             'error': (
-                "CSV files require geometry column parameters. Provide either:\n"
-                "  • 'lat_name' AND 'lon_name' for point geometry\n"
-                "  • OR 'wkt_column' for WKT geometry strings"
+                "CSV files require geometry column parameters in processing_options. Provide either:\n"
+                '  • "lat_column" AND "lon_column" for point geometry, or\n'
+                '  • "wkt_column" for WKT geometry strings.\n'
+                'Example: {"processing_options": {"lat_column": "latitude", "lon_column": "longitude"}}'
             )
         }
     ]

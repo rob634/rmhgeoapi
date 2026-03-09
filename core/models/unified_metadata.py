@@ -945,6 +945,10 @@ class VectorMetadata(BaseMetadata):
                 dt = dt.replace(tzinfo=timezone.utc)
             return dt.isoformat()
 
+        # datetime represents WHEN THE DATA IS FROM, not when it was processed.
+        # If no temporal extent is extractable from the source data, set null.
+        # B2B consumers can provide temporal metadata at submit time; if they
+        # don't, null is correct — it signals "temporal context unknown".
         if self.extent and self.extent.temporal and self.extent.temporal.interval:
             interval = self.extent.temporal.interval[0]
             if interval[0] and interval[1]:
@@ -954,15 +958,9 @@ class VectorMetadata(BaseMetadata):
             elif interval[0]:
                 properties["datetime"] = interval[0]
             else:
-                properties["datetime"] = (
-                    _to_rfc3339(self.created_at) if self.created_at
-                    else datetime.now(timezone.utc).isoformat()
-                )
+                properties["datetime"] = None
         else:
-            properties["datetime"] = (
-                _to_rfc3339(self.created_at) if self.created_at
-                else datetime.now(timezone.utc).isoformat()
-            )
+            properties["datetime"] = None
 
         # Table Extension properties
         if self.feature_count is not None:
@@ -1424,6 +1422,10 @@ class RasterMetadata(BaseMetadata):
                 dt = dt.replace(tzinfo=timezone.utc)
             return dt.isoformat()
 
+        # datetime represents WHEN THE DATA IS FROM, not when it was processed.
+        # If no temporal extent is extractable from the source data, set null.
+        # B2B consumers can provide temporal metadata at submit time; if they
+        # don't, null is correct — it signals "temporal context unknown".
         if self.extent and self.extent.temporal and self.extent.temporal.interval:
             interval = self.extent.temporal.interval[0]
             if interval[0] and interval[1]:
@@ -1433,15 +1435,9 @@ class RasterMetadata(BaseMetadata):
             elif interval[0]:
                 properties["datetime"] = interval[0]
             else:
-                properties["datetime"] = (
-                    _to_rfc3339(self.created_at) if self.created_at
-                    else datetime.now(timezone.utc).isoformat()
-                )
+                properties["datetime"] = None
         else:
-            properties["datetime"] = (
-                _to_rfc3339(self.created_at) if self.created_at
-                else datetime.now(timezone.utc).isoformat()
-            )
+            properties["datetime"] = None
 
         # proj:* extension
         if self.crs:

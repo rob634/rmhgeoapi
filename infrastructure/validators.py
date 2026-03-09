@@ -1390,12 +1390,13 @@ def validate_csv_geometry_params(params: Dict[str, Any], config: Dict[str, Any])
             logger.debug(f"✅ csv_geometry_params: Valid (lat='{lat_name}', lon='{lon_name}')")
         return ValidatorResult(valid=True, message=None)
 
-    # Build helpful error message
+    # Build helpful error message (user-facing names: lat_column, lon_column, wkt_column)
     error_msg = config.get('error') or (
-        f"CSV file requires geometry parameters. Provide either:\n"
-        f"  • 'lat_name' AND 'lon_name' for point geometry from coordinates, OR\n"
-        f"  • 'wkt_column' for WKT geometry strings.\n"
-        f"Current params: lat_name={lat_name}, lon_name={lon_name}, wkt_column={wkt_column}"
+        f"CSV file requires geometry parameters in processing_options. Provide either:\n"
+        f'  • "lat_column" AND "lon_column" for point geometry from coordinates, or\n'
+        f'  • "wkt_column" for WKT geometry strings.\n'
+        f'Example: {{"processing_options": {{"lat_column": "latitude", "lon_column": "longitude"}}}}\n'
+        f"Current values: lat_column={lat_name}, lon_column={lon_name}, wkt_column={wkt_column}"
     )
 
     logger.warning(f"❌ csv_geometry_params: FAILED - {error_msg}")

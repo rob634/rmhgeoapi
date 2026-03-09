@@ -480,12 +480,14 @@ class DatabaseHealthChecks(HealthCheckPlugin):
                                 FROM pg_proc p
                                 JOIN pg_namespace n ON p.pronamespace = n.oid
                                 WHERE n.nspname = 'pgstac'
-                                AND p.proname IN ('search_tohash', 'search_hash')
+                                AND p.proname IN ('search_tohash', 'search_hash', 'all_collections', 'get_version')
                             """)
                             functions_found = [row['proname'] for row in cur.fetchall()]
 
                             critical_functions['search_tohash'] = 'search_tohash' in functions_found
                             critical_functions['search_hash'] = 'search_hash' in functions_found
+                            critical_functions['all_collections'] = 'all_collections' in functions_found
+                            critical_functions['get_version'] = 'get_version' in functions_found
 
                             if searches_table_exists:
                                 try:
@@ -510,12 +512,21 @@ class DatabaseHealthChecks(HealthCheckPlugin):
                                 function_warnings.append("Missing function: pgstac.search_tohash()")
                             if not critical_functions['search_hash']:
                                 function_warnings.append("Missing function: pgstac.search_hash()")
+                            if not critical_functions['all_collections']:
+                                function_warnings.append("Missing function: pgstac.all_collections() — STAC collection listing will fail")
+                            if not critical_functions['get_version']:
+                                function_warnings.append("Missing function: pgstac.get_version() — schema version unknown")
 
                         except Exception as func_error:
                             critical_functions['error'] = str(func_error)[:100]
 
                         all_tables_exist = all(critical_tables.values())
-                        all_functions_exist = critical_functions.get('search_tohash', False) and critical_functions.get('search_hash', False)
+                        all_functions_exist = (
+                            critical_functions.get('search_tohash', False)
+                            and critical_functions.get('search_hash', False)
+                            and critical_functions.get('all_collections', False)
+                            and critical_functions.get('get_version', False)
+                        )
 
                         result = {
                             "schema_exists": True,

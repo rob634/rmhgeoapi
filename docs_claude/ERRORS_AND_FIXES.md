@@ -1,6 +1,6 @@
 # ERRORS_AND_FIXES.md - Error Tracking and Resolution Log
 
-**Last Updated**: 07 MAR 2026
+**Last Updated**: 09 MAR 2026
 **Purpose**: Canonical error tracking for pattern analysis and faster troubleshooting
 
 ---
@@ -933,7 +933,38 @@ status_code = 200 if validation_result.valid else 400
 
 **Fix**: `zarr_format` parameter in `ZarrProcessingOptions` lets callers choose v2 (TiTiler compat) or v3. Default is v3; set to 2 until TiTiler upgrade to titiler-pgstac 2.1.0.
 
+**Update (09 MAR 2026)**: Additional root cause found — see COD-ZV3 below. Even with correct zarr_format, xarray's `consolidated=True` writes empty metadata for Zarr v3.
+
 **Files Modified**: Same as COD-SG131
+
+---
+
+### COD-ZV3: Zarr v3 Consolidated Metadata Empty Block
+
+**Date**: 09 MAR 2026
+**Version**: 0.9.16.1
+**Severity**: CRITICAL
+
+**Error Message**: TiTiler `/xarray/variables` returns `[]` for Zarr v3 stores — xarray opens store and sees zero data variables despite data being present.
+
+**Root Cause**: xarray's `ds.to_zarr(consolidated=True)` for Zarr v3 writes a `zarr.json` with `"consolidated_metadata": {"metadata": {}}` — an empty metadata block. When xarray later opens the store with `consolidated=True` (default), it trusts this empty metadata and sees zero variables. The actual variable metadata exists in per-variable `zarr.json` files, but consolidated mode never reads them.
+
+**Diagnosis**: `az storage blob download` of the root `zarr.json` and inspect — `consolidated_metadata.metadata` is `{}` despite variables existing in subdirectories.
+
+**Fix**: After `ds.to_zarr()`, explicitly call `zarr.consolidate_metadata(store)` using a `zarr.storage.FsspecStore.from_url()` store. This correctly walks the hierarchy and populates the consolidated metadata block. Gated on `zarr_format == 3` only.
+
+```python
+if zarr_format == 3:
+    import zarr
+    consolidate_store = zarr.storage.FsspecStore.from_url(
+        target_az_url, storage_options=target_storage_options,
+    )
+    zarr.consolidate_metadata(consolidate_store)
+```
+
+**Files Modified**: `services/handler_ingest_zarr.py` (in `ingest_zarr_rechunk()`), `services/handler_netcdf_to_zarr.py` (in `netcdf_convert()`)
+
+**Prevention**: Always run `zarr.consolidate_metadata()` as a separate step after `ds.to_zarr()` for Zarr v3 stores. Do not rely on xarray's `consolidated=True` parameter alone.
 
 ---
 

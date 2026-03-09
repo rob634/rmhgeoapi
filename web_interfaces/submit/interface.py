@@ -363,12 +363,6 @@ class UnifiedSubmitInterface(BaseInterface):
             if previous_version_id:
                 platform_payload['previous_version_id'] = previous_version_id
 
-            # Set data_type for API (raster_collection is detected by list)
-            if data_type == 'vector':
-                platform_payload['data_type'] = 'vector'
-            else:
-                platform_payload['data_type'] = 'raster'
-
             # Optional metadata
             title = get_param('title')
             description = get_param('description')
@@ -669,11 +663,6 @@ class UnifiedSubmitInterface(BaseInterface):
             previous_version_id = get_param('previous_version_id')
             if previous_version_id:
                 platform_payload['previous_version_id'] = previous_version_id
-
-            if data_type == 'vector':
-                platform_payload['data_type'] = 'vector'
-            else:
-                platform_payload['data_type'] = 'raster'
 
             # Optional metadata
             title = get_param('title')
@@ -2517,7 +2506,6 @@ class UnifiedSubmitInterface(BaseInterface):
             const payload = {{
                 dataset_id: datasetId,
                 resource_id: resourceId,
-                data_type: currentDataType === 'vector' ? 'vector' : 'raster',
                 container_name: containerName,
                 file_name: fileName
             }};

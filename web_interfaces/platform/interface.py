@@ -230,11 +230,11 @@ class PlatformInterface(BaseInterface):
             parts.append('<h3 class="result-card-title">Services</h3>')
             parts.append('<div class="service-links">')
             service_labels = {
+                'service_url': 'Service URL',
                 'preview': 'Preview',
                 'tiles': 'Tiles',
                 'viewer': 'Viewer',
-                'collection': 'Collection',
-                'items': 'Items',
+                'variables': 'Variables',
                 'stac_collection': 'STAC Collection',
                 'stac_item': 'STAC Item',
             }

@@ -339,9 +339,6 @@ class SubmitRasterInterface(BaseInterface):
             if processing_options:
                 platform_payload['processing_options'] = processing_options
 
-            # Force data_type to raster
-            platform_payload['data_type'] = 'raster'
-
             # =================================================================
             # V0.8 FIX (29 JAN 2026): Call Platform API endpoint via HTTP
             # Previously called internal functions directly, bypassing V0.8

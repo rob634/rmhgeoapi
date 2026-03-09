@@ -1,6 +1,6 @@
 # Working Backlog - ADO Aligned
 
-**Last Updated**: 05 MAR 2026
+**Last Updated**: 09 MAR 2026
 **Source of Truth**: [V0.8_ADO_WORKITEMS.md](/ado_wiki/V0.8_ADO_WORKITEMS.md)
 **Structure**: EPIC → FEATURE → User Story → Tasks
 
@@ -50,6 +50,8 @@ Zarr chunking optimization for tile serving added in v0.9.13.4.
 | STAC collection with VirtualiZarr assets | ✅ Done | Zarr STAC items created at approval |
 | Native Zarr ingest pipeline | ✅ Done | IngestZarr 3-stage pipeline (v0.9.11.8) |
 | Zarr chunking optimization | ✅ Done | Optimized chunking (256×256 spatial, time=1, Blosc+LZ4) in both pipelines (v0.9.13.4) |
+| Zarr pipeline observability | ✅ Done | Tier 1 progress logging + Tier 2 structured CHECKPOINT events in all zarr handlers (v0.9.16.0) |
+| Zarr v3 consolidated metadata fix | ✅ Done | Explicit `zarr.consolidate_metadata()` post-write for Zarr v3 stores — fixes empty variables on TiTiler (v0.9.16.1) |
 
 ### EN 1.6: DAG Orchestration Migration `[FUTURE]`
 
@@ -312,6 +314,10 @@ Migrated 37 occurrences across 22 code files from raw `req.get_json()` to `parse
 
 | Date | Feature | Task |
 |------|---------|------|
+| 09 MAR 2026 | Zarr Pipeline | Zarr v3 consolidated metadata fix — explicit `zarr.consolidate_metadata()` post-write, fixes TiTiler empty variables (v0.9.16.1) |
+| 09 MAR 2026 | Observability | Zarr pipeline observability — Tier 1 progress logging + Tier 2 CHECKPOINT events in all zarr handlers, `progress` field on platform status (v0.9.16.0) |
+| 08 MAR 2026 | SIEGE | SIEGE Run 14 (Run 40): 98.0% pass rate, 17/19 sequences PASS. SG14-1 to SG14-5 findings, 4/5 fixed. |
+| 07 MAR 2026 | SIEGE | SIEGE Run 13 (Run 38): 94.9% pass rate. SG13-1 Blosc codec fix, SG13-4 container inference, SG13-6 zarr_format. |
 | 05 MAR 2026 | Zarr Pipeline | Zarr chunking optimization — `_build_zarr_encoding()` helper, `ingest_zarr_rechunk` handler, 5 new `ZarrProcessingOptions` fields (v0.9.13.4) |
 | 05 MAR 2026 | Error Handling | ERH-5/6: Vector data warnings — structured `NULL_GEOMETRY_DROPPED` + `GEOMETRY_TYPE_SPLIT` in postgis_handler.py, `warnings` field in platform status response |
 | 05 MAR 2026 | Raster Pipeline | Deleted `_process_raster_tiled` (~435 lines) — obsolete VSI tiling for Function Apps. Docker worker always uses mount-based tiling. |

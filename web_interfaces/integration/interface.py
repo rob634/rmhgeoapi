@@ -1081,7 +1081,7 @@ class ProcessRasterIntegrationInterface(BaseInterface):
                 };
 
                 // Optional metadata
-                if (serviceName) payload.service_name = serviceName;
+                if (serviceName) payload.title = serviceName;
                 if (accessLevel) payload.access_level = accessLevel;
                 if (tags) {
                     payload.tags = tags.split(',').map(t => t.trim()).filter(t => t);
@@ -2004,14 +2004,13 @@ class ProcessVectorIntegrationInterface(BaseInterface):
                     dataset_id: datasetId || '{dataset_id}',
                     resource_id: resourceId || '{resource_id}',
                     version_id: versionId,
-                    data_type: 'vector',
                     operation: 'CREATE',
                     container_name: container || '{container}',
                     file_name: selectedFile || '{file_name}'
                 };
 
                 // Optional metadata
-                if (serviceName) payload.service_name = serviceName;
+                if (serviceName) payload.title = serviceName;
                 if (accessLevel) payload.access_level = accessLevel;
                 if (tags) {
                     payload.tags = tags.split(',').map(t => t.trim()).filter(t => t);
@@ -3004,7 +3003,7 @@ class PlatformSubmitIntegrationInterface(BaseInterface):
                     version_id: versionId,
                     container_name: container,
                     file_name: fileName,
-                    service_name: serviceName,
+                    title: serviceName,
                     access_level: accessLevel,
                     processing_options: {
                         overwrite: overwrite

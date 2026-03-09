@@ -97,20 +97,32 @@ class STACMaterializer:
         Remove internal (geoetl:*) properties, keep B2C-facing ones.
 
         B2C properties retained: ddh:*, geo:*, standard STAC (datetime, title, etc.)
-        Internal properties stripped: geoetl:* (provenance, job tracking, etc.)
+        Internal properties stripped: geoetl:* (provenance), processing:* (internal lineage)
 
         Args:
             item_dict: STAC item dict (mutated in place and returned)
 
         Returns:
-            The same item_dict with geoetl:* properties removed
+            The same item_dict with internal properties removed
         """
+        # Prefixes that are internal provenance — not consumer-facing
+        _INTERNAL_PREFIXES = ('geoetl:', 'processing:')
+
         props = item_dict.get('properties', {})
         clean_props = {
             k: v for k, v in props.items()
-            if not k.startswith('geoetl:')
+            if not k.startswith(_INTERNAL_PREFIXES)
         }
         item_dict['properties'] = clean_props
+
+        # Also strip the processing extension URL from stac_extensions
+        extensions = item_dict.get('stac_extensions', [])
+        if extensions:
+            item_dict['stac_extensions'] = [
+                ext for ext in extensions
+                if '/processing/' not in ext
+            ]
+
         return item_dict
 
     # =========================================================================

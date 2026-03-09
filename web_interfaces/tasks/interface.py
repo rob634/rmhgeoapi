@@ -3434,16 +3434,15 @@ class TasksInterface(BaseInterface):
             }}
 
             // Build service links — XSS Fix: validate URL protocol and escape labels
+            // Skip null values and deprecated "collection" alias
             let servicesHtml = '';
-            const serviceEntries = Object.entries(services);
+            const serviceEntries = Object.entries(services).filter(([key, url]) => url && key !== 'collection');
             if (serviceEntries.length > 0) {{
                 servicesHtml = '<div class="ps-services">';
                 for (const [key, url] of serviceEntries) {{
                     const label = escapeHtml(key.replace(/_/g, ' '));
                     if (/^https?:\\/\\//i.test(url)) {{
                         servicesHtml += `<a href="${{escapeHtml(url)}}" target="_blank" class="ps-service-link">${{label}}</a>`;
-                    }} else {{
-                        servicesHtml += `<span class="ps-service-link">${{label}} (invalid URL)</span>`;
                     }}
                 }}
                 servicesHtml += '</div>';

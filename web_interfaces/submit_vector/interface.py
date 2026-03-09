@@ -274,7 +274,6 @@ class SubmitVectorInterface(BaseInterface):
                 'dataset_id': dataset_id,
                 'resource_id': resource_id,
                 'version_id': version_id,
-                'data_type': 'vector',
                 'operation': 'CREATE',
                 'container_name': container_name,
                 'file_name': blob_name
@@ -1508,7 +1507,6 @@ class SubmitVectorInterface(BaseInterface):
                 dataset_id: datasetId,
                 resource_id: resourceId,
                 version_id: versionId,
-                data_type: "vector",
                 operation: "CREATE",
                 container_name: containerName,
                 file_name: blobName

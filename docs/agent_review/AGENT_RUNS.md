@@ -1588,13 +1588,19 @@ All pipeline executions in chronological order.
 
 **New Findings**:
 
-| ID | Severity | Description |
-|----|----------|-------------|
-| SG14-1 | MEDIUM | Zarr STAC materialization at completion (pre-approval) -- stac_collection/stac_item non-null before approve |
-| SG14-2 | MEDIUM | Cannot revoke non-latest approved release after latest is revoked |
-| SG14-3 | LOW | Status vs catalog URL scheme divergence (/vsiaz/ vs https://) |
-| SG14-4 | LOW | siege_config.json data_type_override unusable (extra='forbid' rejects it) |
-| SG14-5 | LOW | Unpublish uses deleted_by instead of reviewer (parameter divergence) |
+| ID | Severity | Description | Status |
+|----|----------|-------------|--------|
+| SG14-1 | MEDIUM | Zarr STAC materialization at completion (pre-approval) -- stac_collection/stac_item non-null before approve | ✅ FIXED — STAC URLs gated behind `approval_state == 'approved'` in `_build_services_block()` |
+| SG14-2 | MEDIUM | Cannot revoke non-latest approved release after latest is revoked | ✅ FIXED — `_resolve_release()` path 3 now operation-aware, falls back to `get_latest()` for revoke |
+| SG14-3 | LOW | Status vs catalog URL scheme divergence (/vsiaz/ vs https://) | ✅ FIXED — Catalog URLs changed to `/vsiaz/` (raster) and `abfs://` (zarr) |
+| SG14-4 | LOW | siege_config.json data_type_override unusable (extra='forbid' rejects it) | No fix needed (cosmetic) |
+| SG14-5 | LOW | Unpublish uses deleted_by instead of reviewer (parameter divergence) | ✅ FIXED — `reviewer` is now standard; `deleted_by` deprecated with warning |
+
+**Post-SIEGE Fixes** (08 MAR 2026): 4 of 5 findings fixed. Files modified:
+- `triggers/trigger_platform_status.py` — STAC URL approval gate (SG14-1) + deprecated `collection` alias for B2B compat
+- `triggers/trigger_approvals.py` — revoke resolution fallback (SG14-2)
+- `services/platform_catalog_service.py` — URL scheme consistency (SG14-3)
+- `triggers/platform/unpublish.py` — `reviewer` as standard field, `deleted_by` deprecated (SG14-5)
 
 ---
 
@@ -1604,13 +1610,13 @@ All pipeline executions in chronological order.
 |----------|------|-------------|
 | COMPETE | Runs 1-6, 9, 12, 19, 28, 29, 30, 33, 39 | ~2,663,632 |
 | GREENFIELD | Runs 7, 8, 10, 24 | ~944,196 |
-| SIEGE | Runs 11, 13, 18, 20, 21, 22, 23, 25, 26, 34, 35, 37, 40 | ~2,305,587+ |
+| SIEGE | Runs 11, 13, 18, 20, 21, 22, 23, 25, 26, 34, 35, 37, 38, 40 | ~2,305,587+ |
 | REFLEXION | Runs 14, 15, 16, 17, 32 | ~974,966 |
 | TOURNAMENT | Run 27 | ~278,000 |
 | ADVOCATE | Runs 31, 36 | ~335,000 |
-| **Instrumented Total** | Runs 9-39 | **~7,501,381+** |
+| **Instrumented Total** | Runs 9-40 | **~7,501,381+** |
 
-**Note**: Runs 1-8 predated the token instrumentation described in `agents/AGENT_METRICS.md`. Per-agent token breakdowns are available for Runs 9-39.
+**Note**: Runs 1-8 predated the token instrumentation described in `agents/AGENT_METRICS.md`. Per-agent token breakdowns are available for Runs 9-40.
 
 ---
 

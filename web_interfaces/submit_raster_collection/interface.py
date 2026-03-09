@@ -1620,34 +1620,29 @@ class SubmitRasterCollectionInterface(BaseInterface):
             const baseUrl = window.location.origin;
 
             // Build Platform API payload for raster collection
-            // Note: Platform API uses data_type: "raster" and file_name as a list
+            // Platform API auto-detects data type from file extension
             // It auto-detects collection when file_name has >1 items
             const payload = {{
                 dataset_id: datasetId,
                 resource_id: resourceId,
                 version_id: versionId,
-                data_type: "raster",
                 operation: "CREATE",
                 container_name: containerName,
                 file_name: blobList  // Platform API expects file_name (list = collection)
             }};
 
-            // Collection ID (passed as part of metadata)
-            if (collectionId) {{
-                payload.collection_id = collectionId;
-            }}
-
             // Optional metadata
             if (title) payload.title = title;
-            if (collectionDescription) payload.collection_description = collectionDescription;
+            if (collectionDescription) payload.description = collectionDescription;
+            else if (description) payload.description = description;
             if (accessLevel) payload.access_level = accessLevel;
-            if (description) payload.description = description;
             if (tags) {{
                 payload.tags = tags.split(',').map(t => t.trim()).filter(t => t);
             }}
 
             // Processing options
             const processingOptions = {{}};
+            if (collectionId) processingOptions.collection_id = collectionId;
             if (rasterType && rasterType !== 'auto') processingOptions.raster_type = rasterType;
             if (outputTier && outputTier !== 'analysis') processingOptions.output_tier = outputTier;
             if (inputCrs) processingOptions.input_crs = inputCrs;

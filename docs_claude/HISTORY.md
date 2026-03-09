@@ -1,6 +1,6 @@
 # Project History
 
-**Last Updated**: 06 MAR 2026 (v0.9.14.3)
+**Last Updated**: 09 MAR 2026 (v0.9.16.1)
 **Active Log**: FEB - MAR 2026
 **Rolling Archive**: When this file exceeds ~600 lines, older content is archived with a UUID filename.
 
@@ -10,6 +10,120 @@
 - [HISTORY_e1fc3ce2.md](./HISTORY_e1fc3ce2.md) - DEC 2025 - JAN 2026
 
 This document tracks completed architectural changes and improvements to the Azure Geospatial ETL Pipeline.
+
+---
+
+## 09 MAR 2026: Zarr v3 Consolidated Metadata Fix (v0.9.16.1) ✅
+
+**Status**: ✅ **COMPLETE**
+**Trigger**: ZARR_NOTES.md investigation — ERA5 rechunk store invisible to TiTiler
+
+### The Problem
+
+`ds.to_zarr(..., consolidated=True)` for Zarr v3 writes an empty `consolidated_metadata.metadata: {}` block. xarray trusts this on read and concludes the store has zero variables — silently returning nothing. Worse than omitting consolidated metadata entirely (which would cause xarray to scan).
+
+### The Fix
+
+Explicit `zarr.consolidate_metadata(store)` call after every `ds.to_zarr()` for `zarr_format == 3`. Uses `FsspecStore.from_url()` with the same storage_options already in scope.
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `services/handler_ingest_zarr.py` | `zarr.consolidate_metadata()` after rechunk write |
+| `services/handler_netcdf_to_zarr.py` | `zarr.consolidate_metadata()` after convert write |
+
+### Verification
+
+Both CMIP6 tasmax and ERA5 small-sample rechunk jobs produce visible variables on TiTiler `/xarray/variables` endpoint and render tiles (HTTP 200).
+
+---
+
+## 08-09 MAR 2026: Zarr Pipeline Observability — Tier 1 & Tier 2 (v0.9.16.0) ✅
+
+**Status**: ✅ **COMPLETE**
+**Trigger**: 27GB ERA5 rechunk job had 30+ min "black hole" — only memory watchdog pulse visible during `ds.to_zarr()`
+
+### Achievement
+
+Added progress logging (Tier 1) and structured CHECKPOINT events (Tier 2) to all zarr pipeline handlers. `JobEventType.CHECKPOINT` (already in schema) now emitted at operation boundaries.
+
+### Tier 1 — Inline Progress Logging
+
+| Handler | Logs Added |
+|---------|-----------|
+| `ingest_zarr_validate` | After `xr.open_zarr()` — vars, blob count, dims |
+| `ingest_zarr_copy` | Every ~10% of blob loop — `copied/total (pct%) [elapsed]` |
+| `ingest_zarr_rechunk` | At each phase: zarr_opened, rechunk_applied, pre_cleanup, write_started (with chunk count estimate), write_complete (with timing) |
+| `netcdf_convert` | After dataset open (file count, vars, dims) + write_started/write_complete with timing |
+
+### Tier 2 — Structured CHECKPOINT Events
+
+`_emit_checkpoint(params, name, data)` helper wraps `JobEventRepository.record_task_event()` with fail-safe. Duplicated in both handler files (avoids circular import).
+
+| Handler | Checkpoints |
+|---------|------------|
+| `ingest_zarr_copy` | `copy_started`, `copy_progress` (every ~10%), `copy_complete` |
+| `ingest_zarr_rechunk` | `zarr_opened`, `rechunk_applied`, `pre_cleanup_done`, `zarr_write_started`, `zarr_write_complete` |
+| `netcdf_convert` | `dataset_opened`, `zarr_write_started`, `zarr_write_complete` |
+
+### Platform Status Integration
+
+| Change | Location |
+|--------|----------|
+| `progress` field on default status (when `job_status == "processing"`) | `trigger_platform_status.py` |
+| `checkpoints` array in `?detail=full` response | `trigger_platform_status.py` |
+| `_get_latest_checkpoint()` + `_get_latest_checkpoints()` helpers | `trigger_platform_status.py` |
+
+### Files Modified (3 files)
+
+| File | Changes |
+|------|---------|
+| `services/handler_ingest_zarr.py` | `_emit_checkpoint()` helper + logging + events in validate, copy, rechunk |
+| `services/handler_netcdf_to_zarr.py` | `_emit_checkpoint()` helper + logging + events in netcdf_convert |
+| `triggers/trigger_platform_status.py` | Checkpoint helpers + `progress` field + `detail.checkpoints` |
+
+---
+
+## 08 MAR 2026: SIEGE Run 13-14 Fixes (v0.9.14.4 → v0.9.16.1) ✅
+
+**Status**: ✅ **COMPLETE**
+**Trigger**: SIEGE Runs 13-14 (Runs 38, 40)
+
+### SIEGE Run 13 Fixes (v0.9.14.4, 07 MAR 2026)
+
+| Bug | Fix | File |
+|-----|-----|------|
+| **SG13-1** | `_build_zarr_encoding()` format-aware — v2: `numcodecs.Blosc`+`"compressor"`, v3: `BloscCodec`+`"compressors"` | `handler_netcdf_to_zarr.py` |
+| **SG13-4** | Three-tier container inference in `_build_outputs_block()` — cog result → zarr URL → blob_path prefix | `trigger_platform_status.py` |
+| **SG13-6** | Same root cause as SG13-1 — `zarr_format` param controls v2/v3 output | Multiple |
+
+### SIEGE Run 14 Fixes (v0.9.16.0-16.1, 08 MAR 2026)
+
+| Bug | Fix | File |
+|-----|-----|------|
+| **SG14-1** | STAC URLs gated behind `approval_state == 'approved'` — null pre-approval | `trigger_platform_status.py` |
+| **SG14-2** | `_resolve_release()` path 3 operation-aware for revoke — falls back to `get_latest()` | `trigger_approvals.py` |
+| **SG14-3** | Catalog URLs use `/vsiaz/` (raster) and `abfs://` (zarr) — consistent with status | `platform_catalog_service.py` |
+| **SG14-5** | Unpublish accepts `reviewer` as standard field — `deleted_by` deprecated | `unpublish.py` |
+
+### Also Fixed
+
+- **AUD-R1-1**: `row_factory=dict_row` on 3 cursors in `trigger_approvals.py` — bulk status lookup was returning `lookup_error: true`
+
+### Remaining Known Bugs
+
+| Bug | Severity | Description |
+|-----|----------|-------------|
+| ID-1 | MEDIUM | No authorization model on approvals (design limitation) |
+| SG13-2 | MEDIUM | Catalog lookup requires version_id — no "get latest" path |
+| SG13-3 | MEDIUM | TiTiler tilejson URLs missing WebMercatorQuad path segment in catalog |
+| SG13-5 | LOW | Unpublish with force_approved fails on STAC collection naming mismatch |
+| SG11-1 | LOW | version_id not validated against version_ordinal (cosmetic) |
+| PRV-8 | LOW | XSS in stored free-text fields (safe at API, dangerous in UI) |
+| PRV-9 | LOW | 404 instead of 405 for unsupported HTTP methods (Azure Functions limitation) |
+| SG-9 | LOW | dbadmin/stats returns 404 |
+| DIAG-1 | LOW | dbadmin/diagnostics/all returns 404 |
 
 ---
 

@@ -3,7 +3,7 @@
 # ============================================================================
 # STATUS: Container Definition - Docker image for long-running GDAL operations
 # PURPOSE: Build Python 3.12 + GDAL environment for processing long-running-tasks queue
-# LAST_REVIEWED: 01 MAR 2026
+# LAST_REVIEWED: 09 MAR 2026
 # ============================================================================
 #
 # This Docker image runs the same codebase as the Azure Functions app,
@@ -25,10 +25,10 @@
 # Official OSGeo GDAL image - Python + GDAL pre-configured
 # Using ubuntu-full for comprehensive driver support on heavy ETL tasks
 # See: https://github.com/OSGeo/gdal/blob/master/docker/README.md
-FROM ghcr.io/osgeo/gdal:ubuntu-full-3.10.1
+FROM ghcr.io/osgeo/gdal:ubuntu-full-3.12.2
 
 # For Production use JFROG Artifactory base image (uncomment below)
-#FROM artifactory.worldbank.org/itsdt-docker-virtual/ubuntu-full:3.10.1
+#FROM artifactory.worldbank.org/itsdt-docker-virtual/ubuntu-full:3.12.2
 
 # Install additional system dependencies:
 # - python3-pip: pip for Python 3 (not included in ubuntu-small)
@@ -51,7 +51,7 @@ COPY requirements-docker.txt .
 RUN python3 -m pip install --no-cache-dir --break-system-packages --ignore-installed -r requirements-docker.txt
 
 # Rebuild GDAL Python bindings against numpy 2.x
-# The base image ships GDAL compiled against numpy 1.x ABI. After pip
+# The base image ships GDAL 3.12.2 compiled against numpy 1.x ABI. After pip
 # installs numpy 2.x above, we must recompile the GDAL Python bindings
 # to match the new ABI. Uses the same GDAL C library already in the image.
 # Requires g++ (not in runtime image), installed and removed in same layer.

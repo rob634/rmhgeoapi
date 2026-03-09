@@ -5,10 +5,10 @@
 # and VirtualiZarr pipeline packages.
 #
 # NOTE: GDAL is NOT listed here - it comes pre-installed in the base image
-# (ghcr.io/osgeo/gdal:ubuntu-full-3.10.1). The Dockerfile rebuilds GDAL
+# (ghcr.io/osgeo/gdal:ubuntu-full-3.12.2). The Dockerfile rebuilds GDAL
 # Python bindings after pip install to match the numpy 2.x ABI.
 #
-# Updated: 01 MAR 2026 - numpy 2.x migration, CVE audit, VirtualiZarr deps
+# Updated: 09 MAR 2026 - GDAL 3.12.2 base image, rasterio 1.5+, pyogrio 0.12+
 # ============================================================================
 
 # === Azure SDK ===
@@ -23,8 +23,9 @@ azure-monitor-opentelemetry>=1.6.0
 
 # === Geospatial Core ===
 geopandas>=1.1.2                      # CVE-2025-69662 (SQL injection) fixed in 1.1.2
+pyogrio>=0.12.0                       # GDAL 3.12 compatibility (arrow/parquet fixes)
 psycopg[binary]>=3.2.0
-rasterio>=1.4.2
+rasterio>=1.5.0
 rio-cogeo>=5.0.0
 rio-stac>=0.10.0
 

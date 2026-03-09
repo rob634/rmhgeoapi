@@ -45,8 +45,8 @@ Usage:
 # VERSION
 # ============================================================================
 # Semantic versioning follows MAJOR.MINOR.PATCH.BUILD
-# V0.9 - Asset and Release data models and semantic versioning workflows
-__version__ = "0.9.17.0"
+# V0.10 - update docker image to gdal 3.12 and added full support for netcdf and zarr
+__version__ = "0.10.0.0"
 
 import threading
 from typing import Optional

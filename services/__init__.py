@@ -61,6 +61,7 @@ from .tiling_extraction import extract_tiles
 from .unpublish_handlers import (
     inventory_raster_item,
     inventory_vector_item,
+    inventory_vector_multi_source,
     inventory_zarr_item,
     delete_blob,
     drop_postgis_table,
@@ -72,6 +73,9 @@ from .handler_process_raster_complete import process_raster_complete
 
 # Docker Vector ETL handler (V0.8 - single stage with checkpoints)
 from .handler_vector_docker_complete import vector_docker_complete
+
+# Multi-source vector collection handler (V0.9 - N files or N layers -> N tables)
+from .handler_vector_multi_source import vector_multi_source_complete
 
 # Docker Raster Collection handler (V0.8 - sequential checkpoint-based)
 from .handler_raster_collection_complete import raster_collection_complete
@@ -154,10 +158,12 @@ ALL_HANDLERS = {
 
     # Vector handlers (Docker - single stage with checkpoints)
     "vector_docker_complete": vector_docker_complete,
+    "vector_multi_source_complete": vector_multi_source_complete,
 
     # Unpublish handlers
     "unpublish_inventory_raster": inventory_raster_item,
     "unpublish_inventory_vector": inventory_vector_item,
+    "unpublish_inventory_vector_multi": inventory_vector_multi_source,
     "unpublish_inventory_zarr": inventory_zarr_item,
     "unpublish_delete_blob": delete_blob,
     "unpublish_drop_table": drop_postgis_table,

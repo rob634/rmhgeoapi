@@ -1505,6 +1505,216 @@ def validate_table_name_syntax(params: Dict[str, Any], config: Dict[str, Any]) -
 
 
 # ============================================================================
+# MULTI-SOURCE VECTOR VALIDATORS (08 MAR 2026)
+# ============================================================================
+
+
+@register_validator("multi_source_mode")
+def validate_multi_source_mode(params: Dict[str, Any], config: Dict[str, Any]) -> ValidatorResult:
+    """
+    Validate mutual exclusivity of P1 (multi-file) vs P3 (multi-layer GPKG) modes.
+
+    The 8-constraint matrix:
+        1. blob_list + layer_names -> REJECT (can't combine modes)
+        2. blob_list without layer_names -> OK (P1 multi-file)
+        3. blob_name + layer_names + gpkg -> OK (P3 multi-layer)
+        4. blob_name + layer_names + NOT gpkg -> REJECT (layer_names only for GPKG)
+        5. blob_list with < 2 items -> REJECT (need >= 2 files)
+        6. layer_names with < 2 items -> REJECT (need >= 2 layers)
+        7. Neither blob_list nor (blob_name + layer_names) -> REJECT (must specify a mode)
+        8. All files in blob_list must share file_extension -> REJECT if mismatch
+
+    Config options:
+        blob_list_param: str - Parameter for blob list (default: 'blob_list')
+        blob_name_param: str - Parameter for blob name (default: 'blob_name')
+        layer_names_param: str - Parameter for layer names (default: 'layer_names')
+        file_extension_param: str - Parameter for file extension (default: 'file_extension')
+        error: str - Optional custom error message (used as fallback)
+
+    Example:
+        resource_validators = [
+            {
+                'type': 'multi_source_mode',
+                'blob_list_param': 'blob_list',
+                'blob_name_param': 'blob_name',
+                'layer_names_param': 'layer_names',
+                'file_extension_param': 'file_extension',
+            }
+        ]
+    """
+    blob_list_param = config.get('blob_list_param', 'blob_list')
+    blob_name_param = config.get('blob_name_param', 'blob_name')
+    layer_names_param = config.get('layer_names_param', 'layer_names')
+    file_ext_param = config.get('file_extension_param', 'file_extension')
+
+    blob_list = params.get(blob_list_param)
+    blob_name = params.get(blob_name_param)
+    layer_names = params.get(layer_names_param)
+    file_extension = (params.get(file_ext_param) or '').lower()
+
+    has_blob_list = blob_list is not None and isinstance(blob_list, list) and len(blob_list) > 0
+    has_blob_name = blob_name is not None and blob_name != ''
+    has_layer_names = layer_names is not None and isinstance(layer_names, list) and len(layer_names) > 0
+
+    # ---- Constraint 1: blob_list + layer_names -> REJECT ----
+    if has_blob_list and has_layer_names:
+        error_msg = (
+            "Cannot combine 'blob_list' with 'layer_names'. Choose ONE mode:\n"
+            "  P1 (multi-file): provide 'blob_list' (list of file paths)\n"
+            "  P3 (multi-layer GPKG): provide 'blob_name' (single .gpkg) + 'layer_names'"
+        )
+        logger.warning(f"❌ multi_source_mode: {error_msg}")
+        return ValidatorResult(valid=False, message=error_msg)
+
+    # ---- Constraint 7: Neither mode specified -> REJECT ----
+    if not has_blob_list and not (has_blob_name and has_layer_names):
+        error_msg = config.get('error') or (
+            "Invalid multi-source configuration. Must specify a source mode:\n"
+            "  P1 (multi-file): provide 'blob_list' (list of file paths)\n"
+            "  P3 (multi-layer GPKG): provide 'blob_name' (single .gpkg) + 'layer_names'"
+        )
+        logger.warning(f"❌ multi_source_mode: {error_msg}")
+        return ValidatorResult(valid=False, message=error_msg)
+
+    # ---- P1 mode: blob_list ----
+    if has_blob_list:
+        # Constraint 5: Need at least 2 files
+        if len(blob_list) < 2:
+            error_msg = (
+                f"Multi-source P1 mode requires at least 2 files in 'blob_list' "
+                f"(got {len(blob_list)}). For single-file ingestion, use "
+                f"'vector_docker_etl' job type instead."
+            )
+            logger.warning(f"❌ multi_source_mode: {error_msg}")
+            return ValidatorResult(valid=False, message=error_msg)
+
+        # Constraint 8: All files must share the declared file_extension
+        if file_extension:
+            mismatched = []
+            for blob_path in blob_list:
+                # Extract extension from each blob path
+                blob_ext = blob_path.rsplit('.', 1)[-1].lower() if '.' in blob_path else ''
+                if blob_ext != file_extension:
+                    mismatched.append(blob_path)
+
+            if mismatched:
+                if len(mismatched) > 5:
+                    preview = mismatched[:5]
+                    mismatch_detail = (
+                        "\n  - ".join(preview) +
+                        f"\n  ... and {len(mismatched) - 5} more"
+                    )
+                else:
+                    mismatch_detail = "\n  - ".join(mismatched)
+
+                error_msg = (
+                    f"All files in 'blob_list' must have extension '.{file_extension}' "
+                    f"(matching 'file_extension' parameter). Mismatched files:\n"
+                    f"  - {mismatch_detail}"
+                )
+                logger.warning(f"❌ multi_source_mode: {error_msg}")
+                return ValidatorResult(valid=False, message=error_msg)
+
+        # Constraint 2: blob_list without layer_names -> OK (P1)
+        logger.debug(f"✅ multi_source_mode: P1 mode validated ({len(blob_list)} files)")
+        return ValidatorResult(valid=True, message=None)
+
+    # ---- P3 mode: blob_name + layer_names ----
+    if has_blob_name and has_layer_names:
+        # Constraint 4: layer_names only valid for GPKG
+        if file_extension != 'gpkg':
+            error_msg = (
+                f"Multi-source P3 mode (layer_names) is only valid for GeoPackage files. "
+                f"Got file_extension='{file_extension}'. Only .gpkg files support "
+                f"multiple named layers."
+            )
+            logger.warning(f"❌ multi_source_mode: {error_msg}")
+            return ValidatorResult(valid=False, message=error_msg)
+
+        # Constraint 6: Need at least 2 layers
+        if len(layer_names) < 2:
+            error_msg = (
+                f"Multi-source P3 mode requires at least 2 entries in 'layer_names' "
+                f"(got {len(layer_names)}). For single-layer ingestion, use "
+                f"'vector_docker_etl' job type instead."
+            )
+            logger.warning(f"❌ multi_source_mode: {error_msg}")
+            return ValidatorResult(valid=False, message=error_msg)
+
+        # Constraint 3: blob_name + layer_names + gpkg -> OK (P3)
+        logger.debug(
+            f"✅ multi_source_mode: P3 mode validated "
+            f"({len(layer_names)} layers from {blob_name})"
+        )
+        return ValidatorResult(valid=True, message=None)
+
+    # Should not reach here, but guard
+    error_msg = config.get('error') or "Unexpected multi-source mode configuration"
+    logger.warning(f"❌ multi_source_mode: {error_msg}")
+    return ValidatorResult(valid=False, message=error_msg)
+
+
+@register_validator("source_count_limit")
+def validate_source_count_limit(params: Dict[str, Any], config: Dict[str, Any]) -> ValidatorResult:
+    """
+    Validate that source count does not exceed MAX_VECTOR_SOURCES.
+
+    Counts sources from blob_list (P1) or layer_names (P3) and checks
+    against the configured limit from VectorDefaults.MAX_VECTOR_SOURCES.
+
+    Config options:
+        blob_list_param: str - Parameter for blob list (default: 'blob_list')
+        layer_names_param: str - Parameter for layer names (default: 'layer_names')
+        error: str - Optional custom error message
+
+    Example:
+        resource_validators = [
+            {
+                'type': 'source_count_limit',
+                'blob_list_param': 'blob_list',
+                'layer_names_param': 'layer_names',
+                'error': 'Source count exceeds MAX_VECTOR_SOURCES limit.'
+            }
+        ]
+    """
+    from config.defaults import VectorDefaults
+
+    blob_list_param = config.get('blob_list_param', 'blob_list')
+    layer_names_param = config.get('layer_names_param', 'layer_names')
+
+    blob_list = params.get(blob_list_param)
+    layer_names = params.get(layer_names_param)
+    max_sources = VectorDefaults.MAX_VECTOR_SOURCES
+
+    # Determine source count from whichever mode is active
+    if blob_list and isinstance(blob_list, list) and len(blob_list) > 0:
+        source_count = len(blob_list)
+        source_label = "files in 'blob_list'"
+    elif layer_names and isinstance(layer_names, list) and len(layer_names) > 0:
+        source_count = len(layer_names)
+        source_label = "layers in 'layer_names'"
+    else:
+        # No sources specified -- multi_source_mode validator handles this
+        logger.debug("✅ source_count_limit: Skipped (no sources to count)")
+        return ValidatorResult(valid=True, message=None)
+
+    if source_count > max_sources:
+        error_msg = config.get('error') or (
+            f"Source count ({source_count} {source_label}) exceeds "
+            f"MAX_VECTOR_SOURCES limit ({max_sources}). "
+            f"Split into multiple jobs with at most {max_sources} sources each."
+        )
+        logger.warning(f"❌ source_count_limit: {error_msg}")
+        return ValidatorResult(valid=False, message=error_msg)
+
+    logger.debug(
+        f"✅ source_count_limit: {source_count} {source_label} "
+        f"within limit ({max_sources})"
+    )
+    return ValidatorResult(valid=True, message=None)
+
+
+# ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
 
@@ -1560,4 +1770,7 @@ __all__ = [
     'validate_stac_item_exists',
     'validate_stac_collection_exists',
     'validate_stac_item_not_exists',
+    # Multi-source vector validators (08 MAR 2026)
+    'validate_multi_source_mode',
+    'validate_source_count_limit',
 ]

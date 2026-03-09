@@ -436,12 +436,14 @@ class TaskRoutingDefaults:
         # VECTOR ETL - DOCKER (V0.8 - geopandas + connection pooling)
         # =====================================================================
         "vector_docker_complete",         # V0.8: Consolidated vector ETL with checkpoints
+        "vector_multi_source_complete",   # V0.9: Multi-source vector collection ETL
 
         # =====================================================================
         # UNPUBLISH OPERATIONS (V0.9 - moved from functionapp-tasks)
         # =====================================================================
         "unpublish_inventory_raster",
         "unpublish_inventory_vector",
+        "unpublish_inventory_vector_multi",
         "unpublish_inventory_zarr",
         "unpublish_delete_blob",
         "unpublish_drop_table",
@@ -594,6 +596,9 @@ class VectorDefaults:
     AUTO_CHUNK_SIZING = True
     TARGET_SCHEMA = "geo"
     CREATE_SPATIAL_INDEXES = True
+
+    # Multi-source collection limits (08 MAR 2026)
+    MAX_VECTOR_SOURCES = 10  # Max files or GPKG layers per collection job
 
 
 # =============================================================================

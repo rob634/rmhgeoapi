@@ -31,7 +31,7 @@ extra='ignore' for forward compatibility (unknown keys logged and dropped).
 import logging
 import re
 from enum import Enum
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -199,6 +199,23 @@ class VectorProcessingOptions(BaseProcessingOptions):
         default=None,
         description="GeoPackage layer name to extract (defaults to first layer)"
     )
+    layer_names: Optional[List[str]] = Field(
+        default=None,
+        description=(
+            "GeoPackage layer names to extract as separate tables. "
+            "Only valid for .gpkg files. Max 10 layers."
+        )
+    )
+
+    @model_validator(mode='after')
+    def _validate_layer_options(self):
+        """layer_name (singular) and layer_names (plural) are mutually exclusive."""
+        if self.layer_name and self.layer_names:
+            raise ValueError(
+                "Cannot specify both 'layer_name' (single layer extraction) and "
+                "'layer_names' (multi-layer extraction). Use one or the other."
+            )
+        return self
 
 
 class RasterProcessingOptions(BaseProcessingOptions):

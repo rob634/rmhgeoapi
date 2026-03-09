@@ -544,6 +544,28 @@ class PlatformRequest(BaseModel):
             self.data_type == DataType.RASTER
         )
 
+    @property
+    def is_vector_collection(self) -> bool:
+        """Check if this is a multi-source vector request.
+
+        True when either:
+        - file_name is a list of 2+ files with data_type VECTOR (multi-file P1)
+        - file_name is a single .gpkg with layer_names specified (multi-layer P3)
+        """
+        if self.data_type != DataType.VECTOR:
+            return False
+        # P1: multi-file
+        if isinstance(self.file_name, list) and len(self.file_name) > 1:
+            return True
+        # P3: single GPKG with layer_names
+        if (isinstance(self.file_name, str)
+                and self.file_name.lower().endswith('.gpkg')
+                and self.processing_options
+                and hasattr(self.processing_options, 'layer_names')
+                and self.processing_options.layer_names):
+            return True
+        return False
+
 
 # ============================================================================
 # DATABASE MODELS - Thin Tracking (22 NOV 2025)

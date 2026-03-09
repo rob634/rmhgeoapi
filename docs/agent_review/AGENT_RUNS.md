@@ -1563,13 +1563,48 @@ All pipeline executions in chronological order.
 
 ---
 
+## Run 40: Platform API Full Regression (SIEGE Run 14)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 08 MAR 2026 |
+| **Pipeline** | SIEGE (Run 14) |
+| **Version** | v0.9.16.0 |
+| **Target** | Orchestrator + Docker Worker + TiTiler |
+| **Sequences** | 19 |
+| **Steps** | 147 |
+| **Pass** | 144 (98.0%) |
+| **Fail** | 3 |
+| **Service URL Probes** | 13/13 PASS |
+| **Findings** | 5 (2 MEDIUM, 3 LOW) |
+| **Output** | `agent_docs/SIEGE_RUN_14.md` |
+
+**Key Results**:
+- 17/19 sequences PASS. 1 FAIL (Seq 18 multi-revoke). 1 expected delta (zarr STAC pre-approval).
+- Zarr rechunk (SG13-1 from Run 38) is FIXED -- end-to-end rechunk works.
+- All 13 service URL probes pass: raster COG, vector OGC Features, VirtualiZarr, native Zarr, rechunked Zarr.
+- State machine guards (11a-11i), missing field validation (12a-12m), version conflict (409) all pass.
+- Overwrite workflows (Seq 10, 14, 15, 16, 17) all pass.
+
+**New Findings**:
+
+| ID | Severity | Description |
+|----|----------|-------------|
+| SG14-1 | MEDIUM | Zarr STAC materialization at completion (pre-approval) -- stac_collection/stac_item non-null before approve |
+| SG14-2 | MEDIUM | Cannot revoke non-latest approved release after latest is revoked |
+| SG14-3 | LOW | Status vs catalog URL scheme divergence (/vsiaz/ vs https://) |
+| SG14-4 | LOW | siege_config.json data_type_override unusable (extra='forbid' rejects it) |
+| SG14-5 | LOW | Unpublish uses deleted_by instead of reviewer (parameter divergence) |
+
+---
+
 ## Cumulative Token Usage
 
 | Pipeline | Runs | Total Tokens |
 |----------|------|-------------|
 | COMPETE | Runs 1-6, 9, 12, 19, 28, 29, 30, 33, 39 | ~2,663,632 |
 | GREENFIELD | Runs 7, 8, 10, 24 | ~944,196 |
-| SIEGE | Runs 11, 13, 18, 20, 21, 22, 23, 25, 26, 34, 35, 37 | ~2,305,587 (Run 37 tokens pending) |
+| SIEGE | Runs 11, 13, 18, 20, 21, 22, 23, 25, 26, 34, 35, 37, 40 | ~2,305,587+ |
 | REFLEXION | Runs 14, 15, 16, 17, 32 | ~974,966 |
 | TOURNAMENT | Run 27 | ~278,000 |
 | ADVOCATE | Runs 31, 36 | ~335,000 |

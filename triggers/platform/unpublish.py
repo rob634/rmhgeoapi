@@ -30,7 +30,8 @@ _UNPUBLISH_FIELDS = {
     'release_id', 'version_ordinal',  # SG2-1
     'data_type', 'table_name', 'schema_name', 'stac_item_id', 'collection_id',
     'dry_run', 'force_approved', 'delete_collection', 'delete_data_files',
-    'deleted_by',
+    'reviewer',
+    'deleted_by',  # DEPRECATED since v0.9.16.0 — use "reviewer" instead
 }
 
 from util_logger import LoggerFactory, ComponentType
@@ -249,7 +250,14 @@ def _try_revoke_release(original_request: ApiRequest, req_body: dict) -> None:
             release = release_repo.get_by_job_id(original_request.job_id)
 
         if release and release.approval_state.value == 'approved':
-            deleted_by = req_body.get('deleted_by', 'platform_unpublish')
+            # SG14-5: "reviewer" is the standard field (matches approve/reject/revoke).
+            # "deleted_by" is accepted for backward compatibility but deprecated.
+            if 'deleted_by' in req_body and 'reviewer' not in req_body:
+                logger.warning(
+                    "DEPRECATED: 'deleted_by' is deprecated in unpublish — "
+                    "please use 'reviewer' instead (consistent with approve/reject/revoke)"
+                )
+            deleted_by = req_body.get('reviewer') or req_body.get('deleted_by', 'platform_unpublish')
             from services.asset_approval_service import AssetApprovalService
             approval_svc = AssetApprovalService()
             approval_svc.revoke_release(

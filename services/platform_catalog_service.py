@@ -677,10 +677,9 @@ class PlatformCatalogService:
         # Generate TiTiler URLs if we have blob_path
         titiler_urls = {}
         if blob_path:
-            # Build full blob URL (COGs are stored in silver zone)
-            storage_account = self._config.storage.silver.account_name
+            # Build /vsiaz/ URL for GDAL/TiTiler access (matches status endpoint)
             container = "silver-cogs"  # COGs are stored in silver container
-            cog_url = f"https://{storage_account}.blob.core.windows.net/{container}/{blob_path}"
+            cog_url = f"/vsiaz/{container}/{blob_path}"
             encoded_url = quote_plus(cog_url)
 
             titiler_base = self._config.titiler_base_url
@@ -809,8 +808,6 @@ class PlatformCatalogService:
         # Build xarray TiTiler URLs
         xarray_urls = {}
         if blob_path:
-            storage_account = self._config.storage.silver.account_name
-
             # Determine container from output_mode
             if output_mode == 'zarr_store':
                 container = self._config.storage.silver.zarr
@@ -823,7 +820,8 @@ class PlatformCatalogService:
             if blob_path.startswith(f"{container}/"):
                 blob_path = blob_path[len(container) + 1:]
 
-            zarr_url = f"https://{storage_account}.blob.core.windows.net/{container}/{blob_path}"
+            # Build abfs:// URL for Azure Blob File System access (matches status endpoint)
+            zarr_url = f"abfs://{container}/{blob_path}"
             xarray_urls = self._config.generate_xarray_tile_urls(zarr_url)
 
         # Extract zarr metadata from cached STAC item if available

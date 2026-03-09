@@ -882,11 +882,25 @@ def _build_services_block(release, data_type: str, asset=None) -> Optional[dict]
     # STAC URLs via Service Layer (titiler-pgstac STAC API)
     # The Service Layer Docker app hosts STAC at /stac/ — this is the B2C endpoint.
     # Vector has no STAC — skip if already set to None above.
-    if data_type != "vector" and release.stac_collection_id:
+    # SG14-1: STAC URLs are only exposed AFTER approval. TiTiler serves raster/zarr
+    # tiles directly (via /vsiaz/ and abfs:// URLs) without needing STAC. STAC
+    # materialization to pgSTAC happens at approval time, so showing STAC URLs
+    # before approval would point to non-existent STAC items.
+    approval_state = release.approval_state.value if hasattr(release.approval_state, 'value') else str(release.approval_state)
+    if data_type != "vector" and release.stac_collection_id and approval_state == 'approved':
         stac_base = f"{config.titiler_base_url.rstrip('/')}/stac"
         services["stac_collection"] = f"{stac_base}/collections/{release.stac_collection_id}"
         if release.stac_item_id:
             services["stac_item"] = f"{stac_base}/collections/{release.stac_collection_id}/items/{release.stac_item_id}"
+
+    # =========================================================================
+    # DEPRECATED: "collection" is a backward-compatibility alias for
+    # "service_url". B2B consumers may reference services.collection.
+    # Canonical key is "service_url" — all new integrations MUST use that.
+    # TODO: Remove "collection" once all B2B consumers have migrated.
+    # DEPRECATED since v0.9.16.0 (08 MAR 2026)
+    # =========================================================================
+    services["collection"] = services["service_url"]  # DEPRECATED — use service_url
 
     # Return None only if no service_url was populated (no outputs to show)
     return services if services["service_url"] else None

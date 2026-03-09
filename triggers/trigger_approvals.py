@@ -168,9 +168,24 @@ def _resolve_release(
         }
 
     # 3. By request_id -- stored on Release
+    #    SG14-2 fix: get_by_request_id returns highest ordinal regardless of
+    #    approval_state. For revoke, we need an approved release — fall back to
+    #    get_latest (which filters approval_state='approved') using the asset_id
+    #    from whichever release the request_id resolves to.
     if request_id:
         release = release_repo.get_by_request_id(request_id)
         if release:
+            if operation == "revoke" and getattr(release, 'approval_state', None) != 'approved':
+                # The resolved release isn't approved — find the latest approved
+                # release for the same asset (e.g., v1 approved when v2 is revoked)
+                approved = release_repo.get_latest(release.asset_id)
+                if approved:
+                    return approved, None
+                return None, {
+                    "success": False,
+                    "error": f"No approved release found for request: {request_id}",
+                    "error_type": "NotFound"
+                }
             return release, None
         return None, {
             "success": False,

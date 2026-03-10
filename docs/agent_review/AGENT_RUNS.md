@@ -1620,6 +1620,33 @@ All pipeline executions in chronological order.
 
 ---
 
+## Run 41: GDAL 3.12.2 Upgrade Regression Test (SIEGE Run 15)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 09 MAR 2026 |
+| **Pipeline** | SIEGE |
+| **Scope** | Full regression test after GDAL 3.10.1 → 3.12.2 Docker base image upgrade |
+| **Version** | v0.10.0.0 (fresh schema rebuild) |
+| **Target** | rmhazuregeoapi @ v0.10.0.0, rmhheavyapi @ v0.10.0.0 (GDAL 3.12.2) |
+| **Sequences** | 19/19 executed |
+| **Pass Rate** | 16/19 PASS (84.2%) — 3 PARTIAL due to SG15-1 |
+| **GDAL regressions** | **NONE** — all geospatial pipelines correct with GDAL 3.12.2 |
+| **New bugs found** | 1 (SG15-1 HIGH: raster STAC datetime=null) |
+| **Output** | `agent_docs/SIEGE_RUN_15.md` |
+
+**Key Findings**:
+
+| ID | Severity | Description | GDAL Related? |
+|----|----------|-------------|---------------|
+| SG15-1 | HIGH | Raster STAC approval fails: `datetime=null` in `RasterMetadata.to_stac_item()` | NO — pre-existing code defect in `core/models/unified_metadata.py` L1429-1440 |
+
+**GDAL 3.12.2 Assessment**: No regressions. COG creation, vector ETL, NetCDF→Zarr, native Zarr ingest, ERA5 rechunk all produced correct outputs. TiTiler served tiles correctly from GDAL 3.12.2-generated COGs.
+
+**Projected 19/19 pass rate** once SG15-1 fixed (add `self.created_at` fallback to `RasterMetadata.to_stac_item()` when `datetime` would be null).
+
+---
+
 ## Recurring Review Patterns
 
 Two subsystems are designated for **regular re-review** using the COMPETE pipeline with full constitution enforcement. These are the highest-churn, highest-risk areas of the codebase — each has been the source of multiple SIEGE/TOURNAMENT findings across runs.

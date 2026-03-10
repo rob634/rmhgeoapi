@@ -946,9 +946,11 @@ class VectorMetadata(BaseMetadata):
             return dt.isoformat()
 
         # datetime represents WHEN THE DATA IS FROM, not when it was processed.
-        # If no temporal extent is extractable from the source data, set null.
-        # B2B consumers can provide temporal metadata at submit time; if they
-        # don't, null is correct — it signals "temporal context unknown".
+        # pgSTAC requires either datetime OR start_datetime+end_datetime (never all null).
+        # When no temporal extent is extractable, use sentinel 1999-12-31T00:00:00Z
+        # to signal "temporal context unknown" while satisfying pgSTAC constraints.
+        TEMPORAL_UNKNOWN = "1999-12-31T00:00:00Z"
+
         if self.extent and self.extent.temporal and self.extent.temporal.interval:
             interval = self.extent.temporal.interval[0]
             if interval[0] and interval[1]:
@@ -958,9 +960,9 @@ class VectorMetadata(BaseMetadata):
             elif interval[0]:
                 properties["datetime"] = interval[0]
             else:
-                properties["datetime"] = None
+                properties["datetime"] = TEMPORAL_UNKNOWN
         else:
-            properties["datetime"] = None
+            properties["datetime"] = TEMPORAL_UNKNOWN
 
         # Table Extension properties
         if self.feature_count is not None:
@@ -1423,9 +1425,11 @@ class RasterMetadata(BaseMetadata):
             return dt.isoformat()
 
         # datetime represents WHEN THE DATA IS FROM, not when it was processed.
-        # If no temporal extent is extractable from the source data, set null.
-        # B2B consumers can provide temporal metadata at submit time; if they
-        # don't, null is correct — it signals "temporal context unknown".
+        # pgSTAC requires either datetime OR start_datetime+end_datetime (never all null).
+        # When no temporal extent is extractable, use sentinel 1999-12-31T00:00:00Z
+        # to signal "temporal context unknown" while satisfying pgSTAC constraints.
+        TEMPORAL_UNKNOWN = "1999-12-31T00:00:00Z"
+
         if self.extent and self.extent.temporal and self.extent.temporal.interval:
             interval = self.extent.temporal.interval[0]
             if interval[0] and interval[1]:
@@ -1435,9 +1439,9 @@ class RasterMetadata(BaseMetadata):
             elif interval[0]:
                 properties["datetime"] = interval[0]
             else:
-                properties["datetime"] = None
+                properties["datetime"] = TEMPORAL_UNKNOWN
         else:
-            properties["datetime"] = None
+            properties["datetime"] = TEMPORAL_UNKNOWN
 
         # proj:* extension
         if self.crs:

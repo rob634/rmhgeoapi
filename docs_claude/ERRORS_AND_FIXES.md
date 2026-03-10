@@ -1524,6 +1524,71 @@ How to fix it
 
 ---
 
+### COD-SG151: Raster STAC Approval Fails — datetime=null Rejected by pgSTAC
+
+**Date**: 09 MAR 2026
+**Version**: v0.10.0.0
+**Severity**: HIGH — blocks ALL raster approvals
+**SIEGE Run**: 15 (Run 41)
+
+**Error Message**:
+```
+PgSTAC item insert failed: Either datetime (<NULL>) or both start_datetime (<NULL>)
+and end_datetime (<NULL>) must be set
+```
+
+**Sequences Affected**: SEQ 1 (Raster Approval), SEQ 3 (Multi-Version Raster), SEQ 4 (Unpublish — cascading)
+
+**Location**: `/core/models/unified_metadata.py` — `RasterMetadata.to_stac_item()` (lines ~1429-1440)
+
+**Root Cause**:
+`RasterMetadata.to_stac_item()` determines the STAC `datetime` field from `self.extent.temporal`. For rasters, `extent` only has a spatial component — `temporal` is always `None`. The code falls through to the `else` branch and sets:
+
+```python
+else:
+    properties["datetime"] = None  # ALWAYS hits this for rasters with no temporal extent
+```
+
+pgSTAC rejects items where `datetime` is null and neither `start_datetime` nor `end_datetime` is provided. The STAC spec requires one or the other.
+
+**Note**: `service_stac_metadata.py` correctly sets `raster_metadata.created_at = datetime.now(timezone.utc)` during COG extraction. This value exists on the model but is NOT used as a fallback in `to_stac_item()`.
+
+**Note**: `stac_validation.py` has a `repair_item(fix_datetime=True)` method that would fix this, but it is NOT called in the approval materialization path (`stac_materialization.py`).
+
+**This is NOT a GDAL 3.12.2 regression** — it is a pre-existing code defect that was exposed during SIEGE Run 15 regression testing.
+
+**Fix Required** (not yet applied):
+
+In `RasterMetadata.to_stac_item()`, replace the `else` branch that sets `datetime=None`:
+
+```python
+# CURRENT (broken):
+else:
+    properties["datetime"] = None
+
+# FIX: fall back to created_at when no temporal extent exists
+else:
+    fallback_dt = getattr(self, "created_at", None)
+    if fallback_dt:
+        if isinstance(fallback_dt, datetime):
+            properties["datetime"] = fallback_dt.isoformat().replace("+00:00", "Z")
+        else:
+            properties["datetime"] = str(fallback_dt)
+    else:
+        properties["datetime"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+```
+
+Also remove the intermediate `properties["datetime"] = None` assignment inside the temporal range branch (when `interval[0]` and `interval[1]` are both set, datetime should be null per STAC spec — that case IS correct for temporal ranges, only the no-temporal-extent fallback is broken).
+
+**Alternative Fix**: Call `repair_item(fix_datetime=True)` in `STACMaterializer.materialize_release()` after building the STAC item dict, before inserting into pgSTAC.
+
+**Prevention**:
+- When writing STAC items, always validate that `datetime` is non-null OR both `start_datetime` and `end_datetime` are provided
+- Add a STAC item datetime assertion to the approval path before pgSTAC write
+- The existing `repair_item()` in `stac_validation.py` provides this guard — wire it into the materialization path
+
+---
+
 ## Related Documents
 
 - `APPLICATION_INSIGHTS.md` - Log query patterns for debugging
@@ -1533,4 +1598,4 @@ How to fix it
 
 ---
 
-**Last Updated**: 06 MAR 2026
+**Last Updated**: 09 MAR 2026

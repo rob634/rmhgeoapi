@@ -355,6 +355,9 @@ def translate_to_coremachine(
 
             # GPKG layer selection (24 FEB 2026)
             'layer_name': opts.layer_name,
+
+            # Split views (09 MAR 2026)
+            'split_column': opts.split_column,
         }
 
     # ========================================================================

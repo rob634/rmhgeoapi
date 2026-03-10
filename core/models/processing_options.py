@@ -207,6 +207,20 @@ class VectorProcessingOptions(BaseProcessingOptions):
         )
     )
 
+    # Split views — per-value PostgreSQL views (09 MAR 2026)
+    split_column: Optional[str] = Field(
+        default=None,
+        description=(
+            "Column name to split into per-value PostgreSQL views. "
+            "Must be categorical (text, integer, boolean). Max 20 distinct values."
+        )
+    )
+    # Future: explicit value list (reserved, raises error if used)
+    split_values: Optional[List[str]] = Field(
+        default=None,
+        description="Reserved for future use. Explicit list of split values."
+    )
+
     @model_validator(mode='after')
     def _validate_layer_options(self):
         """layer_name (singular) and layer_names (plural) are mutually exclusive."""
@@ -214,6 +228,16 @@ class VectorProcessingOptions(BaseProcessingOptions):
             raise ValueError(
                 "Cannot specify both 'layer_name' (single layer extraction) and "
                 "'layer_names' (multi-layer extraction). Use one or the other."
+            )
+        return self
+
+    @model_validator(mode='after')
+    def _validate_split_options(self):
+        """Block split_values until explicit-list feature is implemented."""
+        if self.split_values is not None:
+            raise ValueError(
+                "split_values is reserved for future use. "
+                "Currently only split_column with auto-discovery is supported."
             )
         return self
 

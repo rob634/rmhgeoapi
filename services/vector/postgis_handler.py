@@ -1590,9 +1590,14 @@ class VectorToPostGISHandler:
                             f"Table {schema}.{table_name} already exists. "
                             f"To replace it, specify overwrite=true"
                         )
-                    # Drop existing table (overwrite=true)
-                    logger.info(f"🗑️ Dropping existing table {schema}.{table_name} (overwrite=true)")
-                    cur.execute(sql.SQL("DROP TABLE {schema}.{table}").format(
+                    # Drop existing table + dependent views (overwrite=true)
+                    logger.info(f"Dropping existing table {schema}.{table_name} CASCADE (overwrite=true)")
+                    try:
+                        from services.vector.view_splitter import cleanup_split_view_metadata
+                        cleanup_split_view_metadata(conn, table_name)
+                    except Exception as cleanup_err:
+                        logger.warning(f"Split view metadata cleanup failed (non-fatal): {cleanup_err}")
+                    cur.execute(sql.SQL("DROP TABLE IF EXISTS {schema}.{table} CASCADE").format(
                         schema=sql.Identifier(schema),
                         table=sql.Identifier(table_name)
                     ))

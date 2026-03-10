@@ -327,6 +327,7 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
             "execution_mode": "docker",
             "connection_pooling": True,
             "data_warnings": data_warnings if data_warnings else None,
+            "split_views": split_views_result,
             "vector_tile_urls": primary_result.get('vector_tile_urls'),
         }
 
@@ -981,6 +982,79 @@ def _process_single_table(
         indexes=indexes
     )
     _post_handler.analyze_table(table_name, schema)
+
+    # =====================================================================
+    # PHASE 3.7: Create Split Views (if split_column specified)
+    # =====================================================================
+    split_column = parameters.get('split_column')
+    split_views_result = None
+
+    if split_column:
+        logger.info(f"[{job_id[:8]}] Phase 3.7: Creating split views on column '{split_column}'")
+
+        from services.vector.view_splitter import (
+            validate_split_column,
+            discover_split_values,
+            create_split_views,
+            register_split_views,
+            cleanup_split_view_metadata,
+        )
+        from services.vector.column_sanitizer import sanitize_column_name as _sanitize_col
+
+        # Normalize user's column name to post-sanitization form
+        split_column_sanitized = _sanitize_col(split_column)
+        if split_column_sanitized != split_column:
+            logger.info(
+                f"[{job_id[:8]}] Split column sanitized: "
+                f"'{split_column}' -> '{split_column_sanitized}'"
+            )
+
+        with _post_handler._pg_repo._get_connection() as conn:
+            # Step 1: Validate column exists and has categorical type
+            col_info = validate_split_column(
+                conn, table_name, schema, split_column_sanitized
+            )
+            logger.info(
+                f"[{job_id[:8]}] Split column validated: "
+                f"'{split_column_sanitized}' type={col_info['data_type']}"
+            )
+
+            # Step 2: Discover distinct values (enforces cardinality limit)
+            values = discover_split_values(
+                conn, table_name, schema, split_column_sanitized
+            )
+            logger.info(f"[{job_id[:8]}] Found {len(values)} distinct values for split")
+
+            # Step 3: Clean up stale catalog entries (handles overwrite scenario)
+            cleanup_split_view_metadata(conn, table_name)
+
+            # Step 4: Create views (atomic - all-or-nothing in this transaction)
+            views = create_split_views(
+                conn, table_name, schema, split_column_sanitized, values
+            )
+
+            # Step 5: Register catalog entries (title, bbox, feature_count per view)
+            registered = register_split_views(
+                conn=conn,
+                views=views,
+                base_table_name=table_name,
+                schema=schema,
+                split_column=split_column_sanitized,
+                base_title=parameters.get('title'),
+                geometry_type=table_result['geometry_type'],
+                srid=table_result.get('srid', 4326),
+            )
+
+            conn.commit()
+
+        split_views_result = {
+            'split_column': split_column_sanitized,
+            'values': [str(v) for v in values],
+            'views_created': len(views),
+            'catalog_entries': registered,
+            'view_names': [v['view_name'] for v in views],
+        }
+        checkpoint_fn("split_views_created", split_views_result)
 
     # Phase 4: TiPG refresh
     tipg_collection_id = f"{schema}.{table_name}"

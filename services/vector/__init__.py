@@ -44,6 +44,13 @@ from .core import (
     log_gdf_memory,
 )
 
+# Split views (09 MAR 2026)
+from .view_splitter import (
+    create_split_views,
+    register_split_views,
+    cleanup_split_view_metadata,
+)
+
 __all__ = [
     # Type aliases
     'EventCallback',
@@ -64,4 +71,8 @@ __all__ = [
     'extract_geometry_info',
     'detect_temporal_extent',
     'log_gdf_memory',
+    # Split views
+    'create_split_views',
+    'register_split_views',
+    'cleanup_split_view_metadata',
 ]

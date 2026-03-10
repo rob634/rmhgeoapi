@@ -149,6 +149,11 @@ class VectorDockerETLJob(JobBaseMixin, JobBase):
             'default': None,
             'description': 'GeoPackage layer name to extract (optional, uses first layer if omitted)'
         },
+        'split_column': {
+            'type': 'str',
+            'default': None,
+            'description': 'Column name to split into per-value views (categorical only, max 20 values)'
+        },
         'converter_params': {
             'type': 'dict',
             'default': {},
@@ -368,6 +373,8 @@ class VectorDockerETLJob(JobBaseMixin, JobBase):
             'style',
             # Processing
             'chunk_size', 'indexes', 'create_tile_view', 'max_tile_vertices',
+            # Split views
+            'split_column',
             # Platform tracking
             '_platform_job_id',
         ]

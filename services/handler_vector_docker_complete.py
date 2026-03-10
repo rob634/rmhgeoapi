@@ -327,7 +327,7 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
             "execution_mode": "docker",
             "connection_pooling": True,
             "data_warnings": data_warnings if data_warnings else None,
-            "split_views": split_views_result,
+            "split_views": primary_result.get('split_views'),
             "vector_tile_urls": primary_result.get('vector_tile_urls'),
         }
 
@@ -1116,6 +1116,7 @@ def _process_single_table(
         "style_id": style_result.get('style_id', 'default'),
         "chunks_uploaded": upload_result.get('chunks_uploaded', 0),
         "vector_tile_urls": table_result.get('vector_tile_urls'),
+        "split_views": split_views_result,
     }
 
 

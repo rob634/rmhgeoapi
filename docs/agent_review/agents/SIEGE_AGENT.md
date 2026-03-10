@@ -470,6 +470,38 @@ Tests the `ingest_zarr_rechunk` handler — submitting a native Zarr with `rechu
 
 Note: `rechunk` MUST be inside `processing_options`, same as `overwrite`. The `ingest_zarr_rechunk` handler reads source Zarr via xarray, rechunks to 256×256 spatial / time=1 / Blosc+LZ4, and writes to silver-zarr.
 
+**Sequence 20: Vector Split Views Lifecycle (v0.10.0+)**
+
+Tests the P2 split views workflow — a single vector file with `split_column` parameter produces 1 base table + N PostgreSQL VIEWs, each discoverable as an independent TiPG collection.
+
+| Step | Action | Verify |
+|------|--------|--------|
+| 1 | POST `/api/platform/submit` with `vector_split_views` fixture from config (`processing_options: {split_column: "quadrant"}`) | request_id, job_id, job_type=vector_docker_etl |
+| 2 | Poll until completed | job_status=completed |
+| 3 | GET `/api/platform/status/{request_id}` → verify outputs contain `split_views` block | `split_views.views_created` = 4, `split_views.values` = ["NE", "NW", "SE", "SW"] |
+| 4 | **ASSERT STATUS SERVICES** (pre-approval): GET `/api/platform/status/{request_id}` → assert `services` block: `service_url` contains `/collections/geo.`, `tiles` contains `/{z}/{x}/{y}.pbf` | Services shape matches vector contract |
+| 5 | **PROBE BASE TABLE**: GET `{tipg_base}/collections/{schema}.{table_name}/items?limit=0` → expect 200, `numberMatched` = 3301 | Base table has all features |
+| 6 | **PROBE EACH SPLIT VIEW**: For each view_name in `split_views.view_names`: GET `{tipg_base}/collections/{schema}.{view_name}/items?limit=0` → expect 200, `numberMatched` > 0 | Each view is independently discoverable |
+| 7 | **COUNT VERIFICATION**: Sum of all view `numberMatched` values must equal base table `numberMatched` | No features lost or duplicated |
+| 8 | POST `/api/platform/approve` (version_id="v1") → verify approval succeeds | approval_state=approved |
+| 9 | **CHECKPOINT SV1**: Record all IDs, split_views block, view_names, feature counts per view, count verification result, and service URL probe results |
+
+**CHECKPOINT SV1**: Base table + N views all live. Count sum matches. Split views block in outputs.
+
+Note: `split_column` MUST be inside `processing_options`, same as `overwrite`. The column must exist in the uploaded data and be a categorical type (text, varchar, integer, boolean). Max 20 distinct values.
+
+**Sequence 21: Split Views Validation (Negative Tests)**
+
+Tests error handling for invalid split_column usage.
+
+| # | Action | Expected | Checkpoint |
+|---|--------|----------|------------|
+| 21a | POST `/api/platform/submit` with `vector_split_views_invalid_column` fixture (`split_column: "nonexistent_column"`) → poll until result | Job FAILS with error mentioning column not found | SVV-1 |
+| 21b | POST `/api/platform/submit` with vector file + `split_column` set to a float column (e.g., `"mean"`) → poll until result | Job FAILS with error mentioning type not allowed for split | SVV-2 |
+| 21c | POST `/api/platform/submit` with vector file + `split_column: "quadrant"` but NO `overwrite` and base table still exists from Seq 20 | Job FAILS with table already exists error OR succeeds with overwrite guard | SVV-3 |
+
+**CHECKPOINT SVV**: All 3 negative cases rejected gracefully with informative error messages (not 500s).
+
 ### Lancer Checkpoint Format
 
 ```markdown
@@ -682,6 +714,8 @@ Assessment: {HEALTHY | DEGRADED | DOWN}
 | 17. Overwrite Race Guard | {n} | {n} | {n} | {n} |
 | 18. Multi-Revoke Overwrite Target | {n} | {n} | {n} | {n} |
 | 19. Zarr Rechunk Path | {n} | {n} | {n} | {n} |
+| 20. Vector Split Views | {n} | {n} | {n} | {n} |
+| 21. Split Views Validation (3) | {n} | {n} | {n} | {n} |
 
 ## Services Block Contract (Status Endpoint)
 
@@ -726,6 +760,13 @@ during lifecycle sequences and re-verified by Auditor for any failures.
 | 6 | Zarr info (native) | /xarray/info | {url} | {code} | PASS/FAIL |
 | 19 | Zarr variables (rechunk) | /xarray/variables | {url} | {code} | PASS/FAIL |
 | 19 | Zarr info (rechunk) | /xarray/info | {url} | {code} | PASS/FAIL |
+| 20 | Split views base table | /vector/collections/{table} | {url} | {code} | PASS/FAIL |
+| 20 | Split views base items | /vector/collections/{table}/items | {url} | {code} | PASS/FAIL |
+| 20 | Split view NE | /vector/collections/{table}_quadrant_ne/items | {url} | {code} | PASS/FAIL |
+| 20 | Split view NW | /vector/collections/{table}_quadrant_nw/items | {url} | {code} | PASS/FAIL |
+| 20 | Split view SE | /vector/collections/{table}_quadrant_se/items | {url} | {code} | PASS/FAIL |
+| 20 | Split view SW | /vector/collections/{table}_quadrant_sw/items | {url} | {code} | PASS/FAIL |
+| 20 | Split views count sum | sum(views) == base | -- | -- | PASS/FAIL |
 
 Assessment: {ALL PASS | DEGRADED | UNAVAILABLE}
 - **ALL PASS**: Platform is fully operational — ETL data is discoverable and servable

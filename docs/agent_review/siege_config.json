@@ -252,6 +252,30 @@
         "rechunk": true
       },
       "description": "Native Zarr with rechunk=true — tests ingest_zarr_rechunk handler (Seq 19). Same source file as zarr_era5_global but with rechunk processing option."
+    },
+    "vector_split_views": {
+      "dataset_id_suffix": "split-views-test",
+      "resource_id": "categorized",
+      "file_name": "good-data/11_categorized.geojson",
+      "container_name": "wargames",
+      "processing_options": {
+        "split_column": "quadrant"
+      },
+      "expected_split_values": ["NE", "NW", "SE", "SW"],
+      "expected_view_count": 4,
+      "expected_total_features": 3301,
+      "description": "GeoJSON with categorical 'quadrant' column (4 values: NE/NW/SE/SW, ~825 features each). Tests P2 split views — single file → 1 table + N views as independent TiPG endpoints (Seq 20)."
+    },
+    "vector_split_views_invalid_column": {
+      "dataset_id_suffix": "split-invalid-test",
+      "resource_id": "bad-split",
+      "file_name": "good-data/11_categorized.geojson",
+      "container_name": "wargames",
+      "processing_options": {
+        "split_column": "nonexistent_column"
+      },
+      "expected_error": "Column 'nonexistent_column' not found",
+      "description": "Split views with invalid column name — should fail gracefully (Seq 21 validation)."
     }
   },
   "invalid_files": {
@@ -637,7 +661,8 @@
     "guaranteed_keys": ["service_url", "preview", "stac_collection", "stac_item", "viewer", "tiles"],
     "type_specific_keys": {
       "zarr": ["variables"],
-      "vector_multi_table": ["tables"]
+      "vector_multi_table": ["tables"],
+      "vector_split_views": ["split_views"]
     },
     "key_assertions": {
       "raster": {

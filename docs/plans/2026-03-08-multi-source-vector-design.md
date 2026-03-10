@@ -1,7 +1,7 @@
 # Multi-Source Vector ETL — Design Document
 
 **Created**: 08 MAR 2026
-**Status**: DRAFT
+**Status**: IMPLEMENTED (v0.10.0.2, 10 MAR 2026) — P1+P3 deployed, P2 verified end-to-end
 **Relates to**: V0.9_VIEWS.md (Split Views), multi-table-release-design.md, geometry-type-splitting.md
 
 ---

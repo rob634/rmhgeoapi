@@ -1,6 +1,6 @@
 # Working Backlog - ADO Aligned
 
-**Last Updated**: 09 MAR 2026
+**Last Updated**: 10 MAR 2026
 **Source of Truth**: [V0.8_ADO_WORKITEMS.md](/ado_wiki/V0.8_ADO_WORKITEMS.md)
 **Structure**: EPIC → FEATURE → User Story → Tasks
 
@@ -52,6 +52,28 @@ Zarr chunking optimization for tile serving added in v0.9.13.4.
 | Zarr chunking optimization | ✅ Done | Optimized chunking (256×256 spatial, time=1, Blosc+LZ4) in both pipelines (v0.9.13.4) |
 | Zarr pipeline observability | ✅ Done | Tier 1 progress logging + Tier 2 structured CHECKPOINT events in all zarr handlers (v0.9.16.0) |
 | Zarr v3 consolidated metadata fix | ✅ Done | Explicit `zarr.consolidate_metadata()` post-write for Zarr v3 stores — fixes empty variables on TiTiler (v0.9.16.1) |
+
+### US 1.7: Multi-Table Vector Workflows ✅ COMPLETE (v0.10.0.2)
+
+Three patterns for producing multiple TiPG endpoints from vector data:
+
+| Pattern | Status | Description |
+|---------|--------|-------------|
+| **P2: Split Views** | ✅ Done | Single file → 1 table + N views by categorical column. `split_column` param on `vector_docker_etl`. **Verified end-to-end 10 MAR 2026.** |
+| **P1: Multi-file** | ✅ Implemented | N files → N PostGIS tables. `vector_multi_source_docker` job type. Needs live test. |
+| **P3: GPKG Multi-layer** | ✅ Implemented | 1 GPKG + `layer_names` → N tables. Same job type as P1. Needs live test. |
+
+| Task | Status | Details |
+|------|--------|---------|
+| P2 split view implementation | ✅ Done | `services/vector/view_splitter.py` + Phase 3.7 in handler (v0.10.0.1) |
+| P2 split view bug fix | ✅ Done | `split_views_result` scope fix in return dict (v0.10.0.2) |
+| P2 end-to-end test | ✅ Done | `11_categorized.geojson` with `quadrant` column → 4 views, all live on TiPG |
+| P1 multi-file implementation | ✅ Done | `handler_vector_multi_source.py` + validators (v0.10.0.1) |
+| P1 end-to-end test | 🔲 Pending | Needs 2+ GeoJSON files in wargames container |
+| P3 GPKG multi-layer implementation | ✅ Done | Same handler as P1, uses `pyogrio.list_layers()` (v0.10.0.1) |
+| P3 end-to-end test | 🔲 Pending | Needs multi-layer GPKG in wargames container |
+| Multi-source unpublish | ✅ Done | 3-stage: inventory → drop → cleanup (v0.10.0.1) |
+| Design doc | ✅ Done | `docs/plans/2026-03-08-multi-source-vector-design.md` |
 
 ### EN 1.6: DAG Orchestration Migration `[FUTURE]`
 
@@ -314,6 +336,8 @@ Migrated 37 occurrences across 22 code files from raw `req.get_json()` to `parse
 
 | Date | Feature | Task |
 |------|---------|------|
+| 10 MAR 2026 | Vector ETL | **P2 Split Views verified end-to-end** — single file + `split_column` → N PostgreSQL VIEWs as independent TiPG endpoints (v0.10.0.2) |
+| 10 MAR 2026 | Vector ETL | Multi-source vector ETL (P1 multi-file + P3 GPKG multi-layer) implemented and deployed (v0.10.0.1) |
 | 09 MAR 2026 | Zarr Pipeline | Zarr v3 consolidated metadata fix — explicit `zarr.consolidate_metadata()` post-write, fixes TiTiler empty variables (v0.9.16.1) |
 | 09 MAR 2026 | Observability | Zarr pipeline observability — Tier 1 progress logging + Tier 2 CHECKPOINT events in all zarr handlers, `progress` field on platform status (v0.9.16.0) |
 | 08 MAR 2026 | SIEGE | SIEGE Run 14 (Run 40): 98.0% pass rate, 17/19 sequences PASS. SG14-1 to SG14-5 findings, 4/5 fixed. |

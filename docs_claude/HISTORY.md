@@ -1,6 +1,6 @@
 # Project History
 
-**Last Updated**: 09 MAR 2026 (v0.9.16.1)
+**Last Updated**: 10 MAR 2026 (v0.10.0.2)
 **Active Log**: FEB - MAR 2026
 **Rolling Archive**: When this file exceeds ~600 lines, older content is archived with a UUID filename.
 
@@ -10,6 +10,116 @@
 - [HISTORY_e1fc3ce2.md](./HISTORY_e1fc3ce2.md) - DEC 2025 - JAN 2026
 
 This document tracks completed architectural changes and improvements to the Azure Geospatial ETL Pipeline.
+
+---
+
+## 10 MAR 2026: Split Views — Single File to Multiple TiPG Endpoints (v0.10.0.2) ✅
+
+**Status**: ✅ **COMPLETE** — Verified end-to-end in production
+**Priority**: P2 — Most critical multi-table workflow (one table, N category-based views)
+
+### What It Does
+
+A single vector file is uploaded to one PostGIS table, then a categorical column (e.g., `quadrant`, `admin_level`, `land_type`) generates N PostgreSQL VIEWs. Each view is automatically discovered by TiPG as an independent OGC Features collection with its own endpoint.
+
+### How To Use
+
+Submit a standard `vector_docker_etl` job with `split_column` parameter:
+
+```json
+{
+  "blob_name": "admin_boundaries.geojson",
+  "file_extension": "geojson",
+  "table_name": "admin_boundaries",
+  "split_column": "admin_level"
+}
+```
+
+This creates:
+- `geo.admin_boundaries` — base table (all features)
+- `geo.admin_boundaries_admin_level_0` — VIEW for admin_level=0
+- `geo.admin_boundaries_admin_level_1` — VIEW for admin_level=1
+- etc.
+
+### Constraints
+
+- **MAX_SPLIT_CARDINALITY = 20** — hard cap on distinct values
+- **Allowed types**: text, varchar, integer, smallint, bigint, boolean (NOT float/geometry/json)
+- **View naming**: `{table}_{column}_{value}`, truncated to PostgreSQL's 63-char identifier limit
+- **Idempotent**: `CREATE OR REPLACE VIEW` + catalog cleanup on overwrite
+- **CASCADE cleanup**: `DROP TABLE ... CASCADE` removes dependent views
+
+### Implementation (7 files, 586 insertions)
+
+| File | Change |
+|------|--------|
+| `services/vector/view_splitter.py` | NEW — validate, discover, create views, register catalog (~370 lines) |
+| `services/handler_vector_docker_complete.py` | Phase 3.7 split views block + return dict fix |
+| `services/vector/postgis_handler.py` | `DROP TABLE ... CASCADE` + cleanup stale view metadata |
+| `services/vector/__init__.py` | Export split view functions |
+| `core/models/processing_options.py` | `split_column` + `split_values` fields |
+| `services/platform_translation.py` | Pass `split_column` to job params |
+| `jobs/vector_docker_etl.py` | `split_column` in schema + passthrough |
+
+### Verification (10 MAR 2026)
+
+Test: `11_categorized.geojson` (3,301 H3 hex polygons) with `split_column: "quadrant"` (4 values: NE, NW, SE, SW)
+
+| Collection | Features | TiPG Status |
+|------------|----------|-------------|
+| `geo.split_test_quadrant` (base) | 3,301 | Live |
+| `geo.split_test_quadrant_quadrant_ne` | 825 | Live |
+| `geo.split_test_quadrant_quadrant_nw` | 826 | Live |
+| `geo.split_test_quadrant_quadrant_se` | 825 | Live |
+| `geo.split_test_quadrant_quadrant_sw` | 825 | Live |
+
+Sum of views = 3,301 (matches base table exactly).
+
+### Bug Fixed During Deployment
+
+`NameError: name 'split_views_result' is not defined` — variable was scoped inside `_process_single_table()` but referenced in outer `vector_docker_complete()`. Fixed by including `split_views` in the inner function's return dict.
+
+---
+
+## 10 MAR 2026: Multi-Source Vector ETL — P1 + P3 (v0.10.0.1) ✅
+
+**Status**: ✅ **IMPLEMENTED** — Code complete, merged to master, deployed. End-to-end testing pending.
+**Design**: `docs/plans/2026-03-08-multi-source-vector-design.md`
+
+### What It Does
+
+- **P1 (Multi-file)**: N files submitted together → N PostGIS tables, each a TiPG endpoint
+- **P3 (GPKG multi-layer)**: 1 GeoPackage with N named layers → N PostGIS tables
+
+### Implementation (11 files, 1,712 insertions)
+
+#### New Files (4)
+
+| File | Purpose |
+|------|---------|
+| `jobs/vector_multi_source_docker.py` | Job definition (237 lines) |
+| `services/handler_vector_multi_source.py` | Handler: loops over sources, delegates to existing helpers (573 lines) |
+| `jobs/unpublish_vector_multi_source.py` | 3-stage symmetric unpublish (321 lines) |
+| `services/unpublish_handlers.py` | +166 lines: `inventory_vector_multi_source()` handler |
+
+#### Modified Files (7)
+
+| File | Change |
+|------|--------|
+| `infrastructure/validators.py` | +213 lines: `multi_source_mode` + `source_count_limit` validators |
+| `core/models/processing_options.py` | `layer_names: Optional[List[str]]` with mutual exclusivity validator |
+| `core/models/platform.py` | `is_vector_collection` property |
+| `config/defaults.py` | `MAX_VECTOR_SOURCES = 10`, docker task routing |
+| `services/platform_translation.py` | Route multi-source requests to new job type |
+| `jobs/__init__.py` | Register both new jobs |
+| `services/__init__.py` | Register both new handlers |
+
+### Testing Status
+
+| Pattern | Status | Notes |
+|---------|--------|-------|
+| P1 (multi-file) | 🔲 Needs test data | Requires 2+ GeoJSON files in wargames container |
+| P3 (GPKG multi-layer) | 🔲 Needs test data | Requires GPKG with confirmed multiple layers |
 
 ---
 

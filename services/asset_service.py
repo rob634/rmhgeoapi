@@ -302,6 +302,11 @@ class AssetService:
                         "pending_review, rejected, or revoked (and not actively processing)",
                         "overwrite"
                     )
+                # Clear stale PostGIS table mappings before reprocessing.
+                # The new job will write fresh release_tables entries.
+                from infrastructure.release_table_repository import ReleaseTableRepository
+                ReleaseTableRepository().delete_for_release(candidate.release_id)
+
                 self.release_repo.update_overwrite(
                     candidate.release_id,
                     revision=candidate.revision + 1,
@@ -312,7 +317,19 @@ class AssetService:
                     f"(revision {updated.revision})"
                 )
                 return updated, "overwritten"
-            # No overwrite candidate — fall through to draft check or new creation
+
+            # No overwrite candidate — check if APPROVED releases block overwrite
+            latest = self.release_repo.get_latest(asset_id)
+            if latest and latest.approval_state == ApprovalState.APPROVED:
+                raise ReleaseStateError(
+                    latest.release_id,
+                    "approved",
+                    "pending_review, rejected, or revoked",
+                    "overwrite. The release has been approved and must be revoked "
+                    "before it can be overwritten. To revoke, call "
+                    "POST /api/approvals/{release_id}/revoke with a revocation_reason, "
+                    "then resubmit with overwrite=true"
+                )
 
         # Non-overwrite path: check for existing draft
         existing_draft = self.release_repo.get_draft(asset_id)

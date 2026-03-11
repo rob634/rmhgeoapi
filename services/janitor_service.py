@@ -182,6 +182,27 @@ class JanitorService:
         )
 
     # ========================================================================
+    # SCHEMA READINESS CHECK (11 MAR 2026)
+    # ========================================================================
+
+    def _schema_ready(self) -> bool:
+        """
+        Check if app schema exists before running janitor queries.
+
+        Prevents log spam when schema is missing (e.g. during rebuild).
+        Returns True if app.jobs table exists, False otherwise.
+        """
+        try:
+            result = self.repo._execute_query(
+                "SELECT 1 FROM information_schema.tables WHERE table_schema = %s AND table_name = %s",
+                ("app", "jobs"),
+                fetch='one'
+            )
+            return result is not None
+        except Exception:
+            return False
+
+    # ========================================================================
     # HELPER METHODS FOR ORPHANED TASK RECOVERY (14 DEC 2025)
     # ========================================================================
 
@@ -300,14 +321,18 @@ class JanitorService:
             f"[JANITOR] ========== TASK WATCHDOG STARTING =========="
         )
 
-        # Create audit record FIRST before doing any work
-        result.run_id = self._start_run(result)
-
         if not self.config.enabled:
             logger.info("[JANITOR] Janitor disabled via configuration - skipping")
             result.complete(success=True)
-            self._complete_run(result)
             return result
+
+        if not self._schema_ready():
+            logger.critical("[JANITOR] App schema not ready - skipping task watchdog. Run rebuild to restore.")
+            result.complete(success=False, error="app schema not ready")
+            return result
+
+        # Create audit record FIRST before doing any work
+        result.run_id = self._start_run(result)
 
         try:
             # ================================================================
@@ -838,16 +863,19 @@ class JanitorService:
         result = JanitorRunResult(run_type="job_health", success=False)
         logger.debug("[JANITOR] job_health: Creating JanitorRunResult object")
 
+        if not self.config.enabled:
+            logger.info("[JANITOR] Janitor disabled via configuration - skipping job health check")
+            result.complete(success=True)
+            return result
+
+        if not self._schema_ready():
+            logger.critical("[JANITOR] App schema not ready - skipping job health check. Run rebuild to restore.")
+            result.complete(success=False, error="app schema not ready")
+            return result
+
         # Create audit record FIRST before doing any work
         result.run_id = self._start_run(result)
         logger.debug(f"[JANITOR] job_health: Audit record created with run_id={result.run_id}")
-
-        if not self.config.enabled:
-            logger.info("[JANITOR] Janitor disabled via configuration - skipping job health check")
-            logger.debug("[JANITOR] job_health: JANITOR_ENABLED=false, returning early")
-            result.complete(success=True)
-            self._complete_run(result)
-            return result
 
         try:
             logger.info("[JANITOR] Starting job health check")
@@ -1024,16 +1052,19 @@ class JanitorService:
         result = JanitorRunResult(run_type="orphan_detector", success=False)
         logger.debug("[JANITOR] orphan_detector: Creating JanitorRunResult object")
 
+        if not self.config.enabled:
+            logger.info("[JANITOR] Janitor disabled via configuration - skipping orphan detection")
+            result.complete(success=True)
+            return result
+
+        if not self._schema_ready():
+            logger.critical("[JANITOR] App schema not ready - skipping orphan detection. Run rebuild to restore.")
+            result.complete(success=False, error="app schema not ready")
+            return result
+
         # Create audit record FIRST before doing any work
         result.run_id = self._start_run(result)
         logger.debug(f"[JANITOR] orphan_detector: Audit record created with run_id={result.run_id}")
-
-        if not self.config.enabled:
-            logger.info("[JANITOR] Janitor disabled via configuration - skipping orphan detection")
-            logger.debug("[JANITOR] orphan_detector: JANITOR_ENABLED=false, returning early")
-            result.complete(success=True)
-            self._complete_run(result)
-            return result
 
         try:
             logger.info("[JANITOR] Starting orphan detection (4 categories)")

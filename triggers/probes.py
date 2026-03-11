@@ -86,90 +86,74 @@ class ReadyzProbe:
     should receive traffic. A 503 response means "don't send requests here".
     """
 
+    def _check_db_schema(self) -> bool:
+        """Fast check: can we reach the DB and does app schema exist?"""
+        try:
+            from infrastructure.postgresql import PostgreSQLRepository
+            repo = PostgreSQLRepository()
+            result = repo._execute_query(
+                "SELECT 1 FROM information_schema.schemata WHERE schema_name = %s",
+                ("app",),
+                fetch='one'
+            )
+            return result is not None
+        except Exception:
+            return False
+
     def handle(self, req: func.HttpRequest) -> func.HttpResponse:
         """Handle GET /api/readyz request."""
+        try:
+            from config import __version__
+            version = __version__
+        except ImportError:
+            version = "unknown"
 
-        # Check if validation is still in progress
+        # Check 1: Startup validation
         if not STARTUP_STATE.validation_complete:
             return func.HttpResponse(
                 json.dumps({
-                    "status": "initializing",
+                    "status": "not_ready",
                     "probe": "readyz",
-                    "message": "Startup validation in progress",
-                    "startup_time": STARTUP_STATE.startup_time
+                    "reason": "startup_validation_in_progress"
                 }),
                 status_code=503,
                 mimetype="application/json"
             )
 
-        # Check if all validations passed
-        if STARTUP_STATE.all_passed:
-            # Import version (safe - config has minimal deps)
-            try:
-                from config import __version__
-                version = __version__
-            except ImportError:
-                version = "unknown"
-
-            response = {
-                "status": "ready",
-                "probe": "readyz",
-                "version": version,
-                "message": "All startup validations passed",
-                "summary": STARTUP_STATE.get_summary()
-            }
-
-            # Include warnings for env vars using defaults (informational, not errors)
-            warnings = STARTUP_STATE.get_warnings()
-            if warnings:
-                response["warnings"] = warnings
-                response["message"] = f"Ready ({len(warnings)} env vars using defaults)"
-
-            # Deep mode: include lightweight diagnostics summary
-            deep_mode = req.params.get('deep', 'false').lower() == 'true'
-            if deep_mode:
-                try:
-                    from infrastructure.diagnostics import get_diagnostics_summary
-                    response["diagnostics"] = get_diagnostics_summary()
-                except Exception as e:
-                    response["diagnostics"] = {"error": str(e)}
-
+        if not STARTUP_STATE.all_passed:
             return func.HttpResponse(
-                json.dumps(response, indent=2),
-                status_code=200,
+                json.dumps({
+                    "status": "not_ready",
+                    "probe": "readyz",
+                    "reason": "startup_validation_failed",
+                    "error": STARTUP_STATE.critical_error or "Startup validation failed"
+                }),
+                status_code=503,
                 mimetype="application/json"
             )
 
-        # Validation failed - return 503 with details
-        failed_checks = STARTUP_STATE.get_failed_checks()
-
-        # Build error response with actionable information
-        errors = []
-        for check in failed_checks:
-            error_info = {
-                "name": check.name,
-                "error_type": check.error_type,
-                "message": check.error_message
-            }
-            # Include fix suggestions if available
-            if check.details and "likely_causes" in check.details:
-                error_info["likely_causes"] = check.details["likely_causes"]
-            if check.details and "fix" in check.details:
-                error_info["fix"] = check.details["fix"]
-            # Include detailed validation errors (08 JAN 2026 - env var regex validation)
-            if check.details and "errors" in check.details:
-                error_info["validation_errors"] = check.details["errors"]
-            errors.append(error_info)
+        # Check 2: Database + app schema reachable
+        db_ready = self._check_db_schema()
+        if not db_ready:
+            return func.HttpResponse(
+                json.dumps({
+                    "status": "not_ready",
+                    "probe": "readyz",
+                    "version": version,
+                    "reason": "database_not_ready",
+                    "error": "App schema missing or database unreachable. Run rebuild to restore."
+                }),
+                status_code=503,
+                mimetype="application/json"
+            )
 
         return func.HttpResponse(
             json.dumps({
-                "status": "not_ready",
+                "status": "ready",
                 "probe": "readyz",
-                "message": STARTUP_STATE.critical_error or "Startup validation failed",
-                "summary": STARTUP_STATE.get_summary(),
-                "errors": errors
-            }, indent=2),
-            status_code=503,
+                "version": version
+            }),
+            status_code=200,
             mimetype="application/json"
         )
 

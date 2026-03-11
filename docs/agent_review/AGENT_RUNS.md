@@ -1647,6 +1647,46 @@ All pipeline executions in chronological order.
 
 ---
 
+## Run 42: External Environment Infrastructure (COMPETE)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 10 MAR 2026 |
+| **Pipeline** | COMPETE (Adversarial Code Review) |
+| **Scope** | External Environment Infrastructure — config, DB initializer, health checks, connection wiring |
+| **Version** | v0.10.0.2 |
+| **Split** | B (Internal vs External) |
+| **Files** | 11 |
+| **Findings** | 21 total: 3 CRITICAL, 4 HIGH, 6 MEDIUM, 8 LOW |
+| **Top Fix** | Remove stack traces from HTTP error responses (AAD token leakage risk) |
+| **Verdict** | Significant security gaps require fixes before production; core architecture is sound |
+| **Estimated Tokens** | ~351K |
+| **Output** | `agent_docs/COMPETE_EXTERNAL_ENVIRONMENT.md` |
+
+**Scope Split B — Alpha (Internal Logic) / Beta (External Interfaces)**:
+
+| Agent | Scope | Files |
+|-------|-------|-------|
+| Alpha | Config composition, defaults, env validation, internal DB routing | external_config.py, app_config.py, config/__init__.py, defaults.py, env_validation.py, postgresql.py |
+| Beta | Admin endpoints, health checks, DB initializer service, external.py | admin_external_db.py, external_db_initializer.py, external.py, health_checks/__init__.py, database.py |
+| Gamma | Priority files: defaults.py, health_checks/__init__.py, database.py | All 11 files |
+
+**Top 5 Fixes**:
+
+| # | Finding | Severity | Effort |
+|---|---------|----------|--------|
+| 1 | Remove `traceback.format_exc()` from HTTP error responses — AAD token leakage | CRITICAL | Small |
+| 2 | Validate `target_host` regex before libpq connection string interpolation — injection vector | CRITICAL | Small |
+| 3 | Raise error instead of silent fallback to app DB when external not configured | HIGH | Small |
+| 4 | Fix `is_configured` to read model fields instead of `os.environ` | MEDIUM | Small |
+| 5 | Minimize subprocess environment for pypgstac migrate | HIGH | Small |
+
+**Accepted Risks**: No auth on admin endpoints (dev-only, requires valid AAD UMI to connect), UMI client ID in GET query string (not a secret), token not refreshed between steps (AAD tokens last 60-90min, init takes <5min).
+
+**Architecture Wins**: Structured step-based initialization result (InitStep/ExternalInitResult), proper `psycopg.sql` composition for DDL, AAD Managed Identity auth, prerequisite check as separate endpoint, dry-run mode.
+
+---
+
 ## Recurring Review Patterns
 
 Two subsystems are designated for **regular re-review** using the COMPETE pipeline with full constitution enforcement. These are the highest-churn, highest-risk areas of the codebase — each has been the source of multiple SIEGE/TOURNAMENT findings across runs.

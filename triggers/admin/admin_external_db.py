@@ -48,6 +48,7 @@ Usage:
 """
 
 import json
+import uuid
 import azure.functions as func
 from azure.functions import Blueprint
 from typing import Optional
@@ -119,12 +120,13 @@ def external_db_initialize(req: func.HttpRequest) -> func.HttpResponse:
         admin_umi_client_id = body["admin_umi_client_id"]
         admin_umi_name = body["admin_umi_name"]
         dry_run = body.get("dry_run", False)
+        drop_existing = body.get("drop_existing", False)
         schemas = body.get("schemas", ["geo", "pgstac"])
 
         logger.info(f"📦 External DB initialization request")
         logger.info(f"   Target: {target_host}/{target_database}")
         logger.info(f"   Admin UMI: {admin_umi_client_id[:8]}... ({admin_umi_name})")
-        logger.info(f"   Dry run: {dry_run}")
+        logger.info(f"   Dry run: {dry_run}, Drop existing: {drop_existing}")
         logger.info(f"   Schemas: {schemas}")
 
         # Create initializer
@@ -138,7 +140,11 @@ def external_db_initialize(req: func.HttpRequest) -> func.HttpResponse:
         )
 
         # Run initialization
-        result = initializer.initialize(dry_run=dry_run, schemas=schemas)
+        result = initializer.initialize(
+            dry_run=dry_run,
+            schemas=schemas,
+            drop_existing=drop_existing
+        )
 
         # Return result
         status_code = 200 if result.success else 500
@@ -150,12 +156,12 @@ def external_db_initialize(req: func.HttpRequest) -> func.HttpResponse:
         )
 
     except Exception as e:
-        logger.error(f"❌ External DB initialization failed: {e}")
-        import traceback
+        correlation_id = str(uuid.uuid4())
+        logger.error(f"❌ External DB initialization failed (correlation_id={correlation_id}): {e}", exc_info=True)
         return func.HttpResponse(
             json.dumps({
-                "error": str(e),
-                "traceback": traceback.format_exc()
+                "error": "External DB initialization failed",
+                "correlation_id": correlation_id
             }, indent=2),
             status_code=500,
             mimetype="application/json"
@@ -233,12 +239,12 @@ def external_db_prereqs(req: func.HttpRequest) -> func.HttpResponse:
         )
 
     except Exception as e:
-        logger.error(f"❌ Prerequisite check failed: {e}")
-        import traceback
+        correlation_id = str(uuid.uuid4())
+        logger.error(f"❌ Prerequisite check failed (correlation_id={correlation_id}): {e}", exc_info=True)
         return func.HttpResponse(
             json.dumps({
-                "error": str(e),
-                "traceback": traceback.format_exc()
+                "error": "Prerequisite check failed",
+                "correlation_id": correlation_id
             }, indent=2),
             status_code=500,
             mimetype="application/json"

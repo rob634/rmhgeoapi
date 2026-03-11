@@ -521,6 +521,76 @@ ENV_VAR_RULES: Dict[str, EnvVarRule] = {
         example="ddh",
         default_value="ddh",
     ),
+
+    # =========================================================================
+    # EXTERNAL ENVIRONMENT (10 MAR 2026)
+    # =========================================================================
+    "EXTERNAL_DB_HOST": EnvVarRule(
+        pattern=_LOCALHOST_OR_AZURE,
+        pattern_description="Must be 'localhost' or Azure FQDN ending in .postgres.database.azure.com",
+        required=False,
+        fix_suggestion="Use full Azure FQDN like 'external-db.postgres.database.azure.com'",
+        example="external-db.postgres.database.azure.com",
+    ),
+
+    "EXTERNAL_DB_NAME": EnvVarRule(
+        pattern=_DATABASE_NAME,
+        pattern_description="Alphanumeric database name (letters, numbers, underscore, hyphen)",
+        required=False,
+        fix_suggestion="Use a valid PostgreSQL database name",
+        example="geodb_external",
+    ),
+
+    "EXTERNAL_DB_PORT": EnvVarRule(
+        pattern=_POSITIVE_INT,
+        pattern_description="Positive integer (default 5432)",
+        required=False,
+        fix_suggestion="Use a valid port number like 5432",
+        example="5432",
+    ),
+
+    "EXTERNAL_DB_SCHEMA": EnvVarRule(
+        pattern=_SCHEMA_NAME,
+        pattern_description="Lowercase schema name (letters, numbers, underscore)",
+        required=False,
+        fix_suggestion="Set schema name like 'geo'",
+        example="geo",
+        default_value="geo",
+    ),
+
+    "EXTERNAL_DB_PGSTAC_SCHEMA": EnvVarRule(
+        pattern=_SCHEMA_NAME,
+        pattern_description="Lowercase schema name (letters, numbers, underscore)",
+        required=False,
+        fix_suggestion="Set schema name like 'pgstac'",
+        example="pgstac",
+        default_value="pgstac",
+    ),
+
+    "EXTERNAL_DB_USE_MANAGED_IDENTITY": EnvVarRule(
+        pattern=_BOOLEAN,
+        pattern_description="Boolean value (true/false)",
+        required=False,
+        fix_suggestion="Set to 'true' for Azure deployment",
+        example="true",
+        default_value="true",
+    ),
+
+    "EXTERNAL_STORAGE_ACCOUNT": EnvVarRule(
+        pattern=_AZURE_STORAGE_ACCOUNT,
+        pattern_description="Lowercase alphanumeric, 3-24 characters (Azure storage account name)",
+        required=False,
+        fix_suggestion="Use a valid Azure storage account name for external public data",
+        example="myappexternal",
+    ),
+
+    "EXTERNAL_TITILER_URL": EnvVarRule(
+        pattern=_HTTPS_URL,
+        pattern_description="HTTPS URL for external TiTiler instance",
+        required=False,
+        fix_suggestion="Use full HTTPS URL like 'https://external-titiler.azurewebsites.net'",
+        example="https://external-titiler.azurewebsites.net",
+    ),
 }
 
 

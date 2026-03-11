@@ -68,6 +68,7 @@ from .defaults import (
     ObservabilityDefaults,
     AppDefaults,
     KeyVaultDefaults,
+    ExternalDefaults,
     parse_bool,
 )
 
@@ -82,7 +83,8 @@ from .storage_config import (
     StorageConfig,
     determine_applicable_tiers
 )
-from .database_config import DatabaseConfig, PublicDatabaseConfig, get_postgres_connection_string
+from .database_config import DatabaseConfig, get_postgres_connection_string
+from .external_config import ExternalEnvironmentConfig
 from .docker_config import DockerConfig
 from .raster_config import RasterConfig
 from .vector_config import VectorConfig
@@ -157,8 +159,8 @@ def debug_config() -> dict:
 
             # Database
             'database': config.database.debug_dict(),
-            'public_database': config.public_database.debug_dict() if config.public_database else None,
-            'public_database_configured': config.is_public_database_configured(),
+            'external': config.external.debug_dict() if config.external else None,
+            'external_configured': config.is_external_configured(),
 
             # Docker worker (26 FEB 2026 - shared mount config)
             'docker': config.docker.debug_dict(),
@@ -233,6 +235,7 @@ __all__ = [
     'ObservabilityDefaults',
     'AppDefaults',
     'KeyVaultDefaults',
+    'ExternalDefaults',
     'parse_bool',
 
     # Main config
@@ -257,8 +260,10 @@ __all__ = [
 
     # Database
     'DatabaseConfig',
-    'PublicDatabaseConfig',
     'get_postgres_connection_string',
+
+    # External Environment
+    'ExternalEnvironmentConfig',
 
     # Docker
     'DockerConfig',

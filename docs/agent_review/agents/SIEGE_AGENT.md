@@ -91,11 +91,33 @@ The config contains:
 - **`approval_fixtures`**: Pre-built payloads for approve/reject testing
 - **`discovery`**: Endpoint templates for verifying files exist before testing
 - **`prerequisites`**: Setup commands (rebuild, nuke, health check)
+- **`profiles`**: Run profiles — `quick` or `full` (see below)
 
 Sentinel MUST verify valid files exist before launching by calling the discovery endpoint:
 ```bash
 curl "${BASE_URL}/api/storage/rmhazuregeobronze/blobs?zone=bronze&limit=50"
 ```
+
+### Run Profiles
+
+SIEGE supports two profiles: **quick** (~15 min) and **full** (~45-90 min).
+
+| Profile | Max File Size | Zarr Seq 6 | Zarr Seq 19 | All Other Seqs |
+|---------|---------------|------------|-------------|----------------|
+| **quick** | <100 MB | `cmip6-tasmax-quick.zarr` (10 MB) | `era5-quick.zarr` (19 MB) | Default fixtures (all <26 MB) |
+| **full** | No limit | `cmip6-tasmax-sample.zarr` (1.5 GB) | `era5-global-sample.zarr` (8 GB) | Default fixtures |
+
+**Both profiles run all 22 sequences.** The only difference is which Zarr fixtures are used for Seq 6 and 19.
+
+**Sentinel selects profile at campaign start.** When building the Campaign Brief:
+1. Check if the user specified `quick` or `full`
+2. If `quick`: apply `profiles.quick.fixture_overrides` — replace `zarr_cmip6_tasmax` → `zarr_cmip6_tasmax_quick` and `zarr_era5_rechunk` → `zarr_era5_rechunk_quick`
+3. If `full` or unspecified: use default fixtures (no overrides)
+
+Each fixture in `valid_files` has a `profile` tag:
+- `"both"` — used in all profiles
+- `"quick"` — only used in quick profile (replaces a `"full"` fixture)
+- `"full"` — only used in full profile (GB+ files, skipped in quick)
 
 ---
 
@@ -270,7 +292,7 @@ Use `data_type_override: "zarr"` from siege_config.json. Submit body must includ
 `"data_type": "zarr"`. Processing may take longer than raster (5-stage pipeline).
 
 **Sequence 6: Native Zarr Lifecycle**
-1. POST `/api/platform/submit` with `data_type=zarr`, native `.zarr` store (`zarr_cmip6_tasmax` from config) → capture request_id, job_id
+1. POST `/api/platform/submit` with `data_type=zarr`, native `.zarr` store (`zarr_cmip6_tasmax` from config; **quick profile**: use `zarr_cmip6_tasmax_quick` instead) → capture request_id, job_id
 2. Poll until completed → verify job completes (different code path from VirtualiZarr .nc)
 3. **ASSERT STATUS SERVICES** (pre-approval): GET `/api/platform/status/{request_id}` → assert `services` block present:
    - `services.service_url` contains `/xarray/WebMercatorQuad/tilejson.json`
@@ -458,7 +480,7 @@ Tests the `ingest_zarr_rechunk` handler — submitting a native Zarr with `rechu
 
 | Step | Action | Verify |
 |------|--------|--------|
-| 1 | POST `/api/platform/submit` with `zarr_era5_global` from config (`data_type=zarr`, `processing_options: {rechunk: true}`), dataset_id `sg-zarr-rechunk-test` | request_id, job_id |
+| 1 | POST `/api/platform/submit` with `zarr_era5_rechunk` from config (`data_type=zarr`, `processing_options: {rechunk: true}`), dataset_id `sg-zarr-rechunk-test`. **Quick profile**: use `zarr_era5_rechunk_quick` instead. | request_id, job_id |
 | 2 | Poll until completed | Job succeeds — `ingest_zarr_rechunk` handler fired (Stage 2 rechunk instead of blob copy) |
 | 3 | **ASSERT STATUS SERVICES**: GET `/api/platform/status/{request_id}` → assert `services` block: `service_url` contains `/xarray/`, `preview` contains `/xarray/preview.png`, `variables` contains `/xarray/variables`, `stac_collection` is null (pre-approval) | Services block shape matches zarr contract from `siege_config.json → services_contract.key_assertions.zarr` |
 | 4 | POST `/api/platform/approve` (version_id="v1") | STAC materialized |
@@ -501,6 +523,36 @@ Tests error handling for invalid split_column usage.
 | 21c | POST `/api/platform/submit` with vector file + `split_column: "quadrant"` but NO `overwrite` and base table still exists from Seq 20 | Job FAILS with table already exists error OR succeeds with overwrite guard | SVV-3 |
 
 **CHECKPOINT SVV**: All 3 negative cases rejected gracefully with informative error messages (not 500s).
+
+**Sequence 22: Approved Asset Overwrite Guard — Different File (v0.10.0+)**
+
+Tests the core invariant: **approved assets cannot be overwritten — they must be revoked first.** Uses two different input files to prove data actually changes after revoke+overwrite, not just metadata.
+
+| Step | Action | Verify |
+|------|--------|--------|
+| 1 | POST `/api/platform/submit` (vector, `sg-ow-guard-test`, `vector_geojson_small` fixture: `roads.geojson`, 483 features) | request_id, job_id |
+| 2 | Poll until completed | job_status=completed |
+| 3 | POST `/api/platform/approve` (v1) | approval_state=approved |
+| 4 | GET `/api/platform/status/{request_id}` | version_id="v1", is_latest=true, is_served=true |
+| 5 | **BREAK ATTEMPT**: POST `/api/platform/submit` (same dataset_id+resource_id, DIFFERENT file `roads.gpkg` from `vector_gpkg` fixture, `processing_options: {overwrite: true}`) | Overwrite guard triggers — approved release NOT mutated. Expect NEW release with version_ordinal=2, NOT revision of v1 |
+| 6 | Poll until completed → capture v2 IDs | New release at ordinal=2, v1 untouched |
+| 7 | GET `/api/platform/status/{v1_request_id}` | v1 still approved, revision=1, is_latest=true (v2 is pending, not latest) |
+| 8 | POST `/api/platform/unpublish` (v2, pending release) | v2 cleaned up — we don't want it |
+| 9 | POST `/api/platform/revoke` (v1) with reason "Revoking to test overwrite with different file" | approval_state=revoked, is_latest=false, is_served=false |
+| 10 | GET `/api/platform/status/{request_id}` | Confirm v1 revoked — asset now editable |
+| 11 | POST `/api/platform/submit` (same dataset_id+resource_id, `roads.gpkg` from `vector_gpkg` fixture, `processing_options: {overwrite: true}`) | Overwrite succeeds — revoked release mutated |
+| 12 | Poll until completed | revision=2, approval_state=pending_review |
+| 13 | **PROBE DATA CHANGE**: GET `{tipg_base}/collections/{schema}.{table_name}/items?limit=1` → verify features exist (table repopulated with roads.gpkg data) | Data changed — confirms overwrite replaced content, not just metadata |
+| 14 | POST `/api/platform/approve` (v1) | Re-approved at same ordinal |
+| 15 | GET `/api/platform/status/{request_id}` | version_id="v1", ordinal=1, revision=2, is_latest=true, is_served=true |
+
+**CHECKPOINT OWGD1**: Full lifecycle proves:
+- Step 5: Approved asset PROTECTED from overwrite (new version created instead)
+- Step 9: Revocation UNLOCKS the asset for modification
+- Step 11: Different file successfully replaces original data
+- Step 15: Re-approval restores served state with new data
+
+**Key difference from Seq 14**: Seq 14 uses the same file throughout. This sequence uses **different files** (GeoJSON → GPKG) to prove the overwrite actually replaced the data, not just re-ran the same pipeline.
 
 ### Lancer Checkpoint Format
 
@@ -603,6 +655,7 @@ For each overwrite checkpoint, Auditor MUST verify these fields via `/api/platfo
 | **MREV1** (Seq 18) | Overwritten release_id matches v2's original release_id. v1's revoked release untouched (still revoked, same revision). |
 | **IST-8** (Seq 11h) | Release still in pending_review + processing. No state mutation occurred. |
 | **IST-9** (Seq 11i) | New release created with version_ordinal incremented. Original approved release unchanged. |
+| **OWGD1** (Seq 22) | Step 5 created new version (ordinal=2), NOT mutation of v1. After revoke: revision=2, ordinal=1, file changed from .geojson to .gpkg. v1 re-approved with new data. |
 
 ### Auditor Output Format
 
@@ -716,6 +769,7 @@ Assessment: {HEALTHY | DEGRADED | DOWN}
 | 19. Zarr Rechunk Path | {n} | {n} | {n} | {n} |
 | 20. Vector Split Views | {n} | {n} | {n} | {n} |
 | 21. Split Views Validation (3) | {n} | {n} | {n} | {n} |
+| 22. Approved Overwrite Guard (Diff File) | {n} | {n} | {n} | {n} |
 
 ## Services Block Contract (Status Endpoint)
 
@@ -767,6 +821,7 @@ during lifecycle sequences and re-verified by Auditor for any failures.
 | 20 | Split view SE | /vector/collections/{table}_quadrant_se/items | {url} | {code} | PASS/FAIL |
 | 20 | Split view SW | /vector/collections/{table}_quadrant_sw/items | {url} | {code} | PASS/FAIL |
 | 20 | Split views count sum | sum(views) == base | -- | -- | PASS/FAIL |
+| 22 | Overwrite guard vector (post-revoke) | /vector/collections/{table}/items | {url} | {code} | PASS/FAIL |
 
 Assessment: {ALL PASS | DEGRADED | UNAVAILABLE}
 - **ALL PASS**: Platform is fully operational — ETL data is discoverable and servable

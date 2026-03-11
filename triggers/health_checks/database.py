@@ -38,7 +38,6 @@ class DatabaseHealthChecks(HealthCheckPlugin):
     - duckdb: Analytical engine status
     - pgstac: STAC extension health
     - schema_summary: Table/row counts
-    - public_database: External OGC Features DB
     """
 
     name = "database"
@@ -53,7 +52,6 @@ class DatabaseHealthChecks(HealthCheckPlugin):
             ("duckdb", self.check_duckdb),
             ("pgstac", self.check_pgstac),
             ("schema_summary", self.check_schema_summary),
-            ("public_database", self.check_public_database),
         ]
 
     def is_enabled(self, config) -> bool:
@@ -702,113 +700,8 @@ class DatabaseHealthChecks(HealthCheckPlugin):
             description="Database schema inventory with table counts and STAC statistics"
         )
 
-    # =========================================================================
-    # CHECK: Public Database
-    # =========================================================================
-
-    def check_public_database(self) -> Dict[str, Any]:
-        """
-        Check public database health (optional).
-
-        Returns:
-            Dict with public database health status
-        """
-        def check_public_db():
-            import psycopg
-            import time
-            from config import get_config
-            from infrastructure.postgresql import PostgreSQLRepository
-
-            config = get_config()
-            start_time = time.time()
-
-            if not config.is_public_database_configured():
-                return {
-                    "configured": False,
-                    "message": "Public database not configured (PUBLIC_DB_* env vars not set)"
-                }
-
-            public_config = config.public_database
-
-            try:
-                repo = PostgreSQLRepository(
-                    config=config,
-                    target_database="public"
-                )
-                conn_str = repo.conn_string
-            except Exception as repo_error:
-                return {
-                    "configured": True,
-                    "host": public_config.host,
-                    "database": public_config.database,
-                    "connected": False,
-                    "error": f"Failed to initialize repository: {str(repo_error)[:200]}",
-                    "error_type": type(repo_error).__name__
-                }
-
-            try:
-                with psycopg.connect(conn_str, autocommit=True) as conn:
-                    with conn.cursor() as cur:
-                        connection_time_ms = round((time.time() - start_time) * 1000, 2)
-
-                        # Get PostgreSQL version
-                        cur.execute("SELECT version()")
-                        pg_version = cur.fetchone()[0].split(',')[0]
-
-                        # Check if PostGIS is available
-                        try:
-                            cur.execute("SELECT PostGIS_Version()")
-                            postgis_version = cur.fetchone()[0]
-                        except Exception:
-                            postgis_version = "not installed"
-
-                        # Check target schema exists
-                        target_schema = public_config.db_schema
-                        cur.execute("""
-                            SELECT EXISTS(
-                                SELECT 1 FROM pg_namespace WHERE nspname = %s
-                            ) as schema_exists
-                        """, (target_schema,))
-                        schema_exists = cur.fetchone()[0]
-
-                        # Count tables in schema
-                        table_count = 0
-                        if schema_exists:
-                            cur.execute("""
-                                SELECT COUNT(*) FROM information_schema.tables
-                                WHERE table_schema = %s AND table_type = 'BASE TABLE'
-                            """, (target_schema,))
-                            table_count = cur.fetchone()[0]
-
-                        return {
-                            "configured": True,
-                            "host": public_config.host,
-                            "database": public_config.database,
-                            "schema": target_schema,
-                            "connected": True,
-                            "connection_time_ms": connection_time_ms,
-                            "postgres_version": pg_version,
-                            "postgis_version": postgis_version,
-                            "schema_exists": schema_exists,
-                            "table_count": table_count,
-                            "purpose": "Public-facing OGC Feature Collections"
-                        }
-
-            except Exception as conn_error:
-                return {
-                    "configured": True,
-                    "host": public_config.host,
-                    "database": public_config.database,
-                    "connected": False,
-                    "error": str(conn_error)[:200],
-                    "error_type": type(conn_error).__name__
-                }
-
-        return self.check_component_health(
-            "public_database",
-            check_public_db,
-            description="Public-facing database for OGC Feature Collections"
-        )
+    # check_public_database removed 10 MAR 2026 — replaced by
+    # ExternalEnvironmentHealthChecks in triggers/health_checks/external.py
 
 
 # ============================================================================

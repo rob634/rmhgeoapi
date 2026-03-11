@@ -37,6 +37,7 @@ from .infrastructure import InfrastructureHealthChecks
 from .database import DatabaseHealthChecks
 from .external_services import ExternalServicesHealthChecks
 from .observability import ObservabilityHealthChecks
+from .external import ExternalEnvironmentHealthChecks
 
 
 # ============================================================================
@@ -46,12 +47,13 @@ from .observability import ObservabilityHealthChecks
 # During migration, plugins return empty check lists until methods are moved
 
 HEALTH_CHECK_PLUGINS: List[Type[HealthCheckPlugin]] = [
-    StartupHealthChecks,           # Priority 10 - Run first
-    ApplicationHealthChecks,       # Priority 20
-    InfrastructureHealthChecks,    # Priority 30
-    ObservabilityHealthChecks,     # Priority 35 - Metrics and App Insights
-    DatabaseHealthChecks,          # Priority 40
-    ExternalServicesHealthChecks,  # Priority 50 - Run last (parallel HTTP)
+    StartupHealthChecks,                # Priority 10 - Run first
+    ApplicationHealthChecks,            # Priority 20
+    InfrastructureHealthChecks,         # Priority 30
+    ObservabilityHealthChecks,          # Priority 35 - Metrics and App Insights
+    DatabaseHealthChecks,               # Priority 40
+    ExternalServicesHealthChecks,       # Priority 50 - Parallel HTTP
+    ExternalEnvironmentHealthChecks,    # Priority 55 - External DB/storage/TiTiler
 ]
 
 
@@ -105,4 +107,5 @@ __all__ = [
     'ObservabilityHealthChecks',
     'DatabaseHealthChecks',
     'ExternalServicesHealthChecks',
+    'ExternalEnvironmentHealthChecks',
 ]

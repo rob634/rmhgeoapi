@@ -69,8 +69,8 @@ class VectorToPostGISHandler:
         self.conn_string = self._pg_repo.conn_string
 
         # Log which database we're using
-        if target_database == "public" and config.is_public_database_configured():
-            logger.info(f"📊 VectorToPostGISHandler: Using PUBLIC database ({config.public_database.database})")
+        if target_database == "external" and config.is_external_configured():
+            logger.info(f"📊 VectorToPostGISHandler: Using EXTERNAL database ({config.external.db_name})")
         else:
             logger.info(f"📊 VectorToPostGISHandler: Using APP database (fallback or explicit)")
 

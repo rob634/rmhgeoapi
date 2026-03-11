@@ -53,7 +53,8 @@ Exports:
 Dependencies:
     pydantic: BaseModel for configuration validation
     config.storage_config: StorageConfig
-    config.database_config: DatabaseConfig, PublicDatabaseConfig
+    config.database_config: DatabaseConfig
+    config.external_config: ExternalEnvironmentConfig
     config.raster_config: RasterConfig
     config.vector_config: VectorConfig
     config.queue_config: QueueConfig
@@ -77,7 +78,8 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 from .storage_config import StorageConfig
-from .database_config import DatabaseConfig, PublicDatabaseConfig
+from .database_config import DatabaseConfig
+from .external_config import ExternalEnvironmentConfig
 from .docker_config import DockerConfig
 from .raster_config import RasterConfig
 from .vector_config import VectorConfig
@@ -328,23 +330,23 @@ class AppConfig(BaseModel):
         description="PostgreSQL/PostGIS configuration for app database (full DDL permissions)"
     )
 
-    public_database: Optional[PublicDatabaseConfig] = Field(
+    external: Optional[ExternalEnvironmentConfig] = Field(
         default=None,
-        description="""Public database configuration for OGC Feature Collections.
+        description="""External hosting environment configuration (DB + storage + TiTiler).
 
-        Separate database from app database with RESTRICTED permissions:
-        - App Database: Full DDL (CREATE/DROP SCHEMA) - can nuke/rebuild
-        - Public Database: CRUD only (NO DROP SCHEMA) - protected
+        Separate infrastructure for serving publicly-cleared data to external consumers.
+        The internal (app) database remains the system of record.
 
-        Used for public-facing OGC Features API, typically deployed behind
-        Cloudflare or similar CDN in corporate Azure environments.
+        Components:
+        - External Database: Selective replicas of geo + pgstac schemas
+        - External Storage: Public blob storage account
+        - External TiTiler: Public tile serving instance
 
-        If not configured (PUBLIC_DB_* env vars not set), falls back to app database
-        geo schema for backward compatibility.
+        If not configured (EXTERNAL_DB_* env vars not set), external features are disabled.
 
         Environment Variables:
-            PUBLIC_DB_HOST, PUBLIC_DB_NAME, PUBLIC_DB_SCHEMA,
-            PUBLIC_DB_MANAGED_IDENTITY_NAME (all optional - uses app db if not set)
+            EXTERNAL_DB_HOST, EXTERNAL_DB_NAME, EXTERNAL_DB_SCHEMA,
+            EXTERNAL_STORAGE_ACCOUNT, EXTERNAL_TITILER_URL
         """
     )
 
@@ -591,48 +593,17 @@ class AppConfig(BaseModel):
         return self.raster.intermediate_tiles_container or StorageDefaults.SILVER_COGS
 
     # ========================================================================
-    # Public Database Helper Methods (07 JAN 2026 - renamed from business_database)
+    # External Environment Helper Methods (10 MAR 2026)
     # ========================================================================
 
-    def get_public_database_config(self) -> DatabaseConfig | PublicDatabaseConfig:
+    def is_external_configured(self) -> bool:
         """
-        Get configuration for public-facing OGC Features database.
-
-        Returns PublicDatabaseConfig if explicitly configured (PUBLIC_DB_* env vars set),
-        otherwise falls back to app database for backward compatibility.
-
-        This allows gradual migration:
-        - Phase 1: No PUBLIC_DB_* vars → uses app database geo schema
-        - Phase 2: Set PUBLIC_DB_* vars → uses dedicated public database
-
-        Usage:
-            from config import get_config
-            config = get_config()
-
-            # Get appropriate config for public data
-            public_config = config.get_public_database_config()
-
-            # Check if using dedicated public database
-            if isinstance(public_config, PublicDatabaseConfig):
-                logger.info(f"Using public database: {public_config.database}")
-            else:
-                logger.info("Using app database geo schema (fallback)")
+        Check if external hosting environment is configured.
 
         Returns:
-            PublicDatabaseConfig if configured, DatabaseConfig otherwise
+            True if EXTERNAL_DB_HOST or EXTERNAL_DB_NAME environment variables are set
         """
-        if self.public_database and self.public_database.is_configured:
-            return self.public_database
-        return self.database
-
-    def is_public_database_configured(self) -> bool:
-        """
-        Check if dedicated public database is configured.
-
-        Returns:
-            True if PUBLIC_DB_HOST or PUBLIC_DB_NAME environment variables are set
-        """
-        return self.public_database is not None and self.public_database.is_configured
+        return self.external is not None and self.external.is_configured
 
     # ========================================================================
     # URL Generation Methods (Legacy Compatibility)
@@ -1004,9 +975,9 @@ class AppConfig(BaseModel):
             # Domain configs
             storage=StorageConfig.from_environment(),
             database=DatabaseConfig.from_environment(),
-            # Public database: only instantiate if explicitly configured
-            public_database=PublicDatabaseConfig.from_environment()
-                if (os.environ.get("PUBLIC_DB_HOST") or os.environ.get("PUBLIC_DB_NAME"))
+            # External environment: only instantiate if explicitly configured
+            external=ExternalEnvironmentConfig.from_environment()
+                if (os.environ.get("EXTERNAL_DB_HOST") or os.environ.get("EXTERNAL_DB_NAME"))
                 else None,
             docker=DockerConfig.from_environment(),
             raster=RasterConfig.from_environment(),

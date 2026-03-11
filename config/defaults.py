@@ -792,6 +792,25 @@ class KeyVaultDefaults:
 
 
 # =============================================================================
+# EXTERNAL ENVIRONMENT DEFAULTS (10 MAR 2026)
+# =============================================================================
+
+class ExternalDefaults:
+    """
+    Defaults for external hosting environment.
+
+    The external environment is a separate database, storage account, and
+    TiTiler instance for serving publicly-cleared data to external consumers.
+    """
+
+    DB_PORT = 5432
+    DB_SCHEMA = "geo"                          # Same schema name as internal
+    PGSTAC_SCHEMA = "pgstac"                   # Same schema name as internal
+    TITILER_HEALTH_PATH = "/healthz"           # Standard TiTiler health endpoint
+    CONNECTION_TIMEOUT_SECONDS = 30
+
+
+# =============================================================================
 # SHARED UTILITIES
 # =============================================================================
 
@@ -820,5 +839,6 @@ __all__ = [
     "ObservabilityDefaults",
     "AppDefaults",
     "KeyVaultDefaults",
+    "ExternalDefaults",
     "parse_bool",
 ]

@@ -72,7 +72,7 @@ from datetime import datetime, timezone
 from contextlib import contextmanager
 import logging
 
-from config import AppConfig, get_config, PublicDatabaseConfig
+from config import AppConfig, get_config, ExternalEnvironmentConfig
 from core.models import (
     JobRecord, TaskRecord, JobStatus, TaskStatus,
     StageAdvancementResult, TaskResult
@@ -218,7 +218,7 @@ class PostgreSQLRepository(BaseRepository):
     def __init__(self, connection_string: Optional[str] = None,
                  schema_name: Optional[str] = None,
                  config: Optional[AppConfig] = None,
-                 target_database: Literal["app", "public"] = "app"):
+                 target_database: Literal["app", "external"] = "app"):
         """
         Initialize PostgreSQL repository with configuration.
 
@@ -284,14 +284,14 @@ class PostgreSQLRepository(BaseRepository):
             Configuration object. If not provided, uses get_config().
             This allows for dependency injection in testing.
 
-        target_database : Literal["app", "public"]
-            Which database to connect to (07 JAN 2026):
+        target_database : Literal["app", "external"]
+            Which database to connect to (10 MAR 2026):
             - "app" (default): App database - jobs, tasks, pgstac, h3
-            - "public": Public database - OGC Features, public data
+            - "external": External database - public-facing OGC Features, STAC
 
-            When "public" is specified and PublicDatabaseConfig is configured,
-            connects to the public database with restricted permissions.
-            Falls back to app database if public database not configured.
+            When "external" is specified and ExternalEnvironmentConfig is configured,
+            connects to the external database with restricted permissions.
+            Falls back to app database if external database not configured.
 
         Raises:
         ------
@@ -310,8 +310,8 @@ class PostgreSQLRepository(BaseRepository):
         # Use global configuration (app database)
         repo = PostgreSQLRepository()
 
-        # Connect to public database for OGC Features
-        repo = PostgreSQLRepository(target_database="public")
+        # Connect to external database for OGC Features
+        repo = PostgreSQLRepository(target_database="external")
 
         # Override with specific connection
         repo = PostgreSQLRepository(
@@ -332,8 +332,8 @@ class PostgreSQLRepository(BaseRepository):
         # Determine schema name based on target database
         if schema_name:
             self.schema_name = schema_name
-        elif target_database == "public" and self.config.is_public_database_configured():
-            self.schema_name = self.config.public_database.db_schema
+        elif target_database == "external" and self.config.is_external_configured():
+            self.schema_name = self.config.external.db_schema
         else:
             self.schema_name = self.config.app_schema
 
@@ -347,9 +347,9 @@ class PostgreSQLRepository(BaseRepository):
         self._ensure_schema_exists()
 
         # Log which database we're connected to
-        if target_database == "public" and self.config.is_public_database_configured():
-            db_name = self.config.public_database.database
-            logger.info(f"✅ PostgreSQLRepository initialized with PUBLIC database: {db_name}, schema: {self.schema_name}")
+        if target_database == "external" and self.config.is_external_configured():
+            db_name = self.config.external.db_name
+            logger.info(f"✅ PostgreSQLRepository initialized with EXTERNAL database: {db_name}, schema: {self.schema_name}")
         else:
             logger.info(f"✅ PostgreSQLRepository initialized with APP database, schema: {self.schema_name}")
     
@@ -372,11 +372,11 @@ class PostgreSQLRepository(BaseRepository):
         - Azure Functions with system-assigned identity (simpler setup)
         - Local development with password (developer machines)
 
-        Database Selection (07 JAN 2026):
+        Database Selection (10 MAR 2026):
         ---------------------------------
         Uses self.target_database to determine which database to connect to:
         - "app": Uses config.database - default
-        - "public": Uses config.public_database if configured
+        - "external": Uses config.external if configured
 
         Returns:
         -------
@@ -391,15 +391,15 @@ class PostgreSQLRepository(BaseRepository):
         RuntimeError
             If managed identity token acquisition fails.
         """
-        # Determine which database config to use (07 JAN 2026)
-        use_public_db = (
-            self.target_database == "public" and
-            self.config.is_public_database_configured()
+        # Determine which database config to use (10 MAR 2026)
+        use_external_db = (
+            self.target_database == "external" and
+            self.config.is_external_configured()
         )
 
-        if use_public_db:
-            db_config = self.config.public_database
-            logger.debug(f"🔌 Building connection string for PUBLIC database: {db_config.database}")
+        if use_external_db:
+            db_config = self.config.external
+            logger.debug(f"🔌 Building connection string for EXTERNAL database: {db_config.db_name}")
         else:
             db_config = None  # Will use legacy app database properties
             logger.debug("🔌 Building connection string for APP database")
@@ -408,9 +408,9 @@ class PostgreSQLRepository(BaseRepository):
 
         # Get credentials from config - SINGLE SOURCE OF TRUTH (08 DEC 2025)
         # Config loads all env vars at startup via DatabaseConfig.from_environment()
-        if use_public_db and db_config:
-            client_id = db_config.managed_identity_client_id
-            identity_name = db_config.managed_identity_admin_name
+        if use_external_db and db_config:
+            client_id = db_config.db_managed_identity_client_id
+            identity_name = db_config.db_managed_identity_name
         else:
             client_id = self.config.database.managed_identity_client_id
             identity_name = self.config.database.effective_identity_name
@@ -441,8 +441,8 @@ class PostgreSQLRepository(BaseRepository):
         # Priority 3: Password Authentication
         if password:
             logger.info("🔑 [AUTH] Using PASSWORD authentication (local development mode)")
-            if use_public_db and db_config:
-                # Build password connection string for public database
+            if use_external_db and db_config:
+                # Build password connection string for external database
                 conn_str = self._build_password_connection_string(db_config)
             else:
                 conn_str = self.config.postgis_connection_string
@@ -465,14 +465,14 @@ class PostgreSQLRepository(BaseRepository):
         logger.error(error_msg)
         raise ValueError(error_msg)
 
-    def _build_password_connection_string(self, db_config: PublicDatabaseConfig) -> str:
+    def _build_password_connection_string(self, db_config: ExternalEnvironmentConfig) -> str:
         """
-        Build password-based connection string for public database (07 JAN 2026).
+        Build password-based connection string for external database (10 MAR 2026).
 
-        Used for local development when connecting to public database with password auth.
+        Used for local development when connecting to external database with password auth.
 
         Args:
-            db_config: PublicDatabaseConfig with host, port, database settings
+            db_config: ExternalEnvironmentConfig with host, port, database settings
 
         Returns:
             PostgreSQL connection string with password authentication
@@ -483,17 +483,17 @@ class PostgreSQLRepository(BaseRepository):
 
         conn_str = (
             f"postgresql://{user}:{password}@"
-            f"{db_config.host}:{db_config.port}/"
-            f"{db_config.database}?sslmode=require"
+            f"{db_config.db_host}:{db_config.db_port}/"
+            f"{db_config.db_name}?sslmode=require"
         )
-        logger.debug(f"🔗 Password connection string built for public database: {db_config.database}")
+        logger.debug(f"🔗 Password connection string built for external database: {db_config.db_name}")
         return conn_str
 
     def _build_managed_identity_connection_string(
         self,
         client_id: Optional[str] = None,
         identity_name: str = None,  # Required - caller must provide from config
-        db_config: Optional[PublicDatabaseConfig] = None
+        db_config: Optional[ExternalEnvironmentConfig] = None
     ) -> str:
         """
         Build PostgreSQL connection string using Azure Managed Identity.
@@ -512,9 +512,9 @@ class PostgreSQLRepository(BaseRepository):
             PostgreSQL user name matching the managed identity.
             Required - caller must provide from config (default in database_config.py).
 
-        db_config : Optional[PublicDatabaseConfig]
-            Public database configuration (07 JAN 2026).
-            If provided, uses public database host/port/database.
+        db_config : Optional[ExternalEnvironmentConfig]
+            External database configuration (10 MAR 2026).
+            If provided, uses external database host/port/database.
             If None, uses app database from self.config.
 
         Connection String Format:
@@ -539,11 +539,11 @@ class PostgreSQLRepository(BaseRepository):
         from azure.identity import ManagedIdentityCredential
         from azure.core.exceptions import ClientAuthenticationError
 
-        # Determine database connection parameters (29 NOV 2025)
+        # Determine database connection parameters (10 MAR 2026)
         if db_config:
-            db_host = db_config.host
-            db_port = db_config.port
-            db_name = db_config.database
+            db_host = db_config.db_host
+            db_port = db_config.db_port
+            db_name = db_config.db_name
         else:
             db_host = self.config.postgis_host
             db_port = self.config.postgis_port
@@ -652,9 +652,9 @@ class PostgreSQLRepository(BaseRepository):
         Uses config intent + environment signals to avoid retry-gating drift when
         config flags are inconsistent.
         """
-        if self.target_database == "public" and self.config.is_public_database_configured():
-            public_db = self.config.public_database
-            if public_db and (public_db.use_managed_identity or public_db.managed_identity_client_id):
+        if self.target_database == "external" and self.config.is_external_configured():
+            ext_db = self.config.external
+            if ext_db and (ext_db.db_use_managed_identity or ext_db.db_managed_identity_client_id):
                 return True
 
         db_cfg = self.config.database

@@ -191,14 +191,10 @@ class ExternalEnvironmentHealthChecks(HealthCheckPlugin):
             account = config.external.storage_account
 
             try:
-                from azure.identity import DefaultAzureCredential
-                from azure.storage.blob import BlobServiceClient
+                from infrastructure.blob import BlobRepository
 
-                credential = DefaultAzureCredential()
-                service_client = BlobServiceClient(
-                    account_url=f"https://{account}.blob.core.windows.net",
-                    credential=credential
-                )
+                repo = BlobRepository(account_name=account)
+                service_client = repo.blob_service
 
                 # List containers (lightweight connectivity check)
                 containers = []

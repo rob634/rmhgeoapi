@@ -54,7 +54,7 @@ class ExternalEnvironmentConfig(BaseModel):
     Configuration for external hosting environment (separate DB + storage + TiTiler).
 
     Bundles all three external components into a single config class.
-    Follows the same patterns as PublicDatabaseConfig (which this replaces).
+    Replaces the former PublicDatabaseConfig (deleted 10 MAR 2026).
     """
 
     # --- Database ---
@@ -118,10 +118,7 @@ class ExternalEnvironmentConfig(BaseModel):
     @property
     def is_configured(self) -> bool:
         """True when at minimum the external DB is configured."""
-        return bool(
-            os.environ.get("EXTERNAL_DB_HOST") or
-            os.environ.get("EXTERNAL_DB_NAME")
-        )
+        return bool(self.db_host or self.db_name)
 
     @property
     def is_fully_configured(self) -> bool:
@@ -157,15 +154,12 @@ class ExternalEnvironmentConfig(BaseModel):
         """
         Load ExternalEnvironmentConfig from environment variables.
 
-        Falls back to app database values for host/identity when external
-        environment variables are not explicitly set.
+        No fallbacks to app database values — EXTERNAL_DB_* vars must be
+        explicitly set. If not set, is_configured returns False.
         """
         return cls(
             # Database
-            db_host=os.environ.get(
-                "EXTERNAL_DB_HOST",
-                os.environ.get("POSTGIS_HOST", "")
-            ),
+            db_host=os.environ.get("EXTERNAL_DB_HOST", ""),
             db_port=int(os.environ.get(
                 "EXTERNAL_DB_PORT",
                 str(ExternalDefaults.DB_PORT)

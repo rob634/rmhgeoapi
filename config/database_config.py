@@ -151,15 +151,13 @@ Two databases may be configured:
         - Contains: app, pgstac, h3 schemas
         - Can be nuked/rebuilt for development
 
-    Public Database (PublicDatabaseConfig) - Optional:
-        - Restricted CRUD (NO DROP SCHEMA)
-        - Contains: geo schema (public OGC Features)
-        - Protected from accidental destruction
-        - Serves public-facing OGC Feature Collections
+    External Database (ExternalEnvironmentConfig) - Optional:
+        - Configured via EXTERNAL_DB_* environment variables
+        - Contains: geo + pgstac schemas (publicly-cleared data)
+        - See config/external_config.py
 
 Exports:
     DatabaseConfig: App database configuration
-    PublicDatabaseConfig: Public database configuration (optional)
     get_postgres_connection_string: Connection string factory (deprecated)
 """
 
@@ -532,167 +530,6 @@ class DatabaseConfig(BaseModel):
             connection_timeout_seconds=int(os.environ.get("DB_CONNECTION_TIMEOUT", str(DatabaseDefaults.CONNECTION_TIMEOUT_SECONDS))),
             # Azure environment detection (set automatically by Azure Functions runtime)
             azure_website_name=os.environ.get("WEBSITE_SITE_NAME")
-        )
-
-
-# ============================================================================
-# PUBLIC DATABASE CONFIGURATION (07 JAN 2026 - renamed from BusinessDatabaseConfig)
-# ============================================================================
-
-class PublicDatabaseConfig(BaseModel):
-    """
-    Public-facing database configuration for OGC Feature Collections.
-
-    This is a SEPARATE database from the app database, used for public-facing
-    OGC Features API data. Intended for deployment behind Cloudflare or similar
-    CDN in corporate Azure environments.
-
-    ============================================================================
-    OPTIONAL - SKIP IF USING SINGLE DATABASE
-    ============================================================================
-    This configuration is OPTIONAL. If not configured, the system uses the
-    app database geo schema for all outputs. Configure this when you need
-    a separate public-facing database.
-
-    Architecture:
-        App Database (internal):
-            - Full DDL: CREATE/DROP SCHEMA, ALL PRIVILEGES
-            - Contains: app, pgstac, h3 schemas
-            - ETL engine, job management, STAC catalog
-            - Can be nuked/rebuilt for development
-
-        Public Database (external-facing):
-            - Restricted: CREATE TABLE, INSERT, UPDATE, DELETE, SELECT
-            - NO DROP SCHEMA permission
-            - Contains: geo schema (published vector data)
-            - Serves public OGC Feature Collections
-            - Protected from accidental destruction
-
-    Environment Variables:
-        PUBLIC_DB_HOST: PostgreSQL host (defaults to POSTGIS_HOST if not set)
-        PUBLIC_DB_PORT: Port (default: 5432)
-        PUBLIC_DB_NAME: Database name
-        PUBLIC_DB_SCHEMA: Schema for public data (default: "geo")
-        PUBLIC_DB_MANAGED_IDENTITY_NAME: Identity name (uses DB_ADMIN_MANAGED_IDENTITY_NAME)
-        PUBLIC_DB_MANAGED_IDENTITY_CLIENT_ID: Client ID (optional)
-
-    Usage:
-        from config import get_config
-        config = get_config()
-
-        # Check if public database is configured
-        if config.public_database and config.public_database.is_configured:
-            # Use public database for OGC Features
-            public_config = config.public_database
-        else:
-            # Fall back to app database geo schema
-            public_config = config.database
-    """
-
-    # Connection settings
-    host: str = Field(
-        ...,
-        description="PostgreSQL server hostname for public database"
-    )
-
-    port: int = Field(
-        default=DatabaseDefaults.PORT,
-        description="PostgreSQL server port number"
-    )
-
-    database: str = Field(
-        ...,
-        description="Public database name (separate from app database). Set via PUBLIC_DB_NAME."
-    )
-
-    db_schema: str = Field(
-        default=DatabaseDefaults.POSTGIS_SCHEMA,
-        description="Schema for public data (default: geo)"
-    )
-
-    # Managed identity settings (same identity as app database, different permissions)
-    use_managed_identity: bool = Field(
-        default=True,
-        description="Enable Azure Managed Identity (should match app database setting)"
-    )
-
-    managed_identity_admin_name: str = Field(
-        default=AzureDefaults.MANAGED_IDENTITY_NAME,
-        description="""Admin managed identity name - uses SAME identity as app database.
-
-        The key difference is not the identity, but the PERMISSIONS granted
-        to this identity on the public database:
-        - App database: Full DDL (CREATE/DROP SCHEMA)
-        - Public database: Restricted CRUD (NO DROP SCHEMA)
-        """
-    )
-
-    managed_identity_client_id: Optional[str] = Field(
-        default=None,
-        description="Client ID of user-assigned managed identity (optional)"
-    )
-
-    # Connection settings
-    connection_timeout_seconds: int = Field(
-        default=DatabaseDefaults.CONNECTION_TIMEOUT_SECONDS,
-        description="Connection timeout in seconds"
-    )
-
-    @property
-    def is_configured(self) -> bool:
-        """
-        Check if public database is explicitly configured.
-
-        Returns True if PUBLIC_DB_HOST or PUBLIC_DB_NAME environment
-        variables are set. This allows the system to fall back to app
-        database when public database is not configured.
-        """
-        return (
-            os.environ.get("PUBLIC_DB_HOST") is not None or
-            os.environ.get("PUBLIC_DB_NAME") is not None
-        )
-
-    def debug_dict(self) -> dict:
-        """Debug output for logging."""
-        return {
-            "host": self.host,
-            "port": self.port,
-            "database": self.database,
-            "db_schema": self.db_schema,
-            "use_managed_identity": self.use_managed_identity,
-            "managed_identity_admin_name": self.managed_identity_admin_name,
-            "managed_identity_client_id": self.managed_identity_client_id[:8] + "..." if self.managed_identity_client_id else None,
-            "is_configured": self.is_configured
-        }
-
-    @classmethod
-    def from_environment(cls) -> "PublicDatabaseConfig":
-        """
-        Load PublicDatabaseConfig from environment variables.
-
-        Falls back to app database values when public database
-        environment variables are not set.
-        """
-        return cls(
-            # Host: Use PUBLIC_DB_HOST, fall back to POSTGIS_HOST
-            host=os.environ.get("PUBLIC_DB_HOST", os.environ.get("POSTGIS_HOST", "")),
-            port=int(os.environ.get("PUBLIC_DB_PORT", str(DatabaseDefaults.PORT))),
-            database=os.environ.get("PUBLIC_DB_NAME", ""),  # Required if public DB is configured
-            db_schema=os.environ.get("PUBLIC_DB_SCHEMA", DatabaseDefaults.POSTGIS_SCHEMA),
-            use_managed_identity=os.environ.get(
-                "PUBLIC_DB_USE_MANAGED_IDENTITY",
-                os.environ.get("USE_MANAGED_IDENTITY", "true")
-            ).lower() == "true",
-            # managed_identity_admin_name: Use env vars, fall back to AzureDefaults
-            managed_identity_admin_name=os.environ.get(
-                "PUBLIC_DB_MANAGED_IDENTITY_ADMIN_NAME",
-                os.environ.get("DB_ADMIN_MANAGED_IDENTITY_NAME", AzureDefaults.MANAGED_IDENTITY_NAME)
-            ),
-            managed_identity_client_id=os.environ.get(
-                "PUBLIC_DB_MANAGED_IDENTITY_CLIENT_ID",
-                os.environ.get("DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID")
-            ),
-            connection_timeout_seconds=int(os.environ.get("PUBLIC_DB_CONNECTION_TIMEOUT", str(DatabaseDefaults.CONNECTION_TIMEOUT_SECONDS)))
         )
 
 

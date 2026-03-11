@@ -86,7 +86,7 @@ from .interface_repository import (
 )
 from core.schema.updates import TaskUpdateModel, JobUpdateModel
 from utils import enforce_contract  # Added for contract enforcement
-from exceptions import DatabaseError
+from exceptions import DatabaseError, ConfigurationError
 
 # Logger setup
 logger = logging.getLogger(__name__)
@@ -334,6 +334,11 @@ class PostgreSQLRepository(BaseRepository):
             self.schema_name = schema_name
         elif target_database == "external" and self.config.is_external_configured():
             self.schema_name = self.config.external.db_schema
+        elif target_database == "external":
+            raise ConfigurationError(
+                "target_database='external' but external environment not configured. "
+                "Set EXTERNAL_DB_HOST and EXTERNAL_DB_NAME environment variables."
+            )
         else:
             self.schema_name = self.config.app_schema
 
@@ -392,6 +397,12 @@ class PostgreSQLRepository(BaseRepository):
             If managed identity token acquisition fails.
         """
         # Determine which database config to use (10 MAR 2026)
+        if self.target_database == "external" and not self.config.is_external_configured():
+            raise ConfigurationError(
+                "target_database='external' but external environment not configured. "
+                "Set EXTERNAL_DB_HOST and EXTERNAL_DB_NAME environment variables."
+            )
+
         use_external_db = (
             self.target_database == "external" and
             self.config.is_external_configured()

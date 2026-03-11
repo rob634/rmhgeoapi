@@ -15,7 +15,7 @@ pgstac and geo schemas using a temporary admin managed identity.
 
 Routes:
     POST /api/dbadmin/external/initialize - Initialize external database
-    GET  /api/dbadmin/external/prereqs    - Check DBA prerequisites
+    POST /api/dbadmin/external/prereqs    - Check DBA prerequisites
 
 Security:
     - These endpoints should be protected by RBAC/authentication
@@ -24,7 +24,9 @@ Security:
 
 Usage:
     # Check prerequisites first
-    curl -X GET ".../api/dbadmin/external/prereqs?target_host=...&target_database=...&admin_umi_client_id=..."
+    curl -X POST ".../api/dbadmin/external/prereqs" \
+        -H "Content-Type: application/json" \
+        -d '{"target_host": "...", "target_database": "...", "admin_umi_client_id": "...", "admin_umi_name": "..."}'
 
     # Dry run
     curl -X POST ".../api/dbadmin/external/initialize" \
@@ -168,17 +170,20 @@ def external_db_initialize(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
-@bp.route(route="dbadmin/external/prereqs", methods=["GET"])
+@bp.route(route="dbadmin/external/prereqs", methods=["POST"])
 def external_db_prereqs(req: func.HttpRequest) -> func.HttpResponse:
     """
     Check DBA prerequisites for external database initialization.
 
-    GET /api/dbadmin/external/prereqs?target_host=...&target_database=...&admin_umi_client_id=...
+    POST /api/dbadmin/external/prereqs
 
-    Query parameters:
-        target_host: External database hostname
-        target_database: External database name
-        admin_umi_client_id: Client ID of admin UMI
+    Request body:
+    {
+        "target_host": "external-db.postgres.database.azure.com",
+        "target_database": "geodb",
+        "admin_umi_client_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+        "admin_umi_name": "external-db-admin-umi"
+    }
 
     Response:
     {
@@ -194,28 +199,37 @@ def external_db_prereqs(req: func.HttpRequest) -> func.HttpResponse:
     }
     """
     try:
-        # Get query parameters
-        target_host = req.params.get("target_host")
-        target_database = req.params.get("target_database")
-        admin_umi_client_id = req.params.get("admin_umi_client_id")
-        admin_umi_name = req.params.get("admin_umi_name")
-
-        # Validate required params
-        if not all([target_host, target_database, admin_umi_client_id, admin_umi_name]):
+        # Parse request body
+        try:
+            body = parse_request_json(req)
+        except ValueError:
             return func.HttpResponse(
                 json.dumps({
-                    "error": "Missing required query parameters",
-                    "required": ["target_host", "target_database", "admin_umi_client_id", "admin_umi_name"],
-                    "received": {
-                        "target_host": bool(target_host),
-                        "target_database": bool(target_database),
-                        "admin_umi_client_id": bool(admin_umi_client_id),
-                        "admin_umi_name": bool(admin_umi_name)
-                    }
+                    "error": "Invalid JSON body",
+                    "hint": "Request body must be valid JSON"
                 }),
                 status_code=400,
                 mimetype="application/json"
             )
+
+        # Validate required fields
+        required_fields = ["target_host", "target_database", "admin_umi_client_id", "admin_umi_name"]
+        missing = [f for f in required_fields if not body.get(f)]
+        if missing:
+            return func.HttpResponse(
+                json.dumps({
+                    "error": f"Missing required fields: {missing}",
+                    "required": required_fields,
+                    "received": list(body.keys())
+                }),
+                status_code=400,
+                mimetype="application/json"
+            )
+
+        target_host = body["target_host"]
+        target_database = body["target_database"]
+        admin_umi_client_id = body["admin_umi_client_id"]
+        admin_umi_name = body["admin_umi_name"]
 
         logger.info(f"🔍 Checking prerequisites for {target_host}/{target_database}")
 

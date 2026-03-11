@@ -158,7 +158,8 @@ class ExternalDatabaseInitializer:
         admin_umi_name: str,
         target_port: int = DEFAULT_PORT,
         target_sslmode: str = DEFAULT_SSLMODE,
-        geo_schema_name: str = "geo"
+        geo_schema_name: str = "geo",
+        connect_timeout: int = 30
     ):
         # Validate inputs before storing
         if not self._HOST_PATTERN.match(target_host):
@@ -176,7 +177,9 @@ class ExternalDatabaseInitializer:
         self.target_port = target_port
         self.target_sslmode = target_sslmode
         self.geo_schema_name = geo_schema_name
+        self.connect_timeout = connect_timeout
         self._admin_token: Optional[str] = None
+        self._token_expires_on: Optional[float] = None
         self._admin_username: str = admin_umi_name
 
         logger.info(f"ExternalDatabaseInitializer created")
@@ -196,6 +199,7 @@ class ExternalDatabaseInitializer:
             credential = ManagedIdentityCredential(client_id=self.admin_umi_client_id)
             token = credential.get_token("https://ossrdbms-aad.database.windows.net/.default")
             self._admin_token = token.token
+            self._token_expires_on = token.expires_on  # Unix timestamp
             logger.info(f"AAD token acquired (user: {self._admin_username})")
             return True
         except Exception as e:
@@ -204,11 +208,17 @@ class ExternalDatabaseInitializer:
 
     def _get_connection(self):
         """Get a psycopg connection to the target database using admin token."""
+        import time
         import psycopg
         from psycopg.rows import dict_row
 
         if not self._admin_token:
             raise RuntimeError("Admin token not acquired. Call _acquire_admin_token() first.")
+
+        # Refresh token if within 5 minutes of expiry
+        if self._token_expires_on and time.time() > (self._token_expires_on - 300):
+            logger.info("Admin token nearing expiry, refreshing...")
+            self._acquire_admin_token()
 
         return psycopg.connect(
             host=self.target_host,
@@ -217,6 +227,7 @@ class ExternalDatabaseInitializer:
             user=self._admin_username,
             password=self._admin_token,
             sslmode=self.target_sslmode,
+            connect_timeout=self.connect_timeout,
             row_factory=dict_row
         )
 
@@ -427,15 +438,15 @@ class ExternalDatabaseInitializer:
                 )
                 logger.info(f"Dropped existing pgstac schema")
 
-            # Build environment for pypgstac
-            env = os.environ.copy()
-            env.update({
+            # Build minimal environment for pypgstac (only PATH + PG* vars needed)
+            env = {
+                'PATH': os.environ.get('PATH', '/usr/bin:/bin'),
                 'PGHOST': self.target_host,
                 'PGPORT': str(self.target_port),
                 'PGDATABASE': self.target_database,
                 'PGUSER': self._admin_username,
-                'PGPASSWORD': self._admin_token
-            })
+                'PGPASSWORD': self._admin_token,
+            }
 
             logger.info(
                 f"Running pypgstac migrate on "
@@ -528,28 +539,28 @@ class ExternalDatabaseInitializer:
 
         fixes_applied = []
         functions_to_fix = [
-            'partition_after_triggerfunc()',
-            'collection_delete_trigger_func()',
+            'partition_after_triggerfunc',
+            'collection_delete_trigger_func',
         ]
 
         try:
             with self._get_connection() as conn:
                 with conn.cursor() as cur:
-                    for func_sig in functions_to_fix:
+                    for func_name in functions_to_fix:
                         try:
                             cur.execute(sql.SQL(
-                                "ALTER FUNCTION {}.{} "
+                                "ALTER FUNCTION {}.{}() "
                                 "SET search_path = pgstac, public"
                             ).format(
                                 sql.Identifier(self.PGSTAC_SCHEMA),
-                                sql.SQL(func_sig)
+                                sql.Identifier(func_name)
                             ))
-                            fixes_applied.append(f"pgstac.{func_sig}")
-                            logger.info(f"  Fixed search_path for pgstac.{func_sig}")
+                            fixes_applied.append(f"pgstac.{func_name}()")
+                            logger.info(f"  Fixed search_path for pgstac.{func_name}()")
                         except Exception as e:
                             # Function may not exist in future pypgstac versions
                             logger.warning(
-                                f"  Could not fix pgstac.{func_sig}: {e}"
+                                f"  Could not fix pgstac.{func_name}(): {e}"
                             )
                     conn.commit()
         except Exception as e:

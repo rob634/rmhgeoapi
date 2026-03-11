@@ -27,6 +27,7 @@ Dependencies:
 """
 
 from typing import List, Dict, Any, Literal, Optional
+from contextlib import nullcontext
 import logging
 import geopandas as gpd
 import pandas as pd
@@ -914,7 +915,7 @@ class VectorToPostGISHandler:
                 conn.commit()
                 logger.info(f"Uploaded {len(chunk)} rows to {schema}.{table_name}")
 
-    def create_table_only(self, chunk: gpd.GeoDataFrame, table_name: str, schema: str = "geo", indexes: dict = None):
+    def create_table_only(self, chunk: gpd.GeoDataFrame, table_name: str, schema: str = "geo", indexes: dict = None, conn=None):
         """
         Create PostGIS table without inserting data (DDL only).
 
@@ -929,11 +930,13 @@ class VectorToPostGISHandler:
                 - spatial: bool (default True)
                 - attributes: list of column names for B-tree indexes
                 - temporal: list of column names for DESC B-tree indexes
+            conn: Optional existing connection (reuse). Opens own if None.
 
         Raises:
             psycopg.Error: If table creation fails
         """
-        with self._pg_repo._get_connection() as conn:
+        ctx = nullcontext(conn) if conn is not None else self._pg_repo._get_connection()
+        with ctx as conn:
             with conn.cursor() as cur:
                 self._create_table_if_not_exists(cur, chunk, table_name, schema, indexes)
                 conn.commit()
@@ -1541,7 +1544,8 @@ class VectorToPostGISHandler:
         schema: str,
         gdf: gpd.GeoDataFrame,
         indexes: dict = None,
-        overwrite: bool = False
+        overwrite: bool = False,
+        conn=None
     ) -> None:
         """
         Create PostGIS table with etl_batch_id column for idempotent chunk tracking.
@@ -1565,6 +1569,7 @@ class VectorToPostGISHandler:
                 - attributes: list of column names
                 - temporal: list of column names for DESC indexes
             overwrite: If True, drop existing table. If False and table exists, raise error.
+            conn: Optional existing connection (reuse). Opens own if None.
 
         Raises:
             ValueError: If table exists and overwrite=False
@@ -1573,7 +1578,8 @@ class VectorToPostGISHandler:
         if indexes is None:
             indexes = {'spatial': True, 'attributes': [], 'temporal': []}
 
-        with self._pg_repo._get_connection() as conn:
+        ctx = nullcontext(conn) if conn is not None else self._pg_repo._get_connection()
+        with ctx as conn:
             with conn.cursor() as cur:
                 # Check if table exists
                 cur.execute("""
@@ -1666,7 +1672,8 @@ class VectorToPostGISHandler:
         chunk: gpd.GeoDataFrame,
         table_name: str,
         schema: str,
-        batch_id: str
+        batch_id: str,
+        conn=None
     ) -> Dict[str, int]:
         """
         Insert GeoDataFrame chunk with DELETE+INSERT idempotency pattern.
@@ -1687,6 +1694,7 @@ class VectorToPostGISHandler:
             table_name: Target table
             schema: Target schema
             batch_id: Unique identifier for this chunk (job_id[:8]-chunk-N)
+            conn: Optional existing connection (reuse). Opens own if None.
 
         Returns:
             {'rows_deleted': int, 'rows_inserted': int}
@@ -1694,7 +1702,8 @@ class VectorToPostGISHandler:
         rows_deleted = 0
         rows_inserted = 0
 
-        with self._pg_repo._get_connection() as conn:
+        ctx = nullcontext(conn) if conn is not None else self._pg_repo._get_connection()
+        with ctx as conn:
             with conn.cursor() as cur:
                 # Step 1: DELETE existing rows for this batch (IDEMPOTENCY)
                 # GAP-010 FIX (16 DEC 2025): Log batch_id at DELETE phase for idempotency verification
@@ -1783,14 +1792,20 @@ class VectorToPostGISHandler:
         logger.info(f"✅ Chunk {batch_id}: deleted={rows_deleted}, inserted={rows_inserted}")
         return {'rows_deleted': rows_deleted, 'rows_inserted': rows_inserted}
 
-    def analyze_table(self, table_name: str, schema: str = "geo") -> None:
+    def analyze_table(self, table_name: str, schema: str = "geo", conn=None) -> None:
         """
         Run ANALYZE on table to update query planner statistics.
 
         Should be called after bulk INSERT completes so the planner
         can use spatial index effectively on first query.
+
+        Args:
+            table_name: Target table name
+            schema: Target schema
+            conn: Optional existing connection (reuse). Opens own if None.
         """
-        with self._pg_repo._get_connection() as conn:
+        ctx = nullcontext(conn) if conn is not None else self._pg_repo._get_connection()
+        with ctx as conn:
             with conn.cursor() as cur:
                 cur.execute(sql.SQL("ANALYZE {schema}.{table}").format(
                     schema=sql.Identifier(schema),
@@ -1804,7 +1819,8 @@ class VectorToPostGISHandler:
         table_name: str,
         schema: str,
         gdf: 'gpd.GeoDataFrame',
-        indexes: dict = None
+        indexes: dict = None,
+        conn=None
     ) -> None:
         """
         Create spatial, attribute, and temporal indexes after bulk data INSERT.
@@ -1821,13 +1837,15 @@ class VectorToPostGISHandler:
                 - spatial: bool (default True) — GIST index on geom
                 - attributes: list of column names — BTREE indexes
                 - temporal: list of column names — BTREE DESC indexes
+            conn: Optional existing connection (reuse). Opens own if None.
         """
         if indexes is None:
             indexes = {'spatial': True, 'attributes': [], 'temporal': []}
 
         column_names = [col for col in gdf.columns if col != 'geometry']
 
-        with self._pg_repo._get_connection() as conn:
+        ctx = nullcontext(conn) if conn is not None else self._pg_repo._get_connection()
+        with ctx as conn:
             with conn.cursor() as cur:
                 # Spatial index (GIST)
                 if indexes.get('spatial', True):
@@ -1898,7 +1916,8 @@ class VectorToPostGISHandler:
         temporal_end: str = None,
         temporal_property: str = None,
         # Custom properties (13 JAN 2026 - E8 TiPG Integration)
-        custom_properties: dict = None
+        custom_properties: dict = None,
+        conn=None
     ) -> None:
         """
         Register table metadata in BOTH geo.table_catalog AND app.vector_etl_tracking.
@@ -1933,6 +1952,7 @@ class VectorToPostGISHandler:
             temporal_end: End of temporal extent ISO8601
             temporal_property: Column name containing date data
             custom_properties: Additional JSONB properties
+            conn: Optional existing connection (reuse). Opens own if None.
         """
         # Handle None or invalid bbox gracefully
         bbox_values = (None, None, None, None)
@@ -1943,7 +1963,8 @@ class VectorToPostGISHandler:
         import json
         custom_props_json = json.dumps(custom_properties) if custom_properties else None
 
-        with self._pg_repo._get_connection() as conn:
+        ctx = nullcontext(conn) if conn is not None else self._pg_repo._get_connection()
+        with ctx as conn:
             with conn.cursor() as cur:
                 # =============================================================
                 # STEP 1: Write SERVICE LAYER fields to geo.table_catalog

@@ -609,10 +609,14 @@ def _create_table_and_metadata(
     overwrite: bool,
     parameters: Dict[str, Any],
     load_info: Dict[str, Any],
-    job_id: str
+    job_id: str,
+    conn=None
 ) -> Dict[str, Any]:
     """
     Create PostGIS table and register metadata.
+
+    Args:
+        conn: Optional existing connection (reuse). Opens own if None.
 
     Returns:
         Dict with table creation result
@@ -647,7 +651,8 @@ def _create_table_and_metadata(
         schema=schema,
         gdf=gdf,
         indexes=indexes,
-        overwrite=overwrite
+        overwrite=overwrite,
+        conn=conn
     )
 
     # Generate vector tile URLs
@@ -682,7 +687,8 @@ def _create_table_and_metadata(
         temporal_start=temporal_start,
         temporal_end=temporal_end,
         temporal_property=temporal_property,
-        custom_properties=custom_props
+        custom_properties=custom_props,
+        conn=conn
     )
 
     logger.info(f"[{job_id[:8]}] Created table {schema}.{table_name} ({geometry_type}, SRID=4326)")
@@ -751,12 +757,14 @@ def _upload_chunks_with_checkpoints(
     schema: str,
     chunk_size: int,
     job_id: str,
-    checkpoint_fn
+    checkpoint_fn,
+    conn=None
 ) -> Dict[str, Any]:
     """
     Upload data in chunks with per-chunk checkpoints.
 
     Uses DELETE+INSERT idempotency pattern without pickle serialization.
+    When conn is provided, reuses it for all chunks (11 MAR 2026 — connection reuse).
 
     Returns:
         Dict with upload statistics
@@ -769,7 +777,10 @@ def _upload_chunks_with_checkpoints(
     total_features = len(gdf)
     num_chunks = (total_features + chunk_size - 1) // chunk_size
 
-    logger.info(f"[{job_id[:8]}] Uploading {total_features:,} features in {num_chunks} chunks")
+    if conn is not None:
+        logger.info(f"[{job_id[:8]}] Uploading {total_features:,} features in {num_chunks} chunks (reusing connection)")
+    else:
+        logger.info(f"[{job_id[:8]}] Uploading {total_features:,} features in {num_chunks} chunks")
 
     total_rows_inserted = 0
     total_rows_deleted = 0
@@ -790,7 +801,8 @@ def _upload_chunks_with_checkpoints(
             chunk=chunk,
             table_name=table_name,
             schema=schema,
-            batch_id=batch_id
+            batch_id=batch_id,
+            conn=conn
         )
 
         chunk_elapsed = time.time() - chunk_start_time
@@ -899,6 +911,12 @@ def _process_single_table(
     Handles: table creation, metadata, style, chunk upload,
     deferred indexes, ANALYZE, TiPG refresh, post-upload validation.
 
+    CONNECTION REUSE (11 MAR 2026):
+    Opens ONE connection for the entire workflow. All DB operations
+    (table DDL, chunk inserts, indexes, ANALYZE, split views, verification)
+    share this connection. Each logical operation commits independently,
+    preserving per-chunk idempotency via batch_id DELETE+INSERT.
+
     Args:
         gdf: Single-type GeoDataFrame to upload
         table_name: Target PostGIS table name (with suffix if split)
@@ -915,27 +933,31 @@ def _process_single_table(
         Dict with table_name, geometry_type, total_rows, style_id, vector_tile_urls
     """
     from services.vector.postgis_handler import VectorToPostGISHandler
+    from psycopg import sql as psql
 
     logger.info(f"[{job_id[:8]}] Processing table: {schema}.{table_name} ({len(gdf)} features)")
 
-    # Phase 2: Create table and metadata
-    table_result = _create_table_and_metadata(
-        gdf=gdf,
-        table_name=table_name,
-        schema=schema,
-        overwrite=overwrite,
-        parameters=parameters,
-        load_info=load_info,
-        job_id=job_id
-    )
+    # === ONE CONNECTION FOR THE ENTIRE TABLE PROCESSING ===
+    _handler = VectorToPostGISHandler()
+    with _handler._pg_repo._get_connection() as conn:
+        logger.info(f"[{job_id[:8]}] Single connection opened for entire table processing")
 
-    # Set table_group in catalog if this is a geometry split
-    if table_group:
-        try:
-            _handler = VectorToPostGISHandler()
-            with _handler._pg_repo._get_connection() as conn:
+        # Phase 2: Create table and metadata
+        table_result = _create_table_and_metadata(
+            gdf=gdf,
+            table_name=table_name,
+            schema=schema,
+            overwrite=overwrite,
+            parameters=parameters,
+            load_info=load_info,
+            job_id=job_id,
+            conn=conn
+        )
+
+        # Set table_group in catalog if this is a geometry split
+        if table_group:
+            try:
                 with conn.cursor() as cur:
-                    from psycopg import sql as psql
                     cur.execute(
                         psql.SQL(
                             "UPDATE {schema}.table_catalog SET table_group = %s "
@@ -944,72 +966,72 @@ def _process_single_table(
                         (table_group, table_name)
                     )
                     conn.commit()
-            logger.info(f"[{job_id[:8]}] Set table_group='{table_group}' for {table_name}")
-        except Exception as e:
-            logger.warning(f"[{job_id[:8]}] Failed to set table_group (non-fatal): {e}")
+                logger.info(f"[{job_id[:8]}] Set table_group='{table_group}' for {table_name}")
+            except Exception as e:
+                logger.warning(f"[{job_id[:8]}] Failed to set table_group (non-fatal): {e}")
 
-    checkpoint_fn(f"table_created_{table_name}", {
-        "table": f"{schema}.{table_name}",
-        "geometry_type": table_result['geometry_type'],
-        "srid": table_result['srid']
-    })
+        checkpoint_fn(f"table_created_{table_name}", {
+            "table": f"{schema}.{table_name}",
+            "geometry_type": table_result['geometry_type'],
+            "srid": table_result['srid']
+        })
 
-    # Phase 2.5: Create default style
-    style_result = _create_default_style(
-        table_name=table_name,
-        geometry_type=table_result['geometry_type'],
-        style_params=parameters.get('style'),
-        job_id=job_id
-    )
-
-    # Phase 3: Upload chunks
-    upload_result = _upload_chunks_with_checkpoints(
-        gdf=gdf,
-        table_name=table_name,
-        schema=schema,
-        chunk_size=chunk_size,
-        job_id=job_id,
-        checkpoint_fn=checkpoint_fn
-    )
-
-    # Phase 3.5: Deferred indexes + ANALYZE
-    _post_handler = VectorToPostGISHandler()
-    indexes = parameters.get('indexes', {'spatial': True, 'attributes': [], 'temporal': []})
-    _post_handler.create_deferred_indexes(
-        table_name=table_name,
-        schema=schema,
-        gdf=gdf,
-        indexes=indexes
-    )
-    _post_handler.analyze_table(table_name, schema)
-
-    # =====================================================================
-    # PHASE 3.7: Create Split Views (if split_column specified)
-    # =====================================================================
-    split_column = parameters.get('split_column')
-    split_views_result = None
-
-    if split_column:
-        logger.info(f"[{job_id[:8]}] Phase 3.7: Creating split views on column '{split_column}'")
-
-        from services.vector.view_splitter import (
-            validate_split_column,
-            discover_split_values,
-            create_split_views,
-            register_split_views,
-            cleanup_split_view_metadata,
+        # Phase 2.5: Create default style (blob storage, no DB)
+        style_result = _create_default_style(
+            table_name=table_name,
+            geometry_type=table_result['geometry_type'],
+            style_params=parameters.get('style'),
+            job_id=job_id
         )
-        from services.vector.column_sanitizer import sanitize_column_name as _sanitize_col
 
-        # Normalize user's column name to post-sanitization form
-        split_column_sanitized = _sanitize_col(split_column)
-        if split_column_sanitized != split_column:
-            logger.info(
-                f"[{job_id[:8]}] Split column sanitized: "
-                f"'{split_column}' -> '{split_column_sanitized}'"
+        # Phase 3: Upload chunks (ALL reuse same connection)
+        upload_result = _upload_chunks_with_checkpoints(
+            gdf=gdf,
+            table_name=table_name,
+            schema=schema,
+            chunk_size=chunk_size,
+            job_id=job_id,
+            checkpoint_fn=checkpoint_fn,
+            conn=conn
+        )
+
+        # Phase 3.5: Deferred indexes + ANALYZE
+        indexes = parameters.get('indexes', {'spatial': True, 'attributes': [], 'temporal': []})
+        _handler.create_deferred_indexes(
+            table_name=table_name,
+            schema=schema,
+            gdf=gdf,
+            indexes=indexes,
+            conn=conn
+        )
+        _handler.analyze_table(table_name, schema, conn=conn)
+
+        # =================================================================
+        # PHASE 3.7: Create Split Views (if split_column specified)
+        # =================================================================
+        split_column = parameters.get('split_column')
+        split_views_result = None
+
+        if split_column:
+            logger.info(f"[{job_id[:8]}] Phase 3.7: Creating split views on column '{split_column}'")
+
+            from services.vector.view_splitter import (
+                validate_split_column,
+                discover_split_values,
+                create_split_views,
+                register_split_views,
+                cleanup_split_view_metadata,
             )
+            from services.vector.column_sanitizer import sanitize_column_name as _sanitize_col
 
-        with _post_handler._pg_repo._get_connection() as conn:
+            # Normalize user's column name to post-sanitization form
+            split_column_sanitized = _sanitize_col(split_column)
+            if split_column_sanitized != split_column:
+                logger.info(
+                    f"[{job_id[:8]}] Split column sanitized: "
+                    f"'{split_column}' -> '{split_column_sanitized}'"
+                )
+
             # Step 1: Validate column exists and has categorical type
             col_info = validate_split_column(
                 conn, table_name, schema, split_column_sanitized
@@ -1047,33 +1069,26 @@ def _process_single_table(
 
             conn.commit()
 
-        split_views_result = {
-            'split_column': split_column_sanitized,
-            'values': [str(v) for v in values],
-            'views_created': len(views),
-            'catalog_entries': registered,
-            'view_names': [v['view_name'] for v in views],
-        }
-        checkpoint_fn("split_views_created", split_views_result)
+            split_views_result = {
+                'split_column': split_column_sanitized,
+                'values': [str(v) for v in values],
+                'views_created': len(views),
+                'catalog_entries': registered,
+                'view_names': [v['view_name'] for v in views],
+            }
+            checkpoint_fn("split_views_created", split_views_result)
 
-    # Phase 4: TiPG refresh
-    tipg_collection_id = f"{schema}.{table_name}"
-    tipg_refresh_data = _refresh_tipg(tipg_collection_id, job_id)
-    checkpoint_fn(f"tipg_refresh_{table_name}", tipg_refresh_data)
+        # Post-upload validation (same connection)
+        total_rows = upload_result.get('total_rows', 0)
 
-    # Post-upload validation
-    total_rows = upload_result.get('total_rows', 0)
+        if total_rows == 0:
+            raise ValueError(
+                f"Vector ETL completed all phases but inserted 0 rows into "
+                f"{schema}.{table_name}. Source had {len(gdf)} features."
+            )
 
-    if total_rows == 0:
-        raise ValueError(
-            f"Vector ETL completed all phases but inserted 0 rows into "
-            f"{schema}.{table_name}. Source had {len(gdf)} features."
-        )
-
-    # Cross-check row count
-    try:
-        from psycopg import sql as psql
-        with _post_handler._pg_repo._get_connection() as conn:
+        # Cross-check row count
+        try:
             with conn.cursor() as cur:
                 cur.execute(
                     psql.SQL("SELECT COUNT(*) FROM {schema}.{table}").format(
@@ -1082,20 +1097,18 @@ def _process_single_table(
                     )
                 )
                 db_total = cur.fetchone()['count']
-        if db_total != total_rows:
-            logger.warning(
-                f"[{job_id[:8]}] Row count discrepancy for {table_name}: "
-                f"chunk sum={total_rows}, COUNT(*)={db_total}"
-            )
-            total_rows = db_total
-    except Exception as count_err:
-        logger.warning(f"[{job_id[:8]}] Could not verify row count for {table_name}: {count_err}")
+            if db_total != total_rows:
+                logger.warning(
+                    f"[{job_id[:8]}] Row count discrepancy for {table_name}: "
+                    f"chunk sum={total_rows}, COUNT(*)={db_total}"
+                )
+                total_rows = db_total
+        except Exception as count_err:
+            logger.warning(f"[{job_id[:8]}] Could not verify row count for {table_name}: {count_err}")
 
-    # Update metadata feature_count if needed
-    if total_rows != len(gdf):
-        try:
-            from psycopg import sql as psql
-            with _post_handler._pg_repo._get_connection() as conn:
+        # Update metadata feature_count if needed
+        if total_rows != len(gdf):
+            try:
                 with conn.cursor() as cur:
                     cur.execute(
                         psql.SQL(
@@ -1105,8 +1118,16 @@ def _process_single_table(
                         (total_rows, table_name, schema)
                     )
                     conn.commit()
-        except Exception as meta_err:
-            logger.warning(f"[{job_id[:8]}] Could not update feature_count for {table_name}: {meta_err}")
+            except Exception as meta_err:
+                logger.warning(f"[{job_id[:8]}] Could not update feature_count for {table_name}: {meta_err}")
+
+    # === CONNECTION CLOSED HERE ===
+    logger.info(f"[{job_id[:8]}] Connection closed for {schema}.{table_name}")
+
+    # Phase 4: TiPG refresh (HTTP call, no DB connection needed)
+    tipg_collection_id = f"{schema}.{table_name}"
+    tipg_refresh_data = _refresh_tipg(tipg_collection_id, job_id)
+    checkpoint_fn(f"tipg_refresh_{table_name}", tipg_refresh_data)
 
     return {
         "table_name": table_name,

@@ -93,7 +93,6 @@ def inventory_raster_item(params: Dict[str, Any], context: Optional[Dict[str, An
         force_approved = params.get('force_approved', False)
         try:
             from infrastructure import ReleaseRepository
-            from psycopg import sql as psql
 
             release_repo = ReleaseRepository()
             with release_repo._get_connection() as conn:
@@ -342,7 +341,6 @@ def inventory_vector_item(params: Dict[str, Any], context: Optional[Dict[str, An
         if stac_item_id:
             try:
                 from infrastructure import ReleaseRepository
-                from psycopg import sql as psql
 
                 release_repo = ReleaseRepository()
                 with release_repo._get_connection() as conn:

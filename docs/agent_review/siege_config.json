@@ -85,7 +85,7 @@
       "file_name": "dctest.tif",
       "container_name": "rmhazuregeobronze",
       "size_mb": 26,
-      "profile": "both",
+      "profile": "default",
       "description": "Small GeoTIFF for raster lifecycle testing (WGS84, single band)"
     },
     "vector": {
@@ -94,7 +94,7 @@
       "file_name": "0403c87a-0c6c-4767-a6ad-78a8026258db/Vivid_Standard_30_CO02_24Q2/cutlines.gpkg",
       "container_name": "rmhazuregeobronze",
       "size_mb": 6,
-      "profile": "both",
+      "profile": "default",
       "description": "GeoPackage with nested folder path for vector lifecycle testing (WGS84)"
     },
     "raster_collection": {
@@ -108,8 +108,8 @@
       ],
       "container_name": "rmhazuregeobronze",
       "size_mb": 1619,
-      "profile": "full",
-      "description": "Multi-file raster collection for tiled ingestion testing (WGS84, 1.6 GB total)"
+      "profile": "override_only",
+      "description": "Large raster collection (1.6 GB total). Not currently used as an override target — available for manual stress testing."
     },
     "geojson": {
       "dataset_id_suffix": "geojson-test",
@@ -117,7 +117,7 @@
       "file_name": "8.geojson",
       "container_name": "rmhazuregeobronze",
       "size_mb": 4,
-      "profile": "both",
+      "profile": "default",
       "description": "Simple GeoJSON for vector format variant testing (WGS84, 3.7MB)"
     },
     "_comment_wargames": "--- Files below are in the wargames container (same rmhazuregeo account — no file copying needed) ---",
@@ -127,7 +127,7 @@
       "file_name": "good-data/n00-n05_w005-w010_fluvial-defended_2020.tif",
       "container_name": "wargames",
       "size_mb": 11,
-      "profile": "both",
+      "profile": "default",
       "description": "8-band Int16 FATHOM flood raster (WGS84, 11MB, nodata=-32768)"
     },
     "raster_utm": {
@@ -136,7 +136,7 @@
       "file_name": "good-data/fathom_flood_utm30n.tif",
       "container_name": "wargames",
       "size_mb": 5,
-      "profile": "both",
+      "profile": "default",
       "description": "8-band raster in UTM Zone 30N (EPSG:32630, 5.3MB) — tests CRS reprojection"
     },
     "raster_float32_utm": {
@@ -145,8 +145,8 @@
       "file_name": "good-data/USGS_one_meter_x32y431_MD_VA_Sandy_NCR_2014.tif",
       "container_name": "wargames",
       "size_mb": 462,
-      "profile": "full",
-      "description": "Float32 DEM in NAD83/UTM 18N (462MB, 10012x10012, nodata=-3.4e38) — tests float dtype + large raster"
+      "profile": "override_only",
+      "description": "FULL OVERRIDE for raster. Float32 DEM in NAD83/UTM 18N (462MB, 10012x10012, nodata=-3.4e38)"
     },
     "vector_geojson_small": {
       "dataset_id_suffix": "roads-geojson-test",
@@ -154,7 +154,7 @@
       "file_name": "good-data/roads.geojson",
       "container_name": "wargames",
       "size_mb": 0.2,
-      "profile": "both",
+      "profile": "default",
       "description": "Small GeoJSON with 483 LineString features (WGS84, 217KB, OSM roads)"
     },
     "vector_gpkg": {
@@ -163,7 +163,7 @@
       "file_name": "good-data/roads.gpkg",
       "container_name": "wargames",
       "size_mb": 0.2,
-      "profile": "both",
+      "profile": "default",
       "description": "Same roads data as GeoPackage (WGS84, 228KB)"
     },
     "vector_gpkg_utm": {
@@ -172,7 +172,7 @@
       "file_name": "good-data/roads_utm16n.gpkg",
       "container_name": "wargames",
       "size_mb": 0.2,
-      "profile": "both",
+      "profile": "default",
       "description": "Roads GeoPackage in UTM Zone 16N (EPSG:32616, 228KB) — tests vector CRS reprojection"
     },
     "vector_geojson_webmercator": {
@@ -181,7 +181,7 @@
       "file_name": "good-data/roads_webmercator.geojson",
       "container_name": "wargames",
       "size_mb": 0.3,
-      "profile": "both",
+      "profile": "default",
       "description": "Roads GeoJSON in Web Mercator (EPSG:3857, 299KB) — tests non-geographic CRS"
     },
     "vector_kml": {
@@ -190,7 +190,7 @@
       "file_name": "good-data/roads.kml",
       "container_name": "wargames",
       "size_mb": 0.3,
-      "profile": "both",
+      "profile": "default",
       "description": "KML format (WGS84, 356KB) — tests KML ingest path"
     },
     "vector_shapefile_zip": {
@@ -199,7 +199,7 @@
       "file_name": "good-data/roads.zip",
       "container_name": "wargames",
       "size_mb": 0.05,
-      "profile": "both",
+      "profile": "default",
       "description": "Zipped shapefile (WGS84, 49KB) — tests archive extraction path"
     },
     "vector_geojson_large": {
@@ -208,8 +208,8 @@
       "file_name": "good-data/World_Bank_Global_Administrative_Divisions.geojson",
       "container_name": "wargames",
       "size_mb": 137,
-      "profile": "full",
-      "description": "Large GeoJSON (137MB) — tests chunking, pagination, memory under load"
+      "profile": "override_only",
+      "description": "FULL OVERRIDE for vector. Large GeoJSON (137MB) — tests chunking, pagination, memory under load"
     },
     "csv_geocoded": {
       "dataset_id_suffix": "csv-test",
@@ -221,7 +221,7 @@
         "lon_column": "longitude"
       },
       "size_mb": 3,
-      "profile": "both",
+      "profile": "default",
       "description": "Geocoded CSV with lat/lon columns (2.8MB) — MUST include processing_options with lat_column/lon_column"
     },
     "netcdf_climate": {
@@ -231,7 +231,7 @@
       "container_name": "wargames",
       "data_type_override": "zarr",
       "size_mb": 4,
-      "profile": "both",
+      "profile": "default",
       "description": "NetCDF4 climate data (CMIP6 SPEI, 4MB, CF-1.7) — NOTE: .nc routes to VirtualiZarr pipeline, NOT raster"
     },
     "netcdf_climate_alt": {
@@ -241,7 +241,7 @@
       "container_name": "wargames",
       "data_type_override": "zarr",
       "size_mb": 4,
-      "profile": "both",
+      "profile": "default",
       "description": "Second NetCDF4 (SSP5-8.5 scenario) — routes to VirtualiZarr pipeline"
     },
     "netcdf_climate_p10_370": {
@@ -251,7 +251,7 @@
       "container_name": "wargames",
       "data_type_override": "zarr",
       "size_mb": 4,
-      "profile": "both",
+      "profile": "default",
       "description": "NetCDF4 SPEI p10 variant (SSP3-7.0, 4MB) — routes to VirtualiZarr pipeline"
     },
     "netcdf_climate_p10_585": {
@@ -261,7 +261,7 @@
       "container_name": "wargames",
       "data_type_override": "zarr",
       "size_mb": 4,
-      "profile": "both",
+      "profile": "default",
       "description": "NetCDF4 SPEI p10 variant (SSP5-8.5, 4MB) — routes to VirtualiZarr pipeline"
     },
     "zarr_cmip6_tasmax": {
@@ -271,8 +271,8 @@
       "container_name": "wargames",
       "data_type_override": "zarr",
       "size_mb": 1544,
-      "profile": "full",
-      "description": "Native Zarr store (CMIP6 tasmax, 1.5 GB, 43 blobs) — tests direct zarr submission path, NOT VirtualiZarr"
+      "profile": "override_only",
+      "description": "FULL OVERRIDE for zarr_cmip6_tasmax_quick. Native Zarr store (CMIP6 tasmax, 1.5 GB, 43 blobs)"
     },
     "zarr_cmip6_tasmax_quick": {
       "dataset_id_suffix": "zarr-tasmax-test",
@@ -281,8 +281,8 @@
       "container_name": "wargames",
       "data_type_override": "zarr",
       "size_mb": 10,
-      "profile": "quick",
-      "description": "Small synthetic CMIP6 tasmax Zarr (10 MB, 48×180×360) — quick profile substitute for Seq 6"
+      "profile": "default",
+      "description": "DEFAULT. Small CMIP6 tasmax Zarr (10 MB, 48x180x360). Used by Seq 6. Full profile overrides to zarr_cmip6_tasmax (1.5 GB)."
     },
     "zarr_era5_global": {
       "dataset_id_suffix": "zarr-era5-test",
@@ -291,8 +291,8 @@
       "container_name": "wargames",
       "data_type_override": "zarr",
       "size_mb": 8090,
-      "profile": "full",
-      "description": "Native Zarr store (ERA5 global sample, 8 GB, 5523 blobs) — tests direct zarr submission path, NOT VirtualiZarr"
+      "profile": "override_only",
+      "description": "Standalone large Zarr (ERA5 global, 8 GB, 5523 blobs). Not currently used as an override target — available for manual stress testing."
     },
     "zarr_era5_rechunk": {
       "dataset_id_suffix": "zarr-rechunk-test",
@@ -304,8 +304,8 @@
         "rechunk": true
       },
       "size_mb": 8090,
-      "profile": "full",
-      "description": "Native Zarr with rechunk=true (8 GB) — tests ingest_zarr_rechunk handler (Seq 19). Same source file as zarr_era5_global but with rechunk processing option."
+      "profile": "override_only",
+      "description": "FULL OVERRIDE for zarr_era5_rechunk_quick. Native Zarr with rechunk=true (8 GB)."
     },
     "zarr_era5_rechunk_quick": {
       "dataset_id_suffix": "zarr-rechunk-test",
@@ -317,8 +317,8 @@
         "rechunk": true
       },
       "size_mb": 19,
-      "profile": "quick",
-      "description": "Small synthetic ERA5 Zarr with rechunk (19 MB, 2 vars, 12×360×720) — quick profile substitute for Seq 19"
+      "profile": "default",
+      "description": "DEFAULT. Small ERA5 Zarr with rechunk (19 MB, 2 vars, 12x360x720). Used by Seq 19. Full profile overrides to zarr_era5_rechunk (8 GB)."
     },
     "vector_split_views": {
       "dataset_id_suffix": "split-views-test",
@@ -332,7 +332,7 @@
       "expected_view_count": 4,
       "expected_total_features": 3301,
       "size_mb": 3,
-      "profile": "both",
+      "profile": "default",
       "description": "GeoJSON with categorical 'quadrant' column (4 values: NE/NW/SE/SW, ~825 features each). Tests P2 split views — single file → 1 table + N views as independent TiPG endpoints (Seq 20)."
     },
     "vector_split_views_invalid_column": {
@@ -345,7 +345,7 @@
       },
       "expected_error": "Column 'nonexistent_column' not found",
       "size_mb": 3,
-      "profile": "both",
+      "profile": "default",
       "description": "Split views with invalid column name — should fail gracefully (Seq 21 validation)."
     }
   },
@@ -785,25 +785,28 @@
     "verify_bronze_files": "GET /api/storage/rmhazuregeobronze/blobs?zone=bronze&limit=50"
   },
   "profiles": {
-    "_comment": "SIEGE run profiles — 10 MAR 2026. Quick uses small files (<100 MB each), full uses GB+ files for stress testing.",
+    "_comment": "SIEGE run profiles — 12 MAR 2026. Sequences always reference small (default) fixtures. Full profile overrides to large files for stress testing. Both profiles run all 25 sequences — only data scale differs.",
     "quick": {
-      "description": "Fast smoke test — all files under 100 MB. All 22 sequences run but Zarr sequences use small synthetic stores.",
+      "description": "Fast smoke test — all files under 100 MB. Identical code paths to full, only data volume differs.",
       "max_file_size_mb": 100,
       "estimated_runtime": "10-15 minutes",
-      "fixture_overrides": {
-        "zarr_cmip6_tasmax": "zarr_cmip6_tasmax_quick",
-        "zarr_era5_rechunk": "zarr_era5_rechunk_quick"
-      },
-      "sequences": "all (1-22)",
-      "notes": "Sequences 6 and 19 use _quick Zarr fixtures (10-19 MB synthetic data). All other sequences use their default fixtures (all under 26 MB). Exercises identical code paths — only data volume differs."
+      "fixture_overrides": {},
+      "sequences": "all (1-25)",
+      "notes": "Uses default (small) fixtures for all sequences. No overrides needed — defaults are already small."
     },
     "full": {
-      "description": "Complete stress test with GB+ files. Tests memory pressure, chunking, long-running blob copies.",
+      "description": "Stress test with large files. Tests memory pressure, chunking, long-running blob copies, timeouts.",
       "max_file_size_mb": null,
       "estimated_runtime": "45-90 minutes",
-      "fixture_overrides": {},
-      "sequences": "all (1-22)",
-      "notes": "Seq 6 uses 1.5 GB CMIP6 Zarr, Seq 19 uses 8 GB ERA5 Zarr with rechunk. Full-size fixtures stress blob copy loops, memory, and timeout handling."
+      "fixture_overrides": {
+        "_comment": "Override small defaults with large files for stress testing. Sequences not listed here use their default (small) fixture.",
+        "raster": "raster_float32_utm",
+        "vector": "vector_geojson_large",
+        "zarr_cmip6_tasmax_quick": "zarr_cmip6_tasmax",
+        "zarr_era5_rechunk_quick": "zarr_era5_rechunk"
+      },
+      "sequences": "all (1-25)",
+      "notes": "Overrides: raster→462 MB DEM, vector→137 MB GeoJSON, zarr_native→1.5 GB CMIP6, zarr_rechunk→8 GB ERA5. All other sequences use default small fixtures (split views, KML, etc. have no large variants)."
     }
   },
   "_file_manifest": {

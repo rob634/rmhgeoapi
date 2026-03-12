@@ -107,17 +107,14 @@ SIEGE supports two profiles: **quick** (~15 min) and **full** (~45-90 min).
 | **quick** | <100 MB | `cmip6-tasmax-quick.zarr` (10 MB) | `era5-quick.zarr` (19 MB) | Default fixtures (all <26 MB) |
 | **full** | No limit | `cmip6-tasmax-sample.zarr` (1.5 GB) | `era5-global-sample.zarr` (8 GB) | Default fixtures |
 
-**Both profiles run all 22 sequences.** The only difference is which Zarr fixtures are used for Seq 6 and 19.
+**Both profiles run all 25 sequences.** The only difference is data scale — sequences reference small (default) fixtures, full profile overrides to large files for stress testing.
 
 **Sentinel selects profile at campaign start.** When building the Campaign Brief:
 1. Check if the user specified `quick` or `full`
-2. If `quick`: apply `profiles.quick.fixture_overrides` — replace `zarr_cmip6_tasmax` → `zarr_cmip6_tasmax_quick` and `zarr_era5_rechunk` → `zarr_era5_rechunk_quick`
-3. If `full` or unspecified: use default fixtures (no overrides)
+2. If `quick` or unspecified: use default fixtures (no overrides — defaults are small)
+3. If `full`: apply `profiles.full.fixture_overrides` — e.g., `raster` → `raster_float32_utm` (462 MB), `vector` → `vector_geojson_large` (137 MB), `zarr_cmip6_tasmax_quick` → `zarr_cmip6_tasmax` (1.5 GB), `zarr_era5_rechunk_quick` → `zarr_era5_rechunk` (8 GB)
 
-Each fixture in `valid_files` has a `profile` tag:
-- `"both"` — used in all profiles
-- `"quick"` — only used in quick profile (replaces a `"full"` fixture)
-- `"full"` — only used in full profile (GB+ files, skipped in quick)
+**Rule**: Sequences always reference the small fixture name. Profiles apply overrides. Sentinel resolves the final fixture for each sequence before handing off to Lancer.
 
 ---
 
@@ -292,7 +289,7 @@ Use `data_type_override: "zarr"` from siege_config.json. Submit body must includ
 `"data_type": "zarr"`. Processing may take longer than raster (5-stage pipeline).
 
 **Sequence 6: Native Zarr Lifecycle**
-1. POST `/api/platform/submit` with `data_type=zarr`, native `.zarr` store (`zarr_cmip6_tasmax` from config; **quick profile**: use `zarr_cmip6_tasmax_quick` instead) → capture request_id, job_id
+1. POST `/api/platform/submit` with `data_type=zarr`, native `.zarr` store (`zarr_cmip6_tasmax_quick` from config) → capture request_id, job_id
 2. Poll until completed → verify job completes (different code path from VirtualiZarr .nc)
 3. **ASSERT STATUS SERVICES** (pre-approval): GET `/api/platform/status/{request_id}` → assert `services` block present:
    - `services.service_url` contains `/xarray/WebMercatorQuad/tilejson.json`
@@ -480,7 +477,7 @@ Tests the `ingest_zarr_rechunk` handler — submitting a native Zarr with `rechu
 
 | Step | Action | Verify |
 |------|--------|--------|
-| 1 | POST `/api/platform/submit` with `zarr_era5_rechunk` from config (`data_type=zarr`, `processing_options: {rechunk: true}`), dataset_id `sg-zarr-rechunk-test`. **Quick profile**: use `zarr_era5_rechunk_quick` instead. | request_id, job_id |
+| 1 | POST `/api/platform/submit` with `zarr_era5_rechunk_quick` from config (`data_type=zarr`, `processing_options: {rechunk: true}`), dataset_id `sg-zarr-rechunk-test` | request_id, job_id |
 | 2 | Poll until completed | Job succeeds — `ingest_zarr_rechunk` handler fired (Stage 2 rechunk instead of blob copy) |
 | 3 | **ASSERT STATUS SERVICES**: GET `/api/platform/status/{request_id}` → assert `services` block: `service_url` contains `/xarray/`, `preview` contains `/xarray/preview.png`, `variables` contains `/xarray/variables`, `stac_collection` is null (pre-approval) | Services block shape matches zarr contract from `siege_config.json → services_contract.key_assertions.zarr` |
 | 4 | POST `/api/platform/approve` (version_id="v1") | STAC materialized |

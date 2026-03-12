@@ -554,6 +554,70 @@ Tests the core invariant: **approved assets cannot be overwritten — they must 
 
 **Key difference from Seq 14**: Seq 14 uses the same file throughout. This sequence uses **different files** (GeoJSON → GPKG) to prove the overwrite actually replaced the data, not just re-ran the same pipeline.
 
+**Sequence 23: Unpublish with Blob Preservation (v0.10.0.3+)**
+
+Tests the `delete_blobs=false` flag — STAC item and metadata are removed but storage blobs survive. Covers the UNP-3 bug where `delete_blobs` was silently ignored and blobs were always deleted.
+
+| Step | Action | Verify |
+|------|--------|--------|
+| 1 | POST `/api/platform/submit` (raster, `sg-unp-blobkeep`, `raster` fixture: `dctest.tif`) | request_id, job_id |
+| 2 | Poll until completed | job_status=completed |
+| 3 | POST `/api/platform/approve` (v1) | approval_state=approved |
+| 4 | GET `/api/platform/status/{request_id}` → capture `service_url` (contains blob path) | version_id="v1", is_served=true |
+| 5 | **PROBE BLOB PRE-UNPUBLISH**: GET `/cog/info?url={service_url}` → expect 200 | Blob exists and is readable |
+| 6 | POST `/api/platform/unpublish` with `delete_blobs=false, force_approved=true, dry_run=false` | 202 Accepted, job_type=unpublish_raster |
+| 7 | Poll unpublish job until completed | job_status=completed |
+| 8 | GET `/api/platform/status/{original_request_id}` | STAC item removed (stac_item=null or request not found) |
+| 9 | **PROBE BLOB POST-UNPUBLISH**: GET `/cog/info?url={service_url}` (same blob URL from step 4) → expect 200 | Blob STILL exists — delete_blobs=false was honoured |
+| 10 | **CLEANUP**: POST `/api/platform/unpublish` with same identifiers, `delete_blobs=true, force_approved=true` → poll until completed | Blob now deleted. GET `/cog/info?url={service_url}` → expect 4xx |
+
+**CHECKPOINT BPRES1**: Full lifecycle proves:
+- Step 7: Unpublish job completed successfully with delete_blobs=false
+- Step 9: Blob survived unpublish — flag was honoured at all pipeline layers
+- Step 10: Cleanup pass with delete_blobs=true removes the blob
+
+**Key invariant**: `delete_blobs=false` must preserve storage blobs while still removing STAC metadata and audit records. This is the safety valve for clients who need to remove catalog entries without destroying source data.
+
+**Sequence 24: Resubmit Guards (v0.10.0.3+)**
+
+Tests the UNP-ARCH hardening — resubmit on completed jobs must be blocked (409) unless `force=true`. Also tests resubmit on processing jobs.
+
+| Step | Action | Verify |
+|------|--------|--------|
+| 1 | POST `/api/platform/submit` (raster, `sg-resubmit-guard`, `raster` fixture: `dctest.tif`) | request_id, job_id |
+| 2 | Poll until completed | job_status=completed |
+| 3 | **GUARD TEST**: POST `/api/platform/resubmit` with `{"job_id": "{job_id}"}` (no force flag) | HTTP 409, error_type=JobAlreadyCompleted, message mentions "force=true" |
+| 4 | **DEPRECATION CHECK**: Verify response or logs contain deprecation guidance | Response mentions /api/platform/submit |
+| 5 | **FORCE OVERRIDE**: POST `/api/platform/resubmit` with `{"job_id": "{job_id}", "force": true}` | HTTP 202, new_job_id returned (different from original) |
+| 6 | Poll new job until completed | new job completes successfully |
+| 7 | **CHECKPOINT RSUB1**: Record original_job_id, new_job_id, guard response (step 3), force response (step 5) |
+
+**CHECKPOINT RSUB1**: Resubmit guards prove:
+- Step 3: Completed jobs are PROTECTED — 409 returned without force flag
+- Step 5: Force override works when explicitly requested
+- Step 6: Forced resubmit produces a working new job
+
+**Sequence 25: Unpublish DDH-Only Resolution (v0.10.0.3+)**
+
+Tests the UNP-1 fallback — unpublish resolves data_type from Asset entity when no `platform_requests` record matches the DDH identifiers. Uses explicit `data_type` + DDH identifiers (Option 4 path) to verify the system doesn't return 400.
+
+| Step | Action | Verify |
+|------|--------|--------|
+| 1 | POST `/api/platform/submit` (vector, `sg-unp-ddh-resolve`, `vector` fixture) | request_id, job_id, dataset_id, resource_id |
+| 2 | Poll until completed | job_status=completed |
+| 3 | GET `/api/platform/status/{request_id}` → capture table_name from outputs | table_name recorded |
+| 4 | **DIRECT DDH UNPUBLISH**: POST `/api/platform/unpublish` with `{"data_type": "vector", "dataset_id": "{dataset_id}", "resource_id": "{resource_id}", "version_id": "v1", "dry_run": true}` | HTTP 200 (dry_run preview), data_type=vector, would_delete.table matches expected |
+| 5 | **LIVE DDH UNPUBLISH**: POST `/api/platform/unpublish` with same DDH identifiers + `"dry_run": false` | HTTP 202, job_type=unpublish_vector |
+| 6 | Poll unpublish job until completed | job_status=completed, table dropped |
+| 7 | **VERIFY GONE**: GET `{tipg_base}/collections/geo.{table_name}` → expect 404 | Table no longer discoverable |
+
+**CHECKPOINT DDHR1**: DDH resolution proves:
+- Step 4: Dry-run resolves data_type from explicit parameter + DDH identifiers (no 400)
+- Step 5: Live unpublish executes correctly from DDH-resolved parameters
+- Step 7: Data actually removed — not just a metadata update
+
+**Key difference from Seq 5**: Seq 5 unpublishes using request_id (always resolves via platform_requests). This sequence tests resolution via explicit data_type + DDH identifiers, which exercises the UNP-1 fallback path.
+
 ### Lancer Checkpoint Format
 
 ```markdown
@@ -656,6 +720,9 @@ For each overwrite checkpoint, Auditor MUST verify these fields via `/api/platfo
 | **IST-8** (Seq 11h) | Release still in pending_review + processing. No state mutation occurred. |
 | **IST-9** (Seq 11i) | New release created with version_ordinal incremented. Original approved release unchanged. |
 | **OWGD1** (Seq 22) | Step 5 created new version (ordinal=2), NOT mutation of v1. After revoke: revision=2, ordinal=1, file changed from .geojson to .gpkg. v1 re-approved with new data. |
+| **BPRES1** (Seq 23) | Unpublish with delete_blobs=false: STAC removed, blob still accessible via TiTiler. Cleanup pass with delete_blobs=true deletes blob. |
+| **RSUB1** (Seq 24) | Resubmit on completed job returns 409 (JobAlreadyCompleted). Resubmit with force=true returns 202 and produces working job. |
+| **DDHR1** (Seq 25) | DDH-only unpublish resolves data_type via explicit parameter. Dry-run returns 200 preview. Live unpublish completes and removes data. |
 
 ### Auditor Output Format
 
@@ -770,6 +837,9 @@ Assessment: {HEALTHY | DEGRADED | DOWN}
 | 20. Vector Split Views | {n} | {n} | {n} | {n} |
 | 21. Split Views Validation (3) | {n} | {n} | {n} | {n} |
 | 22. Approved Overwrite Guard (Diff File) | {n} | {n} | {n} | {n} |
+| 23. Unpublish Blob Preservation | {n} | {n} | {n} | {n} |
+| 24. Resubmit Guards | {n} | {n} | {n} | {n} |
+| 25. Unpublish DDH-Only Resolution | {n} | {n} | {n} | {n} |
 
 ## Services Block Contract (Status Endpoint)
 
@@ -822,6 +892,9 @@ during lifecycle sequences and re-verified by Auditor for any failures.
 | 20 | Split view SW | /vector/collections/{table}_quadrant_sw/items | {url} | {code} | PASS/FAIL |
 | 20 | Split views count sum | sum(views) == base | -- | -- | PASS/FAIL |
 | 22 | Overwrite guard vector (post-revoke) | /vector/collections/{table}/items | {url} | {code} | PASS/FAIL |
+| 23 | Blob preserved (post-unpublish) | /cog/info?url={blob_url} | {url} | {code} | PASS/FAIL |
+| 23 | Blob deleted (post-cleanup) | /cog/info?url={blob_url} | {url} | {code} | PASS/FAIL |
+| 25 | DDH unpublish vector gone | /vector/collections/{table} | {url} | 404 | PASS/FAIL |
 
 Assessment: {ALL PASS | DEGRADED | UNAVAILABLE}
 - **ALL PASS**: Platform is fully operational — ETL data is discoverable and servable

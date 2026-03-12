@@ -65,6 +65,12 @@ class PlatformResubmitHandler:
             HTTP response with resubmit result
         """
         try:
+            logger.warning(
+                "DEPRECATION: /api/platform/resubmit called — "
+                "this endpoint is for internal error recovery only. "
+                "External clients should use /api/platform/submit for new submissions."
+            )
+
             # Parse request body
             body = self._parse_body(req)
             if not body:
@@ -126,6 +132,25 @@ class PlatformResubmitHandler:
                         )
                 except Exception as e:
                     logger.warning(f"Release lookup failed (non-fatal): {e}")
+
+            # Block resubmit on completed jobs (UNP-ARCH: prevent destroying completed work)
+            if job.status.value == 'completed' and not force:
+                return func.HttpResponse(
+                    json.dumps({
+                        "success": False,
+                        "error": (
+                            "Job already completed successfully. Resubmitting will destroy "
+                            "the completed output and re-run from scratch. "
+                            "Use force=true to confirm, or submit a new job instead."
+                        ),
+                        "job_status": job.status.value,
+                        "job_id": job_id,
+                        "platform_refs": platform_refs,
+                        "error_type": "JobAlreadyCompleted"
+                    }),
+                    status_code=409,
+                    mimetype="application/json"
+                )
 
             # Check if job is currently processing (unless force=True)
             if job.status.value == 'processing' and not force:

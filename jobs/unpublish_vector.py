@@ -102,6 +102,10 @@ class UnpublishVectorJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
         "force_approved": {
             "type": "bool",
             "default": False  # 16 JAN 2026: Must explicitly override to unpublish approved items
+        },
+        "delete_blobs": {
+            "type": "bool",
+            "default": True  # UNP-3: Reserved (vector has no blob deletion currently)
         }
     }
 

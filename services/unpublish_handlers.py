@@ -960,6 +960,17 @@ def delete_blob(params: Dict[str, Any], context: Optional[Dict[str, Any]] = None
                 "blob_path": blob_path
             }
 
+        # UNP-3: Respect delete_blobs flag — skip deletion if False
+        if not params.get('delete_blobs', True):
+            logger.info(f"Skipped blob deletion (delete_blobs=false): {container}/{blob_path}")
+            return {
+                "success": True,
+                "deleted": False,
+                "skipped_by_flag": True,
+                "container": container,
+                "blob_path": blob_path,
+            }
+
         # Determine zone from container name
         zone = 'silver' if 'silver' in container.lower() else 'bronze'
         blob_repo = BlobRepository.for_zone(zone)

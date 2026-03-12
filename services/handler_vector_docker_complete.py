@@ -940,7 +940,20 @@ def _process_single_table(
     # === ONE CONNECTION FOR THE ENTIRE TABLE PROCESSING ===
     _handler = VectorToPostGISHandler()
     with _handler._pg_repo._get_connection() as conn:
-        logger.info(f"[{job_id[:8]}] Single connection opened for entire table processing")
+        # Connection-level diagnostics (11 MAR 2026)
+        conn_pid = conn.info.backend_pid
+        try:
+            with conn.cursor() as _diag_cur:
+                _diag_cur.execute(
+                    "SELECT COUNT(*) as total FROM pg_stat_activity WHERE datname = current_database()"
+                )
+                _server_conns = _diag_cur.fetchone()['total']
+        except Exception:
+            _server_conns = '?'
+        logger.info(
+            f"[{job_id[:8]}] Connection opened for {schema}.{table_name}: "
+            f"pid={conn_pid}, server_connections={_server_conns}"
+        )
 
         # Phase 2: Create table and metadata
         table_result = _create_table_and_metadata(
@@ -1122,7 +1135,10 @@ def _process_single_table(
                 logger.warning(f"[{job_id[:8]}] Could not update feature_count for {table_name}: {meta_err}")
 
     # === CONNECTION CLOSED HERE ===
-    logger.info(f"[{job_id[:8]}] Connection closed for {schema}.{table_name}")
+    logger.info(
+        f"[{job_id[:8]}] Connection closing for {schema}.{table_name}: "
+        f"pid={conn_pid} (held for entire table lifecycle)"
+    )
 
     # Phase 4: TiPG refresh (HTTP call, no DB connection needed)
     tipg_collection_id = f"{schema}.{table_name}"

@@ -1702,8 +1702,14 @@ class VectorToPostGISHandler:
         rows_deleted = 0
         rows_inserted = 0
 
-        ctx = nullcontext(conn) if conn is not None else self._pg_repo._get_connection()
+        _reusing = conn is not None
+        ctx = nullcontext(conn) if _reusing else self._pg_repo._get_connection()
         with ctx as conn:
+            _pid = conn.info.backend_pid
+            if _reusing:
+                logger.debug(f"[{batch_id}] Reusing connection pid={_pid}")
+            else:
+                logger.info(f"[{batch_id}] Opened new connection pid={_pid}")
             with conn.cursor() as cur:
                 # Step 1: DELETE existing rows for this batch (IDEMPOTENCY)
                 # GAP-010 FIX (16 DEC 2025): Log batch_id at DELETE phase for idempotency verification
@@ -1812,7 +1818,7 @@ class VectorToPostGISHandler:
                     table=sql.Identifier(table_name)
                 ))
                 conn.commit()
-                logger.info(f"[ANALYZE] Updated statistics for {schema}.{table_name}")
+                logger.info(f"[ANALYZE] Updated statistics for {schema}.{table_name} (pid={conn.info.backend_pid})")
 
     def create_deferred_indexes(
         self,
@@ -1885,7 +1891,15 @@ class VectorToPostGISHandler:
                         ))
 
                 conn.commit()
-                logger.info(f"[INDEXES] Created deferred indexes for {schema}.{table_name}")
+                _idx_count = (
+                    (1 if indexes.get('spatial', True) else 0)
+                    + len([c for c in indexes.get('attributes', []) if c in column_names])
+                    + len([c for c in indexes.get('temporal', []) if c in column_names])
+                )
+                logger.info(
+                    f"[INDEXES] Created {_idx_count} deferred indexes for "
+                    f"{schema}.{table_name} (pid={conn.info.backend_pid})"
+                )
 
     # =========================================================================
     # TABLE METADATA REGISTRY (21 JAN 2026 - Split Architecture)

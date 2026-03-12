@@ -776,8 +776,12 @@ class PostgreSQLRepository(BaseRepository):
         for attempt in range(1, max_attempts + 1):
             try:
                 with ConnectionPoolManager.get_connection() as conn:
-                    logger.debug(f"✅ Got pooled connection (attempt {attempt}/{max_attempts})")
-                    yield conn
+                    pid = conn.info.backend_pid
+                    logger.info(f"[CONN] Acquired pooled connection pid={pid}")
+                    try:
+                        yield conn
+                    finally:
+                        logger.info(f"[CONN] Released pooled connection pid={pid}")
                     return
             except Exception as e:
                 logger.error(f"❌ Pool connection error: {e}")
@@ -825,7 +829,8 @@ class PostgreSQLRepository(BaseRepository):
                 try:
                     conn = psycopg.connect(current_conn_string, row_factory=dict_row)
                     _register_type_adapters(conn)
-                    logger.debug("✅ PostgreSQL connection established successfully")
+                    pid = conn.info.backend_pid
+                    logger.info(f"[CONN] Opened single-use connection pid={pid}")
                     yield conn
                     return
 
@@ -869,8 +874,10 @@ class PostgreSQLRepository(BaseRepository):
 
         finally:
             if conn:
+                pid = conn.info.backend_pid
                 conn.close()
-    
+                logger.info(f"[CONN] Closed single-use connection pid={pid}")
+
     @contextmanager
     def _get_cursor(self, conn=None):
         """

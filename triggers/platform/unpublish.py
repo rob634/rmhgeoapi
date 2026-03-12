@@ -155,8 +155,19 @@ def platform_unpublish(req: func.HttpRequest) -> func.HttpResponse:
         data_type, resolved_params, original_request = _resolve_unpublish_data_type(req_body)
 
         if not data_type:
+            # Build actionable error showing which identifiers were tried
+            tried = []
+            if req_body.get('dataset_id'):
+                tried.append(f"DDH ids ({req_body.get('dataset_id')}/{req_body.get('resource_id')}/{req_body.get('version_id')})")
+            if req_body.get('request_id'):
+                tried.append(f"request_id={req_body['request_id']}")
+            if req_body.get('job_id'):
+                tried.append(f"job_id={req_body['job_id']}")
+            tried_str = f" Tried: {', '.join(tried)}." if tried else ""
             return validation_error(
-                "Could not determine data type. Provide: request_id, job_id, release_id, DDH identifiers (dataset_id, resource_id, version_id), version_ordinal with DDH identifiers, or explicit data_type with identifiers."
+                f"Could not determine data type.{tried_str} "
+                f"Try providing: request_id, job_id, explicit data_type with "
+                f"table_name (vector) or stac_item_id + collection_id (raster/zarr)."
             )
 
         logger.info(f"Unpublish: data_type={data_type}, dry_run={dry_run}, params={resolved_params}")
@@ -359,6 +370,72 @@ def _resolve_unpublish_data_type(req_body: dict) -> Tuple[Optional[str], dict, O
             data_type = normalize_data_type(original_request.data_type)
             resolved_params = get_unpublish_params_from_request(original_request, data_type)
             return data_type, resolved_params, original_request
+
+    # Option 3a: DDH identifiers → Asset fallback (UNP-1, 12 MAR 2026)
+    # When platform_request doesn't exist but Asset does — resolves
+    # data_type from Asset, identifiers from Release (authoritative),
+    # falls back to DDH convention generation.
+    if dataset_id and resource_id and not original_request:
+        try:
+            from infrastructure import AssetRepository, ReleaseRepository, ReleaseTableRepository
+            asset_repo = AssetRepository()
+            asset = asset_repo.get_by_identity("ddh", dataset_id, resource_id)
+            if asset:
+                data_type = normalize_data_type(asset.data_type)
+                logger.info(
+                    f"UNP-1 fallback: Asset found for {dataset_id}/{resource_id} "
+                    f"(data_type={data_type}), no platform_request"
+                )
+
+                # Try to find release with authoritative identifiers
+                release_repo = ReleaseRepository()
+                releases = release_repo.list_by_asset(asset.asset_id)
+                release = None
+
+                if version_id is not None:
+                    # Try version_id as version_ordinal (int)
+                    try:
+                        ord_val = int(version_id)
+                        release = next(
+                            (r for r in releases if r.version_ordinal == ord_val),
+                            None
+                        )
+                    except (ValueError, TypeError):
+                        pass
+
+                if not release and releases:
+                    # No ordinal match — use latest release
+                    release = releases[0]
+
+                if release:
+                    if data_type == "vector":
+                        release_table_repo = ReleaseTableRepository()
+                        table_names = release_table_repo.get_table_names(release.release_id)
+                        if table_names:
+                            return data_type, {
+                                'table_names': table_names,
+                                'table_name': table_names[0]
+                            }, None
+                    elif data_type in ("raster", "zarr"):
+                        if release.stac_item_id:
+                            return data_type, {
+                                'stac_item_id': release.stac_item_id,
+                                'collection_id': release.stac_collection_id or dataset_id
+                            }, None
+
+                # No release or no stored identifiers — generate from DDH convention
+                logger.info(f"UNP-1 fallback: generating identifiers from DDH convention")
+                if data_type == "vector":
+                    table_name = generate_table_name(dataset_id, resource_id, version_id)
+                    return data_type, {'table_name': table_name}, None
+                elif data_type in ("raster", "zarr"):
+                    stac_item_id = generate_stac_item_id(dataset_id, resource_id, version_id)
+                    return data_type, {
+                        'stac_item_id': stac_item_id,
+                        'collection_id': dataset_id
+                    }, None
+        except Exception as e:
+            logger.warning(f"UNP-1 Asset fallback failed: {e}")
 
     # Option 3b: By version_ordinal + DDH identifiers (SG2-1)
     version_ordinal = req_body.get('version_ordinal')

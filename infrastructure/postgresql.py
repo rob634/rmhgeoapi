@@ -183,7 +183,7 @@ def _parse_jsonb_column(value: Any, column_name: str, record_id: str, default: A
 class PostgreSQLRepository(BaseRepository):
     """
     PostgreSQL-specific repository base class with connection management.
-    
+
     This class serves as the foundation for all PostgreSQL-based repositories
     in the application. It provides:
     - Connection string management from config or environment
@@ -191,6 +191,9 @@ class PostgreSQLRepository(BaseRepository):
     - Safe SQL execution using psycopg.sql composition
     - Schema verification and initialization
     - Transaction management
+
+    Class-level cache: _verified_schemas tracks which schemas have been
+    confirmed to exist, avoiding redundant DB queries on every init (13 MAR 2026).
     
     Inheritance Pattern:
     -------------------
@@ -214,7 +217,11 @@ class PostgreSQLRepository(BaseRepository):
     thread-safe for concurrent operations. For connection pooling
     in high-throughput scenarios, consider using psycopg_pool.
     """
-    
+
+    # Class-level cache: schemas confirmed to exist (13 MAR 2026)
+    # Avoids 3 redundant DB connections when factory creates 3 repositories
+    _verified_schemas: set = set()
+
     def __init__(self, connection_string: Optional[str] = None,
                  schema_name: Optional[str] = None,
                  config: Optional[AppConfig] = None,
@@ -482,18 +489,29 @@ class PostgreSQLRepository(BaseRepository):
 
         Used for local development when connecting to external database with password auth.
 
+        SECURITY (13 MAR 2026): Requires EXTERNAL_DB_PASSWORD env var.
+        Does NOT reuse the app DB password — external DB may be on a different server,
+        and sending app credentials to the wrong server is a security risk.
+
         Args:
             db_config: ExternalEnvironmentConfig with host, port, database settings
 
         Returns:
             PostgreSQL connection string with password authentication
+
+        Raises:
+            ValueError: If EXTERNAL_DB_PASSWORD is not set
         """
-        # Use the same password as the app database (same server, different database)
-        password = self.config.postgis_password
+        ext_password = os.environ.get("EXTERNAL_DB_PASSWORD")
+        if not ext_password:
+            raise ValueError(
+                "EXTERNAL_DB_PASSWORD is required for password-based external DB connections. "
+                "Do NOT reuse the app DB password — external DB should have its own credentials."
+            )
         user = self.config.postgis_user
 
         conn_str = (
-            f"postgresql://{user}:{password}@"
+            f"postgresql://{user}:{ext_password}@"
             f"{db_config.db_host}:{db_config.db_port}/"
             f"{db_config.db_name}?sslmode=require"
         )
@@ -1037,6 +1055,12 @@ class PostgreSQLRepository(BaseRepository):
         Uses parameterized query to prevent SQL injection even though
         schema_name comes from configuration.
         """
+        # Check class-level cache first (13 MAR 2026 — Fix 5)
+        # Avoids 3 DB connections when factory creates 3 repos for same schema
+        if self.schema_name in self.__class__._verified_schemas:
+            logger.debug(f"✅ Schema {self.schema_name} exists (cached)")
+            return
+
         try:
             with self._get_connection() as conn:
                 with conn.cursor() as cursor:
@@ -1046,7 +1070,7 @@ class PostgreSQLRepository(BaseRepository):
                         sql.SQL("SELECT schema_name FROM information_schema.schemata WHERE schema_name = %s"),
                         (self.schema_name,)
                     )
-                    
+
                     if not cursor.fetchone():
                         # Schema doesn't exist - warn but don't fail
                         logger.warning(
@@ -1054,9 +1078,10 @@ class PostgreSQLRepository(BaseRepository):
                             f"It should be created by schema deployment."
                         )
                     else:
-                        # Schema exists - good to go
+                        # Schema exists — cache it to avoid re-checking
+                        self.__class__._verified_schemas.add(self.schema_name)
                         logger.debug(f"✅ Schema {self.schema_name} exists")
-                        
+
         except Exception as e:
             # Log error but don't fail initialization
             # Actual operations will fail with more specific errors
@@ -1259,6 +1284,11 @@ class PostgreSQLRepository(BaseRepository):
         >>> # where = SQL("WHERE theme = %s AND active = %s")
         >>> # params = ["climate", True]
         """
+        # Validate operator to prevent SQL injection (13 MAR 2026 — COMPETE finding)
+        if operator.upper() not in ("AND", "OR"):
+            raise ValueError(f"operator must be 'AND' or 'OR', got '{operator}'")
+        operator = operator.upper()
+
         if not conditions:
             return sql.SQL(""), []
 
@@ -1878,13 +1908,14 @@ class PostgreSQLJobRepository(PostgreSQLRepository, IJobRepository):
         params={'status_filter': Optional[JobStatus]},
         returns=List[JobRecord]
     )
-    def list_jobs(self, status_filter: Optional[JobStatus] = None) -> List[JobRecord]:
+    def list_jobs(self, status_filter: Optional[JobStatus] = None, limit: int = 1000) -> List[JobRecord]:
         """
         List jobs with optional status filtering.
-        
+
         Args:
             status_filter: Optional status to filter by
-            
+            limit: Maximum number of jobs to return (default 1000)
+
         Returns:
             List of JobRecords
         """
@@ -1899,11 +1930,12 @@ class PostgreSQLJobRepository(PostgreSQLRepository, IJobRepository):
                     FROM {}.{}
                     WHERE status = %s
                     ORDER BY created_at DESC
+                    LIMIT %s
                 """).format(
                     sql.Identifier(self.schema_name),
                     sql.Identifier("jobs")
                 )
-                params = (status_filter.value,)  # Require JobStatus enum
+                params = (status_filter.value, limit)
             else:
                 query = sql.SQL("""
                     SELECT job_id, job_type, status, stage, total_stages,
@@ -1912,11 +1944,12 @@ class PostgreSQLJobRepository(PostgreSQLRepository, IJobRepository):
                            created_at, updated_at
                     FROM {}.{}
                     ORDER BY created_at DESC
+                    LIMIT %s
                 """).format(
                     sql.Identifier(self.schema_name),
                     sql.Identifier("jobs")
                 )
-                params = None
+                params = (limit,)
 
             rows = self._execute_query(query, params, fetch='all')
 
@@ -2349,15 +2382,19 @@ class PostgreSQLStageCompletionRepository(PostgreSQLRepository, IStageCompletion
             logger.debug(f"  - has_result_data: {result_data is not None}")
             logger.debug(f"  - has_error_details: {error_details is not None}")
             
-            # Also query current task status before SQL function for debugging
-            with self._get_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        "SELECT status FROM app.tasks WHERE task_id = %s",
-                        (task_id,)
-                    )
-                    current_status = cur.fetchone()
-                    logger.debug(f"[SQL_FUNCTION_DEBUG] Task {task_id} current DB status before SQL function: {current_status['status'] if current_status else 'NOT FOUND'}")
+            # Query current task status before SQL function for debugging
+            # Gated on DEBUG level to avoid opening an extra connection (13 MAR 2026)
+            if logger.isEnabledFor(logging.DEBUG):
+                with self._get_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            sql.SQL("SELECT status FROM {}.{} WHERE task_id = %s").format(
+                                sql.Identifier(self.schema_name), sql.Identifier("tasks")
+                            ),
+                            (task_id,)
+                        )
+                        current_status = cur.fetchone()
+                        logger.debug(f"[SQL_FUNCTION_DEBUG] Task {task_id} current DB status before SQL function: {current_status['status'] if current_status else 'NOT FOUND'}")
             
             import time
             start_time = time.time()
@@ -2397,17 +2434,20 @@ class PostgreSQLStageCompletionRepository(PostgreSQLRepository, IStageCompletion
             logger.debug(f"  - remaining_tasks: {result.remaining_tasks}")
             
             # If not stage complete, query to see what tasks are still pending
-            if result.task_updated and not result.stage_complete and result.remaining_tasks > 0:
+            # Gated on DEBUG level to avoid opening an extra connection (13 MAR 2026)
+            if result.task_updated and not result.stage_complete and result.remaining_tasks > 0 and logger.isEnabledFor(logging.DEBUG):
                 with self._get_connection() as conn:
                     with conn.cursor() as cur:
                         cur.execute(
-                            """
-                            SELECT task_id, status 
-                            FROM app.tasks 
-                            WHERE parent_job_id = %s 
-                              AND stage = %s 
+                            sql.SQL("""
+                            SELECT task_id, status
+                            FROM {}.{}
+                            WHERE parent_job_id = %s
+                              AND stage = %s
                               AND status NOT IN ('completed', 'failed')
-                            """,
+                            """).format(
+                                sql.Identifier(self.schema_name), sql.Identifier("tasks")
+                            ),
                             (result.job_id, result.stage_number)
                         )
                         pending_tasks = cur.fetchall()

@@ -91,6 +91,9 @@ class CircuitBreaker:
         self._last_failure_at: Optional[float] = None
         self._last_success_at: Optional[float] = None
 
+        # HALF_OPEN permit — only one probe request allowed at a time
+        self._half_open_permit_taken = False
+
         # Counters for monitoring
         self._total_failures = 0
         self._total_successes = 0
@@ -128,11 +131,12 @@ class CircuitBreaker:
                 elapsed = time.monotonic() - self._opened_at
                 if elapsed >= self._recovery_timeout:
                     self._state = CircuitBreakerState.HALF_OPEN
+                    self._half_open_permit_taken = True
                     logger.info(
                         f"Circuit breaker OPEN -> HALF_OPEN after {elapsed:.1f}s — "
                         f"allowing probe request"
                     )
-                    return  # Allow probe request
+                    return  # Allow the ONE probe request
 
                 # Still in recovery period — reject
                 self._total_rejected += 1
@@ -143,7 +147,15 @@ class CircuitBreaker:
                     f"Total rejected: {self._total_rejected}"
                 )
 
-            # HALF_OPEN — allow through (probe request)
+            # HALF_OPEN — only allow if no probe is already in flight
+            if self._half_open_permit_taken:
+                self._total_rejected += 1
+                raise CircuitBreakerOpenError(
+                    f"Circuit breaker HALF_OPEN — probe request already in flight. "
+                    f"Total rejected: {self._total_rejected}"
+                )
+            # Permit available (e.g., previous probe timed out without recording)
+            self._half_open_permit_taken = True
             return
 
     def record_success(self) -> None:
@@ -156,6 +168,7 @@ class CircuitBreaker:
             if self._state == CircuitBreakerState.HALF_OPEN:
                 self._state = CircuitBreakerState.CLOSED
                 self._failure_timestamps.clear()
+                self._half_open_permit_taken = False
                 logger.info("Circuit breaker HALF_OPEN -> CLOSED — DB recovered")
 
     def record_failure(self) -> None:
@@ -170,6 +183,7 @@ class CircuitBreaker:
                 # Probe failed — back to OPEN
                 self._state = CircuitBreakerState.OPEN
                 self._opened_at = now
+                self._half_open_permit_taken = False
                 logger.warning(
                     "Circuit breaker HALF_OPEN -> OPEN — probe failed, "
                     f"extending recovery timeout ({self._recovery_timeout}s)"

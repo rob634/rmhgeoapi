@@ -395,6 +395,23 @@ class JobRepository(PostgreSQLJobRepository):
                     f"Only failed jobs can be reset for re-submission."
                 )
 
+            # Delete stale tasks from previous attempt (13 MAR 2026 — COMPETE Run 2 Fix 4)
+            # Without this, deterministic task IDs + ON CONFLICT DO NOTHING = reset jobs hang
+            # because old FAILED tasks persist and new tasks silently aren't created.
+            delete_query = sql.SQL(
+                "DELETE FROM {schema}.{table} WHERE parent_job_id = %s RETURNING task_id"
+            ).format(
+                schema=sql.Identifier(self.schema_name),
+                table=sql.Identifier("tasks")
+            )
+            deleted_rows = self._execute_query(delete_query, (job_id,), fetch='all')
+            deleted_count = len(deleted_rows) if deleted_rows else 0
+            if deleted_count > 0:
+                logger.info(
+                    f"🧹 Deleted {deleted_count} stale tasks from previous attempt "
+                    f"for job {job_id[:16]}..."
+                )
+
             # Prepare error history preservation
             previous_stage = current_job.stage
             previous_error = current_job.error_details
@@ -1041,6 +1058,7 @@ class TaskRepository(PostgreSQLTaskRepository):
                         metadata, created_at, updated_at
                     )
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (task_id) DO NOTHING
                 """).format(
                     sql.Identifier(self.schema_name),
                     sql.Identifier('tasks')

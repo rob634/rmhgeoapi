@@ -598,7 +598,12 @@ class STACMaterializer:
         logger.info(f"Rebuilding collection '{collection_id}' from internal DB")
 
         # Query approved releases for this collection
-        releases = self.release_repo.list_by_approval_state(ApprovalState.APPROVED, limit=1000)
+        releases = self.release_repo.list_by_approval_state(ApprovalState.APPROVED, limit=100000)
+        if len(releases) >= 100000:
+            logger.warning(
+                "REBUILD: Hit 100000 release limit for collection rebuild. "
+                "Consider adding list_by_collection_id() to ReleaseRepository."
+            )
         matching_releases = [
             r for r in releases
             if r.stac_collection_id == collection_id
@@ -710,7 +715,12 @@ class STACMaterializer:
         logger.info("FULL CATALOG REBUILD: Starting rebuild of all collections from DB")
 
         # Get all approved releases
-        releases = self.release_repo.list_by_approval_state(ApprovalState.APPROVED, limit=10000)
+        releases = self.release_repo.list_by_approval_state(ApprovalState.APPROVED, limit=100000)
+        if len(releases) >= 100000:
+            logger.warning(
+                "REBUILD: Hit 100000 release limit — catalog may be incomplete. "
+                "Consider pagination for very large catalogs."
+            )
 
         # Get distinct collection IDs
         collection_ids = set()

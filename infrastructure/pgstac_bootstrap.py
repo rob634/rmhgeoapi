@@ -913,7 +913,7 @@ ORDER BY r.rolname;""")
 
         except (psycopg.Error, OSError) as e:
             logger.error(f"❌ Verification error: {e}")
-            logger.error(f"   Connection string: {self.connection_string}")
+            logger.error(f"   Connection string: {self._pg_repo.conn_string}")
             logger.error(f"   Error type: {type(e).__name__}")
             checks['errors'].append(str(e))
             checks['valid'] = False

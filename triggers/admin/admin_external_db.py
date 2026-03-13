@@ -50,6 +50,7 @@ Usage:
 """
 
 import json
+import os
 import uuid
 import azure.functions as func
 from azure.functions import Blueprint
@@ -63,7 +64,7 @@ logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, "AdminExternalDb"
 bp = Blueprint()
 
 
-@bp.route(route="dbadmin/external/initialize", methods=["POST"])
+@bp.route(route="dbadmin/external/initialize", methods=["POST"], auth_level=func.AuthLevel.FUNCTION)
 def external_db_initialize(req: func.HttpRequest) -> func.HttpResponse:
     """
     Initialize external database with pgstac and geo schemas.
@@ -125,6 +126,20 @@ def external_db_initialize(req: func.HttpRequest) -> func.HttpResponse:
         drop_existing = body.get("drop_existing", False)
         schemas = body.get("schemas", ["geo", "pgstac"])
 
+        # Host allowlist check (13 MAR 2026 - COMPETE security fix)
+        allowed_hosts_str = os.environ.get("EXTERNAL_DB_ALLOWED_HOSTS", "")
+        if allowed_hosts_str:
+            allowed_hosts = [h.strip() for h in allowed_hosts_str.split(",") if h.strip()]
+            if target_host not in allowed_hosts:
+                return func.HttpResponse(
+                    json.dumps({
+                        "error": "target_host not in allowed hosts",
+                        "hint": "Set EXTERNAL_DB_ALLOWED_HOSTS env var with comma-separated allowed hostnames"
+                    }),
+                    status_code=403,
+                    mimetype="application/json"
+                )
+
         logger.info(f"📦 External DB initialization request")
         logger.info(f"   Target: {target_host}/{target_database}")
         logger.info(f"   Admin UMI: {admin_umi_client_id[:8]}... ({admin_umi_name})")
@@ -170,7 +185,7 @@ def external_db_initialize(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
-@bp.route(route="dbadmin/external/prereqs", methods=["POST"])
+@bp.route(route="dbadmin/external/prereqs", methods=["POST"], auth_level=func.AuthLevel.FUNCTION)
 def external_db_prereqs(req: func.HttpRequest) -> func.HttpResponse:
     """
     Check DBA prerequisites for external database initialization.
@@ -230,6 +245,20 @@ def external_db_prereqs(req: func.HttpRequest) -> func.HttpResponse:
         target_database = body["target_database"]
         admin_umi_client_id = body["admin_umi_client_id"]
         admin_umi_name = body["admin_umi_name"]
+
+        # Host allowlist check (13 MAR 2026 - COMPETE security fix)
+        allowed_hosts_str = os.environ.get("EXTERNAL_DB_ALLOWED_HOSTS", "")
+        if allowed_hosts_str:
+            allowed_hosts = [h.strip() for h in allowed_hosts_str.split(",") if h.strip()]
+            if target_host not in allowed_hosts:
+                return func.HttpResponse(
+                    json.dumps({
+                        "error": "target_host not in allowed hosts",
+                        "hint": "Set EXTERNAL_DB_ALLOWED_HOSTS env var with comma-separated allowed hostnames"
+                    }),
+                    status_code=403,
+                    mimetype="application/json"
+                )
 
         logger.info(f"🔍 Checking prerequisites for {target_host}/{target_database}")
 

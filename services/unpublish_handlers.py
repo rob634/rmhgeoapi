@@ -1116,6 +1116,14 @@ def drop_postgis_table(params: Dict[str, Any], context: Optional[Dict[str, Any]]
                     table_dropped = True
                     logger.info(f"Dropped table: {schema_name}.{table_name}")
 
+                    # Clean up split view catalog entries (13 MAR 2026 — COMPETE Run 3 Fix 1)
+                    # CASCADE drops the views, but their geo.table_catalog entries persist
+                    try:
+                        from services.vector.view_splitter import cleanup_split_view_metadata
+                        cleanup_split_view_metadata(conn, table_name)
+                    except Exception as split_err:
+                        logger.warning(f"Split view catalog cleanup failed (non-fatal): {split_err}")
+
                 # Delete metadata rows if requested (21 JAN 2026: both tables)
                 if delete_metadata:
                     # Delete from geo.table_catalog (service layer)

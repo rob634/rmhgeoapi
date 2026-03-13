@@ -4,7 +4,7 @@
 # EPOCH: 4 - ACTIVE
 # STATUS: Configuration - External hosting environment (DB + storage + TiTiler)
 # PURPOSE: Bundle all external environment settings into single config class
-# LAST_REVIEWED: 10 MAR 2026
+# LAST_REVIEWED: 13 MAR 2026
 # EXPORTS: ExternalEnvironmentConfig
 # DEPENDENCIES: pydantic, config.defaults
 # ============================================================================
@@ -118,7 +118,7 @@ class ExternalEnvironmentConfig(BaseModel):
     @property
     def is_configured(self) -> bool:
         """True when at minimum the external DB is configured."""
-        return bool(self.db_host or self.db_name)
+        return bool(self.db_host and self.db_name)
 
     @property
     def is_fully_configured(self) -> bool:
@@ -154,17 +154,51 @@ class ExternalEnvironmentConfig(BaseModel):
         """
         Load ExternalEnvironmentConfig from environment variables.
 
-        No fallbacks to app database values — EXTERNAL_DB_* vars must be
-        explicitly set. If not set, is_configured returns False.
+        SECURITY (13 MAR 2026): No fallbacks to app database MI vars.
+        EXTERNAL_DB_MANAGED_IDENTITY_* must be explicitly set when using a
+        different UMI for external DB. Silent fallback to app identity is
+        dangerous — wrong principal, wrong audit trail, wrong permissions.
+
+        If EXTERNAL_DB_HOST is set (external DB intended) and MI is enabled,
+        EXTERNAL_DB_MANAGED_IDENTITY_CLIENT_ID is required.
         """
+        db_host = os.environ.get("EXTERNAL_DB_HOST", "")
+        db_name = os.environ.get("EXTERNAL_DB_NAME", "")
+        is_configured = bool(db_host and db_name)
+
+        # MI flag: external-specific only, default true (same as app)
+        db_use_mi = os.environ.get(
+            "EXTERNAL_DB_USE_MANAGED_IDENTITY", "true"
+        ).lower() == "true"
+
+        # MI identity: NO fallback to app DB identity vars (13 MAR 2026)
+        mi_name = os.environ.get("EXTERNAL_DB_MANAGED_IDENTITY_NAME")
+        mi_client_id = os.environ.get("EXTERNAL_DB_MANAGED_IDENTITY_CLIENT_ID")
+
+        # Validate: if external DB is configured with MI, require identity vars
+        if is_configured and db_use_mi and not mi_client_id:
+            raise ValueError(
+                "EXTERNAL_DB_MANAGED_IDENTITY_CLIENT_ID is required when external DB "
+                "uses managed identity. Set EXTERNAL_DB_MANAGED_IDENTITY_CLIENT_ID to "
+                "the client ID of the external DB's user-assigned managed identity. "
+                "Do NOT reuse the app DB identity — external DB should have its own UMI."
+            )
+
+        if is_configured and db_use_mi and not mi_name:
+            raise ValueError(
+                "EXTERNAL_DB_MANAGED_IDENTITY_NAME is required when external DB "
+                "uses managed identity. Set EXTERNAL_DB_MANAGED_IDENTITY_NAME to "
+                "the PostgreSQL username matching the external DB's UMI."
+            )
+
         return cls(
             # Database
-            db_host=os.environ.get("EXTERNAL_DB_HOST", ""),
+            db_host=db_host,
             db_port=int(os.environ.get(
                 "EXTERNAL_DB_PORT",
                 str(ExternalDefaults.DB_PORT)
             )),
-            db_name=os.environ.get("EXTERNAL_DB_NAME", ""),
+            db_name=db_name,
             db_schema=os.environ.get(
                 "EXTERNAL_DB_SCHEMA",
                 ExternalDefaults.DB_SCHEMA
@@ -173,18 +207,9 @@ class ExternalEnvironmentConfig(BaseModel):
                 "EXTERNAL_DB_PGSTAC_SCHEMA",
                 ExternalDefaults.PGSTAC_SCHEMA
             ),
-            db_use_managed_identity=os.environ.get(
-                "EXTERNAL_DB_USE_MANAGED_IDENTITY",
-                os.environ.get("USE_MANAGED_IDENTITY", "true")
-            ).lower() == "true",
-            db_managed_identity_name=os.environ.get(
-                "EXTERNAL_DB_MANAGED_IDENTITY_NAME",
-                os.environ.get("DB_ADMIN_MANAGED_IDENTITY_NAME", AzureDefaults.MANAGED_IDENTITY_NAME)
-            ),
-            db_managed_identity_client_id=os.environ.get(
-                "EXTERNAL_DB_MANAGED_IDENTITY_CLIENT_ID",
-                os.environ.get("DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID")
-            ),
+            db_use_managed_identity=db_use_mi,
+            db_managed_identity_name=mi_name or AzureDefaults.MANAGED_IDENTITY_NAME,
+            db_managed_identity_client_id=mi_client_id,
             db_connection_timeout=int(os.environ.get(
                 "EXTERNAL_DB_CONNECTION_TIMEOUT",
                 str(ExternalDefaults.CONNECTION_TIMEOUT_SECONDS)

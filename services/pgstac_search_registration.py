@@ -145,7 +145,7 @@ class PgSTACSearchRegistration:
                 # The hash column is GENERATED ALWAYS AS (search_hash(search, metadata))
                 # search_hash() internally calls search_tohash() WITHOUT schema prefix
                 # Without pgstac in search_path, PostgreSQL can't find search_tohash()
-                cur.execute("SET search_path TO pgstac, public")
+                cur.execute("SET LOCAL search_path TO pgstac, public")
 
                 # Step 1: Check if search already exists using Python-computed hash
                 cur.execute(

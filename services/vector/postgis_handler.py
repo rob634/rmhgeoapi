@@ -45,6 +45,12 @@ logger = LoggerFactory.create_logger(
     "postgis_handler"
 )
 
+# Geometry type allowlist (13 MAR 2026 — COMPETE Run 3 Fix 2)
+VALID_GEOM_TYPES = frozenset({
+    'POINT', 'MULTIPOINT', 'LINESTRING', 'MULTILINESTRING',
+    'POLYGON', 'MULTIPOLYGON', 'GEOMETRY', 'GEOMETRYCOLLECTION',
+})
+
 
 class VectorToPostGISHandler:
     """Handles GeoDataFrame → PostGIS operations."""
@@ -1015,6 +1021,8 @@ class VectorToPostGISHandler:
         # Get geometry type from first feature
         # After normalization, all geometries should be uniform Multi- types
         geom_type = chunk.geometry.iloc[0].geom_type.upper()
+        if geom_type not in VALID_GEOM_TYPES:
+            raise ValueError(f"Unsupported geometry type: {geom_type}")
 
         # Verify uniform geometry type (should always be true after normalization)
         unique_types = chunk.geometry.geom_type.unique()
@@ -1616,6 +1624,8 @@ class VectorToPostGISHandler:
 
                 # Detect geometry type from first feature
                 geom_type = gdf.geometry.iloc[0].geom_type.upper()
+                if geom_type not in VALID_GEOM_TYPES:
+                    raise ValueError(f"Unsupported geometry type: {geom_type}")
 
                 # Build column definitions
                 # RESERVED COLUMNS: These are created by our schema, skip if in source data

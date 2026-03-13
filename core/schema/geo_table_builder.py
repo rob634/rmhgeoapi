@@ -36,6 +36,12 @@ from util_logger import LoggerFactory, ComponentType
 
 logger = LoggerFactory.create_logger(ComponentType.SERVICE, "GeoTableBuilder")
 
+# Geometry type allowlist (13 MAR 2026 — COMPETE Run 3 Fix 2)
+VALID_GEOM_TYPES = frozenset({
+    'POINT', 'MULTIPOINT', 'LINESTRING', 'MULTILINESTRING',
+    'POLYGON', 'MULTIPOLYGON', 'GEOMETRY', 'GEOMETRYCOLLECTION',
+})
+
 
 class GeometryColumnConfig(Enum):
     """
@@ -252,11 +258,11 @@ class GeoTableBuilder:
         # 1. Standard metadata columns (if enabled)
         if self.include_standard_columns:
             for col_name, col_type in self.STANDARD_COLUMNS.items():
-                column_defs.append(f"{col_name} {col_type}")
+                column_defs.append(sql.Identifier(col_name) + sql.SQL(f" {col_type}"))
             logger.info(f"   Standard columns: {len(self.STANDARD_COLUMNS)}")
 
         # 2. Geometry column
-        geometry_def = f"{self.geometry_column_name} GEOMETRY({geom_type}, {self.srid})"
+        geometry_def = sql.Identifier(self.geometry_column_name) + sql.SQL(f" GEOMETRY({geom_type}, {self.srid})")
         column_defs.append(geometry_def)
 
         # 3. Dynamic attribute columns from GeoDataFrame
@@ -273,14 +279,14 @@ class GeoTableBuilder:
                 continue
 
             pg_type = self._get_postgres_type(gdf[col].dtype)
-            column_defs.append(f"{cleaned_name} {pg_type}")
+            column_defs.append(sql.Identifier(cleaned_name) + sql.SQL(f" {pg_type}"))
             dynamic_columns.append(cleaned_name)
 
         logger.info(f"   Dynamic columns: {len(dynamic_columns)}")
 
         # Build CREATE TABLE statement
-        # Using string composition for column definitions, then wrapping in sql.SQL
-        columns_sql = ",\n                ".join(column_defs)
+        # Using sql.Identifier for column names + sql.SQL for types, joined via sql.SQL
+        columns_sql = sql.SQL(",\n                ").join(column_defs)
 
         create_table = sql.SQL("""
             CREATE TABLE IF NOT EXISTS {schema}.{table} (
@@ -289,7 +295,7 @@ class GeoTableBuilder:
         """).format(
             schema=sql.Identifier(schema),
             table=sql.Identifier(table_name),
-            columns=sql.SQL(columns_sql)
+            columns=columns_sql
         )
 
         statements.append(create_table)
@@ -336,6 +342,9 @@ class GeoTableBuilder:
         if not geom_type.startswith('MULTI') and geom_type in ('POINT', 'LINESTRING', 'POLYGON'):
             geom_type = 'MULTI' + geom_type
             logger.info(f"   Promoted to {geom_type} for consistency")
+
+        if geom_type not in VALID_GEOM_TYPES:
+            raise ValueError(f"Unsupported geometry type: {geom_type}")
 
         return geom_type
 

@@ -207,6 +207,8 @@ class PgStacRepository:
         """
         Check if collection exists in PgSTAC.
 
+        Raises on DB errors — callers must distinguish "not found" from "DB down".
+
         Args:
             collection_id: Collection ID to check
 
@@ -217,21 +219,16 @@ class PgStacRepository:
             CRITICAL for pgSTAC - collections must exist before items
             because collections create partitions that items use.
         """
-        try:
-            with self._pg_repo._get_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        "SELECT EXISTS(SELECT 1 FROM pgstac.collections WHERE id = %s)",
-                        (collection_id,)
-                    )
-                    result = cur.fetchone()
-                    exists = result['exists']
-                    logger.debug(f"   Collection '{collection_id}' exists: {exists}")
-                    return exists
-
-        except Exception as e:
-            logger.error(f"❌ Error checking collection existence: {e}")
-            return False
+        with self._pg_repo._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT EXISTS(SELECT 1 FROM pgstac.collections WHERE id = %s)",
+                    (collection_id,)
+                )
+                result = cur.fetchone()
+                exists = result['exists']
+                logger.debug(f"   Collection '{collection_id}' exists: {exists}")
+                return exists
 
     # =========================================================================
     # ITEM OPERATIONS
@@ -455,14 +452,15 @@ class PgStacRepository:
             logger.error(f"❌ Error updating item properties '{item_id}': {e}")
             return False
 
-    def get_collection_item_ids(self, collection_id: str) -> List[str]:
+    def get_collection_item_ids(self, collection_id: str, limit: int = 50000) -> List[str]:
         """
-        Get all item IDs in a collection.
+        Get item IDs in a collection (bounded).
 
         Used for collection-level operations like bulk unpublish.
 
         Args:
             collection_id: STAC collection ID
+            limit: Maximum number of item IDs to return (default 50000)
 
         Returns:
             List of item IDs in the collection
@@ -478,12 +476,18 @@ class PgStacRepository:
                         FROM pgstac.items
                         WHERE collection = %s
                         ORDER BY id
+                        LIMIT %s
                         """,
-                        (collection_id,)
+                        (collection_id, limit)
                     )
                     results = cur.fetchall()
                     item_ids = [row['id'] for row in results]
-                    logger.debug(f"   ✅ Found {len(item_ids)} items in collection '{collection_id}'")
+                    if len(item_ids) >= limit:
+                        logger.warning(
+                            f"   Hit limit of {limit} items for collection "
+                            f"'{collection_id}' — results may be incomplete"
+                        )
+                    logger.debug(f"   Found {len(item_ids)} items in collection '{collection_id}'")
                     return item_ids
 
         except Exception as e:

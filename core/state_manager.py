@@ -131,12 +131,13 @@ class StateManager:
 
         Returns:
             JobRecord or None if not found
+
+        Raises:
+            Exception: If database query fails (propagated)
         """
-        try:
-            return self.repos['job_repo'].get_job(job_id)
-        except Exception as e:
-            self.logger.error(f"Failed to get job record: {e}")
-            return None
+        # Let DB errors propagate — None means "not found", exception means "DB error"
+        # (13 MAR 2026 — COMPETE Run 2 Fix 7: was swallowing DB errors as None)
+        return self.repos['job_repo'].get_job(job_id)
 
     def update_job_status(
         self,
@@ -742,21 +743,18 @@ class StateManager:
 
         Returns:
             True if storage successful
+
+        Raises:
+            Exception: If database update fails (propagated)
         """
-        try:
+        # Let infrastructure errors propagate — callers handle at orchestration layer
+        # (13 MAR 2026 — COMPETE Run 2 Fix 2: was silently swallowing exceptions)
+        success = self.repos['job_repo'].update_stage_results(job_id, stage_number, stage_results)
 
-            # Update stage results in job record
-            # Note: PostgreSQL will store with string key
-            success = self.repos['job_repo'].update_stage_results(job_id, stage_number, stage_results)
+        if success:
+            self.logger.info(f"Stored results for stage {stage_number} of job {job_id[:16]}...")
 
-            if success:
-                self.logger.info(f"Stored results for stage {stage_number} of job {job_id[:16]}...")
-
-            return success
-
-        except Exception as e:
-            self.logger.error(f"Failed to store stage results: {e}")
-            return False
+        return success
 
     # ========================================================================
     # MONITORING & STATUS QUERIES
@@ -878,7 +876,9 @@ class StateManager:
         in PROCESSING or QUEUED state should also be failed to prevent orphan
         tasks and wasted compute.
 
-        Safe method that won't raise exceptions.
+        Raises exceptions on DB failure — caller handles at orchestration layer.
+        (13 MAR 2026 — COMPETE Run 2 Fix 3: was silently swallowing exceptions,
+        leaving orphan PROCESSING tasks executing after job FAILED)
 
         Args:
             job_id: Job identifier
@@ -887,31 +887,17 @@ class StateManager:
         Returns:
             Number of tasks marked as failed
         """
-        try:
-            failed_task_ids = self.repos['task_repo'].fail_tasks_for_job(job_id, error_msg)
-            failed_count = len(failed_task_ids)
+        failed_task_ids = self.repos['task_repo'].fail_tasks_for_job(job_id, error_msg)
+        failed_count = len(failed_task_ids)
 
-            if failed_count > 0:
-                self.logger.warning(
-                    f"GAP-004: Marked {failed_count} orphan tasks as FAILED for job {job_id[:16]}...",
-                    extra={
-                        'checkpoint': 'STATE_ORPHAN_TASKS_FAILED',
-                        'job_id': job_id,
-                        'failed_count': failed_count,
-                        'task_ids': failed_task_ids[:10],
-                    }
-                )
-            return failed_count
-
-        except Exception as e:
-            self.logger.error(
-                f"Failed to fail orphan tasks for job {job_id[:16]}...: {e}",
+        if failed_count > 0:
+            self.logger.warning(
+                f"GAP-004: Marked {failed_count} orphan tasks as FAILED for job {job_id[:16]}...",
                 extra={
-                    'checkpoint': 'STATE_FAIL_ORPHAN_TASKS_ERROR',
-                    'error_source': 'state',
-                    'error_type': type(e).__name__,
-                    'error_message': str(e),
+                    'checkpoint': 'STATE_ORPHAN_TASKS_FAILED',
                     'job_id': job_id,
+                    'failed_count': failed_count,
+                    'task_ids': failed_task_ids[:10],
                 }
             )
-            return 0
+        return failed_count

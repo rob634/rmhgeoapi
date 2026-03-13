@@ -1539,12 +1539,37 @@ class CoreMachine:
                     # Fall through to mark as FAILED
 
             # Max retries exceeded or retry scheduling failed - mark as permanently FAILED
+            # (13 MAR 2026 — COMPETE Run 2 Fix 1: use complete_task_with_sql instead of
+            # update_task_status_direct so the "last task turns out the lights" stage
+            # completion check fires. Without this, a retry-scheduling failure on the
+            # last task in a stage left the job stuck in PROCESSING forever.)
             try:
-                self.state_manager.update_task_status_direct(
-                    task_message.task_id,
-                    TaskStatus.FAILED,
-                    error_details=result.error_details
+                failed_result = TaskResult(
+                    success=False,
+                    task_id=task_message.task_id,
+                    task_type=task_message.task_type,
+                    error_details=result.error_details or "Task permanently failed"
                 )
+                completion = self.state_manager.complete_task_with_sql(
+                    task_id=task_message.task_id,
+                    job_id=task_message.parent_job_id,
+                    stage=task_message.stage,
+                    task_result=failed_result
+                )
+                if completion and completion.stage_complete:
+                    if self._should_signal_stage_complete():
+                        self._send_stage_complete_signal(
+                            task_message.parent_job_id,
+                            task_message.job_type,
+                            task_message.stage
+                        )
+                    else:
+                        self._handle_stage_completion(
+                            task_message.parent_job_id,
+                            task_message.job_type,
+                            task_message.stage
+                        )
+
                 if task_record and task_record.retry_count >= config.task_max_retries:
                     self.logger.error(
                         f"❌ Task {task_message.task_id[:16]} exceeded max retries "
@@ -1627,6 +1652,9 @@ class CoreMachine:
         routing_counts: Dict[str, int] = {}
 
         for idx, task_def in enumerate(task_defs):
+            # (13 MAR 2026 — COMPETE Run 2 Fix 2: track whether DB create
+            # succeeded so the cleanup error message is accurate)
+            task_created = False
             try:
                 # Route task to appropriate queue based on task_type
                 # V0.8 Phase 7: Pass task_params for admin override check
@@ -1640,6 +1668,7 @@ class CoreMachine:
                     task_def, idx, target_queue=queue_name
                 )
                 self.repos['task_repo'].create_task(task_record)
+                task_created = True
 
                 # Send to Service Bus using helper (single source of truth)
                 queue_message = self._task_definition_to_message(task_def)
@@ -1667,10 +1696,11 @@ class CoreMachine:
                 # Without this, a PENDING task with no Service Bus message blocks
                 # stage completion forever (complete_task_and_check_stage counts
                 # tasks NOT IN ('completed', 'failed')).
+                error_source = "Task DB creation" if not task_created else "Service Bus send"
                 try:
                     self.repos['task_repo'].fail_task(
                         task_def.task_id,
-                        f"Service Bus send failed: {e}"
+                        f"{error_source} failed: {e}"
                     )
                     self.logger.warning(
                         f"Marked orphan task {task_def.task_id} as FAILED",

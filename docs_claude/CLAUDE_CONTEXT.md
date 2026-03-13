@@ -1,48 +1,67 @@
-# Claude Context - Azure Geospatial ETL Pipeline
+# Claude Context - Azure Geospatial ETL Platform
 
-**Date**: 23 DEC 2025
+**Date**: 13 MAR 2026
+**Version**: v0.10.1.1
 **Primary Documentation**: Start here for all Claude instances
 
 ---
 
-## 🎯 What This System Does
+## What This System Does
 
-A **geospatial ETL platform** that processes raster and vector data into standards-compliant APIs:
+A **geospatial ETL platform** that processes raster, vector, and multidimensional data into standards-compliant APIs:
 
 ```
-Bronze Storage (raw files) → CoreMachine (orchestration) → Silver Storage (COGs) + PostGIS + STAC
-                                    ↓
+Bronze Storage (raw files) --> CoreMachine (orchestration) --> Silver Storage (COGs/Zarr) + PostGIS + STAC
+                                    |
                            Standards-Compliant APIs:
-                           • OGC API - Features (vector queries)
-                           • STAC API (metadata search)
-                           • TiTiler (dynamic tile serving)
+                            - OGC API - Features (vector queries via TiPG)
+                            - STAC API (metadata search)
+                            - TiTiler (dynamic tile serving for raster + Zarr)
 ```
 
 **Core Capabilities**:
-- **Raster Processing**: GeoTIFF → Cloud-Optimized GeoTIFF (COG) with STAC metadata
-- **Vector Processing**: GeoJSON/Shapefile/CSV → PostGIS with OGC Features API
+- **Raster Processing**: GeoTIFF --> Cloud-Optimized GeoTIFF (COG) with STAC metadata
+- **Vector Processing**: GeoJSON/Shapefile/GPKG/CSV --> PostGIS with OGC Features API
+- **Zarr/NetCDF Processing**: NetCDF --> Zarr conversion, native Zarr ingest with rechunking, VirtualiZarr references
+- **Multi-Table Vector**: Single file + split_column --> 1 table + N views; multi-file --> N tables; GPKG multi-layer --> N tables
 - **Job Orchestration**: Multi-stage workflows with parallel task execution
+- **Unpublish Pipelines**: Symmetric teardown for raster, vector, Zarr, and multi-source vector
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
-### Active Environment
-- **Function App**: `rmhazuregeoapi` (B3 Basic tier)
-- **URL**: https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net
-- **Database**: rmhpostgres.postgres.database.azure.com (PostgreSQL 17, B2s)
-- **Resource Group**: `rmhazure_rg`
+### Active Environment (3-App Architecture)
+
+| Role | App Name | APP_MODE | URL |
+|------|----------|----------|-----|
+| **Orchestrator** | `rmhazuregeoapi` | `standalone` | https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net |
+| **Gateway** | `rmhgeogateway` | `platform` | https://rmhgeogateway-gdc4hrafawfrcqak.eastus-01.azurewebsites.net |
+| **Docker Worker** | `rmhheavyapi` | `worker_docker` | https://rmhheavyapi-ebdffqhkcsevg7f3.eastus-01.azurewebsites.net |
+
+| Resource | Value |
+|----------|-------|
+| **Database** | `geopgflex` on rmhpostgres.postgres.database.azure.com (PostgreSQL 17) |
+| **TiTiler** | `titiler-pgstac:2.1.0` on rmhtitiler-ghcyd7g0bxdvc2hc |
+| **Silver Storage** | `rmhstorage123` |
+| **Resource Group** | `rmhazure_rg` |
+| **ACR** | `rmhazureacr.azurecr.io` |
 
 ### Essential Commands
 ```bash
-# Deploy
-func azure functionapp publish rmhazuregeoapi --python --build remote
+# Deploy (recommended -- handles versioning, health checks, verification)
+./deploy.sh orchestrator   # Deploy Orchestrator
+./deploy.sh gateway        # Deploy Gateway
+./deploy.sh docker         # Deploy Docker Worker
 
 # Health Check
 curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/health
 
-# Full Schema Rebuild (after deployment)
-curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/maintenance/full-rebuild?confirm=yes"
+# Schema Sync (safe -- creates missing tables/indexes, preserves data)
+curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/maintenance?action=ensure&confirm=yes"
+
+# Schema Rebuild (destructive -- drops and recreates, dev/test only)
+curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/maintenance?action=rebuild&confirm=yes"
 
 # Submit Test Job
 curl -X POST https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/hello_world \
@@ -55,116 +74,139 @@ curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/job
 
 ---
 
-## 🏗️ Architecture Overview
+## Architecture Overview
 
 ### Two-Layer Design
 
 ```
-┌────────────────────────────────────────────────────────────┐
-│                    PLATFORM LAYER                           │
-│  Client-agnostic REST API                                   │
-│  "Give me data, I'll give you API endpoints"                │
-│                                                             │
-│  Input: ProcessingRequest (data_type, source_location)      │
-│  Output: API endpoints (OGC Features, STAC, tiles)          │
-└─────────────────────────┬──────────────────────────────────┘
-                          ▼
-┌────────────────────────────────────────────────────────────┐
-│                    COREMACHINE                              │
-│  Universal Job Orchestration Engine (~450 lines)            │
-│                                                             │
-│  Pattern: Composition over Inheritance                      │
-│  ✅ StateManager (database ops)                             │
-│  ✅ OrchestrationManager (task creation)                    │
-│  ✅ All work delegated to specialized components            │
-└────────────────────────────────────────────────────────────┘
++------------------------------------------------------------+
+|                    PLATFORM LAYER                          |
+|  Client-agnostic REST API                                  |
+|  "Give me data, I'll give you API endpoints"               |
+|                                                            |
+|  Input: ProcessingRequest (data_type, source_location)     |
+|  Output: API endpoints (OGC Features, STAC, tiles)         |
++----------------------------+-------------------------------+
+                             |
+                             v
++------------------------------------------------------------+
+|                    COREMACHINE                              |
+|  Universal Job Orchestration Engine                        |
+|                                                            |
+|  Pattern: Composition over Inheritance                     |
+|  - StateManager (database ops)                             |
+|  - OrchestrationManager (task creation)                    |
+|  - All work delegated to specialized components            |
++------------------------------------------------------------+
 ```
 
-### Job→Stage→Task Pattern
+### Asset/Release Domain Model (v0.9+)
+
+```
+Asset (stable identity, SHA256 of platform_id|dataset_id|resource_id)
+  +-- Release 1 (version_ordinal=1, approval lifecycle)
+  +-- Release 2 (version_ordinal=2, can coexist with v1)
+```
+
+Key decisions:
+- **version_id assigned at approval**, not submission
+- **STAC materialization at approval only** -- cached dict on Release, written to pgSTAC when approved
+- **"is_latest" is computed**, never stored -- `MAX(version_ordinal)` via `ORDER BY version_ordinal DESC LIMIT 1`
+- **Vector excluded from STAC** -- vector discovery via PostGIS/OGC Features API only; STAC is for raster and Zarr
+- **Ordinal naming**: tables use `ord1`, `ord2` (not "draft")
+
+### Job --> Stage --> Task Pattern
 
 ```
 JOB (Blueprint)
- ├── STAGE 1 (Sequential)
- │   ├── Task A (Parallel) ┐
- │   ├── Task B (Parallel) ├─ All tasks run concurrently
- │   └── Task C (Parallel) ┘  Last task triggers stage completion
- │
- ├── STAGE 2 (waits for Stage 1)
- │   └── Tasks...
- │
- └── COMPLETION (aggregation & final status)
+ +-- STAGE 1 (Sequential)
+ |   +-- Task A (Parallel) \
+ |   +-- Task B (Parallel)  > All tasks run concurrently
+ |   +-- Task C (Parallel) /  Last task triggers stage completion
+ |
+ +-- STAGE 2 (waits for Stage 1)
+ |   +-- Tasks...
+ |
+ +-- COMPLETION (aggregation & final status)
 ```
 
 **Key Pattern: "Last Task Turns Out the Lights"**
 - Advisory locks enable unlimited parallelism without deadlocks
 - Exactly one task detects completion and advances stage
+- Zero-task stage guard: when `create_tasks_for_stage` returns `[]`, stage auto-advances
 
 ### Database Schemas
 
 | Schema | Purpose | Management |
 |--------|---------|------------|
-| `app` | Jobs, tasks, API requests | Pydantic → SQL generator |
+| `app` | Jobs, tasks, core orchestration | Pydantic --> SQL generator |
+| `platform` | API request tracking, assets, releases, routes | Own schema (Pydantic --> SQL generator) |
 | `pgstac` | STAC metadata catalog | pypgstac migrate |
 | `geo` | User vector/raster data | Dynamic at runtime |
 | `h3` | H3 hexagonal grids | Static SQL |
-| `platform` | API request tracking | Pydantic → SQL generator |
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 rmhgeoapi/
-├── function_app.py          # Azure Functions entry point
-├── CLAUDE.md                # → Points here
-│
-├── config/                  # Modular configuration
-│   └── *.py                 # app, database, queue, raster, storage, vector
-│
-├── core/                    # CoreMachine orchestration engine
-│   ├── machine.py           # Main orchestrator (~450 lines)
-│   ├── state_manager.py     # Database operations
-│   ├── models/              # Pydantic models (JobRecord, TaskRecord, etc.)
-│   └── schema/              # DDL generation from Pydantic
-│
-├── infrastructure/          # Repository pattern implementations
-│   ├── postgresql.py        # Database access
-│   ├── service_bus.py       # Message queues
-│   └── blob.py              # Azure Blob Storage
-│
-├── jobs/                    # Job definitions (JobBase + JobBaseMixin)
-│   ├── base.py              # JobBase ABC
-│   ├── mixins.py            # JobBaseMixin (77% less boilerplate)
-│   ├── process_raster_v2.py # Raster ETL
-│   ├── process_vector.py    # Vector ETL
-│   └── *.py                 # Other job types
-│
-├── services/                # Business logic & task handlers
-│   ├── raster/              # COG creation, tiling
-│   ├── vector/              # PostGIS operations
-│   └── *.py                 # Handler implementations
-│
-├── triggers/                # HTTP/Service Bus endpoints
-│   ├── jobs.py              # Job submission/status
-│   ├── platform.py          # Platform layer API
-│   └── *.py                 # Other endpoints
-│
-├── ogc_features/            # OGC API - Features (standalone)
-├── stac_api/                # STAC API endpoints
-│
-└── docs_claude/             # Claude documentation (YOU ARE HERE)
-    ├── CLAUDE_CONTEXT.md    # 🎯 THIS FILE - Start here
-    ├── TODO.md              # Active tasks
-    ├── HISTORY.md           # Completed work
-    ├── JOB_CREATION_QUICKSTART.md  # New job guide
-    └── *.md                 # Other reference docs
++-- function_app.py          # Azure Functions entry point
++-- CLAUDE.md                # --> Points here
++-- deploy.sh                # Deployment script (orchestrator/gateway/docker)
+|
++-- config/                  # Modular configuration
+|   +-- *.py                 # app, database, queue, raster, storage, vector, platform, metrics
+|
++-- core/                    # CoreMachine orchestration engine
+|   +-- machine.py           # Main orchestrator
+|   +-- state_manager.py     # Database operations
+|   +-- models/              # Pydantic models (JobRecord, TaskRecord, etc.)
+|   +-- schema/              # DDL generation from Pydantic
+|
++-- infrastructure/          # Repository pattern implementations
+|   +-- postgresql.py        # Database access (psycopg3, type adapters)
+|   +-- service_bus.py       # Message queues
+|   +-- blob.py              # Azure Blob Storage (auth owner)
+|
++-- jobs/                    # Job definitions (JobBase + JobBaseMixin)
+|   +-- base.py              # JobBase ABC
+|   +-- mixins.py            # JobBaseMixin (77% less boilerplate)
+|   +-- process_raster_docker.py        # Raster ETL
+|   +-- vector_docker_etl.py            # Vector ETL (incl. split views)
+|   +-- vector_multi_source_docker.py   # Multi-file/multi-layer vector
+|   +-- ingest_zarr.py                  # Native Zarr ingest + rechunk
+|   +-- netcdf_to_zarr.py              # NetCDF --> Zarr conversion
+|   +-- virtualzarr.py                 # VirtualiZarr references
+|   +-- unpublish_*.py                 # Symmetric teardown jobs
+|
++-- services/                # Business logic & task handlers
+|   +-- raster/              # COG creation, tiling
+|   +-- vector/              # PostGIS operations
+|   |   +-- postgis_handler.py   # Core vector processing
+|   |   +-- view_splitter.py     # Split views (P2)
+|   +-- handler_*.py         # Handler implementations (7 handlers)
+|
++-- triggers/                # HTTP/Service Bus endpoints
+|   +-- jobs.py              # Job submission/status
+|   +-- platform.py          # Platform layer API
+|   +-- *.py                 # Other endpoints
+|
++-- ogc_features/            # OGC API - Features (standalone)
++-- stac_api/                # STAC API endpoints
++-- web_dashboard/           # HTMX-powered admin dashboard
+|
++-- docs_claude/             # Claude documentation (YOU ARE HERE)
+    +-- CLAUDE_CONTEXT.md    # THIS FILE - Start here
+    +-- TODO.md              # Active tasks
+    +-- *.md                 # Reference docs (see Documentation Map)
 ```
 
 ---
 
-## 🔧 Creating New Jobs
+## Creating New Jobs
 
-**Use JobBaseMixin** - 77% less code, 30 minutes instead of 2 hours.
+**Use JobBaseMixin** -- 77% less code, 30 minutes instead of 2 hours.
 
 ```python
 from jobs.base import JobBase
@@ -195,7 +237,7 @@ class MyJob(JobBaseMixin, JobBase):  # Mixin FIRST!
 
 ---
 
-## 🔍 Debugging & Monitoring
+## Debugging and Monitoring
 
 ### Database Endpoints
 ```bash
@@ -214,81 +256,75 @@ curl ".../api/dbadmin/diagnostics?type=stats"
 
 ### Application Insights
 ```bash
-# Create query script (recommended pattern)
+# App ID: d3af3d37-cfe3-411f-adef-bc540181cbca (all 3 apps share this)
 cat > /tmp/query_ai.sh << 'EOF'
 #!/bin/bash
 TOKEN=$(az account get-access-token --resource https://api.applicationinsights.io --query accessToken -o tsv)
 curl -s -H "Authorization: Bearer $TOKEN" \
-  "https://api.applicationinsights.io/v1/apps/829adb94-5f5c-46ae-9f00-18e731529222/query" \
+  "https://api.applicationinsights.io/v1/apps/d3af3d37-cfe3-411f-adef-bc540181cbca/query" \
   --data-urlencode "query=traces | where timestamp >= ago(15m) | order by timestamp desc | take 20" \
   -G
 EOF
 chmod +x /tmp/query_ai.sh && /tmp/query_ai.sh | python3 -m json.tool
 ```
 
+### Web Dashboard
+HTMX-powered admin UI in `web_dashboard/` -- 4 tabs: Platform, Jobs, Data, System.
+Includes storage browser, queue monitoring, and job management.
+
 ---
 
-## 📚 Documentation Map
+## Documentation Map
 
-### Primary Documents
+### Primary
 | Document | Purpose |
 |----------|---------|
-| **CLAUDE_CONTEXT.md** | 🎯 START HERE - System overview |
+| **CLAUDE_CONTEXT.md** | START HERE -- system overview |
 | **TODO.md** | Active tasks only |
+| **DEV_BEST_PRACTICES.md** | Patterns, common mistakes, gotchas |
+| **ERRORS_AND_FIXES.md** | Error catalog -- search here first when debugging |
 
-### Architecture Layer
+### Architecture
 | Document | Purpose |
 |----------|---------|
 | **ARCHITECTURE_REFERENCE.md** | Deep technical specs, job patterns, error handling |
 | **ARCHITECTURE_DIAGRAMS.md** | Visual C4/Mermaid diagrams |
-| **COREMACHINE_PLATFORM_ARCHITECTURE.md** | Two-layer design details |
 | **SCHEMA_ARCHITECTURE.md** | PostgreSQL 5-schema design |
-| **SERVICE_BUS_HARMONIZATION.md** | Queue configuration |
+| **SCHEMA_EVOLUTION.md** | Safe vs breaking changes, migration patterns |
 
-### Operations Layer
+### Operations
 | Document | Purpose |
 |----------|---------|
-| **DEPLOYMENT_GUIDE.md** | Deployment procedures |
+| **DEPLOYMENT_GUIDE.md** | Deployment procedures for all 3 apps |
 | **APPLICATION_INSIGHTS.md** | Log queries and diagnostics |
-| **MEMORY_PROFILING.md** | Performance optimization |
+| **DOCKER_INTEGRATION.md** | Docker worker parallelism model |
+| **PIPELINE_OPERATIONS.md** | Failure modes and resilience |
 
-### Development Layer
+### Development
 | Document | Purpose |
 |----------|---------|
-| **JOB_CREATION_QUICKSTART.md** | New job creation guide |
-| **OGC_FEATURES_METADATA_INTEGRATION.md** | OGC API integration |
-| **ZARR_TITILER_LESSONS.md** | Zarr/TiTiler lessons learned |
-| **MICROSERVICES_ARCHITECTURE.md** | Queue-based decoupling, future Function App separation |
+| **JOB_CREATION_QUICKSTART.md** | 5-step guide for new jobs |
+| **FATHOM_ETL.md** | FATHOM flood data pipeline (Phase 1 and 2) |
+| **AGENT_PLAYBOOKS.md** | Multi-agent review pipelines |
 
-### Pipeline Projects
+### History
 | Document | Purpose |
 |----------|---------|
-| **FATHOM_ETL.md** | FATHOM flood data pipeline |
-| **BUILDING_EXPOSURE_PIPELINE.md** | Building exposure analytics |
-| **PIPELINE_BUILDER_VISION.md** | Future pipeline builder UI |
-
-### History & Archives
-| Document | Purpose |
-|----------|---------|
-| **HISTORY.md** | Main completed work log |
-| **HISTORY_ARCHIVE_DEC2025.md** | TODO cleanup archive |
-
-### Human Documentation (WIKI_*.md in root)
-- `WIKI_ONBOARDING.md` - Comprehensive developer guide
-- `WIKI_TECHNICAL_OVERVIEW.md` - Architecture for humans
-- `WIKI_API_*.md` - API documentation (6 files)
-- `WIKI_QUICK_START.md` - Quick start guide
+| **HISTORY.md** | Completed work log |
 
 ---
 
-## 🚨 Critical Reminders
+## Critical Reminders
 
-1. **Function App**: Use `rmhazuregeoapi` ONLY (not rmhgeoapibeta, rmhgeoapi, etc.)
-2. **Schema Rebuild**: Required after deployment: `/api/dbadmin/maintenance/full-rebuild?confirm=yes`
-3. **No Backward Compatibility**: Fail fast with clear errors (development mode)
-4. **Prefer Editing**: Always edit existing files over creating new ones
-5. **Date Format**: Use military format (05 DEC 2025)
+1. **3-App Architecture**: Orchestrator (`rmhazuregeoapi`), Gateway (`rmhgeogateway`), Docker Worker (`rmhheavyapi`). Deprecated apps: `rmhazurefn`, `rmhgeoapi`, `rmhgeoapifn`, `rmhgeoapibeta`.
+2. **Schema sync after deploy**: Use `?action=ensure&confirm=yes` (safe). Only use `action=rebuild` for fresh dev/test environments.
+3. **No Backward Compatibility**: Fail fast with clear errors (development mode). Never create fallbacks that mask breaking changes.
+4. **Auth owned by BlobRepository**: All blob access (including fsspec/adlfs for h5py/VirtualiZarr) must derive credentials from `BlobRepository.for_zone()` singleton. Never create independent `DefaultAzureCredential()`.
+5. **Schema changes use rebuild, not ALTER**: Enum values and DDL changes go into model code, deploy via `action=rebuild`. No standalone ALTER statements.
+6. **Prefer Editing**: Always edit existing files over creating new ones.
+7. **Date Format**: Use military format (13 MAR 2026).
+8. **Deploy script**: Use `./deploy.sh orchestrator|gateway|docker|all` for deployments.
 
 ---
 
-**Last Updated**: 05 DEC 2025
+**Last Updated**: 13 MAR 2026

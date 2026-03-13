@@ -1,6 +1,6 @@
 # Architecture Reference
 
-**Date**: 02 FEB 2026 (Updated with Platform Layer Architecture)
+**Date**: 13 MAR 2026 (Updated with v0.9-v0.10 architecture changes)
 **Purpose**: Deep technical specifications for the Azure Geospatial ETL Pipeline
 
 ## Table of Contents
@@ -16,6 +16,10 @@
 10. [Storage Architecture](#storage-architecture)
 11. [Error Handling Strategy](#error-handling-strategy)
 12. [Scalability Targets](#scalability-targets)
+13. [Asset/Release Domain Model](#asset-release-domain-model)
+14. [STAC Materialization Strategy](#stac-materialization-strategy)
+15. [Pipeline Families](#pipeline-families)
+16. [Observability Patterns](#observability-patterns)
 
 ---
 
@@ -1670,6 +1674,138 @@ Upon job completion, the system will support outbound HTTP POST notifications to
 - URL allowlisting to prevent SSRF attacks
 - Timeout limits to prevent hanging connections
 - Circuit breaker pattern for failing endpoints
+
+---
+
+## Asset/Release Domain Model
+
+**Added**: v0.8.22.0-v0.8.24.0 (23 FEB 2026)
+**Status**: Production — deployed and QA-verified
+
+### Two-Entity Split
+
+The original single `GeospatialAsset` was split into:
+
+- **Asset** (stable identity): `asset_id = SHA256(platform_id | dataset_id | resource_id)`. Never changes. Permanent container for all versions.
+- **AssetRelease** (versioned lifecycle): `release_id = SHA256(asset_id | submission_key)`. One per version submission. Owns approval state, clearance, revocation.
+
+### Key Design Decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| `version_id` assigned at approval, not submission | Submitter suggests, reviewer confirms. Identity stable before approval. |
+| Multiple approved releases coexist | v1 and v2 can both be APPROVED simultaneously |
+| `is_latest` is computed, never stored | `MAX(version_ordinal)` via `ORDER BY version_ordinal DESC LIMIT 1`. Removed from both `asset_releases` and route tables. |
+| Ordinal naming (ord1, ord2) | Tables use `_ord1`, `_ord2` suffixes, not `_draft`. Reserved at creation time. |
+| Vector data excluded from STAC | Vector discovery via PostGIS/OGC Features API only. STAC is for raster and zarr. |
+
+### Release Lifecycle
+
+```
+DRAFT → APPROVED → (optionally) REVOKED
+  ↑                      |
+  └──────────────────────┘  (new version starts fresh draft)
+```
+
+Overwrite flag: `overwrite=true` increments revision, not ordinal. Same release_id, fresh processing.
+
+---
+
+## STAC Materialization Strategy
+
+**Pattern**: Build at Certification (B2C)
+**Added**: v0.8.24.0
+
+STAC items are NOT created during ETL processing. Instead:
+
+1. **Processing**: Handler builds STAC dict, caches it on `release.stac_item_json`
+2. **Approval**: Approval endpoint writes cached dict to pgSTAC with versioned ID
+3. **Revocation**: Revoke endpoint deletes STAC item from pgSTAC
+
+This means: approved = visible in STAC, not approved = invisible.
+
+### Why Not Build During ETL?
+
+- ETL may be re-run (overwrite). Don't want stale STAC items.
+- Approval may change version_id. STAC item ID depends on final version.
+- Separation of concerns: ETL builds data, approval publishes metadata.
+
+---
+
+## Pipeline Families
+
+**Added**: v0.9.9.0-v0.10.0.2
+
+### Raster Pipelines
+
+| Job Type | Stages | Purpose |
+|----------|--------|---------|
+| `process_raster_docker` | validate → create_cog → register | Single GeoTIFF → COG + STAC |
+| `process_raster_collection_docker` | inventory → process → register | Multi-file raster collection |
+| `unpublish_raster` | inventory → delete_blobs → cleanup | Reverse raster workflow |
+| `validate_raster_job` | validate | Pre-flight validation only |
+
+### Vector Pipelines
+
+| Job Type | Stages | Purpose |
+|----------|--------|---------|
+| `vector_docker_etl` | validate → convert → upload → complete | Single file → PostGIS table. Optional `split_column` → 1 table + N views |
+| `vector_multi_source_docker` | validate → process_sources → complete | N files or GPKG multi-layer → N tables |
+| `unpublish_vector` | inventory → delete → cleanup | Reverse single-table vector |
+| `unpublish_vector_multi_source` | inventory → delete → cleanup | Reverse multi-table vector |
+
+### Zarr Pipelines
+
+| Job Type | Stages | Purpose |
+|----------|--------|---------|
+| `virtualzarr` | scan → copy → validate → combine → register | NetCDF → Zarr virtual reference (Kerchunk-style) |
+| `ingest_zarr` | validate → copy_or_rechunk → register | Native Zarr ingest. Optional `rechunk=True` |
+| `netcdf_to_zarr` | validate → convert → register | NetCDF → Zarr with optimized chunking (256x256, time=1, Blosc+LZ4) |
+| `unpublish_zarr` | inventory → delete_blobs → cleanup | Reverse Zarr workflow |
+
+### Split Views Pattern (v0.10.0.2)
+
+When `split_column` is provided to `vector_docker_etl`:
+1. Single file uploaded → 1 base PostGIS table
+2. `SELECT DISTINCT split_column` discovers categorical values
+3. One PostgreSQL VIEW created per distinct value (max 20)
+4. Each view registered in `geo.table_catalog` with bbox, feature_count
+5. TiPG auto-discovers views as separate OGC Feature collections
+6. Constraints: text/int/bool types only, 63-char identifier limit
+
+### Zero-Task Stage Guard
+
+When `create_tasks_for_stage()` returns `[]` (empty list), the stage auto-advances. No tasks created, no deadlock. Useful for conditional stages.
+
+---
+
+## Observability Patterns
+
+**Added**: v0.9.16.0-v0.10.0.2
+
+### Tier 1: Inline Logging
+
+`logger.info()` at operation boundaries in handlers. Progress log every ~10% for long-running blob copy loops.
+
+### Tier 2: Structured Checkpoints
+
+`JobEventType.CHECKPOINT` events via `_emit_checkpoint()` helper:
+- Non-fatal (failure to emit doesn't break processing)
+- Uses `params._job_id`, `params._task_id`, `params._stage`
+- 13 checkpoint types across zarr handlers (validate, copy_start, copy_progress, rechunk_start, etc.)
+
+### Platform Status Integration
+
+- `progress` field on status response shows most recent checkpoint during PROCESSING
+- `?detail=full` includes full `checkpoints` array
+- Checkpoints stored as job events in `app.job_events` table
+
+### psycopg3 Type Adapters (v0.9.16.0)
+
+Registered at connection level in `postgresql.py`:
+- `dict`/`list` → JSONB automatically (no manual `json.dumps()`)
+- `Enum` subclasses → `.value` automatically
+- Existing explicit serialization is harmless but redundant
 
 ---
 

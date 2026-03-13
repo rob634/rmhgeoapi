@@ -1,11 +1,11 @@
-# Microservices Architecture (Queue-Based Decoupling)
+# Multi-App Architecture (Queue-Based Decoupling)
 
-**Date**: 04 FEB 2026 (Updated with Platform = Gateway = Custom Mini-APIM)
-**Status**: Design Reference - Migration Ready
-**Purpose**: Document queue-based decoupling enabling Function App separation
+**Date**: 13 MAR 2026 (Updated to reflect production 3-app deployment)
+**Status**: Production Architecture -- Deployed
+**Purpose**: Document the deployed multi-app architecture with Service Bus queue decoupling
 
 > **NOTE**: This project uses the **Platform layer as a custom mini-APIM** (API Gateway).
-> We do NOT use Azure API Management. The Platform Function App handles:
+> We do NOT use Azure API Management. The Gateway Function App handles:
 > - HTTP endpoint exposure for external clients (DDH)
 > - Request validation and translation
 > - Queue submission to CoreMachine
@@ -15,274 +15,198 @@
 
 ---
 
-## Critical Design Principle: Platform = Gateway = Custom Mini-APIM
+## 1. Current Production Architecture
 
-**The Platform layer IS our API Gateway.** It's a custom mini-APIM that:
-- Exposes HTTP endpoints for external clients (DDH)
-- Validates and translates requests
-- Enqueues jobs to Service Bus
-- Returns immediately (async processing)
+The platform runs as 3 separate Azure apps communicating via Service Bus queues. All 3 deploy from the same codebase; `APP_MODE` controls which endpoints register.
 
-**The Service Bus queue is the contract boundary between Platform (Gateway) and CoreMachine.**
+| Role | App Name | APP_MODE | URL |
+|------|----------|----------|-----|
+| Orchestrator | `rmhazuregeoapi` | `standalone` | https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net |
+| Gateway | `rmhgeogateway` | `platform` | https://rmhgeogateway-gdc4hrafawfrcqak.eastus-01.azurewebsites.net |
+| Docker Worker | `rmhheavyapi` | `worker_docker` | https://rmhheavyapi-ebdffqhkcsevg7f3.eastus-01.azurewebsites.net |
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│          PLATFORM (GATEWAY) → QUEUE → COREMACHINE                        │
-│                                                                          │
-│   Platform/Gateway         SERVICE BUS           CoreMachine Layer       │
-│   (Custom Mini-APIM)       (Contract)           (Job Orchestration)      │
-│                                                                          │
-│   ┌─────────────┐      ┌─────────────┐      ┌─────────────────────┐     │
-│   │ Authenticate│      │             │      │ Consume job message │     │
-│   │ Validate    │ ───► │ geospatial  │ ───► │ Create tasks        │     │
-│   │ Translate   │      │ -jobs queue │      │ Execute handlers    │     │
-│   │ Enqueue     │      │             │      │ Detect completion   │     │
-│   │ Return 202  │      │             │      │                     │     │
-│   └─────────────┘      └─────────────┘      └─────────────────────┘     │
-│                                                                          │
-│   Gateway knows          Durable,            CoreMachine knows          │
-│   NOTHING about          decoupled,          NOTHING about              │
-│   job execution          scalable            DDH/Gateway                │
-└─────────────────────────────────────────────────────────────────────────┘
+### Shared Resources
 
-Deployments:
-  - rmhgeogateway (APP_MODE=platform) - Gateway/Platform endpoints only
-  - rmhazuregeoapi (APP_MODE=standalone) - Full monolith (dev/orchestration)
-```
+| Resource | Value |
+|----------|-------|
+| Database | `rmhpostgres.postgres.database.azure.com` (database: `geopgflex`) |
+| Resource Group | `rmhazure_rg` |
+| ACR | `rmhazureacr.azurecr.io` (image: `geospatial-worker`) |
+| App Insights | All 3 apps log to same instance (`d3af3d37-cfe3-411f-adef-bc540181cbca`) |
+| Service Bus | 3 queues: `geospatial-jobs`, `functionapp-tasks`, `container-tasks` |
 
-**Why This Matters for Migration**:
-- Platform and CoreMachine are ALREADY decoupled by the queue
-- Splitting to separate Function Apps = deployment change, NOT code change
-- Each can scale independently
-- Each can be deployed independently
-- Fault isolation is built-in
+### Deprecated Apps (never use)
+
+`rmhazurefn`, `rmhgeoapi`, `rmhgeoapifn`, `rmhgeoapibeta`
+
+### Deprecated Database
+
+`rmhpgflex.postgres.database.azure.com` (decommissioned)
 
 ---
 
-## Current vs Future State
+## 2. APP_MODE Routing
 
-### Current: Production-Ready Monolith
+The same codebase deploys to all 3 apps. `APP_MODE` (set via Azure App Settings) controls which endpoints `function_app.py` registers at startup.
 
-**Status**: Fully functional monolithic Function App with queue-based internal decoupling
+| APP_MODE | Registers | Ignores |
+|----------|-----------|---------|
+| `standalone` | All endpoints + Service Bus triggers | Nothing (full monolith for dev) |
+| `platform` | Platform/Gateway HTTP endpoints only | CoreMachine, Service Bus triggers |
+| `worker_docker` | Docker task handlers + health | Platform endpoints, HTTP triggers |
 
-```
-Azure Function App: rmhazuregeoapi (B3 Basic tier)
-├── OGC Features (ogc_features/ - 2,600+ lines, standalone)
-├── STAC API (pgstac/ + infrastructure/stac.py)
-├── Platform Layer (platform schema + triggers) ──┐
-│                                                 │ Queue boundary
-├── CoreMachine (jobs/tasks + app schema) ────────┘
-└── Service Bus Queues (geospatial-jobs, raster-tasks, vector-tasks)
-```
-
-**What We've Built**:
-1. **STAC API** (pgstac/) - STAC v1.0 metadata catalog for spatial data discovery
-2. **OGC Features API** (ogc_features/) - OGC API - Features Core 1.0 for vector feature access
-3. **Platform Layer** - B2B API that validates, translates, and enqueues (stateless)
-4. **CoreMachine** - Job orchestration that consumes from queue (queue-driven)
-
-**Browser Tested & Operational**:
-- 7 vector collections available via OGC Features
-- Direct PostGIS queries with GeoJSON serialization
-- STAC collections and items serving properly
+`standalone` mode is used for local development and for the Orchestrator in production (it needs both HTTP endpoints for admin/status and Service Bus triggers for job processing). The Gateway and Docker Worker each run a restricted subset.
 
 ---
 
-## Future: Microservices Architecture
+## 3. The Queue Contract
 
-### Vision
-
-Separate Function Apps communicating via Service Bus queues (NO APIM).
-
-**Key Insight**: Platform and CoreMachine communicate ONLY via Service Bus queues - they can be separate Function Apps with zero code changes. No API gateway needed.
+Platform and CoreMachine communicate ONLY via Service Bus queues. This is the fundamental decoupling pattern.
 
 ```
-Potential Future State (Separate Function Apps):
-
-Function App: rmhgeoapi-platform
-  URL: https://rmhgeoapi-platform-xxx.azurewebsites.net
-  Routes: /api/platform/*
-  Role: B2B API - validates, translates, enqueues
-
-Function App: rmhgeoapi-core
-  URL: https://rmhgeoapi-core-xxx.azurewebsites.net
-  Routes: /api/jobs/*, Service Bus triggers
-  Role: Job orchestration - consumes queue, runs jobs
-
-Function App: rmhgeoapi-data (optional)
-  URL: https://rmhgeoapi-data-xxx.azurewebsites.net
-  Routes: /api/features/*, /api/stac/*
-  Role: Data APIs - OGC Features, STAC
+Gateway (rmhgeogateway)
+  POST /api/platform/submit --> validates, translates, enqueues
+         |
+         v
+  SERVICE BUS (geospatial-jobs queue)  <-- THE CONTRACT BOUNDARY
+         |
+         v
+Orchestrator (rmhazuregeoapi)
+  Consumes job message --> creates tasks --> routes to queues
+         |
+         v
+  SERVICE BUS (functionapp-tasks OR container-tasks)
+         |
+         v
+Docker Worker (rmhheavyapi) -- heavy compute (GDAL, geopandas, xarray)
+  OR
+Orchestrator itself -- lightweight tasks (DB updates, STAC registration)
 ```
 
-### Architecture Diagram
+### Detailed Flow
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                    NO API GATEWAY NEEDED                             │
-│           Queues provide all necessary coordination                  │
-└─────────────────────────────────────────────────────────────────────┘
+Gateway (rmhgeogateway)                  Orchestrator (rmhazuregeoapi)
+========================                 ============================
 
-DDH Client ──► Platform Function App (B2B API)
-                        │
-                        │ Enqueue JobQueueMessage
-                        ▼
-              ┌─────────────────────────┐
-              │   SERVICE BUS QUEUE     │
-              │   "geospatial-jobs"     │
-              │                         │
-              │   THE CONTRACT          │
-              │   No direct calls       │
-              │   No shared memory      │
-              │   No API gateway        │
-              └─────────────────────────┘
-                        │
-                        │ Consume (Service Bus Trigger)
-                        ▼
-              CoreMachine Function App (Job Orchestration)
-                        │
-                        ▼
-              PostgreSQL (shared database, separate schemas)
+POST /api/platform/submit                Service Bus Trigger
+         |                                        |
+         v                                        v
+  Validate DDH request                   Consume job message
+         |                                        |
+         v                                        v
+  Translate to CoreMachine format        Load job definition
+         |                                        |
+         v                                        v
+  Generate request_id                    Create tasks for stage
+         |                                        |
+         v                                        v
+  Enqueue to Service Bus ===============> Execute handlers
+         |                                        |
+         v                                        v
+  Return {request_id, queued}            Update job/task status
+
+
+Gateway writes to: platform.platform_requests (tracking)
+Orchestrator writes to: app.jobs, app.tasks (orchestration)
+Both read from: PostgreSQL (shared instance, separate schemas)
 ```
 
-### Platform → Queue → CoreMachine (The Contract)
-
-```
-Platform Function App                     CoreMachine Function App
-━━━━━━━━━━━━━━━━━━━━━━                   ━━━━━━━━━━━━━━━━━━━━━━━━━
-
-POST /api/platform/submit                 Service Bus Trigger
-         │                                        │
-         ▼                                        ▼
-  Validate DDH request                    Consume job message
-         │                                        │
-         ▼                                        ▼
-  Translate to CoreMachine format         Load job definition
-         │                                        │
-         ▼                                        ▼
-  Generate request_id                     Create tasks for stage
-         │                                        │
-         ▼                                        ▼
-  Enqueue to Service Bus ────────────────► Execute handlers
-         │                                        │
-         ▼                                        ▼
-  Return {request_id, queued}             Update job/task status
-
-
-Platform writes to: app.api_requests (tracking)
-CoreMachine writes to: app.jobs, app.tasks (orchestration)
-Both read from: PostgreSQL (shared, but separate tables)
-```
+Key properties:
+- **Gateway knows NOTHING about job execution** -- it enqueues and returns 202
+- **CoreMachine knows NOTHING about DDH/Gateway** -- it consumes queue messages
+- **The queue is durable and decoupled** -- either side can restart independently
+- **Fault isolation is built-in** -- Gateway failure does not affect running jobs
 
 ---
 
-## Benefits of Queue-Based Decoupling (No API Gateway)
+## 4. Task Routing
 
-| Benefit | How Achieved |
-|---------|--------------|
-| **Independent Scaling** | Scale CoreMachine workers without touching Platform |
-| **Independent Deployment** | Deploy Platform fixes without affecting job processing |
-| **Fault Isolation** | Platform failure doesn't affect running jobs |
-| **Simple Architecture** | No API gateway to configure, manage, or pay for |
-| **Cost Effective** | Service Bus is cheap; APIM is expensive (~$700/mo) |
-| **Already Built** | Queue decoupling is in place - just deployment decision |
+The Orchestrator creates tasks and routes them to the appropriate queue based on task type.
 
-### Security Without APIM
+| Queue | Consumer | Task Types |
+|-------|----------|------------|
+| `geospatial-jobs` | Orchestrator | Job orchestration messages (new job submissions) |
+| `functionapp-tasks` | Orchestrator | Lightweight tasks (DB updates, STAC registration, inventory, cleanup) |
+| `container-tasks` | Docker Worker | Heavy compute (GDAL, geopandas, xarray, zarr, virtualizarr) |
 
-Each Function App handles its own authentication:
-- **Platform API**: Azure AD / Managed Identity validation in code
-- **Data APIs**: Azure AD token validation for tenant users
-- **Internal**: Service Bus shared access signatures
-
-```python
-# Example: Platform API auth in code (no APIM needed)
-def validate_request(request):
-    token = request.headers.get('Authorization')
-    if not validate_azure_ad_token(token, allowed_app_ids=['ddh-app-id']):
-        return HttpResponse(status_code=401)
-```
+The routing decision is made by the job definition's `stages` configuration. Each stage specifies a `task_type` which maps to a handler, and the handler's registration determines which queue receives the task.
 
 ---
 
-## Key Design Decisions
-
-### 1. No API Gateway (APIM)
-
-**Decision**: Do NOT use Azure API Management.
+## 5. Why No API Gateway (APIM)
 
 | Reason | Explanation |
 |--------|-------------|
-| **Cost** | APIM Standard is ~$700/month - not justified for this use case |
+| **Cost** | APIM Standard is ~$700/month -- not justified for this use case |
 | **Complexity** | Adds another component to manage, configure, debug |
 | **Not Needed** | Service Bus queues provide all necessary decoupling |
-| **Auth in Code** | Function Apps can validate Azure AD tokens directly |
+| **Auth in Code** | Function Apps validate Azure AD tokens directly |
 
-### 2. Shared Code Strategy
+### Security Without APIM
 
-| Option | Description | Recommendation |
-|--------|-------------|----------------|
-| **Option A** | Duplicate common modules (config, logger, infrastructure) in each Function App | Start here (simplest) |
-| **Option B** | Create shared Python package deployed to private PyPI or Azure Artifacts | When patterns stabilize |
-| **Option C** | Git submodules for shared code | Not recommended |
-
-### 3. Database Connection Management
-- All Function Apps share same PostgreSQL instance
-- Use psycopg3 connection pooling per Function App
-- Monitor connection limits carefully
-- Memory-first pattern for bulk operations (see ARCHITECTURE_REFERENCE.md)
-
-### 4. When to Split
-
-**Migration Readiness**: HIGH - Queue decoupling is already in place
-
-| Trigger | Action |
-|---------|--------|
-| **Now** | Continue with monolith, focus on features and data ingestion |
-| **Performance** | Split CoreMachine to dedicated Function App (independent scaling) |
-| **Deployment Conflicts** | Split Platform to enable independent release cycles |
-| **Team Boundaries** | Split when different teams own different APIs |
-
-**Decision Point**: Current monolith works perfectly, but the queue-based architecture means splitting is a deployment decision, not a code rewrite.
-
-**What Splitting Requires**:
-1. Create new Function App(s)
-2. Copy shared code (config, infrastructure, models)
-3. Move relevant triggers/handlers
-4. Configure APIM routing
-5. Done - queue contract unchanged
+Each app handles its own authentication:
+- **Gateway**: Azure AD / Managed Identity validation for external clients (DDH)
+- **Orchestrator**: Admin endpoints protected by Azure AD
+- **Docker Worker**: Internal only -- consumes from Service Bus (SAS auth)
+- **Inter-app**: Service Bus shared access signatures
 
 ---
 
-## Why This Architecture Works
+## 6. Deployment
 
-1. **Queue-Based Decoupling** - Platform and CoreMachine communicate only via Service Bus
-2. **Standards Compliance** - All APIs follow open standards (STAC, OGC, REST)
-3. **Standalone Modules** - OGC Features already designed for separation (zero main app dependencies)
-4. **Schema Separation** - PostgreSQL schemas (geo, pgstac, platform, app) enable clean boundaries
-5. **No Gateway Lock-in** - Direct Function App URLs, no APIM dependency
-6. **Proven Pattern** - Major geospatial platforms use queue-based coordination:
-   - Planetary Computer (Microsoft)
-   - AWS Open Data
-   - Element84 Earth Search
+Use `deploy.sh` for all deployments -- it handles versioning, health checks, and verification.
+
+```bash
+./deploy.sh orchestrator   # Deploy Orchestrator (rmhazuregeoapi)
+./deploy.sh gateway        # Deploy Gateway (rmhgeogateway)
+./deploy.sh docker         # Deploy Docker Worker (rmhheavyapi)
+./deploy.sh all            # Deploy all 3 apps
+```
+
+### What the Script Does
+
+1. Reads version from `config/__init__.py`
+2. Deploys to the target app(s)
+3. Waits for restart (45s for Function Apps, 60s for Docker)
+4. Runs health check
+5. Verifies deployed version matches expected
+
+### Manual Commands (Reference)
+
+```bash
+# Function Apps (Orchestrator or Gateway)
+func azure functionapp publish rmhazuregeoapi --python --build remote
+func azure functionapp publish rmhgeogateway --python --build remote
+
+# Docker Worker
+az acr build --registry rmhazureacr --image geospatial-worker:VERSION --file Dockerfile .
+az webapp config container set --name rmhheavyapi --resource-group rmhazure_rg \
+  --docker-custom-image-name "rmhazureacr.azurecr.io/geospatial-worker:VERSION"
+az webapp stop --name rmhheavyapi --resource-group rmhazure_rg && \
+az webapp start --name rmhheavyapi --resource-group rmhazure_rg
+```
 
 ---
 
-## Current Status
+## 7. Key Design Decisions
 
-**Production-Ready Monolith with Queue Decoupling**:
-- All APIs operational and tested
-- Standards-compliant implementations
-- Platform → Queue → CoreMachine already implemented
-- Ready for production data ingestion
-- Can scale vertically before needing to split
-- Split to microservices = deployment change, NOT code change
+1. **No APIM** -- Cost (~$700/mo) and complexity not justified. Service Bus provides all decoupling needed.
+2. **Shared codebase, APP_MODE routing** -- Single repo, 3 deployments. Eliminates code duplication and drift.
+3. **Shared database, separate schemas** -- All apps connect to `geopgflex` on `rmhpostgres`. Schemas: `app`, `pgstac`, `geo`, `h3`, `platform`.
+4. **All apps log to same App Insights** -- Cross-app correlation via `service.namespace = "rmhgeo-platform"`. Instance: `d3af3d37-cfe3-411f-adef-bc540181cbca`.
+5. **Docker Worker uses ACR images** -- `rmhazureacr.azurecr.io/geospatial-worker:VERSION`. Heavy dependencies (GDAL, geopandas, xarray) isolated in container.
+6. **psycopg3 connection pooling per app** -- Each app manages its own connection pool. Monitor connection limits across all 3 apps.
 
 ---
 
-## Related Documents
+## 8. Related Documents
 
 | Document | Purpose |
 |----------|---------|
-| [ARCHITECTURE_REFERENCE.md](./ARCHITECTURE_REFERENCE.md) | Platform Layer Architecture details |
-| [ARCHITECTURE_DIAGRAMS.md](./ARCHITECTURE_DIAGRAMS.md) | Visual diagrams including queue contract |
-| [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) | Current deployment procedures |
+| [ARCHITECTURE_REFERENCE.md](./ARCHITECTURE_REFERENCE.md) | Deep technical specs, error handling patterns |
+| [ARCHITECTURE_DIAGRAMS.md](./ARCHITECTURE_DIAGRAMS.md) | Visual C4/Mermaid diagrams |
+| [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) | Deployment procedures and troubleshooting |
+| [DOCKER_INTEGRATION.md](./DOCKER_INTEGRATION.md) | Docker worker details and parallelism model |
+| [SERVICE_BUS_HARMONIZATION.md](./SERVICE_BUS_HARMONIZATION.md) | Queue configuration and message contracts |
+| [PLATFORM_STANDARDIZATION.md](../PLATFORM_STANDARDIZATION.md) | Cross-app seam analysis |

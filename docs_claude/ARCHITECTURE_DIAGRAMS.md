@@ -1,6 +1,6 @@
 # Architecture Diagrams
 
-**Last Updated**: 02 FEB 2026
+**Last Updated**: 13 MAR 2026
 **Format**: Mermaid (renders in GitHub/VS Code)
 **Model**: C4 Architecture (Context → Container → Component → Code)
 
@@ -16,6 +16,9 @@
 6. [Job Execution Sequences](#6-job-execution-sequences)
 7. [Data Flow](#7-data-flow)
 8. [Registry Architecture](#8-registry-architecture)
+9. [Asset/Release Domain Model](#9-assetrelease-domain-model)
+10. [Pipeline Families](#10-pipeline-families)
+11. [Multi-App Deployment](#11-multi-app-deployment)
 
 ---
 
@@ -846,6 +849,209 @@ flowchart TB
 
 ---
 
+## 9. Asset/Release Domain Model
+
+### 9.1 Entity Relationship
+
+```mermaid
+erDiagram
+    assets ||--o{ asset_releases : "has many"
+    asset_releases ||--o| app_jobs : "created by"
+
+    assets {
+        varchar asset_id PK "SHA256(platform_id|dataset_id|resource_id)"
+        varchar platform_id
+        varchar dataset_id
+        varchar resource_id
+        enum data_type "raster, vector, zarr"
+        timestamp created_at
+    }
+
+    asset_releases {
+        varchar release_id PK "SHA256(asset_id|submission_key)"
+        varchar asset_id FK
+        int version_ordinal "1, 2, 3..."
+        varchar version_id "assigned at approval"
+        enum approval_state "draft, approved, revoked"
+        jsonb stac_item_json "cached, written to pgSTAC at approval"
+        jsonb result_data
+        timestamp created_at
+    }
+```
+
+### 9.2 Release Lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> DRAFT: Submit (version_ordinal reserved)
+
+    DRAFT --> APPROVED: Approve (version_id assigned, STAC materialized)
+    DRAFT --> DRAFT: Overwrite (revision incremented, re-processed)
+
+    APPROVED --> REVOKED: Revoke (STAC item deleted)
+
+    REVOKED --> [*]
+    APPROVED --> [*]
+
+    note right of DRAFT
+        Ordinal naming: table_ord1, table_ord2
+        Multiple drafts can coexist under same Asset
+    end note
+
+    note right of APPROVED
+        STAC item written to pgSTAC
+        is_latest = MAX(version_ordinal)
+        computed, never stored
+    end note
+```
+
+### 9.3 STAC Materialization Timing
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant ETL as ETL Handler
+    participant Release as AssetRelease
+    participant pgSTAC as pgSTAC
+
+    ETL->>ETL: Process data (COG, PostGIS, Zarr)
+    ETL->>Release: Cache STAC dict in stac_item_json
+    Note over Release: STAC dict cached but NOT published
+
+    Note over Release,pgSTAC: Time passes... approval happens later
+
+    participant Approver as Approval Endpoint
+    Approver->>Release: Approve (assign version_id)
+    Approver->>pgSTAC: Write stac_item_json to pgSTAC
+    Note over pgSTAC: Item now visible in STAC API
+
+    Note over Approver: On revoke:
+    Approver->>pgSTAC: DELETE item from pgSTAC
+    Note over pgSTAC: Item invisible again
+```
+
+---
+
+## 10. Pipeline Families
+
+### 10.1 Vector Pipeline (with Split Views)
+
+```mermaid
+flowchart TD
+    subgraph Submit["Job Submission"]
+        Params["Parameters:<br/>source_file, table_name<br/>optional: split_column"]
+    end
+
+    subgraph Stage1["Stage 1: Validate"]
+        V1["Pre-flight checks<br/>(format, schema, name)"]
+    end
+
+    subgraph Stage2["Stage 2: Convert + Upload"]
+        C1["Read file (GeoJSON/SHP/GPKG)"]
+        C2["Transform to GeoDataFrame"]
+        C3["Upload to PostGIS<br/>(table_name_ord1)"]
+    end
+
+    subgraph Stage3["Stage 3: Complete"]
+        A1["ANALYZE table"]
+        A2{"split_column<br/>provided?"}
+        A3["Create N views<br/>(max 20 distinct values)"]
+        A4["Register in<br/>geo.table_catalog"]
+        A5["Refresh TiPG"]
+    end
+
+    Submit --> Stage1 --> Stage2
+    C1 --> C2 --> C3
+    Stage2 --> Stage3
+    A1 --> A2
+    A2 -->|Yes| A3 --> A4
+    A2 -->|No| A4
+    A4 --> A5
+```
+
+### 10.2 Zarr Pipeline Family
+
+```mermaid
+flowchart LR
+    subgraph Ingest["ingest_zarr"]
+        IZ1["Validate"] --> IZ2["Copy or Rechunk"] --> IZ3["Register"]
+    end
+
+    subgraph Convert["netcdf_to_zarr"]
+        NC1["Validate"] --> NC2["Convert<br/>(256x256, time=1)"] --> NC3["Register"]
+    end
+
+    subgraph Virtual["virtualzarr"]
+        VZ1["Scan"] --> VZ2["Copy"] --> VZ3["Validate"] --> VZ4["Combine"] --> VZ5["Register"]
+    end
+
+    subgraph Unpublish["unpublish_zarr"]
+        UZ1["Inventory"] --> UZ2["Delete Blobs"] --> UZ3["Cleanup"]
+    end
+```
+
+---
+
+## 11. Multi-App Deployment
+
+### 11.1 Production Topology
+
+```mermaid
+flowchart TB
+    subgraph Clients["External Clients"]
+        DDH["DDH Platform"]
+        Dashboard["Web Dashboard"]
+    end
+
+    subgraph Gateway["rmhgeogateway<br/>(APP_MODE=platform)"]
+        GW_HTTP["Platform HTTP Endpoints"]
+    end
+
+    subgraph Orchestrator["rmhazuregeoapi<br/>(APP_MODE=standalone)"]
+        O_HTTP["Job/Admin/STAC/OGC HTTP"]
+        O_CM["CoreMachine"]
+        O_SB["Service Bus Consumer<br/>(functionapp-tasks)"]
+    end
+
+    subgraph DockerWorker["rmhheavyapi<br/>(APP_MODE=worker_docker)"]
+        D_SB["Service Bus Consumer<br/>(container-tasks)"]
+        D_GDAL["GDAL / geopandas / xarray"]
+    end
+
+    subgraph Shared["Shared Infrastructure"]
+        SB["Service Bus<br/>3 queues"]
+        PG["PostgreSQL<br/>(geopgflex)"]
+        Blob["Blob Storage<br/>(Bronze + Silver)"]
+        AI["App Insights"]
+        TT["TiTiler"]
+    end
+
+    DDH -->|"POST /api/platform/*"| GW_HTTP
+    Dashboard -->|"GET /api/*"| O_HTTP
+
+    GW_HTTP -->|"geospatial-jobs"| SB
+    O_CM -->|"functionapp-tasks"| SB
+    O_CM -->|"container-tasks"| SB
+
+    SB --> O_SB
+    SB --> D_SB
+
+    O_SB --> PG
+    D_SB --> Blob
+    D_GDAL --> Blob
+
+    O_CM --> PG
+    O_HTTP --> TT
+
+    Gateway --> AI
+    Orchestrator --> AI
+    DockerWorker --> AI
+
+    style SB fill:#ff9,stroke:#333,stroke-width:3px
+```
+
+---
+
 ## Quick Reference
 
 ### Diagram Types Used
@@ -885,4 +1091,5 @@ mmdc -i ARCHITECTURE_DIAGRAMS.md -o output.pdf
 |----------|---------|
 | [ARCHITECTURE_REFERENCE.md](./ARCHITECTURE_REFERENCE.md) | Detailed technical specs |
 | [JOB_CREATION_QUICKSTART.md](./JOB_CREATION_QUICKSTART.md) | Creating new jobs |
+| [MICROSERVICES_ARCHITECTURE.md](./MICROSERVICES_ARCHITECTURE.md) | Multi-App Architecture |
 | [EPICS.md](/EPICS.md) | SAFe planning structure |

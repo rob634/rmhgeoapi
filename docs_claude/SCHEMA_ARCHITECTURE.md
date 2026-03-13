@@ -1,6 +1,6 @@
 # PostgreSQL Schema Architecture
 
-**Date**: 24 NOV 2025
+**Date**: 13 MAR 2026 (Updated with v0.9-v0.10 schema changes)
 
 ## Overview
 
@@ -26,7 +26,7 @@ Each of the 5 database schemas uses a different management approach appropriate 
 
 ### 1. `app` Schema - CoreMachine (Pydantic-Generated)
 
-**Tables**: `jobs`, `tasks`, `api_requests`, `janitor_runs`
+**Tables**: `jobs`, `tasks`, `assets`, `asset_releases`, `job_events`, `api_requests`, `janitor_runs`
 
 **Management**: Pydantic models → `PydanticToSQL` generator → PostgreSQL DDL
 
@@ -34,7 +34,7 @@ Each of the 5 database schemas uses a different management approach appropriate 
 1. Pydantic models define table structure (`core/models/job.py`, `core/models/task.py`)
 2. `PydanticToSQL` class generates DDL from model fields
 3. DDL includes: CREATE TABLE, ENUM types, indexes, functions, triggers
-4. Deployment via `/api/dbadmin/maintenance/redeploy?confirm=yes`
+4. Deployment via `/api/dbadmin/maintenance?action=ensure&confirm=yes`
 
 **Key Files**:
 - `core/schema/sql_generator.py` - DDL generation (1,127 lines)
@@ -255,6 +255,34 @@ Trigger created:
 
 ---
 
+### Ordinal Naming and Split Views (v0.10+)
+
+**Added**: v0.10.0.1-v0.10.0.2
+
+#### Ordinal Naming
+
+Vector tables use ordinal suffixes instead of "draft":
+- First submission: `table_name_ord1`
+- Second submission: `table_name_ord2`
+- Ordinal is reserved at creation time and never changes
+
+#### Split Views
+
+When `split_column` is provided on `vector_docker_etl`:
+1. One base table created (e.g., `geo.regions_ord1`)
+2. `SELECT DISTINCT split_column` discovers categorical values
+3. One PostgreSQL VIEW per value (e.g., `geo.regions_ord1_northeast`, `geo.regions_ord1_northwest`)
+4. Each view registered in `geo.table_catalog` with title, bbox, feature_count
+5. TiPG auto-discovers views as separate OGC Feature collections
+
+Constraints:
+- MAX_SPLIT_CARDINALITY = 20 distinct values
+- Column types: text, integer, boolean only (not float, geometry, json)
+- 63-character PostgreSQL identifier limit
+- Implementation: `services/vector/view_splitter.py`
+
+---
+
 ### 4. `h3` Schema - H3 Grids (Static SQL)
 
 **Tables**: `grids`, `reference_filters`, `grid_metadata`
@@ -284,11 +312,42 @@ Trigger created:
 
 ### 5. `platform` Schema - API Tracking (Pydantic-Generated)
 
-**Tables**: Part of `app` schema (`api_requests`, `janitor_runs`)
+**Tables**: `platform_requests`, `b2c_routes`, `b2b_routes`
 
-**Management**: Same as `app` schema - Pydantic → `PydanticToSQL`
+**Management**: Pydantic models --> `PydanticToSQL` DDL (same approach as `app` schema)
 
-**Note**: Platform tables are logically separate but physically in `app` schema for simplicity.
+**Note**: The `platform` schema is a separate PostgreSQL schema (not part of `app`). It tracks platform request lifecycle and routing:
+
+| Table | Purpose |
+|-------|---------|
+| `platform_requests` | Tracks each platform submission through its lifecycle |
+| `b2c_routes` | Business-to-consumer route registry for published assets |
+| `b2b_routes` | Business-to-business route registry for published assets |
+
+**Key Files**:
+- `core/models/platform.py` - Pydantic models for platform tables
+- `core/schema/sql_generator.py` - DDL generation (shared with `app`)
+
+---
+
+### Asset/Release Tables (v0.9+)
+
+**Added**: v0.8.22.0-v0.8.24.0
+
+The `app` schema now includes asset lifecycle tracking:
+
+| Table | Purpose |
+|-------|---------|
+| `assets` | Stable identity (one per unique platform_id+dataset_id+resource_id) |
+| `asset_releases` | Versioned lifecycle (one per submission, owns approval/clearance state) |
+| `job_events` | Structured checkpoint events emitted during processing |
+
+Key columns on `asset_releases`:
+- `version_ordinal` (int): Reserved at creation time (1, 2, 3...)
+- `version_id` (varchar): Assigned at approval, not submission
+- `approval_state` (enum): draft, approved, revoked
+- `stac_item_json` (jsonb): Cached STAC dict, written to pgSTAC at approval
+- `is_latest`: REMOVED -- computed via `MAX(version_ordinal)` at query time
 
 ---
 
@@ -298,9 +357,9 @@ Trigger created:
 
 ### Core Principle
 
-The `app` and `pgstac` schemas meet **infrastructure-as-code** standards:
+The `app`, `platform`, and `pgstac` schemas meet **infrastructure-as-code** standards:
 
-> **IaC Standard**: Both schemas can be completely wiped and recreated perfectly from code, with no manual intervention required.
+> **IaC Standard**: All three schemas can be completely wiped and recreated perfectly from code, with no manual intervention required.
 
 ### Schema Classification
 
@@ -309,7 +368,8 @@ The `app` and `pgstac` schemas meet **infrastructure-as-code** standards:
 | `app` | ✅ **100% IaC** | Pydantic → `PydanticToSQL` DDL | **YES** |
 | `pgstac` | ✅ **100% IaC** | `pypgstac migrate` CLI | **YES** |
 | `geo` | ❌ Business Data | Dynamic at runtime | **NEVER** |
-| `h3` | ⚠️ Bootstrap | Static SQL files | Manual only |
+| `platform` | **100% IaC** | Pydantic --> `PydanticToSQL` DDL | **YES** |
+| `h3` | Bootstrap | Static SQL files | Manual only |
 
 ### Why app + pgstac Must Be Wiped Together
 
@@ -323,7 +383,7 @@ Every job ID corresponds to a STAC item. Wiping one without the other creates or
 - Wiping `app` only → STAC items with no job context
 - Wiping `pgstac` only → Jobs referencing non-existent STAC items
 
-**Solution**: The `full-rebuild` endpoint enforces atomic rebuild of both schemas.
+**Solution**: The `action=rebuild` endpoint enforces atomic rebuild of both schemas.
 
 ### What NEVER Gets Touched
 
@@ -340,7 +400,7 @@ Every job ID corresponds to a STAC item. Wiping one without the other creates or
 Atomically wipe and redeploy BOTH `app` and `pgstac` schemas together:
 
 ```bash
-curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/maintenance/full-rebuild?confirm=yes"
+curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/maintenance?action=rebuild&confirm=yes"
 ```
 
 **Steps Performed**:
@@ -362,12 +422,12 @@ not application logic. Users specify `collection_id` when creating STAC items.
 
 ### Redeploy App Schema Only
 ```bash
-curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/maintenance/redeploy?confirm=yes"
+curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/maintenance?action=ensure&confirm=yes"
 ```
 
 ### Redeploy pgstac Schema Only
 ```bash
-curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/maintenance/pgstac/redeploy?confirm=yes"
+curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/maintenance?action=rebuild&target=pgstac&confirm=yes"
 ```
 
 ### Clear STAC Data (dev/test only)
@@ -564,10 +624,10 @@ If migrating to Container Apps or always-on services, implement one of:
 
 ### "column hash has no default"
 **Cause**: Missing `search_tohash` or `search_hash` functions
-**Fix**: Run `/api/dbadmin/maintenance/pgstac/redeploy?confirm=yes`
+**Fix**: Run `/api/dbadmin/maintenance?action=rebuild&target=pgstac&confirm=yes`
 
 ### Schema out of sync with Pydantic models
-**Fix**: Run `/api/dbadmin/maintenance/redeploy?confirm=yes`
+**Fix**: Run `/api/dbadmin/maintenance?action=ensure&confirm=yes`
 
 ---
 

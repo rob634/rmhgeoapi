@@ -90,6 +90,16 @@ class DatabaseError(BusinessLogicError):
     pass
 
 
+class CircuitBreakerOpenError(DatabaseError):
+    """
+    Circuit breaker is open — database connections are temporarily blocked.
+
+    Raised when the circuit breaker has tripped due to consecutive
+    connection failures. Callers should back off and retry later.
+    """
+    pass
+
+
 class TaskExecutionError(BusinessLogicError):
     """
     Task failed during execution.

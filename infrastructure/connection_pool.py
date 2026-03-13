@@ -272,7 +272,7 @@ class ConnectionPoolManager:
         conn_string = cls._build_connection_string()
 
         logger.info(
-            f"Creating connection pool: min={config['min_size']}, max={config['max_size']}"
+            f"Creating connection pool: min={config['min_size']}, max={config['max_size']}, health_check=enabled"
         )
 
         pool = ConnectionPool(
@@ -282,7 +282,8 @@ class ConnectionPoolManager:
             timeout=config['timeout'],
             max_lifetime=config['max_lifetime'],
             configure=cls._configure_connection,
-            open=True,  # Open pool immediately
+            check=ConnectionPool.check_connection,  # Ping before checkout — discard dead connections
+            open=True,
         )
 
         logger.info("Connection pool created successfully")

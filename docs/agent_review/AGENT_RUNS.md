@@ -1731,3 +1731,61 @@ Two subsystems are designated for **regular re-review** using the COMPETE pipeli
 **Recommended split**: A (Design vs Runtime) — Architecture/contracts vs correctness/reliability
 
 **Cadence**: After major CoreMachine changes, or bi-monthly.
+
+---
+
+## Run 41: Post-Deploy Smoke Test (SIEGE Run 16)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 13 MAR 2026 |
+| **Pipeline** | SIEGE (quick profile) |
+| **Scope** | All 25 sequences — full lifecycle smoke test after v0.10.0.3 deploy + DB rebuild |
+| **Target** | Orchestrator v0.10.0.3, Docker Worker, TiTiler |
+| **Agents** | Sentinel -> Cartographer -> Lancer -> Auditor -> Scribe (all sequential, single agent) |
+| **Verdict** | **NEEDS INVESTIGATION** — 10 PASS, 7 PARTIAL, 3 FAIL, 5 NOT TESTED |
+| **Critical Finding** | PostgreSQL OOM + SSL instability. DB `FATAL: out of memory` caused cascading AssetCreationError for all new datasets. |
+| **New Findings** | 7 (1 CRITICAL, 2 HIGH, 2 MEDIUM, 2 LOW) |
+| **Output** | `agent_docs/SIEGE_RUN_16.md` |
+
+**Sequence Results**:
+
+| Seq | Name | Result |
+|-----|------|--------|
+| 1 | Raster Lifecycle | PASS |
+| 2 | Vector Lifecycle | PARTIAL (TiPG 404, OGC OK) |
+| 3 | Multi-Version | PASS |
+| 4 | Unpublish | PASS |
+| 5 | NetCDF/VirtualiZarr | PASS |
+| 6 | Native Zarr | FAIL (invalid test fixture) |
+| 7 | Rejection | PASS |
+| 8 | Reject->Resubmit->Approve | PASS |
+| 9 | Revoke | PARTIAL (InternalError but succeeded) |
+| 10 | Overwrite Draft | PARTIAL (DB instability) |
+| 11 | Invalid State Transitions | PARTIAL (2/9 tested, both PASS) |
+| 12 | Missing Required Fields | PASS (13/13) |
+| 13 | Version Conflict | PARTIAL (submitted but not fully tested) |
+| 14 | Revoke->OW->Reapprove | PARTIAL (approved but STAC failed) |
+| 15 | Overwrite Approved | NOT TESTED |
+| 16 | Triple Revision | NOT TESTED |
+| 17 | Race Guard | PASS |
+| 18 | Multi-Revoke Target | NOT TESTED |
+| 19 | Zarr Rechunk | PARTIAL (orphan request) |
+| 20 | Vector Split Views | PASS |
+| 21 | Split Views Validation | PARTIAL (1/3 tested, PASS) |
+| 22 | Approved OW Guard | PARTIAL (still processing) |
+| 23 | Blob Preservation | NOT TESTED |
+| 24 | Resubmit Guards | NOT TESTED |
+| 25 | DDH-Only Unpublish | PARTIAL (still processing) |
+
+**Key Findings**:
+
+| ID | Severity | Description |
+|----|----------|-------------|
+| SG16-1 | CRITICAL | PostgreSQL OOM caused cascading AssetCreationError |
+| SG16-2 | HIGH | Approval endpoints return InternalError but DB transaction commits |
+| SG16-3 | HIGH | Persistent AssetCreationError even after DB recovers |
+| SG16-4 | MEDIUM | `cmip6-tasmax-quick.zarr` test fixture invalid |
+| SG16-5 | MEDIUM | TiPG collection cache not auto-refreshed |
+| SG16-6 | LOW | siege_config.json `data_type_override` field misleading |
+| SG16-7 | LOW | StacRollbackFailed leaves release in inconsistent state |

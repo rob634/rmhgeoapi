@@ -656,6 +656,33 @@ class PostgreSQLRepository(BaseRepository):
 
         return False
 
+    @staticmethod
+    def _is_transient_connection_error(error: Exception) -> bool:
+        """
+        Return True when error looks like a transient connection issue
+        that may succeed on retry (network blip, server restart, etc.).
+
+        13 MAR 2026 — P3 defensive DB hardening.
+        """
+        transient_markers = [
+            "connection is closed",
+            "the connection is lost",
+            "could not connect to server",
+            "connection refused",
+            "connection timed out",
+            "ssl syscall error",
+            "broken pipe",
+            "connection reset",
+            "server closed the connection unexpectedly",
+        ]
+        for candidate in (error, getattr(error, '__cause__', None), getattr(error, '__context__', None)):
+            if candidate is None:
+                continue
+            msg = str(candidate).lower()
+            if any(marker in msg for marker in transient_markers):
+                return True
+        return False
+
     def _is_managed_identity_effective(self) -> bool:
         """
         Return True when effective auth path is managed identity.
@@ -747,17 +774,33 @@ class PostgreSQLRepository(BaseRepository):
         - On exception, transaction is rolled back automatically
         - For read-only operations, commit is still recommended
         """
+        # Circuit breaker — fail fast if DB is known to be down (13 MAR 2026)
+        from infrastructure.circuit_breaker import CircuitBreaker
+        breaker = CircuitBreaker.get_instance()
+        breaker.check()  # Raises CircuitBreakerOpenError if OPEN
+
         # Check if connection pooling should be used (Docker mode)
         from infrastructure.connection_pool import ConnectionPoolManager
 
-        if ConnectionPoolManager.is_pool_mode():
-            # Docker mode: Use connection pool
-            with self._get_pooled_connection() as conn:
-                yield conn
-        else:
-            # Function App mode: Single-use connection (original behavior)
-            with self._get_single_use_connection() as conn:
-                yield conn
+        connected = False
+        try:
+            if ConnectionPoolManager.is_pool_mode():
+                # Docker mode: Use connection pool
+                with self._get_pooled_connection() as conn:
+                    connected = True
+                    breaker.record_success()
+                    yield conn
+            else:
+                # Function App mode: Single-use connection (original behavior)
+                with self._get_single_use_connection() as conn:
+                    connected = True
+                    breaker.record_success()
+                    yield conn
+        except Exception:
+            # Only count connection failures, not caller query errors
+            if not connected:
+                breaker.record_failure()
+            raise
 
     @contextmanager
     def _get_pooled_connection(self):
@@ -771,7 +814,7 @@ class PostgreSQLRepository(BaseRepository):
 
         logger.debug("🔗 Getting connection from pool...")
         use_managed_identity = self._is_managed_identity_effective()
-        max_attempts = 2 if use_managed_identity else 1
+        max_attempts = 2  # Always allow 1 retry — auth refresh OR dead-pool recovery
 
         for attempt in range(1, max_attempts + 1):
             try:
@@ -784,19 +827,43 @@ class PostgreSQLRepository(BaseRepository):
                         logger.info(f"[CONN] Released pooled connection pid={pid}")
                     return
             except Exception as e:
+                error_str = str(e).lower()
                 logger.error(f"❌ Pool connection error: {e}")
 
+                # Dead-pool indicators — SSL broken, connection lost, etc.
+                dead_pool_markers = [
+                    "ssl syscall error",
+                    "connection is closed",
+                    "the connection is lost",
+                    "broken pipe",
+                    "connection reset",
+                    "server closed the connection unexpectedly",
+                ]
+                is_dead_pool = any(marker in error_str for marker in dead_pool_markers)
+
                 can_retry = (
-                    use_managed_identity
-                    and attempt < max_attempts
-                    and self._is_managed_identity_auth_error(e)
+                    attempt < max_attempts
+                    and (
+                        (use_managed_identity and self._is_managed_identity_auth_error(e))
+                        or is_dead_pool
+                    )
                 )
 
                 if not can_retry:
                     raise
 
-                logger.warning("🔄 Pooled managed identity auth failed; refreshing token, recreating pool, retrying once")
-                self._refresh_pooled_managed_identity_credentials()
+                if is_dead_pool:
+                    logger.warning(
+                        f"🔄 Dead pool detected ({type(e).__name__}); "
+                        f"recreating connection pool and retrying"
+                    )
+                    ConnectionPoolManager.recreate_pool()
+                else:
+                    logger.warning(
+                        "🔄 Pooled managed identity auth failed; "
+                        "refreshing token, recreating pool, retrying once"
+                    )
+                    self._refresh_pooled_managed_identity_credentials()
 
     @contextmanager
     def _get_single_use_connection(self):
@@ -808,7 +875,7 @@ class PostgreSQLRepository(BaseRepository):
         """
         conn = None
         use_managed_identity = self._is_managed_identity_effective()
-        max_attempts = 2 if use_managed_identity else 1
+        max_attempts = 2  # Always allow 1 retry — auth refresh OR transient recovery
 
         try:
             for attempt in range(1, max_attempts + 1):
@@ -855,17 +922,21 @@ class PostgreSQLRepository(BaseRepository):
                         conn.close()
                         conn = None
 
-                    can_retry = (
-                        use_managed_identity
-                        and attempt < max_attempts
-                        and self._is_managed_identity_auth_error(e)
-                    )
+                    is_auth_error = use_managed_identity and self._is_managed_identity_auth_error(e)
+                    is_transient = self._is_transient_connection_error(e)
+
+                    can_retry = attempt < max_attempts and (is_auth_error or is_transient)
 
                     if not can_retry:
                         raise
 
-                    logger.warning("🔄 Managed identity auth failed; refreshing token and retrying connection")
-                    self._refresh_managed_identity_conn_string()
+                    if is_auth_error:
+                        logger.warning("🔄 Managed identity auth failed; refreshing token and retrying connection")
+                        self._refresh_managed_identity_conn_string()
+                    else:
+                        logger.warning(f"🔄 Transient connection error ({type(e).__name__}); retrying in 2s")
+                        import time
+                        time.sleep(2)
 
         except psycopg.Error as e:
             if conn:

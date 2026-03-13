@@ -98,6 +98,7 @@ if TYPE_CHECKING:
     # Route tables (02 MAR 2026 - Service Layer Routing)
     from .route_repository import RouteRepository as _RouteRepository
     from .connection_pool import ConnectionPoolManager as _ConnectionPoolManager
+    from .circuit_breaker import CircuitBreaker as _CircuitBreaker
     from .schema_analyzer import (
         SchemaAnalyzer as _SchemaAnalyzer,
         SchemaReport as _SchemaReport,
@@ -289,6 +290,11 @@ def __getattr__(name: str):
         from .route_repository import RouteRepository
         return RouteRepository
 
+    # Circuit Breaker (13 MAR 2026 - Defensive DB Hardening)
+    elif name == "CircuitBreaker":
+        from .circuit_breaker import CircuitBreaker
+        return CircuitBreaker
+
     else:
         raise AttributeError(f"module 'infrastructure' has no attribute '{name}'")
 
@@ -336,6 +342,8 @@ __all__ = [
     "CheckpointManager",
     "CheckpointValidationError",
     "ConnectionPoolManager",
+    # Circuit Breaker (13 MAR 2026 - Defensive DB Hardening)
+    "CircuitBreaker",
     # Schema Analyzer (21 JAN 2026 - Drift Detection)
     "SchemaAnalyzer",
     "SchemaReport",

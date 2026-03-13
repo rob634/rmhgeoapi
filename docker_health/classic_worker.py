@@ -192,7 +192,12 @@ class ClassicWorkerSubsystem(WorkerSubsystem):
             from infrastructure.connection_pool import ConnectionPoolManager
 
             pool_stats = ConnectionPoolManager.get_pool_stats()
-            pool_has_error = "error" in pool_stats
+
+            # Include circuit breaker state (13 MAR 2026)
+            from infrastructure.circuit_breaker import CircuitBreaker
+            cb_stats = CircuitBreaker.get_instance().get_stats()
+            pool_stats['circuit_breaker'] = cb_stats
+            pool_has_error = "error" in pool_stats or cb_stats.get('state') != 'closed'
 
             return self.build_component(
                 status="healthy" if not pool_has_error else "warning",

@@ -219,3 +219,74 @@ pgSTAC operations span multiple connections. Acceptable because pgSTAC is a mate
 | 13 MAR 2026 | `get_collection_item_ids` unbounded result set | Added LIMIT parameter (default 50000) |
 | 13 MAR 2026 | `SET search_path` pollutes connection state | Changed to `SET LOCAL search_path` |
 | 13 MAR 2026 | `pgstac_bootstrap.py` AttributeError in handler | `self.connection_string` → `self._pg_repo.conn_string` |
+| 14 MAR 2026 | God-class PostgreSQLRepository (former B) | Decomposed into ManagedIdentityAuth + ConnectionManager + db_utils via internal composition |
+| 14 MAR 2026 | Duplicate connection string building (former C) | Accepted as AR-4 — intentional dual paths for different connection modes |
+| 14 MAR 2026 | `is_auth_error()` false-positive pool destruction | Tightened markers — removed bare "token"/"expired", added specific patterns |
+| 14 MAR 2026 | Token logged in plaintext (pgstac_bootstrap) | Added `redact_connection_string()` utility, applied at log site |
+| 14 MAR 2026 | `_ensure_schema_exists` swallows CircuitBreakerOpenError | Re-raises CircuitBreakerOpenError and ConfigurationError |
+| 14 MAR 2026 | `EXTERNAL_DB_PASSWORD` via raw os.environ | Routed through `ExternalEnvironmentConfig.db_password` |
+| 14 MAR 2026 | `DOCKER_DB_POOL_MIN/MAX` via raw os.environ | Routed through `DatabaseConfig.pool_min_size/pool_max_size` |
+| 14 MAR 2026 | `_orphaned_pools` not thread-safe | Drain and shutdown orphan ops moved under `_pool_lock` |
+
+---
+
+## PostgreSQL Decomposition — Deferred Items (14 MAR 2026)
+
+### AR-V10-1: Contextmanager yield-twice pattern (MEDIUM)
+
+`db_connections.py:_get_pooled_connection()` and `_get_single_use_connection()` — `@contextmanager` with `yield` inside a `for` retry loop. If caller exception string-matches retry criteria, generator could attempt second yield.
+
+- **Why accepted**: Pre-existing from original code, not introduced by decomposition. `return` after `yield` exits normally. Edge case requires caller psycopg.Error matching dead-pool markers.
+- **Revisit when**: `RuntimeError: generator didn't stop after throw()` observed in logs, or move to async generators.
+
+### AR-V10-2: `_verified_schemas` not synchronized (MEDIUM)
+
+`postgresql.py:150` — mutable `set()` class attribute shared across all subclasses without locking.
+
+- **Why accepted**: CPython GIL makes `set.add(str)` atomic. Append-only, 3-5 entries max. Shared behavior is intentional.
+- **Revisit when**: No-GIL Python (PEP 703), or concurrent init failures observed.
+
+### AR-V10-3: `refresh_pool_credentials` on ManagedIdentityAuth (MEDIUM)
+
+`db_auth.py:98-106` — pool lifecycle call on the auth class. Should be on `ConnectionManager`.
+
+- **Why accepted**: One call site. Not worth a coordinator.
+- **Revisit when**: Second call site appears, or auth/pool management grows.
+
+### AR-V10-4: Dual token acquisition codepaths (MEDIUM)
+
+`db_auth.py:243` uses `ManagedIdentityCredential` directly. `connection_pool.py:206` uses `infrastructure.auth.get_postgres_token()`.
+
+- **Why accepted**: Different modes, different lifecycles. Pre-existing, not introduced by decomposition.
+- **Revisit when**: Azure AD rate-limiting, or `connection_pool.py` refactor.
+
+### AR-V10-5: Token potentially in psycopg_pool internal logs (LOW)
+
+`connection_pool.py:226/283` — token in `conninfo` string passed to pool constructor.
+
+- **Why accepted**: Cannot redact before passing to pool. Azure AD tokens are short-lived (~1 hour).
+- **Revisit when**: Token exposure confirmed in log audit.
+
+### DF-V10-1: Remove backward-compatible aliases in postgresql.py
+
+`postgresql.py:102-103` — `_register_type_adapters` and `_parse_jsonb_column` aliases. Update callers to import from `infrastructure.db_utils` directly.
+
+- **Target**: V0.11
+
+### DF-V10-2: `deployer.py` should use ConnectionManager directly
+
+`core/schema/deployer.py` calls `self.repository._get_connection()`. Should use `ConnectionManager` or a public method.
+
+- **Target**: Next deployer refactor.
+
+### DF-V10-3: `SnapshotRepository` in wrong location
+
+`services/snapshot_service.py` contains `SnapshotRepository(PostgreSQLRepository)`. Should be in `infrastructure/`.
+
+- **Target**: Next services cleanup.
+
+### DF-V10-4: Remove redundant `json.dumps()` calls
+
+~50+ sites still call `json.dumps()` before PostgreSQL despite psycopg3 type adapters handling JSONB automatically.
+
+- **Target**: V0.11 cleanup pass.

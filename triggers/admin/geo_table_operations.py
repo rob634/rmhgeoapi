@@ -626,7 +626,7 @@ class GeoTableOperations:
         Returns:
             JSON with orphaned tables, orphaned metadata, tracked tables, and summary
         """
-        from services.janitor_service import geo_orphan_detector
+        from services.geo_orphan_detector import geo_orphan_detector
 
         logger.info("Running geo orphan detection...")
 

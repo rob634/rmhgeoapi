@@ -54,7 +54,7 @@ class GeoOrphanTimerHandler(TimerHandlerBase):
         Returns:
             Result dict from GeoOrphanDetector.run()
         """
-        from services.janitor_service import geo_orphan_detector
+        from services.geo_orphan_detector import geo_orphan_detector
 
         result = geo_orphan_detector.run()
 

@@ -87,93 +87,20 @@ from .interface_repository import (
 from core.schema.updates import TaskUpdateModel, JobUpdateModel
 from utils import enforce_contract  # Added for contract enforcement
 from exceptions import DatabaseError, ConfigurationError
+from infrastructure.db_auth import ManagedIdentityAuth
+from infrastructure.db_connections import ConnectionManager
+from infrastructure.db_utils import register_type_adapters, parse_jsonb_column
 
 # Logger setup
 logger = logging.getLogger(__name__)
 
 
 # =============================================================================
-# psycopg3 TYPE ADAPTERS (18 FEB 2026 — EN-TD.2)
+# psycopg3 TYPE ADAPTERS — moved to db_utils.py (14 MAR 2026)
+# Backward-compatible aliases for any internal references
 # =============================================================================
-# psycopg3 does NOT auto-adapt Python dict/list → PostgreSQL JSONB (psycopg2 did).
-# Register adapters once per connection so all repositories inherit automatic
-# serialization. This eliminates the need for manual json.dumps() in every repo.
-# =============================================================================
-
-from psycopg.types.json import JsonbBinaryDumper
-from psycopg.adapt import Dumper
-from enum import Enum
-
-
-class _EnumDumper(Dumper):
-    """Adapt any Enum subclass → its .value for psycopg3."""
-
-    def dump(self, obj):
-        return str(obj.value).encode('utf-8')
-
-
-def _register_type_adapters(conn) -> None:
-    """
-    Register psycopg3 type adapters on a connection.
-
-    Called for both single-use (Function App) and pooled (Docker) connections.
-    After registration, dict/list auto-serialize to JSONB and Enum subclasses
-    auto-serialize to their .value — no manual json.dumps() or .value needed.
-    """
-    conn.adapters.register_dumper(dict, JsonbBinaryDumper)
-    conn.adapters.register_dumper(list, JsonbBinaryDumper)
-    conn.adapters.register_dumper(Enum, _EnumDumper)
-
-
-def _parse_jsonb_column(value: Any, column_name: str, record_id: str, default: Any = None) -> Any:
-    """
-    Parse a JSONB column value with explicit error handling (28 NOV 2025).
-
-    Replaces silent fallbacks that hide data corruption. Now logs errors
-    and raises DatabaseError on malformed JSON.
-
-    Args:
-        value: The raw value from PostgreSQL (could be dict, str, or None)
-        column_name: Name of the column for error context
-        record_id: Job/task ID for error context
-        default: Default value if column is NULL (not for parse errors!)
-
-    Returns:
-        Parsed dict/value or default if NULL
-
-    Raises:
-        DatabaseError: If JSON parsing fails (data corruption)
-    """
-    # NULL is allowed - return default
-    if value is None:
-        return default
-
-    # Already parsed by psycopg (JSONB columns often come as dict)
-    if isinstance(value, dict):
-        return value
-
-    # String needs parsing
-    if isinstance(value, str):
-        try:
-            return json.loads(value)
-        except json.JSONDecodeError as e:
-            logger.error(
-                f"❌ Corrupted JSON in {column_name} for {record_id[:16]}...: {e}",
-                extra={
-                    'record_id': record_id,
-                    'column': column_name,
-                    'error_type': 'JSONDecodeError',
-                    'preview': value[:200] if len(value) > 200 else value
-                }
-            )
-            raise DatabaseError(f"Corrupted {column_name} JSON for {record_id}: {e}")
-
-    # Unexpected type
-    logger.error(
-        f"❌ Unexpected type for {column_name}: {type(value).__name__}",
-        extra={'record_id': record_id, 'column': column_name, 'value_type': type(value).__name__}
-    )
-    raise DatabaseError(f"Unexpected type for {column_name}: {type(value).__name__}")
+_register_type_adapters = register_type_adapters
+_parse_jsonb_column = parse_jsonb_column
 
 
 # ============================================================================
@@ -229,114 +156,27 @@ class PostgreSQLRepository(BaseRepository):
         """
         Initialize PostgreSQL repository with configuration.
 
-        This constructor sets up the PostgreSQL connection parameters and
-        validates that the target schema exists. It uses a priority system
-        for configuration:
-        1. Explicit parameters (connection_string, schema_name)
-        2. Provided AppConfig object
-        3. Global configuration from get_config()
-        4. Environment variables as fallback
-
-        IMPORTANT - Managed Identity Token Caching Behavior:
-        ----------------------------------------------------
-        When USE_MANAGED_IDENTITY=true, this constructor fetches an Azure AD
-        access token and caches it in self.conn_string for the lifetime of
-        this repository instance.
-
-        **Token Expiration**: Azure AD tokens expire after ~1 hour (3600 seconds).
-
-        **Current Architecture (Azure Functions)**:
-        - Function instances are short-lived (typically <10 minutes)
-        - Repository instances are recreated per-request
-        - Token expiration is NOT a problem in practice
-        - Fresh tokens acquired automatically on each function invocation
-
-        **Future Considerations (Container Apps, Long-Running Services)**:
-        If this application evolves into a long-running service (e.g., Container Apps,
-        Kubernetes pods, always-on App Service), the current token caching will cause
-        connection failures after 1 hour.
-
-        **Solutions for Long-Running Services**:
-        1. **Fetch token per connection** (simplest):
-           Move token acquisition from __init__ to _get_connection() so each
-           database connection gets a fresh token. Slight performance penalty
-           (~50ms per connection) but handles expiration automatically.
-
-        2. **Connection pool with token refresh** (complex but efficient):
-           Implement custom psycopg connection pool that detects token expiration
-           and refreshes automatically. See Microsoft sample:
-           https://github.com/Azure-Samples/azure-postgresql-python-managed-identity
-
-        3. **Periodic repository recreation** (current implicit behavior):
-           Recreate PostgreSQLRepository instances periodically (e.g., per-request).
-           This is what Azure Functions does automatically, so it "just works".
-
-        **Why Not Like Azure Storage SDK?**
-        Azure Storage SDK uses credential objects (not connection strings), allowing
-        the SDK to manage token lifecycle internally. PostgreSQL connection strings
-        require the token value upfront, forcing us to manage token refresh explicitly.
+        Delegates auth to ManagedIdentityAuth and connections to ConnectionManager.
+        Constructor signature preserved for all subclasses.
 
         Parameters:
         ----------
         connection_string : Optional[str]
-            Explicit PostgreSQL connection string. If provided, this
-            overrides all other configuration sources.
-            Format: postgresql://user:pass@host:port/database?sslmode=require
-
+            Explicit connection string override. If provided, bypasses all auth.
         schema_name : Optional[str]
-            Database schema name. Defaults to config.app_schema or "app".
-            This is where application tables (jobs, tasks) are stored.
-
+            Database schema name. Defaults to config.app_schema.
         config : Optional[AppConfig]
-            Configuration object. If not provided, uses get_config().
-            This allows for dependency injection in testing.
-
+            Configuration object. Uses get_config() if not provided.
         target_database : Literal["app", "external"]
-            Which database to connect to (10 MAR 2026):
-            - "app" (default): App database - jobs, tasks, pgstac, h3
-            - "external": External database - public-facing OGC Features, STAC
-
-            When "external" is specified and ExternalEnvironmentConfig is configured,
-            connects to the external database with restricted permissions.
-            Falls back to app database if external database not configured.
-
-        Raises:
-        ------
-        ValueError
-            If connection configuration cannot be determined from any source.
-
-        Side Effects:
-        ------------
-        - Logs initialization status
-        - Validates schema existence (warning if missing)
-        - **Acquires and caches managed identity token** (if USE_MANAGED_IDENTITY=true)
-
-        Example:
-        -------
-        ```python
-        # Use global configuration (app database)
-        repo = PostgreSQLRepository()
-
-        # Connect to external database for OGC Features
-        repo = PostgreSQLRepository(target_database="external")
-
-        # Override with specific connection
-        repo = PostgreSQLRepository(
-            connection_string="postgresql://user:pass@host/db",
-            schema_name="custom_schema"
-        )
-        ```
+            Which database to connect to: "app" (default) or "external".
         """
-        # Initialize base class for validation and logging
         super().__init__()
 
-        # Get configuration (use provided or global)
+        # Get configuration
         self.config = config or get_config()
-
-        # Store target database for connection string building (29 NOV 2025)
         self.target_database = target_database
 
-        # Determine schema name based on target database
+        # Resolve schema name
         if schema_name:
             self.schema_name = schema_name
         elif target_database == "external" and self.config.is_external_configured():
@@ -349,681 +189,50 @@ class PostgreSQLRepository(BaseRepository):
         else:
             self.schema_name = self.config.app_schema
 
-        # Set connection string (priority: parameter > config > env)
-        if connection_string:
-            self.conn_string = connection_string
-        else:
-            self.conn_string = self._get_connection_string()
+        # Create auth and connection components
+        self._auth = ManagedIdentityAuth(
+            config=self.config,
+            target_database=target_database,
+            connection_string_override=connection_string,
+        )
+        self._connections = ConnectionManager(self._auth)
 
-        # Validate that schema exists (non-blocking warning if missing)
+        # Validate schema exists
         self._ensure_schema_exists()
 
-        # Log which database we're connected to
+        # Log initialization
         if target_database == "external" and self.config.is_external_configured():
             db_name = self.config.external.db_name
-            logger.info(f"✅ PostgreSQLRepository initialized with EXTERNAL database: {db_name}, schema: {self.schema_name}")
+            logger.info(f"PostgreSQLRepository initialized with EXTERNAL database: {db_name}, schema: {self.schema_name}")
         else:
-            logger.info(f"✅ PostgreSQLRepository initialized with APP database, schema: {self.schema_name}")
+            logger.info(f"PostgreSQLRepository initialized with APP database, schema: {self.schema_name}")
     
-    def _get_connection_string(self) -> str:
+    # ================================================================== #
+    # Delegation to extracted components (14 MAR 2026)
+    # ================================================================== #
+
+    @property
+    def conn_string(self) -> str:
+        """Exposes connection string for external consumers.
+        Read by: pgstac_repository.py, postgis_handler.py, health_checks/external.py,
+        health_checks/database.py, pgstac_bootstrap.py
         """
-        Build PostgreSQL connection string with automatic credential detection.
-
-        Authentication Priority Chain (08 DEC 2025 - Config-Driven):
-        ------------------------------------------------------------
-        All credentials are loaded via DatabaseConfig.from_environment() at startup.
-        This method uses config values only - no direct os.getenv() calls.
-
-        1. User-Assigned Managed Identity (if config.database.managed_identity_client_id is set)
-        2. System-Assigned Managed Identity (if config.database.is_azure_environment is True)
-        3. Password Authentication (if config.postgis_password is set)
-        4. FAIL with clear error message
-
-        This allows the application to work in multiple environments:
-        - Azure Functions with user-assigned identity (production - recommended)
-        - Azure Functions with system-assigned identity (simpler setup)
-        - Local development with password (developer machines)
-
-        Database Selection (10 MAR 2026):
-        ---------------------------------
-        Uses self.target_database to determine which database to connect to:
-        - "app": Uses config.database - default
-        - "external": Uses config.external if configured
-
-        Returns:
-        -------
-        str
-            Complete PostgreSQL connection string with SSL enabled.
-
-        Raises:
-        ------
-        ValueError
-            If no valid credentials are found.
-
-        RuntimeError
-            If managed identity token acquisition fails.
-        """
-        # Determine which database config to use (10 MAR 2026)
-        if self.target_database == "external" and not self.config.is_external_configured():
-            raise ConfigurationError(
-                "target_database='external' but external environment not configured. "
-                "Set EXTERNAL_DB_HOST and EXTERNAL_DB_NAME environment variables."
-            )
-
-        use_external_db = (
-            self.target_database == "external" and
-            self.config.is_external_configured()
-        )
-
-        if use_external_db:
-            db_config = self.config.external
-            logger.debug(f"🔌 Building connection string for EXTERNAL database: {db_config.db_name}")
-        else:
-            db_config = None  # Will use legacy app database properties
-            logger.debug("🔌 Building connection string for APP database")
-
-        logger.debug("🔌 Detecting PostgreSQL authentication method...")
-
-        # Get credentials from config - SINGLE SOURCE OF TRUTH (08 DEC 2025)
-        # Config loads all env vars at startup via DatabaseConfig.from_environment()
-        if use_external_db and db_config:
-            client_id = db_config.db_managed_identity_client_id
-            identity_name = db_config.db_managed_identity_name
-        else:
-            client_id = self.config.database.managed_identity_client_id
-            identity_name = self.config.database.effective_identity_name
-
-        # Azure environment detection from config (not os.getenv)
-        is_azure = self.config.database.is_azure_environment
-        password = self.config.postgis_password
-
-        # Priority 1: User-Assigned Managed Identity
-        if client_id:
-            logger.info(f"🔐 [AUTH] Using USER-ASSIGNED managed identity: {identity_name} (client_id: {client_id[:8]}...)")
-            return self._build_managed_identity_connection_string(
-                client_id=client_id,
-                identity_name=identity_name,
-                db_config=db_config
-            )
-
-        # Priority 2: System-Assigned Managed Identity (running in Azure)
-        if is_azure:
-            # effective_identity_name already handles fallback to azure_website_name
-            logger.info(f"🔐 [AUTH] Using SYSTEM-ASSIGNED managed identity: {identity_name} (detected Azure environment)")
-            return self._build_managed_identity_connection_string(
-                client_id=None,
-                identity_name=identity_name,
-                db_config=db_config
-            )
-
-        # Priority 3: Password Authentication
-        if password:
-            logger.info("🔑 [AUTH] Using PASSWORD authentication (local development mode)")
-            if use_external_db and db_config:
-                # Build password connection string for external database
-                conn_str = self._build_password_connection_string(db_config)
-            else:
-                conn_str = self.config.postgis_connection_string
-            logger.debug(f"✅ Password-based connection string built successfully")
-            return conn_str
-
-        # Priority 4: FAIL - No valid credentials
-        error_msg = (
-            "❌ NO DATABASE CREDENTIALS FOUND!\n"
-            "Please configure one of the following:\n"
-            "  1. User-Assigned Identity: Set DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID + DB_ADMIN_MANAGED_IDENTITY_NAME\n"
-            "  2. System-Assigned Identity: Deploy to Azure (auto-detected via WEBSITE_SITE_NAME)\n"
-            "  3. Password Auth: Set POSTGIS_PASSWORD environment variable\n"
-            "\n"
-            "Current config state:\n"
-            f"  - managed_identity_client_id: {'set' if client_id else 'NOT SET'}\n"
-            f"  - is_azure_environment: {is_azure}\n"
-            f"  - postgis_password: {'set' if password else 'NOT SET'}"
-        )
-        logger.error(error_msg)
-        raise ValueError(error_msg)
-
-    def _build_password_connection_string(self, db_config: ExternalEnvironmentConfig) -> str:
-        """
-        Build password-based connection string for external database (10 MAR 2026).
-
-        Used for local development when connecting to external database with password auth.
-
-        SECURITY (13 MAR 2026): Requires EXTERNAL_DB_PASSWORD env var.
-        Does NOT reuse the app DB password — external DB may be on a different server,
-        and sending app credentials to the wrong server is a security risk.
-
-        Args:
-            db_config: ExternalEnvironmentConfig with host, port, database settings
-
-        Returns:
-            PostgreSQL connection string with password authentication
-
-        Raises:
-            ValueError: If EXTERNAL_DB_PASSWORD is not set
-        """
-        ext_password = os.environ.get("EXTERNAL_DB_PASSWORD")
-        if not ext_password:
-            raise ValueError(
-                "EXTERNAL_DB_PASSWORD is required for password-based external DB connections. "
-                "Do NOT reuse the app DB password — external DB should have its own credentials."
-            )
-        user = self.config.postgis_user
-
-        conn_str = (
-            f"postgresql://{user}:{ext_password}@"
-            f"{db_config.db_host}:{db_config.db_port}/"
-            f"{db_config.db_name}?sslmode=require"
-        )
-        logger.debug(f"🔗 Password connection string built for external database: {db_config.db_name}")
-        return conn_str
-
-    def _build_managed_identity_connection_string(
-        self,
-        client_id: Optional[str] = None,
-        identity_name: str = None,  # Required - caller must provide from config
-        db_config: Optional[ExternalEnvironmentConfig] = None
-    ) -> str:
-        """
-        Build PostgreSQL connection string using Azure Managed Identity.
-
-        This method acquires an access token from Azure AD and uses it as
-        the password in the PostgreSQL connection string. The token is valid
-        for approximately 1 hour and is automatically refreshed by the Azure SDK.
-
-        Args:
-        ----
-        client_id : Optional[str]
-            Client ID for user-assigned managed identity.
-            If None, uses system-assigned identity.
-
-        identity_name : str
-            PostgreSQL user name matching the managed identity.
-            Required - caller must provide from config (default in database_config.py).
-
-        db_config : Optional[ExternalEnvironmentConfig]
-            External database configuration (10 MAR 2026).
-            If provided, uses external database host/port/database.
-            If None, uses app database from self.config.
-
-        Connection String Format:
-        ------------------------
-        host=hostname port=5432 dbname=database user=identity_name password=token sslmode=require
-
-        Returns:
-        -------
-        str
-            PostgreSQL connection string with managed identity token.
-
-        Raises:
-        ------
-        RuntimeError
-            If token acquisition fails.
-
-        Security Notes:
-        --------------
-        - Tokens are short-lived (1 hour) and automatically refreshed
-        - Token is logged in masked form for debugging
-        """
-        from azure.identity import ManagedIdentityCredential
-        from azure.core.exceptions import ClientAuthenticationError
-
-        # Determine database connection parameters (10 MAR 2026)
-        if db_config:
-            db_host = db_config.db_host
-            db_port = db_config.db_port
-            db_name = db_config.db_name
-        else:
-            db_host = self.config.postgis_host
-            db_port = self.config.postgis_port
-            db_name = self.config.postgis_database
-
-        try:
-            if client_id:
-                logger.debug(f"🔑 Acquiring token for user-assigned identity (client_id: {client_id[:8]}...)")
-                credential = ManagedIdentityCredential(client_id=client_id)
-            else:
-                logger.debug("🔑 Acquiring token for system-assigned identity")
-                credential = ManagedIdentityCredential()
-
-            logger.info(f"👤 PostgreSQL user: {identity_name}, database: {db_name}")
-
-            # Get access token for PostgreSQL
-            # Scope is fixed for all Azure PostgreSQL Flexible Servers
-            token_response = credential.get_token(
-                "https://ossrdbms-aad.database.windows.net/.default"
-            )
-            token = token_response.token
-
-            logger.debug(f"✅ Token acquired successfully (expires in ~{token_response.expires_on - __import__('time').time():.0f}s)")
-
-            # Build connection string with token as password
-            # Use psycopg3 format (key=value pairs)
-            conn_str = (
-                f"host={db_host} "
-                f"port={db_port} "
-                f"dbname={db_name} "
-                f"user={identity_name} "
-                f"password={token} "
-                f"sslmode=require"
-            )
-
-            # Log connection details (with token masked)
-            masked_str = (
-                f"host={db_host} "
-                f"port={db_port} "
-                f"dbname={db_name} "
-                f"user={identity_name} "
-                f"password=***TOKEN({len(token)} chars)*** "
-                f"sslmode=require"
-            )
-            logger.debug(f"🔗 Managed identity connection string: {masked_str}")
-
-            return conn_str
-
-        except ClientAuthenticationError as e:
-            # NO FALLBACKS - fail immediately if managed identity configured
-            error_msg = (
-                f"Managed identity token acquisition failed: {e}\n"
-                f"Function App has managed identity enabled but token acquisition failed.\n"
-                f"Ensure managed identity is assigned to PostgreSQL and user exists in database."
-            )
-            logger.error(f"❌ {error_msg}")
-            logger.error(f"   Error type: {type(e).__name__}")
-            logger.error(f"   Error details: {str(e)}")
-            raise RuntimeError(error_msg) from e
-
-        except Exception as e:
-            # NO FALLBACKS - fail immediately on any error
-            error_msg = (
-                f"Unexpected error during managed identity token acquisition: {e}\n"
-                f"Check Azure AD configuration and network connectivity."
-            )
-            logger.error(f"❌ {error_msg}")
-            logger.error(f"   Error type: {type(e).__name__}")
-            raise RuntimeError(error_msg) from e
-
-    @staticmethod
-    def _is_managed_identity_auth_error(error: Exception) -> bool:
-        """
-        Return True when error looks like token/auth failure for PostgreSQL MI auth.
-        """
-        if error is None:
-            return False
-
-        auth_markers = [
-            "password authentication failed",
-            "invalid password",
-            "authentication failed",
-            "token",
-            "expired",
-        ]
-
-        # Check direct error + one level of wrappers (common in pool/runtime wrappers)
-        for candidate in (error, getattr(error, '__cause__', None), getattr(error, '__context__', None)):
-            if candidate is None:
-                continue
-
-            sqlstate = getattr(candidate, 'sqlstate', None)
-            if sqlstate in {"28P01", "28000"}:
-                return True
-
-            msg = str(candidate).lower()
-            if any(marker in msg for marker in auth_markers):
-                return True
-
-        return False
-
-    @staticmethod
-    def _is_transient_connection_error(error: Exception) -> bool:
-        """
-        Return True when error looks like a transient connection issue
-        that may succeed on retry (network blip, server restart, etc.).
-
-        13 MAR 2026 — P3 defensive DB hardening.
-        """
-        transient_markers = [
-            "connection is closed",
-            "the connection is lost",
-            "could not connect to server",
-            "connection refused",
-            "connection timed out",
-            "ssl syscall error",
-            "broken pipe",
-            "connection reset",
-            "server closed the connection unexpectedly",
-        ]
-        for candidate in (error, getattr(error, '__cause__', None), getattr(error, '__context__', None)):
-            if candidate is None:
-                continue
-            msg = str(candidate).lower()
-            if any(marker in msg for marker in transient_markers):
-                return True
-        return False
-
-    def _is_managed_identity_effective(self) -> bool:
-        """
-        Return True when effective auth path is managed identity.
-
-        Uses config intent + environment signals to avoid retry-gating drift when
-        config flags are inconsistent.
-        """
-        if self.target_database == "external" and self.config.is_external_configured():
-            ext_db = self.config.external
-            if ext_db and (ext_db.db_use_managed_identity or ext_db.db_managed_identity_client_id):
-                return True
-
-        db_cfg = self.config.database
-        return bool(
-            db_cfg.use_managed_identity
-            or db_cfg.managed_identity_client_id
-            or db_cfg.is_azure_environment
-        )
-
-    def _refresh_managed_identity_conn_string(self) -> str:
-        """
-        Rebuild managed-identity connection string with a fresh access token.
-        """
-        refreshed = self._get_connection_string()
-        self.conn_string = refreshed
-        return refreshed
-
-    def _refresh_pooled_managed_identity_credentials(self) -> None:
-        """
-        Refresh Docker pooled PostgreSQL credentials and recreate connection pool.
-        """
-        from infrastructure.auth import refresh_postgres_token
-        from infrastructure.connection_pool import ConnectionPoolManager
-
-        refresh_postgres_token()
-        ConnectionPoolManager.recreate_pool()
+        return self._auth.get_connection_string()
 
     @contextmanager
     def _get_connection(self):
+        """Delegates to ConnectionManager.
+        Used by: all subclasses, deployer.py, schema_analyzer.py, validators.py,
+        config/database_config.py, and 30+ trigger/admin files.
         """
-        Context manager for PostgreSQL database connections.
-
-        This method provides a safe way to obtain and automatically clean up
-        PostgreSQL connections. It ensures that:
-        1. Connections are properly closed after use
-        2. Transactions are rolled back on error
-        3. Resources are freed even if exceptions occur
-
-        Connection Modes (16 JAN 2026 - F7.18):
-        --------------------------------------
-        - Docker mode: Uses connection pool (ConnectionPoolManager)
-        - Function App mode: Single-use connections (original behavior)
-
-        Connection Lifecycle:
-        --------------------
-        1. Create connection using connection string (or get from pool)
-        2. Yield connection to caller
-        3. On error: rollback transaction
-        4. Always: close connection (or return to pool)
-
-        Yields:
-        ------
-        psycopg.Connection
-            Active PostgreSQL connection object that can be used for queries.
-            The connection has autocommit disabled by default.
-
-        Raises:
-        ------
-        psycopg.Error
-            On connection failures (network issues, auth failures, etc.).
-            Common errors include:
-            - OperationalError: Can't reach database
-            - ProgrammingError: Invalid connection string
-            - AuthenticationError: Invalid credentials
-
-        Usage Example:
-        -------------
-        ```python
-        with self._get_connection() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT * FROM jobs")
-                results = cursor.fetchall()
-            conn.commit()  # Explicit commit needed
-        ```
-
-        Transaction Notes:
-        -----------------
-        - Autocommit is OFF by default (explicit commit needed)
-        - On exception, transaction is rolled back automatically
-        - For read-only operations, commit is still recommended
-        """
-        # Circuit breaker — fail fast if DB is known to be down (13 MAR 2026)
-        from infrastructure.circuit_breaker import CircuitBreaker
-        breaker = CircuitBreaker.get_instance()
-        breaker.check()  # Raises CircuitBreakerOpenError if OPEN
-
-        # Check if connection pooling should be used (Docker mode)
-        from infrastructure.connection_pool import ConnectionPoolManager
-
-        connected = False
-        try:
-            if ConnectionPoolManager.is_pool_mode():
-                # Docker mode: Use connection pool
-                with self._get_pooled_connection() as conn:
-                    connected = True
-                    breaker.record_success()
-                    yield conn
-            else:
-                # Function App mode: Single-use connection (original behavior)
-                with self._get_single_use_connection() as conn:
-                    connected = True
-                    breaker.record_success()
-                    yield conn
-        except Exception:
-            # Only count connection failures, not caller query errors
-            if not connected:
-                breaker.record_failure()
-            raise
-
-    @contextmanager
-    def _get_pooled_connection(self):
-        """
-        Get connection from pool (Docker mode).
-
-        Connection is automatically returned to pool when context exits.
-        Pool handles connection lifecycle (creation, health checks, etc.).
-        """
-        from infrastructure.connection_pool import ConnectionPoolManager
-
-        logger.debug("🔗 Getting connection from pool...")
-        use_managed_identity = self._is_managed_identity_effective()
-        max_attempts = 2  # Always allow 1 retry — auth refresh OR dead-pool recovery
-
-        for attempt in range(1, max_attempts + 1):
-            try:
-                with ConnectionPoolManager.get_connection() as conn:
-                    pid = conn.info.backend_pid
-                    logger.info(f"[CONN] Acquired pooled connection pid={pid}")
-                    try:
-                        yield conn
-                    finally:
-                        logger.info(f"[CONN] Released pooled connection pid={pid}")
-                    return
-            except Exception as e:
-                error_str = str(e).lower()
-                logger.error(f"❌ Pool connection error: {e}")
-
-                # Dead-pool indicators — SSL broken, connection lost, etc.
-                dead_pool_markers = [
-                    "ssl syscall error",
-                    "connection is closed",
-                    "the connection is lost",
-                    "broken pipe",
-                    "connection reset",
-                    "server closed the connection unexpectedly",
-                ]
-                is_dead_pool = any(marker in error_str for marker in dead_pool_markers)
-
-                can_retry = (
-                    attempt < max_attempts
-                    and (
-                        (use_managed_identity and self._is_managed_identity_auth_error(e))
-                        or is_dead_pool
-                    )
-                )
-
-                if not can_retry:
-                    raise
-
-                if is_dead_pool:
-                    logger.warning(
-                        f"🔄 Dead pool detected ({type(e).__name__}); "
-                        f"recreating connection pool and retrying"
-                    )
-                    ConnectionPoolManager.recreate_pool()
-                else:
-                    logger.warning(
-                        "🔄 Pooled managed identity auth failed; "
-                        "refreshing token, recreating pool, retrying once"
-                    )
-                    self._refresh_pooled_managed_identity_credentials()
-
-    @contextmanager
-    def _get_single_use_connection(self):
-        """
-        Create single-use connection (Function App mode).
-
-        Original connection behavior - each request gets a new connection
-        that is closed after use. Includes reactive retry on MI auth failure.
-        """
-        conn = None
-        use_managed_identity = self._is_managed_identity_effective()
-        max_attempts = 2  # Always allow 1 retry — auth refresh OR transient recovery
-
-        try:
-            for attempt in range(1, max_attempts + 1):
-                current_conn_string = self.conn_string
-
-                logger.debug(f"🔗 Attempting PostgreSQL connection (attempt {attempt}/{max_attempts})...")
-                logger.debug(f"  Connection string length: {len(current_conn_string)} chars")
-
-                if '@' in current_conn_string and '/' in current_conn_string:
-                    try:
-                        after_at = current_conn_string.split('@')[1]
-                        host_port = after_at.split('/')[0]
-                        host = host_port.split(':')[0] if ':' in host_port else host_port
-                        logger.debug(f"  Connecting to host: {host}")
-                    except (IndexError, ValueError) as parse_err:
-                        logger.debug(f"  Could not parse host from connection string: {parse_err}")
-
-                try:
-                    conn = psycopg.connect(current_conn_string, row_factory=dict_row)
-                    _register_type_adapters(conn)
-                    pid = conn.info.backend_pid
-                    logger.info(f"[CONN] Opened single-use connection pid={pid}")
-                    yield conn
-                    return
-
-                except psycopg.Error as e:
-                    logger.error(f"❌ PostgreSQL connection error: {e}")
-                    logger.error(f"  Error type: {type(e).__name__}")
-                    logger.error(f"  Error details: {str(e)}")
-
-                    if "Name or service not known" in str(e) or "could not translate host name" in str(e):
-                        logger.error("  🚨 DNS Resolution Error - Cannot resolve database hostname")
-                        if '@' in current_conn_string and '/' in current_conn_string:
-                            try:
-                                after_at = current_conn_string.split('@')[1]
-                                host_port = after_at.split('/')[0]
-                                host = host_port.split(':')[0] if ':' in host_port else host_port
-                                logger.error(f"  Failed to resolve hostname: {host}")
-                            except (IndexError, ValueError) as parse_err:
-                                logger.error(f"  Could not extract hostname for error reporting: {parse_err}")
-
-                    if conn:
-                        conn.rollback()
-                        conn.close()
-                        conn = None
-
-                    is_auth_error = use_managed_identity and self._is_managed_identity_auth_error(e)
-                    is_transient = self._is_transient_connection_error(e)
-
-                    can_retry = attempt < max_attempts and (is_auth_error or is_transient)
-
-                    if not can_retry:
-                        raise
-
-                    if is_auth_error:
-                        logger.warning("🔄 Managed identity auth failed; refreshing token and retrying connection")
-                        self._refresh_managed_identity_conn_string()
-                    else:
-                        logger.warning(f"🔄 Transient connection error ({type(e).__name__}); retrying in 2s")
-                        import time
-                        time.sleep(2)
-
-        except psycopg.Error as e:
-            if conn:
-                conn.rollback()
-            raise
-
-        finally:
-            if conn:
-                pid = conn.info.backend_pid
-                conn.close()
-                logger.info(f"[CONN] Closed single-use connection pid={pid}")
+        with self._connections.get_connection() as conn:
+            yield conn
 
     @contextmanager
     def _get_cursor(self, conn=None):
-        """
-        Context manager for PostgreSQL cursors with automatic transaction handling.
-        
-        This method provides two modes of operation:
-        1. Use an existing connection (for multi-statement transactions)
-        2. Create a new connection (for single operations)
-        
-        When creating a new connection, the transaction is automatically
-        committed on success, making this ideal for single operations.
-        
-        Parameters:
-        ----------
-        conn : Optional[psycopg.Connection]
-            Existing connection to use. If None, creates a new connection
-            that will be auto-committed and closed after use.
-        
-        Yields:
-        ------
-        psycopg.Cursor
-            Database cursor for executing queries. The cursor is automatically
-            closed when the context exits.
-        
-        Transaction Behavior:
-        --------------------
-        - With existing conn: No auto-commit (caller controls transaction)
-        - Without conn: Auto-commits on success, auto-rollback on error
-        
-        Usage Examples:
-        --------------
-        ```python
-        # Single operation with auto-commit
-        with self._get_cursor() as cursor:
-            cursor.execute("INSERT INTO jobs ...")
-            # Automatically committed
-        
-        # Multi-statement transaction
-        with self._get_connection() as conn:
-            with self._get_cursor(conn) as cursor1:
-                cursor1.execute("INSERT INTO jobs ...")
-            with self._get_cursor(conn) as cursor2:
-                cursor2.execute("INSERT INTO tasks ...")
-            conn.commit()  # Commit both operations together
-        ```
-        """
-        if conn:
-            # Use existing connection - caller controls transaction
-            with conn.cursor() as cursor:
-                yield cursor
-        else:
-            # Create new connection with auto-commit
-            with self._get_connection() as conn:
-                with conn.cursor() as cursor:
-                    yield cursor
-                    # Auto-commit on successful completion
-                    conn.commit()
+        """Delegates to ConnectionManager."""
+        with self._connections.get_cursor(conn) as cursor:
+            yield cursor
     
     def _ensure_schema_exists(self) -> None:
         """

@@ -1,8 +1,12 @@
 # ============================================================================
-# DATABASE UTILITIES
+# CLAUDE CONTEXT - DATABASE_UTILITIES
 # ============================================================================
-# PURPOSE: Shared psycopg3 type adapters and JSONB parsing
-# DEPENDENCIES: psycopg, json, logging (no infrastructure imports)
+# EPOCH: 4 - ACTIVE
+# STATUS: Infrastructure - Shared database utilities
+# PURPOSE: psycopg3 type adapters, JSONB parsing, connection string redaction
+# LAST_REVIEWED: 14 MAR 2026
+# EXPORTS: register_type_adapters, parse_jsonb_column, redact_connection_string
+# DEPENDENCIES: psycopg, json, logging (no infrastructure imports — leaf node)
 # ============================================================================
 """
 Database utilities shared across infrastructure components.
@@ -108,3 +112,6 @@ def redact_connection_string(conn_str: str) -> str:
     # URI format: postgresql://user:password@host
     redacted = re.sub(r'://([^:]+):([^@]+)@', r'://\1:***REDACTED***@', redacted)
     return redacted
+
+
+__all__ = ['register_type_adapters', 'parse_jsonb_column', 'redact_connection_string']

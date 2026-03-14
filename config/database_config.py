@@ -254,6 +254,16 @@ class DatabaseConfig(BaseModel):
         description="PostgreSQL schema name for H3 hexagonal grids"
     )
 
+    # Connection pool settings (Docker mode)
+    pool_min_size: int = Field(
+        default=DatabaseDefaults.POOL_MIN_SIZE if hasattr(DatabaseDefaults, 'POOL_MIN_SIZE') else 2,
+        description="Minimum connections in Docker connection pool"
+    )
+    pool_max_size: int = Field(
+        default=DatabaseDefaults.POOL_MAX_SIZE if hasattr(DatabaseDefaults, 'POOL_MAX_SIZE') else 10,
+        description="Maximum connections in Docker connection pool"
+    )
+
     # Managed identity settings
     use_managed_identity: bool = Field(
         default=False,
@@ -528,6 +538,9 @@ class DatabaseConfig(BaseModel):
             managed_identity_client_id=os.environ.get("DB_ADMIN_MANAGED_IDENTITY_CLIENT_ID"),
             managed_identity_reader_name=os.environ.get("DB_READER_MANAGED_IDENTITY_NAME"),  # Optional reader identity
             connection_timeout_seconds=int(os.environ.get("DB_CONNECTION_TIMEOUT", str(DatabaseDefaults.CONNECTION_TIMEOUT_SECONDS))),
+            # Connection pool settings (Docker mode)
+            pool_min_size=int(os.environ.get("DOCKER_DB_POOL_MIN", "2")),
+            pool_max_size=int(os.environ.get("DOCKER_DB_POOL_MAX", "10")),
             # Azure environment detection (set automatically by Azure Functions runtime)
             azure_website_name=os.environ.get("WEBSITE_SITE_NAME")
         )

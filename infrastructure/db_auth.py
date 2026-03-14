@@ -1,7 +1,11 @@
 # ============================================================================
-# MANAGED IDENTITY AUTHENTICATION
+# CLAUDE CONTEXT - MANAGED_IDENTITY_AUTH
 # ============================================================================
+# EPOCH: 4 - ACTIVE
+# STATUS: Infrastructure - Database authentication
 # PURPOSE: Azure AD token acquisition and connection string management
+# LAST_REVIEWED: 14 MAR 2026
+# EXPORTS: ManagedIdentityAuth
 # DEPENDENCIES: config, azure.identity (lazy), logging
 # ============================================================================
 """
@@ -16,6 +20,7 @@ Import graph:
     db_auth.py -> config (only)
 """
 
+import time
 import logging
 from typing import Optional
 
@@ -267,7 +272,7 @@ class ManagedIdentityAuth:
             )
             token = token_response.token
 
-            logger.debug(f"Token acquired (expires in ~{token_response.expires_on - __import__('time').time():.0f}s)")
+            logger.debug(f"Token acquired (expires in ~{token_response.expires_on - time.time():.0f}s)")
 
             conn_str = (
                 f"host={db_host} "
@@ -316,3 +321,6 @@ class ManagedIdentityAuth:
             f"{db_config.db_name}?sslmode=require"
         )
         return conn_str
+
+
+__all__ = ['ManagedIdentityAuth']

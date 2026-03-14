@@ -1,7 +1,11 @@
 # ============================================================================
-# CONNECTION MANAGER
+# CLAUDE CONTEXT - CONNECTION_MANAGER
 # ============================================================================
+# EPOCH: 4 - ACTIVE
+# STATUS: Infrastructure - Database connection lifecycle
 # PURPOSE: PostgreSQL connection lifecycle — pooled and single-use modes
+# LAST_REVIEWED: 14 MAR 2026
+# EXPORTS: ConnectionManager
 # DEPENDENCIES: db_auth, db_utils, circuit_breaker, connection_pool, psycopg
 # ============================================================================
 """
@@ -26,6 +30,19 @@ from infrastructure.db_auth import ManagedIdentityAuth
 from infrastructure.db_utils import register_type_adapters
 
 logger = logging.getLogger(__name__)
+
+# Shared error markers — used by both is_transient_error() and _get_pooled_connection()
+_TRANSIENT_MARKERS = frozenset([
+    "connection is closed",
+    "the connection is lost",
+    "could not connect to server",
+    "connection refused",
+    "connection timed out",
+    "ssl syscall error",
+    "broken pipe",
+    "connection reset",
+    "server closed the connection unexpectedly",
+])
 
 
 class ConnectionManager:
@@ -84,11 +101,13 @@ class ConnectionManager:
     @contextmanager
     def get_cursor(self, conn=None):
         """
-        Context manager for cursors with optional auto-commit.
+        Context manager for cursors with mode-dependent transaction handling.
+
+        With conn (caller provides):  No auto-commit. Caller controls transaction.
+        Without conn (creates new):   Auto-commits on success, rollback on error.
 
         Args:
-            conn: Existing connection (caller controls transaction).
-                  If None, creates a new connection with auto-commit.
+            conn: Existing connection. If None, creates a new auto-committing connection.
         """
         if conn:
             with conn.cursor() as cursor:
@@ -105,22 +124,11 @@ class ConnectionManager:
         Return True when error looks like a transient connection issue
         that may succeed on retry (network blip, server restart, etc.).
         """
-        transient_markers = [
-            "connection is closed",
-            "the connection is lost",
-            "could not connect to server",
-            "connection refused",
-            "connection timed out",
-            "ssl syscall error",
-            "broken pipe",
-            "connection reset",
-            "server closed the connection unexpectedly",
-        ]
         for candidate in (error, getattr(error, '__cause__', None), getattr(error, '__context__', None)):
             if candidate is None:
                 continue
             msg = str(candidate).lower()
-            if any(marker in msg for marker in transient_markers):
+            if any(marker in msg for marker in _TRANSIENT_MARKERS):
                 return True
         return False
 
@@ -155,15 +163,7 @@ class ConnectionManager:
                 error_str = str(e).lower()
                 logger.error(f"Pool connection error: {e}")
 
-                dead_pool_markers = [
-                    "ssl syscall error",
-                    "connection is closed",
-                    "the connection is lost",
-                    "broken pipe",
-                    "connection reset",
-                    "server closed the connection unexpectedly",
-                ]
-                is_dead_pool = any(marker in error_str for marker in dead_pool_markers)
+                is_dead_pool = any(marker in error_str for marker in _TRANSIENT_MARKERS)
 
                 can_retry = (
                     attempt < max_attempts
@@ -249,6 +249,12 @@ class ConnectionManager:
 
         finally:
             if conn:
-                pid = conn.info.backend_pid
+                try:
+                    pid = conn.info.backend_pid
+                except Exception:
+                    pid = "unknown"
                 conn.close()
                 logger.info(f"[CONN] Closed single-use connection pid={pid}")
+
+
+__all__ = ['ConnectionManager']

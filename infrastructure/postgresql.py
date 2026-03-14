@@ -3,8 +3,8 @@
 # ============================================================================
 # STATUS: Infrastructure - Database connection and repository pattern
 # PURPOSE: PostgreSQL access with managed identity authentication
-# LAST_REVIEWED: 02 JAN 2026
-# REVIEW_STATUS: Checks 1-7 Applied (Check 8 ref: config/database_config.py)
+# LAST_REVIEWED: 14 MAR 2026
+# REVIEW_STATUS: V10 decomposition — auth/connections extracted to db_auth.py + db_connections.py
 # ============================================================================
 """
 PostgreSQL Repository Implementation.
@@ -96,7 +96,8 @@ logger = logging.getLogger(__name__)
 
 # =============================================================================
 # psycopg3 TYPE ADAPTERS — moved to db_utils.py (14 MAR 2026)
-# Backward-compatible aliases for any internal references
+# Backward-compatible aliases. TODO: Remove after V0.11 — update all callers
+# to import from infrastructure.db_utils directly.
 # =============================================================================
 _register_type_adapters = register_type_adapters
 _parse_jsonb_column = parse_jsonb_column

@@ -165,11 +165,12 @@ class ConnectionPoolManager:
         Loads configuration lazily on first access.
         """
         if cls._pool_config is None:
-            import os
+            from config import get_config
+            config = get_config()
 
             cls._pool_config = {
-                'min_size': int(os.environ.get('DOCKER_DB_POOL_MIN', DEFAULT_POOL_MIN)),
-                'max_size': int(os.environ.get('DOCKER_DB_POOL_MAX', DEFAULT_POOL_MAX)),
+                'min_size': config.database.pool_min_size,
+                'max_size': config.database.pool_max_size,
                 'timeout': POOL_CONNECTION_TIMEOUT,
                 'max_lifetime': POOL_MAX_LIFETIME,
             }

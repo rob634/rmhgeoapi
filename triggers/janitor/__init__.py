@@ -1,30 +1,26 @@
 # ============================================================================
 # JANITOR TRIGGERS PACKAGE
 # ============================================================================
+# EPOCH: 4 - ACTIVE
 # STATUS: Trigger layer - Package init for system maintenance triggers
-# PURPOSE: Export timer and HTTP triggers for janitor operations
-# LAST_REVIEWED: 05 JAN 2026
-# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
-# EXPORTS: task_watchdog_handler, job_health_handler, orphan_detector_handler, janitor_*_handler
+# PURPOSE: Export SystemGuardian trigger and HTTP handlers
+# LAST_REVIEWED: 14 MAR 2026
+# EXPORTS: system_guardian_handler, janitor_*_handler
 # ============================================================================
 """
 Janitor Triggers Package.
 
-Timer and HTTP triggers for system maintenance operations.
+SystemGuardian timer trigger and HTTP triggers for maintenance operations.
 
 Exports:
-    task_watchdog_handler: Timer trigger for detecting stale tasks
-    job_health_handler: Timer trigger for detecting jobs with failed tasks
-    orphan_detector_handler: Timer trigger for detecting orphaned records
-    janitor_run_handler: HTTP trigger for manual janitor execution
-    janitor_status_handler: HTTP trigger for janitor status
-    janitor_history_handler: HTTP trigger for janitor run history
+    system_guardian_handler: Timer trigger for 4-phase sweep (replaces
+        task_watchdog, job_health, orphan_detector)
+    janitor_run_handler: HTTP trigger for manual sweep/maintenance
+    janitor_status_handler: HTTP trigger for status
+    janitor_history_handler: HTTP trigger for history
 """
 
-# Timer trigger handlers
-from .task_watchdog import task_watchdog_handler
-from .job_health import job_health_handler
-from .orphan_detector import orphan_detector_handler
+from .system_guardian import system_guardian_handler
 
 # HTTP trigger handlers
 from .http_triggers import (
@@ -34,11 +30,7 @@ from .http_triggers import (
 )
 
 __all__ = [
-    # Timer handlers
-    'task_watchdog_handler',
-    'job_health_handler',
-    'orphan_detector_handler',
-    # HTTP handlers
+    'system_guardian_handler',
     'janitor_run_handler',
     'janitor_status_handler',
     'janitor_history_handler'

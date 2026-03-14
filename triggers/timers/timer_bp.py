@@ -13,9 +13,7 @@ Contains all scheduled timer triggers for system maintenance and monitoring.
 Register this blueprint in function_app.py to enable all timers.
 
 Timer Schedule Overview:
-    - janitor_task_watchdog: Every 5 minutes (orphan recovery with queue peek)
-    - janitor_job_health: :15 and :45 past each hour
-    - janitor_orphan_detector: Every hour on the hour
+    - system_guardian_sweep: Every 5 minutes (4-phase distributed recovery)
     - geo_orphan_check_timer: Every 6 hours
     - metadata_consistency_timer: 03:00, 09:00, 15:00, 21:00 UTC
     - geo_integrity_check_timer: 02:00, 08:00, 14:00, 20:00 UTC
@@ -40,82 +38,36 @@ bp = func.Blueprint()
 
 
 # ============================================================================
-# JANITOR TIMERS (21 NOV 2025 - System Maintenance)
+# SYSTEM GUARDIAN (14 MAR 2026 - replaces 3 janitor timers)
 # ============================================================================
-# Three timers for different maintenance operations:
-# 1. Task Watchdog: Detect stale PROCESSING tasks (Azure Functions timeout)
-# 2. Job Health: Detect jobs with failed tasks, propagate failure
-# 3. Orphan Detector: Find orphaned tasks, zombie jobs, stuck queued jobs
+# Single timer runs 4 ordered phases: task recovery, stage recovery,
+# job recovery, consistency. Replaces task_watchdog + job_health +
+# orphan_detector.
 #
 # Configuration via environment variables:
-# - JANITOR_ENABLED: true/false (default: true)
-# - JANITOR_TASK_TIMEOUT_MINUTES: 30 (Azure Functions max timeout)
-# - JANITOR_JOB_STALE_HOURS: 24 (max reasonable job duration)
-# - JANITOR_QUEUED_TIMEOUT_HOURS: 1 (max time in QUEUED state)
+# - GUARDIAN_ENABLED: true/false (default: true)
+# - GUARDIAN_PROCESSING_TASK_TIMEOUT_MINUTES: 30
+# - GUARDIAN_DOCKER_TASK_TIMEOUT_MINUTES: 180
+# - GUARDIAN_ANCIENT_JOB_TIMEOUT_MINUTES: 360
+# - GUARDIAN_MAX_TASK_RETRIES: 3
 # ============================================================================
 
 @bp.timer_trigger(
-    schedule="0 */5 * * * *",  # Every 5 minutes (15 DEC 2025 - orphan recovery with queue peek)
+    schedule="0 */5 * * * *",
     arg_name="timer",
     run_on_startup=False
 )
-def janitor_task_watchdog(timer: func.TimerRequest) -> None:
+def system_guardian_sweep(timer: func.TimerRequest) -> None:
     """
-    Detect and mark stale PROCESSING tasks as FAILED.
-    Also re-queues orphaned QUEUED tasks (message loss recovery).
+    SystemGuardian — distributed systems recovery sweep.
 
-    Tasks stuck in PROCESSING for > 30 minutes have silently failed
-    (Azure Functions max execution time is 10-30 minutes).
+    Runs 4 ordered phases: task recovery → stage recovery → job recovery → consistency.
+    Replaces task_watchdog + job_health + orphan_detector.
 
-    Tasks stuck in QUEUED for > 5 minutes with NO message in queue
-    are re-queued (defense against message loss). Queue is peeked
-    to verify message is actually missing before re-queueing.
-
-    Schedule: Every 5 minutes - fast detection of orphaned queued tasks
+    Schedule: Every 5 minutes
     """
-    from triggers.janitor import task_watchdog_handler
-    task_watchdog_handler(timer)
-
-
-@bp.timer_trigger(
-    schedule="0 15,45 * * * *",  # At :15 and :45 past each hour
-    arg_name="timer",
-    run_on_startup=False
-)
-def janitor_job_health(timer: func.TimerRequest) -> None:
-    """
-    Check job health and propagate task failures.
-
-    Finds PROCESSING jobs with failed tasks and marks them as FAILED.
-    Captures partial results from completed tasks for debugging.
-
-    Schedule: Every 30 minutes, offset from task_watchdog by 15 min
-    This runs AFTER task_watchdog has marked failed tasks, allowing
-    proper failure propagation to job level.
-    """
-    from triggers.janitor import job_health_handler
-    job_health_handler(timer)
-
-
-@bp.timer_trigger(
-    schedule="0 0 * * * *",  # Every hour on the hour
-    arg_name="timer",
-    run_on_startup=False
-)
-def janitor_orphan_detector(timer: func.TimerRequest) -> None:
-    """
-    Detect and handle orphaned tasks and zombie jobs.
-
-    Detects:
-    1. Orphaned tasks (parent job doesn't exist)
-    2. Zombie jobs (PROCESSING but all tasks terminal)
-    3. Stuck QUEUED jobs (no tasks created after timeout)
-    4. Ancient stale jobs (PROCESSING > 24 hours)
-
-    Schedule: Every hour - these are edge cases, not time-critical
-    """
-    from triggers.janitor import orphan_detector_handler
-    orphan_detector_handler(timer)
+    from triggers.janitor import system_guardian_handler
+    system_guardian_handler(timer)
 
 
 # ============================================================================

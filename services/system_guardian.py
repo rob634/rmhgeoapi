@@ -694,10 +694,13 @@ class SystemGuardian:
             if not completed:
                 return None
 
+            all_tasks = self._repo.get_all_task_results(job_id) or []
+            failed_tasks = [t for t in all_tasks if t.get('status') == 'failed']
             return {
-                'status': 'partial',
-                'completed_tasks': len(completed),
-                'total_stages': job_info.get('total_stages'),
+                'status': 'partial_failure',
+                'completed_tasks_count': len(completed),
+                'failed_tasks_count': len(failed_tasks),
+                'total_tasks_count': len(all_tasks),
                 'failed_at_stage': job_info.get('stage'),
                 'partial_results': [
                     {
@@ -708,7 +711,7 @@ class SystemGuardian:
                     }
                     for t in completed[:10]  # Truncate to 10
                 ],
-                'recovered_by': 'system_guardian',
+                'guardian_cleanup_at': datetime.now(timezone.utc).isoformat(),
             }
         except Exception as e:
             logger.warning(

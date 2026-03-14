@@ -10,10 +10,13 @@
 Janitor Admin Blueprint - All cleanup/* routes.
 
 Routes (4 total):
-    POST /api/cleanup/run?type={task_watchdog|job_health|orphan_detector|metadata_consistency|log_cleanup|all}
+    POST /api/cleanup/run?type={sweep|metadata_consistency|log_cleanup|queue_depth_snapshot|all}
     GET  /api/cleanup/metadata-health
     GET  /api/cleanup/status
     GET  /api/cleanup/history?hours=24&type={type}&limit=50
+
+Legacy types (task_watchdog, job_health, orphan_detector) are accepted but
+mapped to 'sweep' with a deprecation warning.
 
 NOTE: Using /api/cleanup/* instead of /api/admin/janitor/* because Azure Functions
 reserves /api/admin/* for built-in admin UI (returns 404).
@@ -35,10 +38,10 @@ def cleanup_run(req: func.HttpRequest) -> func.HttpResponse:
     """
     Manually trigger a cleanup (janitor) run.
 
-    POST /api/cleanup/run?type={task_watchdog|job_health|orphan_detector|metadata_consistency|log_cleanup|all}
+    POST /api/cleanup/run?type={sweep|metadata_consistency|log_cleanup|queue_depth_snapshot|all}
 
     Examples:
-        curl -X POST "https://.../api/cleanup/run?type=task_watchdog"
+        curl -X POST "https://.../api/cleanup/run?type=sweep"
         curl -X POST "https://.../api/cleanup/run?type=metadata_consistency"
         curl -X POST "https://.../api/cleanup/run?type=all"
     """

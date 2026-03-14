@@ -41,7 +41,7 @@ class GeoOrphanTimerHandler(TimerHandlerBase):
     """
     Timer handler for geo schema orphan detection.
 
-    Wraps GeoOrphanDetector from janitor_service with standard
+    Wraps GeoOrphanDetector from geo_orphan_detector with standard
     timer handling patterns.
     """
 

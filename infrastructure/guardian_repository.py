@@ -253,7 +253,7 @@ class GuardianRepository(PostgreSQLRepository):
 
     def get_stale_docker_tasks(
         self,
-        timeout_minutes: int = 1440,
+        timeout_minutes: int = 180,
         docker_types: Optional[List[str]] = None
     ) -> List[Dict[str, Any]]:
         """
@@ -505,6 +505,34 @@ class GuardianRepository(PostgreSQLRepository):
         """).format(schema=sql.Identifier(self.schema_name))
 
         with self._error_context("get completed task results"):
+            result = self._execute_query(query, (job_id,), fetch='all')
+            return result or []
+
+    def get_all_task_results(
+        self,
+        job_id: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all tasks for a job (any status) for partial result counting.
+
+        Args:
+            job_id: Job ID to fetch tasks for.
+
+        Returns:
+            List of task dicts (task_id, status, task_type, stage).
+        """
+        query = sql.SQL("""
+            SELECT
+                task_id,
+                status,
+                task_type,
+                stage
+            FROM {schema}.tasks
+            WHERE parent_job_id = %s
+            ORDER BY stage, task_id
+        """).format(schema=sql.Identifier(self.schema_name))
+
+        with self._error_context("get all task results"):
             result = self._execute_query(query, (job_id,), fetch='all')
             return result or []
 

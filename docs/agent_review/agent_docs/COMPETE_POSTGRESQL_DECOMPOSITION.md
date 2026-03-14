@@ -5,6 +5,7 @@
 **Split**: B — Internal vs External
 **Scope**: infrastructure/db_auth.py, db_connections.py, db_utils.py, postgresql.py + priority files
 **Agents**: Omega (scope) → Alpha (architecture) + Beta (correctness) → Gamma (contradictions) → Delta (final)
+**Status**: Top 5 fixes applied (commit `abe02f4`). Remaining findings tracked below.
 
 ---
 

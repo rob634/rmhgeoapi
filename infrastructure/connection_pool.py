@@ -237,8 +237,8 @@ class ConnectionPoolManager:
 
         # Register psycopg3 type adapters (18 FEB 2026 — EN-TD.2)
         # dict/list → JSONB, Enum → .value — same adapters as single-use path
-        from infrastructure.postgresql import _register_type_adapters
-        _register_type_adapters(conn)
+        from infrastructure.db_utils import register_type_adapters
+        register_type_adapters(conn)
 
         # Set search path to include common schemas
         from config import get_config

@@ -1,16 +1,18 @@
 # ============================================================================
-# JANITOR AUDIT MODELS
+# GUARDIAN AUDIT MODELS
 # ============================================================================
+# EPOCH: 4 - ACTIVE
 # STATUS: Core - Maintenance operation audit trail
-# PURPOSE: Track janitor runs for task watchdog, job health, orphan detection
-# LAST_REVIEWED: 03 JAN 2026
-# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# PURPOSE: Track SystemGuardian sweeps and legacy janitor runs
+# LAST_REVIEWED: 14 MAR 2026
+# EXPORTS: JanitorRun, JanitorRunType, JanitorRunStatus
+# DEPENDENCIES: pydantic
 # ============================================================================
 """
-Janitor Audit Models.
+Guardian/Janitor Audit Models.
 
-Pydantic models for janitor_runs audit table. Logs all janitor
-maintenance operations for audit and monitoring purposes.
+Pydantic models for janitor_runs audit table. Logs all SystemGuardian
+sweep operations and legacy maintenance runs for audit and monitoring.
 
 Exports:
     JanitorRun: Audit record for maintenance operations
@@ -26,14 +28,15 @@ import uuid
 
 
 class JanitorRunType(str, Enum):
-    """Types of janitor maintenance runs."""
-    TASK_WATCHDOG = "task_watchdog"
-    JOB_HEALTH = "job_health"
-    ORPHAN_DETECTOR = "orphan_detector"
+    """Types of maintenance runs."""
+    SWEEP = "sweep"
+    TASK_WATCHDOG = "task_watchdog"       # Legacy
+    JOB_HEALTH = "job_health"             # Legacy
+    ORPHAN_DETECTOR = "orphan_detector"   # Legacy
 
 
 class JanitorRunStatus(str, Enum):
-    """Status of a janitor run."""
+    """Status of a maintenance run."""
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -41,20 +44,21 @@ class JanitorRunStatus(str, Enum):
 
 class JanitorRun(BaseModel):
     """
-    Database representation of a janitor maintenance run.
+    Database representation of a maintenance run.
 
-    Records all janitor operations for audit trail and monitoring.
-    Each timer trigger execution creates one JanitorRun record.
+    Records all SystemGuardian sweep operations for audit trail and monitoring.
+    Each sweep() call creates one JanitorRun record.
 
     Fields:
     - run_id: Unique identifier (UUID)
-    - run_type: Type of janitor operation
+    - run_type: Type of operation (sweep for SystemGuardian)
     - started_at: When the run started
     - completed_at: When the run completed (optional until done)
     - status: Current status (running/completed/failed)
     - items_scanned: Number of records examined
     - items_fixed: Number of records updated/fixed
-    - actions_taken: Detailed list of actions performed
+    - actions_taken: Flat list of all actions performed
+    - phases: Per-phase breakdown (sweep runs only)
     - error_details: Error message if run failed
     - duration_ms: Run duration in milliseconds
     """
@@ -75,7 +79,7 @@ class JanitorRun(BaseModel):
     # Run classification
     run_type: str = Field(
         ...,
-        description="Type of janitor run (task_watchdog, job_health, orphan_detector)"
+        description="Type of run (sweep, task_watchdog, job_health, orphan_detector)"
     )
 
     # Timing
@@ -114,6 +118,10 @@ class JanitorRun(BaseModel):
     actions_taken: List[Dict[str, Any]] = Field(
         default_factory=list,
         description="List of actions taken during the run"
+    )
+    phases: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Per-phase breakdown for sweep runs"
     )
     error_details: Optional[str] = Field(
         default=None,

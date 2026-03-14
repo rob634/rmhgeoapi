@@ -281,14 +281,58 @@ The `type=task_watchdog|job_health|orphan_detector` values become aliases that m
 
 ## Audit Trail
 
-Reuse existing `app.janitor_runs` table with minor schema adjustments:
+### Existing Infrastructure (carried forward)
+
+The `app.janitor_runs` table stores audit records for all maintenance operations. Indexed on `started_at DESC` and `run_type`. Schema generated from `JanitorRun` Pydantic model in `core/models/janitor.py`.
+
+### Two-Phase Write Pattern (carried forward, required)
+
+The existing system uses a two-phase write that must be preserved:
+
+1. **INSERT at sweep start** — creates audit row with `status='running'` before any phase executes. If the sweep crashes mid-run, the `running` row persists as evidence of the failure.
+2. **UPDATE at sweep end** — sets `completed_at`, `duration_ms`, `status`, final `items_scanned`/`items_fixed`, `actions_taken`, and the new `phases` breakdown.
+
+Both writes are **non-fatal** — wrapped so audit failure does not kill the sweep itself. A sweep that can't write audit records still performs recovery. Audit is observability, not a gate.
+
+### Schema Changes
 
 | Column | Change |
 |--------|--------|
 | `run_type` | New value: `sweep` (replaces task_watchdog/job_health/orphan_detector) |
-| `phases` | **New JSONB column**: per-phase breakdown `{task_recovery: {scanned: N, fixed: N, actions: [...]}, ...}` |
+| `phases` | **New JSONB column**: per-phase breakdown (see structure below) |
+| `duration_ms` | Existing — carried forward, calculated at completion |
+| All existing columns | Retained unchanged for backward compatibility with non-sweep run types (e.g., `queue_depth_snapshot`) |
 
-Single audit row per sweep. The `actions_taken` JSONB array is retained for flat action list. The new `phases` column adds structured breakdown.
+### `phases` JSONB Structure
+
+```json
+{
+    "task_recovery": {
+        "scanned": 12,
+        "fixed": 2,
+        "actions": [
+            {"action": "resend_pending_task", "task_id": "abc-123", "parent_job_id": "def-456", "reason": "pending_timeout"},
+            {"action": "mark_queued_task_failed", "task_id": "ghi-789", "reason": "max_retries_exceeded"}
+        ],
+        "error": null
+    },
+    "stage_recovery": {"scanned": 3, "fixed": 1, "actions": [...], "error": null},
+    "job_recovery": {"scanned": 5, "fixed": 0, "actions": [], "error": null},
+    "consistency": {"scanned": 0, "fixed": 0, "actions": [], "error": null}
+}
+```
+
+The flat `actions_taken` JSONB array is also retained — it aggregates all actions across all phases into a single list for simple queries like "show me everything this sweep did." The `phases` column adds structured breakdown for per-phase analysis.
+
+### Model Updates Required
+
+`core/models/janitor.py`:
+- Add `SWEEP = "sweep"` to `JanitorRunType` enum
+- Add `phases: Optional[Dict[str, Any]] = None` field to `JanitorRun` model (nullable for backward compatibility with old rows)
+
+### Non-sweep Run Types
+
+The audit table continues to serve non-sweep operations invoked via HTTP endpoints (`queue_depth_snapshot`, `metadata_consistency`, `log_cleanup`). These write their own rows with their own `run_type` values. The `phases` column is nullable and unused for these run types.
 
 ---
 

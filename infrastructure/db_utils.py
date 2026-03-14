@@ -93,3 +93,18 @@ def parse_jsonb_column(value: Any, column_name: str, record_id: str, default: An
         extra={'record_id': record_id, 'column': column_name, 'value_type': type(value).__name__}
     )
     raise DatabaseError(f"Unexpected type for {column_name}: {type(value).__name__}")
+
+
+def redact_connection_string(conn_str: str) -> str:
+    """
+    Redact password/token from a PostgreSQL connection string for safe logging.
+
+    Handles both URI format (postgresql://user:pass@host/db) and
+    key=value format (host=x password=token sslmode=require).
+    """
+    import re
+    # key=value format: password=<token> sslmode=...
+    redacted = re.sub(r'password=\S+', 'password=***REDACTED***', conn_str)
+    # URI format: postgresql://user:password@host
+    redacted = re.sub(r'://([^:]+):([^@]+)@', r'://\1:***REDACTED***@', redacted)
+    return redacted

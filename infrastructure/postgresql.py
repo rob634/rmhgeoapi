@@ -62,7 +62,6 @@ Dependencies:
     core.models: Pydantic data models
 """
 
-import os
 import json
 import psycopg
 from psycopg import sql
@@ -292,9 +291,13 @@ class PostgreSQLRepository(BaseRepository):
                         logger.debug(f"✅ Schema {self.schema_name} exists")
 
         except Exception as e:
-            # Log error but don't fail initialization
+            # Let circuit breaker and config errors propagate — these are fatal
+            from infrastructure.circuit_breaker import CircuitBreakerOpenError
+            if isinstance(e, (CircuitBreakerOpenError, ConfigurationError)):
+                raise
+            # Other errors (network blip, etc.) — log but don't fail init
             # Actual operations will fail with more specific errors
-            logger.error(f"❌ Error checking schema existence: {e}")
+            logger.error(f"Error checking schema existence: {e}")
     
     def _execute_query(self, query: sql.Composed, params: Optional[Tuple] = None, 
                       fetch: str = None) -> Optional[Any]:

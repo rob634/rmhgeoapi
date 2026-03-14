@@ -98,6 +98,11 @@ class ExternalEnvironmentConfig(BaseModel):
         description="Client ID of user-assigned managed identity for external DB"
     )
 
+    db_password: Optional[str] = Field(
+        default=None,
+        description="External database password (dev-only, when managed identity not available)"
+    )
+
     db_connection_timeout: int = Field(
         default=ExternalDefaults.CONNECTION_TIMEOUT_SECONDS,
         description="Connection timeout in seconds for external DB"
@@ -210,6 +215,7 @@ class ExternalEnvironmentConfig(BaseModel):
             db_use_managed_identity=db_use_mi,
             db_managed_identity_name=mi_name or AzureDefaults.MANAGED_IDENTITY_NAME,
             db_managed_identity_client_id=mi_client_id,
+            db_password=os.environ.get("EXTERNAL_DB_PASSWORD"),
             db_connection_timeout=int(os.environ.get(
                 "EXTERNAL_DB_CONNECTION_TIMEOUT",
                 str(ExternalDefaults.CONNECTION_TIMEOUT_SECONDS)

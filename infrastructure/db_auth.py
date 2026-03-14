@@ -16,7 +16,6 @@ Import graph:
     db_auth.py -> config (only)
 """
 
-import os
 import logging
 from typing import Optional
 
@@ -135,8 +134,11 @@ class ManagedIdentityAuth:
             "password authentication failed",
             "invalid password",
             "authentication failed",
-            "token",
-            "expired",
+            "azure ad token",
+            "access token",
+            "token is expired",
+            "token expired",
+            "credential expired",
         ]
 
         for candidate in (error, getattr(error, '__cause__', None), getattr(error, '__context__', None)):
@@ -300,11 +302,11 @@ class ManagedIdentityAuth:
         SECURITY: Requires EXTERNAL_DB_PASSWORD env var.
         Does NOT reuse the app DB password.
         """
-        ext_password = os.environ.get("EXTERNAL_DB_PASSWORD")
+        ext_password = db_config.db_password
         if not ext_password:
             raise ValueError(
                 "EXTERNAL_DB_PASSWORD is required for password-based external DB connections. "
-                "Do NOT reuse the app DB password — external DB should have its own credentials."
+                "Set EXTERNAL_DB_PASSWORD env var. Do NOT reuse the app DB password."
             )
         user = self.config.postgis_user
 

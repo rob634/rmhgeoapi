@@ -1,17 +1,18 @@
 # ============================================================================
 # JANITOR HTTP TRIGGERS
 # ============================================================================
+# EPOCH: 4 - ACTIVE
 # STATUS: Trigger layer - /api/admin/janitor/* endpoints
-# PURPOSE: Manual janitor operations and status monitoring
-# LAST_REVIEWED: 05 JAN 2026
-# REVIEW_STATUS: Checks 1-7 Applied (Check 8 N/A - no infrastructure config)
+# PURPOSE: Manual sweep operations and status monitoring via SystemGuardian
+# LAST_REVIEWED: 14 MAR 2026
 # EXPORTS: janitor_run_handler, janitor_status_handler, janitor_history_handler
-# DEPENDENCIES: services.janitor_service
+# DEPENDENCIES: services.system_guardian, infrastructure.guardian_repository
 # ============================================================================
 """
 Janitor HTTP Triggers.
 
-HTTP endpoints for manual janitor operations and status monitoring.
+HTTP endpoints for manual maintenance operations and status monitoring.
+Uses SystemGuardian for sweep operations, GuardianRepository for status/history.
 
 Exports:
     janitor_run_handler: HTTP trigger for POST /api/admin/janitor/run
@@ -22,33 +23,60 @@ Exports:
 import azure.functions as func
 import json
 from datetime import datetime, timezone
-from typing import Optional
 
-from services.janitor_service import JanitorService, JanitorConfig
 from util_logger import LoggerFactory, ComponentType
 
 logger = LoggerFactory.create_logger(ComponentType.TRIGGER, "JanitorHTTP")
 
 
+def _build_guardian():
+    """Construct SystemGuardian with repository and queue client."""
+    from services.system_guardian import SystemGuardian, GuardianConfig
+    from infrastructure.guardian_repository import GuardianRepository
+    from infrastructure.service_bus import ServiceBusRepository
+
+    repo = GuardianRepository()
+    queue = ServiceBusRepository()
+    config = GuardianConfig.from_environment()
+    return SystemGuardian(repo, queue, config)
+
+
+def _build_repo():
+    """Construct GuardianRepository for status/history queries."""
+    from infrastructure.guardian_repository import GuardianRepository
+    return GuardianRepository()
+
+
+# Legacy types that now map to a full sweep
+_LEGACY_SWEEP_TYPES = {"task_watchdog", "job_health", "orphan_detector"}
+
+
 def janitor_run_handler(req: func.HttpRequest) -> func.HttpResponse:
     """
-    Manually trigger a janitor run.
+    Manually trigger a maintenance run.
 
-    POST /api/admin/janitor/run?type={task_watchdog|job_health|orphan_detector|metadata_consistency|log_cleanup|all}
+    POST /api/admin/janitor/run?type={sweep|task_watchdog|job_health|orphan_detector|metadata_consistency|log_cleanup|queue_depth_snapshot|all}
 
     Query Parameters:
-        type: Which janitor to run (required)
-            - task_watchdog: Detect stale PROCESSING tasks
-            - job_health: Detect jobs with failed tasks
-            - orphan_detector: Detect orphaned/zombie records
-            - metadata_consistency: Unified metadata validation (09 JAN 2026)
-            - log_cleanup: Clean up expired JSONL log files (11 JAN 2026 - F7.12.F)
-            - all: Run all in sequence
+        type: Which operation to run (required)
+            - sweep: Run SystemGuardian 4-phase sweep
+            - task_watchdog: DEPRECATED — maps to sweep
+            - job_health: DEPRECATED — maps to sweep
+            - orphan_detector: DEPRECATED — maps to sweep
+            - metadata_consistency: Unified metadata validation
+            - log_cleanup: Clean up expired JSONL log files
+            - queue_depth_snapshot: Capture queue depths for trending
+            - all: Run sweep + metadata_consistency + log_cleanup + queue_depth_snapshot
 
     Returns:
         JSON with run results
     """
     run_type = req.params.get('type', '').lower()
+
+    valid_types = [
+        "sweep", "task_watchdog", "job_health", "orphan_detector",
+        "metadata_consistency", "log_cleanup", "queue_depth_snapshot", "all"
+    ]
 
     if not run_type:
         return func.HttpResponse(
@@ -56,14 +84,13 @@ def janitor_run_handler(req: func.HttpRequest) -> func.HttpResponse:
                 "success": False,
                 "error": "Missing required parameter: type",
                 "error_type": "ValidationError",
-                "valid_types": ["task_watchdog", "job_health", "orphan_detector", "metadata_consistency", "log_cleanup", "queue_depth_snapshot", "all"],
-                "usage": "POST /api/admin/janitor/run?type=task_watchdog"
+                "valid_types": valid_types,
+                "usage": "POST /api/admin/janitor/run?type=sweep"
             }),
             status_code=400,
             mimetype="application/json"
         )
 
-    valid_types = ["task_watchdog", "job_health", "orphan_detector", "metadata_consistency", "log_cleanup", "queue_depth_snapshot", "all"]
     if run_type not in valid_types:
         return func.HttpResponse(
             json.dumps({
@@ -79,39 +106,42 @@ def janitor_run_handler(req: func.HttpRequest) -> func.HttpResponse:
     logger.info(f"Manual janitor run requested: type={run_type}")
 
     try:
-        service = JanitorService()
         results = []
 
-        if run_type == "task_watchdog" or run_type == "all":
-            result = service.run_task_watchdog()
-            results.append(result.to_dict())
+        # Sweep: runs for sweep, legacy types, or all
+        if run_type == "sweep" or run_type in _LEGACY_SWEEP_TYPES or run_type == "all":
+            if run_type in _LEGACY_SWEEP_TYPES:
+                logger.warning(
+                    f"[JANITOR] Deprecated type '{run_type}' — "
+                    f"use 'sweep' instead. Running full SystemGuardian sweep."
+                )
 
-        if run_type == "job_health" or run_type == "all":
-            result = service.run_job_health_check()
-            results.append(result.to_dict())
-
-        if run_type == "orphan_detector" or run_type == "all":
-            result = service.run_orphan_detection()
-            results.append(result.to_dict())
+            guardian = _build_guardian()
+            sweep_result = guardian.sweep()
+            results.append({
+                "run_type": "sweep",
+                "success": sweep_result.success,
+                "sweep_id": sweep_result.sweep_id,
+                "items_scanned": sweep_result.total_scanned,
+                "items_fixed": sweep_result.total_fixed,
+                "phases": sweep_result.phases_dict,
+                "error": sweep_result.error,
+            })
 
         if run_type == "metadata_consistency" or run_type == "all":
-            # Metadata consistency check (09 JAN 2026 - F7.10)
             from services.metadata_consistency import get_metadata_consistency_checker
             checker = get_metadata_consistency_checker()
             result = checker.run()
             results.append(result)
 
         if run_type == "log_cleanup" or run_type == "all":
-            # Log cleanup (11 JAN 2026 - F7.12.F)
             from triggers.admin.log_cleanup_timer import log_cleanup_timer_handler
             result = log_cleanup_timer_handler.execute()
             results.append(result)
 
         if run_type == "queue_depth_snapshot" or run_type == "all":
-            # Queue depth snapshot (03 MAR 2026 - OBSERVATORY)
-            from infrastructure.janitor_repository import JanitorRepository
-            janitor_repo = JanitorRepository()
-            result = janitor_repo.record_queue_depth_snapshot()
+            repo = _build_repo()
+            result = repo.record_queue_depth_snapshot()
             results.append(result)
 
         # Summary
@@ -157,20 +187,54 @@ def janitor_run_handler(req: func.HttpRequest) -> func.HttpResponse:
 
 def janitor_status_handler(req: func.HttpRequest) -> func.HttpResponse:
     """
-    Get current janitor status and configuration.
+    Get current guardian status and configuration.
 
     GET /api/admin/janitor/status
 
     Returns:
-        JSON with configuration and recent run statistics
+        JSON with configuration and recent sweep statistics
     """
     try:
-        service = JanitorService()
-        status = service.get_status()
+        from services.system_guardian import GuardianConfig
+
+        repo = _build_repo()
+        config = GuardianConfig.from_environment()
+
+        recent_sweeps = repo.get_recent_sweeps(hours=24, limit=10)
+
+        total_runs = len(recent_sweeps)
+        failed_runs = sum(1 for r in recent_sweeps if r.get('status') == 'failed')
+        total_fixed = sum(r.get('items_fixed', 0) for r in recent_sweeps)
 
         response = {
             "status": "success",
-            "janitor": status,
+            "guardian": {
+                "enabled": config.enabled,
+                "config": {
+                    "sweep_interval_minutes": config.sweep_interval_minutes,
+                    "processing_task_timeout_minutes": config.processing_task_timeout_minutes,
+                    "docker_task_timeout_minutes": config.docker_task_timeout_minutes,
+                    "ancient_job_timeout_minutes": config.ancient_job_timeout_minutes,
+                    "max_task_retries": config.max_task_retries,
+                },
+                "last_24_hours": {
+                    "total_sweeps": total_runs,
+                    "failed_sweeps": failed_runs,
+                    "total_items_fixed": total_fixed
+                },
+                "recent_sweeps": [
+                    {
+                        "run_type": r.get('run_type'),
+                        "status": r.get('status'),
+                        "items_scanned": r.get('items_scanned', 0),
+                        "items_fixed": r.get('items_fixed', 0),
+                        "phases": r.get('phases'),
+                        "started_at": r.get('started_at'),
+                        "duration_ms": r.get('duration_ms')
+                    }
+                    for r in recent_sweeps[:5]
+                ]
+            },
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
@@ -181,7 +245,7 @@ def janitor_status_handler(req: func.HttpRequest) -> func.HttpResponse:
         )
 
     except Exception as e:
-        logger.error(f"Failed to get janitor status: {e}")
+        logger.error(f"Failed to get guardian status: {e}")
         return func.HttpResponse(
             json.dumps({
                 "success": False,
@@ -195,17 +259,17 @@ def janitor_status_handler(req: func.HttpRequest) -> func.HttpResponse:
 
 def janitor_history_handler(req: func.HttpRequest) -> func.HttpResponse:
     """
-    Get recent janitor run history.
+    Get recent maintenance run history.
 
-    GET /api/admin/janitor/history?hours=24&type=task_watchdog&limit=50
+    GET /api/admin/janitor/history?hours=24&type=sweep&limit=50
 
     Query Parameters:
         hours: How many hours of history (default: 24)
-        type: Filter by run type (optional)
+        type: Filter by run type (optional, e.g. 'sweep', 'queue_depth_snapshot')
         limit: Maximum records to return (default: 50)
 
     Returns:
-        JSON with recent janitor runs
+        JSON with recent maintenance runs
     """
     try:
         hours = int(req.params.get('hours', '24'))
@@ -218,8 +282,8 @@ def janitor_history_handler(req: func.HttpRequest) -> func.HttpResponse:
         if limit < 1 or limit > 200:
             limit = 50
 
-        service = JanitorService()
-        runs = service.repo.get_recent_janitor_runs(
+        repo = _build_repo()
+        runs = repo.get_recent_runs(
             hours=hours,
             run_type=run_type,
             limit=limit
@@ -251,6 +315,7 @@ def janitor_history_handler(req: func.HttpRequest) -> func.HttpResponse:
                     "status": r.get('status'),
                     "items_scanned": r.get('items_scanned', 0),
                     "items_fixed": r.get('items_fixed', 0),
+                    "phases": r.get('phases'),
                     "duration_ms": r.get('duration_ms'),
                     "started_at": r.get('started_at').isoformat() if r.get('started_at') else None,
                     "error_details": r.get('error_details')
@@ -267,7 +332,7 @@ def janitor_history_handler(req: func.HttpRequest) -> func.HttpResponse:
         )
 
     except Exception as e:
-        logger.error(f"Failed to get janitor history: {e}")
+        logger.error(f"Failed to get maintenance history: {e}")
         return func.HttpResponse(
             json.dumps({
                 "success": False,

@@ -812,6 +812,217 @@ class GuardianRepository(PostgreSQLRepository):
             logger.warning(f"[GUARDIAN] Could not get recent sweeps: {e}")
             return []
 
+    def get_recent_runs(
+        self,
+        hours: int = 24,
+        run_type: Optional[str] = None,
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        Get recent janitor_runs records (all types) for monitoring/history.
+
+        Args:
+            hours: How many hours of history to fetch.
+            run_type: Optional filter by run_type.
+            limit: Maximum records to return.
+
+        Returns:
+            List of run dicts, newest first.
+        """
+        if run_type:
+            query = sql.SQL("""
+                SELECT *
+                FROM {schema}.janitor_runs
+                WHERE started_at > NOW() - make_interval(hours => %s)
+                  AND run_type = %s
+                ORDER BY started_at DESC
+                LIMIT %s
+            """).format(schema=sql.Identifier(self.schema_name))
+            params = (hours, run_type, limit)
+        else:
+            query = sql.SQL("""
+                SELECT *
+                FROM {schema}.janitor_runs
+                WHERE started_at > NOW() - make_interval(hours => %s)
+                ORDER BY started_at DESC
+                LIMIT %s
+            """).format(schema=sql.Identifier(self.schema_name))
+            params = (hours, limit)
+
+        try:
+            with self._error_context("get recent runs"):
+                result = self._execute_query(query, params, fetch='all')
+                return result or []
+        except Exception as e:
+            logger.warning(f"[GUARDIAN] Could not get recent runs: {e}")
+            return []
+
+    def log_run(
+        self,
+        run_type: str,
+        started_at,
+        completed_at,
+        items_scanned: int,
+        items_fixed: int,
+        actions_taken: List[Dict[str, Any]],
+        status: str = "completed",
+        error_details: Optional[str] = None
+    ) -> Optional[str]:
+        """
+        Log a maintenance run to the janitor_runs audit table.
+
+        Generic run logger used by non-sweep operations (e.g. queue_depth_snapshot).
+
+        Args:
+            run_type: Type of run.
+            started_at: When the run started.
+            completed_at: When the run completed.
+            items_scanned: Number of items scanned.
+            items_fixed: Number of items fixed.
+            actions_taken: List of actions taken.
+            status: Run status.
+            error_details: Error message if failed.
+
+        Returns:
+            Run ID if created, None if failed.
+        """
+        run_id = str(uuid.uuid4())
+        if completed_at and started_at:
+            duration_ms = int((completed_at - started_at).total_seconds() * 1000)
+        else:
+            duration_ms = None
+
+        query = sql.SQL("""
+            INSERT INTO {schema}.janitor_runs (
+                run_id,
+                run_type,
+                started_at,
+                completed_at,
+                status,
+                items_scanned,
+                items_fixed,
+                actions_taken,
+                error_details,
+                duration_ms
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s)
+            RETURNING run_id
+        """).format(schema=sql.Identifier(self.schema_name))
+
+        try:
+            with self._error_context("log run"):
+                result = self._execute_query(
+                    query,
+                    (
+                        run_id, run_type, started_at, completed_at,
+                        status, items_scanned, items_fixed,
+                        json.dumps(actions_taken), error_details, duration_ms
+                    ),
+                    fetch='one'
+                )
+                if result:
+                    logger.info(
+                        f"[GUARDIAN] Logged run: type={run_type}, "
+                        f"scanned={items_scanned}, fixed={items_fixed}"
+                    )
+                    return str(result['run_id'])
+                return None
+        except Exception as e:
+            logger.warning(f"[GUARDIAN] Failed to log run (non-fatal): {e}")
+            return None
+
+    def record_queue_depth_snapshot(self) -> Dict[str, Any]:
+        """
+        Capture queue depth snapshot using janitor_runs infrastructure.
+
+        Records Service Bus queue depths as a run of type
+        'queue_depth_snapshot'. The actions_taken field stores per-queue
+        message counts for time-series trending.
+
+        Returns:
+            Dict with snapshot results (success, queue_depths, etc.)
+        """
+        from datetime import timedelta
+        started_at = datetime.now(timezone.utc)
+        actions = []
+        total_messages = 0
+
+        try:
+            from infrastructure.service_bus import ServiceBusRepository
+            from config import get_config
+
+            config = get_config()
+            sb_repo = ServiceBusRepository()
+
+            queue_names = [
+                config.queues.jobs_queue,
+                config.queues.container_tasks_queue,
+            ]
+
+            for queue_name in queue_names:
+                if not queue_name:
+                    continue
+                try:
+                    count = sb_repo.get_queue_length(queue_name)
+                    actions.append({
+                        "queue": queue_name,
+                        "active_messages": count,
+                        "status": "ok",
+                    })
+                    total_messages += count
+                except Exception as e:
+                    actions.append({
+                        "queue": queue_name,
+                        "active_messages": -1,
+                        "status": "error",
+                        "error": str(e)[:200],
+                    })
+
+            completed_at = datetime.now(timezone.utc)
+
+            run_id = self.log_run(
+                run_type="queue_depth_snapshot",
+                started_at=started_at,
+                completed_at=completed_at,
+                items_scanned=len(queue_names),
+                items_fixed=0,
+                actions_taken=actions,
+                status="completed",
+            )
+
+            return {
+                "success": True,
+                "run_type": "queue_depth_snapshot",
+                "run_id": run_id,
+                "items_scanned": len(queue_names),
+                "items_fixed": 0,
+                "total_messages": total_messages,
+                "queue_depths": actions,
+                "duration_ms": int((completed_at - started_at).total_seconds() * 1000),
+            }
+
+        except Exception as e:
+            completed_at = datetime.now(timezone.utc)
+            logger.warning(f"[GUARDIAN] Queue depth snapshot failed: {e}")
+
+            self.log_run(
+                run_type="queue_depth_snapshot",
+                started_at=started_at,
+                completed_at=completed_at,
+                items_scanned=0,
+                items_fixed=0,
+                actions_taken=actions,
+                status="failed",
+                error_details=str(e)[:500],
+            )
+
+            return {
+                "success": False,
+                "run_type": "queue_depth_snapshot",
+                "error": str(e)[:500],
+                "items_scanned": 0,
+                "items_fixed": 0,
+            }
+
 
 # ============================================================================
 # MODULE EXPORTS

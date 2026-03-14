@@ -1,9 +1,9 @@
 # Dataset Approval Workflow (F4.AP)
 
-**Last Updated**: 07 FEB 2026
+**Last Updated**: 13 MAR 2026
 **Epic**: E4 Security Zones / Externalization
 **Goal**: QA workflow for reviewing datasets before STAC publication
-**Status**: IN PROGRESS
+**Status**: COMPLETE (core workflow); ADF integration pending
 
 ---
 
@@ -13,6 +13,10 @@ When ETL jobs complete, datasets need human review before being marked "publishe
 Classification determines post-approval action:
 - **OUO** (Official Use Only): Just update STAC `app:published=true`
 - **PUBLIC**: Trigger ADF pipeline for external distribution + update STAC
+
+**NOTE (13 MAR 2026)**: Approval state now lives on `AssetRelease`, not on the `Asset` itself.
+The Asset/Release split means multiple approved releases can coexist under the same Asset.
+See "Approval Consolidation" section below for details.
 
 ---
 
@@ -79,13 +83,24 @@ Values: `pending`, `approved`, `rejected`
 
 ---
 
-## API Endpoints
+## Current Approval Endpoints (13 MAR 2026)
+
+| Endpoint | Status | Purpose |
+|----------|--------|---------|
+| `POST /api/platform/approve` | Primary, working | Main approval endpoint used by DDH integration |
+| `POST /api/assets/{id}/approve` | Broken | Legacy endpoint, not maintained |
+| `POST /api/approvals/{id}/approve` | Admin | Admin-only approval endpoint |
+
+The primary endpoint is `/api/platform/approve`. Use this for all approval workflows.
+
+## API Endpoints (Full List)
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
 | GET | `/api/approvals` | List approvals (query: ?status=pending&limit=50) |
 | GET | `/api/approvals/{id}` | Get specific approval with full details |
-| POST | `/api/approvals/{id}/approve` | Approve (body: {reviewer, notes}) |
+| POST | `/api/platform/approve` | **Primary** - Approve via DDH integration |
+| POST | `/api/approvals/{id}/approve` | Admin-only approve (body: {reviewer, notes}) |
 | POST | `/api/approvals/{id}/reject` | Reject (body: {reviewer, reason} - reason required) |
 | POST | `/api/approvals/{id}/resubmit` | Resubmit rejected item back to pending |
 | POST | `/api/approvals/test` | Create test approval (dev only) |
@@ -167,3 +182,20 @@ curl -X POST .../api/approvals/{id}/approve \
 │  Trigger ADF pipeline │                                          │
 └───────────────────────┴─────────────────────────────────────────┘
 ```
+
+---
+
+## Approval Consolidation (11 FEB 2026)
+
+US 4.2 Approval Consolidation is COMPLETE. The approval workflow was standardized:
+- Approval state lives on `AssetRelease`, not `Asset`
+- `version_id` is assigned at approval time (submitter suggests, reviewer confirms)
+- STAC materialization happens at approval (cached dict written to pgSTAC)
+- Revocation deletes the STAC item from pgSTAC
+- Multiple approved releases can coexist under the same Asset
+
+---
+
+## Known Limitation: No Authorization Model (ID-1)
+
+There is currently no authorization model on approvals. Any authenticated caller can approve any release. This is a known design limitation tracked as ID-1, to be addressed when the auth system is implemented.

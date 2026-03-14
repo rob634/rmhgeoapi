@@ -4,7 +4,7 @@
 # EPOCH: 4 - ACTIVE ✅
 # STATUS: QA/Deployment Documentation - Quick reference for creating new jobs
 # PURPOSE: Step-by-step guide for creating new geospatial data processing jobs
-# LAST_REVIEWED: 05 DEC 2025
+# LAST_REVIEWED: 13 MAR 2026
 # EXPORTS: Job creation patterns (JobBaseMixin recommended, manual fallback)
 # INTERFACES: JobBase ABC, JobBaseMixin (boilerplate elimination)
 # PYDANTIC_MODELS: JobRecord, TaskRecord, JobQueueMessage
@@ -24,7 +24,7 @@
 
 # Job Creation Quickstart Guide
 
-**Last Updated**: 14 NOV 2025
+**Last Updated**: 13 MAR 2026
 
 ---
 
@@ -257,7 +257,7 @@ python3 -c "from jobs import validate_job_registry; validate_job_registry()"
 func azure functionapp publish rmhazuregeoapi --python --build remote
 
 # 3. Redeploy database schema (if needed)
-curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/db/schema/redeploy?confirm=yes"
+curl -X POST "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/dbadmin/maintenance?action=ensure&confirm=yes"
 
 # 4. Submit test job
 curl -X POST https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/jobs/submit/my_new_job \
@@ -317,9 +317,61 @@ parameters_schema = {
 - **min/max**: For int/float types, enforces range
 - **allowed**: For str type, enforces enum-like values
 
+### Advanced Parameter Patterns (v0.10+)
+
+#### processing_options Sub-Dict
+
+Parameters that control processing behavior (not data identity) go inside `processing_options`:
+
+```python
+parameters_schema = {
+    'source_file': {'type': 'str', 'required': True},
+    'table_name': {'type': 'str', 'required': True},
+    'processing_options': {'type': 'dict', 'required': False, 'default': {}}
+}
+```
+
+Usage in submission:
+```json
+{
+    "source_file": "regions.geojson",
+    "table_name": "regions",
+    "processing_options": {"overwrite": true}
+}
+```
+
+CRITICAL: `overwrite` must be inside `processing_options`, NOT at the top level. Pydantic silently ignores extra top-level fields.
+
+#### split_column Parameter (Vector Split Views)
+
+Add `split_column` to create PostgreSQL VIEWs from categorical values:
+
+```python
+parameters_schema = {
+    'source_file': {'type': 'str', 'required': True},
+    'table_name': {'type': 'str', 'required': True},
+    'split_column': {'type': 'str', 'required': False}  # Optional
+}
+```
+
+When provided, the completion handler creates one VIEW per distinct value (max 20). Each view auto-registers in `geo.table_catalog` and appears as a separate TiPG collection.
+
+#### Multi-Source Vector Parameters
+
+For `vector_multi_source_docker` jobs:
+
+```python
+parameters_schema = {
+    'sources': {'type': 'list', 'required': True},  # List of source dicts
+    'multi_source_mode': {'type': 'str', 'required': True}  # "multi_file" or "gpkg_layers"
+}
+```
+
+Each source dict contains `{source_file, table_name}`. Max 10 sources per job.
+
 ---
 
-## 🔧 Advanced: Overriding Mixin Methods
+## Advanced: Overriding Mixin Methods
 
 **The default implementations work for 95% of jobs. Override only when needed.**
 
@@ -521,5 +573,5 @@ If you must migrate an existing job:
 
 ---
 
-**Date**: 05 DEC 2025
+**Date**: 13 MAR 2026
 **Status**: Production-Ready QA/Deployment Documentation

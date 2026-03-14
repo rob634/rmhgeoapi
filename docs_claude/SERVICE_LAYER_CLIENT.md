@@ -1,7 +1,7 @@
 # Service Layer Client Integration
 
 **Created**: 04 FEB 2026
-**Status**: PLANNED
+**Status**: COMPLETE (deployed v0.8.9.6, 05 FEB 2026 — commit 6f66243; probe added 24 FEB 2026)
 **Priority**: MEDIUM - Enables immediate TiPG collection visibility after vector ETL
 **Epic**: E1 (Vector Data Pipeline)
 

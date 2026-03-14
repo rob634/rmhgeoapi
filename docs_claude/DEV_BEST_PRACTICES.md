@@ -1,6 +1,6 @@
 # Development Best Practices
 
-**Last Updated**: 26 JAN 2026
+**Last Updated**: 13 MAR 2026
 **Purpose**: Accumulated lessons learned and patterns for developers and future Claude instances
 
 ---
@@ -331,6 +331,82 @@ job_id_2 = submit_job("process_vector", {"file": "a.gpkg"})
 assert job_id_1 == job_id_2  # Same job, not duplicated
 ```
 
+### Patterns Added in v0.9-v0.10
+
+#### psycopg3 Type Adapters (v0.9.16.0)
+
+Dict/list and Enum types are now auto-serialized at the connection level via `_register_type_adapters()` in `postgresql.py`. You no longer need `json.dumps()` for JSONB columns or `.value` for enum SQL parameters.
+
+```python
+# OLD (still works, but redundant)
+cur.execute("INSERT INTO jobs (parameters) VALUES (%s)", [json.dumps(params)])
+cur.execute("UPDATE tasks SET status = %s", [status.value])
+
+# NEW (automatic via registered adapters)
+cur.execute("INSERT INTO jobs (parameters) VALUES (%s)", [params])  # dict -> JSONB
+cur.execute("UPDATE tasks SET status = %s", [status])  # Enum -> .value
+```
+
+Existing `json.dumps()` calls are harmless but redundant (~50+ sites, cleanup is EN-TD.2 Phase 3).
+
+#### Ordinal Naming Convention
+
+Vector tables use ordinal suffixes, not "draft":
+- First submission: `table_name_ord1`
+- Second version: `table_name_ord2`
+- Ordinal is reserved at creation time and never changes
+
+#### Split Views Pattern (v0.10.0.2)
+
+When `split_column` is provided to `vector_docker_etl`, the system creates PostgreSQL VIEWs from categorical values:
+
+```python
+# In handler_vector_docker_complete.py, Phase 3.7:
+from services.vector.view_splitter import ViewSplitter
+splitter = ViewSplitter(conn)
+result = splitter.create_views(schema, table_name, split_column)
+# Returns: {"views_created": ["region_northeast", ...], "cardinality": 4}
+```
+
+Constraints: MAX_SPLIT_CARDINALITY=20, text/int/bool only, 63-char identifier limit.
+
+#### Checkpoint Emission in Handlers
+
+Use `_emit_checkpoint()` for structured observability during long-running operations:
+
+```python
+def _emit_checkpoint(params, checkpoint_type, details=None):
+    """Non-fatal checkpoint emission. Failure to emit does not break processing."""
+    try:
+        event_repo = JobEventRepository()
+        event_repo.create_event(
+            job_id=params._job_id,
+            task_id=params._task_id,
+            event_type=JobEventType.CHECKPOINT,
+            details={"checkpoint": checkpoint_type, **(details or {})}
+        )
+    except Exception:
+        logger.warning(f"Failed to emit checkpoint: {checkpoint_type}")
+```
+
+13 checkpoint types across zarr handlers. Progress shows on platform status `?detail=full`.
+
+#### Docker Context Parameter
+
+The Docker worker injects `_docker_context` into task parameters via `BackgroundQueueWorker`. Handlers can access it for Docker-specific behavior:
+
+```python
+def my_handler(params, context=None):
+    docker_ctx = getattr(params, '_docker_context', None)
+    if docker_ctx:
+        # Running in Docker worker -- has access to mounted volumes, etc.
+        pass
+```
+
+#### Zero-Task Stage Guard
+
+When `create_tasks_for_stage()` returns an empty list `[]`, the stage auto-advances in `core/machine.py`. No tasks created, no deadlock. Useful for conditional stages that only apply in certain parameter configurations.
+
 ---
 
 ## STAC Patterns
@@ -529,6 +605,30 @@ curl -X POST ".../api/dbadmin/maintenance?action=ensure&confirm=yes"
 ```
 
 **Why**: `action=rebuild` drops and recreates schemas, destroying all data. Use `ensure` for normal deployments - it only creates missing tables/indexes. Only use `rebuild` for fresh dev/test environments where data loss is acceptable.
+
+### Mistake 9: Putting overwrite at top level instead of processing_options
+
+```python
+# WRONG -- Pydantic silently ignores extra top-level fields
+{"source_file": "test.geojson", "overwrite": true}
+
+# CORRECT -- overwrite must be inside processing_options
+{"source_file": "test.geojson", "processing_options": {"overwrite": true}}
+```
+
+### Mistake 10: Creating independent DefaultAzureCredential for blob access
+
+```python
+# WRONG -- breaks auth isolation, creates credential leak
+from azure.identity import DefaultAzureCredential
+credential = DefaultAzureCredential()
+container_client = BlobServiceClient(url, credential=credential)
+
+# CORRECT -- auth owned by BlobRepository singleton
+from infrastructure.blob import BlobRepository
+repo = BlobRepository.for_zone("silver")
+# All blob access derives from this singleton
+```
 
 ---
 

@@ -46,7 +46,7 @@ Usage:
 # ============================================================================
 # Semantic versioning follows MAJOR.MINOR.PATCH.BUILD
 # V0.10 - update docker image to gdal 3.12 and added full support for netcdf and zarr
-__version__ = "0.10.1.2"
+__version__ = "0.10.2.1"
 
 import threading
 from typing import Optional

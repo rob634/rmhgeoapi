@@ -1,8 +1,8 @@
 # Phase 17.3: Unified STAC Blueprint Implementation
 
 **Date**: 24 JAN 2026
-**Status**: PLANNING
-**Option**: B - Single Unified Blueprint
+**Status**: COMPLETE (deployed v0.7.29, 24 JAN 2026 — commit 5cc36cb)
+**Option**: B - Single Unified Blueprint (IMPLEMENTED)
 
 ---
 

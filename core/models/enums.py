@@ -43,27 +43,40 @@ class JobStatus(Enum):
 
 class TaskStatus(Enum):
     """
-    Valid status values for tasks.
+    DAG-standard task lifecycle states.
 
-    State transitions (16 DEC 2025 - PENDING status added):
-    - PENDING -> QUEUED (trigger confirms message received)
-    - QUEUED -> PROCESSING -> COMPLETED
-    - QUEUED -> PROCESSING -> FAILED
-    - QUEUED -> PROCESSING -> FAILED -> RETRYING -> PROCESSING
+    State machine (15 MAR 2026 — DB-polling migration, replaces Service Bus):
 
-    PENDING vs QUEUED:
-    - PENDING: Task record created in DB, message sent to Service Bus, awaiting trigger confirmation
-    - QUEUED: Trigger received message, confirmed delivery, task ready for processing
+        PENDING ──→ READY ──→ PROCESSING ──→ COMPLETED
+            │                      │
+            ↓                      ↓
+          SKIPPED               FAILED ──→ PENDING_RETRY ──→ READY
+                                                              (retry loop)
+        CANCELLED (from any non-terminal state)
+
+    Alignment with standard DAG executors:
+        PENDING       = Airflow 'scheduled', Prefect 'Pending'
+        READY         = Airflow 'queued', Prefect 'Scheduled'
+        PROCESSING    = Airflow 'running', Prefect 'Running'
+        COMPLETED     = Airflow 'success', Prefect 'Completed'
+        FAILED        = universal
+        PENDING_RETRY = Airflow 'up_for_retry'
+        SKIPPED       = Airflow 'skipped'
+        CANCELLED     = universal
+
+    15 MAR 2026: Replaced QUEUED (implied external queue) with READY (DAG-standard).
+    Removed RETRYING (redundant with PENDING_RETRY). Added SKIPPED for when-clause.
+    PENDING meaning changed from 'SB message sent' to 'dependencies not yet satisfied'.
     """
 
-    PENDING = "pending"  # Task created, message sent but not yet confirmed by trigger
-    QUEUED = "queued"  # Trigger confirmed message receipt
-    PROCESSING = "processing"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    RETRYING = "retrying"
-    PENDING_RETRY = "pending_retry"  # Waiting for retry
-    CANCELLED = "cancelled"  # Task was cancelled
+    PENDING = "pending"            # Created, dependencies not yet satisfied
+    READY = "ready"                # All deps met, available for worker SKIP LOCKED
+    PROCESSING = "processing"      # Claimed by worker, executing
+    COMPLETED = "completed"        # Handler succeeded
+    FAILED = "failed"              # Handler error
+    PENDING_RETRY = "pending_retry"  # Failed, scheduled for retry with backoff
+    SKIPPED = "skipped"            # when: condition false or upstream skip
+    CANCELLED = "cancelled"        # Externally cancelled
 
 
 class StageStatus(Enum):

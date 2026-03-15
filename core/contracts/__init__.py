@@ -70,8 +70,8 @@ class TaskData(BaseModel):
         # Specialization adds boundary-specific fields:
         task_record = TaskRecord(
             **task_data.model_dump(),
-            status=TaskStatus.QUEUED,  # Database-specific
-            created_at=datetime.now()   # Database-specific
+            status=TaskStatus.READY,  # Database-specific
+            created_at=datetime.now()  # Database-specific
         )
         ```
     """

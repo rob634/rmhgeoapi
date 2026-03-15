@@ -54,18 +54,17 @@ class TaskRecord(TaskData):
     model_config = ConfigDict()
 
     @field_serializer(
-        'last_pulse', 'checkpoint_updated_at', 'execution_started_at',
-        'created_at', 'updated_at'
+        'last_pulse', 'checkpoint_updated_at', 'execute_after',
+        'execution_started_at', 'created_at', 'updated_at'
     )
     @classmethod
     def serialize_datetime(cls, v: datetime) -> Optional[str]:
         return v.isoformat() if v else None
 
     # Status tracking (Database-specific)
-    # 16 DEC 2025: Default changed from QUEUED to PENDING
-    # PENDING = task created, message sent but not yet confirmed by trigger
-    # QUEUED = trigger confirmed message receipt
-    status: TaskStatus = Field(default=TaskStatus.PENDING, description="Current task status")
+    # 15 MAR 2026: Default READY — tasks immediately available for worker pickup.
+    # For V11 DAG, orchestrator creates as PENDING, promotes to READY when deps met.
+    status: TaskStatus = Field(default=TaskStatus.READY, description="Current task status")
 
     # Data fields (Database-specific)
     result_data: Optional[Dict[str, Any]] = Field(default=None, description="Task execution results")
@@ -78,19 +77,23 @@ class TaskRecord(TaskData):
     next_stage_params: Optional[Dict[str, Any]] = Field(default=None, description="Parameters for next stage")
 
     # Checkpoint tracking (11 JAN 2026 - Docker worker resume support)
-    # Enables resume from checkpoint if Docker task is interrupted
     checkpoint_phase: Optional[int] = Field(default=None, description="Current checkpoint phase number")
     checkpoint_data: Optional[Dict[str, Any]] = Field(default=None, description="Checkpoint state data (JSONB)")
     checkpoint_updated_at: Optional[datetime] = Field(default=None, description="When checkpoint was last saved")
 
-    # Multi-app tracking (07 DEC 2025 - Multi-Function App Architecture)
-    target_queue: Optional[str] = Field(
+    # Worker tracking (15 MAR 2026 - DB-polling migration)
+    claimed_by: Optional[str] = Field(
         default=None,
-        description="Service Bus queue task was routed to (raster-tasks, vector-tasks, etc)"
+        max_length=200,
+        description="Worker identity (hostname:pid) that claimed this task"
+    )
+    execute_after: Optional[datetime] = Field(
+        default=None,
+        description="Earliest time this task can be claimed (retry backoff)"
     )
     executed_by_app: Optional[str] = Field(
         default=None,
-        description="APP_NAME of the Function App that processed this task"
+        description="APP_NAME of the app instance that processed this task"
     )
     execution_started_at: Optional[datetime] = Field(
         default=None,
@@ -103,15 +106,16 @@ class TaskRecord(TaskData):
 
     def can_transition_to(self, new_status: TaskStatus) -> bool:
         """
-        Validate task status transitions.
+        Validate task status transitions (DAG-standard lifecycle).
 
-        Tasks follow linear progression (no cycling):
-        - PENDING → QUEUED (trigger confirms message receipt) [16 DEC 2025]
-        - QUEUED → PROCESSING → COMPLETED/FAILED
-        - Terminal states → Any (retry/recovery)
+        15 MAR 2026: DB-polling migration — aligned with DAG executor standards.
 
-        Unlike jobs, tasks don't cycle between states. Each task executes once
-        per stage, following a simple linear lifecycle.
+        State machine:
+            PENDING → READY → PROCESSING → COMPLETED
+            PENDING → SKIPPED (when: condition false)
+            PROCESSING → FAILED → PENDING_RETRY → READY (retry loop)
+            PROCESSING → PENDING (janitor reset of stuck tasks)
+            CANCELLED from any non-terminal state
 
         Args:
             new_status: The proposed new status
@@ -120,34 +124,20 @@ class TaskRecord(TaskData):
             True if transition is valid, False otherwise
 
         Examples:
-            Normal task lifecycle (16 DEC 2025):
-            PENDING → QUEUED → PROCESSING → COMPLETED
+            Normal lifecycle:
+            READY → PROCESSING → COMPLETED
+
+            DAG with dependencies (V11):
+            PENDING → READY → PROCESSING → COMPLETED
 
             Failed task with retry:
-            PENDING → QUEUED → PROCESSING → FAILED → QUEUED → PROCESSING → COMPLETED
+            READY → PROCESSING → FAILED → PENDING_RETRY → READY → PROCESSING → COMPLETED
         """
+        from core.logic.transitions import can_task_transition
+
         # Normalize current status to enum (handles string values from database)
         current = TaskStatus(self.status) if isinstance(self.status, str) else self.status
-
-        # 16 DEC 2025: PENDING transitions (message confirmation)
-        if current == TaskStatus.PENDING and new_status in [
-            TaskStatus.QUEUED, TaskStatus.FAILED, TaskStatus.CANCELLED
-        ]:
-            return True
-
-        # Standard task lifecycle
-        if current == TaskStatus.QUEUED and new_status == TaskStatus.PROCESSING:
-            return True
-        if current == TaskStatus.PROCESSING and new_status in [
-            TaskStatus.COMPLETED, TaskStatus.FAILED
-        ]:
-            return True
-
-        # Allow retry transitions from terminal states
-        if current in [TaskStatus.COMPLETED, TaskStatus.FAILED]:
-            return True  # Can restart from terminal states
-
-        return False
+        return can_task_transition(current, new_status)
 
 
 class TaskDefinition(BaseModel):

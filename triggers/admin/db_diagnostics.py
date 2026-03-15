@@ -436,7 +436,7 @@ class AdminDbDiagnosticsTrigger:
                     'sql_commands': [
                         f"SET search_path TO {self.config.app_schema}, public;",
                         f"CREATE TYPE {self.config.app_schema}.job_status AS ENUM ('queued', 'processing', 'completed', 'failed');",
-                        f"CREATE TYPE {self.config.app_schema}.task_status AS ENUM ('queued', 'processing', 'completed', 'failed', 'retrying');"
+                        f"CREATE TYPE {self.config.app_schema}.task_status AS ENUM ('pending', 'ready', 'processing', 'completed', 'failed', 'pending_retry', 'skipped', 'cancelled');"
                     ]
                 },
                 'timestamp': datetime.now(timezone.utc).isoformat()
@@ -888,7 +888,7 @@ class AdminDbDiagnosticsTrigger:
                         "total": len(task_rows),
                         "completed": len([t for t in task_rows if t["status"] == "completed"]),
                         "failed": len([t for t in task_rows if t["status"] == "failed"]),
-                        "pending": len([t for t in task_rows if t["status"] in ("queued", "processing")]),
+                        "pending": len([t for t in task_rows if t["status"] in ("pending", "ready", "processing")]),
                     }
 
             lineage["timestamp"] = datetime.now(timezone.utc).isoformat()

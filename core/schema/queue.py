@@ -198,6 +198,27 @@ class TaskQueueMessage(TaskData):
 
     model_config = ConfigDict(validate_assignment=True)
 
+    @classmethod
+    def from_task_record(cls, record) -> 'TaskQueueMessage':
+        """
+        Construct a TaskQueueMessage from a database TaskRecord.
+
+        Used by DB-polling workers to produce the same message contract
+        that CoreMachine.process_task_message() expects.
+        """
+        return cls(
+            task_id=record.task_id,
+            parent_job_id=record.parent_job_id,
+            job_type=record.job_type,
+            task_type=record.task_type,
+            stage=record.stage,
+            task_index=record.task_index,
+            parameters=record.parameters,
+            retry_count=record.retry_count,
+            parent_task_id=None,
+            timestamp=record.created_at,
+        )
+
 
 # Export all public classes
 __all__ = [

@@ -2,9 +2,10 @@
 # DOCKER HEALTH - Shared Infrastructure Subsystem
 # ============================================================================
 # EPOCH: 4 - ACTIVE
-# STATUS: Health Subsystem - Database, Storage, Service Bus
+# STATUS: Health Subsystem - Database, Storage, Task Polling
 # PURPOSE: Health checks for Docker Worker shared infrastructure
 # CREATED: 29 JAN 2026
+# LAST_REVIEWED: 15 MAR 2026
 # EXPORTS: SharedInfrastructureSubsystem
 # DEPENDENCIES: base.WorkerSubsystem, config, psycopg
 # ============================================================================
@@ -14,9 +15,12 @@ Shared Infrastructure Health Subsystem.
 Monitors infrastructure components used by the Docker Worker:
 - database: PostgreSQL connectivity and authentication
 - storage_containers: Azure Blob Storage access
-- service_bus: Azure Service Bus connectivity
+- task_polling: DB-polling queue worker status
 
 These checks run once and are shared across all worker types.
+
+15 MAR 2026: Replaced Service Bus health check with task polling check.
+Docker worker now claims tasks via PostgreSQL SKIP LOCKED instead of SB.
 """
 
 from typing import Dict, Any
@@ -31,11 +35,11 @@ class SharedInfrastructureSubsystem(WorkerSubsystem):
     Components:
     - database: PostgreSQL connection and version
     - storage_containers: Azure Blob Storage access
-    - service_bus: Azure Service Bus queue connectivity
+    - task_polling: DB-polling task worker status
     """
 
     name = "shared_infrastructure"
-    description = "Database, Storage, and Service Bus (shared by all workers)"
+    description = "Database, Storage, and Task Polling (shared by all workers)"
     priority = 10  # Run first - other subsystems depend on these
 
     def __init__(self, queue_worker=None):
@@ -68,11 +72,11 @@ class SharedInfrastructureSubsystem(WorkerSubsystem):
         if storage_result["status"] == "unhealthy":
             errors.append(storage_result.get("details", {}).get("error", "Storage unhealthy"))
 
-        # Check service bus
-        sb_result = self._check_service_bus()
-        components["service_bus"] = sb_result
-        if sb_result["status"] == "unhealthy":
-            errors.append("Service Bus unhealthy")
+        # Check task polling (DB-based, replaces Service Bus)
+        poll_result = self._check_task_polling()
+        components["task_polling"] = poll_result
+        if poll_result["status"] == "unhealthy":
+            errors.append("Task polling unhealthy")
 
         return {
             "status": self.compute_status(components),
@@ -140,28 +144,21 @@ class SharedInfrastructureSubsystem(WorkerSubsystem):
                 details={"error": str(e)}
             )
 
-    def _check_service_bus(self) -> Dict[str, Any]:
-        """Check Azure Service Bus connectivity."""
-        from config import get_config
-
-        config = get_config()
-
+    def _check_task_polling(self) -> Dict[str, Any]:
+        """Check DB-polling task worker status."""
         queue_running = False
-        queue_name = "N/A"
 
         if self.queue_worker:
             queue_status = self.queue_worker.get_status()
             queue_running = queue_status.get("running", False)
-            queue_name = queue_status.get("queue_name", "N/A")
 
         return self.build_component(
             status="healthy" if queue_running else "warning",
-            description="Azure Service Bus queues",
-            source="function_app",  # Shared but owned by Function App
+            description="PostgreSQL SKIP LOCKED task polling",
+            source="docker_worker",
             details={
-                "namespace": config.queues.namespace,
-                "long_running_queue": queue_name,
-                "worker_connected": queue_running,
+                "mode": "db_polling",
+                "worker_running": queue_running,
             }
         )
 

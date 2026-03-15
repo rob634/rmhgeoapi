@@ -1,13 +1,24 @@
 # ============================================================================
 # SERVICE BUS TASK HANDLER
 # ============================================================================
-# STATUS: Trigger layer - Task queue message processing
+# STATUS: DEPRECATED (15 MAR 2026) - DB-polling via SKIP LOCKED replaces SB task dispatch
 # PURPOSE: Handle messages from functionapp-tasks and container-tasks queues (V0.8)
 # CREATED: 23 JAN 2026
 # EPIC: APP_CLEANUP - Phase 2 Service Bus Handler Extraction
 # ============================================================================
+# DEPRECATION NOTE (15 MAR 2026):
+# Tasks are now created as READY and polled via PostgreSQL SKIP LOCKED.
+# The container-tasks Service Bus queue is no longer used for task dispatch.
+# The _confirm_task_queued() PENDING->QUEUED flow is dead code — tasks
+# transition PENDING->READY at creation time, not via SB confirmation.
+# This module is retained for the geospatial-jobs queue handler and
+# error_handler integration. Remove entirely when SB is fully retired.
+# ============================================================================
 """
 Task Queue Message Handler Module.
+
+DEPRECATED (15 MAR 2026): container-tasks queue replaced by DB-polling (SKIP LOCKED).
+The _confirm_task_queued() flow is dead code. Retained for geospatial-jobs queue.
 
 Handles messages from the functionapp-tasks and container-tasks Service Bus queues.
 Shared logic for both task types with queue-specific logging.
@@ -19,7 +30,7 @@ V0.8 Queue Architecture (24 JAN 2026):
 Task Processing Flow:
     1. Log message receipt (GAP-1 fix)
     2. Parse TaskQueueMessage
-    3. Update status: PENDING -> QUEUED
+    3. Update status: PENDING -> QUEUED  [DEAD CODE — tasks are now created as READY]
     4. Process via CoreMachine
     5. Log results and stage completion
 
@@ -166,6 +177,12 @@ def _confirm_task_queued(
     task_repo=None
 ) -> None:
     """
+    DEPRECATED (15 MAR 2026): Dead code — QUEUED status removed from TaskStatus enum.
+    Tasks are now created as READY via DB-polling (SKIP LOCKED). This function
+    will fail at runtime because TaskStatus.QUEUED no longer exists.
+    Retained for reference until Service Bus task dispatch is fully removed.
+
+    Original purpose:
     Update task status from PENDING to QUEUED.
 
     This confirms the message was received by the trigger, providing

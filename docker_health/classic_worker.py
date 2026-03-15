@@ -2,21 +2,23 @@
 # DOCKER HEALTH - Classic Worker Subsystem
 # ============================================================================
 # EPOCH: 4 - ACTIVE
-# STATUS: Health Subsystem - Queue-based job processing (existing system)
-# PURPOSE: Health checks for the existing Service Bus queue worker
+# STATUS: Health Subsystem - DB-polling job processing
+# PURPOSE: Health checks for the DB-polling queue worker
 # CREATED: 29 JAN 2026
+# LAST_REVIEWED: 15 MAR 2026
 # EXPORTS: ClassicWorkerSubsystem
 # DEPENDENCIES: base.WorkerSubsystem
 # ============================================================================
 """
 Classic Worker Health Subsystem.
 
-Monitors the existing queue-based job processing system:
-- queue_worker: Service Bus long-running-tasks consumer
+Monitors the DB-polling job processing system:
+- queue_worker: PostgreSQL SKIP LOCKED task consumer
 - auth_tokens: OAuth tokens for PostgreSQL and Storage
 - connection_pool: PostgreSQL connection pool
 - lifecycle: Graceful shutdown and signal handling
 
+15 MAR 2026: Updated from Service Bus to DB-polling model.
 """
 
 from typing import Dict, Any
@@ -26,13 +28,13 @@ from .base import WorkerSubsystem
 
 class ClassicWorkerSubsystem(WorkerSubsystem):
     """
-    Health checks for classic queue-based job processing.
+    Health checks for DB-polling job processing.
 
-    This subsystem monitors the existing Service Bus queue worker that
-    processes tasks from the container-tasks queue.
+    This subsystem monitors the queue worker that claims tasks from
+    PostgreSQL via SKIP LOCKED.
 
     Components:
-    - queue_worker: Service Bus consumer thread status
+    - queue_worker: DB-polling consumer thread status
     - auth_tokens: OAuth token status and refresh worker
     - connection_pool: PostgreSQL connection pool stats
     - lifecycle: Graceful shutdown coordination
@@ -106,11 +108,11 @@ class ClassicWorkerSubsystem(WorkerSubsystem):
         return result
 
     def _check_queue_worker(self) -> Dict[str, Any]:
-        """Check Service Bus queue worker status."""
+        """Check DB-polling queue worker status."""
         if not self.queue_worker:
             return self.build_component(
                 status="disabled",
-                description="Service Bus long-running-tasks consumer",
+                description="DB-polling task consumer",
                 details={"note": "Queue worker not initialized"}
             )
 
@@ -129,9 +131,8 @@ class ClassicWorkerSubsystem(WorkerSubsystem):
 
         return self.build_component(
             status=status,
-            description="Service Bus long-running-tasks consumer",
+            description="DB-polling task consumer (SKIP LOCKED)",
             details={
-                "queue_name": queue_status.get("queue_name", "N/A"),
                 "running": queue_running,
                 "healthy": self.queue_worker.is_healthy(),
                 "init_failed": queue_init_failed,

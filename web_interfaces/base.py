@@ -81,6 +81,8 @@ class BaseInterface(ABC):
             /* Status colors */
             --ds-status-queued-bg: #f3f4f6;
             --ds-status-queued-fg: #6b7280;
+            --ds-status-ready-bg: #e0f2fe;
+            --ds-status-ready-fg: #0284c7;
             --ds-status-pending-bg: #fef3c7;
             --ds-status-pending-fg: #d97706;
             --ds-status-processing-bg: #dbeafe;
@@ -89,6 +91,12 @@ class BaseInterface(ABC):
             --ds-status-completed-fg: #059669;
             --ds-status-failed-bg: #fee2e2;
             --ds-status-failed-fg: #dc2626;
+            --ds-status-skipped-bg: #f3f4f6;
+            --ds-status-skipped-fg: #9ca3af;
+            --ds-status-pending-retry-bg: #fff7ed;
+            --ds-status-pending-retry-fg: #c2410c;
+            --ds-status-cancelled-bg: #f3f4f6;
+            --ds-status-cancelled-fg: #6b7280;
             /* V0.9 Approval state colors */
             --ds-approval-pending-bg: #fef3c7;
             --ds-approval-pending-fg: #92400e;
@@ -238,10 +246,34 @@ class BaseInterface(ABC):
             color: var(--ds-status-queued-fg);
         }
 
+        .status-badge.status-ready,
+        .status-ready {
+            background: var(--ds-status-ready-bg);
+            color: var(--ds-status-ready-fg);
+        }
+
         .status-badge.status-pending,
         .status-pending {
             background: var(--ds-status-pending-bg);
             color: var(--ds-status-pending-fg);
+        }
+
+        .status-badge.status-pending_retry,
+        .status-pending_retry {
+            background: var(--ds-status-pending-retry-bg);
+            color: var(--ds-status-pending-retry-fg);
+        }
+
+        .status-badge.status-skipped,
+        .status-skipped {
+            background: var(--ds-status-skipped-bg);
+            color: var(--ds-status-skipped-fg);
+        }
+
+        .status-badge.status-cancelled,
+        .status-cancelled {
+            background: var(--ds-status-cancelled-bg);
+            color: var(--ds-status-cancelled-fg);
         }
 
         .status-badge.status-processing,

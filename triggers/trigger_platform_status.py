@@ -273,7 +273,7 @@ def _get_task_summary(
             "failed": 0,
             "processing": 1,
             "pending": 0,
-            "queued": 0,
+            "ready": 0,
             "by_stage": {
                 "1": {"total": 3, "completed": 3, "task_types": ["handler_raster_validate"]},
                 "2": {"total": 2, "completed": 1, "processing": 1, "task_types": ["handler_raster_create_cog"]}
@@ -291,7 +291,7 @@ def _get_task_summary(
                 "failed": 0,
                 "processing": 0,
                 "pending": 0,
-                "queued": 0,
+                "ready": 0,
                 "by_stage": {}
             }
 
@@ -302,7 +302,7 @@ def _get_task_summary(
             "failed": 0,
             "processing": 0,
             "pending": 0,
-            "queued": 0
+            "ready": 0
         }
 
         # Group by stage
@@ -321,8 +321,8 @@ def _get_task_summary(
                 status_counts["processing"] += 1
             elif status == "pending":
                 status_counts["pending"] += 1
-            elif status == "queued":
-                status_counts["queued"] += 1
+            elif status == "ready":
+                status_counts["ready"] += 1
 
             # Update stage counts
             stage_key = str(task.stage)
@@ -333,7 +333,7 @@ def _get_task_summary(
                     "failed": 0,
                     "processing": 0,
                     "pending": 0,
-                    "queued": 0,
+                    "ready": 0,
                     "task_types": set()
                 }
 
@@ -348,8 +348,8 @@ def _get_task_summary(
                 by_stage[stage_key]["processing"] += 1
             elif status == "pending":
                 by_stage[stage_key]["pending"] += 1
-            elif status == "queued":
-                by_stage[stage_key]["queued"] += 1
+            elif status == "ready":
+                by_stage[stage_key]["ready"] += 1
 
         # Convert task_types sets to lists and remove zero counts
         for stage_key in by_stage:

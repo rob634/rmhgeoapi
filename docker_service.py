@@ -1,31 +1,33 @@
 #!/usr/bin/env python3
 # ============================================================================
-# CLAUDE CONTEXT - DOCKER SERVICE (HTTP + Queue Worker)
+# CLAUDE CONTEXT - DOCKER SERVICE (HTTP + DB-Polling Worker)
 # ============================================================================
-# STATUS: Core Component - Docker container with HTTP API and queue processing
-# PURPOSE: Health checks + Service Bus queue polling for container-tasks (V0.8)
-# LAST_REVIEWED: 16 JAN 2026
-# F7.18: Added DockerWorkerLifecycle, graceful shutdown, shared shutdown event
+# STATUS: Core Component - Docker container with HTTP API and DB-polling worker
+# PURPOSE: Health checks + PostgreSQL SKIP LOCKED task claiming
+# LAST_REVIEWED: 15 MAR 2026
+# F7.18: DockerWorkerLifecycle, graceful shutdown, shared shutdown event
+# DB-POLL: 15 MAR 2026 - Replaced Service Bus polling with PostgreSQL SKIP LOCKED
 # ============================================================================
 """
-Docker Service - HTTP API + Background Queue Worker.
+Docker Service - HTTP API + Background DB-Polling Worker.
 
 This module runs:
     1. FastAPI HTTP server (for health checks and diagnostics)
-    2. Background thread polling Service Bus queue for long-running tasks
+    2. Background thread claiming tasks from PostgreSQL via SKIP LOCKED
 
 The queue worker uses CoreMachine.process_task_message() - identical to how
-Azure Functions process tasks. The only difference is the trigger mechanism.
+Azure Functions process tasks. The only difference is the trigger mechanism:
+DB polling with SKIP LOCKED instead of Service Bus queue.
 
 HTTP Endpoints:
     /livez       - Liveness probe (is the process running?)
     /readyz      - Readiness probe (can we serve traffic?)
-    /health      - Detailed health (token status, connectivity, queue status)
+    /health      - Detailed health (token status, connectivity, worker status)
     /queue/status - Queue worker status
 
 Background Services:
     - Token refresh thread (PostgreSQL + Storage OAuth every 45 min)
-    - Queue polling thread (polls container-tasks queue)
+    - DB-polling thread (claims READY tasks via SKIP LOCKED)
 
 Usage:
     # Start the server (includes background queue worker)
@@ -173,27 +175,22 @@ def configure_docker_logging():
     logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
     logging.getLogger("azure.storage").setLevel(logging.WARNING)
     logging.getLogger("azure.core").setLevel(logging.WARNING)
-    logging.getLogger("azure.servicebus").setLevel(logging.WARNING)
-    logging.getLogger("azure.servicebus._pyamqp").setLevel(logging.WARNING)
     logging.getLogger("azure.monitor.opentelemetry").setLevel(logging.WARNING)
     logging.getLogger("msal").setLevel(logging.WARNING)
 
 
 configure_docker_logging()
 
-import json
 import logging
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-# Azure Service Bus imports for queue polling
-from azure.servicebus import ServiceBusClient, ServiceBusReceiver, ServiceBusReceivedMessage, AutoLockRenewer
-from azure.servicebus.exceptions import (
-    ServiceBusError,
-    ServiceBusConnectionError,
-    OperationTimeoutError,
-)
+import socket
+
+from core.schema.queue import TaskQueueMessage
+from core.models.task import TaskRecord
+
 logger = logging.getLogger(__name__)
 
 
@@ -408,25 +405,27 @@ class TokenRefreshWorker:
 
 
 # ============================================================================
-# BACKGROUND QUEUE WORKER (Service Bus Polling)
+# BACKGROUND QUEUE WORKER (DB Polling via SKIP LOCKED)
 # ============================================================================
 
 class BackgroundQueueWorker:
     """
-    Background worker that polls Service Bus queue in a separate thread.
+    Background worker that claims tasks from PostgreSQL via SKIP LOCKED.
 
     This runs alongside the FastAPI HTTP server, allowing Azure Web App
-    to receive health checks while processing queue messages.
+    to receive health checks while processing tasks.
 
     The worker uses CoreMachine.process_task_message() - identical to how
     Azure Functions process tasks. The only difference is the trigger
-    mechanism (polling vs Function trigger).
+    mechanism (DB polling with SKIP LOCKED).
 
     F7.18: Supports shared shutdown event for graceful shutdown coordination.
     When shutdown is signaled:
-    - Stops accepting new messages
+    - Stops claiming new tasks
     - Allows in-flight task to complete (with checkpoint support)
-    - Abandons queued messages for retry
+    - Releases claimed-but-unprocessed tasks back to READY
+
+    15 MAR 2026: Replaced Service Bus polling with PostgreSQL SKIP LOCKED.
     """
 
     def __init__(self, shutdown_event: Optional[threading.Event] = None):
@@ -434,25 +433,23 @@ class BackgroundQueueWorker:
         # Use shared shutdown event if provided, otherwise create own
         self._stop_event = shutdown_event if shutdown_event else threading.Event()
         self._uses_shared_event = shutdown_event is not None
-        self._sb_client: Optional[ServiceBusClient] = None
         self._is_running = False
         self._messages_processed = 0
         self._last_poll_time: Optional[datetime] = None
         self._last_error: Optional[str] = None
         self._started_at: Optional[datetime] = None
+        self._worker_id: Optional[str] = None
 
         # Initialization failure tracking (29 JAN 2026)
-        # If init fails (e.g., no Service Bus config), the worker is broken
         self._init_failed = False
         self._init_error: Optional[str] = None
 
         # Lazy-load config to avoid import issues at module load time
         self._config = None
-        self._queue_name = None
         self._core_machine = None
 
         # Processing settings
-        self.max_wait_time_seconds = 30  # Long poll
+        self.poll_interval_seconds = 5   # Seconds between polls when idle
         self.poll_interval_on_error = 5  # Seconds to wait after error
 
     def _ensure_initialized(self):
@@ -460,7 +457,6 @@ class BackgroundQueueWorker:
         if self._config is None:
             from config import get_config
             self._config = get_config()
-            self._queue_name = self._config.queues.container_tasks_queue
 
         if self._core_machine is None:
             from core.machine_factory import create_core_machine
@@ -468,26 +464,18 @@ class BackgroundQueueWorker:
             from services import ALL_HANDLERS
             self._core_machine = create_core_machine(ALL_JOBS, ALL_HANDLERS)
 
-    def _get_sb_client(self) -> ServiceBusClient:
-        """
-        Get or create Service Bus client.
+    def _claim_next_task(self) -> Optional[TaskRecord]:
+        """Claim one task via SKIP LOCKED."""
+        task_repo = self._core_machine.repos.get('task_repo')
+        return task_repo.claim_ready_task(worker_id=self._worker_id)
 
-        Authentication Priority (Identity-First):
-            1. Managed Identity via SERVICE_BUS_FQDN (preferred, production)
-            2. Connection string via ServiceBusConnection (local dev only)
-
-        Required RBAC Roles (on Service Bus namespace):
-            - Azure Service Bus Data Sender
-            - Azure Service Bus Data Receiver
-        """
-        if self._sb_client is None:
-            self._ensure_initialized()
-
-            from infrastructure.service_bus import ServiceBusRepository
-            sb_repo = ServiceBusRepository.instance()
-            self._sb_client = sb_repo.client
-
-        return self._sb_client
+    def _release_task(self, task_id: str):
+        """Release a claimed task back to READY."""
+        try:
+            task_repo = self._core_machine.repos.get('task_repo')
+            task_repo.release_task(task_id)
+        except Exception as e:
+            logger.warning(f"[Queue Worker] Failed to release task {task_id}: {e}")
 
     def _ensure_fresh_tokens(self):
         """
@@ -517,320 +505,85 @@ class BackgroundQueueWorker:
         except Exception as e:
             logger.error(f"[Token] Pre-task refresh FAILED: {e}")
 
-    def _process_message(
-        self,
-        message: ServiceBusReceivedMessage,
-        receiver: ServiceBusReceiver
-    ) -> bool:
-        """Process a single message via CoreMachine with Docker context."""
-        from core.schema.queue import TaskQueueMessage
+    def _process_task(self, task_message: TaskQueueMessage) -> bool:
+        """Process a claimed task via CoreMachine."""
         from core.docker_context import create_docker_context
-        from infrastructure import RepositoryFactory
 
-        start_time = time.time()
-        task_id = "unknown"
+        task_repo = self._core_machine.repos.get('task_repo')
+
+        # Ensure tokens are fresh before any DB work (03 MAR 2026)
+        self._ensure_fresh_tokens()
+
+        docker_context = create_docker_context(
+            task_id=task_message.task_id,
+            job_id=task_message.parent_job_id,
+            job_type=task_message.job_type,
+            stage=task_message.stage,
+            shutdown_event=self._stop_event,
+            task_repo=task_repo,
+            auto_start_pulse=True,
+            enable_memory_watchdog=True,
+            memory_threshold_percent=80,
+        )
 
         try:
-            # Ensure tokens are fresh before any DB work (03 MAR 2026)
-            self._ensure_fresh_tokens()
-
-            message_body = str(message)
-            task_data = json.loads(message_body)
-            task_message = TaskQueueMessage(**task_data)
-            task_id = task_message.task_id
-
-            logger.info("=" * 50)
-            logger.info(f"[Queue] 📥 MESSAGE RECEIVED")
-            logger.info(f"  Task ID: {task_id}")
-            logger.info(f"  Task Type: {task_message.task_type}")
-            logger.info(f"  Job ID: {task_message.parent_job_id}")
-            logger.info(f"  Job Type: {task_message.job_type}")
-            logger.info(f"  Stage: {task_message.stage}")
-            logger.info("=" * 50)
-
-            # Create Docker context with checkpoint, shutdown awareness, pulse, and memory watchdog
-            # (F7.18, 22 JAN 2026; Memory watchdog added 24 JAN 2026)
-            # - Pulse: updates last_pulse every 60s for liveness tracking
-            # - Memory watchdog: triggers graceful shutdown before OOM kill (80% threshold)
-            task_repo = RepositoryFactory.create_task_repository()
-            docker_context = create_docker_context(
-                task_id=task_message.task_id,
-                job_id=task_message.parent_job_id,
-                job_type=task_message.job_type,
-                stage=task_message.stage,
-                shutdown_event=self._stop_event,
-                task_repo=task_repo,
-                auto_start_pulse=True,           # Start pulse immediately
-                enable_memory_watchdog=True,     # Prevent OOM kills (24 JAN 2026)
-                memory_threshold_percent=80,     # Trigger shutdown at 80% memory usage
+            result = self._core_machine.process_task_message(
+                task_message,
+                docker_context=docker_context
             )
-
-            # Log checkpoint state if resuming
-            if docker_context.checkpoint.current_phase > 0:
-                logger.info(
-                    f"[Queue] 🔄 RESUMING from checkpoint phase {docker_context.checkpoint.current_phase}"
-                )
-
-            logger.info(f"[Queue] ▶️ Starting task execution...")
-
-            try:
-                # Process via CoreMachine with Docker context
-                result = self._core_machine.process_task_message(
-                    task_message,
-                    docker_context=docker_context
-                )
-            finally:
-                # Always stop pulse and memory watchdog when task processing ends
-                # (22 JAN 2026 - pulse; 24 JAN 2026 - memory watchdog)
-                docker_context.stop_pulse()
-                docker_context.stop_memory_watchdog()
-
-            elapsed = time.time() - start_time
 
             if result.get('success'):
                 if result.get('interrupted'):
-                    # Graceful shutdown - abandon message so another instance can resume
-                    # Checkpoint was saved, delivery_count increments, message becomes visible
-                    oom_abort = docker_context.oom_abort_requested
-                    reason = "MEMORY PRESSURE (OOM prevention)" if oom_abort else "graceful shutdown"
-                    emoji = "🧠🛑" if oom_abort else "🛑"
-
-                    logger.warning("=" * 50)
-                    logger.warning(f"[Queue] {emoji} TASK INTERRUPTED ({reason})")
-                    logger.warning(f"  Task ID: {task_id[:16]}...")
-                    logger.warning(f"  Phase completed: {result.get('phase_completed', '?')}")
-                    logger.warning(f"  Elapsed: {elapsed:.2f}s")
-                    logger.warning(f"  Pulses sent: {docker_context.pulse_count}")
-
-                    # Log memory stats if available (24 JAN 2026)
-                    mem_stats = docker_context.memory_watchdog_stats
-                    if mem_stats:
-                        logger.warning(
-                            f"  Memory: peak={mem_stats['peak_gb']:.2f}GB / "
-                            f"limit={mem_stats['limit_gb']:.1f}GB "
-                            f"({mem_stats['peak_gb']/mem_stats['limit_gb']*100:.1f}%)"
-                        )
-
-                    logger.warning(f"  Action: ABANDONING message for resume by another instance")
-                    logger.warning("=" * 50)
-                    receiver.abandon_message(message)
-                    return True  # Not an error, just interrupted
-                else:
-                    # Fully complete
-                    logger.info("=" * 50)
-                    logger.info(f"[Queue] ✅ TASK COMPLETED")
-                    logger.info(f"  Task ID: {task_id[:16]}...")
-                    logger.info(f"  Elapsed: {elapsed:.2f}s")
-                    logger.info(f"  Pulses sent: {docker_context.pulse_count}")
-
-                    # Log memory stats if available (24 JAN 2026)
-                    mem_stats = docker_context.memory_watchdog_stats
-                    if mem_stats:
-                        logger.info(
-                            f"  Memory: peak={mem_stats['peak_gb']:.2f}GB / "
-                            f"limit={mem_stats['limit_gb']:.1f}GB "
-                            f"({mem_stats['peak_gb']/mem_stats['limit_gb']*100:.1f}%)"
-                        )
-
-                    logger.info(f"  Action: Message COMPLETED (removed from queue)")
-                    logger.info("=" * 50)
-                    receiver.complete_message(message)
-                    self._messages_processed += 1
-
-                    if result.get('stage_complete'):
-                        logger.info(
-                            f"[Queue] 🏁 Stage {task_message.stage} complete for job "
-                            f"{task_message.parent_job_id[:16]}... - advancing to next stage"
-                        )
+                    self._release_task(task_message.task_id)
+                    logger.info(f"[Queue Worker] Task {task_message.task_id} released (interrupted)")
+                self._messages_processed += 1
                 return True
             else:
-                error = result.get('error', 'Unknown error')
-                logger.error("=" * 50)
-                logger.error(f"[Queue] ❌ TASK FAILED")
-                logger.error(f"  Task ID: {task_id[:16]}...")
-                logger.error(f"  Error: {error}")
-                logger.error(f"  Elapsed: {elapsed:.2f}s")
-                logger.error(f"  Pulses sent: {docker_context.pulse_count}")
-                logger.error(f"  Action: Message DEAD-LETTERED")
-                logger.error("=" * 50)
-                receiver.dead_letter_message(
-                    message,
-                    reason="TaskFailed",
-                    error_description=str(error)[:1024]
-                )
+                # CoreMachine already marked FAILED
                 return False
 
-        except json.JSONDecodeError as e:
-            logger.error(f"[Queue] Invalid JSON: {e}")
-            receiver.dead_letter_message(message, reason="JSONDecodeError", error_description=str(e))
-            return False
-
         except Exception as e:
-            elapsed = time.time() - start_time
-            logger.exception(f"[Queue] Exception processing {task_id[:16]}... after {elapsed:.2f}s")
-            try:
-                receiver.abandon_message(message)
-            except Exception:
-                pass
+            logger.error(f"[Queue Worker] Unhandled error processing {task_message.task_id}: {e}")
             return False
+        finally:
+            docker_context.stop_pulse()
+            docker_context.stop_memory_watchdog()
 
     def _run_loop(self):
-        """Main polling loop (runs in background thread)."""
+        """Main DB-polling loop (runs in background thread)."""
         self._ensure_initialized()
-        logger.info(f"[Queue Worker] Starting on queue: {self._queue_name}")
+        self._worker_id = f"{socket.gethostname()}:{os.getpid()}"
+        logger.info(f"[Queue Worker] Starting DB-polling loop (worker_id={self._worker_id})")
         self._is_running = True
         self._started_at = datetime.now(timezone.utc)
 
-        try:
-            client = self._get_sb_client()
-        except Exception as e:
-            error_msg = str(e)
-            self._last_error = error_msg
-            self._init_failed = True
-            self._init_error = error_msg
-            logger.error("=" * 60)
-            logger.error("🚨 QUEUE WORKER INITIALIZATION FAILED")
-            logger.error("=" * 60)
-            logger.error(f"  Error: {error_msg}")
-            logger.error("")
-            logger.error("  This worker CANNOT process tasks!")
-            logger.error("  /readyz will report NOT READY")
-            logger.error("")
-            logger.error("  To fix: Configure Service Bus connection")
-            logger.error("  Set SERVICE_BUS_FQDN (preferred) or ServiceBusConnection")
-            logger.error("=" * 60)
-            self._is_running = False
-            return
-
-        # Create AutoLockRenewer for long-running tasks (up to 2 hours)
-        # This prevents competing consumers during lengthy COG processing
-        # NOTE: We use MANUAL registration (not auto_lock_renewer param) for explicit control
-        #
-        # Lock Renewal Logging (25 JAN 2026):
-        # - on_lock_renew_failure callback logs when renewal fails
-        # - Failure usually means message was already completed/abandoned or network issue
-        lock_renewal_count = [0]  # Mutable counter for closure
-
-        def on_lock_renew_failure(
-            renewable: ServiceBusReceivedMessage,
-            error: Exception
-        ) -> None:
-            """Callback when lock renewal fails."""
-            lock_renewal_count[0] += 1
-            logger.error(
-                f"🔒❌ LOCK RENEWAL FAILED (attempt #{lock_renewal_count[0]}): {error}"
-            )
-            # Log message details if available
-            try:
-                logger.error(f"   Message ID: {renewable.message_id}")
-                logger.error(f"   Lock expiry was: {renewable.locked_until_utc}")
-            except Exception:
-                pass
-
-        lock_renewer = AutoLockRenewer(
-            max_lock_renewal_duration=7200,  # 2 hours in seconds
-            on_lock_renew_failure=on_lock_renew_failure
-        )
-        logger.info("[Queue Worker] AutoLockRenewer initialized (max_duration=2h, manual registration, with failure callback)")
-
-        logger.info("[Queue Worker] Entering main polling loop - waiting for messages...")
-
         while not self._stop_event.is_set():
             try:
-                # Don't pass auto_lock_renewer to receiver - use manual registration instead
-                # This provides explicit control over which messages get lock renewal
-                logger.info(f"[Queue Worker] 🔄 Opening receiver for: {self._queue_name}")
-                with client.get_queue_receiver(
-                    queue_name=self._queue_name,
-                    max_wait_time=self.max_wait_time_seconds,
-                ) as receiver:
-                    logger.info(f"[Queue Worker] ✅ Receiver opened, calling receive_messages()...")
+                task_record = self._claim_next_task()
 
+                if task_record is None:
                     self._last_poll_time = datetime.now(timezone.utc)
                     self._last_error = None
+                    self._stop_event.wait(self.poll_interval_seconds)
+                    continue
 
-                    messages = receiver.receive_messages(
-                        max_message_count=1,
-                        max_wait_time=self.max_wait_time_seconds
-                    )
+                self._last_poll_time = datetime.now(timezone.utc)
+                self._last_error = None
 
-                    logger.info(f"[Queue Worker] 📨 receive_messages() returned: {len(messages) if messages else 0} message(s)")
+                if self._stop_event.is_set():
+                    self._release_task(task_record.task_id)
+                    break
 
-                    if not messages:
-                        logger.info("[Queue Worker] ⏳ No messages in queue, will poll again...")
-                        continue
-
-                    for message in messages:
-                        if self._stop_event.is_set():
-                            logger.warning(
-                                "[Queue Worker] 🛑 Shutdown detected BEFORE processing - "
-                                "abandoning message for another instance"
-                            )
-                            receiver.abandon_message(message)
-                            break
-
-                        # MANUAL lock registration - register AFTER receiving, BEFORE processing
-                        # This ensures lock renewal only for messages we're actually processing
-                        lock_renewer.register(receiver, message, max_lock_renewal_duration=7200)
-
-                        # Detailed lock logging (25 JAN 2026)
-                        try:
-                            initial_lock_until = message.locked_until_utc
-                            message_id = message.message_id
-                            logger.info(f"[Queue Worker] 🔒 Lock registered for message")
-                            logger.info(f"   Message ID: {message_id}")
-                            logger.info(f"   Initial lock until: {initial_lock_until}")
-                            logger.info(f"   Auto-renewal: up to 2 hours")
-                            logger.info(f"   Lock renewal interval: ~5 mins (Azure SDK default)")
-                        except Exception as e:
-                            logger.info(f"[Queue Worker] 🔒 Lock registered for message (2h renewal)")
-                            logger.debug(f"   Could not get lock details: {e}")
-
-                        self._process_message(message, receiver)
-
-            except (ServiceBusConnectionError, OperationTimeoutError) as e:
-                self._last_error = f"{type(e).__name__}: {e}"
-                logger.warning(f"[Queue Worker] Transient error: {self._last_error}")
-                if not self._stop_event.is_set():
-                    self._stop_event.wait(self.poll_interval_on_error)
-
-            except ServiceBusError as e:
-                self._last_error = f"{type(e).__name__}: {e}"
-                logger.error(f"[Queue Worker] Service Bus error: {self._last_error}")
-                if not self._stop_event.is_set():
-                    self._stop_event.wait(self.poll_interval_on_error)
+                task_message = TaskQueueMessage.from_task_record(task_record)
+                self._process_task(task_message)
 
             except Exception as e:
-                self._last_error = f"{type(e).__name__}: {e}"
-                logger.exception("[Queue Worker] Unexpected error")
-                if not self._stop_event.is_set():
-                    self._stop_event.wait(self.poll_interval_on_error)
+                self._last_error = str(e)
+                logger.warning(f"[Queue Worker] Poll error: {e}")
+                self._stop_event.wait(self.poll_interval_on_error)
 
-        # Cleanup
-        logger.info("[Queue Worker] 🛑 Exited polling loop - beginning cleanup")
         self._is_running = False
-
-        try:
-            lock_renewer.close()
-            logger.info("[Queue Worker] Lock renewer closed")
-        except Exception as e:
-            logger.warning(f"[Queue Worker] Error closing lock renewer: {e}")
-
-        if self._sb_client:
-            try:
-                self._sb_client.close()
-                logger.info("[Queue Worker] Service Bus client closed")
-            except Exception as e:
-                logger.warning(f"[Queue Worker] Error closing Service Bus client: {e}")
-            self._sb_client = None
-
-        logger.info("=" * 60)
-        logger.info("[Queue Worker] STOPPED")
-        logger.info(f"  Messages processed this session: {self._messages_processed}")
-        if self._started_at:
-            uptime = (datetime.now(timezone.utc) - self._started_at).total_seconds()
-            logger.info(f"  Uptime: {int(uptime // 3600)}h {int((uptime % 3600) // 60)}m {int(uptime % 60)}s")
-        logger.info("=" * 60)
+        logger.info("[Queue Worker] Stopped")
 
     def start(self):
         """Start the background worker thread."""
@@ -859,7 +612,8 @@ class BackgroundQueueWorker:
         """Get current worker status."""
         return {
             "running": self._is_running,
-            "queue_name": self._queue_name,
+            "mode": "db_polling",
+            "worker_id": self._worker_id,
             "messages_processed": self._messages_processed,
             "started_at": self._started_at.isoformat() if self._started_at else None,
             "last_poll_time": self._last_poll_time.isoformat() if self._last_poll_time else None,
@@ -1137,7 +891,7 @@ async def lifespan(app: FastAPI):
     # Start background token refresh
     token_refresh_worker.start()
 
-    # Start background queue worker (polls container-tasks queue)
+    # Start background queue worker (DB-polling via SKIP LOCKED)
     queue_worker.start()
 
     yield
@@ -1298,7 +1052,7 @@ def readiness_probe():
 # ║  HEALTH SUBSYSTEM ARCHITECTURE - 29 JAN 2026 - V0.8.1.1                   ║
 # ║                                                                           ║
 # ║  Subsystems:                                                              ║
-# ║  - SharedInfrastructureSubsystem: Database, Storage, Service Bus          ║
+# ║  - SharedInfrastructureSubsystem: Database, Storage, Task Polling         ║
 # ║  - RuntimeSubsystem: Hardware, GDAL, ETL Mount, Deployment                ║
 # ║  - ClassicWorkerSubsystem: Queue worker, Auth, Lifecycle                  ║
 # ╚═══════════════════════════════════════════════════════════════════════════╝
@@ -1310,7 +1064,7 @@ def health_check():
     Detailed health check endpoint using subsystem architecture.
 
     Returns comprehensive health information from all subsystems:
-    - SharedInfrastructure: Database, Storage, Service Bus
+    - SharedInfrastructure: Database, Storage, Task Polling
     - Runtime: Hardware, GDAL, ETL Mount, Deployment
     - ClassicWorker: Queue worker, Auth tokens, Lifecycle
 
@@ -1837,7 +1591,7 @@ if __name__ == "__main__":
     logger.info("=" * 60)
     logger.info("Background Workers:")
     logger.info("  - Token refresh (every 45 min)")
-    logger.info("  - Queue polling (container-tasks)")
+    logger.info("  - DB-polling (SKIP LOCKED task claiming)")
     logger.info("=" * 60)
 
     uvicorn.run(app, host="0.0.0.0", port=port)

@@ -506,11 +506,20 @@ def get_task_settled_states():
 
 Callers that need "is this task done forever" use `settled`. Callers that need "has this task finished its current attempt" use `terminal`. The guardian uses `terminal` to decide if a task needs recovery.
 
-### 8e. System Guardian Changes
+### 8e. System Guardian Changes — DEFERRED (15 MAR 2026)
+
+**Decision**: Guardian updates are **not blocking** for DB-polling deploy. Deferred to Phase 2 (v0.10.4) when the orchestrator moves to a timer trigger — the guardian runs on the orchestrator, so both changes happen together.
+
+**Why safe to defer**: All guardian phases are fail-open (try/except per phase). After DB-polling deploy:
+- Phases 1a/1b: Dead code — queries for `status='pending'`/`status='queued'` return 0 rows (tasks now created as READY, QUEUED removed from enum). No harm.
+- Phase 1c: Recovery action calls `_send_task_message()` (sends to SB queue workers no longer poll). Broken recovery path, but stale PROCESSING tasks are still caught by Phase 3c ancient stale backstop (6 hours). Acceptable gap.
+- Phase 2: Zombie stage detection has stale `'queued'` string in NOT IN clause — should be `'ready'`. Could cause false positives (detects non-zombie stages). Low risk since READY tasks drain in seconds.
+- Phase 3: `'queued'` in task count filter — cosmetic, affects reporting not recovery.
+- Phase 4: No SB dependency. Works as-is.
 
 **Files**: `services/system_guardian.py`, `infrastructure/guardian_repository.py`
 
-The guardian has SB-dependent phases that must change:
+**When this lands (v0.10.4)**, the changes are:
 
 | Phase | Current | New |
 |-------|---------|-----|
@@ -518,6 +527,9 @@ The guardian has SB-dependent phases that must change:
 | 1b: Orphaned QUEUED tasks | Peeks SB queue, re-sends | **REMOVE** — no queue to peek |
 | 1c: Stale PROCESSING tasks | Marks FAILED | **UPDATE** — check `claimed_by` + `last_pulse`. If worker is dead and retry budget remains, set `PENDING_RETRY` with `execute_after`. If retries exhausted, mark FAILED. |
 | 1d: Stale PROCESSING check | Same as 1c | **MERGE** with 1c |
+| Phase 2 zombie SQL | `'queued'` in NOT IN | **UPDATE** — `'queued'` → `'ready'` |
+| Phase 3 task counts | `'queued'` filter | **UPDATE** — `'queued'` → `'ready'` |
+| `_send_task_message()` | Sends to SB | **REPLACE** with `_reset_task_to_ready()` (~10 lines) |
 | NEW: Retry promotion | N/A | **Not needed** — worker poll query handles PENDING_RETRY directly |
 
 `guardian_repository.py` method `get_orphaned_pending_tasks()` queries `status = 'pending'` — this now means "dependencies not satisfied" (V11 DAG semantics), not "SB message lost." Remove or repurpose for V11.

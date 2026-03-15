@@ -152,7 +152,7 @@ class JobStatusTrigger(JobManagementTrigger):
                 "failed": 0,
                 "processing": 0,
                 "pending": 0,
-                "queued": 0,
+                "ready": 0,
                 "byStage": {
                     "1": {"total": 3, "completed": 3, "taskTypes": ["hello_world_greeting"]},
                     "2": {"total": 3, "completed": 3, "taskTypes": ["hello_world_reply"]}
@@ -170,7 +170,7 @@ class JobStatusTrigger(JobManagementTrigger):
                     "failed": 0,
                     "processing": 0,
                     "pending": 0,
-                    "queued": 0,
+                    "ready": 0,
                     "byStage": {}
                 }
 
@@ -181,7 +181,7 @@ class JobStatusTrigger(JobManagementTrigger):
                 "failed": 0,
                 "processing": 0,
                 "pending": 0,
-                "queued": 0
+                "ready": 0
             }
 
             # Group by stage
@@ -200,8 +200,8 @@ class JobStatusTrigger(JobManagementTrigger):
                     status_counts["processing"] += 1
                 elif status == "pending":
                     status_counts["pending"] += 1
-                elif status == "queued":
-                    status_counts["queued"] += 1
+                elif status == "ready":
+                    status_counts["ready"] += 1
 
                 # Update stage counts
                 stage_key = str(task.stage)
@@ -212,7 +212,7 @@ class JobStatusTrigger(JobManagementTrigger):
                         "failed": 0,
                         "processing": 0,
                         "pending": 0,
-                        "queued": 0,
+                        "ready": 0,
                         "taskTypes": set()
                     }
 
@@ -227,8 +227,8 @@ class JobStatusTrigger(JobManagementTrigger):
                     by_stage[stage_key]["processing"] += 1
                 elif status == "pending":
                     by_stage[stage_key]["pending"] += 1
-                elif status == "queued":
-                    by_stage[stage_key]["queued"] += 1
+                elif status == "ready":
+                    by_stage[stage_key]["ready"] += 1
 
             # Convert taskTypes sets to lists and remove zero counts
             for stage_key in by_stage:

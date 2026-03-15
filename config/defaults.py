@@ -336,6 +336,8 @@ class QueueDefaults:
     JOBS_QUEUE = "geospatial-jobs"
 
     # V0.9: Docker-only queue (19 FEB 2026)
+    # DEPRECATED (15 MAR 2026): DB-polling (SKIP LOCKED) replaces Service Bus for task dispatch.
+    # Retained because system_guardian.py, queue_config.py, and servicebus admin still reference it.
     CONTAINER_TASKS_QUEUE = "container-tasks"      # Docker worker (all operations)
 
     # Service outage alerts queue (22 JAN 2026)

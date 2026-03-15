@@ -1388,9 +1388,8 @@ class CoreMachine:
                         'retry_event': 'condition_met'
                     }
                 )
-                # Retry needed - calculate exponential backoff delay
+                # Retry needed — estimate backoff for log message (actual computed by SQL)
                 retry_attempt = task_record.retry_count + 1
-                # 15 MAR 2026: DB-polling backoff — 30s base, doubling, capped at 600s
                 backoff_seconds = min(30 * (2 ** task_record.retry_count), 600)
 
                 self.logger.info(
@@ -1410,50 +1409,46 @@ class CoreMachine:
                 )
 
                 try:
-                    # 15 MAR 2026: DB-polling migration — set PENDING_RETRY with
-                    # execute_after timestamp instead of re-sending to Service Bus.
-                    # Worker will pick up the task after backoff expires.
-                    self.logger.debug(f"Incrementing retry_count from {task_record.retry_count} to {retry_attempt}")
-                    self.state_manager.increment_task_retry_count(task_message.task_id)
-                    self.logger.debug(f"retry_count incremented successfully")
-
-                    # Set PENDING_RETRY with execute_after for backoff
-                    execute_after_ts = datetime.now(timezone.utc) + timedelta(seconds=backoff_seconds)
-
-                    retry_update = TaskUpdateModel(
-                        status=TaskStatus.PENDING_RETRY,
-                        error_details=result.error_details,
-                        execute_after=execute_after_ts,
-                        claimed_by=None,  # Release claim so worker can re-pick
-                    )
-                    self.state_manager.update_task_with_model(
+                    # 15 MAR 2026 (COMPETE Fix 3): Single atomic SQL function call.
+                    # Sets retry_count, status=PENDING_RETRY, execute_after (backoff),
+                    # claimed_by=NULL, error_details — all in one transaction.
+                    retry_result = self.state_manager.increment_task_retry_count(
                         task_message.task_id,
-                        retry_update
+                        error_details=result.error_details,
                     )
 
-                    self.logger.info(
-                        f"Task retry scheduled via PENDING_RETRY - attempt {retry_attempt}, "
-                        f"backoff: {backoff_seconds}s, execute_after: {execute_after_ts.isoformat()}",
-                        extra={
-                            'checkpoint': 'RETRY_PENDING_RETRY_SET',
-                            'error_source': 'orchestration',
-                            'task_id': task_message.task_id,
-                            'job_id': task_message.parent_job_id,
-                            'task_type': task_message.task_type,
-                            'retry_attempt': retry_attempt,
-                            'backoff_seconds': backoff_seconds,
+                    if retry_result is None:
+                        self.logger.error(
+                            f"Retry scheduling failed — task {task_message.task_id[:16]} "
+                            f"not found or not in processing/failed state"
+                        )
+                        # Fall through to mark as FAILED
+                    else:
+                        execute_after_ts = retry_result['new_execute_after']
+                        actual_retry_count = retry_result['new_retry_count']
+
+                        self.logger.info(
+                            f"Task retry scheduled via PENDING_RETRY - attempt {actual_retry_count}/"
+                            f"{config.task_max_retries}, execute_after: {execute_after_ts.isoformat()}",
+                            extra={
+                                'checkpoint': 'RETRY_PENDING_RETRY_SET',
+                                'error_source': 'orchestration',
+                                'task_id': task_message.task_id,
+                                'job_id': task_message.parent_job_id,
+                                'task_type': task_message.task_type,
+                                'retry_attempt': actual_retry_count,
+                                'execute_after': execute_after_ts.isoformat(),
+                                'retry_event': 'pending_retry'
+                            }
+                        )
+
+                        return {
+                            'success': False,
+                            'retry_scheduled': True,
+                            'retry_attempt': actual_retry_count,
                             'execute_after': execute_after_ts.isoformat(),
-                            'retry_event': 'pending_retry'
+                            'task_id': task_message.task_id
                         }
-                    )
-
-                    return {
-                        'success': False,
-                        'retry_scheduled': True,
-                        'retry_attempt': retry_attempt,
-                        'delay_seconds': backoff_seconds,
-                        'task_id': task_message.task_id
-                    }
 
                 except Exception as e:
                     self.logger.error(f"Failed to schedule retry: {e}")

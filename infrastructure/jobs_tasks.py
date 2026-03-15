@@ -834,36 +834,54 @@ class TaskRepository(PostgreSQLTaskRepository):
             # Update in database
             return self.update_task(task_id, update)
 
-    def increment_task_retry_count(self, task_id: str) -> bool:
+    def increment_task_retry_count(
+        self, task_id: str, error_details: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
         """
-        Atomically increment retry count and set status to PENDING_RETRY.
+        Atomically schedule a task retry with exponential backoff.
 
-        Calls the PostgreSQL function increment_task_retry_count() for atomic operation.
-        This is used when a task fails and needs to be retried with exponential backoff.
+        Single atomic operation: increments retry_count, sets PENDING_RETRY,
+        calculates execute_after (30*2^n seconds, capped at 600s), clears
+        claimed_by, and stores error_details.
+
+        15 MAR 2026 (COMPETE Fix 3): Merged two separate writes into one
+        atomic SQL function call. Backoff formula: LEAST(30 * 2^n, 600)s.
+        Status guard: only updates tasks in processing/failed state.
 
         Args:
-            task_id: Task ID to increment retry count for
+            task_id: Task ID to schedule for retry
+            error_details: Error message from the failed attempt
 
         Returns:
-            True if updated successfully, False if task not found
+            Dict with 'new_retry_count' and 'new_execute_after' if updated,
+            None if task not found or not in valid state for retry.
         """
         from psycopg import sql
 
         with self._error_context("increment retry count", task_id):
-            # Call PostgreSQL function for atomic increment + status reset
             query = sql.SQL("""
-                SELECT * FROM {schema}.increment_task_retry_count(%s)
+                SELECT * FROM {schema}.increment_task_retry_count(%s, %s)
             """).format(schema=sql.Identifier(self.schema_name))
 
-            result = self._execute_query(query, (task_id,), fetch='one')
+            result = self._execute_query(query, (task_id, error_details), fetch='one')
 
             if result and result.get('new_retry_count') is not None:
                 new_retry_count = result['new_retry_count']
-                logger.info(f"🔄 Task {task_id[:16]} retry count → {new_retry_count}, status → PENDING_RETRY")
-                return True
+                execute_after = result['new_execute_after']
+                logger.info(
+                    f"🔄 Task {task_id[:16]} retry → attempt {new_retry_count}, "
+                    f"execute_after={execute_after.isoformat()}"
+                )
+                return {
+                    'new_retry_count': new_retry_count,
+                    'new_execute_after': execute_after,
+                }
             else:
-                logger.warning(f"⚠️ Cannot increment retry count - task not found: {task_id}")
-                return False
+                logger.warning(
+                    f"⚠️ Cannot schedule retry - task {task_id[:16]} not found "
+                    f"or not in processing/failed state"
+                )
+                return None
 
     def complete_task(self, task_id: str, result_data: Dict[str, Any]) -> bool:
         """

@@ -327,23 +327,26 @@ class StateManager:
             self.logger.error(f"Failed to get task status for {task_id}: {e}")
             return None
 
-    def increment_task_retry_count(self, task_id: str) -> bool:
+    def increment_task_retry_count(
+        self, task_id: str, error_details: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
         """
-        Increment retry count atomically.
+        Atomically schedule a task retry with exponential backoff.
 
-        15 MAR 2026: DB-polling migration — no longer resets status to QUEUED.
-        Status transition to PENDING_RETRY is handled separately by CoreMachine
-        with execute_after timestamp for backoff.
-
-        This delegates to TaskRepository which performs the atomic operation.
+        15 MAR 2026 (COMPETE Fix 3): Single atomic operation — increments
+        retry_count, sets PENDING_RETRY, calculates execute_after, clears
+        claimed_by, stores error_details. No second write needed.
 
         Args:
             task_id: Task identifier
+            error_details: Error message from the failed attempt
 
         Returns:
-            True if updated successfully
+            Dict with new_retry_count and new_execute_after, or None if failed
         """
-        return self.repos['task_repo'].increment_task_retry_count(task_id)
+        return self.repos['task_repo'].increment_task_retry_count(
+            task_id, error_details=error_details
+        )
 
     def update_task_result(
         self,

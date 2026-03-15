@@ -1526,33 +1526,43 @@ $$""").format(
             sql.SQL(body_check_completion)
         ))
         
-        # 4. increment_task_retry_count function (for exponential backoff retry)
+        # 4. increment_task_retry_count function (atomic retry with backoff)
+        # 15 MAR 2026 (COMPETE Fix 3): Single atomic operation for retry.
+        # Previously: SQL function incremented retry_count with wrong backoff,
+        # then Python immediately overwrote with correct backoff — non-atomic gap
+        # allowed concurrent workers to claim task before backoff was set.
+        # Now: one UPDATE sets retry_count, status, execute_after, claimed_by,
+        # error_details atomically. Backoff: LEAST(30 * 2^n, 600) seconds.
         body_increment_retry = """
 DECLARE
     v_new_retry_count INTEGER;
+    v_execute_after TIMESTAMPTZ;
 BEGIN
-    -- Atomically increment retry count and set status to PENDING_RETRY
-    -- Worker will pick up task after execute_after via SKIP LOCKED polling
     UPDATE {schema}.tasks
     SET
         retry_count = retry_count + 1,
         status = 'pending_retry'::{schema}.task_status,
-        execute_after = NOW() + (POWER(2, retry_count) * INTERVAL '1 second'),
+        execute_after = NOW() + LEAST(30 * POWER(2, retry_count), 600) * INTERVAL '1 second',
+        claimed_by = NULL,
+        error_details = COALESCE(p_error_details, error_details),
         updated_at = NOW()
     WHERE task_id = p_task_id
-    RETURNING retry_count INTO v_new_retry_count;
+      AND status IN ('processing', 'failed')
+    RETURNING retry_count, execute_after
+    INTO v_new_retry_count, v_execute_after;
 
-    -- Return the new retry count (NULL if task not found)
-    RETURN QUERY SELECT v_new_retry_count;
+    RETURN QUERY SELECT v_new_retry_count, v_execute_after;
 END;
 """.format(schema=self.schema_name)
 
         functions.append(sql.SQL("""
 CREATE OR REPLACE FUNCTION {}.{}(
-    p_task_id VARCHAR(100)
+    p_task_id VARCHAR(100),
+    p_error_details TEXT DEFAULT NULL
 )
 RETURNS TABLE (
-    new_retry_count INTEGER
+    new_retry_count INTEGER,
+    new_execute_after TIMESTAMPTZ
 )
 LANGUAGE plpgsql
 AS $$

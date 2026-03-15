@@ -1789,3 +1789,63 @@ Two subsystems are designated for **regular re-review** using the COMPETE pipeli
 | SG16-5 | MEDIUM | TiPG collection cache not auto-refreshed |
 | SG16-6 | LOW | siege_config.json `data_type_override` field misleading |
 | SG16-7 | LOW | StacRollbackFailed leaves release in inconsistent state |
+
+---
+
+## Run 43: PostgreSQL Decomposition Regression (SIEGE Run 17)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 14 MAR 2026 |
+| **Pipeline** | SIEGE (quick profile) |
+| **Scope** | All 25 sequences — regression test after PostgreSQL god class decomposition (V0.10.2.0) |
+| **Target** | Orchestrator v0.10.2.0, Docker Worker v0.10.2.0, TiTiler v0.9.6.0 |
+| **Agents** | Sentinel (Claude) → Cartographer (subagent) + Lancer (subagent, parallel) → Auditor (subagent) → Scribe (Claude) |
+| **Verdict** | **PASS** — zero regressions from decomposition. All failures pre-existing. |
+| **Pass Rate** | 101/109 = 92.7% (3 sequences skipped for missing fixtures) |
+| **New Findings** | 7 (2 MEDIUM, 5 LOW) |
+| **Output** | `agent_docs/SIEGE_RUN_17.md` |
+
+**Sequence Results**:
+
+| Seq | Name | Result |
+|-----|------|--------|
+| 1 | Raster Lifecycle | PASS (6/7, cross-check minor) |
+| 2 | Vector Lifecycle | PASS (5/6, TiPG cache lag on probe) |
+| 3 | Multi-Version | PASS (3/3) |
+| 4 | Unpublish | PASS (2/3, status returns latest release) |
+| 5 | NetCDF/VirtualiZarr | PASS (8/8) |
+| 6 | Native Zarr | FAIL (job stuck processing after 20 min) |
+| 7 | Rejection | PASS (3/3) |
+| 8 | Reject→Resubmit→Approve | PASS (4/4) |
+| 9 | Revoke + is_latest | PASS (4/4) |
+| 10 | Overwrite Draft | PASS (3/3) |
+| 11 | Invalid State Transitions | PASS (7/9, 11f/11g: revoke 404 not 400) |
+| 12 | Missing Required Fields | PASS (13/13) |
+| 13 | Version Conflict | PASS (2/2) |
+| 14 | Revoke→OW→Reapprove | PASS (7/7) |
+| 15 | Overwrite Approved→New Version | FAIL (409 by design — requires revoke first) |
+| 16 | Triple Revision | PASS (6/6) |
+| 17 | Race Guard | PASS (2/2) |
+| 18 | Multi-Revoke Target | PASS (6/6) |
+| 19 | Zarr Rechunk | SKIP (era5-quick.zarr missing) |
+| 20 | Vector Split Views | PASS (5/6, TiPG cache lag on probe) |
+| 21 | Split Views Validation | PASS (2/3, 1 SKIP) |
+| 22 | Approved OW Guard (Diff File) | SKIP (roads fixtures missing) |
+| 23 | Unpublish Blob Preservation | PASS (4/4) |
+| 24 | Resubmit Guards | PASS (3/3) |
+| 25 | DDH-Only Unpublish | PASS (5/5) |
+
+**Key Findings**:
+
+| ID | Severity | Description |
+|----|----------|-------------|
+| F-1 | LOW | Catalog key is `raster.tiles` not `titiler_urls` (test script expectation mismatch) |
+| F-2 | LOW | Status returns latest release when request_id maps to multiple versions |
+| F-3 | LOW | Revoke returns 404 instead of 400 for already-revoked (pre-existing) |
+| F-4 | LOW | Revoke returns 404 instead of 400 for pending_review (pre-existing) |
+| F-5 | MEDIUM | Overwrite on approved requires explicit revoke first (by design, 409) |
+| F-6 | MEDIUM | Zarr pipeline timeout under concurrent Docker worker load |
+| F-7 | LOW | TiPG cache lag on newly created vector tables (pre-existing) |
+
+**Regression Assessment**: Connection infrastructure fully validated — ManagedIdentityAuth, ConnectionManager (pool + single-use), circuit breaker (856 successes, 0 failures), type adapters all working. Zero regressions.

@@ -104,7 +104,9 @@ def can_task_transition(current: TaskStatus, target: TaskStatus) -> bool:
         # FAILED: terminal for stage completion, but allows retry
         TaskStatus.FAILED: [TaskStatus.PENDING_RETRY, TaskStatus.CANCELLED],
         # PENDING_RETRY: scheduled for retry with execute_after backoff
-        TaskStatus.PENDING_RETRY: [TaskStatus.READY, TaskStatus.CANCELLED],
+        # PROCESSING added (15 MAR 2026): claim_ready_task claims PENDING_RETRY
+        # directly via SKIP LOCKED — no intermediate READY state needed.
+        TaskStatus.PENDING_RETRY: [TaskStatus.READY, TaskStatus.PROCESSING, TaskStatus.CANCELLED],
         # Terminal states
         TaskStatus.COMPLETED: [],
         TaskStatus.SKIPPED: [],

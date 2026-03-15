@@ -283,9 +283,21 @@ class DockerWorkerLifecycle:
         logger.warning("=" * 60)
         logger.info("  → Setting shutdown event for all components")
         self._shutdown_event.set()
-        logger.info("  → Shutdown event SET - workers will stop accepting new messages")
+        logger.info("  → Shutdown event SET - workers will stop accepting new tasks")
 
-        # Drain connection pool (F7.18 integration)
+        # 15 MAR 2026: Connection pool shutdown moved to finalize_shutdown().
+        # Pool must survive until in-flight tasks complete and worker threads join.
+
+        logger.info("  → Graceful shutdown initiated - waiting for in-flight tasks to complete")
+
+    def finalize_shutdown(self):
+        """
+        Tear down connection pool AFTER worker threads have joined.
+
+        15 MAR 2026 (COMPETE Fix 1): Pool must survive until in-flight tasks
+        write their final status (COMPLETED/FAILED). Previously destroyed in
+        initiate_shutdown(), killing DB access for in-flight tasks.
+        """
         try:
             from infrastructure.connection_pool import ConnectionPoolManager
             logger.info("  → Shutting down connection pool...")
@@ -293,8 +305,6 @@ class DockerWorkerLifecycle:
             logger.info("  → Connection pool shutdown complete")
         except Exception as e:
             logger.warning(f"  → Connection pool shutdown error (non-fatal): {e}")
-
-        logger.info("  → Graceful shutdown initiated - waiting for in-flight tasks to complete")
 
     def get_status(self) -> Dict[str, Any]:
         """Get lifecycle status for health endpoint."""
@@ -906,6 +916,9 @@ async def lifespan(app: FastAPI):
     # Wait for workers to finish (they will stop on their own via shared event)
     queue_worker.stop()
     token_refresh_worker.stop()
+
+    # Tear down connection pool AFTER workers have joined (COMPETE Fix 1)
+    worker_lifecycle.finalize_shutdown()
 
     print("DOCKER SERVICE - SHUTDOWN COMPLETE", flush=True)
 

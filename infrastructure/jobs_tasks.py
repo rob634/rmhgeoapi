@@ -928,7 +928,7 @@ class TaskRepository(PostgreSQLTaskRepository):
                             error_details = %s,
                             updated_at = NOW()
                         WHERE parent_job_id = %s
-                          AND status NOT IN ('completed', 'failed')
+                          AND status NOT IN ('completed', 'failed', 'skipped', 'cancelled')
                         RETURNING task_id
                     """).format(schema=sql.Identifier(self.schema_name)),
                     (error_msg, job_id)
@@ -1101,15 +1101,23 @@ class TaskRepository(PostgreSQLTaskRepository):
                             claimed_by = NULL,
                             updated_at = NOW()
                         WHERE task_id = %(task_id)s
+                          AND status IN ('processing', 'failed')
                     """).format(schema=sql.Identifier(self.schema_name)),
                     {'task_id': task_id, 'execute_after': execute_after}
                 )
+                rows_affected = cur.rowcount
                 conn.commit()
 
-        logger.info(
-            f"🔄 Scheduled retry for task {task_id[:16]}... "
-            f"(execute_after={execute_after.isoformat()})"
-        )
+        if rows_affected == 0:
+            logger.warning(
+                f"⚠️ schedule_retry blocked for task {task_id[:16]}... "
+                f"(task not in processing/failed state)"
+            )
+        else:
+            logger.info(
+                f"🔄 Scheduled retry for task {task_id[:16]}... "
+                f"(execute_after={execute_after.isoformat()})"
+            )
 
     # ========================================================================
     # BATCH OPERATIONS - For Service Bus aligned batching

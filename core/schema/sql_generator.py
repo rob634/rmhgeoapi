@@ -1474,6 +1474,7 @@ BEGIN
         COUNT(*)::BIGINT as total_tasks,
         COUNT(CASE WHEN status = 'completed' THEN 1 END)::BIGINT as completed_tasks,
         COUNT(CASE WHEN status = 'failed' THEN 1 END)::BIGINT as failed_tasks,
+        COUNT(CASE WHEN status IN ('completed', 'failed', 'skipped', 'cancelled') THEN 1 END)::BIGINT as terminal_tasks,
         COALESCE(
             jsonb_agg(
                 jsonb_build_object(
@@ -1494,8 +1495,8 @@ BEGIN
     
     RETURN QUERY SELECT 
         (
-            v_task_counts.total_tasks > 0 AND 
-            (v_task_counts.completed_tasks + v_task_counts.failed_tasks) = v_task_counts.total_tasks AND
+            v_task_counts.total_tasks > 0 AND
+            v_task_counts.terminal_tasks = v_task_counts.total_tasks AND
             v_job_record.stage >= v_job_record.total_stages
         ) as job_complete,
         v_job_record.stage as final_stage,

@@ -1,6 +1,6 @@
 # Project History
 
-**Last Updated**: 10 MAR 2026 (v0.10.0.2)
+**Last Updated**: 14 MAR 2026 (v0.10.2.1)
 **Active Log**: FEB - MAR 2026
 **Rolling Archive**: When this file exceeds ~600 lines, older content is archived with a UUID filename.
 
@@ -10,6 +10,62 @@
 - [HISTORY_e1fc3ce2.md](./HISTORY_e1fc3ce2.md) - DEC 2025 - JAN 2026
 
 This document tracks completed architectural changes and improvements to the Azure Geospatial ETL Pipeline.
+
+---
+
+## 14 MAR 2026: PostgreSQL Repository Decomposition (v0.10.2.0) ✅
+
+**Status**: ✅ **COMPLETE** — Deployed, COMPETE reviewed, SIEGE regression-free
+
+### What Changed
+
+Decomposed the `PostgreSQLRepository` god class (1,530 lines, 6 concerns, 22 subclasses) into composable components via internal composition. Zero breaking changes to the 41+ factory consumers.
+
+### New Files
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `infrastructure/db_auth.py` | 326 | `ManagedIdentityAuth` — token acquisition, connection string building, auth priority chain |
+| `infrastructure/db_connections.py` | 260 | `ConnectionManager` — pooled/single-use routing, circuit breaker, transient retry |
+| `infrastructure/db_utils.py` | 117 | Shared utilities — psycopg3 type adapters, JSONB parsing, connection string redaction |
+
+### Modified Files
+
+| File | Change |
+|------|--------|
+| `infrastructure/postgresql.py` | Reduced from ~1,530 to ~820 lines. Delegates auth to `ManagedIdentityAuth`, connections to `ConnectionManager`. `conn_string` is now a `@property`. |
+| `infrastructure/connection_pool.py` | Imports from `db_utils`, thread-safety fixes for orphan drain, pool config from config layer |
+| `infrastructure/pgstac_bootstrap.py` | Connection string redaction via `redact_connection_string()` |
+| `config/database_config.py` | Added `pool_min_size`, `pool_max_size` fields |
+| `config/external_config.py` | Added `db_password` field (routed through config, not `os.environ`) |
+
+### Validation
+
+- **COMPETE Run 42**: 15 findings fixed (2 CRITICAL: plaintext token logging, false-positive auth error markers), 5 accepted risks, 4 deferred
+- **SIEGE Run 17** (Run 43): 101/109 = 92.7% pass rate. Zero regressions. ManagedIdentityAuth, ConnectionManager (pool + single-use), circuit breaker (856 successes, 0 failures), type adapters all working.
+- **Schema rebuilt**: 22 enums, 27 tables, 121 indexes, 5 functions, pgSTAC 0.9.8
+
+### Design Documents
+
+- `V10_POSTGRES.md` — Knowledge repository
+- `V10_DECISIONS.md` — Accepted risks and deferred items
+- `docs/superpowers/specs/2026-03-14-postgresql-repository-decomposition-design.md` — Design spec
+- `docs/agent_review/agent_docs/COMPETE_POSTGRESQL_DECOMPOSITION.md` — COMPETE review
+- `docs/agent_review/agent_docs/SIEGE_RUN_17.md` — SIEGE regression report
+
+---
+
+## 13 MAR 2026: Connection Pool Hardening (v0.10.1.0-v0.10.1.1) ✅
+
+**Status**: ✅ **COMPLETE** — Defensive DB hardening for Docker worker
+
+### Changes
+
+- **Circuit breaker**: 3 failures in 10s → OPEN (block 30s) → HALF_OPEN → CLOSED. Prevents cascading DB failures.
+- **Orphan-and-sweep pool pattern**: Token refresh orphans old pool (in-flight connections preserved), janitor sweeps at next refresh cycle. 3-layer defense: max_lifetime → server idle timeout → pool drain.
+- **Pool health check**: `check=ConnectionPool.check_connection` pings before checkout, discards dead connections.
+- **Transient retry**: `_TRANSIENT_MARKERS` frozenset for connection-level retry on SSL/network errors.
+- **Thread-safety**: `_drain_orphaned_pools()` moved inside `_pool_lock` in `recreate_pool()` and `shutdown()`.
 
 ---
 

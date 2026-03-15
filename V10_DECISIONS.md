@@ -1,8 +1,8 @@
 # V10 Accepted Risks & Architecture Decisions
 
-**Version**: v0.10.1.1
-**Last Updated**: 13 MAR 2026
-**Source**: COMPETE adversarial code review pipeline — Runs 1-4
+**Version**: v0.10.2.1
+**Last Updated**: 14 MAR 2026
+**Source**: COMPETE adversarial code review pipeline — Runs 1-4, Run 42 (PostgreSQL decomposition)
 
 ---
 
@@ -16,21 +16,18 @@ Extra DB read per task update for diagnostic logging. Bounded by task count per 
 - **Revisit when**: 100+ task stages become common
 - **File**: `infrastructure/postgresql.py`, `update_task()`
 
-### B. God-class `PostgreSQLRepository` (~2600 lines)
+### ~~B. God-class `PostgreSQLRepository` (~2600 lines)~~ — RESOLVED 14 MAR 2026
 
-Single class owns connection management, SQL execution, and all domain queries. Cohesive — splitting creates circular deps on shared methods (`_get_connection`, `_execute_query`, `build_where_clause`).
+Decomposed via internal composition (V0.10.2.0):
+- `db_auth.py` → `ManagedIdentityAuth` (token acquisition, connection strings)
+- `db_connections.py` → `ConnectionManager` (pooled/single-use routing, circuit breaker, retry)
+- `db_utils.py` → Shared utilities (type adapters, JSONB parsing, redaction)
+- `postgresql.py` reduced from ~1,530 to ~820 lines
+- COMPETE reviewed (Run 42), SIEGE Run 17 regression-free (93% pass rate)
 
-- **Impact**: Large file, harder to navigate
-- **Revisit when**: File exceeds ~3500 lines
-- **File**: `infrastructure/postgresql.py`
+### ~~C. Duplicate connection string building~~ — RESOLVED 14 MAR 2026
 
-### C. Duplicate connection string building
-
-Pool path (Docker/MI-only) and full path (local-dev/password/external) build connection strings independently. Pool path is intentionally simpler — Docker always uses MI, never needs fallbacks.
-
-- **Impact**: Auth logic changes require updating two paths
-- **Revisit when**: Third auth method added (certificate, workload identity federation)
-- **Files**: `infrastructure/connection_pool.py`, `infrastructure/postgresql.py:_get_connection_string()`
+`ManagedIdentityAuth` now owns all connection string building. Pool path delegates to `ManagedIdentityAuth._build_connection_string()`. Single auth chain: override → user-assigned MI → system MI → password (dev-only) → FAIL.
 
 ### ~~D. External config MI fallback~~ — RESOLVED 13 MAR 2026
 

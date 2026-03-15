@@ -1,6 +1,6 @@
 # Working Backlog - ADO Aligned
 
-**Last Updated**: 10 MAR 2026
+**Last Updated**: 14 MAR 2026
 **Source of Truth**: [V0.8_ADO_WORKITEMS.md](/ado_wiki/V0.8_ADO_WORKITEMS.md)
 **Structure**: EPIC → FEATURE → User Story → Tasks
 
@@ -217,6 +217,22 @@ Items below are tracked here but not yet added to ADO. Add to ADO when prioritiz
 
 ## Technical Debt
 
+### EN-TD.5: PostgreSQL Repository Decomposition ✅ COMPLETE (v0.10.2.0, 14 MAR 2026)
+
+**Scope**: Decompose `PostgreSQLRepository` god class (1,530 lines, 6 concerns) into composable components via internal composition.
+**Design**: `docs/superpowers/specs/2026-03-14-postgresql-repository-decomposition-design.md`
+**Knowledge**: `V10_POSTGRES.md` (root)
+
+| Task | Status | File | Details |
+|------|--------|------|---------|
+| Extract `ManagedIdentityAuth` | ✅ Done | `infrastructure/db_auth.py` (326 lines) | Token acquisition, connection string building, auth priority chain |
+| Extract `ConnectionManager` | ✅ Done | `infrastructure/db_connections.py` (260 lines) | Pooled/single-use routing, circuit breaker, retry logic |
+| Extract shared utilities | ✅ Done | `infrastructure/db_utils.py` (117 lines) | Type adapters, JSONB parsing, connection string redaction |
+| Wire into PostgreSQLRepository | ✅ Done | `infrastructure/postgresql.py` | Reduced from ~1,530 to ~820 lines, `conn_string` is `@property` |
+| COMPETE adversarial review | ✅ Done | Run 42 | 15 findings fixed, 5 accepted risks, 4 deferred |
+| Deploy V0.10.2.0 | ✅ Done | Orchestrator + Docker Worker | Both healthy, schema rebuilt |
+| SIEGE regression test | ✅ Done | Run 17 (Run 43) | 92.7% pass rate, zero regressions from decomposition |
+
 ### EN-TD.2: psycopg3 Type Adapter + Serialization Cleanup `[NEW 18 FEB 2026]`
 
 **Plan**: [PYDANTIC_REVIEW.md](/PYDANTIC_REVIEW.md) (root)
@@ -227,15 +243,16 @@ Items below are tracked here but not yet added to ADO. Add to ADO when prioritiz
 #### Phase 1: Register psycopg3 Type Adapters (THE FIX) ✅ COMPLETE
 
 **Completed ~FEB 2026. Adapters registered at both connection paths — all repos inherit automatically.**
+**Note**: As of V0.10.2.0, adapters are now in `infrastructure/db_utils.py:register_type_adapters()` (extracted from postgresql.py during EN-TD.5 decomposition).
 
 | Task | Status | File | Details |
 |------|--------|------|---------|
-| T-TD2.1: Register `JsonbBinaryDumper` for dict+list on single-use connections | ✅ Done | `infrastructure/postgresql.py:729` | `_register_type_adapters(conn)` called after `psycopg.connect()` in `_get_single_use_connection()` |
-| T-TD2.2: Register `JsonbBinaryDumper` for dict+list on pooled connections | ✅ Done | `infrastructure/connection_pool.py:240-241` | `_register_type_adapters(conn)` called in `_configure_connection()` |
-| T-TD2.3: Register Enum adapter | ✅ Done | `infrastructure/postgresql.py:108-112` | Custom `_EnumDumper` class registered for `Enum` base class (Option A). |
+| T-TD2.1: Register `JsonbBinaryDumper` for dict+list on single-use connections | ✅ Done | `infrastructure/db_connections.py` | `register_type_adapters(conn)` called in `ConnectionManager._get_single_use_connection()` |
+| T-TD2.2: Register `JsonbBinaryDumper` for dict+list on pooled connections | ✅ Done | `infrastructure/connection_pool.py:240-241` | `register_type_adapters(conn)` called in `_configure_connection()` |
+| T-TD2.3: Register Enum adapter | ✅ Done | `infrastructure/db_utils.py:35-39` | Custom `_EnumDumper` class registered for `Enum` base class (Option A). |
 | T-TD2.4: Verify existing code still works (no repo changes) | ✅ Done | N/A | Deployed and verified — submit, approval, job creation all work. Existing `json.dumps()` calls are harmless. |
 
-**Implementation**: `_register_type_adapters()` function at `postgresql.py:115-125` registers dict→`JsonbBinaryDumper`, list→`JsonbBinaryDumper`, Enum→`_EnumDumper`.
+**Implementation**: `register_type_adapters()` function in `infrastructure/db_utils.py` registers dict→`JsonbBinaryDumper`, list→`JsonbBinaryDumper`, Enum→`_EnumDumper`.
 
 #### Phase 2: Revert Bandaid + Simplify asset_repository.update()
 
@@ -336,6 +353,10 @@ Migrated 37 occurrences across 22 code files from raw `req.get_json()` to `parse
 
 | Date | Feature | Task |
 |------|---------|------|
+| 14 MAR 2026 | Infrastructure | **PostgreSQL decomposition deployed** — god class split into db_auth.py, db_connections.py, db_utils.py. COMPETE reviewed (Run 42), SIEGE regression-free (Run 43). V0.10.2.0. |
+| 14 MAR 2026 | Infrastructure | **Connection pool hardening** — orphan-and-sweep pattern, thread-safe drain, circuit breaker integration (v0.10.1.1) |
+| 14 MAR 2026 | SIEGE | **SIEGE Run 17** (Run 43): 92.7% pass rate, 101/109 steps. Zero regressions from PostgreSQL decomposition. |
+| 13 MAR 2026 | SIEGE | **SIEGE Run 16** (Run 41): Post-deploy smoke test v0.10.0.3, found PostgreSQL OOM + SSL instability |
 | 10 MAR 2026 | Vector ETL | **P2 Split Views verified end-to-end** — single file + `split_column` → N PostgreSQL VIEWs as independent TiPG endpoints (v0.10.0.2) |
 | 10 MAR 2026 | Vector ETL | Multi-source vector ETL (P1 multi-file + P3 GPKG multi-layer) implemented and deployed (v0.10.0.1) |
 | 09 MAR 2026 | Zarr Pipeline | Zarr v3 consolidated metadata fix — explicit `zarr.consolidate_metadata()` post-write, fixes TiTiler empty variables (v0.9.16.1) |

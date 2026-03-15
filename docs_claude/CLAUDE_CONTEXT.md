@@ -1,7 +1,7 @@
 # Claude Context - Azure Geospatial ETL Platform
 
-**Date**: 13 MAR 2026
-**Version**: v0.10.1.1
+**Date**: 14 MAR 2026
+**Version**: v0.10.2.1
 **Primary Documentation**: Start here for all Claude instances
 
 ---

@@ -435,7 +435,7 @@ class JobRepository(PostgreSQLJobRepository):
             # Update job to reset state
             query = sql.SQL("""
                 UPDATE {schema}.{table}
-                SET status = 'queued',
+                SET status = 'ready',
                     stage = 1,
                     error_details = NULL,
                     result_data = NULL,
@@ -581,14 +581,14 @@ class JobRepository(PostgreSQLJobRepository):
                        j.parameters, j.result_data, j.error_details,
                        j.asset_id, j.platform_id, j.request_id, j.etl_version,
                        j.created_at, j.updated_at,
-                       COALESCE(tc.queued, 0) as task_queued,
+                       COALESCE(tc.ready, 0) as task_ready,
                        COALESCE(tc.processing, 0) as task_processing,
                        COALESCE(tc.completed, 0) as task_completed,
                        COALESCE(tc.failed, 0) as task_failed
                 FROM {schema}.jobs j
                 LEFT JOIN (
                     SELECT parent_job_id,
-                           COUNT(*) FILTER (WHERE status::text = 'queued') as queued,
+                           COUNT(*) FILTER (WHERE status::text = 'ready') as ready,
                            COUNT(*) FILTER (WHERE status::text = 'processing') as processing,
                            COUNT(*) FILTER (WHERE status::text = 'completed') as completed,
                            COUNT(*) FILTER (WHERE status::text = 'failed') as failed
@@ -638,7 +638,7 @@ class JobRepository(PostgreSQLJobRepository):
                     'created_at': row['created_at'].isoformat() if row['created_at'] else None,
                     'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None,
                     'task_counts': {
-                        'queued': row['task_queued'],
+                        'ready': row['task_ready'],
                         'processing': row['task_processing'],
                         'completed': row['task_completed'],
                         'failed': row['task_failed']
@@ -836,7 +836,7 @@ class TaskRepository(PostgreSQLTaskRepository):
 
     def increment_task_retry_count(self, task_id: str) -> bool:
         """
-        Atomically increment retry count and reset status to QUEUED.
+        Atomically increment retry count and set status to PENDING_RETRY.
 
         Calls the PostgreSQL function increment_task_retry_count() for atomic operation.
         This is used when a task fails and needs to be retried with exponential backoff.
@@ -859,7 +859,7 @@ class TaskRepository(PostgreSQLTaskRepository):
 
             if result and result.get('new_retry_count') is not None:
                 new_retry_count = result['new_retry_count']
-                logger.info(f"🔄 Task {task_id[:16]} retry count → {new_retry_count}, status → QUEUED")
+                logger.info(f"🔄 Task {task_id[:16]} retry count → {new_retry_count}, status → PENDING_RETRY")
                 return True
             else:
                 logger.warning(f"⚠️ Cannot increment retry count - task not found: {task_id}")
@@ -986,6 +986,132 @@ class TaskRepository(PostgreSQLTaskRepository):
             return self.update_task(task_id, update)
 
     # ========================================================================
+    # DB-POLLING CLAIM OPERATIONS - SKIP LOCKED (15 MAR 2026)
+    # ========================================================================
+
+    def claim_ready_task(self, worker_id: str) -> Optional[TaskRecord]:
+        """
+        Atomically claim one task available for processing via SKIP LOCKED.
+
+        Claims tasks in READY or PENDING_RETRY status where execute_after
+        has elapsed (or is NULL). Uses FOR UPDATE SKIP LOCKED to prevent
+        double-claiming across concurrent workers.
+
+        Args:
+            worker_id: Worker identity string (hostname:pid) for diagnostics
+
+        Returns:
+            TaskRecord if a task was claimed, None if no tasks available
+        """
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                # SELECT one claimable task with SKIP LOCKED
+                select_query = sql.SQL("""
+                    SELECT * FROM {schema}.tasks
+                    WHERE status IN ('ready', 'pending_retry')
+                      AND (execute_after IS NULL OR execute_after < NOW())
+                    ORDER BY created_at
+                    LIMIT 1
+                    FOR UPDATE SKIP LOCKED
+                """).format(schema=sql.Identifier(self.schema_name))
+
+                cur.execute(select_query)
+                row = cur.fetchone()
+
+                if not row:
+                    conn.commit()
+                    return None
+
+                task_id = row['task_id']
+
+                # UPDATE the claimed row to processing
+                update_query = sql.SQL("""
+                    UPDATE {schema}.tasks
+                    SET status = 'processing',
+                        claimed_by = %(worker_id)s,
+                        execution_started_at = NOW(),
+                        last_pulse = NOW(),
+                        updated_at = NOW()
+                    WHERE task_id = %(task_id)s
+                """).format(schema=sql.Identifier(self.schema_name))
+
+                cur.execute(update_query, {
+                    'worker_id': worker_id,
+                    'task_id': task_id
+                })
+
+                conn.commit()
+
+                # Construct TaskRecord from the SELECT row
+                task_record = TaskRecord(**row)
+                # Reflect the status change we just made
+                task_record.status = TaskStatus.PROCESSING
+
+                logger.info(
+                    f"🔒 Claimed task {task_id[:16]}... "
+                    f"(type={row['task_type']}, worker={worker_id})"
+                )
+
+                return task_record
+
+    def release_task(self, task_id: str) -> None:
+        """
+        Release a claimed task back to READY for another worker.
+
+        Used during graceful shutdown when a task was claimed but
+        processing was interrupted before side effects occurred.
+        """
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL("""
+                        UPDATE {schema}.tasks
+                        SET status = 'ready',
+                            claimed_by = NULL,
+                            execution_started_at = NULL,
+                            last_pulse = NULL,
+                            updated_at = NOW()
+                        WHERE task_id = %(task_id)s
+                          AND status = 'processing'
+                    """).format(schema=sql.Identifier(self.schema_name)),
+                    {'task_id': task_id}
+                )
+                conn.commit()
+
+        logger.info(f"🔓 Released task {task_id[:16]}... back to READY")
+
+    def schedule_retry(self, task_id: str, execute_after: datetime) -> None:
+        """
+        Schedule a failed task for retry with backoff.
+
+        Sets task to PENDING_RETRY with execute_after timestamp.
+        Workers will pick it up after the backoff period elapses.
+
+        Args:
+            task_id: Task ID to schedule for retry
+            execute_after: Timestamp after which the task becomes claimable
+        """
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL("""
+                        UPDATE {schema}.tasks
+                        SET status = 'pending_retry',
+                            execute_after = %(execute_after)s,
+                            claimed_by = NULL,
+                            updated_at = NOW()
+                        WHERE task_id = %(task_id)s
+                    """).format(schema=sql.Identifier(self.schema_name)),
+                    {'task_id': task_id, 'execute_after': execute_after}
+                )
+                conn.commit()
+
+        logger.info(
+            f"🔄 Scheduled retry for task {task_id[:16]}... "
+            f"(execute_after={execute_after.isoformat()})"
+        )
+
+    # ========================================================================
     # BATCH OPERATIONS - For Service Bus aligned batching
     # ========================================================================
 
@@ -1095,11 +1221,11 @@ class TaskRepository(PostgreSQLTaskRepository):
             Number of tasks updated
 
         Example:
-            # Mark batch as queued after successful Service Bus send
+            # Mark batch as ready for processing
             task_repo.batch_update_status(
                 task_ids=['task1', 'task2', ...],
-                new_status='queued',
-                additional_updates={'queued_at': datetime.now(timezone.utc)}
+                new_status='ready',
+                additional_updates={'updated_at': datetime.now(timezone.utc)}
             )
         """
         if not task_ids:
@@ -1432,7 +1558,7 @@ class TaskRepository(PostgreSQLTaskRepository):
 
             rows = self._execute_query(query, (job_id,), fetch='all')
 
-            counts = {'queued': 0, 'processing': 0, 'completed': 0, 'failed': 0}
+            counts = {'ready': 0, 'pending_retry': 0, 'processing': 0, 'completed': 0, 'failed': 0}
             for row in rows:
                 status = row['status']
                 if status in counts:

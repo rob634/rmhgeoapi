@@ -62,6 +62,9 @@ class TaskUpdateModel(BaseModel):
     checkpoint_phase: Optional[int] = None
     checkpoint_data: Optional[Dict[str, Any]] = None
     checkpoint_updated_at: Optional[datetime] = None
+    # DB-polling fields (15 MAR 2026 - replaces Service Bus routing)
+    claimed_by: Optional[str] = None
+    execute_after: Optional[datetime] = None
 
     def to_dict(self, exclude_unset: bool = True) -> Dict[str, Any]:
         """Convert to dictionary for SQL operations."""

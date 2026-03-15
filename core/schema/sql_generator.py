@@ -1154,8 +1154,12 @@ class PydanticToSQL:
                                               partial_where="last_pulse IS NOT NULL"))
             indexes.append(IndexBuilder.btree(s, "tasks", "retry_count", name="idx_tasks_retry_count",
                                               partial_where="retry_count > 0"))
-            indexes.append(IndexBuilder.btree(s, "tasks", "target_queue", name="idx_tasks_target_queue"))
             indexes.append(IndexBuilder.btree(s, "tasks", "executed_by_app", name="idx_tasks_executed_by_app"))
+            # DB-polling worker claim index (15 MAR 2026 - SKIP LOCKED migration)
+            # NOTE: execute_after filtering is in the poll query, not the index —
+            # partial indexes with NOW() are evaluated at build time, not query time
+            indexes.append(IndexBuilder.btree(s, "tasks", "created_at", name="idx_tasks_claimable",
+                                              partial_where="status IN ('ready', 'pending_retry')"))
             # Checkpoint index (11 JAN 2026 - Docker worker resume support)
             indexes.append(IndexBuilder.btree(s, "tasks", "checkpoint_phase", name="idx_tasks_checkpoint_phase",
                                               partial_where="checkpoint_phase IS NOT NULL"))
@@ -1349,7 +1353,7 @@ BEGIN
     FROM {schema}.tasks 
     WHERE parent_job_id = v_job_id 
       AND stage = v_stage 
-      AND status NOT IN ('completed', 'failed');
+      AND status NOT IN ('completed', 'failed', 'skipped', 'cancelled');
     
     RETURN QUERY SELECT 
         TRUE,
@@ -1526,12 +1530,13 @@ $$""").format(
 DECLARE
     v_new_retry_count INTEGER;
 BEGIN
-    -- Atomically increment retry count and reset status to QUEUED
-    -- This supports exponential backoff retry with Service Bus scheduled delivery
+    -- Atomically increment retry count and set status to PENDING_RETRY
+    -- Worker will pick up task after execute_after via SKIP LOCKED polling
     UPDATE {schema}.tasks
     SET
         retry_count = retry_count + 1,
-        status = 'queued'::{schema}.task_status,
+        status = 'pending_retry'::{schema}.task_status,
+        execute_after = NOW() + (POWER(2, retry_count) * INTERVAL '1 second'),
         updated_at = NOW()
     WHERE task_id = p_task_id
     RETURNING retry_count INTO v_new_retry_count;

@@ -14,7 +14,7 @@ out the lights" pattern using PostgreSQL advisory locks.
 
 Key Responsibilities:
     - Job state transitions (QUEUED → PROCESSING → COMPLETED/FAILED)
-    - Task state transitions with atomic completion checks
+    - Task state transitions (READY → PROCESSING → COMPLETED/FAILED) with atomic completion checks
     - Stage advancement with advisory locks
     - Job completion and result aggregation
     - Database record creation and updates
@@ -329,7 +329,11 @@ class StateManager:
 
     def increment_task_retry_count(self, task_id: str) -> bool:
         """
-        Increment retry count and reset status to QUEUED for retry.
+        Increment retry count atomically.
+
+        15 MAR 2026: DB-polling migration — no longer resets status to QUEUED.
+        Status transition to PENDING_RETRY is handled separately by CoreMachine
+        with execute_after timestamp for backoff.
 
         This delegates to TaskRepository which performs the atomic operation.
 
@@ -594,7 +598,7 @@ class StateManager:
                 )
 
             if task.status != TaskStatus.PROCESSING:
-                # Only raise for truly unexpected states (PENDING, QUEUED, etc.)
+                # Only raise for truly unexpected states (READY, PENDING_RETRY, etc.)
                 raise RuntimeError(
                     f"Task {task_id} has unexpected status: {task.status} "
                     f"(expected: PROCESSING, COMPLETED, or FAILED)"
@@ -873,7 +877,7 @@ class StateManager:
         Mark all non-terminal tasks for a job as FAILED.
 
         GAP-004 FIX (15 DEC 2025): When a job is marked failed, sibling tasks
-        in PROCESSING or QUEUED state should also be failed to prevent orphan
+        in PROCESSING or READY state should also be failed to prevent orphan
         tasks and wasted compute.
 
         Raises exceptions on DB failure — caller handles at orchestration layer.

@@ -1,9 +1,12 @@
 # V10 Migration: DAG-Based YAML Workflow Orchestration
 
 **Created**: 14 MAR 2026
-**Status**: DESIGN — pending review
+**Updated**: 14 MAR 2026
+**Status**: DESIGN — versioned migration path agreed (v0.10.3 → v0.13.0)
 **Target**: Decompose monolithic job/stage/task system into atomic DAG nodes with YAML workflow definitions
 **Justification**: Interchangeable tasks, polling-based orchestration, no distributed messaging complexity
+**End State (v0.12.1)**: Function App gateway + Docker orchestrator + Docker workers + PostgreSQL. Zero Service Bus.
+**Azure Resources**: See [Azure Resource Map](#azure-resource-map) below.
 
 ---
 
@@ -1292,79 +1295,151 @@ Option B is simpler (fewer deployments) but couples the orchestrator to Function
 
 ---
 
-## Migration Path
+## Migration Path — Versioned Phases
 
-### Phase 1: Extract Atomic Handlers (No Orchestrator Change)
+### Version Roadmap
 
-**Risk**: Zero — existing job definitions still work.
+| Version | Phase | What | Breaking? |
+|---------|-------|------|-----------|
+| **v0.10.3** | 1 | Worker polls DB instead of Service Bus | No |
+| **v0.10.4** | 2 | Orchestrator → 60s timer trigger (poll-based) | No |
+| **v0.11.0** | 3 | Remove Service Bus entirely | Yes (infra) |
+| **v0.11.1** | 4 | Handler decomposition (monolithic → atomic) | No |
+| **v0.12.0** | 5 | YAML workflows + DAG tables + DAGOrchestrator | Yes (schema) |
+| **v0.12.1** | 6 | Orchestrator → Docker container | No |
+
+**End state at v0.12.1**: Function App gateway + two Docker process types + PostgreSQL. Zero Service Bus.
+
+```
+v0.12.1 Architecture:
+  Gateway (Function App) — HTTP endpoints, validation, entity management, B2B integration
+  Orchestrator (Docker)  — lightweight poll loop, DAG evaluation, no heavy libs
+  Workers (Docker × N)   — SKIP LOCKED poll, handler execution, GDAL/xarray/etc.
+  PostgreSQL             — single coordination mechanism (no queues, no AMQP)
+```
+
+The gateway remains a Function App — it's the right tool for HTTP request/response with Azure's built-in scaling, auth hooks, and APIM integration. Docker is for long-running poll loops and heavy compute, not HTTP endpoints behind Azure infrastructure.
+
+Major version (v1.0.0) tracks with production deployment, not this infrastructure work.
+
+---
+
+### Phase 1: Worker Polls DB (v0.10.3)
+
+**Risk**: Low — worker already runs a polling loop against Service Bus. Same pattern, different poll target.
+**Effort**: Low-Medium — replace SB consumer with `SELECT FOR UPDATE SKIP LOCKED` in `docker_service.py`.
+**Breaking**: No — CoreMachine, job definitions, handlers all unchanged.
+
+The Docker worker's `BackgroundQueueWorker._run_loop()` currently polls Service Bus `container-tasks` queue. The queue was always just a replica of DB state — tasks were written to the database AND sent as messages. Remove the middleman:
+
+1. Replace SB `receive_messages()` with `SELECT ... FOR UPDATE SKIP LOCKED` against `app.tasks`
+2. Replace `complete_message()` with `UPDATE app.tasks SET status='completed'`
+3. Worker heartbeat writes `last_pulse` to task row (replaces SB lock renewal)
+4. Keep SB for orchestrator→worker dispatch (Phase 2 removes this)
+
+**Validation**: Submit job → worker picks up task from DB → handler executes → results written. Same end-to-end behavior, no SB involved in task dispatch.
+
+### Phase 2: Orchestrator → Timer Trigger (v0.10.4)
+
+**Risk**: Low — same CoreMachine logic, just poll-driven instead of event-driven.
+**Effort**: Low — replace SB queue trigger with 60-second Azure Functions timer trigger.
+**Breaking**: No — same tables, same state machine, same handlers.
+
+The orchestrator Function App currently triggers on SB queue messages (job dispatch + stage_complete signals). Convert to a timer trigger that polls for state changes:
+
+1. Add 60-second timer trigger that polls `app.jobs` for pending work
+2. CoreMachine evaluates stage readiness from DB state (tasks completed → advance stage)
+3. Remove `_should_signal_stage_complete()` — orchestrator detects completion by polling
+4. Remove `stage_complete` SB message sending from workers
+5. Accept Function App cold-start latency (worst case: 60s vs instant SB trigger — negligible for ETL)
+
+**Validation**: Same job lifecycle, same stage progression, same handler execution. Latency increases by up to 60s between stages — invisible for ETL jobs taking minutes.
+
+### Phase 3: Remove Service Bus (v0.11.0)
+
+**Risk**: Low — by this point neither worker nor orchestrator uses SB.
+**Effort**: Low — delete code and Azure resources.
+**Breaking**: Yes (infrastructure) — Service Bus Azure resources removed, `service_bus.py` deleted.
+
+1. Remove `infrastructure/service_bus.py` (800+ lines)
+2. Remove `triggers/service_bus/` directory (job_handler, task_handler, error_handler)
+3. Remove SB connection strings from environment config
+4. Remove 3 Azure Service Bus queues (`geospatial-jobs`, `container-tasks`, `stage-complete`)
+5. Remove SB-related config fields from `QueueConfig`
+6. Clean up `docker_service.py` — remove any remaining SB references
+
+**What this eliminates**: AMQP warmup bugs, `_open()` silent message loss, DLQ management, peek-lock complexity, SB credential rotation, accepted risks G and H from V10_DECISIONS.md, ~$50/month Azure cost.
+
+### Phase 4: Handler Decomposition (v0.11.1)
+
+**Risk**: Zero — existing job definitions still work via wrapper handlers.
 **Effort**: Medium — break monolithic handlers into composable functions.
+**Breaking**: No — wrappers preserve existing behavior.
 
 1. Extract `vector_docker_complete` → 6 atomic handlers
 2. Extract `raster_docker_complete` → 5 atomic handlers
-3. Standardize `stac_create_item` as shared handler
+3. Standardize `stac_create_item` as shared handler (currently duplicated in raster, zarr, virtualzarr)
 4. Standardize `catalog_register_asset` as shared handler
 5. Create wrapper handler that calls atomic handlers in sequence (backward compat)
 6. Update `ALL_HANDLERS` registry with new atomic handlers
 
-**Validation**: Existing job types still work identically. New atomic handlers also registered and testable independently.
+**Validation**: Existing job types still work identically through wrappers. New atomic handlers also registered and testable independently. SIEGE regression test.
 
-### Phase 2: YAML Workflow Loader (Parallel to Existing)
+### Phase 5: YAML Workflows + DAG Orchestrator (v0.12.0)
 
-**Risk**: Low — new code path, doesn't touch existing.
-**Effort**: Medium — YAML parser, validator, DAG cycle detection.
+**Risk**: Medium — new orchestration paradigm, but coexists with CoreMachine during transition.
+**Effort**: High — YAML parser, DAG tables, orchestrator poll loop, parameter resolution, fan-out, conditionals.
+**Breaking**: Yes (schema) — new tables, new submission path.
+
+**5a: YAML Workflow Loader**
 
 1. Build `WorkflowLoader` — parse YAML, validate schema, detect cycles
 2. Build `WorkflowRegistry` — load all YAML files from `workflows/` directory
 3. Add DAG database tables (`workflow_runs`, `workflow_tasks`, `workflow_task_deps`)
-4. Add submission endpoint: `POST /api/workflows/submit/{workflow_name}`
-5. Build `DAGInitializer` — create task instances + dependency edges from YAML
+4. Build `DAGInitializer` — create task instances + dependency edges from YAML
 
-**Coexistence**: Old Python jobs use `POST /api/jobs/submit/{job_type}` + CoreMachine. New YAML workflows use `POST /api/workflows/submit/{workflow_name}` + DAG tables. Both run simultaneously.
-
-### Phase 3: DAG Orchestrator (Replaces CoreMachine for YAML Workflows)
-
-**Risk**: Medium — new orchestration loop, but doesn't affect existing jobs.
-**Effort**: High — polling loop, parameter resolution, fan-out expansion, conditional evaluation.
+**5b: DAG Orchestrator**
 
 1. Build `DAGOrchestrator` with poll loop (detects new runs, evaluates DAG, promotes tasks)
 2. Implement parameter resolution (`receives:` dotted path extraction)
 3. Implement fan-out expansion (create N task instances from array result)
 4. Implement conditional evaluation (`when:` clause)
 5. Implement completion detection and `finalize` handler
-6. Worker polls `app.workflow_tasks` via `SKIP LOCKED` instead of Service Bus
-7. Deploy orchestrator as lightweight container or timer-triggered Function
+6. Worker polls `app.workflow_tasks` via `SKIP LOCKED`
 
-**Coexistence**: YAML workflows use DAG orchestrator. Python jobs still use CoreMachine + Service Bus.
+**5c: Gateway Migration**
 
-### Phase 4: Gateway Migration (Wire Platform to DAG)
+1. Modify `services/platform_job_submit.py`: replace job creation with `INSERT INTO workflow_runs`
+2. Modify `triggers/trigger_platform_status.py`: query `workflow_runs` + `workflow_tasks`
+3. Modify unpublish/resubmit: create workflow runs instead of legacy jobs
+4. Update `services/platform_translation.py`: `job_type` → `workflow_name` mapping
+5. Verify B2B polling contract unchanged (same response shape, richer progress info)
 
-**Risk**: Low — gateway changes are minimal (one function call replacement per endpoint).
-**Effort**: Low — change submit to INSERT, status to query new tables.
-
-1. Modify `services/platform_job_submit.py`: replace `send_message()` with `INSERT INTO workflow_runs`
-2. Modify `triggers/trigger_platform_status.py`: query `workflow_runs` + `workflow_tasks` instead of `jobs` + `tasks`
-3. Modify `triggers/platform/unpublish.py`: create unpublish workflow run instead of SB message
-4. Modify `triggers/platform/resubmit.py`: reset workflow_run status instead of SB resend
-5. Update `services/platform_translation.py`: `job_type` → `workflow_name` mapping
-6. Verify B2B polling contract unchanged (same response shape, richer progress info)
-
-**Gateway keeps**: All 20 platform endpoints, auth/ACL, asset/release management, approvals, catalog — zero changes to these.
-
-### Phase 5: Full Migration & Cleanup
-
-**Risk**: Low by this point — all workflows already running on DAG.
-**Effort**: Low — convert remaining Python jobs to YAML, remove Service Bus.
+**5d: Convert Python Jobs to YAML + Cleanup**
 
 1. Convert all 14 Python job types to YAML workflow files
-2. Verify all workflows pass end-to-end testing
+2. Verify all workflows pass end-to-end testing (SIEGE campaign)
 3. Remove `core/machine.py` (CoreMachine)
-4. Remove `infrastructure/service_bus.py` (800 lines)
-5. Remove `triggers/service_bus/` (job_handler, task_handler, error_handler)
-6. Remove Service Bus Azure resources (3 queues)
-7. Remove `jobs/*.py` Python job classes (14 files)
-8. Remove `jobs/base.py`, `jobs/mixins.py`
-9. Consolidate submission endpoint: `/api/platform/submit` → writes `workflow_runs`
-10. Update `docker_service.py`: remove SB polling, add DB polling with `SKIP LOCKED`
+4. Remove `jobs/*.py` Python job classes (14 files)
+5. Remove `jobs/base.py`, `jobs/mixins.py`
+
+**Gateway keeps**: All 20 platform endpoints, auth/ACL, asset/release management, approvals, catalog — zero changes.
+
+### Phase 6: Orchestrator → Docker (v0.12.1)
+
+**Risk**: Zero — standing up a new Docker container that takes over orchestration duties.
+**Effort**: Trivial — ~20 lines changed. Same poll loop, different host.
+**Breaking**: No — Function App retains all `/api/platform/*` B2B endpoints unchanged. Only the orchestration timer trigger is removed from it.
+
+**Key architecture point**: The Function App currently serves two roles: (1) B2B gateway (`/api/platform/*` HTTP endpoints) and (2) orchestrator (timer/queue triggers that advance job stages). Phase 6 only replaces role #2. The Function App stays as the B2B integration point — same URL, same endpoints, same API signature. B2B clients see zero change.
+
+1. Deploy DAGOrchestrator as lightweight Docker container with poll loop
+2. Deploy with 2+ instances for HA (advisory lock ensures single-active)
+3. Remove orchestration timer trigger from Function App (it keeps all HTTP endpoints)
+4. Tiny Docker image: Python + psycopg3, no GDAL/heavy libs
+
+**Result**: Function App = B2B gateway only (HTTP). Docker orchestrator = DAG evaluation only (poll loop). Clean separation.
+
 
 ---
 
@@ -1424,12 +1499,75 @@ Option B is simpler (fewer deployments) but couples the orchestrator to Function
 ### Deferred to Review
 
 - [ ] **`when:` clause complexity** — Defer to Review Committee. Current proposal: simple dotted-path truthiness. Open question: whether comparisons (`row_count > 10000`) will be needed.
-- [ ] **Backward compat period** — Critical decision. How long do Python jobs + Service Bus coexist with YAML + DAG? Needs dedicated discussion after Phase 2 is built and testable.
-- [ ] **Observability architecture** — Goal: best possible observability system, not accommodation of legacy patterns. Current `JobEventType` events may be good framework or may be technical debt. Decision: evaluate honestly during Phase 3 — if the event model serves DAG observability well, keep it; if it constrains, build from scratch. Do not compromise observability to preserve old code.
+- [x] **Backward compat period** — Resolved: Service Bus removed at v0.11.0 (Phase 3), before YAML/DAG work begins. No coexistence period — SB is eliminated while still using Python jobs + CoreMachine. YAML migration (Phase 5, v0.12.0) replaces CoreMachine, not SB.
+- [ ] **Observability architecture** — Goal: best possible observability system, not accommodation of legacy patterns. Current `JobEventType` events may be good framework or may be technical debt. Decision: evaluate honestly during Phase 5 — if the event model serves DAG observability well, keep it; if it constrains, build from scratch. Do not compromise observability to preserve old code.
 
 ## Remaining Open Questions
 
 See "Deferred to Review" items above. All other questions have been resolved in "Decisions Made".
+
+---
+
+## Azure Resource Map
+
+### Active Resources (v0.12.1 End State)
+
+| Resource | Type | Role | Phase Impact |
+|----------|------|------|-------------|
+| `rmhazuregeoapi` | Function App | B2B gateway (`/platform/*` endpoints) + orchestrator (today) | v0.10.4: orchestration moves to timer trigger. v0.12.1: orchestration removed entirely, gateway-only. |
+| `rmhtitiler` | Web App (Docker) | Service layer (TiTiler + TiPG + STAC API) | **Untouched** — no ETL migration impact |
+| `rmhheavyapi` | Web App (Docker) | ETL worker — executes handlers, heavy compute (GDAL, xarray, geopandas) | v0.10.3: SB polling → DB `SKIP LOCKED` polling. v0.12.0: polls `workflow_tasks` instead of `tasks`. |
+| `rmhdagmaster` | Web App (Docker) | DAG orchestrator — lightweight poll loop, DAG evaluation | v0.12.1: takes over orchestration from `rmhazuregeoapi`. Advisory lock HA. No heavy libs. |
+
+### Resources to Retire
+
+| Resource | Type | Current State | Action |
+|----------|------|---------------|--------|
+| `rmhdagworker` | Web App (Docker) | Running (empty) | **Retire** — `rmhheavyapi` is the worker, no need for a separate DAG worker |
+| `rmhdaggateway` | Function App | Stopped | **Retire** — `rmhazuregeoapi` stays as B2B gateway |
+| `rmhgeogateway` | Function App | Stopped | Already deprecated |
+| `rmhgeoapi-worker` | Function App | Running (legacy) | Already deprecated |
+
+### Resource Topology by Phase
+
+```
+TODAY (v0.10.2.1):
+  rmhazuregeoapi (Function App) ──SB──→ rmhheavyapi (Docker Worker)
+       ↑ HTTP                              ↑ SB poll
+       B2B clients                         geospatial-jobs + container-tasks queues
+
+v0.10.3 (Worker polls DB):
+  rmhazuregeoapi (Function App) ──SB──→ rmhheavyapi (Docker Worker)
+       ↑ HTTP                              ↑ DB poll (SKIP LOCKED)
+       B2B clients                         SB still used for job dispatch
+
+v0.10.4 (Orchestrator timer):
+  rmhazuregeoapi (Function App) ──DB──→ rmhheavyapi (Docker Worker)
+       ↑ HTTP        ↑ 60s timer           ↑ DB poll
+       B2B clients   polls DB for work     No SB involved
+
+v0.11.0 (SB removed):
+  rmhazuregeoapi (Function App) ──DB──→ rmhheavyapi (Docker Worker)
+       ↑ HTTP        ↑ 60s timer           ↑ DB poll
+       B2B clients   Service Bus deleted   Pure PostgreSQL coordination
+
+v0.12.0 (YAML/DAG):
+  rmhazuregeoapi (Function App) ──DB──→ rmhheavyapi (Docker Worker)
+       ↑ HTTP        ↑ 60s timer           ↑ DB poll (workflow_tasks)
+       B2B clients   DAGOrchestrator       YAML-defined workflows
+
+v0.12.1 (Docker orchestrator — END STATE):
+  rmhazuregeoapi (Function App)          rmhdagmaster (Docker)
+       ↑ HTTP (gateway only)              ↑ poll loop (orchestration only)
+       B2B clients                         DAG evaluation, lightweight
+                          ↘       ↙
+                        PostgreSQL
+                          ↗
+                 rmhheavyapi (Docker Worker × N)
+                    SKIP LOCKED poll, handler execution
+
+  rmhtitiler (Docker) — service layer, independent
+```
 
 ---
 

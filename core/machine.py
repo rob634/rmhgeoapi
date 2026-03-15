@@ -41,7 +41,7 @@ Entry Points:
 """
 
 from typing import Dict, Any, Optional
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import uuid
 import time
 import traceback
@@ -74,7 +74,7 @@ from infrastructure import RepositoryFactory
 
 # Configuration
 from config import AppConfig
-from config.defaults import TaskRoutingDefaults
+# TaskRoutingDefaults removed (15 MAR 2026 - DB-polling migration, no SB queue routing)
 from config.app_mode_config import get_app_mode_config, AppMode
 
 # Logging
@@ -260,130 +260,51 @@ class CoreMachine:
         return self._event_repo
 
     # ========================================================================
-    # TASK ROUTING (V0.8 - 24 JAN 2026 - Consolidated Queues)
-    # ========================================================================
-
-    def _get_queue_for_task(self, task_type: str, task_params: Optional[dict] = None) -> str:
-        """
-        Route task to appropriate queue based on task type.
-
-        V0.9 Architecture (19 FEB 2026):
-        - All tasks → container_tasks_queue (Docker worker)
-
-        CRITICAL: All task types MUST be explicitly mapped in TaskRoutingDefaults.
-        Unmapped task types raise ContractViolationError to enforce explicit routing.
-
-        Args:
-            task_type: The task_type field from TaskDefinition
-            task_params: Optional task parameters (reserved for future use)
-
-        Returns:
-            Queue name string (e.g., "container-tasks")
-
-        Raises:
-            ContractViolationError: If task_type is not mapped in TaskRoutingDefaults
-
-        Used by:
-            - _individual_queue_tasks() - routes each task to appropriate queue
-
-        Example:
-            queue = self._get_queue_for_task("raster_process_complete")
-            # Returns: "container-tasks"
-        """
-        from exceptions import ContractViolationError
-
-        # V0.9: All tasks route to Docker worker (19 FEB 2026)
-        if task_type in TaskRoutingDefaults.DOCKER_TASKS:
-            queue_name = self.config.queues.container_tasks_queue
-            self.logger.debug(f"📤 Task type '{task_type}' → container queue: {queue_name}")
-        else:
-            # NO FALLBACK - Explicit routing required
-            raise ContractViolationError(
-                f"Task type '{task_type}' is not mapped to a queue. "
-                f"Add '{task_type}' to TaskRoutingDefaults.DOCKER_TASKS in config/defaults.py"
-            )
-
-        return queue_name
-
-    # ========================================================================
     # TASK CONVERSION HELPERS (13 NOV 2025 - Part 1 Task 1.2)
     # ========================================================================
 
     def _task_definition_to_record(
         self,
         task_def: TaskDefinition,
-        task_index: int,
-        target_queue: Optional[str] = None
+        task_index: int
     ) -> TaskRecord:
         """
         Convert TaskDefinition to TaskRecord for database persistence.
 
         Single source of truth for TaskRecord creation. Ensures consistent
-        status, timestamps, and field mapping across batch and individual queueing.
+        status, timestamps, and field mapping.
+
+        15 MAR 2026: DB-polling migration — tasks created as READY,
+        immediately available for worker pickup via SKIP LOCKED.
+        Removed target_queue (no Service Bus routing).
 
         Args:
             task_def: TaskDefinition from job's create_tasks_for_stage()
             task_index: Index in task list (for task_index field)
-            target_queue: Queue name this task will be sent to (07 DEC 2025)
 
         Returns:
             TaskRecord ready for database insertion
 
         Used by:
-            - _individual_queue_tasks() (task creation and queueing)
+            - _individual_queue_tasks() (task creation)
 
         Example:
-            queue_name = self._get_queue_for_task(task_def.task_type)
-            task_record = self._task_definition_to_record(task_def, 0, queue_name)
+            task_record = self._task_definition_to_record(task_def, 0)
             self.repos['task_repo'].create_task(task_record)
         """
-        # 16 DEC 2025: Tasks start as PENDING, trigger confirms QUEUED
+        # 15 MAR 2026: Tasks start as READY — immediately available for DB-polling pickup
         return TaskRecord(
             task_id=task_def.task_id,
             parent_job_id=task_def.parent_job_id,
             job_type=task_def.job_type,
             task_type=task_def.task_type,
-            status=TaskStatus.PENDING,  # 16 DEC 2025: PENDING until trigger confirms receipt
+            status=TaskStatus.READY,  # 15 MAR 2026: READY for worker pickup (DB-polling)
             stage=task_def.stage,
             task_index=str(task_index),
             parameters=task_def.parameters,
             metadata=task_def.metadata or {},
-            target_queue=target_queue,  # Multi-app tracking (07 DEC 2025)
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc)
-        )
-
-    def _task_definition_to_message(
-        self,
-        task_def: TaskDefinition
-    ) -> TaskQueueMessage:
-        """
-        Convert TaskDefinition to TaskQueueMessage for Service Bus.
-
-        Single source of truth for queue message creation. Generates fresh
-        correlation_id for tracing individual task execution.
-
-        Args:
-            task_def: TaskDefinition from job's create_tasks_for_stage()
-
-        Returns:
-            TaskQueueMessage ready for Service Bus
-
-        Used by:
-            - _individual_queue_tasks() (task queueing via to_queue_message())
-
-        Example:
-            queue_message = self._task_definition_to_message(task_def)
-            self.service_bus.send_message(queue_name, queue_message)
-        """
-        return TaskQueueMessage(
-            task_id=task_def.task_id,
-            parent_job_id=task_def.parent_job_id,
-            job_type=task_def.job_type,
-            task_type=task_def.task_type,
-            stage=task_def.stage,
-            parameters=task_def.parameters,
-            correlation_id=str(uuid.uuid4())[:8]  # Fresh correlation_id
         )
 
     # ========================================================================
@@ -629,15 +550,13 @@ class CoreMachine:
             self._mark_job_failed(job_message.job_id, f"TaskDefinition conversion failed: {e}", job_type=job_message.job_type)
             raise BusinessLogicError(f"Failed to convert tasks to TaskDefinition: {e}")
 
-        # Step 6: Queue tasks (database + Service Bus) using existing helper
+        # Step 6: Create task records in database (DB-polling — workers pick up READY tasks)
         try:
-            self.logger.debug(f"📤 COREMACHINE STEP 7: Queueing {len(task_definitions)} tasks...")
+            self.logger.debug(f"COREMACHINE STEP 7: Creating {len(task_definitions)} task records...")
 
-            # Use individual queueing helper (batch helper exists for high-volume jobs)
-            # This helper handles:
-            # 1. TaskDefinition → TaskRecord (database persistence)
-            # 2. TaskDefinition → TaskQueueMessage (Service Bus queueing)
-            # 3. Error handling and rollback
+            # Create task records as READY in database.
+            # Workers pick up tasks via SKIP LOCKED polling.
+            # No Service Bus send required.
             result = self._individual_queue_tasks(
                 task_definitions,
                 job_message.job_id,
@@ -646,16 +565,16 @@ class CoreMachine:
 
             # Check result
             if result['status'] == 'partial':
-                self.logger.warning(f"⚠️ COREMACHINE STEP 7: Partial success - {result['tasks_queued']}/{result['total_tasks']} tasks queued")
+                self.logger.warning(f"COREMACHINE STEP 7: Partial success - {result['tasks_queued']}/{result['total_tasks']} tasks created")
             else:
-                self.logger.info(f"✅ COREMACHINE STEP 7: All {result['tasks_queued']} tasks queued successfully")
+                self.logger.info(f"COREMACHINE STEP 7: All {result['tasks_queued']} tasks created as READY")
 
-            # If NO tasks were queued, fail the job immediately (26 FEB 2026)
-            # All tasks failed to send to Service Bus — orphan PENDING tasks
-            # have been marked FAILED by _individual_queue_tasks, but the job
-            # itself must also be failed to prevent it sitting in PROCESSING forever.
+            # If NO tasks were created, fail the job immediately (26 FEB 2026)
+            # All tasks failed DB insertion — failed tasks have been marked FAILED
+            # by _individual_queue_tasks, but the job itself must also be failed
+            # to prevent it sitting in PROCESSING forever.
             if result.get('tasks_queued', 0) == 0 and result.get('tasks_failed', 0) > 0:
-                error_msg = f"All {result['tasks_failed']} tasks failed to queue (Service Bus unavailable)"
+                error_msg = f"All {result['tasks_failed']} tasks failed to create (database error)"
                 self._mark_job_failed(job_message.job_id, error_msg, job_type=job_message.job_type)
                 return {
                     'success': False,
@@ -1471,14 +1390,12 @@ class CoreMachine:
                 )
                 # Retry needed - calculate exponential backoff delay
                 retry_attempt = task_record.retry_count + 1
-                delay_seconds = min(
-                    config.task_retry_base_delay * (2 ** task_record.retry_count),
-                    config.task_retry_max_delay
-                )
+                # 15 MAR 2026: DB-polling backoff — 30s base, doubling, capped at 600s
+                backoff_seconds = min(30 * (2 ** task_record.retry_count), 600)
 
                 self.logger.info(
-                    f"🔄 RETRY SCHEDULED - Task {task_message.task_id[:16]} failed (attempt {retry_attempt}/"
-                    f"{config.task_max_retries}) - will retry in {delay_seconds}s",
+                    f"RETRY SCHEDULED - Task {task_message.task_id[:16]} failed (attempt {retry_attempt}/"
+                    f"{config.task_max_retries}) - will retry after {backoff_seconds}s backoff",
                     extra={
                         'checkpoint': 'RETRY_SCHEDULED',
                         'error_source': 'orchestration',
@@ -1487,41 +1404,46 @@ class CoreMachine:
                         'task_type': task_message.task_type,
                         'retry_attempt': retry_attempt,
                         'max_retries': config.task_max_retries,
-                        'delay_seconds': delay_seconds,
-                        'base_delay': config.task_retry_base_delay,
+                        'backoff_seconds': backoff_seconds,
                         'retry_event': 'scheduled'
                     }
                 )
 
                 try:
-                    # Increment retry count and reset to QUEUED
-                    self.logger.debug(f"📝 Incrementing retry_count from {task_record.retry_count} to {retry_attempt}")
+                    # 15 MAR 2026: DB-polling migration — set PENDING_RETRY with
+                    # execute_after timestamp instead of re-sending to Service Bus.
+                    # Worker will pick up the task after backoff expires.
+                    self.logger.debug(f"Incrementing retry_count from {task_record.retry_count} to {retry_attempt}")
                     self.state_manager.increment_task_retry_count(task_message.task_id)
-                    self.logger.debug(f"✅ retry_count incremented successfully")
+                    self.logger.debug(f"retry_count incremented successfully")
 
-                    # Re-queue with delay using Service Bus scheduled delivery
-                    # Route to ORIGINAL queue based on task type (11 DEC 2025 - No Legacy Fallbacks)
-                    # V0.8 Phase 7: Pass task_params for admin override check
-                    retry_queue = self._get_queue_for_task(task_message.task_type, task_message.parameters)
-                    message_id = self.service_bus.send_message_with_delay(
-                        retry_queue,
-                        task_message,
-                        delay_seconds
+                    # Set PENDING_RETRY with execute_after for backoff
+                    execute_after_ts = datetime.now(timezone.utc) + timedelta(seconds=backoff_seconds)
+
+                    retry_update = TaskUpdateModel(
+                        status=TaskStatus.PENDING_RETRY,
+                        error_details=result.error_details,
+                        execute_after=execute_after_ts,
+                        claimed_by=None,  # Release claim so worker can re-pick
+                    )
+                    self.state_manager.update_task_with_model(
+                        task_message.task_id,
+                        retry_update
                     )
 
                     self.logger.info(
-                        f"✅ Task retry scheduled - attempt {retry_attempt}, "
-                        f"delay: {delay_seconds}s, message_id: {message_id}",
+                        f"Task retry scheduled via PENDING_RETRY - attempt {retry_attempt}, "
+                        f"backoff: {backoff_seconds}s, execute_after: {execute_after_ts.isoformat()}",
                         extra={
-                            'checkpoint': 'RETRY_QUEUED_SUCCESS',
+                            'checkpoint': 'RETRY_PENDING_RETRY_SET',
                             'error_source': 'orchestration',
                             'task_id': task_message.task_id,
                             'job_id': task_message.parent_job_id,
                             'task_type': task_message.task_type,
                             'retry_attempt': retry_attempt,
-                            'delay_seconds': delay_seconds,
-                            'message_id': message_id,
-                            'retry_event': 'queued'
+                            'backoff_seconds': backoff_seconds,
+                            'execute_after': execute_after_ts.isoformat(),
+                            'retry_event': 'pending_retry'
                         }
                     )
 
@@ -1529,12 +1451,12 @@ class CoreMachine:
                         'success': False,
                         'retry_scheduled': True,
                         'retry_attempt': retry_attempt,
-                        'delay_seconds': delay_seconds,
+                        'delay_seconds': backoff_seconds,
                         'task_id': task_message.task_id
                     }
 
                 except Exception as e:
-                    self.logger.error(f"❌ Failed to schedule retry: {e}")
+                    self.logger.error(f"Failed to schedule retry: {e}")
                     self.logger.error(f"Traceback: {traceback.format_exc()}")
                     # Fall through to mark as FAILED
 
@@ -1636,45 +1558,26 @@ class CoreMachine:
         stage_number: int
     ) -> Dict[str, Any]:
         """
-        Queue tasks individually to Service Bus, routing by task type.
+        Create task records in database with READY status for DB-polling pickup.
 
-        Routes each task to the appropriate queue (raster/vector/default)
-        based on task_type. Used for small task batches below batch_threshold.
+        15 MAR 2026: DB-polling migration — tasks are inserted as READY and
+        picked up by workers via PostgreSQL SKIP LOCKED. No Service Bus send.
 
-        Updated: 07 DEC 2025 - Multi-App Architecture
+        Previously: routed tasks to Service Bus queues.
+        Now: inserts to DB only. Workers poll for READY tasks.
         """
         start_time = time.time()
         total_tasks = len(task_defs)
         tasks_queued = 0
         tasks_failed = 0
 
-        # Track routing distribution (07 DEC 2025)
-        routing_counts: Dict[str, int] = {}
-
         for idx, task_def in enumerate(task_defs):
-            # (13 MAR 2026 — COMPETE Run 2 Fix 2: track whether DB create
-            # succeeded so the cleanup error message is accurate)
-            task_created = False
             try:
-                # Route task to appropriate queue based on task_type
-                # V0.8 Phase 7: Pass task_params for admin override check
-                queue_name = self._get_queue_for_task(task_def.task_type, task_def.parameters)
-
-                # Track routing distribution
-                routing_counts[queue_name] = routing_counts.get(queue_name, 0) + 1
-
-                # Create task record with target_queue tracking
-                task_record = self._task_definition_to_record(
-                    task_def, idx, target_queue=queue_name
-                )
+                # Create task record as READY (immediately available for worker pickup)
+                task_record = self._task_definition_to_record(task_def, idx)
                 self.repos['task_repo'].create_task(task_record)
-                task_created = True
 
-                # Send to Service Bus using helper (single source of truth)
-                queue_message = self._task_definition_to_message(task_def)
-                self.service_bus.send_message(queue_name, queue_message)
-
-                # Record TASK_QUEUED event (23 JAN 2026 - Job Event Tracking)
+                # Record TASK_QUEUED event (name kept for backward compat in logs)
                 try:
                     self.event_repo.record_task_event(
                         job_id=job_id,
@@ -1682,50 +1585,43 @@ class CoreMachine:
                         stage=stage_number,
                         event_type=JobEventType.TASK_QUEUED,
                         event_status=JobEventStatus.INFO,
-                        event_data={"task_type": task_def.task_type, "queue": queue_name}
+                        event_data={"task_type": task_def.task_type, "method": "db_polling"}
                     )
                 except Exception as event_err:
-                    self.logger.warning(f"⚠️ Failed to record TASK_QUEUED event: {event_err}")
+                    self.logger.warning(f"Failed to record TASK_QUEUED event: {event_err}")
 
                 tasks_queued += 1
 
             except Exception as e:
                 tasks_failed += 1
-                self.logger.error(f"❌ Failed to queue task {task_def.task_id}: {e}")
-                # Mark orphan task as FAILED to prevent stage deadlock (26 FEB 2026)
-                # Without this, a PENDING task with no Service Bus message blocks
-                # stage completion forever (complete_task_and_check_stage counts
-                # tasks NOT IN ('completed', 'failed')).
-                error_source = "Task DB creation" if not task_created else "Service Bus send"
+                self.logger.error(f"Failed to create task {task_def.task_id}: {e}")
+                # Mark failed task to prevent stage deadlock
                 try:
                     self.repos['task_repo'].fail_task(
                         task_def.task_id,
-                        f"{error_source} failed: {e}"
+                        f"Task DB creation failed: {e}"
                     )
                     self.logger.warning(
-                        f"Marked orphan task {task_def.task_id} as FAILED",
+                        f"Marked failed task {task_def.task_id} as FAILED",
                         extra={
-                            'checkpoint': 'ORPHAN_TASK_FAILED',
+                            'checkpoint': 'TASK_CREATE_FAILED',
                             'task_id': task_def.task_id,
                             'error': str(e)
                         }
                     )
                 except Exception as cleanup_err:
-                    self.logger.error(f"❌ Failed to cleanup orphan task {task_def.task_id}: {cleanup_err}")
+                    self.logger.error(f"Failed to cleanup task {task_def.task_id}: {cleanup_err}")
 
         elapsed_ms = (time.time() - start_time) * 1000
 
-        # Log routing summary
-        for queue, count in routing_counts.items():
-            self.logger.info(f"📤 Routed {count} tasks to queue: {queue}")
+        self.logger.info(f"Created {tasks_queued}/{total_tasks} tasks as READY (DB-polling)")
 
         return {
             'status': 'completed' if tasks_failed == 0 else 'partial',
             'total_tasks': total_tasks,
             'tasks_queued': tasks_queued,
             'tasks_failed': tasks_failed,
-            'routing': routing_counts,  # NEW: Shows distribution across queues
-            'method': 'individual',
+            'method': 'db_polling',
             'elapsed_ms': elapsed_ms
         }
 

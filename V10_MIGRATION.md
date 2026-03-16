@@ -1693,7 +1693,7 @@ Migration Window (peak operational complexity — invisible to clients):
 | Phase | Feature | Status | SIEGE |
 |-------|---------|--------|-------|
 | **F1** | Worker polls DB (SKIP LOCKED) v0.10.3 | **DONE** | Run 18: 18/18 100% |
-| **F-DAG** | DAG Foundation (loader, tables, resolver, orchestrator) | **D.1-D.3 DONE**, D.4-D.10 not started | — |
+| **F-DAG** | DAG Foundation (loader, tables, resolver, orchestrator) | **D.1-D.4 DONE**, D.5-D.10 not started | — |
 | **F4** | Handler decomposition (monolithic → atomic) | NOT STARTED | — |
 | **Port** | Workflows ported one at a time (14 total) | 0/14 | — |
 | **Cleanup** | Remove CoreMachine, SB, Python jobs | NOT STARTED | — |
@@ -1712,7 +1712,7 @@ Each story should be dispatched to a separate Claude session with the appropriat
 | **D.1** Workflow loader | ~~GREENFIELD~~ **DONE** | Completed 16 MAR 2026. 36 tests, all passing. |
 | **D.2** DAG tables | ~~GREENFIELD~~ **DONE** | Completed 16 MAR 2026. 37 tests, all passing. |
 | **D.3** DAG initializer | ~~GREENFIELD~~ **DONE** | Completed 16 MAR 2026. GREENFIELD pipeline (S→A+C+O→M→B→V). |
-| **D.4** Param resolver | **GREENFIELD** | ~150 lines. Jinja2 edge cases benefit from Critic stress-test. |
+| **D.4** Param resolver | ~~GREENFIELD~~ **DONE** | Completed 16 MAR 2026. GREENFIELD pipeline. V found 2 bugs, both fixed. |
 | **D.5** DAG orchestrator | **ARB → GREENFIELD** | Most complex (~400 lines). Concurrency, brain guard, fan-out. ARB decomposes into subsystems first, then GREENFIELD per subsystem. |
 | **D.6** Worker dual-poll | **Direct implementation** | Small change to existing file. No pipeline needed. |
 | **D.7** Janitor | **GREENFIELD** | Port pattern from rmhdagmaster. ~80 lines. |
@@ -1825,19 +1825,32 @@ Each story should be dispatched to a separate Claude session with the appropriat
 - Optional deps (`?` suffix) stored with `optional=true`
 - Transaction failure → no partial state
 
-#### Story D.4: Parameter Resolver (1-2 days)
+#### Story D.4: Parameter Resolver — DONE (16 MAR 2026)
 
 **What**: Resolve `receives:` dotted paths from predecessor results and merge with job params. Jinja2 for fan-out `task.params` only.
 
-**Port from rmhdagmaster**: `orchestrator/engine/templates.py` (302 lines). Simplify — `receives:` is dotted-path lookup, Jinja2 scoped to fan-out only.
+**Pipeline**: GREENFIELD (S→A+C+O→M→B→V).
 
-**Files**:
-- NEW: `core/param_resolver.py` (~150 lines)
+**Delivered**:
+- `core/param_resolver.py` (~290 lines) — 3 public functions + ParameterResolutionError
+- `resolve_dotted_path`: navigates predecessor result_data by dotted path, raises on missing
+- `resolve_task_params`: list params (pass-through from job_params) or dict params (literals), receives overlay
+- `resolve_fan_out_params`: Jinja2 NativeEnvironment with StrictUndefined, type-preserving
+- Module-level `_JINJA_ENV = NativeEnvironment(undefined=StrictUndefined)` — read-only singleton
 
-**Acceptance criteria**:
-- `receives: {metadata: "validate.result.metadata"}` resolves to predecessor's result_data
-- Fan-out `{{ item }}`, `{{ index }}`, `{{ inputs.param }}` templates resolve correctly
-- Missing predecessor → clear error, task marked FAILED
+**Key Design Decisions (M resolutions)**:
+- No "result" sentinel in dotted paths — `"node_name.field"` navigates raw result_data directly
+- Missing job params in params: list → raise immediately (Constraint 1: fail explicitly)
+- Jinja2 NativeEnvironment preserves native types (int, list, dict) for single-expression templates
+- Fan-out does NOT support receives: (FanOutTaskDef has no receives field)
+- Index is zero-based
+- Jinja2 context: `{item, index, inputs (=job_params), nodes (=predecessor_outputs)}`
+
+**V Findings (2 bugs fixed)**:
+- C4: `TemplateSyntaxError` not caught → added to except clause
+- C5: `node.params` type not validated → added type guard
+
+**Acceptance**: All 8 inline tests pass. 73/73 existing tests (D.1+D.2) still pass.
 
 #### Story D.5: DAG Orchestrator Core Loop (2-3 days)
 

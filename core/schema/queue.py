@@ -21,7 +21,7 @@ Exports:
     TaskQueueMessage: Task message for queue transport
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 
@@ -54,7 +54,7 @@ class JobQueueMessage(JobData):
     stage: int = Field(..., ge=1, le=100, description="Current stage number")
     stage_results: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Results from previous stages")
     retry_count: int = Field(default=0, ge=0, le=10, description="Number of retry attempts")
-    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Message creation time")
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Message creation time")
 
     correlation_id: Optional[str] = Field(
         default=None,
@@ -194,7 +194,7 @@ class TaskQueueMessage(TaskData):
         description="For explicit handoff from previous stage"
     )
     retry_count: int = Field(default=0, ge=0, le=10, description="Number of retry attempts")
-    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Message creation time")
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Message creation time")
 
     model_config = ConfigDict(validate_assignment=True)
 

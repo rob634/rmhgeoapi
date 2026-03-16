@@ -480,10 +480,10 @@ class BackgroundQueueWorker:
         return task_repo.claim_ready_task(worker_id=self._worker_id)
 
     def _release_task(self, task_id: str):
-        """Release a claimed task back to READY."""
+        """Release a claimed task back to READY (only if claimed by this worker)."""
         try:
             task_repo = self._core_machine.repos.get('task_repo')
-            task_repo.release_task(task_id)
+            task_repo.release_task(task_id, worker_id=self._worker_id)
         except Exception as e:
             logger.warning(f"[Queue Worker] Failed to release task {task_id}: {e}")
 

@@ -292,17 +292,23 @@ def _get_task_summary(
                 "processing": 0,
                 "pending": 0,
                 "ready": 0,
+                "pending_retry": 0,
+                "skipped": 0,
+                "cancelled": 0,
                 "by_stage": {}
             }
 
-        # Count by status
+        # Count by status (all 8 DAG-standard states)
         status_counts = {
             "total": len(tasks),
             "completed": 0,
             "failed": 0,
             "processing": 0,
             "pending": 0,
-            "ready": 0
+            "ready": 0,
+            "pending_retry": 0,
+            "skipped": 0,
+            "cancelled": 0,
         }
 
         # Group by stage
@@ -323,6 +329,12 @@ def _get_task_summary(
                 status_counts["pending"] += 1
             elif status == "ready":
                 status_counts["ready"] += 1
+            elif status == "pending_retry":
+                status_counts["pending_retry"] += 1
+            elif status == "skipped":
+                status_counts["skipped"] += 1
+            elif status == "cancelled":
+                status_counts["cancelled"] += 1
 
             # Update stage counts
             stage_key = str(task.stage)
@@ -334,6 +346,9 @@ def _get_task_summary(
                     "processing": 0,
                     "pending": 0,
                     "ready": 0,
+                    "pending_retry": 0,
+                    "skipped": 0,
+                    "cancelled": 0,
                     "task_types": set()
                 }
 
@@ -350,6 +365,12 @@ def _get_task_summary(
                 by_stage[stage_key]["pending"] += 1
             elif status == "ready":
                 by_stage[stage_key]["ready"] += 1
+            elif status == "pending_retry":
+                by_stage[stage_key]["pending_retry"] += 1
+            elif status == "skipped":
+                by_stage[stage_key]["skipped"] += 1
+            elif status == "cancelled":
+                by_stage[stage_key]["cancelled"] += 1
 
         # Convert task_types sets to lists and remove zero counts
         for stage_key in by_stage:

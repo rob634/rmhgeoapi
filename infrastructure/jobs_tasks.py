@@ -1072,28 +1072,48 @@ class TaskRepository(PostgreSQLTaskRepository):
 
                 return task_record
 
-    def release_task(self, task_id: str) -> None:
+    def release_task(self, task_id: str, worker_id: Optional[str] = None) -> None:
         """
         Release a claimed task back to READY for another worker.
 
         Used during graceful shutdown when a task was claimed but
         processing was interrupted before side effects occurred.
+
+        Args:
+            task_id: Task ID to release
+            worker_id: If provided, only release if claimed by this worker
         """
         with self._get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    sql.SQL("""
-                        UPDATE {schema}.tasks
-                        SET status = 'ready',
-                            claimed_by = NULL,
-                            execution_started_at = NULL,
-                            last_pulse = NULL,
-                            updated_at = NOW()
-                        WHERE task_id = %(task_id)s
-                          AND status = 'processing'
-                    """).format(schema=sql.Identifier(self.schema_name)),
-                    {'task_id': task_id}
-                )
+                if worker_id:
+                    cur.execute(
+                        sql.SQL("""
+                            UPDATE {schema}.tasks
+                            SET status = 'ready',
+                                claimed_by = NULL,
+                                execution_started_at = NULL,
+                                last_pulse = NULL,
+                                updated_at = NOW()
+                            WHERE task_id = %(task_id)s
+                              AND status = 'processing'
+                              AND claimed_by = %(worker_id)s
+                        """).format(schema=sql.Identifier(self.schema_name)),
+                        {'task_id': task_id, 'worker_id': worker_id}
+                    )
+                else:
+                    cur.execute(
+                        sql.SQL("""
+                            UPDATE {schema}.tasks
+                            SET status = 'ready',
+                                claimed_by = NULL,
+                                execution_started_at = NULL,
+                                last_pulse = NULL,
+                                updated_at = NOW()
+                            WHERE task_id = %(task_id)s
+                              AND status = 'processing'
+                        """).format(schema=sql.Identifier(self.schema_name)),
+                        {'task_id': task_id}
+                    )
                 conn.commit()
 
         logger.info(f"🔓 Released task {task_id[:16]}... back to READY")

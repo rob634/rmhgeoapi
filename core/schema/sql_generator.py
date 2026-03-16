@@ -1156,9 +1156,11 @@ class PydanticToSQL:
                                               partial_where="retry_count > 0"))
             indexes.append(IndexBuilder.btree(s, "tasks", "executed_by_app", name="idx_tasks_executed_by_app"))
             # DB-polling worker claim index (15 MAR 2026 - SKIP LOCKED migration)
-            # NOTE: execute_after filtering is in the poll query, not the index —
-            # partial indexes with NOW() are evaluated at build time, not query time
-            indexes.append(IndexBuilder.btree(s, "tasks", "created_at", name="idx_tasks_claimable",
+            # Covers: WHERE status IN ('ready','pending_retry') AND (execute_after IS NULL OR execute_after < NOW())
+            # execute_after included as column so PostgreSQL can filter without heap access.
+            # NOTE: NOW() cannot be in the partial WHERE (evaluated at build time), but
+            # execute_after as a column lets the planner use it for the runtime filter.
+            indexes.append(IndexBuilder.btree(s, "tasks", "execute_after, created_at", name="idx_tasks_claimable",
                                               partial_where="status IN ('ready', 'pending_retry')"))
             # Checkpoint index (11 JAN 2026 - Docker worker resume support)
             indexes.append(IndexBuilder.btree(s, "tasks", "checkpoint_phase", name="idx_tasks_checkpoint_phase",

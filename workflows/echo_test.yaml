@@ -23,5 +23,6 @@ nodes:
   final:
     type: task
     handler: hello_world_greeting
-    depends_on: [transform?]
+    depends_on:
+      - "transform?"
     params: [message]

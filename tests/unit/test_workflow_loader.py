@@ -365,3 +365,82 @@ class TestWorkflowLoader:
         with pytest.raises(WorkflowValidationError) as exc_info:
             WorkflowLoader.load(path, handler_names={"h"})
         assert len(exc_info.value.errors) >= 3
+
+
+# ============================================================================
+# WORKFLOW REGISTRY TESTS
+# ============================================================================
+
+from core.workflow_registry import WorkflowRegistry, WorkflowNotFoundError
+
+
+class TestWorkflowRegistry:
+    """Tests for WorkflowRegistry in-memory cache."""
+
+    def test_load_all_from_directory(self, tmp_path):
+        """Write 2 YAML files, registry loads both."""
+        wf1 = _minimal_workflow(workflow="alpha")
+        wf2 = _minimal_workflow(workflow="beta")
+        _write_yaml(tmp_path, wf1, "alpha.yaml")
+        _write_yaml(tmp_path, wf2, "beta.yaml")
+
+        registry = WorkflowRegistry(tmp_path, handler_names={"h"})
+        count = registry.load_all()
+        assert count == 2
+        assert registry.get("alpha") is not None
+        assert registry.get("beta") is not None
+
+    def test_get_or_raise_on_missing(self, tmp_path):
+        """get_or_raise raises WorkflowNotFoundError for unknown name."""
+        wf = _minimal_workflow(workflow="only")
+        _write_yaml(tmp_path, wf, "only.yaml")
+
+        registry = WorkflowRegistry(tmp_path, handler_names={"h"})
+        registry.load_all()
+
+        with pytest.raises(WorkflowNotFoundError, match="ghost"):
+            registry.get_or_raise("ghost")
+
+    def test_list_workflows(self, tmp_path):
+        """list_workflows returns sorted list of loaded names."""
+        for name in ["charlie", "alpha", "bravo"]:
+            _write_yaml(tmp_path, _minimal_workflow(workflow=name), f"{name}.yaml")
+
+        registry = WorkflowRegistry(tmp_path, handler_names={"h"})
+        registry.load_all()
+        assert registry.list_workflows() == ["alpha", "bravo", "charlie"]
+
+    def test_has(self, tmp_path):
+        """has returns True for loaded, False for missing."""
+        _write_yaml(tmp_path, _minimal_workflow(workflow="present"), "present.yaml")
+
+        registry = WorkflowRegistry(tmp_path, handler_names={"h"})
+        registry.load_all()
+        assert registry.has("present") is True
+        assert registry.has("absent") is False
+
+    def test_duplicate_workflow_name_rejected(self, tmp_path):
+        """Two files with the same workflow name raises WorkflowValidationError."""
+        _write_yaml(tmp_path, _minimal_workflow(workflow="dupe"), "file_a.yaml")
+        _write_yaml(tmp_path, _minimal_workflow(workflow="dupe"), "file_b.yml")
+
+        registry = WorkflowRegistry(tmp_path, handler_names={"h"})
+        with pytest.raises(WorkflowValidationError, match="dupe"):
+            registry.load_all()
+
+    def test_real_workflow_files(self):
+        """Load actual workflows/ directory with ALL_HANDLERS."""
+        try:
+            from services import ALL_HANDLERS
+        except Exception:
+            pytest.skip("services.ALL_HANDLERS not importable in this environment")
+
+        workflows_dir = Path(__file__).resolve().parents[2] / "workflows"
+        if not workflows_dir.exists():
+            pytest.skip("workflows/ directory not found")
+
+        registry = WorkflowRegistry(workflows_dir, handler_names=ALL_HANDLERS)
+        count = registry.load_all()
+        assert count >= 2
+        assert registry.has("hello_world")
+        assert registry.has("echo_test")

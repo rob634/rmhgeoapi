@@ -1876,7 +1876,7 @@ Each story should be dispatched to a separate Claude session with the appropriat
 
 | Phase | Run | File(s) | Lines | Status |
 |-------|-----|---------|-------|--------|
-| 1 | Run 1 | `core/dag_graph_utils.py` + repo additions to `workflow_run_repository.py` | ~380 | IN PROGRESS |
+| 1 | Run 1 | `core/dag_graph_utils.py` + repo additions to `workflow_run_repository.py` | ~740 | **DONE** |
 | 2 | Run 2 | `core/dag_transition_engine.py` + `core/dag_fan_engine.py` | ~470 | NOT STARTED |
 | 3 | Run 3 | `core/dag_orchestrator.py` | ~220 | NOT STARTED |
 

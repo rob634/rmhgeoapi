@@ -1687,6 +1687,73 @@ All pipeline executions in chronological order.
 
 ---
 
+## Run 44: DB-Polling Task Dispatch (COMPETE)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 15 MAR 2026 |
+| **Pipeline** | COMPETE (Adversarial Code Review) |
+| **Scope** | DB-polling task dispatch subsystem — SKIP LOCKED migration from Service Bus |
+| **Version** | v0.10.3.0 |
+| **Split** | C (Data vs Control Flow) |
+| **Files** | 9 |
+| **Findings** | 18 total: 3 CRITICAL, 4 HIGH, 6 MEDIUM, 5 LOW |
+| **Fixes Applied** | 11 (all CRITICAL + HIGH + 4 MEDIUM) |
+| **Accepted Risks** | 3 (no janitor — deferred v0.10.4, health check auth — diagnostics exception, double PROCESSING write — SB compat) |
+| **Verdict** | Sound architecture, critical shutdown/retry bugs fixed, deployable |
+
+**Scope Split C — Alpha (Data Integrity) / Beta (Control Flow)**:
+
+| Agent | Scope | Focus |
+|-------|-------|-------|
+| Alpha | Data validation, enum alignment, schema evolution, datetime consistency | enums.py, task.py, transitions.py, queue.py, sql_generator.py, jobs_tasks.py |
+| Beta | SKIP LOCKED atomicity, graceful shutdown, retry path, race conditions | jobs_tasks.py, machine.py, docker_service.py, transitions.py |
+| Gamma | Blind spots: health check auth, status API gaps, index coverage | shared.py, defaults.py, sql_generator.py, get_job_status.py |
+
+**Top Fixes**:
+
+| # | Finding | Severity | Fix |
+|---|---------|----------|-----|
+| 1 | Connection pool destroyed while task in-flight (SIGTERM) | CRITICAL | `finalize_shutdown()` after thread join |
+| 2 | `check_job_completion` ignores SKIPPED/CANCELLED | HIGH | `terminal_tasks` count |
+| 3 | Non-atomic retry (two writes, conflicting backoff) | CRITICAL | Single atomic SQL function |
+| 4 | PENDING_RETRY→PROCESSING bypass | CRITICAL | Transition table updated |
+| 5 | `fail_tasks_for_job` overwrites settled states | HIGH | Excluded skipped/cancelled |
+
+---
+
+## Run 45: DB-Polling Regression (SIEGE)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 15 MAR 2026 |
+| **Pipeline** | SIEGE (Sequential Smoke Test) |
+| **Scope** | Post-deployment regression — DB-polling migration validation |
+| **Version** | v0.10.3.0 |
+| **Profile** | Quick |
+| **Pass Rate** | **18/18 (100%)** |
+| **Duration** | 1m 52s |
+| **Findings** | 1 LOW (dbadmin task_counts missing 3 new statuses) |
+| **Verdict** | Zero regressions. DB-polling fully functional. |
+
+**Sequences**:
+
+| Seq | Name | Verdict | Notes |
+|-----|------|---------|-------|
+| S0 | Endpoint Probes (7) | PASS | All healthy |
+| S1 | Raster Lifecycle | PASS | Submit → complete → approve → catalog → TiTiler |
+| S2 | Vector Lifecycle | PASS | Submit → complete → approve → catalog → OGC Features |
+| S3 | Status API Validation | PASS | All 8 TaskStatus values in responses |
+| S4 | Negative Tests | PASS | Ghost file → 400, fake release → 404 |
+
+**Finding**:
+
+| ID | Severity | Description |
+|----|----------|-------------|
+| SG18-F1 | LOW | `dbadmin/jobs` task_counts missing `pending_retry`, `skipped`, `cancelled` — only 4 of 8 statuses |
+
+---
+
 ## Recurring Review Patterns
 
 Two subsystems are designated for **regular re-review** using the COMPETE pipeline with full constitution enforcement. These are the highest-churn, highest-risk areas of the codebase — each has been the source of multiple SIEGE/TOURNAMENT findings across runs.

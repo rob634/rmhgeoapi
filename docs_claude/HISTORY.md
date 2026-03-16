@@ -1,6 +1,6 @@
 # Project History
 
-**Last Updated**: 14 MAR 2026 (v0.10.2.1)
+**Last Updated**: 15 MAR 2026 (v0.10.3.0)
 **Active Log**: FEB - MAR 2026
 **Rolling Archive**: When this file exceeds ~600 lines, older content is archived with a UUID filename.
 
@@ -10,6 +10,70 @@
 - [HISTORY_e1fc3ce2.md](./HISTORY_e1fc3ce2.md) - DEC 2025 - JAN 2026
 
 This document tracks completed architectural changes and improvements to the Azure Geospatial ETL Pipeline.
+
+---
+
+## 15 MAR 2026: DB-Polling Migration — Worker SKIP LOCKED (v0.10.3.0) ✅
+
+**Status**: ✅ **COMPLETE** — Phase 1 of V10 DAG migration. Deployed, COMPETE reviewed, SIEGE regression-free.
+
+### What Changed
+
+Replaced Service Bus `container-tasks` queue with PostgreSQL `SELECT FOR UPDATE SKIP LOCKED` for Docker worker task dispatch. Tasks now created as READY (not PENDING→QUEUED), workers claim directly from DB. Service Bus still used for `geospatial-jobs` queue (orchestrator job dispatch — Phase 2).
+
+### Commits (6 total)
+
+| Commit | Description |
+|--------|-------------|
+| `fedbc1b` | DB-POLL-1: DAG-standard TaskStatus enum (8 values), TaskRecord model changes |
+| `8ac97e4` | DB-POLL-2: SQL schema, CoreMachine send-side (removed SB send), TaskRepository claim methods |
+| `dcc7059` | DB-POLL-3: Docker worker polling loop, health checks, status string updates |
+| `733addf` | COMPETE fixes (5): shutdown pool timing, terminal states, transition table, status guards |
+| `a3f02bf` | COMPETE fix 3: atomic retry — single SQL function for retry scheduling |
+| `e8d3f75` | COMPETE remaining: datetime.utcnow, release_task guard, status API counts, claimable index |
+
+### TaskStatus Enum (New)
+
+```
+PENDING → READY → PROCESSING → COMPLETED
+    │                   │
+    ↓                   ↓
+  SKIPPED            FAILED → PENDING_RETRY → READY (retry loop)
+CANCELLED (from any non-terminal state)
+```
+
+Replaces: QUEUED (removed), RETRYING (removed). Added: READY, SKIPPED, PENDING_RETRY, CANCELLED.
+
+### Key Design Decisions
+
+- **Tasks created as READY** — immediately available for worker SKIP LOCKED pickup
+- **Atomic retry** — single SQL function sets retry_count + PENDING_RETRY + execute_after (LEAST(30*2^n, 600)s) + clears claimed_by
+- **Connection pool survives shutdown** — `finalize_shutdown()` called after worker thread joins, not during SIGTERM
+- **Guardian changes deferred** to v0.10.4 — fail-open design means no breakage
+- **Terminal states**: COMPLETED, FAILED, SKIPPED, CANCELLED (FAILED allows retry)
+- **Settled states**: COMPLETED, SKIPPED, CANCELLED (will never change)
+
+### Validation
+
+- **COMPETE Run (15 MAR 2026)**: Split C (Data vs Control Flow). 18 findings: 3 CRITICAL, 4 HIGH, 6 MEDIUM, 5 LOW. All CRITICAL/HIGH fixed. 3 accepted risks.
+- **SIEGE Run 18 (15 MAR 2026)**: 18/18 = 100% pass rate. Raster + vector lifecycles, approval, catalog, negative tests. Zero regressions. 1 LOW finding (dbadmin task_counts missing 3 new statuses).
+
+### Design Documents
+
+- `V10_MIGRATION.md` — Full 6-phase migration design (v0.10.3 → v0.12.1)
+- `DDIA.md` — Architectural principles and DDIA concept mapping
+- `docs/superpowers/specs/2026-03-15-docker-worker-db-polling-design.md` — Phase 1 implementation spec (12 sections)
+
+### What's Next (V10 Roadmap)
+
+| Version | Phase | Status |
+|---------|-------|--------|
+| **v0.10.3** | Worker polls DB (SKIP LOCKED) | ✅ **DONE** |
+| v0.10.4 | Orchestrator → 60s timer trigger | Planned |
+| v0.11.0 | Remove Service Bus entirely | Planned |
+| v0.11.1 | Handler decomposition (monolithic → atomic) | Planned |
+| v0.12.0 | YAML workflows + DAG tables + DAGOrchestrator | Planned |
+| v0.12.1 | Orchestrator → Docker container | Planned |
 
 ---
 

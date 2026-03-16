@@ -434,6 +434,33 @@ sanitized names. The fix only applies to new uploads going forward.
 - If new reserved words cause issues, add them to `PG_RESERVED_WORDS` frozenset
 - Test with known-problematic sources (Shapefiles with `type`, `name` columns)
 
+### DB-008: IndexBuilder.btree composite index — comma-separated string treated as single column
+
+**Date**: 15 MAR 2026
+**Version**: v0.10.3.0
+**Severity**: Deploy-blocking (schema rebuild fails, cascading transaction abort)
+**Category**: CODE — API misuse
+
+**Error Message**:
+```
+Failed SQL: CREATE INDEX IF NOT EXISTS "idx_tasks_claimable" ON "app"."tasks" ("execute_after, created_at") WHERE status IN ('ready', 'pending_retry')
+```
+
+**Root Cause**: `IndexBuilder.btree()` accepts `columns: Union[str, Sequence[str]]`. Passing `"execute_after, created_at"` (a comma-separated string) results in a single quoted identifier `"execute_after, created_at"` instead of two separate columns. PostgreSQL rejects the non-existent column name.
+
+**Fix**:
+```python
+# ❌ WRONG — treated as one column name
+IndexBuilder.btree(s, "tasks", "execute_after, created_at", ...)
+
+# ✅ CORRECT — list of column names
+IndexBuilder.btree(s, "tasks", ["execute_after", "created_at"], ...)
+```
+
+**Impact**: First `action=rebuild` after DB-POLL-3 deploy failed. Schema was dropped but not recreated, leaving all tables missing. Health checks returned 503. Fixed with `d47c800` and re-deployed.
+
+**Prevention**: Always pass a list to `IndexBuilder.btree()` for multi-column indexes. The `str` form is for single-column only.
+
 ---
 
 ## STORAGE Errors

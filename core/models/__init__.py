@@ -226,6 +226,8 @@ from .workflow_enums import (
     NodeType,
     AggregationMode,
     BackoffStrategy,
+    WorkflowRunStatus,
+    WorkflowTaskStatus,
 )
 from .workflow_definition import (
     RetryPolicy,
@@ -241,6 +243,11 @@ from .workflow_definition import (
     NodeDefinition,
     WorkflowDefinition,
 )
+
+# Workflow DAG execution models (16 MAR 2026 - D.2)
+from .workflow_run import WorkflowRun
+from .workflow_task import WorkflowTask
+from .workflow_task_dep import WorkflowTaskDep
 
 __all__ = [
     # Enums
@@ -398,6 +405,8 @@ __all__ = [
     'NodeType',
     'AggregationMode',
     'BackoffStrategy',
+    'WorkflowRunStatus',
+    'WorkflowTaskStatus',
     'RetryPolicy',
     'BranchDef',
     'FanOutTaskDef',
@@ -410,4 +419,9 @@ __all__ = [
     'FanInNode',
     'NodeDefinition',
     'WorkflowDefinition',
+
+    # Workflow DAG execution models (16 MAR 2026 - D.2)
+    'WorkflowRun',
+    'WorkflowTask',
+    'WorkflowTaskDep',
 ]

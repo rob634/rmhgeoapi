@@ -169,3 +169,199 @@ class TestNodeTypeDiscrimination:
             adapter.validate_python(
                 {"type": "fan_in", "depends_on": ["x"], "handler": "bad"}
             )
+
+
+# ============================================================================
+# WORKFLOW LOADER TESTS
+# ============================================================================
+
+import yaml
+from pathlib import Path
+from core.workflow_loader import WorkflowLoader, WorkflowValidationError
+
+
+def _write_yaml(tmp_path: Path, data: dict, name: str = "test.yaml") -> Path:
+    """Helper to write a YAML dict to a temp file and return the path."""
+    path = tmp_path / name
+    path.write_text(yaml.dump(data, default_flow_style=False))
+    return path
+
+
+def _minimal_workflow(**overrides) -> dict:
+    """Return a minimal valid workflow dict, with optional overrides."""
+    base = {
+        "workflow": "test",
+        "description": "test workflow",
+        "version": 1,
+        "parameters": {"msg": {"type": "str", "required": True}},
+        "nodes": {
+            "step": {
+                "type": "task",
+                "handler": "h",
+                "params": ["msg"],
+            }
+        },
+    }
+    base.update(overrides)
+    return base
+
+
+class TestWorkflowLoader:
+    """Tests for WorkflowLoader YAML parsing and structural validations."""
+
+    def test_load_hello_world(self, tmp_path):
+        """Valid simple workflow loads without error."""
+        data = {
+            "workflow": "hello",
+            "description": "simple",
+            "version": 1,
+            "parameters": {"message": {"type": "str", "required": True}},
+            "nodes": {
+                "greet": {
+                    "type": "task",
+                    "handler": "h",
+                    "params": ["message"],
+                }
+            },
+        }
+        path = _write_yaml(tmp_path, data)
+        defn = WorkflowLoader.load(path, handler_names={"h"})
+        assert defn.workflow == "hello"
+        assert "greet" in defn.nodes
+
+    def test_cycle_detected(self, tmp_path):
+        """A depends_on B, B depends_on A triggers cycle error."""
+        data = _minimal_workflow(nodes={
+            "a": {"type": "task", "handler": "h", "depends_on": ["b"]},
+            "b": {"type": "task", "handler": "h", "depends_on": ["a"]},
+        })
+        path = _write_yaml(tmp_path, data)
+        with pytest.raises(WorkflowValidationError, match="(?i)cycle"):
+            WorkflowLoader.load(path, handler_names={"h"})
+
+    def test_missing_handler_rejected(self, tmp_path):
+        """Handler not in handler_names triggers error."""
+        data = _minimal_workflow(nodes={
+            "step": {"type": "task", "handler": "nonexistent", "params": ["msg"]},
+        })
+        path = _write_yaml(tmp_path, data)
+        with pytest.raises(WorkflowValidationError, match="unknown handler"):
+            WorkflowLoader.load(path, handler_names={"h"})
+
+    def test_missing_dependency_ref_rejected(self, tmp_path):
+        """depends_on referencing nonexistent node triggers error."""
+        data = _minimal_workflow(nodes={
+            "step": {
+                "type": "task",
+                "handler": "h",
+                "depends_on": ["typo_node"],
+                "params": ["msg"],
+            },
+        })
+        path = _write_yaml(tmp_path, data)
+        with pytest.raises(WorkflowValidationError, match="does not exist"):
+            WorkflowLoader.load(path, handler_names={"h"})
+
+    def test_conditional_without_default_rejected(self, tmp_path):
+        """ConditionalNode with no default branch triggers error."""
+        data = _minimal_workflow(nodes={
+            "check": {
+                "type": "conditional",
+                "condition": "params.mode",
+                "branches": [
+                    {"name": "a", "next": ["step"]},
+                    {"name": "b", "next": ["step"]},
+                ],
+            },
+            "step": {"type": "task", "handler": "h", "params": ["msg"]},
+        })
+        path = _write_yaml(tmp_path, data)
+        with pytest.raises(WorkflowValidationError, match="no default branch"):
+            WorkflowLoader.load(path, handler_names={"h"})
+
+    def test_fan_in_without_fan_out_rejected(self, tmp_path):
+        """FanInNode depending on a TaskNode (not FanOutNode) triggers error."""
+        data = _minimal_workflow(nodes={
+            "step": {"type": "task", "handler": "h", "params": ["msg"]},
+            "gather": {"type": "fan_in", "depends_on": ["step"]},
+        })
+        path = _write_yaml(tmp_path, data)
+        with pytest.raises(WorkflowValidationError, match="0 FanOutNode"):
+            WorkflowLoader.load(path, handler_names={"h"})
+
+    def test_optional_dependency_suffix_stripped(self, tmp_path):
+        """depends_on: ['a?'] works when node 'a' exists."""
+        data = _minimal_workflow(nodes={
+            "a": {"type": "task", "handler": "h", "params": ["msg"]},
+            "b": {
+                "type": "task",
+                "handler": "h",
+                "depends_on": ["a?"],
+                "params": ["msg"],
+            },
+        })
+        path = _write_yaml(tmp_path, data)
+        defn = WorkflowLoader.load(path, handler_names={"h"})
+        assert "b" in defn.nodes
+
+    def test_receives_bad_node_ref_rejected(self, tmp_path):
+        """receives referencing nonexistent node triggers error."""
+        data = _minimal_workflow(nodes={
+            "step": {
+                "type": "task",
+                "handler": "h",
+                "params": ["msg"],
+                "receives": {"data": "ghost.result.value"},
+            },
+        })
+        path = _write_yaml(tmp_path, data)
+        with pytest.raises(WorkflowValidationError, match="unknown node 'ghost'"):
+            WorkflowLoader.load(path, handler_names={"h"})
+
+    def test_params_referencing_undeclared_parameter_rejected(self, tmp_path):
+        """params list item not in workflow parameters triggers error."""
+        data = _minimal_workflow(nodes={
+            "step": {
+                "type": "task",
+                "handler": "h",
+                "params": ["nonexistent"],
+            },
+        })
+        path = _write_yaml(tmp_path, data)
+        with pytest.raises(WorkflowValidationError, match="undeclared parameter"):
+            WorkflowLoader.load(path, handler_names={"h"})
+
+    def test_orphan_node_rejected(self, tmp_path):
+        """Disconnected node (no path from roots) triggers error."""
+        data = _minimal_workflow(nodes={
+            "root": {"type": "task", "handler": "h", "params": ["msg"]},
+            "orphan": {
+                "type": "task",
+                "handler": "h",
+                "depends_on": ["orphan_dep"],
+            },
+            "orphan_dep": {
+                "type": "task",
+                "handler": "h",
+                "depends_on": ["orphan"],
+            },
+        })
+        path = _write_yaml(tmp_path, data)
+        with pytest.raises(WorkflowValidationError, match="[Uu]nreachable"):
+            WorkflowLoader.load(path, handler_names={"h"})
+
+    def test_errors_collected_not_one_at_a_time(self, tmp_path):
+        """Multiple errors are reported together (at least 3)."""
+        data = _minimal_workflow(nodes={
+            "a": {
+                "type": "task",
+                "handler": "bad_handler",
+                "depends_on": ["missing_dep"],
+                "params": ["no_such_param"],
+                "receives": {"x": "ghost.result"},
+            },
+        })
+        path = _write_yaml(tmp_path, data)
+        with pytest.raises(WorkflowValidationError) as exc_info:
+            WorkflowLoader.load(path, handler_names={"h"})
+        assert len(exc_info.value.errors) >= 3

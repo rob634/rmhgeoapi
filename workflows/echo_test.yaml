@@ -1,0 +1,27 @@
+workflow: echo_test
+description: "Multi-node test with receives and conditional skip"
+version: 1
+
+parameters:
+  message: {type: str, required: true}
+  uppercase: {type: bool, default: false}
+
+nodes:
+  echo:
+    type: task
+    handler: hello_world_greeting
+    params: [message]
+
+  transform:
+    type: task
+    handler: hello_world_reply
+    depends_on: [echo]
+    when: "params.uppercase"
+    receives:
+      original: "echo.result.message"
+
+  final:
+    type: task
+    handler: hello_world_greeting
+    depends_on: [transform?]
+    params: [message]

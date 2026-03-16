@@ -1,0 +1,15 @@
+workflow: hello_world
+description: "Minimal test workflow — single task node"
+version: 1
+
+parameters:
+  message: {type: str, required: true}
+
+nodes:
+  greet:
+    type: task
+    handler: hello_world_greeting
+    params: [message]
+
+finalize:
+  handler: hello_world_reply

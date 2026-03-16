@@ -1,12 +1,14 @@
 # V10 Migration: DAG-Based YAML Workflow Orchestration
 
 **Created**: 14 MAR 2026
-**Updated**: 14 MAR 2026
-**Status**: DESIGN — versioned migration path agreed (v0.10.3 → v0.13.0)
+**Updated**: 16 MAR 2026
+**Status**: ACTIVE — F1 done (v0.10.3), F-DAG + F4 starting (strangler fig migration)
 **Target**: Decompose monolithic job/stage/task system into atomic DAG nodes with YAML workflow definitions
 **Justification**: Interchangeable tasks, polling-based orchestration, no distributed messaging complexity
-**End State (v0.12.1)**: Function App gateway + Docker orchestrator + Docker workers + PostgreSQL. Zero Service Bus.
+**Migration Strategy**: Strangler fig — DAG Brain runs alongside existing CoreMachine. Workflows ported one at a time. Legacy removed after all 14 proven.
+**End State (v0.12.0)**: Function App gateway + Docker DAG Brain + Docker workers + PostgreSQL. Zero Service Bus.
 **Azure Resources**: See [Azure Resource Map](#azure-resource-map) below.
+**Spec**: `docs/superpowers/specs/2026-03-16-workflow-loader-yaml-schema-design.md` — YAML schema + Pydantic models
 
 ---
 
@@ -1297,28 +1299,36 @@ Option B is simpler (fewer deployments) but couples the orchestrator to Function
 
 ## Migration Path — Versioned Phases
 
-### Version Roadmap
+### Version Roadmap (Revised — Strangler Fig)
 
 | Version | Phase | What | Breaking? |
 |---------|-------|------|-----------|
-| **v0.10.3** | 1 | Worker polls DB instead of Service Bus | No |
-| **v0.10.4** | 2 | Orchestrator → 60s timer trigger (poll-based) | No |
-| **v0.11.0** | 3 | Remove Service Bus entirely | Yes (infra) |
-| **v0.11.1** | 4 | Handler decomposition (monolithic → atomic) | No |
-| **v0.12.0** | 5 | YAML workflows + DAG tables + DAGOrchestrator | Yes (schema) |
-| **v0.12.1** | 6 | Orchestrator → Docker container | No |
+| **v0.10.3** | F1 | Worker polls DB instead of Service Bus | No | **DONE** |
+| **v0.10.4** | ~~F2~~ | ~~Orchestrator → 60s timer trigger~~ | ~~No~~ | **ELIMINATED** (strangler fig) |
+| **v0.11.0** | F-DAG | DAG Foundation: loader, tables, initializer, resolver, orchestrator, gateway routing | Yes (schema — additive) |
+| **v0.11.1** | F4 | Handler decomposition (monolithic → atomic) | No |
+| **v0.11.2+** | F5 | Port workflows tier by tier (strangler fig — incremental) | No (per-workflow rollback) |
+| **v0.12.0** | F6 | Cleanup: remove CoreMachine, Service Bus, Python jobs | Yes (infra) |
 
-**End state at v0.12.1**: Function App gateway + two Docker process types + PostgreSQL. Zero Service Bus.
+**Migration approach**: Strangler fig. DAG Brain (Docker) runs alongside Function App orchestrator. New YAML workflows go to DAG Brain; legacy Python jobs stay on CoreMachine. Ported one workflow at a time, each SIEGE-validated. When all 14 are proven, remove legacy system in one clean cut.
+
+**What changed from original roadmap**:
+- **F2 (timer trigger) eliminated** — the DAG Brain IS the new orchestrator. No point converting Function App to polling when we're about to replace it.
+- **F3 (remove SB) deferred** — SB keeps working for legacy jobs during migration. Removed once at the end in F6.
+- **F6 (Docker lift) free** — DAG Brain starts as Docker from day one.
+- **19 stories instead of 25. 22-32 days instead of 25-38.**
+
+**End state at v0.12.0**: Function App gateway + Docker DAG Brain + Docker workers + PostgreSQL. Zero Service Bus.
 
 ```
-v0.12.1 Architecture:
+v0.12.0 Architecture:
   Gateway (Function App) — HTTP endpoints, validation, entity management, B2B integration
-  Orchestrator (Docker)  — lightweight poll loop, DAG evaluation, no heavy libs
+  DAG Brain (Docker)     — poll loop, DAG evaluation, brain guard HA
   Workers (Docker × N)   — SKIP LOCKED poll, handler execution, GDAL/xarray/etc.
   PostgreSQL             — single coordination mechanism (no queues, no AMQP)
 ```
 
-The gateway remains a Function App — it's the right tool for HTTP request/response with Azure's built-in scaling, auth hooks, and APIM integration. Docker is for long-running poll loops and heavy compute, not HTTP endpoints behind Azure infrastructure.
+The gateway remains a Function App — right tool for HTTP request/response with Azure's scaling, auth hooks, and APIM integration. Docker is for long-running poll loops and heavy compute.
 
 Major version (v1.0.0) tracks with production deployment, not this infrastructure work.
 
@@ -1499,8 +1509,17 @@ The orchestrator Function App currently triggers on SB queue messages (job dispa
 ### Deferred to Review
 
 - [ ] **`when:` clause complexity** — Defer to Review Committee. Current proposal: simple dotted-path truthiness. Open question: whether comparisons (`row_count > 10000`) will be needed.
-- [x] **Backward compat period** — Resolved: Service Bus removed at v0.11.0 (Phase 3), before YAML/DAG work begins. No coexistence period — SB is eliminated while still using Python jobs + CoreMachine. YAML migration (Phase 5, v0.12.0) replaces CoreMachine, not SB.
+- [x] **Backward compat period** — Resolved: Strangler fig (revised 16 MAR). SB stays for legacy jobs during migration. Removed in F6 cleanup after all workflows ported.
 - [ ] **Observability architecture** — Goal: best possible observability system, not accommodation of legacy patterns. Current `JobEventType` events may be good framework or may be technical debt. Decision: evaluate honestly during Phase 5 — if the event model serves DAG observability well, keep it; if it constrains, build from scratch. Do not compromise observability to preserve old code.
+
+### Resolved During Implementation (16 MAR 2026)
+
+- [x] **TIMESTAMP not TIMESTAMPTZ** — We use UTC everywhere. No timezone data stored. TIMESTAMP is correct. No need for TIMESTAMPTZ.
+- [x] **`task_name` vs `node_name` column** — DDL spec says `task_name`, conceptual model says `node_name`. Implemented as `task_name` in database. "Node" is the YAML blueprint concept, "task" is the execution/DB concept. Column is on the execution table → `task_name` is correct.
+- [x] **CANCELLED as 8th WorkflowTaskStatus** — Added beyond the 7-value spec. Needed for admin force-stop of running workflows.
+- [x] **`updated_at` on `workflow_tasks`** — Not in spec, added intentionally. Useful for janitor debugging (detect when a task was last modified).
+- [x] **Extra indexes on `workflow_runs`** — workflow_name, status, created_at, request_id indexes added beyond spec. Needed for dashboard and platform status queries.
+- [x] **Epoch 4 freeze enforced** — D.1 and D.2 are pure new code. Only additive changes to `__init__.py` and `sql_generator.py`. Zero Epoch 4 files modified.
 
 ## Remaining Open Questions
 
@@ -1607,5 +1626,766 @@ v0.12.1 (Docker orchestrator — END STATE):
 
 ---
 
+## SAFe Implementation Plan — Strangler Fig Migration
+
+**Date**: 16 MAR 2026
+**Team**: Robert (Product Owner + Dev) + Claude (Dev + SAFe Coach)
+**Cadence**: 1-3 day stories, SIEGE regression after each ported workflow
+**Epic**: V10 DAG Migration (v0.10.3 → v0.12.0)
+
+### Migration Strategy: Strangler Fig
+
+The DAG Brain (Docker orchestrator) runs **alongside** the existing Function App orchestrator. New workflows go to the DAG Brain; legacy jobs stay on the old path. Workflows are ported one at a time, each validated with SIEGE. When all 14 are ported, remove the old system.
+
+```
+Migration Window (peak operational complexity — invisible to clients):
+
+  Gateway (Function App)
+      │
+      ├──→ DAG Brain (Docker) ──→ workflow_tasks ──→ Docker Worker (SKIP LOCKED)
+      │    ↑ new YAML workflows                       ↑ polls BOTH tables
+      │
+      └──→ CoreMachine (Function App) ──→ app.tasks ──→ Docker Worker (SKIP LOCKED)
+           ↑ legacy Python jobs                        ↑ same worker, two poll targets
+
+  Routing logic (~10 lines in Gateway):
+    if workflow_registry.has(workflow_name):
+        INSERT INTO workflow_runs → DAG Brain handles it
+    else:
+        create_and_submit_job() → CoreMachine handles it (existing path)
+
+  Rollback: remove a YAML file → that workflow falls back to the old path. No code changes.
+```
+
+### Why Strangler Fig (Not Sequential Cutover)
+
+| Sequential Plan (Original) | Strangler Fig (Revised) |
+|---------------------------|------------------------|
+| F2: Convert Function App to timer trigger (3-5 days) | **Eliminated** — DAG Brain IS the new orchestrator |
+| F3: Remove SB in separate phase | **Deferred** — SB keeps working for legacy jobs, removed once at the end |
+| F5: Big-bang YAML cutover | **Incremental** — one workflow at a time, each SIEGE-validated |
+| F6: Move orchestrator to Docker | **Free** — DAG Brain starts as Docker from day one |
+| Risk: all 14 workflows must work before any go live | Risk: each workflow proven independently before the next |
+
+**Time saved**: ~7 days (F2 eliminated, F6 free, F3 consolidated into cleanup).
+
+### Epoch 4 Freeze Policy (CRITICAL — All Claude Instances Must Follow)
+
+**Epoch 4 (CoreMachine, Python jobs, Service Bus) is in maintenance mode during the DAG build.** The existing system continues to run in production, but changes are restricted to prevent complicating the Epoch 5 migration. Every feature added to Epoch 4 is a feature that must be ported to Epoch 5.
+
+| Change Type | Allowed? | Rationale |
+|-------------|----------|-----------|
+| Bug fix (known bugs from SIEGE/COMPETE) | **Yes** | Fix what's broken |
+| Operational fix (health, diagnostics, logging) | **Yes** | Keep production stable |
+| New atomic handler (F4 pattern, reusable) | **Yes** | **Feeds both epochs** — works in Epoch 4 via wrapper AND Epoch 5 via YAML node |
+| New pipeline / job type | **No** | Build it as a YAML workflow from the start. Adding a Python job class creates porting debt. |
+| CoreMachine refactoring | **No** | We're replacing it. Refactoring dead-end code is waste. |
+| Schema redesign on `app.jobs`/`app.tasks` | **No** | New schema work goes into `workflow_runs`/`workflow_tasks` tables. |
+| Service Bus changes | **No** | SB is deprecated. Will be deleted in F6 cleanup. |
+| New job stages or stage logic | **No** | Stages are eliminated in Epoch 5. Build as DAG nodes instead. |
+
+**The one bridge**: If a new handler is needed for a real business requirement, build it as an **atomic handler** and register it in `ALL_HANDLERS`. It works in Epoch 4 (called by existing monolithic handlers or via a thin wrapper job) AND in Epoch 5 (referenced by YAML nodes). Atomic handlers are additive — they don't complicate the migration, they accelerate it.
+
+**When this policy ends**: After F6 cleanup (all 14 workflows on DAG Brain, CoreMachine deleted). At that point Epoch 5 is the sole system and the freeze is moot.
+
+### Progress Tracker
+
+| Phase | Feature | Status | SIEGE |
+|-------|---------|--------|-------|
+| **F1** | Worker polls DB (SKIP LOCKED) v0.10.3 | **DONE** | Run 18: 18/18 100% |
+| **F-DAG** | DAG Foundation (loader, tables, resolver, orchestrator) | **D.1-D.3 DONE**, D.4-D.10 not started | — |
+| **F4** | Handler decomposition (monolithic → atomic) | NOT STARTED | — |
+| **Port** | Workflows ported one at a time (14 total) | 0/14 | — |
+| **Cleanup** | Remove CoreMachine, SB, Python jobs | NOT STARTED | — |
+
+### Agent Pipeline Recommendations (Per Story)
+
+Each story should be dispatched to a separate Claude session with the appropriate agent pipeline. This session (architecture + review) stays high-level.
+
+**Documents to provide to dispatched Claude sessions:**
+- `V10_MIGRATION.md` — full migration context (this file)
+- `docs/superpowers/specs/2026-03-16-workflow-loader-yaml-schema-design.md` — YAML schema spec
+- `docs/superpowers/plans/2026-03-16-workflow-loader-yaml-schema.md` — D.1 plan (completed, but pattern for future plans)
+
+| Story | Pipeline | Rationale |
+|-------|----------|-----------|
+| **D.1** Workflow loader | ~~GREENFIELD~~ **DONE** | Completed 16 MAR 2026. 36 tests, all passing. |
+| **D.2** DAG tables | ~~GREENFIELD~~ **DONE** | Completed 16 MAR 2026. 37 tests, all passing. |
+| **D.3** DAG initializer | ~~GREENFIELD~~ **DONE** | Completed 16 MAR 2026. GREENFIELD pipeline (S→A+C+O→M→B→V). |
+| **D.4** Param resolver | **GREENFIELD** | ~150 lines. Jinja2 edge cases benefit from Critic stress-test. |
+| **D.5** DAG orchestrator | **ARB → GREENFIELD** | Most complex (~400 lines). Concurrency, brain guard, fan-out. ARB decomposes into subsystems first, then GREENFIELD per subsystem. |
+| **D.6** Worker dual-poll | **Direct implementation** | Small change to existing file. No pipeline needed. |
+| **D.7** Janitor | **GREENFIELD** | Port pattern from rmhdagmaster. ~80 lines. |
+| **D.8** Gateway routing | **Direct implementation** | ~10 lines of routing logic. No pipeline needed. |
+| **D.9** DAG status | **Direct implementation** | Query changes to existing endpoints. |
+| **D.10** First blood | **SIEGE** | End-to-end validation of hello_world through DAG Brain. |
+| **F4.1** Raster atomics | **GREENFIELD** per handler | Extract + rewrite from rmhdagmaster reference code. |
+| **F4.2** Vector atomics | **GREENFIELD** per handler | Extract from existing monolithic handler. |
+| **F5** Port workflows | **SIEGE** per tier | Each tier validated end-to-end against live system. |
+| **F6** Cleanup | **COMPETE** | Adversarial review that no legacy references remain. |
+
+**Key principle**: GREENFIELD for building new code. COMPETE for reviewing code. SIEGE for validating live system. ARB for decomposing complex stories before GREENFIELD.
+
+---
+
+### Feature DAG: DAG Foundation + Brain (v0.10.4 → v0.11.0)
+
+**Goal**: Build the complete DAG orchestration system and stand it up as a Docker container running alongside the existing Function App. No disruption to existing workflows.
+
+**Acceptance**: DAG Brain running as Docker container. `hello_world` workflow submitted via Gateway → routed to DAG Brain → completed via `workflow_tasks`. Legacy jobs unaffected.
+
+#### Story D.1: Workflow Loader + Registry — DONE (16 MAR 2026)
+
+**What**: Parse YAML workflow files, validate structure, cache in memory.
+
+**Spec**: `docs/superpowers/specs/2026-03-16-workflow-loader-yaml-schema-design.md`
+**Plan**: `docs/superpowers/plans/2026-03-16-workflow-loader-yaml-schema.md`
+
+**Port from rmhdagmaster**: `services/workflow_service.py` (184) + `core/models/workflow.py` (260). Adapt to V10 schema (discriminated union, `depends_on`, `receives:`).
+
+**Files**:
+- NEW: `core/workflow_loader.py` (~200 lines)
+- NEW: `core/workflow_registry.py` (~100 lines)
+- NEW: `core/models/workflow_definition.py` (~300 lines)
+- NEW: `core/models/workflow_enums.py` (~30 lines)
+- NEW: `core/errors/workflow_errors.py` (~30 lines)
+
+**Delivered** (16 MAR 2026):
+- `core/models/workflow_enums.py` — NodeType, AggregationMode, BackoffStrategy
+- `core/models/workflow_definition.py` — Discriminated union (TaskNode/ConditionalNode/FanOutNode/FanInNode) + WorkflowDefinition + all supporting models
+- `core/workflow_loader.py` — WorkflowLoader with 9 structural validations + WorkflowValidationError
+- `core/workflow_registry.py` — WorkflowRegistry (load_all, has, get_or_raise) + WorkflowNotFoundError
+- `workflows/hello_world.yaml` — 1-node test workflow
+- `workflows/echo_test.yaml` — 3-node test with receives, when, optional deps
+- `tests/unit/test_workflow_loader.py` — 36 tests, all passing
+- `requirements.txt` — added PyYAML, Jinja2
+- Errors defined inline in loader/registry modules (not separate errors dir)
+
+**Acceptance**: All met. 36/36 tests pass. Real YAML files load against ALL_HANDLERS registry.
+
+#### Story D.2: DAG Database Tables — DONE (16 MAR 2026)
+
+**What**: Create `workflow_runs`, `workflow_tasks`, `workflow_task_deps` tables.
+
+**Delivered**:
+- `core/models/workflow_run.py` — WorkflowRun model (97 lines), WorkflowRunStatus enum (4 values)
+- `core/models/workflow_task.py` — WorkflowTask model (146 lines), WorkflowTaskStatus enum (8 values incl. CANCELLED)
+- `core/models/workflow_task_dep.py` — WorkflowTaskDep model (57 lines)
+- `core/schema/sql_generator.py` — registered 3 tables + 2 enums for DDL generation
+- `tests/unit/test_workflow_dag_models.py` — 37 tests, all passing
+- `tests/factories/model_factories.py` — added make_workflow_run, make_workflow_task factories
+
+**Review findings** (16 MAR 2026):
+- TIMESTAMP (no timezone) is correct — we use UTC everywhere, no TIMESTAMPTZ needed
+- `updated_at` on `workflow_tasks` kept intentionally — useful for janitor debugging
+- Extra indexes on `workflow_runs` (workflow_name, status, created_at, request_id) — beneficial for dashboard/status queries
+- CANCELLED as 8th WorkflowTaskStatus — forward-looking addition beyond 7-value spec
+- `task_name` column used (matching DDL spec) — V10_MIGRATION.md conceptual model says `node_name` but DDL says `task_name`, accepted as-is
+
+**Acceptance**: All met. 37/37 tests pass. `action=ensure` additive (no existing table changes).
+
+#### Story D.3: DAG Initializer — DONE (16 MAR 2026)
+
+**What**: When a workflow run is created, instantiate blueprint nodes as execution tasks with dependency edges.
+
+**Pipeline**: GREENFIELD (S→A+C+O→M→B→V). Full report: `docs/agent_review/agent_docs/greenfield_dag_initializer_d3.md`
+
+**Delivered**:
+- `core/dag_initializer.py` (~370 lines) — DAGInitializer class + 6 private pure functions
+- `infrastructure/workflow_run_repository.py` (~290 lines) — atomic INSERT with UniqueViolation idempotency
+- 3-pass pure `_build_tasks_and_deps`: validate refs → build tasks → build deduplicated deps
+- Structural validation: missing refs, cycle detection (empty-roots guard)
+- Idempotent via SHA256 run_id + UniqueViolation catch (no TOCTOU race)
+
+**Open Questions Resolved**:
+- Q1: Handler sentinels `__conditional__` / `__fan_in__` for non-worker nodes (NOT NULL preserved)
+- Q2: All node types (including conditional/fan_in) instantiated as WorkflowTask rows
+- Q3: No timestamp in run_id — pure content-addressing, FAILED retry deferred (D-1)
+
+**GREENFIELD Agent Results**:
+- A: 4-component design (collapsed to 2 files by M per Constraint 10)
+- C: 5 ambiguities, 10 edge cases, 8 unstated assumptions, 4 contradictions
+- O: 6 failure modes, 3 infrastructure constraints
+- M: 11 conflicts resolved, 3 design tensions, 6 deferred decisions, 7 risks
+- V: NEEDS MINOR WORK — 10 concerns, all resolved or accepted
+
+**Deferred Decisions**:
+- D-1: Retry/reset for FAILED runs (when retry UI needed)
+- D-2: Full topological sort cycle detection (before production — Kahn's algorithm)
+- D-3: GET /api/dbadmin/runs/{run_id} endpoint (when operator needs it)
+- D-4: Index on workflow_task_deps(task_instance_id) (before D.5 orchestrator)
+
+**Verification**: Tested with hello_world.yaml (1 task, 0 deps), multi-node synthetic (4 tasks, 4 deps, optional deps), cycle detection, missing ref detection. 73/73 existing tests (D.1+D.2) still pass.
+
+**Acceptance criteria**:
+- Create workflow run → all nodes instantiated as tasks in `workflow_tasks`
+- Root nodes (no deps) immediately `ready`
+- Dependency edges created in `workflow_task_deps`
+- Conditional `next:` creates implicit dependency edges
+- Optional deps (`?` suffix) stored with `optional=true`
+- Transaction failure → no partial state
+
+#### Story D.4: Parameter Resolver (1-2 days)
+
+**What**: Resolve `receives:` dotted paths from predecessor results and merge with job params. Jinja2 for fan-out `task.params` only.
+
+**Port from rmhdagmaster**: `orchestrator/engine/templates.py` (302 lines). Simplify — `receives:` is dotted-path lookup, Jinja2 scoped to fan-out only.
+
+**Files**:
+- NEW: `core/param_resolver.py` (~150 lines)
+
+**Acceptance criteria**:
+- `receives: {metadata: "validate.result.metadata"}` resolves to predecessor's result_data
+- Fan-out `{{ item }}`, `{{ index }}`, `{{ inputs.param }}` templates resolve correctly
+- Missing predecessor → clear error, task marked FAILED
+
+#### Story D.5: DAG Orchestrator Core Loop (2-3 days)
+
+**What**: The DAG Brain — a poll loop that evaluates DAG state, promotes tasks, expands fan-outs, evaluates conditionals, detects completion.
+
+**Port from rmhdagmaster**: Brain guard (~225 lines), fan-out expansion (~140 lines), conditional routing (~80 lines), fan-in aggregation (~100 lines), completion detection (~55 lines), heartbeat (~32 lines), orphan scan (~40 lines). Adapt from async to sync, from 3-level to 2-level model. Drop SB dispatch.
+
+**Files**:
+- NEW: `core/dag_orchestrator.py` (~400 lines)
+
+**Acceptance criteria**:
+- Brain guard: advisory lock ensures single active instance
+- Poll loop: detect new runs → initialize DAG → promote ready tasks → evaluate conditionals → expand fan-outs → aggregate fan-ins → detect completion
+- Heartbeat + orphan scan for HA
+- Fan-out: one blueprint node → N execution tasks (atomic INSERT)
+- Conditional: evaluate branches → activate taken, skip untaken
+- `hello_world` workflow completes end-to-end via DAG Brain
+
+#### Story D.6: Worker Dual-Poll (1 day)
+
+**What**: Worker's SKIP LOCKED poll targets both `app.tasks` (legacy) AND `workflow_tasks` (DAG). Same handler execution, same contract.
+
+**Files**:
+- `docker_service.py` — add second poll query for `workflow_tasks`
+- `infrastructure/jobs_tasks.py` — `claim_ready_workflow_task()` method
+- `core/param_resolver.py` — called at claim time for DAG tasks
+
+**Acceptance criteria**:
+- Worker claims tasks from both tables
+- Legacy jobs (via `app.tasks`) work exactly as before
+- DAG workflows (via `workflow_tasks`) resolve params at claim time, execute handler, write result
+- Single worker instance serves both systems
+
+#### Story D.7: Janitor — Stale Task Recovery (1 day)
+
+**What**: Background thread in DAG Brain that reclaims stuck tasks with stale heartbeats. Covers both `workflow_tasks` (DAG) and `app.tasks` (legacy, deferred from v0.10.3).
+
+**Port from rmhdagmaster**: Orphan scan pattern (~40 lines) + timing constants (ORPHAN_THRESHOLD=120s, SCAN_INTERVAL=60s).
+
+**Files**:
+- `core/dag_orchestrator.py` — janitor loop alongside main poll loop
+- `infrastructure/jobs_tasks.py` — `reclaim_stale_tasks()` for legacy table
+
+**Acceptance criteria**:
+- Stale DAG task (simulated by killing worker mid-task) reclaimed within ~2 minutes
+- Stale legacy task also reclaimed
+- Exhausted retries → FAILED (not stuck forever)
+
+#### Story D.8: Gateway Routing (1 day)
+
+**What**: Gateway checks WorkflowRegistry before submitting. If YAML exists → DAG path. If not → legacy path.
+
+**Files**:
+- `services/platform_job_submit.py` — routing logic (~10 lines)
+- `services/platform_translation.py` — `job_type` → `workflow_name` mapping
+- `triggers/jobs.py` — direct submit path also checks registry
+
+**Acceptance criteria**:
+- Submit `hello_world` (YAML exists) → routed to DAG Brain → completes
+- Submit `process_raster_docker` (no YAML yet) → routed to CoreMachine → completes as before
+- Status endpoint works for both paths
+
+#### Story D.9: DAG Status Integration (1 day)
+
+**What**: Status endpoints (`/api/jobs/status`, `/api/platform/status`) query both `app.jobs`/`app.tasks` and `workflow_runs`/`workflow_tasks`.
+
+**Files**:
+- `triggers/get_job_status.py` — query DAG tables if run_id found
+- `triggers/trigger_platform_status.py` — same dual-query
+- `services/platform_response.py` — build response from DAG tables (task names, not stage numbers)
+
+**Acceptance criteria**:
+- Status for legacy job → same response as today
+- Status for DAG workflow → response includes node-level progress (`"current_node": "create_cog"`)
+- B2B response shape unchanged (same fields, richer progress for DAG workflows)
+
+#### Story D.10: First Blood — `hello_world` End-to-End + SIEGE (0.5 day)
+
+**What**: Deploy DAG Brain. Submit `hello_world` via Gateway. Verify full lifecycle. SIEGE regression for legacy workflows.
+
+**Files**:
+- NEW: `workflows/hello_world.yaml` (created in D.1)
+- NEW: `entrypoint_orchestrator.py`
+- Existing `Dockerfile` (DAG Brain uses same image with `APP_MODE=orchestrator`)
+
+**Acceptance criteria**:
+- DAG Brain running as Docker container alongside Function App
+- `hello_world` submits via Gateway → DAG Brain → worker → completed
+- SIEGE regression: all legacy workflows unaffected (≥ 95% pass rate)
+- COMPETE adversarial review on DAG orchestrator code
+
+---
+
+### Feature 4: Handler Decomposition (v0.11.1)
+
+**Goal**: Break monolithic handlers into atomic, reusable handlers that become DAG nodes. Wrappers preserve existing job compatibility.
+
+**Acceptance**: All existing jobs work identically through wrappers. New atomic handlers registered and independently testable.
+
+#### Story 4.1: Extract Raster Atomic Handlers (2-3 days)
+
+**What**: Decompose `raster_docker_complete` into 5 atomic handlers.
+
+**Port from rmhdagmaster**: `handlers/raster/` — validate (468 lines), cog_create (262), blob_copy (116), statistics (417), stac (706). Adapt to rmhgeoapi's blob/STAC layer.
+
+**New handlers**:
+| Handler | Extracted From | Est. Lines |
+|---------|---------------|------------|
+| `raster_validate_source` | Phase 1 validate | ~80 |
+| `raster_create_cog` | Phase 2 COG creation | ~100 |
+| `raster_upload_cog` | Phase 3 blob upload | ~60 |
+| `stac_create_item` | Phase 4 STAC (shared) | ~80 |
+| `catalog_register_raster` | Phase 5 catalog | ~50 |
+
+**Files**:
+- NEW: `services/raster/validate_source.py`
+- NEW: `services/raster/create_cog.py`
+- NEW: `services/raster/upload_cog.py`
+- NEW: `services/shared/stac_create_item.py`
+- NEW: `services/shared/catalog_register.py`
+- `services/__init__.py` — register new handlers in `ALL_HANDLERS`
+- `services/handler_raster_docker_complete.py` — wrapper calls atomics in sequence
+
+**Acceptance criteria**:
+- Existing raster job works identically (wrapper delegates to atomics)
+- Each atomic handler independently callable with correct contract
+- `stac_create_item` usable by raster, zarr, and virtualzarr workflows
+
+#### Story 4.2: Extract Vector Atomic Handlers (2-3 days)
+
+**What**: Decompose `vector_docker_complete` (400+ lines, 7 phases) into 6 atomic handlers.
+
+**New handlers**:
+| Handler | Extracted From | Est. Lines |
+|---------|---------------|------------|
+| `vector_validate_source` | Phase 1 | ~60 |
+| `vector_create_postgis_table` | Phase 2 DDL | ~80 |
+| `vector_load_chunks` | Phase 3 upload | ~100 |
+| `vector_create_split_views` | Phase 3.7 | ~80 (already in `view_splitter.py`) |
+| `catalog_register_vector` | Phase 4 | ~50 |
+| `tipg_refresh_collections` | Phase 5 | ~20 (already in `service_layer_client.py`) |
+
+**Files**:
+- NEW: `services/vector/validate_source.py`
+- NEW: `services/vector/create_table.py`
+- NEW: `services/vector/load_chunks.py`
+- NEW: `services/shared/catalog_register_vector.py`
+- `services/__init__.py` — register new handlers
+- `services/handler_vector_docker_complete.py` — wrapper calls atomics
+
+**Acceptance criteria**:
+- Existing vector job works identically through wrapper
+- Split views handler already extracted (`view_splitter.py`) — just register
+- TiPG refresh already isolated — just register
+
+#### Story 4.3: Standardize Unpublish + Zarr Handlers (1-2 days)
+
+**What**: Zarr pipelines are already ~80% decomposed. Standardize interfaces and register shared unpublish handlers.
+
+**Tasks**:
+1. Register existing zarr stage handlers as atomic handlers in `ALL_HANDLERS`
+2. Create shared unpublish handlers: `unpublish_inventory_item`, `unpublish_delete_blob`, `unpublish_cleanup_stac`, `unpublish_cleanup_postgis`, `unpublish_cleanup_catalog`
+3. Wrapper handlers preserve existing job behavior
+
+**Acceptance criteria**:
+- Zarr ingest, netcdf-to-zarr, virtualzarr, and all unpublish jobs work identically
+- Shared handlers registered and reusable across workflow types
+
+#### Story 4.4: SIEGE Regression (0.5 day)
+
+**What**: Full regression after handler decomposition. Deploy v0.11.1.
+
+**Acceptance criteria**:
+- SIEGE pass rate ≥ 95%
+- Zero regressions from decomposition (wrappers preserve behavior)
+- All new atomic handlers visible in handler registry
+
+---
+
+### Feature 5: Port Workflows (Strangler Fig — Incremental) ~~(v0.12.0)~~
+
+**Goal**: Port all 14 Python job classes to YAML workflows, one at a time. Each ported workflow is immediately live on the DAG Brain. Legacy jobs stay on CoreMachine until their YAML is ready.
+
+**Requires**: F-DAG done (DAG Brain running) + F4 done (atomic handlers available).
+
+**Rollback**: Remove a YAML file from `workflows/` → that workflow falls back to CoreMachine. No code changes.
+
+#### Story 5.2: DAG Database Tables (1 day)
+
+**What**: Create `workflow_runs`, `workflow_tasks`, `workflow_task_deps` tables.
+
+**Files**:
+- `core/models/` — NEW Pydantic models for WorkflowRun, WorkflowTask
+- `core/schema/sql_generator.py` — DDL generation for new tables
+- `infrastructure/` — NEW repository methods for DAG tables
+
+**Tasks**:
+1. Add Pydantic models with `__sql_table__` metadata
+2. Generate DDL via existing `PydanticToSQL` pattern
+3. Deploy via `action=ensure` (additive, no data loss)
+4. Verify tables created with correct indexes
+
+**Acceptance criteria**:
+- `action=ensure` creates 3 new tables + indexes without touching existing tables
+- `workflow_tasks` has partial indexes for orchestrator and worker poll queries
+
+#### Story 5.3: DAG Initializer (1-2 days)
+
+**What**: When a workflow run is created, instantiate blueprint nodes as execution tasks with dependency edges.
+
+**Files**:
+- NEW: `core/dag_initializer.py` (~200 lines)
+
+**Tasks**:
+1. Read workflow definition from `workflow_runs.definition` JSONB
+2. For each node in blueprint: INSERT `workflow_tasks` row (status=pending)
+3. For each `depends_on` edge: INSERT `workflow_task_deps` row
+4. Mark root nodes (no dependencies) as `ready` immediately
+5. Evaluate `when:` clauses for root nodes → `skipped` if false
+6. All in one transaction (atomic DAG initialization)
+
+**Acceptance criteria**:
+- Create workflow run → all nodes instantiated as tasks
+- Root nodes (no deps) immediately `ready`
+- Dependency edges correctly created in `workflow_task_deps`
+- Transaction failure → no partial state
+
+#### Story 5.4: Parameter Resolver (1-2 days)
+
+**What**: Resolve `receives:` dotted paths from predecessor results and merge with job params.
+
+**Port from rmhdagmaster**: `orchestrator/engine/templates.py` (302 lines). Simplify — V10 uses explicit `receives:` mapping instead of Jinja2 in every param field.
+
+**Files**:
+- NEW: `core/param_resolver.py` (~150 lines)
+
+**Tasks**:
+1. Parse dotted paths: `"validate.result.metadata"` → look up `workflow_tasks` where `node_name='validate'`, extract `result_data.metadata`
+2. Merge: job params (from `params:` list) + received values (from `receives:`) + system params (`_run_id`, `_node_name`)
+3. Handle fan-out collection: `"copy_blob.result[]"` → collect all fan-out task results into array
+4. Error on unresolved reference (strict mode — fail fast)
+
+**Acceptance criteria**:
+- `receives: {metadata: "validate.result.metadata"}` resolves to predecessor's result_data
+- Fan-out collection `result[]` aggregates all fan-out task results
+- Missing predecessor → clear error, task marked FAILED
+
+#### Story 5.5: DAG Orchestrator Core Loop (2-3 days)
+
+**What**: The orchestrator poll loop that evaluates DAG state and promotes tasks.
+
+**Port from rmhdagmaster**: Brain guard (~225 lines), main loop structure, fan-out expansion (~140 lines), conditional evaluation (~80 lines), completion detection (~30 lines). Adapt from async to sync, from 3-level to 2-level state model.
+
+**Files**:
+- NEW: `core/dag_orchestrator.py` (~400 lines)
+
+**Tasks**:
+1. Brain guard: `pg_try_advisory_lock` on dedicated connection, standby retry
+2. Main poll loop (every 3-5 seconds):
+   - Detect new `workflow_runs` (status=pending) → call DAG initializer
+   - Query `promotable_tasks` view → mark `ready`
+   - Evaluate `when:` clauses on newly-ready tasks → `skipped` if false
+   - Expand fan-out nodes: resolve source array → INSERT N execution tasks
+   - Detect completed workflows → run finalize handler → mark run completed
+3. Heartbeat loop: update `owner_heartbeat_at` on owned runs
+4. Orphan scan: reclaim runs with stale heartbeats
+
+**Acceptance criteria**:
+- Submit workflow → orchestrator initializes DAG → root tasks become ready
+- Worker completes task → orchestrator promotes successors → eventually workflow completes
+- Fan-out: one blueprint node → N execution tasks → fan-in collects results
+- Conditional: `when:` false → task skipped → optional dependents proceed
+- Brain guard: only one orchestrator instance active at a time
+
+#### Story 5.6: Worker Adapts to `workflow_tasks` (1 day)
+
+**What**: Worker's SKIP LOCKED poll targets `workflow_tasks` instead of (or in addition to) `app.tasks`.
+
+**Files**:
+- `docker_service.py` — add second poll target or unify
+- `infrastructure/jobs_tasks.py` — `claim_ready_workflow_task()` method
+
+**Tasks**:
+1. Worker poll query targets `workflow_tasks` with same SKIP LOCKED pattern
+2. Parameter resolution at claim time (call param_resolver)
+3. Handler execution unchanged — same contract
+4. Result written to `workflow_tasks.result_data` directly
+
+**Acceptance criteria**:
+- Worker claims task from `workflow_tasks` → resolves params → executes handler → writes result
+- Legacy `app.tasks` polling still works (dual-mode during transition)
+
+#### Story 5.7: Write YAML Workflows for All 14 Job Types (2-3 days)
+
+**What**: Convert every Python job class to a YAML workflow definition using the atomic handlers from v0.11.1.
+
+**Files**:
+- NEW: `workflows/` directory with 14 YAML files
+
+**Workflows to create**:
+| Workflow | Current Job Class | Nodes |
+|----------|------------------|-------|
+| `hello_world.yaml` | `HelloWorldJob` | 1 |
+| `validate_only.yaml` | `ValidateOnlyJob` | 1 |
+| `process_raster_docker.yaml` | `ProcessRasterDockerJob` | 5 |
+| `vector_docker_etl.yaml` | `VectorDockerETLJob` | 6 |
+| `vector_multi_source_docker.yaml` | `VectorMultiSourceDockerJob` | 6+ |
+| `ingest_zarr.yaml` | `IngestZarrJob` | 6 |
+| `netcdf_to_zarr.yaml` | `NetCDFToZarrJob` | 5 |
+| `virtualzarr.yaml` | `VirtualZarrJob` | 5 |
+| `unpublish_raster.yaml` | `UnpublishRasterJob` | 3 |
+| `unpublish_vector.yaml` | `UnpublishVectorJob` | 3 |
+| `unpublish_zarr.yaml` | `UnpublishZarrJob` | 3 |
+| `unpublish_vector_multi_source.yaml` | `UnpublishVectorMultiSourceJob` | 3 |
+| `fathom_etl.yaml` | `FathomETLJob` | 4 |
+| `fathom_unpublish.yaml` | `FathomUnpublishJob` | 3 |
+
+**Acceptance criteria**:
+- Each YAML loads and validates without errors
+- Workflow loader detects all at startup
+- YAML structure matches blueprint spec (nodes:, depends_on:, receives:, when:, fan_out:, fan_in:)
+
+#### Story 5.2: Port Workflows — Tier by Tier (4-6 days)
+
+**What**: Write YAML workflows and activate them on the DAG Brain one tier at a time. Each tier is a SIEGE checkpoint. Gateway routing sends ported workflows to DAG Brain, unported to CoreMachine.
+
+**Tier 1 — Simple** (1 day):
+| Workflow | Nodes | Complexity |
+|----------|-------|-----------|
+| `hello_world.yaml` | 1 | Trivial (already proven in D.10) |
+| `validate_only.yaml` | 1 | Trivial |
+
+**Tier 2 — Linear Chains** (1-2 days):
+| Workflow | Nodes | Complexity |
+|----------|-------|-----------|
+| `process_raster_docker.yaml` | 5 | Linear: validate → cog → upload → stac → register |
+| `vector_docker_etl.yaml` | 6 | Linear + conditional split_views (`when:`) |
+| `unpublish_raster.yaml` | 3 | Linear |
+| `unpublish_vector.yaml` | 3 | Linear |
+
+SIEGE after Tier 2: raster + vector full lifecycle through DAG Brain.
+
+**Tier 3 — Fan-Out** (1-2 days):
+| Workflow | Nodes | Complexity |
+|----------|-------|-----------|
+| `ingest_zarr.yaml` | 8 | Fan-out blob copy + fan-in + conditional rechunk |
+| `netcdf_to_zarr.yaml` | 7 | Fan-out conversion + fan-in |
+| `virtualzarr.yaml` | 7 | Fan-out scan + fan-in combine |
+| `unpublish_zarr.yaml` | 5 | Fan-out delete + fan-in |
+
+SIEGE after Tier 3: zarr lifecycle through DAG Brain. This tier proves fan-out/fan-in works.
+
+**Tier 4 — Complex** (1-2 days):
+| Workflow | Nodes | Complexity |
+|----------|-------|-----------|
+| `vector_multi_source_docker.yaml` | 6+ | Multi-file fan-out |
+| `unpublish_vector_multi_source.yaml` | 3 | Multi-table cleanup |
+| `fathom_etl.yaml` | 4 | Domain-specific |
+| `fathom_unpublish.yaml` | 3 | Domain-specific |
+
+SIEGE after Tier 4: all 14 workflows on DAG Brain. Legacy path receives zero traffic.
+
+**Acceptance criteria per tier**:
+- All workflows in tier load and validate
+- End-to-end test for each workflow type (submit → complete → verify outputs)
+- SIEGE regression: ported workflows via DAG Brain + unported via CoreMachine, ≥ 95%
+- No changes to handler code — YAML wires existing atomic handlers
+
+---
+
+### Feature 6: Cleanup — Remove Legacy System (v0.12.0)
+
+**Goal**: All 14 workflows proven on DAG Brain. Remove CoreMachine, Service Bus, Python job classes. Function App becomes gateway-only.
+
+**Prerequisite**: All Tier 1-4 workflows ported and SIEGE-validated. Zero traffic on legacy path.
+
+#### Story 6.1: Remove CoreMachine + Python Jobs (1-2 days)
+
+**What**: Delete the old orchestration system.
+
+**Files to DELETE**:
+- `core/machine.py` — CoreMachine (2,400 lines)
+- `core/state_manager.py` — legacy state management
+- `jobs/*.py` — 14 Python job classes
+- `jobs/base.py`, `jobs/mixins.py` — base classes
+- Wrapper handlers from F4 — remove wrappers, keep atomics
+
+**Files to CLEAN**:
+- `services/__init__.py` — remove `ALL_JOBS` registry (keep `ALL_HANDLERS`)
+- `function_app.py` — remove SB triggers and legacy orchestration
+- `services/platform_job_submit.py` — remove legacy path from routing (DAG-only)
+- `docker_service.py` — remove `app.tasks` poll (only `workflow_tasks`)
+
+**Acceptance criteria**:
+- `grep -r "CoreMachine\|JobBase\|JobBaseMixin" --include="*.py"` returns zero hits
+- Worker polls `workflow_tasks` only
+- Gateway routes all submissions to DAG Brain
+
+#### Story 6.2: Remove Service Bus (1 day)
+
+**What**: Delete all Service Bus code and Azure resources. Deferred from original F3 — now one clean cut.
+
+**Files to DELETE**:
+- `infrastructure/service_bus.py` (800+ lines)
+- `triggers/service_bus/` directory (job_handler, task_handler, error_handler)
+
+**Files to CLEAN**:
+- `config/defaults.py` — remove queue config fields
+- `requirements.txt` — remove `azure-servicebus` dependency
+- Remove SB connection strings from Azure App Settings
+- Delete 3 Azure SB queues (`geospatial-jobs`, `container-tasks`, `stage-complete`)
+
+**Acceptance criteria**:
+- `grep -r "service_bus\|ServiceBus\|servicebus" --include="*.py"` returns zero hits
+- App starts without `azure-servicebus` installed
+- Zero SB Azure resources (~$50/month savings)
+
+#### Story 6.3: SIEGE Final + Deploy v0.12.0 (1 day)
+
+**What**: Final regression. This is the V10 end state.
+
+**Acceptance criteria**:
+- SIEGE extended campaign: all 14 workflow types via DAG Brain
+- Raster, vector, zarr, unpublish lifecycles complete end-to-end
+- Platform submit/status/approve flow works
+- COMPETE adversarial review on cleanup (no legacy references remain)
+- Architecture: Function App (gateway) + Docker (DAG Brain) + Docker (workers) + PostgreSQL
+- Zero Service Bus. Zero CoreMachine. Zero Python job classes.
+
+---
+
+### Porting Map: rmhdagmaster → Story (Revised for Strangler Fig)
+
+Each story's relationship to rmhdagmaster code — what to port, what to write fresh, what to skip.
+
+#### F-DAG: DAG Foundation + Brain
+
+| Story | rmhdagmaster Source | Lines | Action |
+|-------|-------------------|-------|--------|
+| D.1 Workflow loader | `services/workflow_service.py` (184) + `core/models/workflow.py` (260) | 444 | **Direct port.** Adapt Pydantic model to V10 discriminated union schema. Keep cycle detection, reference validation, version pinning. |
+| D.2 DAG tables | `core/schema/sql_generator.py` (538) | 538 | **Merge improvements.** rmhgeoapi already has PydanticToSQL. Write new Pydantic models from scratch (different schema). |
+| D.3 DAG initializer | `orchestrator/loop.py:463-528` + `job_service.create_job()` | ~65 | **Adapt.** Same pattern, V10's 2-level model is simpler. |
+| D.4 Param resolver | `orchestrator/engine/templates.py` (302) | 302 | **Direct port with simplification.** `receives:` is dotted-path lookup. Jinja2 scoped to fan-out only. |
+| D.5 DAG orchestrator | `orchestrator/loop.py` — brain guard (~225), main cycle (~25), heartbeat (~32), orphan scan (~40), fan-out (~140), conditional (~80), fan-in (~100), completion (~55) | ~700 | **Largest port.** Drop async, SB, Node↔Task sync. Keep brain guard, fan-out/fan-in, conditional routing, completion detection. |
+| | `orchestrator/engine/evaluator.py` (734) — FanOutHandler, ConditionEvaluator | 734 | **Port selectively.** FanOutHandler + aggregation modes directly. Full ConditionEvaluator for conditional nodes (operators needed). |
+| D.6 Worker dual-poll | — | — | **Extend existing.** Add second SKIP LOCKED query for `workflow_tasks`. |
+| D.7 Janitor | `orchestrator/loop.py:719-758` (orphan scan, ~40 lines) | ~40 | **Port pattern.** Same SQL, adapt to sync thread in DAG Brain. |
+| D.8 Gateway routing | — | — | **Write fresh.** ~10 lines of routing logic. rmhdagmaster has no gateway. |
+| D.9 DAG status | — | — | **Write fresh.** Dual-query for legacy + DAG tables. |
+| D.10 First blood | `Dockerfile` (orchestrator variant) + `entrypoint.sh` | ~50 | **Direct port.** Same image with `APP_MODE=orchestrator`. |
+
+#### F4: Handler Decomposition
+
+| Story | rmhdagmaster Source | Action |
+|-------|-------------------|--------|
+| 4.1 Raster atomics | `handlers/raster/validate.py` (468), `cog_create.py` (262), `blob_copy.py` (116), `statistics.py` (417), `stac.py` (706) — **~2,000 lines** | **Rewrite to fit.** Reference code for logic and edge cases. Adapt to rmhgeoapi's BlobRepository, STAC layer, sync handler contract. |
+| 4.2 Vector atomics | — | **Extract from existing.** Pull phases from `handler_vector_docker_complete.py`. No rmhdagmaster equivalent. |
+| 4.3 Zarr/unpublish | — | **Register existing.** Already decomposed in rmhgeoapi. |
+| 4.4 SIEGE | — | — |
+
+#### F5: Port Workflows + F6: Cleanup
+
+| Story | rmhdagmaster Source | Action |
+|-------|-------------------|--------|
+| 5.1 Write YAMLs | `workflows/*.yaml` (10 files) as **format reference only** | **Write fresh.** Different pipelines. Use rmhdagmaster YAMLs as structural template. |
+| 5.2 Port tiers 1-4 | — | **Write fresh.** Wire existing atomic handlers into YAML graphs. |
+| 6.1 Remove CoreMachine | — | **Delete only.** |
+| 6.2 Remove SB | — | **Delete only.** One clean cut instead of 3 phases. |
+| 6.3 SIEGE final | — | — |
+
+#### Porting Summary
+
+| Category | rmhdagmaster Lines | V10 Output Lines | Ratio |
+|----------|-------------------|-----------------|-------|
+| Workflow loader (D.1) | ~444 | ~400 (direct port) | 90% reuse |
+| DAG initializer (D.3) | ~65 | ~200 (expanded) | Pattern port |
+| Param resolver (D.4) | ~302 | ~150 (simplified) | 50% reuse |
+| Orchestrator loop (D.5) | ~1,400 | ~400 (heavily adapted) | 30% reuse |
+| Evaluator (D.5) | ~734 | ~200 (selective port) | 25% reuse |
+| Raster handlers (4.1) | ~2,000 | ~400 (rewrite to fit) | Reference only |
+| Dockerfile (D.10) | ~50 | ~50 (direct port) | 100% reuse |
+| **Total** | **~5,000** | **~1,800** | |
+
+### Effort Summary (Revised — Strangler Fig)
+
+| Feature | Stories | Est. Days | Risk |
+|---------|---------|-----------|------|
+| ~~F1: Worker DB-Poll (v0.10.3)~~ | ~~done~~ | ~~DONE~~ | ~~DONE~~ |
+| F-DAG: DAG Foundation + Brain | 10 | 10-14 days | **Medium** |
+| F4: Handler Decomposition | 4 | 5-8 days | Low |
+| F5: Port Workflows (4 tiers) | 2 | 4-6 days | Low (per-workflow rollback) |
+| F6: Cleanup (remove legacy) | 3 | 3-4 days | Low |
+| **Total** | **19 stories** | **22-32 days** | |
+
+**Savings vs original plan**: ~6 stories eliminated (F2 timer trigger, F3 SB removal phases). F6 "Docker lift" is free (DAG Brain starts as Docker). SB removal consolidated into one cleanup story.
+
+### Dependency Graph (Strangler Fig)
+
+```
+                  Stream A                    Stream B
+                  (DAG Foundation + Brain)     (Handlers)
+
+Week 1-2:         D.1 workflow loader          F4.1 raster atomics
+                  D.2 DAG tables               F4.2 vector atomics
+                  D.3 DAG initializer          F4.3 zarr/unpublish
+                  D.4 param resolver           F4.4 SIEGE
+                        │                            │
+Week 3-4:         D.5 DAG orchestrator loop          │
+                  D.6 worker dual-poll               │
+                  D.7 janitor                        │
+                  D.8 gateway routing                │
+                  D.9 status integration             │
+                  D.10 first blood (hello_world)     │
+                        │                            │
+                        ▼                            ▼
+Week 5-6:         ┌─────────────────────────────────────────────────┐
+                  │  F5: Port Workflows (Tier 1 → 2 → 3 → 4)       │
+                  │  Requires: F-DAG ✓ + F4 ✓                       │
+                  │  Each tier: write YAML + SIEGE                   │
+                  │  Rollback: remove YAML file → legacy path        │
+                  └──────────────────────┬──────────────────────────┘
+                                         │
+Week 7:           ┌──────────────────────┴──────────────────────────┐
+                  │  F6: Cleanup — remove CoreMachine, SB, jobs/*.py │
+                  │  One clean cut. SIEGE final.                      │
+                  └─────────────────────────────────────────────────┘
+```
+
+**Two parallel streams** (team of 2):
+- **Stream A**: DAG Foundation → DAG Brain → first blood. 10-14 days.
+- **Stream B**: Handler decomposition. 5-8 days. Can start simultaneously.
+- **Convergence**: F5 (port workflows) needs both streams done.
+- **Cleanup**: F6 after all workflows ported. One clean cut.
+
+### Risk Mitigation
+
+| Risk | Mitigation |
+|------|-----------|
+| **Two orchestration systems during migration** | Invisible to clients — Gateway routes transparently. Bounded: each ported workflow reduces legacy scope. Rollback: remove YAML file. |
+| **Peak operational complexity** | 4 processes: Function App (gateway+legacy orch) + DAG Brain + Worker + PostgreSQL. But the Worker is unchanged and the Gateway routing is ~10 lines. Monitor via dashboard + SIEGE. |
+| **Handler decomposition breaks existing jobs** | Wrapper pattern: monolithic handler calls atomics in sequence. Remove wrappers only in F6 after all workflows on DAG Brain. |
+| **DAG orchestrator has subtle concurrency bugs** | Port brain guard from rmhdagmaster (proven). COMPETE adversarial review before first blood (D.10). |
+| **YAML schema design needs iteration** | Tier 1 (hello_world) proves the basics. Tier 2 (raster+vector) proves linear chains + `when:`. Tier 3 (zarr) proves fan-out/fan-in. Iterate before Tier 4. |
+| **Team of 2 — bus factor** | All decisions in V10_MIGRATION.md. Spec in `docs/superpowers/specs/`. Claude has full context. rmhdagmaster is reference implementation. |
+| **Worker polling two tables** | Two SKIP LOCKED queries per cycle. Negligible overhead vs ETL execution time. Remove legacy poll in F6 cleanup. |
+
+---
+
 *Document created: 14 MAR 2026*
+*Updated: 16 MAR 2026 — Strangler fig strategy, D.1 completed, agent pipeline recommendations, Epoch 4 freeze*
 *Author: Claude + Robert Harrison*

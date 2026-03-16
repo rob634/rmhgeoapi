@@ -221,6 +221,27 @@ from .raster_results import (
     STACCreationResult,
 )
 
+# Workflow DAG models (16 MAR 2026 - Epoch 5)
+from .workflow_enums import (
+    NodeType,
+    AggregationMode,
+    BackoffStrategy,
+)
+from .workflow_definition import (
+    RetryPolicy,
+    BranchDef,
+    FanOutTaskDef,
+    FinalizeDef,
+    ParameterDef,
+    ValidatorDef,
+    TaskNode,
+    ConditionalNode,
+    FanOutNode,
+    FanInNode,
+    NodeDefinition,
+    WorkflowDefinition,
+)
+
 __all__ = [
     # Enums
     'JobStatus',
@@ -372,4 +393,21 @@ __all__ = [
     # Service Layer integration models (05 FEB 2026 - F1.6)
     'CollectionRefreshResponse',
     'ServiceLayerHealth',
+
+    # Workflow DAG models (16 MAR 2026 - Epoch 5)
+    'NodeType',
+    'AggregationMode',
+    'BackoffStrategy',
+    'RetryPolicy',
+    'BranchDef',
+    'FanOutTaskDef',
+    'FinalizeDef',
+    'ParameterDef',
+    'ValidatorDef',
+    'TaskNode',
+    'ConditionalNode',
+    'FanOutNode',
+    'FanInNode',
+    'NodeDefinition',
+    'WorkflowDefinition',
 ]

@@ -1160,7 +1160,7 @@ class PydanticToSQL:
             # execute_after included as column so PostgreSQL can filter without heap access.
             # NOTE: NOW() cannot be in the partial WHERE (evaluated at build time), but
             # execute_after as a column lets the planner use it for the runtime filter.
-            indexes.append(IndexBuilder.btree(s, "tasks", "execute_after, created_at", name="idx_tasks_claimable",
+            indexes.append(IndexBuilder.btree(s, "tasks", ["execute_after", "created_at"], name="idx_tasks_claimable",
                                               partial_where="status IN ('ready', 'pending_retry')"))
             # Checkpoint index (11 JAN 2026 - Docker worker resume support)
             indexes.append(IndexBuilder.btree(s, "tasks", "checkpoint_phase", name="idx_tasks_checkpoint_phase",

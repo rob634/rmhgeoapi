@@ -1852,22 +1852,47 @@ Each story should be dispatched to a separate Claude session with the appropriat
 
 **Acceptance**: All 8 inline tests pass. 73/73 existing tests (D.1+D.2) still pass.
 
-#### Story D.5: DAG Orchestrator Core Loop (2-3 days)
+#### Story D.5: DAG Orchestrator Core Loop (2-3 days) — ARB DECOMPOSED
 
 **What**: The DAG Brain — a poll loop that evaluates DAG state, promotes tasks, expands fan-outs, evaluates conditionals, detects completion.
 
-**Port from rmhdagmaster**: Brain guard (~225 lines), fan-out expansion (~140 lines), conditional routing (~80 lines), fan-in aggregation (~100 lines), completion detection (~55 lines), heartbeat (~32 lines), orphan scan (~40 lines). Adapt from async to sync, from 3-level to 2-level model. Drop SB dispatch.
+**Pipeline**: ARB → GREENFIELD (3 runs). ARB report: `docs/agent_review/agent_docs/arb_dag_orchestrator_d5.md`
 
-**Files**:
-- NEW: `core/dag_orchestrator.py` (~400 lines)
+**ARB Decomposition** (16 MAR 2026):
+- Original 4 subsystems (D.5a/b/c/d) collapsed to 3 Greenfield runs by merging D.5b+D.5d (no independent test surface)
+- R flagged 6 CRITICAL/HIGH risks — all resolved by P's architectural decisions
+- Total: ~1,070 lines across 4 new files + 1 extended file
 
-**Acceptance criteria**:
+**Critical Architectural Decisions (P resolutions)**:
+- Advisory lock: DEDICATED non-pooled connection (never pooled — zombie lock risk)
+- Transaction boundaries: One transaction per handler call, committed before next handler
+- Dispatch ordering: conditionals → transitions → fan-out → fan-in (prevents promote-before-skip)
+- When-clause: `resolve_dotted_path()` + `bool()` only — no Jinja2, three-value return (True/False/None=wait)
+- Fan-out child IDs: `{run_id[:12]}-{task_name}-fo{index}` (fo prefix prevents collision)
+- State refresh: Full DB reload each cycle — no carried state between cycles
+- Error model: Per-task catch → FAIL task + continue. ContractViolationError → FAIL entire run.
+
+**Build Plan**:
+
+| Phase | Run | File(s) | Lines | Status |
+|-------|-----|---------|-------|--------|
+| 1 | Run 1 | `core/dag_graph_utils.py` + repo additions to `workflow_run_repository.py` | ~380 | IN PROGRESS |
+| 2 | Run 2 | `core/dag_transition_engine.py` + `core/dag_fan_engine.py` | ~470 | NOT STARTED |
+| 3 | Run 3 | `core/dag_orchestrator.py` | ~220 | NOT STARTED |
+
+**Run 1 deliverables**: Shared graph traversal (pure functions: `build_adjacency`, `get_descendants`, `all_predecessors_terminal`, `is_run_terminal`), `TaskSummary` dataclass, `PredecessorOutputs` type alias, 8 new repository methods (IC-R1 through IC-R8).
+
+**Run 2 deliverables**: `evaluate_conditionals()`, `evaluate_transitions()` (merged D.5b+D.5d), `expand_fan_outs()`, `aggregate_fan_ins()` (D.5c).
+
+**Run 3 deliverables**: `DAGOrchestrator.run(run_id)`, advisory lock lifecycle, poll loop, `OrchestratorResult` dataclass, run terminal detection.
+
+**Acceptance criteria** (end-to-end after all 3 runs):
 - Brain guard: advisory lock ensures single active instance
-- Poll loop: detect new runs → initialize DAG → promote ready tasks → evaluate conditionals → expand fan-outs → aggregate fan-ins → detect completion
-- Heartbeat + orphan scan for HA
+- Poll loop: fixed order — conditionals → transitions → fan-out → fan-in → terminal check
 - Fan-out: one blueprint node → N execution tasks (atomic INSERT)
-- Conditional: evaluate branches → activate taken, skip untaken
+- Conditional: evaluate branches → activate taken, skip untaken + exclusive descendants
 - `hello_world` workflow completes end-to-end via DAG Brain
+- Idempotent handlers: status guard clauses on every state transition
 
 #### Story D.6: Worker Dual-Poll (1 day)
 

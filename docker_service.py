@@ -475,17 +475,36 @@ class BackgroundQueueWorker:
             self._core_machine = create_core_machine(ALL_JOBS, ALL_HANDLERS)
 
     def _claim_next_task(self) -> Optional[TaskRecord]:
-        """Claim one task via SKIP LOCKED."""
+        """Claim one legacy task via SKIP LOCKED."""
         task_repo = self._core_machine.repos.get('task_repo')
         return task_repo.claim_ready_task(worker_id=self._worker_id)
 
+    def _claim_next_workflow_task(self):
+        """Claim one DAG workflow task via SKIP LOCKED (D.6 dual-poll)."""
+        try:
+            from infrastructure.workflow_run_repository import WorkflowRunRepository
+            repo = WorkflowRunRepository()
+            return repo.claim_ready_workflow_task(worker_id=self._worker_id)
+        except Exception as e:
+            logger.debug(f"[Queue Worker] DAG claim skipped: {e}")
+            return None
+
     def _release_task(self, task_id: str):
-        """Release a claimed task back to READY (only if claimed by this worker)."""
+        """Release a claimed legacy task back to READY (only if claimed by this worker)."""
         try:
             task_repo = self._core_machine.repos.get('task_repo')
             task_repo.release_task(task_id, worker_id=self._worker_id)
         except Exception as e:
             logger.warning(f"[Queue Worker] Failed to release task {task_id}: {e}")
+
+    def _release_workflow_task(self, task_instance_id: str):
+        """Release a claimed DAG task back to READY (D.6 dual-poll)."""
+        try:
+            from infrastructure.workflow_run_repository import WorkflowRunRepository
+            repo = WorkflowRunRepository()
+            repo.release_workflow_task(task_instance_id, worker_id=self._worker_id)
+        except Exception as e:
+            logger.warning(f"[Queue Worker] Failed to release workflow task {task_instance_id}: {e}")
 
     def _ensure_fresh_tokens(self):
         """
@@ -559,8 +578,71 @@ class BackgroundQueueWorker:
             docker_context.stop_pulse()
             docker_context.stop_memory_watchdog()
 
+    def _process_workflow_task(self, workflow_task) -> bool:
+        """
+        Process a claimed DAG workflow task (D.6 dual-poll).
+
+        Unlike legacy tasks, DAG tasks bypass CoreMachine stage/job machinery.
+        The handler is looked up directly from ALL_HANDLERS and executed with
+        the task's pre-resolved parameters. Results are written back to
+        workflow_tasks via WorkflowRunRepository.
+        """
+        from services import ALL_HANDLERS
+        from infrastructure.workflow_run_repository import WorkflowRunRepository
+
+        handler_name = workflow_task.handler
+        task_id = workflow_task.task_instance_id
+        params = workflow_task.parameters or {}
+
+        # Handler lookup
+        handler = ALL_HANDLERS.get(handler_name)
+        if handler is None:
+            logger.error(
+                "[Queue Worker] DAG task %s: handler '%s' not in ALL_HANDLERS",
+                task_id, handler_name,
+            )
+            repo = WorkflowRunRepository()
+            repo.fail_workflow_task(task_id, f"Handler '{handler_name}' not registered")
+            return False
+
+        # Inject system fields (same convention as CoreMachine)
+        enriched_params = {
+            **params,
+            '_task_id': task_id,
+            '_job_id': workflow_task.run_id,
+            '_job_type': f"dag:{workflow_task.task_name}",
+        }
+
+        logger.info(
+            "[Queue Worker] DAG task %s: executing handler '%s'",
+            task_id, handler_name,
+        )
+
+        repo = WorkflowRunRepository()
+        try:
+            raw_result = handler(enriched_params)
+
+            if isinstance(raw_result, dict) and raw_result.get('success', False):
+                repo.complete_workflow_task(task_id, raw_result)
+                self._messages_processed += 1
+                logger.info("[Queue Worker] DAG task %s: COMPLETED", task_id)
+                return True
+            else:
+                error = raw_result.get('error', 'Handler returned failure') if isinstance(raw_result, dict) else str(raw_result)
+                repo.fail_workflow_task(task_id, error)
+                logger.warning("[Queue Worker] DAG task %s: FAILED — %s", task_id, error)
+                return False
+
+        except Exception as exc:
+            logger.error("[Queue Worker] DAG task %s: unhandled error — %s", task_id, exc)
+            try:
+                repo.fail_workflow_task(task_id, str(exc))
+            except Exception:
+                logger.error("[Queue Worker] DAG task %s: failed to write error to DB", task_id)
+            return False
+
     def _run_loop(self):
-        """Main DB-polling loop (runs in background thread)."""
+        """Main DB-polling loop — dual-poll for legacy tasks AND DAG workflow tasks (D.6)."""
         self._ensure_initialized()
         self._worker_id = f"{socket.gethostname()}:{os.getpid()}"
         logger.info(f"[Queue Worker] Starting DB-polling loop (worker_id={self._worker_id})")
@@ -569,23 +651,39 @@ class BackgroundQueueWorker:
 
         while not self._stop_event.is_set():
             try:
+                # D.6 dual-poll: try legacy tasks first, then DAG workflow tasks
                 task_record = self._claim_next_task()
 
-                if task_record is None:
+                if task_record is not None:
                     self._last_poll_time = datetime.now(timezone.utc)
                     self._last_error = None
-                    self._stop_event.wait(self.poll_interval_seconds)
+
+                    if self._stop_event.is_set():
+                        self._release_task(task_record.task_id)
+                        break
+
+                    task_message = TaskQueueMessage.from_task_record(task_record)
+                    self._process_task(task_message)
                     continue
 
+                # No legacy task — try DAG workflow task
+                workflow_task = self._claim_next_workflow_task()
+
+                if workflow_task is not None:
+                    self._last_poll_time = datetime.now(timezone.utc)
+                    self._last_error = None
+
+                    if self._stop_event.is_set():
+                        self._release_workflow_task(workflow_task.task_instance_id)
+                        break
+
+                    self._process_workflow_task(workflow_task)
+                    continue
+
+                # Nothing in either table — wait
                 self._last_poll_time = datetime.now(timezone.utc)
                 self._last_error = None
-
-                if self._stop_event.is_set():
-                    self._release_task(task_record.task_id)
-                    break
-
-                task_message = TaskQueueMessage.from_task_record(task_record)
-                self._process_task(task_message)
+                self._stop_event.wait(self.poll_interval_seconds)
 
             except Exception as e:
                 self._last_error = str(e)

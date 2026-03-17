@@ -836,6 +836,175 @@ class WorkflowRunRepository(PostgreSQLRepository):
                 f"Failed to set task parameters (task_instance_id={task_instance_id}): {exc}"
             ) from exc
 
+    # =========================================================================
+    # D.6 — WORKER CLAIM / COMPLETE / RELEASE FOR WORKFLOW TASKS
+    # =========================================================================
+
+    def claim_ready_workflow_task(self, worker_id: str) -> Optional[WorkflowTask]:
+        """
+        Atomically claim one workflow task via SKIP LOCKED.
+
+        Spec: D.6 — Worker dual-poll. Mirrors claim_ready_task() from
+        jobs_tasks.py but targets app.workflow_tasks instead of app.tasks.
+
+        Only claims tasks with handler NOT in sentinel set (conditionals,
+        fan-in, fan-out templates are orchestrator-managed, not worker tasks).
+
+        Returns WorkflowTask if claimed, None if no tasks available.
+        """
+        select_query = sql.SQL(
+            "SELECT * FROM {schema}.workflow_tasks "
+            "WHERE status = 'ready' "
+            "  AND handler NOT IN ('__conditional__', '__fan_in__') "
+            "  AND (execute_after IS NULL OR execute_after < NOW()) "
+            "ORDER BY created_at "
+            "LIMIT 1 "
+            "FOR UPDATE SKIP LOCKED"
+        ).format(schema=sql.Identifier(_SCHEMA))
+
+        update_query = sql.SQL(
+            "UPDATE {schema}.workflow_tasks "
+            "SET status = 'running', "
+            "    claimed_by = %s, "
+            "    started_at = NOW(), "
+            "    last_pulse = NOW(), "
+            "    updated_at = NOW() "
+            "WHERE task_instance_id = %s"
+        ).format(schema=sql.Identifier(_SCHEMA))
+
+        t0 = time.perf_counter()
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor(row_factory=dict_row) as cur:
+                    cur.execute(select_query)
+                    row = cur.fetchone()
+
+                    if not row:
+                        conn.commit()
+                        return None
+
+                    task_instance_id = row["task_instance_id"]
+                    cur.execute(update_query, (worker_id, task_instance_id))
+                conn.commit()
+
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            task = _workflow_task_from_row(row)
+            task.status = WorkflowTaskStatus.RUNNING
+
+            logger.info(
+                "claim_ready_workflow_task: claimed task_instance_id=%s handler=%s "
+                "worker=%s elapsed_ms=%.1f",
+                task_instance_id, row["handler"], worker_id, elapsed_ms,
+            )
+            return task
+
+        except psycopg.Error as exc:
+            logger.error("DB error in claim_ready_workflow_task: %s", exc)
+            raise DatabaseError(f"Failed to claim workflow task: {exc}") from exc
+
+    def complete_workflow_task(
+        self, task_instance_id: str, result_data: dict
+    ) -> None:
+        """
+        Mark a workflow task as COMPLETED with result data.
+
+        Spec: D.6 — Worker writes result after handler execution.
+        """
+        query = sql.SQL(
+            "UPDATE {schema}.workflow_tasks "
+            "SET status = 'completed', "
+            "    result_data = %s::jsonb, "
+            "    completed_at = NOW(), "
+            "    updated_at = NOW() "
+            "WHERE task_instance_id = %s "
+            "AND status = 'running'"
+        ).format(schema=sql.Identifier(_SCHEMA))
+
+        t0 = time.perf_counter()
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(query, (json.dumps(result_data), task_instance_id))
+                conn.commit()
+
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            logger.info(
+                "complete_workflow_task: task_instance_id=%s elapsed_ms=%.1f",
+                task_instance_id, elapsed_ms,
+            )
+        except psycopg.Error as exc:
+            logger.error("DB error in complete_workflow_task: %s", exc)
+            raise DatabaseError(
+                f"Failed to complete workflow task {task_instance_id}: {exc}"
+            ) from exc
+
+    def fail_workflow_task(
+        self, task_instance_id: str, error_details: str
+    ) -> None:
+        """
+        Mark a workflow task as FAILED with error details.
+
+        Spec: D.6 — Worker writes error after handler failure.
+        """
+        query = sql.SQL(
+            "UPDATE {schema}.workflow_tasks "
+            "SET status = 'failed', "
+            "    error_details = %s, "
+            "    completed_at = NOW(), "
+            "    updated_at = NOW() "
+            "WHERE task_instance_id = %s "
+            "AND status = 'running'"
+        ).format(schema=sql.Identifier(_SCHEMA))
+
+        t0 = time.perf_counter()
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(query, (error_details, task_instance_id))
+                conn.commit()
+
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            logger.info(
+                "fail_workflow_task: task_instance_id=%s elapsed_ms=%.1f",
+                task_instance_id, elapsed_ms,
+            )
+        except psycopg.Error as exc:
+            logger.error("DB error in fail_workflow_task: %s", exc)
+            raise DatabaseError(
+                f"Failed to fail workflow task {task_instance_id}: {exc}"
+            ) from exc
+
+    def release_workflow_task(
+        self, task_instance_id: str, worker_id: str
+    ) -> None:
+        """
+        Release a claimed workflow task back to READY (graceful shutdown).
+
+        Spec: D.6 — Worker releases on shutdown, only if still claimed by this worker.
+        """
+        query = sql.SQL(
+            "UPDATE {schema}.workflow_tasks "
+            "SET status = 'ready', "
+            "    claimed_by = NULL, "
+            "    started_at = NULL, "
+            "    last_pulse = NULL, "
+            "    updated_at = NOW() "
+            "WHERE task_instance_id = %s "
+            "AND status = 'running' "
+            "AND claimed_by = %s"
+        ).format(schema=sql.Identifier(_SCHEMA))
+
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(query, (task_instance_id, worker_id))
+                conn.commit()
+        except psycopg.Error as exc:
+            logger.warning(
+                "release_workflow_task failed (non-fatal): task=%s error=%s",
+                task_instance_id, exc,
+            )
+
     def update_run_status(self, run_id: str, status: WorkflowRunStatus) -> bool:
         """
         Transition a workflow run to a new status with valid-transition guard.
@@ -1010,4 +1179,29 @@ def _dep_to_params(dep: WorkflowTaskDep) -> tuple:
         dep.task_instance_id,
         dep.depends_on_instance_id,
         dep.optional,
+    )
+
+
+# ============================================================================
+# D.6 — WORKER CLAIM / COMPLETE / RELEASE FOR WORKFLOW TASKS
+# ============================================================================
+
+
+def _workflow_task_from_row(row: dict) -> WorkflowTask:
+    """Construct WorkflowTask from a dict_row result."""
+    return WorkflowTask(
+        task_instance_id=row["task_instance_id"],
+        run_id=row["run_id"],
+        task_name=row["task_name"],
+        handler=row["handler"],
+        status=WorkflowTaskStatus(row["status"]),
+        fan_out_index=row.get("fan_out_index"),
+        fan_out_source=row.get("fan_out_source"),
+        when_clause=row.get("when_clause"),
+        parameters=row.get("parameters"),
+        result_data=row.get("result_data"),
+        error_details=row.get("error_details"),
+        retry_count=row.get("retry_count", 0),
+        max_retries=row.get("max_retries", 3),
+        claimed_by=row.get("claimed_by"),
     )

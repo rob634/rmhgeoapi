@@ -418,7 +418,10 @@ if _app_mode.has_admin_endpoints:
     app.register_functions(admin_external_services_bp)  # External service registry (22 JAN 2026)
     app.register_functions(admin_data_migration_bp)  # ADF data migration (22 JAN 2026)
     app.register_functions(snapshot_bp)
-    logger.info("✅ Admin blueprints registered (APP_MODE=%s)", _app_mode.mode.value)
+    # DAG diagnostic endpoints (17 MAR 2026 — D.9)
+    from triggers.dag import dag_bp
+    app.register_functions(dag_bp)
+    logger.info("✅ Admin + DAG blueprints registered (APP_MODE=%s)", _app_mode.mode.value)
 else:
     logger.info("⏭️ SKIPPING admin blueprints (APP_MODE=%s)", _app_mode.mode.value)
 

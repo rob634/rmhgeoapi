@@ -2070,7 +2070,7 @@ Migration Window (peak operational complexity — invisible to clients):
 | Phase | Feature | Status | SIEGE |
 |-------|---------|--------|-------|
 | **F1** | Worker polls DB (SKIP LOCKED) v0.10.3 | **DONE** | Run 18: 18/18 100% |
-| **F-DAG** | DAG Foundation (loader, tables, resolver, orchestrator) | **D.1-D.4 DONE**, D.5-D.10 not started | — |
+| **F-DAG** | DAG Foundation (loader, tables, resolver, orchestrator) | **D.1-D.5 DONE**, D.6-D.10 not started | — |
 | **F4** | Handler decomposition (monolithic → atomic) | NOT STARTED | — |
 | **Port** | Workflows ported one at a time (14 total) | 0/14 | — |
 | **Cleanup** | Remove CoreMachine, SB, Python jobs | NOT STARTED | — |
@@ -2255,7 +2255,7 @@ Each story should be dispatched to a separate Claude session with the appropriat
 |-------|-----|---------|-------|--------|
 | 1 | Run 1 | `core/dag_graph_utils.py` + repo additions to `workflow_run_repository.py` | ~740 | **DONE** |
 | 2 | Run 2 | `core/dag_transition_engine.py` + `core/dag_fan_engine.py` + `set_task_parameters` | ~860 | **DONE** |
-| 3 | Run 3 | `core/dag_orchestrator.py` | ~220 | NOT STARTED |
+| 3 | Run 3 | `core/dag_orchestrator.py` | ~510 | **DONE** |
 
 **Run 1 deliverables**: Shared graph traversal (pure functions: `build_adjacency`, `get_descendants`, `all_predecessors_terminal`, `is_run_terminal`), `TaskSummary` dataclass, `PredecessorOutputs` type alias, 8 new repository methods (IC-R1 through IC-R8).
 

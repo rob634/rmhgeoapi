@@ -2070,7 +2070,7 @@ Migration Window (peak operational complexity — invisible to clients):
 | Phase | Feature | Status | SIEGE |
 |-------|---------|--------|-------|
 | **F1** | Worker polls DB (SKIP LOCKED) v0.10.3 | **DONE** | Run 18: 18/18 100% |
-| **F-DAG** | DAG Foundation (loader, tables, resolver, orchestrator) | **D.1-D.5 DONE**, D.6-D.10 not started | — |
+| **F-DAG** | DAG Foundation (loader, tables, resolver, orchestrator) | **D.1-D.6 DONE**, D.7-D.10 not started | — |
 | **F4** | Handler decomposition (monolithic → atomic) | NOT STARTED | — |
 | **Port** | Workflows ported one at a time (14 total) | 0/14 | — |
 | **Cleanup** | Remove CoreMachine, SB, Python jobs | NOT STARTED | — |
@@ -2091,7 +2091,7 @@ Each story should be dispatched to a separate Claude session with the appropriat
 | **D.3** DAG initializer | ~~GREENFIELD~~ **DONE** | Completed 16 MAR 2026. GREENFIELD pipeline (S→A+C+O→M→B→V). |
 | **D.4** Param resolver | ~~GREENFIELD~~ **DONE** | Completed 16 MAR 2026. GREENFIELD pipeline. V found 2 bugs, both fixed. |
 | **D.5** DAG orchestrator | **ARB → GREENFIELD** | Most complex (~400 lines). Concurrency, brain guard, fan-out. ARB decomposes into subsystems first, then GREENFIELD per subsystem. |
-| **D.6** Worker dual-poll | **Direct implementation** | Small change to existing file. No pipeline needed. |
+| **D.6** Worker dual-poll | ~~Direct~~ **DONE** | Completed 16 MAR 2026. Dual SKIP LOCKED in _run_loop. |
 | **D.7** Janitor | **GREENFIELD** | Port pattern from rmhdagmaster. ~80 lines. |
 | **D.8** Gateway routing | **Direct implementation** | ~10 lines of routing logic. No pipeline needed. |
 | **D.9** DAG status | **Direct implementation** | Query changes to existing endpoints. |

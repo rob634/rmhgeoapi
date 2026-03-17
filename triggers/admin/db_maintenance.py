@@ -1596,50 +1596,65 @@ class AdminDbMaintenanceTrigger:
             results["steps"].append(step5)
 
             # ================================================================
-            # STEP 6: Grant pgstac_read role to admin identity
+            # STEP 6: Grant pgstac roles and permissions to admin identity
             # ================================================================
-            # ARCHITECTURE PRINCIPLE (08 DEC 2025 - Updated):
+            # ARCHITECTURE PRINCIPLE (08 DEC 2025, consolidated 17 MAR 2026):
             # Single admin identity is used for all database operations (ETL, OGC/STAC, TiTiler).
             # After pypgstac migrate recreates the pgstac schema and roles,
-            # we grant pgstac_read to the admin identity for STAC catalog access.
+            # we grant role membership + EXECUTE on functions to the admin identity.
+            # This is the SINGLE place for all pgstac permission grants.
             # Note: admin_identity already defined in step 4 (geo schema)
-            logger.info(f"🔐 Step 6/11: Granting pgstac_read role to {admin_identity}...")
-            step6 = {"step": 6, "action": "grant_pgstac_read_role", "status": "pending"}
+            logger.info(f"🔐 Step 6/11: Granting pgstac roles + permissions to {admin_identity}...")
+            step6 = {"step": 6, "action": "grant_pgstac_roles_and_permissions", "status": "pending"}
 
             if pgstac_failed:
                 # Skip if pgstac deployment failed - role doesn't exist
-                logger.warning("⏭️ Skipping pgstac_read grant - pgstac deployment failed")
+                logger.warning("⏭️ Skipping pgstac grants - pgstac deployment failed")
                 step6["status"] = "skipped"
                 step6["reason"] = "pgstac deployment failed"
             else:
                 try:
                     from infrastructure.postgresql import PostgreSQLRepository
                     pgstac_repo = PostgreSQLRepository(schema_name='pgstac')
+                    admin_ident = sql.Identifier(admin_identity)
 
                     with pgstac_repo._get_connection() as conn:
                         with conn.cursor() as cur:
-                            # Grant pgstac_read role to admin identity
-                            # This allows OGC/STAC API and TiTiler to query pgstac tables
-                            # Use sql.Identifier to safely inject the role name
-                            cur.execute(
-                                sql.SQL("GRANT pgstac_read TO {}").format(
-                                    sql.Identifier(admin_identity)
-                                )
-                            )
+                            # 1. Grant pgstac_read role to admin identity
+                            #    Allows OGC/STAC API and TiTiler to query pgstac tables
+                            cur.execute(sql.SQL("GRANT pgstac_read TO {}").format(admin_ident))
+
+                            # 2. Grant pgstac_ingest role to admin identity
+                            #    Allows ETL to write STAC items at approval time
+                            cur.execute(sql.SQL("GRANT pgstac_ingest TO {}").format(admin_ident))
+
+                            # 3. Grant EXECUTE on all pgstac functions to pgstac_read
+                            #    Required for TiTiler/OGC to call pgstac.search() etc.
+                            cur.execute("GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgstac TO pgstac_read")
+
+                            # 4. Grant EXECUTE on all pgstac functions to pgstac_ingest
+                            #    Required for ETL to call pgstac.create_item() etc.
+                            cur.execute("GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgstac TO pgstac_ingest")
+
+                            # 5. Ensure admin identity has direct schema USAGE
+                            cur.execute(sql.SQL("GRANT USAGE ON SCHEMA pgstac TO {}").format(admin_ident))
+
                             conn.commit()
-                            logger.info(f"✅ Granted pgstac_read to {admin_identity}")
+                            logger.info(f"✅ Granted pgstac_read + pgstac_ingest + EXECUTE to {admin_identity}")
 
                     step6["status"] = "success"
-                    step6["role_granted"] = "pgstac_read"
+                    step6["roles_granted"] = ["pgstac_read", "pgstac_ingest"]
+                    step6["function_execute"] = ["pgstac_read", "pgstac_ingest"]
+                    step6["schema_usage"] = admin_identity
                     step6["granted_to"] = admin_identity
 
                 except Exception as e:
                     # Non-fatal error - log warning but continue
                     # The role grant might fail if admin identity doesn't exist yet
-                    logger.warning(f"⚠️ Failed to grant pgstac_read to {admin_identity}: {e}")
+                    logger.warning(f"⚠️ Failed to grant pgstac permissions to {admin_identity}: {e}")
                     step6["status"] = "warning"
                     step6["error"] = str(e)
-                    step6["note"] = "Role grant failed - OGC/STAC API may not have read access"
+                    step6["note"] = "pgstac grants failed - STAC API and ETL may not have proper access"
 
             results["steps"].append(step6)
 
